@@ -12,6 +12,7 @@ Internal changes are omitted unless they affect users.
 - A minimal web page showing backend connectivity, including failure feedback and a manual recheck button.
 - A health endpoint and Docker Compose deployment with a configurable Web UI port (default `3190`) and same-origin API proxying. Immich integration and photo editing are not implemented.
 - An authenticated Immich connectivity check, configured through backend environment variables, with connected, not configured, and failed states in the Web UI. Photo retrieval and editing remain unimplemented.
+- An optional Compose override that connects only the backend to an existing Immich Docker network for same-host deployments.
 
 ### Fixed
 

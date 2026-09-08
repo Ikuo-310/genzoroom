@@ -17,8 +17,10 @@ Frontend: nginx on container port 8080
                      Backend: Uvicorn / FastAPI on port 8000
                        ├─ GET /health → {"status":"ok"}
                        └─ GET /immich/status
-                            ↓ x-api-key, outbound network
+                            ↓ x-api-key
                           Immich: GET /api/users/me
+                            via LAN / routed network,
+                            HTTPS URL, or shared Docker network
 ```
 
 React renders the title, early development status, and separate backend and Immich connectivity results. It fetches the relative URLs `/api/health` and `/api/immich/status` and displays connected, not configured, or failed states as appropriate. A button repeats both checks; there is no background polling.
@@ -26,6 +28,8 @@ React renders the title, early development status, and separate backend and Immi
 The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 
 The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` reads `IMMICH_URL` and `IMMICH_API_KEY`, then calls the stable, read-only Immich `GET /api/users/me` endpoint with the official `x-api-key` header. The response confirms that the server is reachable and that the API key has `user.read` permission. Redirects are not followed, TLS verification remains enabled, and the request uses a five-second overall timeout with a three-second connection timeout and no retries.
+
+Application code uses only the configured `IMMICH_URL`; it does not know whether Docker DNS, a LAN route, or HTTPS provides the route. Selecting and operating that route is a deployment responsibility.
 
 The status response distinguishes missing URL, missing key, unreachable server, rejected or insufficient credentials, and unexpected API responses using safe error codes and messages. It does not return the upstream response body, URL, API key, or internal exception text. The frontend intentionally reduces these details to concise user-facing states.
 
@@ -40,13 +44,15 @@ For optional local development, Vite provides the same `/api/` prefix mapping to
 | `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
 | `backend` | `8000` | None | Backend and authenticated Immich connectivity checks. |
 
-Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network so it can reach an Immich server on the NAS or local network. Joining `outbound` does not publish backend port 8000. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
+Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
+
+The standard `docker-compose.yml` has no dependency on an Immich Docker network. The optional `docker-compose.immich-network.yml` attaches only the backend to an existing external network selected with `IMMICH_DOCKER_NETWORK`. This enables Docker DNS access to an Immich service on the same host without exposing the backend or attaching the frontend to Immich. The external network and Immich service name belong to the deployment environment and are never hardcoded by GenzoRoom. The application still receives only `IMMICH_URL` and `IMMICH_API_KEY`; `IMMICH_DOCKER_NETWORK` is consumed by Compose.
 
 Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. Runtime temporary files stay inside containers. No persistent application state or volumes are needed at this stage. `.env` can provide local Compose inputs for the host port and Immich connection, but it is not mounted into the application; Portainer can supply the same values through stack environment variables.
 
 Compose starts the backend before the frontend but does not wait for API readiness. Startup failures are visible in container logs and the UI; the user can check again after services become ready. Both services use `restart: unless-stopped`.
 
-The files support builds on a Docker Compose NAS. Portainer use requires a Docker Standalone workflow with the full build contexts, or management of containers already started by Compose. The configuration does not provide prebuilt registry images or Swarm deployment support.
+The files support builds on a Docker Compose NAS. A Portainer Git Repository stack can use `docker-compose.yml` as its Compose path and, when same-host networking is needed, `docker-compose.immich-network.yml` as an additional path. Portainer must target the Docker endpoint where the external network already exists. The configuration does not provide prebuilt registry images or Swarm deployment support.
 
 See [the README](../README.md) for startup, verification, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 

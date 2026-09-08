@@ -7,8 +7,8 @@ services:
       - backend
     restart: unless-stopped
     networks:
-      - web
-      - api
+      web:
+      api:
     cap_drop:
       - ALL
     security_opt:
@@ -23,8 +23,8 @@ services:
       - "8000"
     restart: unless-stopped
     networks:
-      - api
-      - outbound
+      api:
+      outbound:
     cap_drop:
       - ALL
     security_opt:
