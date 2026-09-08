@@ -54,13 +54,17 @@ docker compose \
 
 The optional file adds only the backend to the external network. The frontend remains isolated from Immich. `IMMICH_DOCKER_NETWORK` is used by Compose for deployment and is not read by the GenzoRoom application.
 
-## Run on a NAS with Docker Compose
+## Deployment
 
-Use a NAS with Docker Engine and Docker Compose available. From a designated deployment directory on the NAS:
+GenzoRoom supports two deployment workflows. Use Docker Compose when you want to manage the repository and commands directly on the host. Use a Portainer Git Repository Stack when you want Portainer to fetch, build, and deploy the project from a Git repository. Both workflows use the same Compose configuration and expose only the frontend port, which defaults to `3190`; the backend port `8000` remains internal to Docker.
 
-1. Copy the repository, including `frontend/`, `backend/`, and the Compose files, to that directory. Do not copy local `node_modules`, virtual environments, or build output.
-2. Supply `IMMICH_URL` and `IMMICH_API_KEY` as environment variables using one of the connection routes above. For local Compose use, copy `.env.example` to the ignored `.env` file and replace its example values. `GENZOROOM_PORT` is optional and defaults to `3190`.
-3. For network-accessible Immich, run the standard Compose file:
+### Docker Compose
+
+On a NAS or other server with Docker Engine and Docker Compose available:
+
+1. Clone this repository into a deployment directory, or place the complete repository contents there using an equivalent method. Do not include local `node_modules`, virtual environments, or build output.
+2. Supply `IMMICH_URL` and `IMMICH_API_KEY` as environment variables using one of the connection routes above. You can copy `.env.example` to the ignored `.env` file and replace its example values. Never commit a real API key. `GENZOROOM_PORT` is optional and defaults to `3190`.
+3. For network-accessible Immich, start the standard Compose configuration:
 
    ```sh
    docker compose config
@@ -68,21 +72,39 @@ Use a NAS with Docker Engine and Docker Compose available. From a designated dep
    docker compose ps
    ```
 
-   For same-host shared-network access, use both Compose files as shown above for `config`, `up`, `ps`, and later operational commands.
+   For Immich on the same Docker host, use both Compose files for validation, startup, status checks, and later operational commands:
 
-4. Open `http://<NAS-IP>:3190` (or the configured port). Confirm `Backend: Connected`, `Immich: Connected`, and a grid containing up to 10 recent photos. Missing environment variables show `Immich: Not configured`; rejected credentials, unreachable servers, insufficient asset permissions, and unexpected API responses produce a failed state or photo-loading message.
-5. Open `http://<NAS-IP>:3190/api/health` and confirm `{"status":"ok"}`.
-6. Open `http://<NAS-IP>:3190/api/immich/status` and confirm `{"configured":true,"connected":true}`.
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.immich-network.yml config
+   docker compose -f docker-compose.yml -f docker-compose.immich-network.yml up -d --build
+   docker compose -f docker-compose.yml -f docker-compose.immich-network.yml ps
+   ```
 
-The initial build requires internet access for base images and dependencies. Vite runs at build time; nginx serves static files during NAS operation. The backend has no published host port.
+The initial build requires internet access for base images and dependencies. Vite runs only during the build; nginx serves the built static files during operation.
 
-Portainer can manage the resulting containers on the same Docker endpoint. For a GitHub Repository stack, add `IMMICH_URL` and `IMMICH_API_KEY` under the stack's Environment variables so the secret stays outside the repository. For normal network access, set the Compose path to `docker-compose.yml` and do not add the optional file.
+### Portainer Git Repository Stack
 
-For a same-host shared network, set the Compose path to `docker-compose.yml`, add `docker-compose.immich-network.yml` under **Additional paths**, and add `IMMICH_DOCKER_NETWORK` along with the two application variables. Portainer processes additional paths as Compose overrides. The selected external network must already exist on the same Docker endpoint. Use a Docker Standalone workflow that supplies the complete repository as build context and supports building both services. This configuration is not intended for Swarm.
+Portainer can fetch the project directly from any Git repository it can access, so the repository does not need to be copied manually to the deployment host.
 
-For troubleshooting, run `docker compose logs frontend backend`. When using the shared-network file, include both `-f` arguments in operational commands. To verify the error state, stop the backend, click **Check again**, and confirm a connection failure. Restart the backend and check again to confirm recovery; allow a few seconds for startup and internal DNS refresh.
+1. Create a Stack that uses a Git repository as its source or build method.
+2. Enter the repository URL and select the required branch or reference.
+3. Set the Compose path to `docker-compose.yml`.
+4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Add `GENZOROOM_PORT` only when you want to override the default frontend port of `3190`. Keep the real API key outside the repository.
+5. Build and deploy the Stack.
 
-Stop and remove the deployment with `docker compose down`. This stage creates no application volumes, persistent data, or host bind mounts. The copied project directory and built images remain until explicitly removed.
+When Immich runs on the same Docker host and requires shared-network access, also add `docker-compose.immich-network.yml` as an additional Compose path and set `IMMICH_DOCKER_NETWORK` to the name of the existing Immich network. The external network must already exist on the same Docker endpoint. The override connects only the backend to that network; the frontend remains isolated from it.
+
+Use a Docker Standalone workflow that provides the complete repository as the build context and can build both services. This Compose configuration is not intended for Swarm. After repository updates are available, use Portainer's pull and redeploy action to rebuild and update the Stack.
+
+### Verify the deployment
+
+1. Open `http://<NAS-IP>:3190` or the configured port. Confirm `Backend: Connected`, `Immich: Connected`, and a grid containing up to 10 recent photos. Missing environment variables show `Immich: Not configured`; rejected credentials, unreachable servers, insufficient asset permissions, and unexpected API responses produce a failed state or photo-loading message.
+2. Open `http://<NAS-IP>:3190/api/health` and confirm `{"status":"ok"}`.
+3. Open `http://<NAS-IP>:3190/api/immich/status` and confirm `{"configured":true,"connected":true}`.
+
+For troubleshooting, inspect the frontend and backend container logs. With Docker Compose, run `docker compose logs frontend backend`; when using the shared-network override, include both `-f` arguments in operational commands. To verify the error state, stop the backend, click **Check again**, and confirm a connection failure. Restart the backend and check again to confirm recovery; allow a few seconds for startup and internal DNS refresh.
+
+Stop and remove a Docker Compose deployment with `docker compose down`, including both `-f` arguments when the shared-network override is in use. In Portainer, remove the Stack. This stage creates no application volumes, persistent data, or host bind mounts. Repository files and built images remain until explicitly removed.
 
 ## Planned direction
 
@@ -104,8 +126,8 @@ The target environment is a self-hosted NAS running Docker / Portainer. Windows 
 The validation workflow is:
 
 1. Develop in the local Windows workspace.
-2. Copy or deploy the required project files to the NAS.
-3. Start the application on the NAS using Docker Compose / Portainer.
+2. Prepare the repository on the NAS for Docker Compose, or configure Portainer to fetch it directly from an accessible Git repository.
+3. Start the application on the NAS using Docker Compose or a Portainer Git Repository Stack.
 4. Verify actual behavior in the NAS environment.
 
 The default Web UI host port is **3190**, configurable through `GENZOROOM_PORT`. The backend container port is **8000**, reachable by the frontend over the internal Docker network and not published to the host.
