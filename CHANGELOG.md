@@ -16,6 +16,7 @@ Internal changes are omitted unless they affect users.
 - A recent-photo grid that retrieves up to 10 images from Immich and displays proxied thumbnails without exposing the Immich API key to the browser.
 - English and Japanese UI support with a remembered manual language selection.
 - Locale-aware photo date and time formatting for English and Japanese.
+- Image format badges on photo cards, including distinct RAW format metadata for future filtering.
 
 ### Fixed
 

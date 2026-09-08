@@ -12,6 +12,7 @@ import httpx
 from immich import (
     ImmichRequestError,
     check_immich_status,
+    classify_image_format,
     get_asset_thumbnail,
     get_recent_assets,
 )
@@ -174,6 +175,8 @@ class ImmichAssetTests(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].filename, "photo.jpg")
+        self.assertEqual(result[0].format, "JPEG")
+        self.assertFalse(result[0].is_raw)
         self.assertEqual(
             result[0].thumbnail_url,
             f"/api/assets/{ASSET_ID}/thumbnail",
@@ -227,6 +230,41 @@ class ImmichAssetTests(unittest.TestCase):
             self.run_recent(handler)
 
         self.assertEqual(raised.exception.error_code, "unreachable")
+
+
+class ImageFormatTests(unittest.TestCase):
+    def test_normalizes_common_non_raw_formats(self):
+        cases = {
+            "photo.jpg": "JPEG",
+            "photo.jpeg": "JPEG",
+            "photo.heic": "HEIC",
+            "photo.heif": "HEIC",
+            "photo.JpEg": "JPEG",
+        }
+
+        for filename, expected_format in cases.items():
+            with self.subTest(filename=filename):
+                image_format, is_raw = classify_image_format(filename)
+                self.assertEqual(image_format, expected_format)
+                self.assertFalse(is_raw)
+
+    def test_identifies_supported_raw_formats(self):
+        for extension in ("dng", "pef", "nef", "arw", "cr2", "cr3", "raf", "orf", "rw2"):
+            with self.subTest(extension=extension):
+                image_format, is_raw = classify_image_format(f"photo.{extension}")
+                self.assertEqual(image_format, extension.upper())
+                self.assertTrue(is_raw)
+
+    def test_returns_unknown_extension_in_uppercase(self):
+        image_format, is_raw = classify_image_format("photo.avif")
+
+        self.assertEqual(image_format, "AVIF")
+        self.assertFalse(is_raw)
+
+    def test_uses_a_safe_fallback_without_an_extension(self):
+        for filename in ("photo", "photo."):
+            with self.subTest(filename=filename):
+                self.assertEqual(classify_image_format(filename), ("UNKNOWN", False))
 
 
 if __name__ == "__main__":

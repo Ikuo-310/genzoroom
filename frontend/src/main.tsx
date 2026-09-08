@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
-import { changeAppLanguage, formatPhotoDate, type AppLanguage } from './i18n';
+import { changeAppLanguage, type AppLanguage } from './i18n';
+import { PhotoCard, type RecentAsset } from './PhotoCard';
 import './style.css';
 
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
-
-type RecentAsset = {
-  id: string;
-  filename: string;
-  date: string;
-  thumbnail_url: string;
-};
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -82,7 +76,9 @@ function App() {
           !('id' in asset) || typeof asset.id !== 'string' ||
           !('filename' in asset) || typeof asset.filename !== 'string' ||
           !('date' in asset) || typeof asset.date !== 'string' ||
-          !('thumbnail_url' in asset) || typeof asset.thumbnail_url !== 'string'
+          !('thumbnail_url' in asset) || typeof asset.thumbnail_url !== 'string' ||
+          !('format' in asset) || typeof asset.format !== 'string' ||
+          !('is_raw' in asset) || typeof asset.is_raw !== 'boolean'
         ))) throw new Error('Unexpected recent assets response');
 
         if (active) {
@@ -180,13 +176,7 @@ function App() {
         ) : (
           <div className="photo-grid">
             {assets.map((asset) => (
-              <article className="photo-card" key={asset.id}>
-                <img src={asset.thumbnail_url} alt={asset.filename} loading="lazy" />
-                <div className="photo-info">
-                  <p title={asset.filename}>{asset.filename}</p>
-                  <time dateTime={asset.date}>{formatPhotoDate(asset.date, language)}</time>
-                </div>
-              </article>
+              <PhotoCard asset={asset} language={language} key={asset.id} />
             ))}
           </div>
         )}

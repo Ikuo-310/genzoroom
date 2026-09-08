@@ -34,7 +34,10 @@ h2 { margin: 0 0 18px; font-size: 1.35rem; }
 .error-text { color: #ffbbae; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
 .photo-card { min-width: 0; overflow: hidden; border: 1px solid #43584d; border-radius: 8px; background: #17221f; }
-.photo-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #111a17; }
+.thumbnail { position: relative; }
+.thumbnail img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #111a17; }
+.format-badge { position: absolute; top: 8px; right: 8px; max-width: calc(100% - 16px); overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 45%); padding: 2px 6px; font-size: 0.7rem; font-weight: 750; line-height: 1.35; letter-spacing: 0.05em; text-overflow: ellipsis; white-space: nowrap; }
+.format-badge.raw { background: rgb(73 52 20 / 88%); border-width: 2px; }
 .photo-info { padding: 10px 12px 12px; }
 .photo-info p { margin: 0; overflow: hidden; font-size: 0.9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .photo-info time { color: #9fb2a8; font-size: 0.78rem; }

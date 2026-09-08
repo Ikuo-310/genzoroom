@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import Literal
 from uuid import UUID
 
@@ -8,6 +9,37 @@ from pydantic import BaseModel
 
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 RECENT_ASSET_LIMIT = 10
+FORMAT_ALIASES = {
+    "jpg": "JPEG",
+    "jpeg": "JPEG",
+    "heic": "HEIC",
+    "heif": "HEIC",
+}
+RAW_FORMATS = frozenset(
+    {
+        "ARW",
+        "CR2",
+        "CR3",
+        "CRW",
+        "DNG",
+        "ERF",
+        "KDC",
+        "MEF",
+        "MOS",
+        "MRW",
+        "NEF",
+        "NRW",
+        "ORF",
+        "PEF",
+        "RAF",
+        "RAW",
+        "RW2",
+        "SR2",
+        "SRF",
+        "SRW",
+        "X3F",
+    }
+)
 ErrorCode = Literal[
     "configuration_missing",
     "immich_url_missing",
@@ -30,6 +62,8 @@ class RecentAsset(BaseModel):
     filename: str
     date: str
     thumbnail_url: str
+    format: str
+    is_raw: bool
 
 
 class ImmichRequestError(Exception):
@@ -42,6 +76,16 @@ class ImmichRequestError(Exception):
 class ImmichThumbnail:
     content: bytes
     media_type: str
+
+
+def classify_image_format(filename: str) -> tuple[str, bool]:
+    extension = PurePath(filename).suffix.removeprefix(".").lower()
+    # Keep arbitrary filenames from creating an unbounded or misleading badge value.
+    if not extension or len(extension) > 10 or not extension.isalnum():
+        return "UNKNOWN", False
+
+    image_format = FORMAT_ALIASES.get(extension, extension.upper())
+    return image_format, image_format in RAW_FORMATS
 
 
 def _status_error(error_code: ErrorCode, error: str, *, configured: bool) -> ImmichStatus:
@@ -210,12 +254,15 @@ async def get_recent_assets(
             date = item["fileCreatedAt"]
             if not isinstance(filename, str) or not isinstance(date, str):
                 raise TypeError
+            image_format, is_raw = classify_image_format(filename)
             assets.append(
                 RecentAsset(
                     id=asset_id,
                     filename=filename,
                     date=date,
                     thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
+                    format=image_format,
+                    is_raw=is_raw,
                 )
             )
     except (KeyError, TypeError, ValueError):
