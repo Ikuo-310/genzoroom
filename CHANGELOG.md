@@ -8,4 +8,6 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Initial public project documentation describing the early development status, planned direction, and provisional NAS deployment architecture. No application features are available yet.
+- Initial public project documentation describing the early development status, planned direction, and provisional NAS deployment architecture.
+- A minimal web page showing backend connectivity, including failure feedback and a manual recheck button.
+- A health endpoint and Docker Compose deployment with a configurable Web UI port (default `3190`) and same-origin API proxying. Immich integration and photo editing are not implemented.

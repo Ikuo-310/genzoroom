@@ -1,71 +1,73 @@
 # Provisional Architecture
 
-**Status: Early Development — design only, with no application implementation.**
+**Status: Early Development — the first-stage connectivity scaffold is implemented. Photo features are not implemented.**
 
-This document describes an initial direction, not an implemented system or a stable specification. Every component, technology choice, interface, and deployment detail is provisional and may change during development.
+This document describes the current minimal implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
-## Intended request flow
+## Current request flow
 
 ```text
-Browser
+Browser: http://<NAS-IP>:3190
   ↓
-Frontend
-  ↓
-Backend API
-  ↓
-Immich API
+Frontend: nginx on container port 8080
+  ├─ /             → built React / TypeScript frontend
+  └─ /api/health   → internal Docker network
+                       ↓
+                     Backend: Uvicorn / FastAPI on port 8000
+                       └─ GET /health → {"status":"ok"}
 ```
 
-The browser would access a frontend built with React and TypeScript. The frontend would communicate with a FastAPI / Python backend, which would integrate with the Immich API. Authentication, credentials handling, API compatibility, and asset access behavior remain to be designed.
+React renders the title, early development status, and backend connectivity result. It fetches the relative URL `/api/health`, verifies the HTTP response and JSON status, and displays checking, connected, or failed states. A five-second timeout handles unresponsive services. A button repeats the check; there is no background polling.
 
-To keep the backend private to the Docker network, the frontend-facing service is expected to forward browser API requests to the backend. The exact routing mechanism has not been selected; the browser should not need direct access to the backend container port.
+The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 
-## Planned responsibilities
+The backend uses Python 3.13, FastAPI, and Uvicorn. Its only application endpoint is `GET /health`; automatically generated API documentation endpoints are disabled. There is no database, authentication, Immich connection, or image processing.
 
-| Component | Tentative responsibility |
-| --- | --- |
-| Frontend | Browser-based photo display, editing controls, and visual feedback using React and TypeScript. |
-| Backend API | Immich integration, edit parameter coordination, and rendering orchestration using FastAPI and Python. |
-| Immich API | Access to photos managed by the user's Immich instance; integration details remain undecided. |
-| Edit parameter storage | Store non-destructive edit parameters separately from original images. The storage engine and schema are undecided. |
-| Preview rendering | Provide responsive editing previews, potentially using client-side GPU assistance where useful. The division between client and server work is undecided. |
-| Final rendering | Produce high-quality output on the server. Output formats, persistence, and export or Immich write-back behavior remain undecided. |
-| RAW processing | Evaluate LibRaw, rawpy, or alternatives for future RAW / DNG development. No library has been selected or integrated. |
+For optional local development, Vite provides the same `/api/` prefix mapping to a loopback backend. This is separate from the production nginx configuration.
 
-JPEG and HEIC support are planned; RAW and DNG development are longer-term possibilities. Planned editing controls include exposure, contrast, highlights, shadows, white balance, tone curve, and HSL. A histogram is envisaged, with waveform and RGB parade as possible later additions. None of these capabilities is available yet.
+## Docker deployment
 
-The non-destructive design aims to preserve original images and store editing instructions independently. Parameter versioning, preview caching, rendering consistency, and handling of derived images require further design.
+`docker-compose.yml` defines two services:
 
-## Intended Docker deployment and network
+| Service | Container port | Host exposure | Role |
+| --- | --- | --- | --- |
+| `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
+| `backend` | `8000` | None | Health endpoint. |
 
-The target deployment environment is a self-hosted NAS using Docker Compose / Portainer. Dockerfiles and Compose configuration have not been created.
+Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`; the backend joins no other network. The frontend also joins a `web` bridge network for its published entry point. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
 
-| Endpoint | Proposed port | Exposure policy |
-| --- | --- | --- |
-| Web UI | Host port `3190` by default | User-facing entry point; the future Compose configuration must allow changing the host port. |
-| Backend API | Container port `8000` | Docker internal network only; no host port publication unless explicitly required. |
+Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. Runtime temporary files stay inside containers. No persistent application state or volumes are needed at this stage. `.env` is an optional deployment input for the host port, not a file mounted into the application.
 
-The future default access URL is `http://<NAS-IP>:3190`. The frontend container's listening port is undecided. Only the frontend-facing service is intended to publish a host port by default.
+Compose starts the backend before the frontend but does not wait for API readiness. Startup failures are visible in container logs and the UI; the user can check again after services become ready. Both services use `restart: unless-stopped`.
 
-## Portability, storage, and cleanup constraints
+The files support builds on a Docker Compose NAS. Portainer use requires a Docker Standalone workflow with the full build contexts, or management of containers already started by Compose. The configuration does not provide prebuilt registry images or Swarm deployment support.
 
-- Do not introduce Windows-specific runtime dependencies or hardcode Windows paths in application code.
-- Do not require NAS host OS configuration changes or write application-specific files and settings directly into the NAS host OS.
-- Manage application-specific configuration and persistent data inside Docker containers or explicitly declared Docker volumes. Data that must survive container replacement belongs in declared persistent volumes.
-- Copying or deploying project files into a designated NAS deployment directory is part of the workflow; it must not require modifying host OS configuration or installing application components into host system directories.
-- Favor a removable deployment that leaves no unnecessary host settings or files. Future operational instructions should distinguish removing containers from explicitly deleting persistent volumes so that user data is not removed unintentionally.
+See [the README](../README.md) for startup, verification, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 
-Volume names, configuration delivery, credentials storage, backups, and cache retention are not yet specified.
+## Future direction (not implemented)
 
-## Development and runtime validation
+The eventual integration path is expected to be:
 
-The Windows workspace is only a local development and working directory. Its location is not a runtime dependency and must not be embedded in application code or deployment configuration.
+```text
+Browser → Frontend → Backend API → Immich API
+```
 
-The intended validation workflow is:
+Possible extensions include:
 
-1. Develop in the local Windows workspace.
-2. Copy or deploy the necessary files to the NAS.
-3. Start the services on the NAS using Docker Compose / Portainer.
-4. Verify real application behavior in the NAS environment.
+- Immich API integration; credentials handling and asset access are undecided.
+- JPEG / HEIC handling and later RAW / DNG processing, potentially using LibRaw or rawpy.
+- Non-destructive edit parameter storage separate from original images; storage and schema are undecided.
+- Responsive preview rendering, with client-side GPU assistance only if useful.
+- High-quality server-side final rendering; output storage and export behavior are undecided.
+- Exposure, contrast, highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
+- Explicit Docker volumes if persistent data becomes necessary.
 
-Successful execution on local Windows alone does not constitute completed runtime validation. NAS-based checks will be needed for deployment, connectivity to Immich, supported image handling, rendering, and persistence as those features are implemented. No runtime validation is possible for this documentation-only scaffold.
+These are provisional directions, not available functionality or delivery commitments. The current internal-only backend network will need deliberate review when connectivity to an external Immich instance is implemented.
+
+## Portability and validation
+
+The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify NAS host OS settings or install application files into host system directories. Future persistent data must use explicitly declared container storage or Docker volumes.
+
+The validation workflow is to develop locally, copy or deploy the required files to the NAS, start them with Docker Compose / Portainer, and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
+
+The NAS acceptance check is to open the Web UI, confirm `Backend: Connected`, and obtain `{"status":"ok"}` from `/api/health`. Also verify the visible error state with the backend stopped and recovery after restarting it. Container builds, nginx routing, and restart behavior still require target-environment validation; static checks alone cannot establish them.

@@ -1,0 +1,32 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "${GENZOROOM_PORT:-3190}:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - web
+      - api
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    build: ./backend
+    expose:
+      - "8000"
+    restart: unless-stopped
+    networks:
+      - api
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  web:
+  api:
+    internal: true
