@@ -1,8 +1,12 @@
 __pycache__
 *.py[cod]
+Dockerfile
+.dockerignore
 .venv
 venv
 .env
 .env.*
 .pytest_cache
+.coverage
+htmlcov
 tests
