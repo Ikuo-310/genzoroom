@@ -14,6 +14,8 @@ Internal changes are omitted unless they affect users.
 - An authenticated Immich connectivity check, configured through backend environment variables, with connected, not configured, and failed states in the Web UI. Photo retrieval and editing remain unimplemented.
 - An optional Compose override that connects only the backend to an existing Immich Docker network for same-host deployments.
 - A recent-photo grid that retrieves up to 10 images from Immich and displays proxied thumbnails without exposing the Immich API key to the browser.
+- English and Japanese UI support with a remembered manual language selection.
+- Locale-aware photo date and time formatting for English and Japanese.
 
 ### Fixed
 

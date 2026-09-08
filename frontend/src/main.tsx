@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { useTranslation } from 'react-i18next';
+import { changeAppLanguage, formatPhotoDate, type AppLanguage } from './i18n';
 import './style.css';
 
 type Connection = 'checking' | 'connected' | 'error';
@@ -13,12 +15,9 @@ type RecentAsset = {
   thumbnail_url: string;
 };
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
 function App() {
+  const { t, i18n } = useTranslation();
+  const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const [connection, setConnection] = useState<Connection>('checking');
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
@@ -108,55 +107,76 @@ function App() {
     };
   }, [attempt]);
 
+  const connectionDetail = connection === 'error'
+    ? t('connection.backendFailedDetail')
+    : immichConnection === 'not-configured'
+      ? t('connection.notConfiguredDetail')
+      : immichConnection === 'error'
+        ? t('connection.immichFailedDetail')
+        : immichConnection === 'connected'
+          ? t('connection.succeededDetail')
+          : t('connection.checkingDetail');
+
   return (
     <main>
-      <p className="eyebrow">A photo development room</p>
-      <h1>GenzoRoom</h1>
-      <p className="stage">Status: Early Development</p>
-      <section aria-label="Backend connection">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">{t('app.eyebrow')}</p>
+          <h1>{t('app.title')}</h1>
+          <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
+        </div>
+        <div className="language-control">
+          <label htmlFor="language-select">{t('language.label')}</label>
+          <select
+            id="language-select"
+            value={language}
+            onChange={(event) => void changeAppLanguage(event.target.value as AppLanguage)}
+          >
+            <option value="en">{t('language.english')}</option>
+            <option value="ja">{t('language.japanese')}</option>
+          </select>
+        </div>
+      </header>
+      <section aria-label={t('connection.sectionLabel')}>
         <div className="status-list" role="status" aria-live="polite">
           <p className={`connection ${connection}`}>
             <span className="dot" aria-hidden="true" />
-            Backend: {connection === 'checking' ? 'Checking…' : connection === 'connected' ? 'Connected' : 'Connection failed'}
+            {t('connection.backend')}: {
+              connection === 'checking'
+                ? t('connection.checking')
+                : connection === 'connected'
+                  ? t('connection.connected')
+                  : t('connection.failed')
+            }
           </p>
           <p className={`connection ${immichConnection}`}>
             <span className="dot" aria-hidden="true" />
-            Immich: {
-              immichConnection === 'checking' ? 'Checking…'
-                : immichConnection === 'connected' ? 'Connected'
-                  : immichConnection === 'not-configured' ? 'Not configured'
-                    : 'Connection failed'
+            {t('connection.immich')}: {
+              immichConnection === 'checking' ? t('connection.checking')
+                : immichConnection === 'connected' ? t('connection.connected')
+                  : immichConnection === 'not-configured' ? t('connection.notConfigured')
+                    : t('connection.failed')
             }
           </p>
         </div>
-        <p className="detail">
-          {connection === 'error'
-            ? 'The backend could not be reached or returned an invalid response. Check the services and try again.'
-            : immichConnection === 'not-configured'
-              ? 'Set the Immich URL and API key in the backend environment.'
-              : immichConnection === 'error'
-                ? 'The backend could not verify the Immich connection. Check its configuration and logs.'
-                : immichConnection === 'connected'
-                  ? 'The backend and Immich connection checks succeeded.'
-                  : 'Checking the backend and Immich connection…'}
-        </p>
+        <p className="detail">{connectionDetail}</p>
         <button disabled={connection === 'checking' || immichConnection === 'checking' || assetState === 'loading'} onClick={() => {
           setConnection('checking');
           setImmichConnection('checking');
           setAssetState('loading');
           setAttempt((value) => value + 1);
         }}>
-          Check again
+          {t('connection.checkAgain')}
         </button>
       </section>
       <section className="photos" aria-labelledby="recent-photos-heading">
-        <h2 id="recent-photos-heading">Recent photos</h2>
+        <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
         {assetState === 'loading' ? (
-          <p className="gallery-message" role="status">Loading photos…</p>
+          <p className="gallery-message" role="status">{t('photos.loading')}</p>
         ) : assetState === 'error' ? (
-          <p className="gallery-message error-text" role="alert">Recent photos could not be loaded.</p>
+          <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
         ) : assets.length === 0 ? (
-          <p className="gallery-message">No photos found.</p>
+          <p className="gallery-message">{t('photos.empty')}</p>
         ) : (
           <div className="photo-grid">
             {assets.map((asset) => (
@@ -164,14 +184,14 @@ function App() {
                 <img src={asset.thumbnail_url} alt={asset.filename} loading="lazy" />
                 <div className="photo-info">
                   <p title={asset.filename}>{asset.filename}</p>
-                  <time dateTime={asset.date}>{formatDate(asset.date)}</time>
+                  <time dateTime={asset.date}>{formatPhotoDate(asset.date, language)}</time>
                 </div>
               </article>
             ))}
           </div>
         )}
       </section>
-      <p className="note">This stage displays up to 10 recent Immich photos. Photo editing is not available yet.</p>
+      <p className="note">{t('app.stageNotice')}</p>
     </main>
   );
 }

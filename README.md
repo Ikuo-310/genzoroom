@@ -10,6 +10,8 @@ The name comes from the Japanese word **現像 (genzō)**, meaning photographic 
 
 The scaffold contains a React / TypeScript / Vite frontend, a Python 3.13 / FastAPI / Uvicorn backend, and Docker Compose configuration. The page shows separate backend and Immich connection states and up to 10 recent photos in a simple thumbnail grid. The button reloads both states and the photo list; there is no background polling.
 
+GenzoRoom's UI currently supports English and Japanese. It initially follows the browser language and remembers a language selected in the UI.
+
 nginx serves the built frontend and forwards same-origin API requests to the backend. `GET /api/health` checks GenzoRoom's backend. `GET /api/immich/status` makes the backend call Immich's authenticated current-user endpoint. `GET /api/assets/recent` returns limited metadata, and thumbnail requests are also proxied through the backend so the Immich API key is never sent to the browser. The backend can reach Immich through a routed network, an HTTPS URL, or an optional shared Docker network. Photo detail views, image processing, editing, and GenzoRoom user authentication are not implemented.
 
 ## Choose an Immich connection route

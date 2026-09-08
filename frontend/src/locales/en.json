@@ -1,0 +1,35 @@
+{
+  "app": {
+    "title": "GenzoRoom",
+    "eyebrow": "A photo development room",
+    "statusLabel": "Status",
+    "earlyDevelopment": "Early Development",
+    "stageNotice": "This stage displays up to 10 recent Immich photos. Photo editing is not available yet."
+  },
+  "connection": {
+    "sectionLabel": "Service connections",
+    "backend": "Backend",
+    "immich": "Immich",
+    "checking": "Checking…",
+    "connected": "Connected",
+    "failed": "Connection failed",
+    "notConfigured": "Not configured",
+    "backendFailedDetail": "The backend could not be reached or returned an invalid response. Check the services and try again.",
+    "notConfiguredDetail": "Set the Immich URL and API key in the backend environment.",
+    "immichFailedDetail": "The backend could not verify the Immich connection. Check its configuration and logs.",
+    "succeededDetail": "The backend and Immich connection checks succeeded.",
+    "checkingDetail": "Checking the backend and Immich connection…",
+    "checkAgain": "Check again"
+  },
+  "photos": {
+    "recent": "Recent photos",
+    "loading": "Loading photos…",
+    "empty": "No recent photos",
+    "loadFailed": "Recent photos could not be loaded."
+  },
+  "language": {
+    "label": "Language",
+    "english": "English",
+    "japanese": "日本語"
+  }
+}

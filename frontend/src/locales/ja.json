@@ -1,0 +1,34 @@
+{
+  "app": {
+    "eyebrow": "写真現像室",
+    "statusLabel": "ステータス",
+    "earlyDevelopment": "開発初期段階",
+    "stageNotice": "現在はImmichの最近の写真を最大10件表示できます。写真編集機能はまだ利用できません。"
+  },
+  "connection": {
+    "sectionLabel": "サービス接続状況",
+    "backend": "Backend",
+    "immich": "Immich",
+    "checking": "確認中…",
+    "connected": "接続済み",
+    "failed": "接続失敗",
+    "notConfigured": "未設定",
+    "backendFailedDetail": "Backendに接続できないか、応答が正しくありません。サービスの状態を確認して再試行してください。",
+    "notConfiguredDetail": "Backendの環境変数にImmich URLとAPIキーを設定してください。",
+    "immichFailedDetail": "Immichへの接続を確認できませんでした。設定とBackendのログを確認してください。",
+    "succeededDetail": "BackendとImmichへの接続を確認できました。",
+    "checkingDetail": "BackendとImmichへの接続を確認しています…",
+    "checkAgain": "再確認"
+  },
+  "photos": {
+    "recent": "最近の写真",
+    "loading": "写真を読み込んでいます…",
+    "empty": "最近の写真はありません",
+    "loadFailed": "最近の写真を読み込めませんでした。"
+  },
+  "language": {
+    "label": "言語",
+    "english": "English",
+    "japanese": "日本語"
+  }
+}
