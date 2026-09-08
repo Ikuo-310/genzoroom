@@ -17,6 +17,7 @@ Internal changes are omitted unless they affect users.
 - English and Japanese UI support with a remembered manual language selection.
 - Locale-aware photo date and time formatting for English and Japanese.
 - Image format badges on photo cards, including distinct RAW format metadata for future filtering.
+- Client-side RAW and Non-RAW filters for the fetched recent-photo list.
 
 ### Fixed
 

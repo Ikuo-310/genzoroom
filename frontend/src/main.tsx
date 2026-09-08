@@ -3,6 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { changeAppLanguage, type AppLanguage } from './i18n';
 import { PhotoCard, type RecentAsset } from './PhotoCard';
+import { PhotoFilterControls } from './PhotoFilterControls';
+import {
+  DEFAULT_PHOTO_FILTERS,
+  filterPhotos,
+  togglePhotoFilter,
+  type PhotoFilters,
+} from './photoFilters';
 import './style.css';
 
 type Connection = 'checking' | 'connected' | 'error';
@@ -16,6 +23,7 @@ function App() {
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
+  const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(DEFAULT_PHOTO_FILTERS);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -112,6 +120,8 @@ function App() {
         : immichConnection === 'connected'
           ? t('connection.succeededDetail')
           : t('connection.checkingDetail');
+  // Filtering is derived from the fetched list and never participates in API request state.
+  const visibleAssets = filterPhotos(assets, photoFilters);
 
   return (
     <main>
@@ -166,16 +176,26 @@ function App() {
         </button>
       </section>
       <section className="photos" aria-labelledby="recent-photos-heading">
-        <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
+        <div className="photos-heading">
+          <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
+          <PhotoFilterControls
+            filters={photoFilters}
+            onToggle={(filter) => setPhotoFilters((current) => (
+              togglePhotoFilter(current, filter)
+            ))}
+          />
+        </div>
         {assetState === 'loading' ? (
           <p className="gallery-message" role="status">{t('photos.loading')}</p>
         ) : assetState === 'error' ? (
           <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
         ) : assets.length === 0 ? (
           <p className="gallery-message">{t('photos.empty')}</p>
+        ) : visibleAssets.length === 0 ? (
+          <p className="gallery-message">{t('photos.noMatches')}</p>
         ) : (
           <div className="photo-grid">
-            {assets.map((asset) => (
+            {visibleAssets.map((asset) => (
               <PhotoCard asset={asset} language={language} key={asset.id} />
             ))}
           </div>

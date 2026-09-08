@@ -25,7 +25,10 @@
     "recent": "Recent photos",
     "loading": "Loading photos…",
     "empty": "No recent photos",
-    "loadFailed": "Recent photos could not be loaded."
+    "loadFailed": "Recent photos could not be loaded.",
+    "filterLabel": "Photo type",
+    "nonRaw": "Non-RAW",
+    "noMatches": "No photos match this filter."
   },
   "language": {
     "label": "Language",

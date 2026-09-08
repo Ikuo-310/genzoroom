@@ -52,6 +52,8 @@ describe('localized resources', () => {
     expect(i18n.t('connection.connected', { lng: 'ja' })).toBe('接続済み');
     expect(i18n.t('photos.recent', { lng: 'en' })).toBe('Recent photos');
     expect(i18n.t('photos.recent', { lng: 'ja' })).toBe('最近の写真');
+    expect(i18n.t('photos.noMatches', { lng: 'en' })).toBe('No photos match this filter.');
+    expect(i18n.t('photos.noMatches', { lng: 'ja' })).toBe('この条件に一致する写真はありません。');
   });
 
   it('uses English as the translation fallback', () => {

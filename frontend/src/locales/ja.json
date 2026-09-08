@@ -24,7 +24,10 @@
     "recent": "最近の写真",
     "loading": "写真を読み込んでいます…",
     "empty": "最近の写真はありません",
-    "loadFailed": "最近の写真を読み込めませんでした。"
+    "loadFailed": "最近の写真を読み込めませんでした。",
+    "filterLabel": "写真の種類",
+    "nonRaw": "RAW以外",
+    "noMatches": "この条件に一致する写真はありません。"
   },
   "language": {
     "label": "言語",
