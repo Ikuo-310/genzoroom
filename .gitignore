@@ -1,0 +1,81 @@
+# Node.js / React / TypeScript dependencies and tooling
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+.yarn/build-state.yml
+.pnp.*
+*.tsbuildinfo
+.vite/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# Build output and generated package metadata
+dist/
+build/
+out/
+*.egg-info/
+.eggs/
+*.egg
+
+# Python / FastAPI bytecode, virtual environments, and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+__pypackages__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+
+# Test coverage
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.lcov
+
+# Local environment settings and secrets; retain shareable examples
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs, caches, and temporary files
+*.log
+.cache/
+.temp/
+.tmp/
+tmp/
+temp/
+*.tmp
+*.bak
+
+# IDE / editor temporary and local settings
+.idea/
+.vscode/
+.vs/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+
+# OS-generated files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
