@@ -1,6 +1,6 @@
 # GenzoRoom
 
-**Status: Early Development — a minimal connectivity scaffold is available. Photo features are not implemented.**
+**Status: Early Development — backend and authenticated Immich connectivity checks are available. Photo features are not implemented.**
 
 GenzoRoom is a hobby and learning project aiming to become a self-hosted photo development and color correction interface for photos managed by Immich, accessible through a web browser.
 
@@ -8,16 +8,16 @@ The name comes from the Japanese word **現像 (genzō)**, meaning photographic 
 
 ## Current state
 
-The first-stage scaffold contains a React / TypeScript / Vite frontend, a Python 3.13 / FastAPI / Uvicorn backend, and Docker Compose configuration. The page shows checking, connected, and error states and a button to check again. A check times out after five seconds; the displayed result is the last check, not continuous monitoring.
+The scaffold contains a React / TypeScript / Vite frontend, a Python 3.13 / FastAPI / Uvicorn backend, and Docker Compose configuration. The page shows separate backend and Immich connection states with a button to check again. The displayed result is the last check, not continuous monitoring.
 
-nginx serves the built frontend and forwards same-origin `GET /api/health` requests to the backend's `GET /health`, which returns `{"status":"ok"}`. Immich integration, image loading and processing, photo editing, and authentication are not implemented.
+nginx serves the built frontend and forwards same-origin API requests to the backend. `GET /api/health` checks GenzoRoom's backend. `GET /api/immich/status` makes the backend call Immich's authenticated current-user endpoint. Photo retrieval, image processing, editing, and GenzoRoom user authentication are not implemented.
 
 ## Run on a NAS with Docker Compose
 
 Use a NAS with Docker Engine and Docker Compose available. From a designated deployment directory on the NAS:
 
 1. Copy the repository, including `frontend/`, `backend/`, and `docker-compose.yml`, to that directory. Do not copy local `node_modules`, virtual environments, or build output.
-2. Optionally copy `.env.example` to `.env` and change `GENZOROOM_PORT`. Without a `.env` file, the default is `3190`.
+2. Supply `IMMICH_URL` and `IMMICH_API_KEY` as environment variables. `IMMICH_URL` is the Immich server root URL, such as `http://192.168.1.20:2283`. Never commit a real API key or place it in source code or an image. For local Compose use, copy `.env.example` to the ignored `.env` file and replace its example values. `GENZOROOM_PORT` is optional and defaults to `3190`.
 3. Run:
 
    ```sh
@@ -26,12 +26,13 @@ Use a NAS with Docker Engine and Docker Compose available. From a designated dep
    docker compose ps
    ```
 
-4. Open `http://<NAS-IP>:3190` (or the configured port). Confirm `GenzoRoom`, `Status: Early Development`, and `Backend: Connected`.
+4. Open `http://<NAS-IP>:3190` (or the configured port). Confirm `Backend: Connected` and `Immich: Connected`. Missing environment variables show `Immich: Not configured`; rejected credentials, unreachable servers, and unexpected API responses show `Immich: Connection failed`.
 5. Open `http://<NAS-IP>:3190/api/health` and confirm `{"status":"ok"}`.
+6. Open `http://<NAS-IP>:3190/api/immich/status` and confirm `{"configured":true,"connected":true}`.
 
 The initial build requires internet access for base images and dependencies. Vite runs at build time; nginx serves static files during NAS operation. The backend has no published host port.
 
-Portainer can manage the resulting containers on the same Docker endpoint. For a Portainer stack, use a Docker Standalone workflow that supplies the complete repository as build context and supports building both services. Pasting only the Compose YAML into a web editor does not supply `./frontend` and `./backend`. This configuration is not intended for Swarm.
+Portainer can manage the resulting containers on the same Docker endpoint. For a GitHub Repository stack, add `IMMICH_URL` and `IMMICH_API_KEY` under the stack's Environment variables so the secret stays outside the repository. Use a Docker Standalone workflow that supplies the complete repository as build context and supports building both services. This configuration is not intended for Swarm.
 
 For troubleshooting, run `docker compose logs frontend backend`. To verify the error state, run `docker compose stop backend`, click **Check again**, and confirm a connection failure. Run `docker compose start backend` and check again to confirm recovery; allow a few seconds for startup and internal DNS refresh.
 
@@ -41,7 +42,7 @@ Stop and remove the deployment with `docker compose down`. This stage creates no
 
 The following capabilities are ideas for future development, **not implemented features or delivery commitments**:
 
-- Immich API integration and browser-based photo development and color correction.
+- Photo access through the Immich API and browser-based photo development and color correction.
 - Non-destructive editing, with edit parameters stored separately from original images.
 - JPEG and HEIC support, with RAW and DNG development considered for a later stage.
 - Exposure, contrast, highlights, shadows, white balance, tone curve, and HSL controls.

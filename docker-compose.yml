@@ -16,11 +16,15 @@ services:
 
   backend:
     build: ./backend
+    environment:
+      IMMICH_URL: ${IMMICH_URL:-}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
     expose:
       - "8000"
     restart: unless-stopped
     networks:
       - api
+      - outbound
     cap_drop:
       - ALL
     security_opt:
@@ -30,3 +34,4 @@ networks:
   web:
   api:
     internal: true
+  outbound:
