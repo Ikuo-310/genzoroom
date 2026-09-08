@@ -1,17 +1,25 @@
 import asyncio
 import io
+import json
 import logging
 import os
 import unittest
+from uuid import UUID
 from unittest.mock import patch
 
 import httpx
 
-from immich import check_immich_status
+from immich import (
+    ImmichRequestError,
+    check_immich_status,
+    get_asset_thumbnail,
+    get_recent_assets,
+)
 from main import app
 
 API_KEY = "test-secret-api-key"
 IMMICH_URL = "http://immich.example:2283"
+ASSET_ID = UUID("12345678-1234-4234-9234-123456789abc")
 
 
 def run_check(handler, *, url=IMMICH_URL, api_key=API_KEY):
@@ -117,6 +125,108 @@ class ImmichStatusTests(unittest.TestCase):
         rendered_result = result.model_dump_json(exclude_none=True)
         self.assertNotIn(API_KEY, rendered_result)
         self.assertNotIn(API_KEY, log_output.getvalue())
+
+
+class ImmichAssetTests(unittest.TestCase):
+    def run_recent(self, handler, *, url=IMMICH_URL, api_key=API_KEY):
+        return asyncio.run(
+            get_recent_assets(
+                url,
+                api_key,
+                transport=httpx.MockTransport(handler),
+            )
+        )
+
+    def test_gets_recent_images_with_minimal_frontend_fields(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "POST")
+            self.assertEqual(request.url.path, "/api/search/metadata")
+            self.assertEqual(request.headers["x-api-key"], API_KEY)
+            self.assertEqual(
+                json.loads(request.content),
+                {
+                    "filter": {"type": {"eq": "IMAGE"}},
+                    "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
+                    "size": 10,
+                },
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "assets": {
+                        "items": [
+                            {
+                                "id": str(ASSET_ID),
+                                "type": "IMAGE",
+                                "originalFileName": "photo.jpg",
+                                "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+                            },
+                            {
+                                "id": "video-is-not-parsed",
+                                "type": "VIDEO",
+                            },
+                        ]
+                    }
+                },
+            )
+
+        result = self.run_recent(handler)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].filename, "photo.jpg")
+        self.assertEqual(
+            result[0].thumbnail_url,
+            f"/api/assets/{ASSET_ID}/thumbnail",
+        )
+        self.assertNotIn(API_KEY, result[0].model_dump_json())
+
+    def test_gets_an_empty_asset_list(self):
+        result = self.run_recent(
+            lambda request: httpx.Response(200, json={"assets": {"items": []}})
+        )
+
+        self.assertEqual(result, [])
+
+    def test_reports_asset_api_errors_without_exposing_the_key(self):
+        for status_code, error_code in ((403, "authentication_failed"), (500, "unexpected_response")):
+            with self.subTest(status_code=status_code):
+                with self.assertRaises(ImmichRequestError) as raised:
+                    self.run_recent(lambda request: httpx.Response(status_code))
+
+                self.assertEqual(raised.exception.error_code, error_code)
+                self.assertNotIn(API_KEY, str(raised.exception))
+
+    def test_proxies_thumbnail_bytes_and_content_type(self):
+        image = b"fake-thumbnail"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.path, f"/api/assets/{ASSET_ID}/thumbnail")
+            self.assertEqual(request.url.params["size"], "thumbnail")
+            self.assertEqual(request.headers["x-api-key"], API_KEY)
+            return httpx.Response(200, content=image, headers={"content-type": "image/jpeg"})
+
+        thumbnail = asyncio.run(
+            get_asset_thumbnail(
+                IMMICH_URL,
+                API_KEY,
+                ASSET_ID,
+                transport=httpx.MockTransport(handler),
+            )
+        )
+
+        self.assertEqual(thumbnail.content, image)
+        self.assertEqual(thumbnail.media_type, "image/jpeg")
+        self.assertNotIn(API_KEY, repr(thumbnail))
+
+    def test_reports_unreachable_asset_api(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection failed", request=request)
+
+        with self.assertRaises(ImmichRequestError) as raised:
+            self.run_recent(handler)
+
+        self.assertEqual(raised.exception.error_code, "unreachable")
 
 
 if __name__ == "__main__":

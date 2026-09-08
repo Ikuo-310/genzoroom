@@ -1,6 +1,6 @@
 # GenzoRoom
 
-**Status: Early Development — backend and authenticated Immich connectivity checks are available. Photo features are not implemented.**
+**Status: Early Development — authenticated Immich connectivity and a small recent-photo view are available. Photo editing is not implemented.**
 
 GenzoRoom is a hobby and learning project aiming to become a self-hosted photo development and color correction interface for photos managed by Immich, accessible through a web browser.
 
@@ -8,13 +8,15 @@ The name comes from the Japanese word **現像 (genzō)**, meaning photographic 
 
 ## Current state
 
-The scaffold contains a React / TypeScript / Vite frontend, a Python 3.13 / FastAPI / Uvicorn backend, and Docker Compose configuration. The page shows separate backend and Immich connection states with a button to check again. The displayed result is the last check, not continuous monitoring.
+The scaffold contains a React / TypeScript / Vite frontend, a Python 3.13 / FastAPI / Uvicorn backend, and Docker Compose configuration. The page shows separate backend and Immich connection states and up to 10 recent photos in a simple thumbnail grid. The button reloads both states and the photo list; there is no background polling.
 
-nginx serves the built frontend and forwards same-origin API requests to the backend. `GET /api/health` checks GenzoRoom's backend. `GET /api/immich/status` makes the backend call Immich's authenticated current-user endpoint. The backend can reach Immich through a routed network, an HTTPS URL, or an optional shared Docker network. Photo retrieval, image processing, editing, and GenzoRoom user authentication are not implemented.
+nginx serves the built frontend and forwards same-origin API requests to the backend. `GET /api/health` checks GenzoRoom's backend. `GET /api/immich/status` makes the backend call Immich's authenticated current-user endpoint. `GET /api/assets/recent` returns limited metadata, and thumbnail requests are also proxied through the backend so the Immich API key is never sent to the browser. The backend can reach Immich through a routed network, an HTTPS URL, or an optional shared Docker network. Photo detail views, image processing, editing, and GenzoRoom user authentication are not implemented.
 
 ## Choose an Immich connection route
 
 GenzoRoom always uses `IMMICH_URL` and `IMMICH_API_KEY` for the application-level connection. Choose a URL that is reachable from the backend container. Never commit a real API key or place it in source code or an image.
+
+The API key needs only `user.read` for the connection check, `asset.read` for recent-photo metadata, and `asset.view` for thumbnails. Do not grant write, upload, delete, or download permissions for this stage.
 
 ### Network-accessible Immich
 
@@ -66,7 +68,7 @@ Use a NAS with Docker Engine and Docker Compose available. From a designated dep
 
    For same-host shared-network access, use both Compose files as shown above for `config`, `up`, `ps`, and later operational commands.
 
-4. Open `http://<NAS-IP>:3190` (or the configured port). Confirm `Backend: Connected` and `Immich: Connected`. Missing environment variables show `Immich: Not configured`; rejected credentials, unreachable servers, and unexpected API responses show `Immich: Connection failed`.
+4. Open `http://<NAS-IP>:3190` (or the configured port). Confirm `Backend: Connected`, `Immich: Connected`, and a grid containing up to 10 recent photos. Missing environment variables show `Immich: Not configured`; rejected credentials, unreachable servers, insufficient asset permissions, and unexpected API responses produce a failed state or photo-loading message.
 5. Open `http://<NAS-IP>:3190/api/health` and confirm `{"status":"ok"}`.
 6. Open `http://<NAS-IP>:3190/api/immich/status` and confirm `{"configured":true,"connected":true}`.
 
@@ -84,7 +86,7 @@ Stop and remove the deployment with `docker compose down`. This stage creates no
 
 The following capabilities are ideas for future development, **not implemented features or delivery commitments**:
 
-- Photo access through the Immich API and browser-based photo development and color correction.
+- Browser-based photo development and color correction for Immich photos.
 - Non-destructive editing, with edit parameters stored separately from original images.
 - JPEG and HEIC support, with RAW and DNG development considered for a later stage.
 - Exposure, contrast, highlights, shadows, white balance, tone curve, and HSL controls.
@@ -112,7 +114,7 @@ Local checks do not establish NAS compatibility. NAS container startup, proxy be
 
 ## Local development checks
 
-Use Node.js 24 and Python 3.13 for development. From `frontend/`, run `npm ci` and `npm run build` to check TypeScript and build static assets. From the repository root, run `python -m py_compile backend/main.py` and `docker compose config` for basic static checks.
+Use Node.js 24 and Python 3.13 for development. From `frontend/`, run `npm ci` and `npm run build` to check TypeScript and build static assets. From the repository root, run `python -m py_compile backend/main.py backend/immich.py`, `python -m unittest discover -s backend/tests`, and `docker compose config` for basic static checks.
 
 For optional local development, install `backend/requirements.txt` in a Python virtual environment, then run `uvicorn main:app --host 127.0.0.1 --port 8000` from `backend/`. Run `npm run dev` from `frontend/`. Vite proxies `/api/` to the local backend; browser code always uses a relative same-origin URL. This development server is not used in the NAS deployment.
 

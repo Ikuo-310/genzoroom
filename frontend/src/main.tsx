@@ -4,10 +4,25 @@ import './style.css';
 
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
+type AssetState = 'loading' | 'ready' | 'error';
+
+type RecentAsset = {
+  id: string;
+  filename: string;
+  date: string;
+  thumbnail_url: string;
+};
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
 
 function App() {
   const [connection, setConnection] = useState<Connection>('checking');
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
+  const [assets, setAssets] = useState<RecentAsset[]>([]);
+  const [assetState, setAssetState] = useState<AssetState>('loading');
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -55,7 +70,35 @@ function App() {
       }
     }
 
-    void Promise.all([checkBackend(), checkImmich()]).finally(() => {
+    async function loadRecentAssets() {
+      try {
+        const response = await fetch('/api/assets/recent', {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error('Recent assets request failed');
+        const data: unknown = await response.json();
+        if (!Array.isArray(data) || data.some((asset) => (
+          typeof asset !== 'object' || asset === null ||
+          !('id' in asset) || typeof asset.id !== 'string' ||
+          !('filename' in asset) || typeof asset.filename !== 'string' ||
+          !('date' in asset) || typeof asset.date !== 'string' ||
+          !('thumbnail_url' in asset) || typeof asset.thumbnail_url !== 'string'
+        ))) throw new Error('Unexpected recent assets response');
+
+        if (active) {
+          setAssets(data as RecentAsset[]);
+          setAssetState('ready');
+        }
+      } catch {
+        if (active) {
+          setAssets([]);
+          setAssetState('error');
+        }
+      }
+    }
+
+    void Promise.all([checkBackend(), checkImmich(), loadRecentAssets()]).finally(() => {
       window.clearTimeout(timeout);
     });
     return () => {
@@ -97,15 +140,38 @@ function App() {
                   ? 'The backend and Immich connection checks succeeded.'
                   : 'Checking the backend and Immich connection…'}
         </p>
-        <button disabled={connection === 'checking' || immichConnection === 'checking'} onClick={() => {
+        <button disabled={connection === 'checking' || immichConnection === 'checking' || assetState === 'loading'} onClick={() => {
           setConnection('checking');
           setImmichConnection('checking');
+          setAssetState('loading');
           setAttempt((value) => value + 1);
         }}>
           Check again
         </button>
       </section>
-      <p className="note">This stage checks authenticated Immich connectivity only. Photo retrieval and editing are not available yet.</p>
+      <section className="photos" aria-labelledby="recent-photos-heading">
+        <h2 id="recent-photos-heading">Recent photos</h2>
+        {assetState === 'loading' ? (
+          <p className="gallery-message" role="status">Loading photos…</p>
+        ) : assetState === 'error' ? (
+          <p className="gallery-message error-text" role="alert">Recent photos could not be loaded.</p>
+        ) : assets.length === 0 ? (
+          <p className="gallery-message">No photos found.</p>
+        ) : (
+          <div className="photo-grid">
+            {assets.map((asset) => (
+              <article className="photo-card" key={asset.id}>
+                <img src={asset.thumbnail_url} alt={asset.filename} loading="lazy" />
+                <div className="photo-info">
+                  <p title={asset.filename}>{asset.filename}</p>
+                  <time dateTime={asset.date}>{formatDate(asset.date)}</time>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <p className="note">This stage displays up to 10 recent Immich photos. Photo editing is not available yet.</p>
     </main>
   );
 }

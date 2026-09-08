@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Status: Early Development — backend and authenticated Immich connectivity checks are implemented. Photo features are not implemented.**
+**Status: Early Development — authenticated connectivity and a limited recent-photo thumbnail view are implemented. Photo editing is not implemented.**
 
 This document describes the current minimal implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -12,26 +12,30 @@ Browser: http://<NAS-IP>:3190
 Frontend: nginx on container port 8080
   ├─ /             → built React / TypeScript frontend
   ├─ /api/health         → internal Docker network
-  └─ /api/immich/status  → internal Docker network
+  ├─ /api/immich/status  → internal Docker network
+  ├─ /api/assets/recent  → internal Docker network
+  └─ /api/assets/{id}/thumbnail → internal Docker network
                        ↓
                      Backend: Uvicorn / FastAPI on port 8000
                        ├─ GET /health → {"status":"ok"}
-                       └─ GET /immich/status
-                            ↓ x-api-key
-                          Immich: GET /api/users/me
+                       ├─ GET /immich/status
+                       ├─ GET /assets/recent
+                       └─ GET /assets/{id}/thumbnail
+                            ↓ x-api-key (server-side only)
+                          Immich: authenticated read-only API
                             via LAN / routed network,
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, early development status, and separate backend and Immich connectivity results. It fetches the relative URLs `/api/health` and `/api/immich/status` and displays connected, not configured, or failed states as appropriate. A button repeats both checks; there is no background polling.
+React renders the title, early development status, separate backend and Immich connectivity results, and up to 10 recent photos. It uses only same-origin `/api/` URLs. A button repeats both checks and reloads the photo list; there is no background polling, pagination, search, or detail view.
 
 The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 
-The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` reads `IMMICH_URL` and `IMMICH_API_KEY`, then calls the stable, read-only Immich `GET /api/users/me` endpoint with the official `x-api-key` header. The response confirms that the server is reachable and that the API key has `user.read` permission. Redirects are not followed, TLS verification remains enabled, and the request uses a five-second overall timeout with a three-second connection timeout and no retries.
+The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` calls the stable Immich `GET /api/users/me` endpoint. `GET /assets/recent` calls stable `POST /api/search/metadata`, filters for `IMAGE`, orders by `fileCreatedAt` descending, limits the result to 10, and returns only the ID, filename, date, and a local thumbnail URL. `GET /assets/{id}/thumbnail` proxies stable `GET /api/assets/{id}/thumbnail?size=thumbnail`. All Immich calls use the official `x-api-key` header from backend environment variables. The key needs `user.read`, `asset.read`, and `asset.view`; no write endpoint is used. Redirects are not followed, TLS verification remains enabled, and requests use a five-second overall timeout with a three-second connection timeout and no retries.
 
 Application code uses only the configured `IMMICH_URL`; it does not know whether Docker DNS, a LAN route, or HTTPS provides the route. Selecting and operating that route is a deployment responsibility.
 
-The status response distinguishes missing URL, missing key, unreachable server, rejected or insufficient credentials, and unexpected API responses using safe error codes and messages. It does not return the upstream response body, URL, API key, or internal exception text. The frontend intentionally reduces these details to concise user-facing states.
+The status response distinguishes missing URL, missing key, unreachable server, rejected or insufficient credentials, and unexpected API responses using safe error codes and messages. Asset endpoints also return only generic configuration, reachability, authentication, or upstream-response errors. They do not return the upstream response body, URL, API key, or internal exception text. The frontend intentionally reduces these details to concise user-facing states.
 
 For optional local development, Vite provides the same `/api/` prefix mapping to a loopback backend. This is separate from the production nginx configuration.
 
@@ -42,7 +46,7 @@ For optional local development, Vite provides the same `/api/` prefix mapping to
 | Service | Container port | Host exposure | Role |
 | --- | --- | --- | --- |
 | `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
-| `backend` | `8000` | None | Backend and authenticated Immich connectivity checks. |
+| `backend` | `8000` | None | Connectivity checks, recent asset metadata, and thumbnail proxying. |
 
 Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
 
@@ -58,15 +62,15 @@ See [the README](../README.md) for startup, verification, and removal commands. 
 
 ## Future direction (not implemented)
 
-The current authenticated connectivity path is:
+The current authenticated read path is:
 
 ```text
-Browser → Frontend → Backend API → Immich API (`GET /api/users/me` only)
+Browser → Frontend → Backend API → Immich API
 ```
 
 Possible extensions include:
 
-- Immich asset access; connection credentials currently come only from backend environment variables.
+- Expanded Immich asset browsing; connection credentials currently come only from backend environment variables.
 - JPEG / HEIC handling and later RAW / DNG processing, potentially using LibRaw or rawpy.
 - Non-destructive edit parameter storage separate from original images; storage and schema are undecided.
 - Responsive preview rendering, with client-side GPU assistance only if useful.
@@ -74,7 +78,7 @@ Possible extensions include:
 - Exposure, contrast, highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
 - Explicit Docker volumes if persistent data becomes necessary.
 
-These are provisional directions, not available functionality or delivery commitments. The current Immich integration performs only the authenticated connection check described above.
+These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated connection checking and the recent-photo thumbnail view described above.
 
 ## Portability and validation
 
@@ -82,4 +86,4 @@ The Windows workspace is only a development directory. Application code and depl
 
 The validation workflow is to develop locally, copy or deploy the required files to the NAS, start them with Docker Compose / Portainer, and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 
-The NAS acceptance check is to open the Web UI, confirm `Backend: Connected` and `Immich: Connected`, obtain `{"status":"ok"}` from `/api/health`, and obtain a connected result from `/api/immich/status`. Also verify the appropriate visible state with missing Immich settings, rejected credentials, and the backend stopped. Container builds, nginx routing, real Immich connectivity, and restart behavior still require target-environment validation; static checks alone cannot establish them.
+The NAS acceptance check is to open the Web UI, confirm `Backend: Connected`, `Immich: Connected`, and up to 10 recent thumbnails, obtain `{"status":"ok"}` from `/api/health`, and obtain a connected result from `/api/immich/status`. Also verify the empty and failed photo-list states, missing Immich settings, rejected credentials, and the backend stopped. Container builds, nginx routing, real Immich photo and thumbnail access, and restart behavior still require target-environment validation; static checks alone cannot establish them.
