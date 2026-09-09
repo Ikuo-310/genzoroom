@@ -31,6 +31,12 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .photos { margin-top: 24px; }
 h2 { margin: 0; font-size: 1.35rem; }
 .photos-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 18px; }
+.selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; margin: -2px 0 18px; padding: 10px 12px; border: 1px solid #708077; border-radius: 8px; background: #17221f; }
+.selection-bar strong { font-size: 0.92rem; }
+.selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.selection-actions button { padding-block: 6px; font-size: 0.84rem; }
+.selection-actions .selection-clear { color: #e6eee9; background: transparent; border: 1px solid #64756c; }
+.selection-actions .selection-clear:hover { background: #263630; }
 .photo-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; }
 .photo-filters legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .photo-filter { display: flex; align-items: center; gap: 6px; color: #bacac1; border: 1px solid #526a5e; border-radius: 6px; padding: 4px 9px; font-size: 0.82rem; cursor: pointer; }
@@ -41,11 +47,21 @@ h2 { margin: 0; font-size: 1.35rem; }
 .gallery-message { margin: 0; color: #bacac1; }
 .error-text { color: #ffbbae; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
-.photo-card { min-width: 0; overflow: hidden; border: 1px solid #43584d; border-radius: 8px; background: #17221f; }
+.photo-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid #43584d; border-radius: 8px; background: #17221f; }
+.photo-card.selected { border-color: #f0f5f2; box-shadow: 0 0 0 2px #f0f5f2; }
 .photo-card-button { display: block; width: 100%; color: inherit; background: transparent; border: 0; border-radius: 0; padding: 0; text-align: left; }
 .photo-card-button:hover { background: #1d2b26; }
 .photo-card-button:focus-visible { position: relative; z-index: 1; outline: 3px solid #e6eee9; outline-offset: -3px; }
 .thumbnail { position: relative; }
+.photo-selection-control { position: absolute; top: 8px; left: 8px; z-index: 2; display: grid; width: 25px; height: 25px; place-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.photo-selection-control input { appearance: none; width: 21px; height: 21px; margin: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 5px rgb(0 0 0 / 75%); background: rgb(15 20 18 / 62%); cursor: pointer; }
+.photo-selection-control input:checked { background: #eef4f0; }
+.photo-selection-control input:checked::after { display: block; width: 5px; height: 10px; margin: 2px 0 0 6px; border: solid #17221f; border-width: 0 2px 2px 0; content: ''; transform: rotate(45deg); }
+.photo-selection-control input:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.photo-card:hover .photo-selection-control,
+.photo-card:focus-within .photo-selection-control,
+.photo-card.selection-mode .photo-selection-control,
+.photo-card.selected .photo-selection-control { opacity: 1; pointer-events: auto; }
 .thumbnail img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #111a17; }
 .format-badge { position: absolute; top: 8px; right: 8px; max-width: calc(100% - 16px); overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 45%); padding: 2px 6px; font-size: 0.7rem; font-weight: 750; line-height: 1.35; letter-spacing: 0.05em; text-overflow: ellipsis; white-space: nowrap; }
 .format-badge.raw { background: rgb(73 52 20 / 88%); border-width: 2px; }
@@ -115,6 +131,12 @@ h2 { margin: 0; font-size: 1.35rem; }
   .language-control { margin-bottom: 24px; }
   .language-control select { width: 100%; }
   .photos-heading { align-items: flex-start; flex-direction: column; }
+  .selection-bar { align-items: stretch; flex-direction: column; }
+  .selection-actions { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .photo-selection-control { opacity: 1; pointer-events: auto; }
 }
 
 @media (max-width: 760px) {

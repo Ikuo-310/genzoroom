@@ -28,7 +28,13 @@
     "filterLabel": "写真の種類",
     "nonRaw": "RAW以外",
     "noMatches": "この条件に一致する写真はありません。",
-    "openWorkspace": "{{filename}}を暗室で開く"
+    "openWorkspace": "{{filename}}を暗室で開く",
+    "selectPhoto": "{{filename}}を選択",
+    "deselectPhoto": "{{filename}}の選択を解除",
+    "selectionActions": "写真の選択操作",
+    "selectionCount": "{{count}}枚選択中",
+    "clearSelection": "選択解除",
+    "openSelected": "暗室へ"
   },
   "workspace": {
     "name": "暗室",

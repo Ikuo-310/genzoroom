@@ -15,14 +15,26 @@ const asset: RecentAsset = {
   format: 'DNG',
   is_raw: true,
 };
+const secondAsset: RecentAsset = {
+  id: '87654321-4321-4321-8321-cba987654321',
+  filename: 'second-photo.heic',
+  date: '2026-09-09T08:15:00',
+  thumbnail_url: '/api/assets/456/thumbnail',
+  format: 'HEIC',
+  is_raw: false,
+};
 
 afterEach(async () => i18n.changeLanguage('en'));
 
-function renderWorkspace(language: 'en' | 'ja') {
+function renderWorkspace(
+  language: 'en' | 'ja',
+  selectedAssets = [asset],
+  activeAssetId = asset.id,
+) {
   void i18n.changeLanguage(language);
-  const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id };
+  const state: WorkspaceNavigationState = { selectedAssets, activeAssetId };
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={[{ pathname: `/anshitsu/${asset.id}`, state }]}>
+    <MemoryRouter initialEntries={[{ pathname: `/anshitsu/${activeAssetId}`, state }]}>
       <App />
     </MemoryRouter>,
   );
@@ -52,10 +64,27 @@ describe('Anshitsu workspace', () => {
   });
 
   it('marks the active Filmstrip thumbnail and keeps the format badge', () => {
-    const markup = renderToStaticMarkup(<Filmstrip assets={[asset]} activeAssetId={asset.id} onActivate={vi.fn()} />);
+    const markup = renderToStaticMarkup(<Filmstrip assets={[asset, secondAsset]} activeAssetId={secondAsset.id} onActivate={vi.fn()} />);
     expect(markup).toContain('filmstrip-item active');
     expect(markup).toContain('aria-current="true"');
     expect(markup).toContain('format-badge raw');
+    expect(markup).toContain('>HEIC</span>');
+    expect(markup.match(/filmstrip-item/g)).toHaveLength(2);
+  });
+
+  it('uses the active Filmstrip asset for the workspace filename and date', () => {
+    const markup = renderWorkspace('en', [asset, secondAsset], secondAsset.id);
+    expect(markup).toContain(`title="${secondAsset.filename}"`);
+    expect(markup).toContain(formatPhotoDate(secondAsset.date, 'en'));
+    expect(markup).toContain('aria-current="true"');
+  });
+
+  it('keeps the single-photo URL usable without navigation state', () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/anshitsu/${asset.id}`]}><App /></MemoryRouter>,
+    );
+    expect(markup).toContain('Anshitsu');
+    expect(markup).toContain('Loading photo');
   });
 
   it('provides Fit, 1:1, zoom, pan surface, and panel controls', () => {

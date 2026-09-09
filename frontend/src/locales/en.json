@@ -29,7 +29,13 @@
     "filterLabel": "Photo type",
     "nonRaw": "Non-RAW",
     "noMatches": "No photos match this filter.",
-    "openWorkspace": "Open {{filename}} in Anshitsu"
+    "openWorkspace": "Open {{filename}} in Anshitsu",
+    "selectPhoto": "Select {{filename}}",
+    "deselectPhoto": "Deselect {{filename}}",
+    "selectionActions": "Photo selection actions",
+    "selectionCount": "{{count}} selected",
+    "clearSelection": "Clear selection",
+    "openSelected": "Open in Anshitsu"
   },
   "workspace": {
     "name": "Anshitsu",

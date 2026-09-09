@@ -6,7 +6,9 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { changeAppLanguage, type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { PhotoFilterControls } from './PhotoFilterControls';
+import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
+import { createWorkspaceNavigation, resolveSelectedAssets, toggleSelectedAssetId, workspacePath } from './photoSelection';
 
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
@@ -21,6 +23,7 @@ export function GalleryPage() {
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
   const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(DEFAULT_PHOTO_FILTERS);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -80,10 +83,17 @@ export function GalleryPage() {
         : immichConnection === 'connected' ? t('connection.succeededDetail')
           : t('connection.checkingDetail');
   const visibleAssets = filterPhotos(assets, photoFilters);
+  const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
+  const selectionMode = selectedAssetIds.length > 0;
 
   function openWorkspace(asset: RecentAsset) {
     const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id };
-    navigate(`/anshitsu/${asset.id}`, { state });
+    navigate(workspacePath(asset.id), { state });
+  }
+
+  function openSelectedAssets() {
+    const state = createWorkspaceNavigation(selectedAssets);
+    if (state) navigate(workspacePath(state.activeAssetId), { state });
   }
 
   return (
@@ -114,12 +124,25 @@ export function GalleryPage() {
           <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
           <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
         </div>
+        {selectionMode && <PhotoSelectionBar
+          count={selectedAssetIds.length}
+          onClear={() => setSelectedAssetIds([])}
+          onOpen={openSelectedAssets}
+        />}
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                 : <div className="photo-grid">{visibleAssets.map((asset) => (
-                  <PhotoCard asset={asset} language={language} key={asset.id} onOpen={() => openWorkspace(asset)} />
+                  <PhotoCard
+                    asset={asset}
+                    language={language}
+                    key={asset.id}
+                    selected={selectedAssetIds.includes(asset.id)}
+                    selectionMode={selectionMode}
+                    onToggleSelection={() => setSelectedAssetIds((current) => toggleSelectedAssetId(current, asset.id))}
+                    onOpen={() => openWorkspace(asset)}
+                  />
                 ))}</div>}
       </section>
       <p className="note">{t('app.stageNotice')}</p>

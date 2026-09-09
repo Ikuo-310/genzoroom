@@ -7,6 +7,7 @@ import { FormatBadge } from './FormatBadge';
 import { LanguageControl } from './GalleryPage';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
+import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 
 type DetailState = 'loading' | 'ready' | 'error';
 
@@ -113,9 +114,11 @@ export function AnshitsuPage() {
     <Filmstrip
       assets={selectedAssets}
       activeAssetId={assetId}
-      onActivate={(nextId) => navigate(`/anshitsu/${nextId}`, {
-        state: { selectedAssets, activeAssetId: nextId } satisfies WorkspaceNavigationState,
-      })}
+      onActivate={(nextId) => {
+        const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId };
+        const nextState = activateWorkspaceAsset(currentState, nextId);
+        navigate(workspacePath(nextState.activeAssetId), { state: nextState });
+      }}
     />
   </main>;
 }

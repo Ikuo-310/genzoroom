@@ -232,4 +232,12 @@ RAWとRAW以外の2つのチェックボックスは初期状態で両方ONと�
 
 詳細表示画像には原画像ではなく、Immichの `GET /api/assets/{id}/thumbnail?size=preview` で生成済みpreviewを使う。GenzoRoom Backendのproxyを経由するため、Immich APIキーはブラウザへ渡らない。EXIFは `GET /api/assets/{id}` から取得し、GPSを除く主要項目だけをFrontendへ返す。欠損項目は画面に出さない。
 
-左右パネルは独立して折りたためる。中央Viewerは初期状態をFitとし、100%、段階的な拡大・縮小、ホイールズーム、拡大時のドラッグPanに対応した。現像操作、Scope表示、History保存はまだプレースホルダーである。写真の色判断を妨げないよう、暗室だけは無彩色のダークグレーから黒を基調とした。
+左右パネルは独立して折りたためる。中央Viewerは初期状態をFitとし、等倍（1:1）、段階的な拡大・縮小、ホイールズーム、拡大時のドラッグPanに対応した。現像操作、Scope表示、History保存はまだプレースホルダーである。写真の色判断を妨げないよう、暗室だけは無彩色のダークグレーから黒を基調とした。
+
+## 16. 一覧の複数選択とFilmstrip切替
+
+最近の写真一覧では、選択したAsset IDを配列で保持する。Setではなく配列にしたのは、最初に選んだ写真を暗室のactiveAssetにし、選択順をそのままFilmstripへ反映するためである。RAW / RAW以外フィルターは表示対象だけを変え、一覧から一時的に隠れたAssetの選択状態は解除しない。
+
+通常状態でカード本体を押すと、従来どおりその1枚だけを暗室へ渡す。チェックから最初の1枚を選ぶと選択モードになり、以後はカード本体でも選択と解除を切り替える。Desktopでは通常時のチェックをホバーまたはキーボードフォーカス時に表示し、hoverのないモバイルではチェックを常時表示して単写真遷移と複数選択開始を分ける。
+
+「暗室へ」では、選択順に解決した `selectedAssets` と先頭Assetの `activeAssetId` をReact Routerのnavigation stateで渡す。Filmstripで別の写真を押したときは `activeAssetId` とURLだけを切り替え、`selectedAssets` は維持する。再読み込み時にnavigation stateが失われた場合は、URLのactiveAsset 1枚をImmichから再取得する既存挙動へ戻る。

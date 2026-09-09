@@ -58,6 +58,8 @@ describe('localized resources', () => {
     expect(i18n.t('workspace.name', { lng: 'ja' })).toBe('暗室');
     expect(i18n.t('workspace.actualSize', { lng: 'en' })).toBe('1:1');
     expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍');
+    expect(i18n.t('photos.selectionCount', { lng: 'en', count: 3 })).toBe('3 selected');
+    expect(i18n.t('photos.selectionCount', { lng: 'ja', count: 3 })).toBe('3枚選択中');
   });
 
   it('uses English as the translation fallback', () => {
