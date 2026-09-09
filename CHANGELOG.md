@@ -24,6 +24,7 @@ Internal changes are omitted unless they affect users.
 ### Changed
 
 - Changed the project license from the MIT License to the GNU Affero General Public License v3.0 (`AGPL-3.0-only`).
+- Reorganized the README around the current feature set and moved detailed deployment guidance to a dedicated document.
 
 ### Fixed
 

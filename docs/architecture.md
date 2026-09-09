@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Status: Early Development — authenticated connectivity and a limited recent-photo thumbnail view are implemented. Photo editing is not implemented.**
+**Status: Early Development — authenticated photo browsing and the initial Anshitsu workspace are implemented. Photo development and image adjustment are not implemented.**
 
 This document describes the current minimal implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -13,25 +13,29 @@ Frontend: nginx on container port 8080
   ├─ /             → built React / TypeScript frontend
   ├─ /api/health         → internal Docker network
   ├─ /api/immich/status  → internal Docker network
-  ├─ /api/assets/recent  → internal Docker network
-  └─ /api/assets/{id}/thumbnail → internal Docker network
+  ├─ /api/assets/recent        → internal Docker network
+  ├─ /api/assets/{id}          → internal Docker network
+  ├─ /api/assets/{id}/thumbnail → internal Docker network
+  └─ /api/assets/{id}/preview  → internal Docker network
                        ↓
                      Backend: Uvicorn / FastAPI on port 8000
                        ├─ GET /health → {"status":"ok"}
                        ├─ GET /immich/status
                        ├─ GET /assets/recent
-                       └─ GET /assets/{id}/thumbnail
+                       ├─ GET /assets/{id}
+                       ├─ GET /assets/{id}/thumbnail
+                       └─ GET /assets/{id}/preview
                             ↓ x-api-key (server-side only)
                           Immich: authenticated read-only API
                             via LAN / routed network,
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, early development status, separate backend and Immich connectivity results, and up to 10 recent photos. It uses only same-origin `/api/` URLs. A button repeats both checks and reloads the photo list; there is no background polling, pagination, search, or detail view.
+React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. It uses only same-origin `/api/` URLs. There is no background polling, pagination, search, or image adjustment.
 
 The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 
-The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` calls the stable Immich `GET /api/users/me` endpoint. `GET /assets/recent` calls stable `POST /api/search/metadata`, filters for `IMAGE`, orders by `fileCreatedAt` descending, limits the result to 10, and returns only the ID, filename, date, and a local thumbnail URL. `GET /assets/{id}/thumbnail` proxies stable `GET /api/assets/{id}/thumbnail?size=thumbnail`. All Immich calls use the official `x-api-key` header from backend environment variables. The key needs `user.read`, `asset.read`, and `asset.view`; no write endpoint is used. Redirects are not followed, TLS verification remains enabled, and requests use a five-second overall timeout with a three-second connection timeout and no retries.
+The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` calls the stable Immich `GET /api/users/me` endpoint. `GET /assets/recent` calls stable `POST /api/search/metadata`, filters for `IMAGE`, orders by `fileCreatedAt` descending, limits the result to 10, and returns the metadata needed by the grid. `GET /assets/{id}` returns selected non-GPS details and EXIF data. The thumbnail and preview routes proxy Immich-generated images at the corresponding sizes. All Immich calls use the official `x-api-key` header from backend environment variables. The key needs `user.read`, `asset.read`, and `asset.view`; no write endpoint is used. Redirects are not followed, TLS verification remains enabled, and requests use a five-second overall timeout with a three-second connection timeout and no retries.
 
 Application code uses only the configured `IMMICH_URL`; it does not know whether Docker DNS, a LAN route, or HTTPS provides the route. Selecting and operating that route is a deployment responsibility.
 
@@ -46,7 +50,7 @@ For optional local development, Vite provides the same `/api/` prefix mapping to
 | Service | Container port | Host exposure | Role |
 | --- | --- | --- | --- |
 | `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
-| `backend` | `8000` | None | Connectivity checks, recent asset metadata, and thumbnail proxying. |
+| `backend` | `8000` | None | Connectivity checks, asset metadata, EXIF filtering, and image proxying. |
 
 Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
 
@@ -58,7 +62,7 @@ Compose starts the backend before the frontend but does not wait for API readine
 
 The files support builds on a Docker Compose NAS. A Portainer Git Repository stack can use `docker-compose.yml` as its Compose path and, when same-host networking is needed, `docker-compose.immich-network.yml` as an additional path. Portainer must target the Docker endpoint where the external network already exists. The configuration does not provide prebuilt registry images or Swarm deployment support.
 
-See [the README](../README.md) for startup, verification, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
+See the [deployment guide](deployment.md) for startup, verification, troubleshooting, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 
 ## Future direction (not implemented)
 
@@ -78,7 +82,7 @@ Possible extensions include:
 - Exposure, contrast, highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
 - Explicit Docker volumes if persistent data becomes necessary.
 
-These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated connection checking and the recent-photo thumbnail view described above.
+These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated read-only browsing, generated image previews, and the initial Anshitsu workspace described above.
 
 ## Portability and validation
 
