@@ -58,10 +58,10 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('format-badge raw');
   });
 
-  it('provides Fit, 100%, zoom, pan surface, and panel controls', () => {
+  it('provides Fit, 1:1, zoom, pan surface, and panel controls', () => {
     const markup = renderToStaticMarkup(<ImageViewer src="/preview" alt={asset.filename} leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />);
     expect(markup).toContain('Fit');
-    expect(markup).toContain('100%');
+    expect(markup).toContain('1:1');
     expect(markup).toContain('aria-label="Zoom in"');
     expect(markup).toContain('aria-label="Zoom out"');
     expect(markup).toContain('viewer-viewport');

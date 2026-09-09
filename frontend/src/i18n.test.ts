@@ -56,6 +56,8 @@ describe('localized resources', () => {
     expect(i18n.t('photos.noMatches', { lng: 'ja' })).toBe('この条件に一致する写真はありません。');
     expect(i18n.t('workspace.name', { lng: 'en' })).toBe('Anshitsu');
     expect(i18n.t('workspace.name', { lng: 'ja' })).toBe('暗室');
+    expect(i18n.t('workspace.actualSize', { lng: 'en' })).toBe('1:1');
+    expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍');
   });
 
   it('uses English as the translation fallback', () => {

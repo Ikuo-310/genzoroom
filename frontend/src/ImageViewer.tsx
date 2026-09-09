@@ -99,7 +99,7 @@ export function ImageViewer({ src, alt, leftOpen, rightOpen, onToggleLeft, onTog
       </button>
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
         <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>
-        <button type="button" className="tool-button" onClick={setActualSize}>100%</button>
+        <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
