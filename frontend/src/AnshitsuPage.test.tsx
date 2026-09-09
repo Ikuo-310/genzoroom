@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { ExifDetails, Filmstrip } from './AnshitsuPage';
+import { ExifDetails, Filmstrip, WorkspaceLayout } from './AnshitsuPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { ImageViewer } from './ImageViewer';
 import i18n, { formatPhotoDate } from './i18n';
@@ -67,5 +67,26 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('viewer-viewport');
     expect(markup).toContain('aria-label="Collapse left panel"');
     expect(markup).toContain('aria-label="Collapse right panel"');
+  });
+
+  it.each([
+    { leftOpen: true, rightOpen: true, expectedClass: 'workspace-body left-open right-open' },
+    { leftOpen: false, rightOpen: true, expectedClass: 'workspace-body right-open' },
+    { leftOpen: true, rightOpen: false, expectedClass: 'workspace-body left-open' },
+    { leftOpen: false, rightOpen: false, expectedClass: 'workspace-body' },
+  ])('keeps the Viewer rendered with left=$leftOpen and right=$rightOpen', ({ leftOpen, rightOpen, expectedClass }) => {
+    const markup = renderToStaticMarkup(
+      <WorkspaceLayout
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
+        leftPanel={<p>Left panel</p>}
+        viewer={<section className="viewer-panel" data-testid="viewer">Viewer</section>}
+        rightPanel={<p>Right panel</p>}
+      />,
+    );
+
+    expect(markup).toContain(`class="${expectedClass}"`);
+    expect(markup).toContain('data-testid="viewer"');
+    expect(markup.match(/data-testid="viewer"/g)).toHaveLength(1);
   });
 });

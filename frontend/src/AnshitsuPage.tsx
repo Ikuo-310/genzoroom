@@ -53,8 +53,6 @@ export function AnshitsuPage() {
   }, [assetId]);
 
   const summary = detail ? detailToRecent(detail) : selectedAssets.find((asset) => asset.id === assetId);
-  const layoutClass = `workspace-body${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`;
-
   return <main className="workspace-page">
     <header className="workspace-header">
       <div className="workspace-brand">
@@ -72,8 +70,10 @@ export function AnshitsuPage() {
       </div>
     </header>
 
-    <div className={layoutClass}>
-      <aside className="workspace-side-panel left-panel" hidden={!leftOpen}>
+    <WorkspaceLayout
+      leftOpen={leftOpen}
+      rightOpen={rightOpen}
+      leftPanel={<>
         <WorkspaceSection title={t('workspace.scope')}>
           <p>{t('workspace.scopePlaceholder')}</p>
         </WorkspaceSection>
@@ -84,9 +84,8 @@ export function AnshitsuPage() {
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
             : <p>{detailState === 'error' ? t('workspace.detailFailed') : t('workspace.loading')}</p>}
         </WorkspaceSection>
-      </aside>
-
-      {detailState === 'ready' && detail ? (
+      </>}
+      viewer={detailState === 'ready' && detail ? (
         <ImageViewer
           src={detail.preview_url}
           alt={detail.filename}
@@ -104,13 +103,12 @@ export function AnshitsuPage() {
           <p className={detailState === 'error' ? 'error-text' : ''}>{t(detailState === 'error' ? 'workspace.detailFailed' : 'workspace.loading')}</p>
         </section>
       )}
-
-      <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>
+      rightPanel={
         <WorkspaceSection title={t('workspace.developControls')} grow>
           <p>{t('workspace.controlsUnavailable')}</p>
         </WorkspaceSection>
-      </aside>
-    </div>
+      }
+    />
 
     <Filmstrip
       assets={selectedAssets}
@@ -120,6 +118,23 @@ export function AnshitsuPage() {
       })}
     />
   </main>;
+}
+
+type WorkspaceLayoutProps = {
+  leftOpen: boolean;
+  rightOpen: boolean;
+  leftPanel: ReactNode;
+  viewer: ReactNode;
+  rightPanel: ReactNode;
+};
+
+export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightPanel }: WorkspaceLayoutProps) {
+  const layoutClass = `workspace-body${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`;
+  return <div className={layoutClass}>
+    <aside className="workspace-side-panel left-panel" hidden={!leftOpen}>{leftPanel}</aside>
+    {viewer}
+    <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>{rightPanel}</aside>
+  </div>;
 }
 
 function WorkspaceSection({ title, children, grow = false }: { title: string; children: ReactNode; grow?: boolean }) {
