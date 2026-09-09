@@ -42,7 +42,15 @@ type KeyboardEventDetails = {
 export function shouldClearSelectionOnEscape(event: KeyboardEventDetails, hasSelection: boolean): boolean {
   if (!hasSelection || event.defaultPrevented || event.key !== 'Escape') return false;
 
-  const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
+  const target = event.target as { tagName?: string; type?: string; isContentEditable?: boolean } | null;
   const tagName = target?.tagName?.toUpperCase();
-  return !target?.isContentEditable && tagName !== 'INPUT' && tagName !== 'SELECT' && tagName !== 'TEXTAREA';
+  if (target?.isContentEditable || tagName === 'SELECT' || tagName === 'TEXTAREA') return false;
+
+  if (tagName === 'INPUT') {
+    const inputType = target?.type?.toLowerCase() || 'text';
+    return inputType === 'checkbox' || inputType === 'radio' || inputType === 'button'
+      || inputType === 'submit' || inputType === 'reset';
+  }
+
+  return true;
 }

@@ -57,8 +57,28 @@ describe('photo selection', () => {
     expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target: null }, false)).toBe(false);
   });
 
-  it.each(['INPUT', 'SELECT', 'TEXTAREA'])('does not clear selection while %s has focus', (tagName) => {
+  it('clears selection immediately after a photo checkbox receives focus', () => {
+    const target = { tagName: 'INPUT', type: 'checkbox' } as unknown as EventTarget;
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(true);
+  });
+
+  it('clears selection while a button has focus', () => {
+    const target = { tagName: 'BUTTON' } as unknown as EventTarget;
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(true);
+  });
+
+  it.each(['text', 'search', 'number', 'email'])('does not clear selection while a %s input is being edited', (type) => {
+    const target = { tagName: 'INPUT', type } as unknown as EventTarget;
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(false);
+  });
+
+  it.each(['TEXTAREA', 'SELECT'])('does not clear selection while %s has focus', (tagName) => {
     const target = { tagName } as unknown as EventTarget;
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(false);
+  });
+
+  it('does not clear selection while contenteditable content has focus', () => {
+    const target = { tagName: 'DIV', isContentEditable: true } as unknown as EventTarget;
     expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(false);
   });
 });
