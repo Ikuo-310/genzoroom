@@ -128,8 +128,8 @@ export function GalleryPage() {
     <main className="home-page">
       <header className="app-header">
         <div>
-          <p className="eyebrow">{t('app.eyebrow')}</p>
           <h1>{t('app.title')}</h1>
+          <p className="eyebrow">{t('app.eyebrow')}</p>
           <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
         </div>
         <LanguageControl language={language} />
