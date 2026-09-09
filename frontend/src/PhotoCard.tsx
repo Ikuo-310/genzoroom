@@ -35,6 +35,7 @@ export function PhotoCard({
     <article className={`photo-card${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}>
       <label className="photo-selection-control" title={selectionLabel}>
         <input
+          className="photo-selection-input"
           type="checkbox"
           checked={selected}
           onChange={onToggleSelection}

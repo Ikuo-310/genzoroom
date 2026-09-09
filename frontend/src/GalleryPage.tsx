@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { fetchRecentAssets } from './api';
@@ -9,6 +9,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
 import {
+  blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
   resolveSelectedAssets,
   shouldClearSelectionOnEscape,
@@ -91,6 +92,16 @@ export function GalleryPage() {
   const visibleAssets = filterPhotos(assets, photoFilters);
   const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
   const selectionMode = selectedAssetIds.length > 0;
+  const previousSelectionMode = useRef(selectionMode);
+
+  useLayoutEffect(() => {
+    blurPhotoSelectionCheckboxWhenSelectionEnds(
+      document.activeElement,
+      previousSelectionMode.current,
+      selectionMode,
+    );
+    previousSelectionMode.current = selectionMode;
+  }, [selectionMode]);
 
   useEffect(() => {
     if (!selectionMode) return;

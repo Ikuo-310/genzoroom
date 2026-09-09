@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RecentAsset } from './assets';
 import {
   activateWorkspaceAsset,
+  blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
   resolveSelectedAssets,
   shouldClearSelectionOnEscape,
@@ -80,5 +81,29 @@ describe('photo selection', () => {
   it('does not clear selection while contenteditable content has focus', () => {
     const target = { tagName: 'DIV', isContentEditable: true } as unknown as EventTarget;
     expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(false);
+  });
+
+  it('removes focus from the photo selection checkbox when selection mode ends', () => {
+    const blur = vi.fn();
+    const element = { classList: { contains: (name: string) => name === 'photo-selection-input' }, blur };
+
+    expect(blurPhotoSelectionCheckboxWhenSelectionEnds(element, true, false)).toBe(true);
+    expect(blur).toHaveBeenCalledOnce();
+  });
+
+  it('keeps photo selection focus while selection mode remains active', () => {
+    const blur = vi.fn();
+    const element = { classList: { contains: (name: string) => name === 'photo-selection-input' }, blur };
+
+    expect(blurPhotoSelectionCheckboxWhenSelectionEnds(element, true, true)).toBe(false);
+    expect(blur).not.toHaveBeenCalled();
+  });
+
+  it('does not blur unrelated controls when selection mode exits', () => {
+    const blur = vi.fn();
+    const rawFilter = { classList: { contains: () => false }, blur };
+
+    expect(blurPhotoSelectionCheckboxWhenSelectionEnds(rawFilter, true, false)).toBe(false);
+    expect(blur).not.toHaveBeenCalled();
   });
 });

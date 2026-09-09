@@ -41,6 +41,7 @@ describe('PhotoCard format badge', () => {
   it('renders a keyboard-operable selection checkbox without changing normal card navigation', () => {
     const markup = renderBadge('JPEG', false, 'photo.jpg');
     expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain('class="photo-selection-input"');
     expect(markup).toContain('aria-label="Select photo.jpg"');
     expect(markup).toContain('aria-label="Open photo.jpg in Anshitsu"');
   });

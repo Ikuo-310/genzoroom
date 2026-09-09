@@ -39,6 +39,22 @@ type KeyboardEventDetails = {
   target: EventTarget | null;
 };
 
+type FocusableElement = {
+  classList?: { contains: (className: string) => boolean };
+  blur?: () => void;
+};
+
+export function blurPhotoSelectionCheckboxWhenSelectionEnds(
+  element: FocusableElement | null,
+  wasSelectionMode: boolean,
+  isSelectionMode: boolean,
+): boolean {
+  if (!wasSelectionMode || isSelectionMode) return false;
+  if (!element?.classList?.contains('photo-selection-input') || !element.blur) return false;
+  element.blur();
+  return true;
+}
+
 export function shouldClearSelectionOnEscape(event: KeyboardEventDetails, hasSelection: boolean): boolean {
   if (!hasSelection || event.defaultPrevented || event.key !== 'Escape') return false;
 
