@@ -54,6 +54,8 @@ describe('localized resources', () => {
     expect(i18n.t('photos.recent', { lng: 'ja' })).toBe('最近の写真');
     expect(i18n.t('photos.noMatches', { lng: 'en' })).toBe('No photos match this filter.');
     expect(i18n.t('photos.noMatches', { lng: 'ja' })).toBe('この条件に一致する写真はありません。');
+    expect(i18n.t('workspace.name', { lng: 'en' })).toBe('Anshitsu');
+    expect(i18n.t('workspace.name', { lng: 'ja' })).toBe('暗室');
   });
 
   it('uses English as the translation fallback', () => {

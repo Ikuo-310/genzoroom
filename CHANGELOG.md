@@ -18,6 +18,7 @@ Internal changes are omitted unless they affect users.
 - Locale-aware photo date and time formatting for English and Japanese.
 - Image format badges on photo cards, including distinct RAW format metadata for future filtering.
 - Client-side RAW and Non-RAW filters for the fetched recent-photo list.
+- An initial Anshitsu photo development workspace with a large preview, zoom and pan controls, collapsible side panels, selected EXIF details, and a Filmstrip foundation.
 
 ### Fixed
 

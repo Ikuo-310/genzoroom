@@ -1,32 +1,30 @@
+import { useTranslation } from 'react-i18next';
+import type { RecentAsset } from './assets';
+import { FormatBadge } from './FormatBadge';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 
-export type RecentAsset = {
-  id: string;
-  filename: string;
-  date: string;
-  thumbnail_url: string;
-  format: string;
-  is_raw: boolean;
-};
+export type { RecentAsset } from './assets';
 
 type PhotoCardProps = {
   asset: RecentAsset;
   language: AppLanguage;
+  onOpen?: () => void;
 };
 
-export function PhotoCard({ asset, language }: PhotoCardProps) {
+export function PhotoCard({ asset, language, onOpen }: PhotoCardProps) {
+  const { t } = useTranslation();
   return (
     <article className="photo-card">
-      <div className="thumbnail">
-        <img src={asset.thumbnail_url} alt={asset.filename} loading="lazy" />
-        <span className={`format-badge${asset.is_raw ? ' raw' : ''}`}>
-          {asset.format}
-        </span>
-      </div>
-      <div className="photo-info">
-        <p title={asset.filename}>{asset.filename}</p>
-        <time dateTime={asset.date}>{formatPhotoDate(asset.date, language)}</time>
-      </div>
+      <button className="photo-card-button" type="button" onClick={onOpen} aria-label={t('photos.openWorkspace', { filename: asset.filename })}>
+        <div className="thumbnail">
+          <img src={asset.thumbnail_url} alt="" loading="lazy" />
+          <FormatBadge format={asset.format} isRaw={asset.is_raw} />
+        </div>
+        <div className="photo-info">
+          <p title={asset.filename}>{asset.filename}</p>
+          <time dateTime={asset.date}>{formatPhotoDate(asset.date, language)}</time>
+        </div>
+      </button>
     </article>
   );
 }

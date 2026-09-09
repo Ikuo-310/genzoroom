@@ -223,3 +223,13 @@ Frontendは現時点ではこれらを形式バッジの表示にだけ使用す
 最近の写真APIが返した最大10件のAssetに対し、Frontendが `is_raw` を使って表示だけを絞り込む。フィルター変更時にBackendやImmichへ再取得せず、取得件数と検索条件も変更しない。
 
 RAWとRAW以外の2つのチェックボックスは初期状態で両方ONとし、片方だけがONになった場合は最後のチェックを外せないようにした。フィルター結果が0件の場合は、Immichからの取得結果自体が0件の場合とは別のメッセージを表示する。フィルター状態は保存せず、再読み込み時には両方ONへ戻る。
+
+## 15. 暗室 / Anshitsuワークスペース
+
+最近の写真をクリックすると、写真ごとのURLを持つ暗室へ遷移する。暗室は将来の現像作業を行う画面で、左にScope / History / EXIF、中央に写真Viewer、右にDevelop controls、下にFilmstripを配置した。英語UIでは名称を `Anshitsu` とし、意味を補うため `Photo development workspace` を併記する。
+
+この段階では1枚だけを暗室へ渡すが、Frontendの遷移状態は `selectedAssets` と `activeAssetId` を分けた。将来、複数写真を持ち込んでFilmstripから表示対象を切り替える際に、同じ役割を拡張できるようにするためである。ページを直接再読み込みした場合は、URLのAsset IDから詳細を再取得する。
+
+詳細表示画像には原画像ではなく、Immichの `GET /api/assets/{id}/thumbnail?size=preview` で生成済みpreviewを使う。GenzoRoom Backendのproxyを経由するため、Immich APIキーはブラウザへ渡らない。EXIFは `GET /api/assets/{id}` から取得し、GPSを除く主要項目だけをFrontendへ返す。欠損項目は画面に出さない。
+
+左右パネルは独立して折りたためる。中央Viewerは初期状態をFitとし、100%、段階的な拡大・縮小、ホイールズーム、拡大時のドラッグPanに対応した。現像操作、Scope表示、History保存はまだプレースホルダーである。写真の色判断を妨げないよう、暗室だけは無彩色のダークグレーから黒を基調とした。

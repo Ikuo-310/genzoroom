@@ -5,14 +5,19 @@ import logging
 import os
 import unittest
 from uuid import UUID
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from immich import (
+    AssetDetail,
+    AssetExif,
     ImmichRequestError,
+    ImmichThumbnail,
     check_immich_status,
     classify_image_format,
+    get_asset_detail,
+    get_asset_preview,
     get_asset_thumbnail,
     get_recent_assets,
 )
@@ -221,6 +226,138 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(thumbnail.content, image)
         self.assertEqual(thumbnail.media_type, "image/jpeg")
         self.assertNotIn(API_KEY, repr(thumbnail))
+
+    def test_gets_asset_detail_and_selected_exif_fields(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.path, f"/api/assets/{ASSET_ID}")
+            self.assertEqual(request.headers["x-api-key"], API_KEY)
+            return httpx.Response(
+                200,
+                json={
+                    "id": str(ASSET_ID),
+                    "type": "IMAGE",
+                    "originalFileName": "capture.DNG",
+                    "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+                    "exifInfo": {
+                        "dateTimeOriginal": "2026-09-01T12:00:00.000Z",
+                        "make": "Example Camera Co.",
+                        "model": "Model One",
+                        "lensModel": "Prime 35mm",
+                        "focalLength": 35,
+                        "fNumber": 2.8,
+                        "exposureTime": "1/125",
+                        "iso": 200,
+                        "exposureCompensation": -0.3,
+                        "exifImageWidth": 6000,
+                        "exifImageHeight": 4000,
+                        "latitude": 35.0,
+                        "longitude": 139.0,
+                    },
+                },
+            )
+
+        detail = asyncio.run(get_asset_detail(
+            IMMICH_URL,
+            API_KEY,
+            ASSET_ID,
+            transport=httpx.MockTransport(handler),
+        ))
+
+        self.assertEqual(detail.filename, "capture.DNG")
+        self.assertEqual(detail.preview_url, f"/api/assets/{ASSET_ID}/preview")
+        self.assertEqual(detail.format, "DNG")
+        self.assertTrue(detail.is_raw)
+        self.assertEqual(detail.exif.focal_length, 35)
+        self.assertEqual(detail.exif.width, 6000)
+        self.assertNotIn("latitude", detail.exif.model_dump())
+        self.assertNotIn(API_KEY, detail.model_dump_json())
+
+    def test_asset_detail_handles_missing_exif_safely(self):
+        response = {
+            "id": str(ASSET_ID),
+            "type": "IMAGE",
+            "originalFileName": "photo.jpg",
+            "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+        }
+        detail = asyncio.run(get_asset_detail(
+            IMMICH_URL,
+            API_KEY,
+            ASSET_ID,
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
+        ))
+
+        self.assertEqual(detail.exif.model_dump(exclude_none=True), {})
+
+    def test_proxies_preview_instead_of_the_original_asset(self):
+        image = b"fake-preview"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, f"/api/assets/{ASSET_ID}/thumbnail")
+            self.assertEqual(request.url.params["size"], "preview")
+            self.assertEqual(request.headers["x-api-key"], API_KEY)
+            return httpx.Response(200, content=image, headers={"content-type": "image/webp"})
+
+        preview = asyncio.run(get_asset_preview(
+            IMMICH_URL,
+            API_KEY,
+            ASSET_ID,
+            transport=httpx.MockTransport(handler),
+        ))
+
+        self.assertEqual(preview.content, image)
+        self.assertEqual(preview.media_type, "image/webp")
+        self.assertNotIn(API_KEY, repr(preview))
+
+    def test_asset_detail_and_preview_report_upstream_errors(self):
+        for operation in (get_asset_detail, get_asset_preview):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaises(ImmichRequestError) as raised:
+                    asyncio.run(operation(
+                        IMMICH_URL,
+                        API_KEY,
+                        ASSET_ID,
+                        transport=httpx.MockTransport(lambda request: httpx.Response(403)),
+                    ))
+                self.assertEqual(raised.exception.error_code, "authentication_failed")
+                self.assertNotIn(API_KEY, str(raised.exception))
+
+    def test_genzoroom_asset_detail_endpoint_omits_missing_exif(self):
+        async def request_detail():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                return await client.get(f"/assets/{ASSET_ID}")
+
+        detail = AssetDetail(
+            id=ASSET_ID,
+            filename="photo.jpg",
+            date="2026-09-01T12:00:00.000Z",
+            preview_url=f"/api/assets/{ASSET_ID}/preview",
+            thumbnail_url=f"/api/assets/{ASSET_ID}/thumbnail",
+            format="JPEG",
+            is_raw=False,
+            exif=AssetExif(),
+        )
+        with patch("main.get_asset_detail", new=AsyncMock(return_value=detail)):
+            response = asyncio.run(request_detail())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["exif"], {})
+        self.assertNotIn(API_KEY, response.text)
+
+    def test_genzoroom_preview_endpoint_returns_proxied_image(self):
+        async def request_preview():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                return await client.get(f"/assets/{ASSET_ID}/preview")
+
+        preview = ImmichThumbnail(content=b"preview", media_type="image/jpeg")
+        with patch("main.get_asset_preview", new=AsyncMock(return_value=preview)):
+            response = asyncio.run(request_preview())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"preview")
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
 
     def test_reports_unreachable_asset_api(self):
         def handler(request: httpx.Request) -> httpx.Response:

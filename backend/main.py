@@ -4,10 +4,13 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Response
 
 from immich import (
+    AssetDetail,
     ImmichRequestError,
     ImmichStatus,
     RecentAsset,
     check_immich_status,
+    get_asset_detail,
+    get_asset_preview,
     get_asset_thumbnail,
     get_recent_assets,
 )
@@ -62,5 +65,39 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
     return Response(
         content=thumbnail.content,
         media_type=thumbnail.media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@app.get(
+    "/assets/{asset_id}",
+    response_model=AssetDetail,
+    response_model_exclude_none=True,
+)
+async def asset_detail(asset_id: UUID) -> AssetDetail:
+    try:
+        return await get_asset_detail(
+            os.getenv("IMMICH_URL"),
+            os.getenv("IMMICH_API_KEY"),
+            asset_id,
+        )
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/assets/{asset_id}/preview")
+async def asset_preview(asset_id: UUID) -> Response:
+    try:
+        preview = await get_asset_preview(
+            os.getenv("IMMICH_URL"),
+            os.getenv("IMMICH_API_KEY"),
+            asset_id,
+        )
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+    return Response(
+        content=preview.content,
+        media_type=preview.media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
