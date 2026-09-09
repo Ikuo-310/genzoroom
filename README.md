@@ -150,4 +150,4 @@ The changelog follows a simple Keep a Changelog-style structure with an `Unrelea
 
 ## License
 
-GenzoRoom is licensed under the [MIT License](LICENSE).
+GenzoRoom is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`).

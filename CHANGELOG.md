@@ -21,6 +21,10 @@ Internal changes are omitted unless they affect users.
 - An initial Anshitsu photo development workspace with a large preview, zoom and pan controls, collapsible side panels, selected EXIF details, and a Filmstrip foundation.
 - Multi-photo selection in the recent-photo grid, with ordered selected photos sent to Anshitsu and switchable from the Filmstrip.
 
+### Changed
+
+- Changed the project license from the MIT License to the GNU Affero General Public License v3.0 (`AGPL-3.0-only`).
+
 ### Fixed
 
 - Include all backend application modules in the production image so the backend can start with the Immich connectivity module.
