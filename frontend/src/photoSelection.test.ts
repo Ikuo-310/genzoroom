@@ -4,6 +4,7 @@ import {
   activateWorkspaceAsset,
   createWorkspaceNavigation,
   resolveSelectedAssets,
+  shouldClearSelectionOnEscape,
   toggleSelectedAssetId,
   workspacePath,
 } from './photoSelection';
@@ -46,5 +47,18 @@ describe('photo selection', () => {
 
   it('does not create a workspace state without a selection', () => {
     expect(createWorkspaceNavigation([])).toBeNull();
+  });
+
+  it('clears a non-empty selection with Escape', () => {
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target: null }, true)).toBe(true);
+  });
+
+  it('does nothing with Escape when no photos are selected', () => {
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target: null }, false)).toBe(false);
+  });
+
+  it.each(['INPUT', 'SELECT', 'TEXTAREA'])('does not clear selection while %s has focus', (tagName) => {
+    const target = { tagName } as unknown as EventTarget;
+    expect(shouldClearSelectionOnEscape({ key: 'Escape', defaultPrevented: false, target }, true)).toBe(false);
   });
 });

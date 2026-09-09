@@ -32,3 +32,17 @@ export function activateWorkspaceAsset(
 export function workspacePath(assetId: string): string {
   return `/anshitsu/${assetId}`;
 }
+
+type KeyboardEventDetails = {
+  key: string;
+  defaultPrevented: boolean;
+  target: EventTarget | null;
+};
+
+export function shouldClearSelectionOnEscape(event: KeyboardEventDetails, hasSelection: boolean): boolean {
+  if (!hasSelection || event.defaultPrevented || event.key !== 'Escape') return false;
+
+  const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
+  const tagName = target?.tagName?.toUpperCase();
+  return !target?.isContentEditable && tagName !== 'INPUT' && tagName !== 'SELECT' && tagName !== 'TEXTAREA';
+}

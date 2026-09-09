@@ -8,7 +8,13 @@ import { PhotoCard } from './PhotoCard';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
-import { createWorkspaceNavigation, resolveSelectedAssets, toggleSelectedAssetId, workspacePath } from './photoSelection';
+import {
+  createWorkspaceNavigation,
+  resolveSelectedAssets,
+  shouldClearSelectionOnEscape,
+  toggleSelectedAssetId,
+  workspacePath,
+} from './photoSelection';
 
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
@@ -86,6 +92,17 @@ export function GalleryPage() {
   const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
   const selectionMode = selectedAssetIds.length > 0;
 
+  useEffect(() => {
+    if (!selectionMode) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (shouldClearSelectionOnEscape(event, true)) setSelectedAssetIds([]);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectionMode]);
+
   function openWorkspace(asset: RecentAsset) {
     const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id };
     navigate(workspacePath(asset.id), { state });
@@ -122,13 +139,14 @@ export function GalleryPage() {
       <section className="photos" aria-labelledby="recent-photos-heading">
         <div className="photos-heading">
           <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
+          <PhotoSelectionBar
+            active={selectionMode}
+            count={selectedAssetIds.length}
+            onClear={() => setSelectedAssetIds([])}
+            onOpen={openSelectedAssets}
+          />
           <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
         </div>
-        {selectionMode && <PhotoSelectionBar
-          count={selectedAssetIds.length}
-          onClear={() => setSelectedAssetIds([])}
-          onOpen={openSelectedAssets}
-        />}
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
