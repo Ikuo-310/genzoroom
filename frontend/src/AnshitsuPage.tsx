@@ -9,7 +9,7 @@ import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { EXPOSURE, formatExposure, supportsEditing, type EditEntry } from './editing';
+import { CONTRAST, EXPOSURE, formatContrast, formatExposure, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -132,9 +132,18 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.exposureReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
               onChange={(value) => dispatch({ type: 'exposure', value })}
-              onCommit={() => dispatch({ type: 'commit' })}
+              onCommit={() => dispatch({ type: 'commit', kind: 'exposure' })}
               onReset={() => dispatch({ type: 'exposureReset' })} />
+            <AdjustmentSlider key={`${assetId}-contrast`} label={t('workspace.contrast')} value={session.recipe.adjustments.contrast}
+              {...CONTRAST} valueText={formatContrast(session.recipe.adjustments.contrast)}
+              valueLabel={t('workspace.contrastValue')} precision={0} defaultValue={0}
+              resetLabel={t('workspace.contrastReset')}
+              onBegin={() => dispatch({ type: 'begin', kind: 'contrast' })}
+              onChange={(value) => dispatch({ type: 'contrast', value })}
+              onCommit={() => dispatch({ type: 'commit', kind: 'contrast' })}
+              onReset={() => dispatch({ type: 'contrastReset' })} />
             <p>{t('workspace.exposureHelp')}</p>
+            <p>{t('workspace.contrastHelp')}</p>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
@@ -223,11 +232,17 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
   const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
 
   return <ol className="edit-history">
-    {newestFirst.map(({ entry, index }) => <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
-      aria-current={index === cursor - 1 ? 'step' : undefined}>
-      {t(`workspace.${entry.kind}`)} {formatExposure(entry.before.adjustments.exposure)} → {formatExposure(entry.after.adjustments.exposure)}
-      {index >= cursor && <span> ({t('workspace.undone')})</span>}
-    </li>)}
+    {newestFirst.map(({ entry, index }) => {
+      const isContrast = entry.kind === 'contrast' || entry.kind === 'contrastReset';
+      const before = isContrast ? formatContrast(entry.before.adjustments.contrast) : formatExposure(entry.before.adjustments.exposure);
+      const after = isContrast ? formatContrast(entry.after.adjustments.contrast) : formatExposure(entry.after.adjustments.exposure);
+      return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
+        aria-current={index === cursor - 1 ? 'step' : undefined}>
+        {t(`workspace.${entry.kind}`)} {entry.kind === 'allReset' && <>{t('workspace.exposure')} </>}{before} → {after}
+        {entry.kind === 'allReset' && <>; {t('workspace.contrast')} {formatContrast(entry.before.adjustments.contrast)} → {formatContrast(entry.after.adjustments.contrast)}</>}
+        {index >= cursor && <span> ({t('workspace.undone')})</span>}
+      </li>;
+    })}
   </ol>;
 }
 

@@ -134,6 +134,23 @@ describe('Anshitsu workspace', () => {
     expect(withNewEdit).toContain('<li value="4" aria-current="step">Exposure +0.30 → +0.40</li>');
   });
 
+  it('renders Contrast and All Reset history values in newest-first order', () => {
+    const contrast: EditEntry = {
+      kind: 'contrast',
+      before: { version: 1, adjustments: { exposure: 0.25, contrast: 0 } },
+      after: { version: 1, adjustments: { exposure: 0.25, contrast: 30 } },
+    };
+    const allReset: EditEntry = {
+      kind: 'allReset',
+      before: contrast.after,
+      after: { version: 1, adjustments: { exposure: 0, contrast: 0 } },
+    };
+    const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, allReset]} cursor={3} />);
+    expect(markup.indexOf('value="3"')).toBeLessThan(markup.indexOf('value="2"'));
+    expect(markup).toContain('All Reset Exposure +0.25 → 0.00; Contrast +30 → 0');
+    expect(markup).toContain('Contrast 0 → +30');
+  });
+
   it('places History and EXIF on the left and Scope above Develop controls on the right', () => {
     const markup = renderWorkspace('en');
     const leftStart = markup.indexOf('class="workspace-side-panel left-panel"');
@@ -182,7 +199,7 @@ describe('Anshitsu workspace', () => {
 function historyEntry(before: number, after: number): EditEntry {
   return {
     kind: 'exposure',
-    before: { version: 1, adjustments: { exposure: before } },
-    after: { version: 1, adjustments: { exposure: after } },
+    before: { version: 1, adjustments: { exposure: before, contrast: 0 } },
+    after: { version: 1, adjustments: { exposure: after, contrast: 0 } },
   };
 }

@@ -1,10 +1,10 @@
 # GenzoRoom 開発ノート
 
-## JPEG Exposure編集基盤（最新フェーズ）
+## JPEG Exposure / Contrast編集基盤（最新フェーズ）
 
-JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）の調整を追加した。RAW/DNG・HEIC処理、Backend、DB、永続保存、Immich書き戻しには変更を加えていない。
+JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）とコントラスト −100〜+100（1刻み、初期値0）の調整を追加した。RAW/DNG・HEIC処理、Backend、DB、永続保存、Immich書き戻しには変更を加えていない。
 
-編集はAsset IDごとのメモリ上のsessionで保持する。recipeは `{ version: 1, adjustments: { exposure: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure ResetとAll Resetは別の操作種別で、どちらもUndo可能。
+編集はAsset IDごとのメモリ上のsessionで保持する。recipeは `{ version: 1, adjustments: { exposure: 0, contrast: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure Reset、Contrast Reset、All Resetは別の操作種別で、いずれもUndo可能。All Resetは両方を1操作で0へ戻す。
 
 操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、コントロールのunmount、キーボード入力停止500msでcommitする。キーボード入力では受理したkeydownごとにtimerをresetし、keyup、pointer leave、focus移動では早期commitしない。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
 
@@ -12,7 +12,7 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 現像項目を増やす前提で、AdjustmentSliderをラベル・直接数値入力・小型個別Resetの1行と、その直下のrangeに整理した。Exposureは従来どおり −5〜+5 EV、0.01 EV刻み、表示2桁。直接入力中は有限値をstepと範囲へ正規化してcurrent recipeへ反映し、Enterまたはblurでcommit、Escまたは空・無効入力で編集開始値へ戻す。編集中だけdraft文字列を表示し、確定後はslider、ホバーキー、Reset、Undo/Redoなど全経路のrecipe値へ即時追従する。number入力中のカーソルキーは既存のホバースライダー操作から除外する。個別Resetは既定値0のときdisabledにし、All Resetは個別Resetと区別できるようDevelop Controls見出し右端へ配置する。画像処理pipelineとrecipe schemaは変更していない。
 
-画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、sRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。alphaを保ち、表示範囲外はclipする。毎回未変更の画素bufferから計算するため、明るくした後で戻しても累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
+画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、まずsRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。その後、各sRGB channelを0.5中心に `1 + contrast / 100` 倍して0〜1へclipする。Contrast 0はidentity、−100は中間gray、+100は中点からの距離を2倍にする。alphaを保ち、毎回未変更の画素bufferからExposure → Contrastの順に計算するため累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
 
 8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。大画像のmain thread負荷は別途評価し、必要が出てからWorker等を検討する。
 

@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS, AdjustmentSlider } from './AdjustmentSlider';
-import { EXPOSURE, type EditSession } from './editing';
+import { CONTRAST, EXPOSURE, formatContrast, type EditSession } from './editing';
 import { useAssetEdits } from './useAssetEdits';
 
 let host: HTMLDivElement;
@@ -15,8 +15,14 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
       valueText={`${session.recipe.adjustments.exposure} EV`} valueLabel="Exposure value" unit="EV"
       precision={2} defaultValue={0} resetLabel="Reset Exposure"
       onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
-      onChange={(value) => dispatch({ type: 'exposure', value })} onCommit={() => dispatch({ type: 'commit' })}
+      onChange={(value) => dispatch({ type: 'exposure', value })} onCommit={() => dispatch({ type: 'commit', kind: 'exposure' })}
       onReset={() => dispatch({ type: 'exposureReset' })} />
+    <AdjustmentSlider key={`${assetId}-contrast`} label="Contrast" {...CONTRAST} value={session.recipe.adjustments.contrast}
+      valueText={formatContrast(session.recipe.adjustments.contrast)} valueLabel="Contrast value"
+      precision={0} defaultValue={0} resetLabel="Reset Contrast"
+      onBegin={() => dispatch({ type: 'begin', kind: 'contrast' })}
+      onChange={(value) => dispatch({ type: 'contrast', value })} onCommit={() => dispatch({ type: 'commit', kind: 'contrast' })}
+      onReset={() => dispatch({ type: 'contrastReset' })} />
     <pre>{JSON.stringify(session)}</pre>
     <input type="text" /><textarea /><select><option>one</option></select><div contentEditable />
     <button onClick={() => dispatch({ type: 'allReset' })}>All Reset</button>
@@ -25,6 +31,8 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
 const session = (): EditSession => JSON.parse(host.querySelector('pre')!.textContent!);
 const range = () => host.querySelector<HTMLInputElement>('input[type="range"]')!;
 const number = () => host.querySelector<HTMLInputElement>('input[type="number"]')!;
+const contrastRange = () => host.querySelectorAll<HTMLInputElement>('input[type="range"]')[1];
+const contrastNumber = () => host.querySelectorAll<HTMLInputElement>('input[type="number"]')[1];
 function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}, type = 'keydown') {
   const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
@@ -43,6 +51,12 @@ function changeNumber(value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number(), value);
     number().dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+function changeInput(input: HTMLInputElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
 beforeEach(() => {
@@ -181,6 +195,45 @@ describe('edit controls DOM interaction', () => {
     expect(session().recipe.adjustments.exposure).toBe(0);
     changeNumber('0.01');
     expect(session().recipe.adjustments.exposure).toBe(0.01);
+  });
+  it('reuses direct input, hover keyboard, grouped commit, and reset for Contrast', () => {
+    const input = contrastNumber();
+    const slider = contrastRange();
+    const reset = host.querySelectorAll<HTMLButtonElement>('.adjustment-reset')[1];
+    expect(input.value).toBe('0');
+    expect(reset.disabled).toBe(true);
+    act(() => input.focus());
+    changeInput(input, '25');
+    expect(slider.value).toBe('25');
+    key('Enter', input);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['contrast']);
+    pointer('pointerover', slider);
+    key('ArrowUp');
+    expect(session().recipe.adjustments.contrast).toBe(35);
+    expect(input.value).toBe('35');
+    expect(session().history).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    expect(session().history.map((entry) => entry.kind)).toEqual(['contrast', 'contrast']);
+    act(() => reset.click());
+    expect(session().recipe.adjustments.contrast).toBe(0);
+    expect(input.value).toBe('0');
+    expect(reset.disabled).toBe(true);
+    key('z', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.contrast).toBe(35);
+    key('y', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.contrast).toBe(0);
+  });
+  it('keeps rapid alternating hover-key edits as correctly typed History entries', () => {
+    pointer('pointerover');
+    key('ArrowRight');
+    pointer('pointerout');
+    pointer('pointerover', contrastRange());
+    key('ArrowRight');
+    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure']);
+    expect(session().pending?.kind).toBe('contrast');
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast']);
+    expect(session().recipe.adjustments).toEqual({ exposure: 0.01, contrast: 1 });
   });
   it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {
     pointer('pointerover');
