@@ -9,7 +9,7 @@ import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { CONTRAST, EXPOSURE, HIGHLIGHTS, formatContrast, formatExposure, formatHighlights, supportsEditing, type EditEntry } from './editing';
+import { CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, formatContrast, formatExposure, formatHighlights, formatShadows, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -150,9 +150,18 @@ export function AnshitsuPage() {
               onChange={(value) => dispatch({ type: 'highlights', value })}
               onCommit={() => dispatch({ type: 'commit', kind: 'highlights' })}
               onReset={() => dispatch({ type: 'highlightsReset' })} />
+            <AdjustmentSlider key={`${assetId}-shadows`} label={t('workspace.shadows')} value={session.recipe.adjustments.shadows}
+              {...SHADOWS} valueText={formatShadows(session.recipe.adjustments.shadows)}
+              valueLabel={t('workspace.shadowsValue')} precision={0} defaultValue={0}
+              resetLabel={t('workspace.shadowsReset')}
+              onBegin={() => dispatch({ type: 'begin', kind: 'shadows' })}
+              onChange={(value) => dispatch({ type: 'shadows', value })}
+              onCommit={() => dispatch({ type: 'commit', kind: 'shadows' })}
+              onReset={() => dispatch({ type: 'shadowsReset' })} />
             <p>{t('workspace.exposureHelp')}</p>
             <p>{t('workspace.contrastHelp')}</p>
             <p>{t('workspace.highlightsHelp')}</p>
+            <p>{t('workspace.shadowsHelp')}</p>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
@@ -244,15 +253,19 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
     {newestFirst.map(({ entry, index }) => {
       const isContrast = entry.kind === 'contrast' || entry.kind === 'contrastReset';
       const isHighlights = entry.kind === 'highlights' || entry.kind === 'highlightsReset';
+      const isShadows = entry.kind === 'shadows' || entry.kind === 'shadowsReset';
       const before = isContrast ? formatContrast(entry.before.adjustments.contrast)
-        : isHighlights ? formatHighlights(entry.before.adjustments.highlights) : formatExposure(entry.before.adjustments.exposure);
+        : isHighlights ? formatHighlights(entry.before.adjustments.highlights)
+          : isShadows ? formatShadows(entry.before.adjustments.shadows) : formatExposure(entry.before.adjustments.exposure);
       const after = isContrast ? formatContrast(entry.after.adjustments.contrast)
-        : isHighlights ? formatHighlights(entry.after.adjustments.highlights) : formatExposure(entry.after.adjustments.exposure);
+        : isHighlights ? formatHighlights(entry.after.adjustments.highlights)
+          : isShadows ? formatShadows(entry.after.adjustments.shadows) : formatExposure(entry.after.adjustments.exposure);
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
         {t(`workspace.${entry.kind}`)} {entry.kind === 'allReset' && <>{t('workspace.exposure')} </>}{before} → {after}
         {entry.kind === 'allReset' && <>; {t('workspace.contrast')} {formatContrast(entry.before.adjustments.contrast)} → {formatContrast(entry.after.adjustments.contrast)}</>}
         {entry.kind === 'allReset' && <>; {t('workspace.highlights')} {formatHighlights(entry.before.adjustments.highlights)} → {formatHighlights(entry.after.adjustments.highlights)}</>}
+        {entry.kind === 'allReset' && <>; {t('workspace.shadows')} {formatShadows(entry.before.adjustments.shadows)} → {formatShadows(entry.after.adjustments.shadows)}</>}
         {index >= cursor && <span> ({t('workspace.undone')})</span>}
       </li>;
     })}

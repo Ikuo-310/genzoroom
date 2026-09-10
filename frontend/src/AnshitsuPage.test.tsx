@@ -137,22 +137,28 @@ describe('Anshitsu workspace', () => {
   it('renders tonal adjustments and All Reset history values in newest-first order', () => {
     const contrast: EditEntry = {
       kind: 'contrast',
-      before: { version: 2, adjustments: { exposure: 0.25, contrast: 0, highlights: 0 } },
-      after: { version: 2, adjustments: { exposure: 0.25, contrast: 30, highlights: 0 } },
+      before: { version: 3, adjustments: { exposure: 0.25, contrast: 0, highlights: 0, shadows: 0 } },
+      after: { version: 3, adjustments: { exposure: 0.25, contrast: 30, highlights: 0, shadows: 0 } },
     };
     const highlights: EditEntry = {
       kind: 'highlights',
       before: contrast.after,
-      after: { version: 2, adjustments: { exposure: 0.25, contrast: 30, highlights: -20 } },
+      after: { version: 3, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, shadows: 0 } },
+    };
+    const shadows: EditEntry = {
+      kind: 'shadows',
+      before: highlights.after,
+      after: { version: 3, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, shadows: 25 } },
     };
     const allReset: EditEntry = {
       kind: 'allReset',
-      before: highlights.after,
-      after: { version: 2, adjustments: { exposure: 0, contrast: 0, highlights: 0 } },
+      before: shadows.after,
+      after: { version: 3, adjustments: { exposure: 0, contrast: 0, highlights: 0, shadows: 0 } },
     };
-    const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, allReset]} cursor={4} />);
-    expect(markup.indexOf('value="4"')).toBeLessThan(markup.indexOf('value="3"'));
-    expect(markup).toContain('All Reset Exposure +0.25 → 0.00; Contrast +30 → 0; Highlights -20 → 0');
+    const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, shadows, allReset]} cursor={5} />);
+    expect(markup.indexOf('value="5"')).toBeLessThan(markup.indexOf('value="4"'));
+    expect(markup).toContain('All Reset Exposure +0.25 → 0.00; Contrast +30 → 0; Highlights -20 → 0; Shadows +25 → 0');
+    expect(markup).toContain('Shadows 0 → +25');
     expect(markup).toContain('Highlights 0 → -20');
     expect(markup).toContain('Contrast 0 → +30');
   });
@@ -205,7 +211,7 @@ describe('Anshitsu workspace', () => {
 function historyEntry(before: number, after: number): EditEntry {
   return {
     kind: 'exposure',
-    before: { version: 2, adjustments: { exposure: before, contrast: 0, highlights: 0 } },
-    after: { version: 2, adjustments: { exposure: after, contrast: 0, highlights: 0 } },
+    before: { version: 3, adjustments: { exposure: before, contrast: 0, highlights: 0, shadows: 0 } },
+    after: { version: 3, adjustments: { exposure: after, contrast: 0, highlights: 0, shadows: 0 } },
   };
 }
