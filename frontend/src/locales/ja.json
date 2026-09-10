@@ -57,6 +57,8 @@
     "expandLeft": "左パネルを開く",
     "collapseRight": "右パネルを閉じる",
     "expandRight": "右パネルを開く",
+    "resizeLeftPanel": "左パネルの幅を変更",
+    "resizeRightPanel": "右パネルの幅を変更",
     "exif": {
       "date": "撮影日時",
       "make": "メーカー",

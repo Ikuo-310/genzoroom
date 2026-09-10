@@ -16,7 +16,7 @@ GenzoRoom currently provides:
 - Client-side RAW and Non-RAW filtering.
 - Ordered multi-photo selection and transfer to the **Anshitsu** development workspace.
 - A large preview, EXIF display, Filmstrip, and active-photo switching in Anshitsu.
-- Fit, 1:1, zoom, and pan controls, with independently collapsible side panels.
+- Fit, 1:1, zoom, and pan controls, with independently collapsible and resizable desktop side panels whose widths are remembered.
 - Non-destructive JPEG Exposure adjustment with per-asset in-memory recipes, grouped Undo/Redo and History, Exposure Reset, and All Reset. This initial version uses Immich previews as a temporary input.
 - English and Japanese UI, remembered language selection, and locale-aware date and time display.
 

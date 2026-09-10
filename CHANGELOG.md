@@ -11,6 +11,7 @@ Internal changes are omitted unless they affect users.
 - Non-destructive JPEG Exposure adjustment (−5 to +5 EV, 0.01 EV steps) in Anshitsu, with per-asset in-memory recipes and a Canvas linear-light preview pipeline. This initial version uses Immich previews as a temporary source.
 - Grouped edit History, Undo/Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y), Exposure Reset, and undoable All Reset.
 - Reusable sliders with hover/focus arrow controls: left/right change one step, up/down ten steps. Native form editing keeps its keyboard behavior.
+- Independently resizable Anshitsu side panels with remembered widths, safe sizing limits, and preserved collapse/expand behavior.
 
 - Initial public project documentation describing the early development status, planned direction, and provisional NAS deployment architecture.
 - A minimal web page showing backend connectivity, including failure feedback and a manual recheck button.

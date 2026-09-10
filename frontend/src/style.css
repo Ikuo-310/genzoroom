@@ -84,13 +84,20 @@ h2 { margin: 0; font-size: 1.35rem; }
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 .language-control.compact { display: flex; align-items: center; gap: 7px; color: #aaa; }
 .language-control.compact select { min-width: 100px; color: #eee; background: #252527; border-color: #4b4b4e; padding-block: 5px; }
-.workspace-body { --left-panel: 0px; --right-panel: 0px; display: grid; grid-template-areas: 'left viewer right'; grid-template-columns: var(--left-panel) minmax(0, 1fr) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-body { --left-panel: 0px; --left-resizer: 0px; --right-panel: 0px; --right-resizer: 0px; display: grid; grid-template-areas: 'left left-resizer viewer right-resizer right'; grid-template-columns: var(--left-panel) var(--left-resizer) minmax(0, 1fr) var(--right-resizer) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
 .workspace-body.left-open { --left-panel: clamp(210px, 18vw, 270px); }
 .workspace-body.right-open { --right-panel: clamp(230px, 20vw, 300px); }
 .workspace-side-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; background: #18181a; }
 .workspace-side-panel[hidden] { display: none; }
 .left-panel { grid-area: left; border-right: 1px solid #353537; }
 .right-panel { grid-area: right; border-left: 1px solid #353537; }
+.sidebar-resize-handle { display: none; position: relative; z-index: 2; min-width: 0; background: #202023; cursor: col-resize; touch-action: none; }
+.sidebar-resize-handle::after { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #3b3b3e; content: ''; transform: translateX(-50%); transition: background 120ms ease; }
+.sidebar-resize-handle:hover::after { background: #77777b; }
+.sidebar-resize-handle.left { grid-area: left-resizer; }
+.sidebar-resize-handle.right { grid-area: right-resizer; }
+.sidebar-resize-handle[hidden] { display: none; }
+body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
 .workspace-section { display: flex; flex: 0 0 auto; flex-direction: column; min-height: 130px; border-bottom: 1px solid #353537; }
 .workspace-section.grow { flex: 1 0 auto; }
 .right-panel .scope-section { flex: 0 0 34%; min-height: 180px; }
@@ -137,6 +144,13 @@ h2 { margin: 0; font-size: 1.35rem; }
 
 @media (hover: none), (pointer: coarse) {
   .photo-selection-control { opacity: 1; pointer-events: auto; }
+}
+
+@media (min-width: 961px) and (pointer: fine) {
+  .workspace-body { grid-template-columns: var(--left-panel) var(--left-resizer) minmax(360px, 1fr) var(--right-resizer) var(--right-panel); }
+  .workspace-body.left-open { --left-panel: var(--left-panel-width); --left-resizer: 6px; }
+  .workspace-body.right-open { --right-panel: var(--right-panel-width); --right-resizer: 6px; }
+  .sidebar-resize-handle { display: block; }
 }
 
 @media (max-width: 760px) {

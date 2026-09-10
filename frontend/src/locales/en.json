@@ -59,6 +59,8 @@
     "expandLeft": "Expand left panel",
     "collapseRight": "Collapse right panel",
     "expandRight": "Expand right panel",
+    "resizeLeftPanel": "Resize left panel",
+    "resizeRightPanel": "Resize right panel",
     "exif": {
       "date": "Captured",
       "make": "Make",
