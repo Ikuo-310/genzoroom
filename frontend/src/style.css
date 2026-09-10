@@ -115,8 +115,10 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .tool-button:focus-visible, .filmstrip-item:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .panel-toggle { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-toggle.right { justify-self: end; }
+.viewer-primary-controls { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 8px; }
 .zoom-controls { display: flex; align-items: center; gap: 5px; }
 .zoom-controls output { min-width: 48px; color: #aaa; font-variant-numeric: tabular-nums; text-align: center; font-size: 0.72rem; }
+.viewer-toolbar-separator { align-self: stretch; width: 1px; min-height: 24px; background: #3a3a3d; }
 .icon-button { min-width: 31px; padding-inline: 7px; font-size: 1rem; }
 .viewer-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; }
 .viewer-viewport.pannable { cursor: grab; }
@@ -135,7 +137,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-reset:hover:not(:disabled) { background: #303033; }
 .adjustment-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-range { width: 100%; min-height: 24px; margin: 0; accent-color: #bbb; }
-.all-reset-actions { display: flex; justify-content: flex-end; margin: 2px 0 10px; }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
 .edit-history [aria-current="step"] { color: #eee; }
@@ -185,6 +186,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .workspace-section.grow { flex: 0 0 auto; }
   .right-panel .scope-section { flex-basis: auto; min-height: 100px; }
   .viewer-toolbar { grid-template-columns: 34px minmax(0, 1fr) 34px; }
+  .viewer-primary-controls { flex-wrap: wrap; }
   .panel-toggle { width: 34px; padding-inline: 6px; }
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .zoom-controls { justify-content: center; }

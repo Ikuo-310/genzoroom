@@ -19,6 +19,7 @@ export function AdjustmentSlider(props: Props) {
   const interaction = useRef<'idle' | 'keyboard' | 'pointer' | 'number'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const numberStartValue = useRef<number | null>(null);
+  const [numberEditing, setNumberEditing] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
 
   function formatNumber(value: number) {
@@ -42,6 +43,7 @@ export function AdjustmentSlider(props: Props) {
       interaction.current = 'number';
       numberStartValue.current = latest.current.value;
       latest.current.onBegin();
+      setNumberEditing(true);
     }
   }
 
@@ -52,6 +54,7 @@ export function AdjustmentSlider(props: Props) {
     latest.current.onCommit();
     interaction.current = 'idle';
     numberStartValue.current = null;
+    setNumberEditing(false);
     setDraft(null);
   }
 
@@ -61,6 +64,7 @@ export function AdjustmentSlider(props: Props) {
     latest.current.onCommit();
     interaction.current = 'idle';
     numberStartValue.current = null;
+    setNumberEditing(false);
     setDraft(null);
   }
 
@@ -131,7 +135,7 @@ export function AdjustmentSlider(props: Props) {
       <label id={labelId} htmlFor={rangeId}>{props.label}</label>
       <div className="adjustment-value-controls">
         <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
-          value={draft ?? formatNumber(props.value)} aria-label={props.valueLabel}
+          value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel}
           onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
           onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
         {props.unit && <span className="adjustment-unit" aria-hidden="true">{props.unit}</span>}
@@ -145,6 +149,7 @@ export function AdjustmentSlider(props: Props) {
       onPointerLeave={() => { hovered.current = false; }}
       onPointerDown={() => {
         clearTimeout(timer.current);
+        if (interaction.current === 'number') commitNumberEdit();
         interaction.current = 'pointer';
         props.onBegin();
       }}

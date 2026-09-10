@@ -88,7 +88,7 @@ describe('Anshitsu workspace', () => {
   });
 
   it('provides Fit, 1:1, zoom, pan surface, and panel controls', () => {
-    const markup = renderToStaticMarkup(<ImageViewer src="/preview" alt={asset.filename} leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />);
+    const markup = renderToStaticMarkup(<ImageViewer src="/preview" alt={asset.filename} leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} onAllReset={vi.fn()} />);
     expect(markup).toContain('Fit');
     expect(markup).toContain('1:1');
     expect(markup).toContain('aria-label="Zoom in"');
@@ -97,6 +97,9 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('aria-label="Collapse left panel"');
     expect(markup).toContain('aria-label="Collapse right panel"');
     expect(markup).toContain('<span>History</span>');
+    expect(markup).toContain('viewer-toolbar-separator');
+    expect(markup).toContain('>All Reset</button>');
+    expect(markup.indexOf('>All Reset</button>')).toBeLessThan(markup.indexOf('aria-label="Collapse right panel"'));
   });
 
   it('places History and EXIF on the left and Scope above Develop controls on the right', () => {

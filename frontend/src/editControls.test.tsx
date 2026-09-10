@@ -101,6 +101,35 @@ describe('edit controls DOM interaction', () => {
     expect(session().recipe.adjustments.exposure).toBe(-0.45);
     expect(session().history).toHaveLength(1);
   });
+  it('clears the direct-input draft when a slider pointer gesture starts before blur', () => {
+    act(() => number().focus());
+    changeNumber('0.37');
+    pointer('pointerdown');
+    act(() => number().blur());
+    change('0.5');
+    pointer('pointerup', window);
+    expect(session().recipe.adjustments.exposure).toBe(0.5);
+    expect(number().value).toBe('0.50');
+  });
+  it('reflects slider, hover keyboard, reset, undo, and redo updates after direct input', () => {
+    act(() => number().focus());
+    changeNumber('0.37');
+    key('Enter', number());
+    pointer('pointerdown');
+    change('0.5');
+    pointer('pointerup', window);
+    expect(number().value).toBe('0.50');
+    pointer('pointerover');
+    key('ArrowRight');
+    expect(number().value).toBe('0.51');
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    act(() => host.querySelector<HTMLButtonElement>('.adjustment-reset')!.click());
+    expect(number().value).toBe('0.00');
+    key('z', window, { ctrlKey: true });
+    expect(number().value).toBe('0.51');
+    key('y', window, { ctrlKey: true });
+    expect(number().value).toBe('0.00');
+  });
   it('cancels direct input with Escape', () => {
     act(() => number().focus());
     changeNumber('0.75');

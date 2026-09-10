@@ -113,6 +113,7 @@ export function AnshitsuPage() {
           rightOpen={rightOpen}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
+          onAllReset={editable ? () => dispatch({ type: 'allReset' }) : undefined}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -137,9 +138,6 @@ export function AnshitsuPage() {
               onChange={(value) => dispatch({ type: 'exposure', value })}
               onCommit={() => dispatch({ type: 'commit' })}
               onReset={() => dispatch({ type: 'exposureReset' })} />
-            <div className="all-reset-actions">
-              <button className="tool-button" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
-            </div>
             <p>{t('workspace.exposureHelp')}</p>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
