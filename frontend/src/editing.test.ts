@@ -184,8 +184,21 @@ describe('JPEG adjustment pipeline', () => {
     expect(positive[3]).toBe(67);
     expect(negative[3]).toBe(67);
   });
+  it('limits Shadows to luminance below 0.4 with a smooth dark-region transition', () => {
+    const source = new Uint8ClampedArray([
+      80, 80, 80, 255,
+      102, 102, 102, 255,
+      115, 115, 115, 255,
+    ]);
+    const positive = renderAdjustments(source, adjustShadows(newSession(), 100).recipe);
+    const negative = renderAdjustments(source, adjustShadows(newSession(), -100).recipe);
+    expect(positive[0]).toBeGreaterThan(source[0]);
+    expect(negative[0]).toBeLessThan(source[0]);
+    expect(Array.from(positive.slice(4))).toEqual(Array.from(source.slice(4)));
+    expect(Array.from(negative.slice(4))).toEqual(Array.from(source.slice(4)));
+  });
   it('keeps Shadows finite at black and preserves RGB proportions before clipping', () => {
-    const source = new Uint8ClampedArray([0, 0, 0, 51, 60, 45, 30, 255]);
+    const source = new Uint8ClampedArray([0, 0, 0, 51, 80, 60, 40, 255]);
     const positive = renderAdjustments(source, adjustShadows(newSession(), 100).recipe);
     const negative = renderAdjustments(source, adjustShadows(newSession(), -100).recipe);
     expect(Array.from(positive.slice(0, 4))).toEqual([0, 0, 0, 51]);
