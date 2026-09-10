@@ -152,7 +152,7 @@ export function AdjustmentSlider(props: Props) {
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel}
         onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-      {props.unit && <span className="adjustment-unit" aria-hidden="true">{props.unit}</span>}
+      <span className="adjustment-unit" aria-hidden="true">{props.unit ?? ''}</span>
       <button type="button" className="adjustment-reset" onClick={props.onReset}
         disabled={props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
     </div>

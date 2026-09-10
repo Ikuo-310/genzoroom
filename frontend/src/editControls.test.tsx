@@ -83,6 +83,9 @@ describe('edit controls DOM interaction', () => {
       expect(control.children[1].classList.contains('adjustment-range')).toBe(true);
       expect(control.children[2].classList.contains('adjustment-value-controls')).toBe(true);
     }
+    const unitSlots = host.querySelectorAll('.adjustment-unit');
+    expect(unitSlots).toHaveLength(2);
+    expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '']);
   });
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
