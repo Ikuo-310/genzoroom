@@ -6,22 +6,30 @@ type Props = {
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void;
 };
 
+export const ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS = 500;
+
 export function AdjustmentSlider(props: Props) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const latest = useRef(props);
   latest.current = props;
   const hovered = useRef(false);
-  const dragging = useRef(false);
+  const interaction = useRef<'idle' | 'keyboard' | 'pointer'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  function finish() {
+  function commitKeyboardAfterInactivity() {
     clearTimeout(timer.current);
-    dragging.current = false;
+    interaction.current = 'idle';
     latest.current.onCommit();
   }
   function scheduleCommit() {
     clearTimeout(timer.current);
-    timer.current = setTimeout(finish, 400);
+    interaction.current = 'keyboard';
+    timer.current = setTimeout(commitKeyboardAfterInactivity, ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS);
+  }
+  function finishPointer() {
+    if (interaction.current !== 'pointer') return;
+    interaction.current = 'idle';
+    latest.current.onCommit();
   }
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -39,21 +47,16 @@ export function AdjustmentSlider(props: Props) {
       current.onChange(value);
       scheduleCommit();
     };
-    const pointerEnd = () => { if (dragging.current) finish(); };
-    const focusChange = (event: Event) => { if (event.target !== input.current) finish(); };
+    const pointerEnd = () => finishPointer();
     window.addEventListener('keydown', keydown);
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
-    window.addEventListener('blur', focusChange);
-    document.addEventListener('focusin', focusChange);
     return () => {
       clearTimeout(timer.current);
       latest.current.onCommit();
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
       window.removeEventListener('pointercancel', pointerEnd);
-      window.removeEventListener('blur', focusChange);
-      document.removeEventListener('focusin', focusChange);
     };
   }, []);
   return <div className="adjustment-slider">
@@ -61,10 +64,16 @@ export function AdjustmentSlider(props: Props) {
     <input ref={input} id={id} type="range" min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText}
       onPointerEnter={() => { hovered.current = true; }}
-      onPointerLeave={() => { hovered.current = false; if (!dragging.current) finish(); }}
-      onPointerDown={() => { clearTimeout(timer.current); dragging.current = true; props.onBegin(); }}
-      onLostPointerCapture={() => { if (dragging.current) finish(); }}
-      onBlur={finish}
-      onChange={(event) => { props.onChange(Number(event.target.value)); if (!dragging.current) scheduleCommit(); }} />
+      onPointerLeave={() => { hovered.current = false; }}
+      onPointerDown={() => {
+        clearTimeout(timer.current);
+        interaction.current = 'pointer';
+        props.onBegin();
+      }}
+      onLostPointerCapture={finishPointer}
+      onChange={(event) => {
+        props.onChange(Number(event.target.value));
+        if (interaction.current !== 'pointer') scheduleCommit();
+      }} />
   </div>;
 }

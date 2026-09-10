@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AdjustmentSlider } from './AdjustmentSlider';
+import { ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS, AdjustmentSlider } from './AdjustmentSlider';
 import { EXPOSURE, type EditSession } from './editing';
 import { useAssetEdits } from './useAssetEdits';
 
@@ -22,8 +22,8 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
 }
 const session = (): EditSession => JSON.parse(host.querySelector('pre')!.textContent!);
 const range = () => host.querySelector<HTMLInputElement>('input[type="range"]')!;
-function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}) {
-  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}, type = 'keydown') {
+  const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
   return event;
 }
@@ -55,10 +55,16 @@ describe('edit controls DOM interaction', () => {
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
     expect(document.activeElement).not.toBe(range());
-    key('ArrowRight'); key('ArrowRight'); key('ArrowUp'); key('ArrowLeft'); key('ArrowDown');
+    key('ArrowRight');
+    act(() => vi.advanceTimersByTime(300));
+    key('ArrowRight');
+    act(() => vi.advanceTimersByTime(300));
+    key('ArrowUp'); key('ArrowLeft'); key('ArrowDown');
     expect(session().recipe.adjustments.exposure).toBe(0.01);
     expect(session().history).toHaveLength(0);
-    act(() => vi.advanceTimersByTime(400));
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS - 1));
+    expect(session().history).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(1));
     expect(session().history).toHaveLength(1);
     key('z', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0);
@@ -68,6 +74,18 @@ describe('edit controls DOM interaction', () => {
     key('y', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0.01);
   });
+  it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {
+    pointer('pointerover');
+    key('ArrowRight');
+    key('ArrowRight', window, {}, 'keyup');
+    pointer('pointerout');
+    act(() => range().focus());
+    act(() => host.querySelector('button')!.focus());
+    expect(session().recipe.adjustments.exposure).toBe(0.01);
+    expect(session().history).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    expect(session().history).toHaveLength(1);
+  });
   it('keeps a pointer gesture open across initial focus and a long pause', () => {
     pointer('pointerdown');
     act(() => range().focus());
@@ -75,6 +93,17 @@ describe('edit controls DOM interaction', () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(session().history).toHaveLength(0);
     change('0.3');
+    pointer('pointerup', window);
+    expect(session().history).toHaveLength(1);
+    expect(session().history[0].before.adjustments.exposure).toBe(0);
+    expect(session().history[0].after.adjustments.exposure).toBe(0.3);
+  });
+  it('merges a pointer gesture started during keyboard debounce into one edit', () => {
+    pointer('pointerover');
+    key('ArrowRight');
+    pointer('pointerdown');
+    change('0.3');
+    expect(session().history).toHaveLength(0);
     pointer('pointerup', window);
     expect(session().history).toHaveLength(1);
     expect(session().history[0].before.adjustments.exposure).toBe(0);
@@ -90,11 +119,13 @@ describe('edit controls DOM interaction', () => {
     }
     expect(session().recipe.adjustments.exposure).toBe(0.1);
   });
-  it('supports focused sliders and commits on focus departure', () => {
+  it('supports focused sliders and commits only after keyboard inactivity', () => {
     act(() => range().focus());
     key('ArrowUp', range());
     expect(session().recipe.adjustments.exposure).toBe(0.1);
     act(() => host.querySelector('button')!.focus());
+    expect(session().history).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
     expect(session().history).toHaveLength(1);
   });
   it('does not intercept keys for hidden controls, other focused ranges, or IME', () => {

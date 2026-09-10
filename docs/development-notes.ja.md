@@ -6,7 +6,7 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 編集はAsset IDごとのメモリ上のsessionで保持する。recipeは `{ version: 1, adjustments: { exposure: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure ResetとAll Resetは別の操作種別で、どちらもUndo可能。
 
-操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、フォーカス移動、コントロールのunmount、キーボード入力停止400msでcommitする。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
+操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、コントロールのunmount、キーボード入力停止500msでcommitする。キーボード入力では受理したkeydownごとにtimerをresetし、keyup、pointer leave、focus移動では早期commitしない。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
 
 共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
 
