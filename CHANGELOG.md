@@ -29,7 +29,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
-- Made Anshitsu adjustment rows more compact, with synchronized direct numeric input and an inline per-adjustment reset control; All Reset now sits in the Develop controls heading.
+- Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.
 - Reorganized the Anshitsu side panels so History and EXIF remain on the left, while Scope sits above Develop controls on the right.
 - Changed the project license from the MIT License to the GNU Affero General Public License v3.0 (`AGPL-3.0-only`).
 - Reorganized the README around the current feature set and moved detailed deployment guidance to a dedicated document.

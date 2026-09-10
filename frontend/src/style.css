@@ -125,18 +125,17 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .viewer-viewport.pannable:active { cursor: grabbing; }
 .viewer-image-position { position: absolute; top: 50%; left: 50%; line-height: 0; will-change: transform; }
 .viewer-image-position img, .viewer-image-position canvas { display: block; max-width: none; height: auto; box-shadow: 0 4px 24px rgb(0 0 0 / 45%); }
-.adjustment-control { display: grid; gap: 2px; min-width: 0; margin-bottom: 8px; }
-.adjustment-control-row { display: flex; min-width: 0; min-height: 28px; align-items: center; justify-content: space-between; gap: 8px; color: #ddd; }
-.adjustment-control-row > label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.adjustment-control { display: grid; grid-template-columns: clamp(40px, 22%, 64px) minmax(28px, 1fr) auto; column-gap: 5px; align-items: center; min-width: 0; min-height: 30px; margin-bottom: 4px; color: #ddd; }
+.adjustment-control > label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .adjustment-value-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
-.adjustment-number { box-sizing: border-box; width: 62px; height: 26px; color: #eee; background: #202022; border: 1px solid #4a4a4d; border-radius: 4px; padding: 2px 5px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; -moz-appearance: textfield; }
+.adjustment-number { box-sizing: border-box; width: 52px; height: 26px; color: #eee; background: #202022; border: 1px solid #4a4a4d; border-radius: 4px; padding: 2px 5px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; -moz-appearance: textfield; }
 .adjustment-number::-webkit-inner-spin-button, .adjustment-number::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
 .adjustment-number:focus-visible, .adjustment-reset:focus-visible, .adjustment-range:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
-.adjustment-unit { min-width: 18px; color: #99999c; font-size: 0.7rem; }
+.adjustment-unit { min-width: 16px; color: #99999c; font-size: 0.7rem; }
 .adjustment-reset { display: grid; width: 26px; height: 26px; place-items: center; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 0; font-size: 0.9rem; line-height: 1; }
 .adjustment-reset:hover:not(:disabled) { background: #303033; }
 .adjustment-reset:disabled { cursor: default; opacity: 0.35; }
-.adjustment-range { width: 100%; min-height: 24px; margin: 0; accent-color: #bbb; }
+.adjustment-range { min-width: 0; width: 100%; min-height: 28px; margin: 0; accent-color: #bbb; }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
 .edit-history [aria-current="step"] { color: #eee; }

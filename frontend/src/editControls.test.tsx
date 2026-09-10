@@ -75,6 +75,15 @@ afterEach(() => {
 });
 
 describe('edit controls DOM interaction', () => {
+  it('renders every adjustment as one shared label-range-value row', () => {
+    const controls = host.querySelectorAll('.adjustment-control');
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      expect(Array.from(control.children).map((child) => child.tagName)).toEqual(['LABEL', 'INPUT', 'DIV']);
+      expect(control.children[1].classList.contains('adjustment-range')).toBe(true);
+      expect(control.children[2].classList.contains('adjustment-value-controls')).toBe(true);
+    }
+  });
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
     expect(document.activeElement).not.toBe(range());

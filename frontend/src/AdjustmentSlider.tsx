@@ -131,18 +131,7 @@ export function AdjustmentSlider(props: Props) {
     };
   }, []);
   return <div className="adjustment-control" role="group" aria-labelledby={labelId}>
-    <div className="adjustment-control-row">
-      <label id={labelId} htmlFor={rangeId}>{props.label}</label>
-      <div className="adjustment-value-controls">
-        <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
-          value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel}
-          onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
-          onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-        {props.unit && <span className="adjustment-unit" aria-hidden="true">{props.unit}</span>}
-        <button type="button" className="adjustment-reset" onClick={props.onReset}
-          disabled={props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
-      </div>
-    </div>
+    <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
     <input ref={range} id={rangeId} className="adjustment-range" type="range" min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText}
       onPointerEnter={() => { hovered.current = true; }}
@@ -158,5 +147,14 @@ export function AdjustmentSlider(props: Props) {
         props.onChange(Number(event.target.value));
         if (interaction.current !== 'pointer') scheduleCommit();
       }} />
+    <div className="adjustment-value-controls">
+      <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
+        value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel}
+        onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
+        onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
+      {props.unit && <span className="adjustment-unit" aria-hidden="true">{props.unit}</span>}
+      <button type="button" className="adjustment-reset" onClick={props.onReset}
+        disabled={props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
+    </div>
   </div>;
 }
