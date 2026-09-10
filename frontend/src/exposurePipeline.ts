@@ -49,7 +49,7 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     const green = output[i + 1] / 255;
     const blue = output[i + 2] / 255;
     const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    const threshold = Math.max(0, Math.min(1, (0.4 - luminance) / 0.4));
+    const threshold = Math.max(0, Math.min(1, (0.35 - luminance) / 0.35));
     const weight = threshold * threshold * (3 - 2 * threshold);
     const targetLuminance = shadows > 0 ? Math.sqrt(luminance) : luminance ** 2;
     const amount = Math.abs(shadows) * weight;
