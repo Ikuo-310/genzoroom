@@ -184,10 +184,10 @@ describe('JPEG adjustment pipeline', () => {
     expect(positive[3]).toBe(67);
     expect(negative[3]).toBe(67);
   });
-  it('limits Shadows to luminance below 0.25 with a smooth dark-region transition', () => {
+  it('limits Shadows to luminance below 0.2 with a smooth dark-region transition', () => {
     const source = new Uint8ClampedArray([
-      50, 50, 50, 255,
-      25, 60, 215, 255,
+      35, 35, 35, 255,
+      51, 51, 51, 255,
       115, 115, 115, 255,
     ]);
     const positive = renderAdjustments(source, adjustShadows(newSession(), 100).recipe);
