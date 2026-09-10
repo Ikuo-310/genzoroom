@@ -14,10 +14,9 @@ type ImageViewerProps = {
   rightOpen: boolean;
   onToggleLeft: () => void;
   onToggleRight: () => void;
-  onAllReset?: () => void;
 };
 
-export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, onToggleLeft, onToggleRight, onAllReset }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, onToggleLeft, onToggleRight }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
@@ -103,18 +102,12 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
       <button type="button" className="tool-button panel-toggle" onClick={onToggleLeft} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')} aria-pressed={leftOpen}>
         {leftOpen ? '‹' : '›'} <span>{t('workspace.history')}</span>
       </button>
-      <div className="viewer-primary-controls">
-        <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
-          <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>
-          <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
-          <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
-          <output aria-live="polite">{Math.round(scale * 100)}%</output>
-          <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
-        </div>
-        {onAllReset && <>
-          <span className="viewer-toolbar-separator" role="separator" aria-orientation="vertical" />
-          <button type="button" className="tool-button" onClick={onAllReset}>{t('workspace.allReset')}</button>
-        </>}
+      <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
+        <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>
+        <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
+        <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
+        <output aria-live="polite">{Math.round(scale * 100)}%</output>
+        <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
       </div>
       <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
         <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}

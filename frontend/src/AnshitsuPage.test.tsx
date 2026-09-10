@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { ExifDetails, Filmstrip, WorkspaceLayout } from './AnshitsuPage';
+import { ExifDetails, Filmstrip, WorkspaceLayout, WorkspaceSection } from './AnshitsuPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { ImageViewer } from './ImageViewer';
 import i18n, { formatPhotoDate } from './i18n';
@@ -88,7 +88,7 @@ describe('Anshitsu workspace', () => {
   });
 
   it('provides Fit, 1:1, zoom, pan surface, and panel controls', () => {
-    const markup = renderToStaticMarkup(<ImageViewer src="/preview" alt={asset.filename} leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} onAllReset={vi.fn()} />);
+    const markup = renderToStaticMarkup(<ImageViewer src="/preview" alt={asset.filename} leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />);
     expect(markup).toContain('Fit');
     expect(markup).toContain('1:1');
     expect(markup).toContain('aria-label="Zoom in"');
@@ -97,9 +97,18 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('aria-label="Collapse left panel"');
     expect(markup).toContain('aria-label="Collapse right panel"');
     expect(markup).toContain('<span>History</span>');
-    expect(markup).toContain('viewer-toolbar-separator');
-    expect(markup).toContain('>All Reset</button>');
-    expect(markup.indexOf('>All Reset</button>')).toBeLessThan(markup.indexOf('aria-label="Collapse right panel"'));
+    expect(markup).not.toContain('All Reset');
+  });
+
+  it('places All Reset beside the Develop controls heading', () => {
+    const markup = renderToStaticMarkup(<WorkspaceSection title="Develop controls"
+      headerAction={<button className="workspace-section-action">All Reset</button>}><p>Adjustment</p></WorkspaceSection>);
+    const headerStart = markup.indexOf('class="workspace-section-header"');
+    const contentStart = markup.indexOf('class="workspace-section-content"');
+    const header = markup.slice(headerStart, contentStart);
+    expect(header).toContain('>Develop controls</h2>');
+    expect(header).toContain('>All Reset</button>');
+    expect(markup.slice(contentStart)).not.toContain('All Reset');
   });
 
   it('places History and EXIF on the left and Scope above Develop controls on the right', () => {

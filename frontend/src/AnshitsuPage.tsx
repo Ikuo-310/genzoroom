@@ -113,7 +113,6 @@ export function AnshitsuPage() {
           rightOpen={rightOpen}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
-          onAllReset={editable ? () => dispatch({ type: 'allReset' }) : undefined}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -128,7 +127,9 @@ export function AnshitsuPage() {
         <WorkspaceSection title={t('workspace.scope')} className="scope-section">
           <p>{t('workspace.scopePlaceholder')}</p>
         </WorkspaceSection>
-        <WorkspaceSection title={t('workspace.developControls')} grow>
+        <WorkspaceSection title={t('workspace.developControls')} grow headerAction={editable
+          ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
+          : undefined}>
           {editable ? <>
             <AdjustmentSlider key={assetId} label={t('workspace.exposure')} value={session.recipe.adjustments.exposure}
               {...EXPOSURE} valueText={`${formatExposure(session.recipe.adjustments.exposure)} EV`}
@@ -210,11 +211,14 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
   </div>;
 }
 
-function WorkspaceSection({ title, children, grow = false, className = '' }: { title: string; children: ReactNode; grow?: boolean; className?: string }) {
+export function WorkspaceSection({ title, children, grow = false, className = '', headerAction }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode }) {
   const sectionClassName = `workspace-section${grow ? ' grow' : ''}${className ? ` ${className}` : ''}`;
 
   return <section className={sectionClassName}>
-    <h2>{title}</h2>
+    <div className="workspace-section-header">
+      <h2>{title}</h2>
+      {headerAction}
+    </div>
     <div className="workspace-section-content">{children}</div>
   </section>;
 }

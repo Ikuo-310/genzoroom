@@ -101,7 +101,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .workspace-section { display: flex; flex: 0 0 auto; flex-direction: column; min-height: 130px; border-bottom: 1px solid #353537; }
 .workspace-section.grow { flex: 1 0 auto; }
 .right-panel .scope-section { flex: 0 0 34%; min-height: 180px; }
-.workspace-section h2 { padding: 12px 14px 8px; color: #ddd; font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.workspace-section-header { display: flex; min-width: 0; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px 4px; }
+.workspace-section h2 { min-width: 0; overflow: hidden; color: #ddd; font-size: 0.82rem; letter-spacing: 0.06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.workspace-section-action { flex: 0 0 auto; min-height: 26px; padding: 3px 7px; font-size: 0.7rem; white-space: nowrap; }
 .workspace-section-content { padding: 6px 14px 16px; color: #959598; font-size: 0.78rem; }
 .workspace-section-content p { margin: 0; }
 .exif-list { display: grid; gap: 9px; margin: 0; }
@@ -115,10 +117,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .tool-button:focus-visible, .filmstrip-item:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .panel-toggle { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-toggle.right { justify-self: end; }
-.viewer-primary-controls { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 8px; }
 .zoom-controls { display: flex; align-items: center; gap: 5px; }
 .zoom-controls output { min-width: 48px; color: #aaa; font-variant-numeric: tabular-nums; text-align: center; font-size: 0.72rem; }
-.viewer-toolbar-separator { align-self: stretch; width: 1px; min-height: 24px; background: #3a3a3d; }
 .icon-button { min-width: 31px; padding-inline: 7px; font-size: 1rem; }
 .viewer-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; }
 .viewer-viewport.pannable { cursor: grab; }
@@ -186,7 +186,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .workspace-section.grow { flex: 0 0 auto; }
   .right-panel .scope-section { flex-basis: auto; min-height: 100px; }
   .viewer-toolbar { grid-template-columns: 34px minmax(0, 1fr) 34px; }
-  .viewer-primary-controls { flex-wrap: wrap; }
   .panel-toggle { width: 34px; padding-inline: 6px; }
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .zoom-controls { justify-content: center; }
