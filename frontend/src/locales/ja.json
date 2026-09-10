@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "現在はImmichの最近の写真を最大10件表示できます。写真編集機能はまだ利用できません。"
+    "stageNotice": "Immichの最近の写真を最大10件表示します。暗室でJPEGの露光量を調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
@@ -46,9 +46,7 @@
     "scope": "スコープ",
     "scopePlaceholder": "将来、ヒストグラム、Waveform、RGB Paradeを表示する領域です。",
     "history": "ヒストリー",
-    "historyPlaceholder": "将来、現像操作の履歴を表示する領域です。",
     "developControls": "現像操作",
-    "controlsUnavailable": "現像機能はまだ利用できません。",
     "filmstrip": "フィルムストリップ",
     "fit": "全体表示",
     "actualSize": "等倍",
@@ -70,7 +68,17 @@
       "exposureCompensation": "露出補正",
       "dimensions": "画像サイズ",
       "empty": "表示できるEXIF情報がありません。"
-    }
+    },
+    "exposure": "露光量",
+    "exposureReset": "露光量をリセット",
+    "allReset": "すべてリセット",
+    "undo": "元に戻す",
+    "redo": "やり直す",
+    "undone": "取り消し済み",
+    "historyEmpty": "確定した編集はまだありません。",
+    "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
+    "exposureHelp": "スライダーにホバーまたはフォーカス：← / → 0.01 EV、↑ / ↓ 0.10 EV。",
+    "previewEditingNote": "暫定的に既存プレビューを調整しています。編集状態は暗室を離れるか再読み込みすると失われます。"
   },
   "language": {
     "label": "言語",

@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "This stage displays up to 10 recent Immich photos. Photo editing is not available yet."
+    "stageNotice": "Browse up to 10 recent Immich photos. JPEG Exposure adjustment is available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
@@ -48,9 +48,7 @@
     "scope": "Scope",
     "scopePlaceholder": "Histogram, waveform, and RGB parade will appear here in a future phase.",
     "history": "History",
-    "historyPlaceholder": "Development history will appear here in a future phase.",
     "developControls": "Develop controls",
-    "controlsUnavailable": "Development controls are not available yet.",
     "filmstrip": "Filmstrip",
     "fit": "Fit",
     "actualSize": "1:1",
@@ -72,7 +70,17 @@
       "exposureCompensation": "Exposure compensation",
       "dimensions": "Dimensions",
       "empty": "No EXIF details are available."
-    }
+    },
+    "exposure": "Exposure",
+    "exposureReset": "Exposure Reset",
+    "allReset": "All Reset",
+    "undo": "Undo",
+    "redo": "Redo",
+    "undone": "Undone",
+    "historyEmpty": "No committed edits yet.",
+    "jpegOnly": "Adjustments are currently available for JPEG only.",
+    "exposureHelp": "Hover or focus the slider: ← / → 0.01 EV, ↑ / ↓ 0.10 EV.",
+    "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."
   },
   "language": {
     "label": "Language",

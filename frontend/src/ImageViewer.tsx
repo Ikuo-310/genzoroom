@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
+import { AdjustedImage } from './AdjustedImage';
+import type { EditRecipe } from './editing';
+import type { EditImageSource } from './editImageSource';
 
 type ImageViewerProps = {
   src: string;
+  editSource?: EditImageSource;
+  recipe?: EditRecipe;
   alt: string;
   leftOpen: boolean;
   rightOpen: boolean;
@@ -11,7 +16,7 @@ type ImageViewerProps = {
   onToggleRight: () => void;
 };
 
-export function ImageViewer({ src, alt, leftOpen, rightOpen, onToggleLeft, onToggleRight }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, onToggleLeft, onToggleRight }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
@@ -118,7 +123,10 @@ export function ImageViewer({ src, alt, leftOpen, rightOpen, onToggleLeft, onTog
       onPointerCancel={stopPan}
     >
       <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}>
-        <img
+        {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt}
+          width={imageSize.x * scale}
+          onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
+          onError={() => setImageState('error')} /> : <img
           src={src}
           alt={alt}
           draggable="false"
@@ -128,7 +136,7 @@ export function ImageViewer({ src, alt, leftOpen, rightOpen, onToggleLeft, onTog
             setImageSize({ x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight });
           }}
           onError={() => setImageState('error')}
-        />
+        />}
       </div>
       {imageState !== 'ready' && <p className={`viewer-image-status${imageState === 'error' ? ' error-text' : ''}`}>
         {t(imageState === 'error' ? 'workspace.previewFailed' : 'workspace.loading')}

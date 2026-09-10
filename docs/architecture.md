@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Status: Early Development — authenticated photo browsing and the initial Anshitsu workspace are implemented. Photo development and image adjustment are not implemented.**
+**Status: Early Development — authenticated photo browsing, Anshitsu, and minimal JPEG Exposure adjustment are implemented. RAW development is not implemented.**
 
 This document describes the current minimal implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -31,7 +31,7 @@ Frontend: nginx on container port 8080
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and reserves the bottom row for the Filmstrip. It uses only same-origin `/api/` URLs. There is no background polling, pagination, search, or image adjustment.
+React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and reserves the bottom row for the Filmstrip. It uses only same-origin `/api/` URLs. There is no background polling, pagination, or search. JPEG Exposure adjustment runs locally in the browser.
 
 Anshitsu is desktop-first because practical photo development requires adequate space for the Viewer, Scope, Develop controls, and Filmstrip. Narrow layouts should remain usable enough to avoid critical breakage, but a dedicated mobile development workspace, or a Drawer, Tab, or vertically stacked redesign, is outside the current architecture unless explicitly planned separately. Possible future mobile workflows such as asset selection, stack management, preset application, or sending completed results to Immich should be treated separately from the full Anshitsu editing interface.
 
@@ -66,6 +66,29 @@ The files support builds on a Docker Compose NAS. A Portainer Git Repository sta
 
 See the [deployment guide](deployment.md) for startup, verification, troubleshooting, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 
+## JPEG editing foundation
+
+Anshitsu owns an in-memory map keyed by Immich asset ID. Each session contains a JSON-serializable recipe (`{ version: 1, adjustments: { exposure: 0 } }`), committed history entries (`kind`, `before`, `after`), a history cursor, and an optional pending transaction. Only JPEG assets are editable. Filmstrip switches preserve each asset's recipe and history; leaving Anshitsu or reloading discards them.
+
+`editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, focus departure, control unmount, or 400 ms keyboard inactivity commits one operation. No-op operations do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Exposure Reset and All Reset have separate operation kinds; both are undoable. History labels are localized at display time rather than stored in recipes.
+
+`AdjustmentSlider` supplies reusable native range inputs and hover/focus keyboard behavior; `editShortcuts.ts` protects text inputs, textarea, select, contenteditable, and IME input. Focused other sliders retain their own behavior. Exposure is bounded to −5…+5 EV in 0.01 EV increments.
+
+The current rendering path is:
+
+```text
+Temporary Immich preview adapter (editImageSource.ts)
+  → browser decode into sRGB RGBA
+  → exposurePipeline.ts (immutable source → linear-light gain 2^EV → sRGB)
+  → GenzoRoom Canvas preview → existing Viewer transforms
+```
+
+The pipeline preserves alpha, clips display output to the sRGB range, and returns exact source bytes at zero Exposure. Each update starts from the untouched decoded buffer, so clipping is not accumulated. Rendering is coalesced with requestAnimationFrame. No CSS brightness filter, GPU, rendered asset, or backend change is involved. Source loads are aborted/ignored on asset changes and decoded bitmap resources are closed. Viewer source identity remains stable during adjustments, preserving Zoom/Pan.
+
+This is an 8-bit browser-managed sRGB preview, not an original-quality rendering or RAW workflow. Immich-generated preview dimensions still define Viewer 1:1. Full-sized pixel processing runs on the main thread; large-source performance, wide-gamut/HDR fidelity, and color-profile matching need separate work before final rendering. Original acquisition is isolated from recipe and processing code: the next source adapter should provide JPEG original → GenzoRoom pipeline → GenzoRoom preview without silently treating existing preview-based recipes as equivalent original-based results.
+
+Future persistence should validate/migrate recipe versions, associate recipes with stable asset and source identity (including processing/color-space version), and save committed recipes atomically. Decide separately whether to persist undo history and its cursor. Do not serialize transient decoded buffers, pending gestures, or translated labels. There is currently no DB, localStorage recipe storage, container volume, original mutation, or Immich write-back.
+
 ## Future direction (not implemented)
 
 The current authenticated read path is:
@@ -77,11 +100,11 @@ Browser → Frontend → Backend API → Immich API
 Possible extensions include:
 
 - Expanded Immich asset browsing; connection credentials currently come only from backend environment variables.
-- JPEG / HEIC handling and later RAW / DNG processing, potentially using LibRaw or rawpy.
+- Original-based JPEG processing, HEIC handling, and later RAW / DNG processing, potentially using LibRaw or rawpy.
 - Non-destructive edit parameter storage separate from original images; storage and schema are undecided.
 - Responsive preview rendering, with client-side GPU assistance only if useful.
 - High-quality server-side final rendering; output storage and export behavior are undecided.
-- Exposure, contrast, highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
+- Further adjustments beyond JPEG Exposure: contrast, highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
 - Explicit Docker volumes if persistent data becomes necessary.
 
 These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated read-only browsing, generated image previews, and the initial Anshitsu workspace described above.

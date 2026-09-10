@@ -1,5 +1,25 @@
 # GenzoRoom 開発ノート
 
+## JPEG Exposure編集基盤（最新フェーズ）
+
+JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）の調整を追加した。RAW/DNG・HEIC処理、Backend、DB、永続保存、Immich書き戻しには変更を加えていない。
+
+編集はAsset IDごとのメモリ上のsessionで保持する。recipeは `{ version: 1, adjustments: { exposure: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure ResetとAll Resetは別の操作種別で、どちらもUndo可能。
+
+操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、フォーカス移動、コントロールのunmount、キーボード入力停止400msでcommitする。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
+
+共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
+
+画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、sRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。alphaを保ち、表示範囲外はclipする。毎回未変更の画素bufferから計算するため、明るくした後で戻しても累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
+
+8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。大画像のmain thread負荷は別途評価し、必要が出てからWorker等を検討する。
+
+DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理versionの紐付け、commit時の原子的保存を設計する。previewベースのレシピをoriginalへ無条件に適用して同じ見え方になるとは扱わない。pending操作やCanvas bufferは永続化対象にせず、Historyを保存するかは別に決める。
+
+以下は過去フェーズの記録であり、当時の「未実装」の記述を含む。
+
+検証：Frontendの既存59件と追加26件、計85件のテストおよびproduction buildが成功。DOMテスト用にjsdomを開発依存へ追加した。ローカルの1200×800 JPEG fixtureを使うブラウザ確認では、Exposure表示、ドラッグ/連続キーの履歴集約、ホバー矢印、Undo/Redo、両Reset、Filmstrip復帰、DNG/HEIC対象外表示、英日切替、Fit/1:1/Zoom/Panと左右パネル開閉を確認した。実Immich/NAS接続、実写真の色再現、大画像の性能は今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
+
 この文書は、GenzoRoomの第三段階までに行った実装、実機確認、設計判断、トラブルシュートを後から振り返るための内部向けメモである。公開リポジトリに置くため、APIキーなどの秘密情報は記録しない。
 
 ## 1. プロジェクト概要

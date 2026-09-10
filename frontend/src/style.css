@@ -115,7 +115,14 @@ h2 { margin: 0; font-size: 1.35rem; }
 .viewer-viewport.pannable { cursor: grab; }
 .viewer-viewport.pannable:active { cursor: grabbing; }
 .viewer-image-position { position: absolute; top: 50%; left: 50%; line-height: 0; will-change: transform; }
-.viewer-image-position img { display: block; max-width: none; height: auto; box-shadow: 0 4px 24px rgb(0 0 0 / 45%); }
+.viewer-image-position img, .viewer-image-position canvas { display: block; max-width: none; height: auto; box-shadow: 0 4px 24px rgb(0 0 0 / 45%); }
+.adjustment-slider > div { display: flex; justify-content: space-between; gap: 8px; color: #ddd; }
+.adjustment-slider input { width: 100%; margin: 12px 0; accent-color: #bbb; }
+.edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.edit-history { padding-left: 18px; line-height: 1.7; }
+.edit-history [aria-current="step"] { color: #eee; }
+.edit-history .undone { opacity: 0.55; }
+.workspace-section-content .edit-source-note { margin-top: 14px; }
 .viewer-image-status { position: absolute; top: 50%; left: 50%; margin: 0; color: #aaa; transform: translate(-50%, -50%); }
 .viewer-message { position: relative; }
 .viewer-message > p { align-self: center; justify-self: center; color: #aaa; }

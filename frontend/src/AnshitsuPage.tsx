@@ -8,6 +8,10 @@ import { LanguageControl } from './GalleryPage';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
+import { AdjustmentSlider } from './AdjustmentSlider';
+import { EXPOSURE, formatExposure, supportsEditing } from './editing';
+import { getEditImageSource } from './editImageSource';
+import { useAssetEdits } from './useAssetEdits';
 
 type DetailState = 'loading' | 'ready' | 'error';
 
@@ -24,6 +28,9 @@ export function AnshitsuPage() {
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const activeDetail = detail?.id === assetId ? detail : null;
+  const editable = !!activeDetail && supportsEditing(activeDetail);
+  const { session, dispatch } = useAssetEdits(assetId, editable);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,17 +83,30 @@ export function AnshitsuPage() {
       rightOpen={rightOpen}
       leftPanel={<>
         <WorkspaceSection title={t('workspace.history')}>
-          <p>{t('workspace.historyPlaceholder')}</p>
+          <div className="edit-actions">
+            <button className="tool-button" disabled={!editable || (session.cursor === 0 && !session.pending)} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+            <button className="tool-button" disabled={!editable || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
+          </div>
+          {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p> : <ol className="edit-history">
+            {session.history.map((entry, index) => <li key={index} className={index >= session.cursor ? 'undone' : ''}
+              aria-current={index === session.cursor - 1 ? 'step' : undefined}>
+              {t(`workspace.${entry.kind}`)} {formatExposure(entry.before.adjustments.exposure)} → {formatExposure(entry.after.adjustments.exposure)}
+              {index >= session.cursor && <span> ({t('workspace.undone')})</span>}
+            </li>)}
+          </ol>}
         </WorkspaceSection>
         <WorkspaceSection title="EXIF" grow>
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
             : <p>{detailState === 'error' ? t('workspace.detailFailed') : t('workspace.loading')}</p>}
         </WorkspaceSection>
       </>}
-      viewer={detailState === 'ready' && detail ? (
+      viewer={detailState === 'ready' && activeDetail ? (
         <ImageViewer
-          src={detail.preview_url}
-          alt={detail.filename}
+          key={assetId}
+          src={activeDetail.preview_url}
+          editSource={editable ? getEditImageSource(activeDetail) : undefined}
+          recipe={editable ? session.recipe : undefined}
+          alt={activeDetail.filename}
           leftOpen={leftOpen}
           rightOpen={rightOpen}
           onToggleLeft={() => setLeftOpen((value) => !value)}
@@ -106,7 +126,19 @@ export function AnshitsuPage() {
           <p>{t('workspace.scopePlaceholder')}</p>
         </WorkspaceSection>
         <WorkspaceSection title={t('workspace.developControls')} grow>
-          <p>{t('workspace.controlsUnavailable')}</p>
+          {editable ? <>
+            <AdjustmentSlider key={assetId} label={t('workspace.exposure')} value={session.recipe.adjustments.exposure}
+              {...EXPOSURE} valueText={`${formatExposure(session.recipe.adjustments.exposure)} EV`}
+              onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
+              onChange={(value) => dispatch({ type: 'exposure', value })}
+              onCommit={() => dispatch({ type: 'commit' })} />
+            <div className="edit-actions">
+              <button className="tool-button" onClick={() => dispatch({ type: 'exposureReset' })}>{t('workspace.exposureReset')}</button>
+              <button className="tool-button" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
+            </div>
+            <p>{t('workspace.exposureHelp')}</p>
+            <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
+          </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
       </>}
     />
