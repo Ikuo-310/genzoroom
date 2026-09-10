@@ -72,7 +72,7 @@ Anshitsu owns an in-memory map keyed by Immich asset ID. Each session contains a
 
 `editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, control unmount, or 500 ms keyboard inactivity commits one operation. Keyboard input resets the timer on every accepted keydown; keyup, pointer leave, and focus changes do not commit it early. No-op operations do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Exposure Reset and All Reset have separate operation kinds; both are undoable. History labels are localized at display time rather than stored in recipes.
 
-`AdjustmentSlider` supplies reusable native range inputs and hover/focus keyboard behavior; `editShortcuts.ts` protects text inputs, textarea, select, contenteditable, and IME input. Focused other sliders retain their own behavior. Exposure is bounded to −5…+5 EV in 0.01 EV increments.
+`AdjustmentSlider` supplies a compact reusable adjustment row with a native range input, synchronized direct numeric input, and inline reset. Direct input updates the current recipe only for finite normalized values, commits on Enter or blur, and restores its pre-edit value on Escape or invalid input. `editShortcuts.ts` protects text and number inputs, textarea, select, contenteditable, and IME input from the hover/focus slider shortcuts. Focused other sliders retain their own behavior. Exposure remains bounded to −5…+5 EV in 0.01 EV increments with two displayed decimal places.
 
 The current rendering path is:
 

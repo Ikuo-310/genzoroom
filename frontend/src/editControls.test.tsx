@@ -12,9 +12,11 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
   const { session, dispatch } = useAssetEdits(assetId, true);
   return <>
     <AdjustmentSlider key={assetId} label="Exposure" {...EXPOSURE} value={session.recipe.adjustments.exposure}
-      valueText={String(session.recipe.adjustments.exposure)}
+      valueText={`${session.recipe.adjustments.exposure} EV`} valueLabel="Exposure value" unit="EV"
+      precision={2} defaultValue={0} resetLabel="Reset Exposure"
       onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
-      onChange={(value) => dispatch({ type: 'exposure', value })} onCommit={() => dispatch({ type: 'commit' })} />
+      onChange={(value) => dispatch({ type: 'exposure', value })} onCommit={() => dispatch({ type: 'commit' })}
+      onReset={() => dispatch({ type: 'exposureReset' })} />
     <pre>{JSON.stringify(session)}</pre>
     <input type="text" /><textarea /><select><option>one</option></select><div contentEditable />
     <button onClick={() => dispatch({ type: 'allReset' })}>All Reset</button>
@@ -22,6 +24,7 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
 }
 const session = (): EditSession => JSON.parse(host.querySelector('pre')!.textContent!);
 const range = () => host.querySelector<HTMLInputElement>('input[type="range"]')!;
+const number = () => host.querySelector<HTMLInputElement>('input[type="number"]')!;
 function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}, type = 'keydown') {
   const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
@@ -34,6 +37,12 @@ function change(value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range(), value);
     range().dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+function changeNumber(value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number(), value);
+    number().dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
 beforeEach(() => {
@@ -61,6 +70,7 @@ describe('edit controls DOM interaction', () => {
     act(() => vi.advanceTimersByTime(300));
     key('ArrowUp'); key('ArrowLeft'); key('ArrowDown');
     expect(session().recipe.adjustments.exposure).toBe(0.01);
+    expect(number().value).toBe('0.01');
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS - 1));
     expect(session().history).toHaveLength(0);
@@ -72,6 +82,75 @@ describe('edit controls DOM interaction', () => {
     expect(session().recipe.adjustments.exposure).toBe(0.01);
     key('z', window, { ctrlKey: true });
     key('y', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.exposure).toBe(0.01);
+  });
+  it('keeps direct input, range, and preview state synchronized and commits with Enter', () => {
+    act(() => number().focus());
+    changeNumber('0.37');
+    expect(session().recipe.adjustments.exposure).toBe(0.37);
+    expect(range().value).toBe('0.37');
+    expect(session().history).toHaveLength(0);
+    key('Enter', number());
+    expect(session().history).toHaveLength(1);
+    expect(number().value).toBe('0.37');
+  });
+  it('commits direct input on blur', () => {
+    act(() => number().focus());
+    changeNumber('-0.45');
+    act(() => number().blur());
+    expect(session().recipe.adjustments.exposure).toBe(-0.45);
+    expect(session().history).toHaveLength(1);
+  });
+  it('cancels direct input with Escape', () => {
+    act(() => number().focus());
+    changeNumber('0.75');
+    expect(session().recipe.adjustments.exposure).toBe(0.75);
+    key('Escape', number());
+    expect(session().recipe.adjustments.exposure).toBe(0);
+    expect(range().value).toBe('0');
+    expect(number().value).toBe('0.00');
+    expect(session().history).toHaveLength(0);
+  });
+  it('clamps direct input to Exposure boundaries and step precision', () => {
+    act(() => number().focus());
+    changeNumber('9');
+    expect(session().recipe.adjustments.exposure).toBe(5);
+    key('Enter', number());
+    expect(number().value).toBe('5.00');
+    act(() => number().focus());
+    changeNumber('-9');
+    expect(session().recipe.adjustments.exposure).toBe(-5);
+    act(() => number().blur());
+    expect(number().value).toBe('-5.00');
+    expect(session().history).toHaveLength(2);
+  });
+  it('restores the starting value for an empty or invalid direct input', () => {
+    act(() => number().focus());
+    changeNumber('');
+    expect(session().recipe.adjustments.exposure).toBe(0);
+    act(() => number().blur());
+    expect(number().value).toBe('0.00');
+    expect(session().history).toHaveLength(0);
+  });
+  it('resets Exposure inline and disables reset at its default value', () => {
+    const reset = host.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+    expect(reset.disabled).toBe(true);
+    act(() => number().focus());
+    changeNumber('0.5');
+    key('Enter', number());
+    expect(reset.disabled).toBe(false);
+    act(() => reset.click());
+    expect(session().recipe.adjustments.exposure).toBe(0);
+    expect(session().history).toHaveLength(2);
+    expect(reset.disabled).toBe(true);
+  });
+  it('does not treat number-field arrow keys as hovered slider shortcuts', () => {
+    pointer('pointerover');
+    act(() => number().focus());
+    const event = key('ArrowUp', number());
+    expect(event.defaultPrevented).toBe(false);
+    expect(session().recipe.adjustments.exposure).toBe(0);
+    changeNumber('0.01');
     expect(session().recipe.adjustments.exposure).toBe(0.01);
   });
   it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {

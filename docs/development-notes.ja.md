@@ -10,6 +10,8 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
 
+現像項目を増やす前提で、AdjustmentSliderをラベル・直接数値入力・小型個別Resetの1行と、その直下のrangeに整理した。Exposureは従来どおり −5〜+5 EV、0.01 EV刻み、表示2桁。直接入力中は有限値をstepと範囲へ正規化してcurrent recipeへ反映し、Enterまたはblurでcommit、Escまたは空・無効入力で編集開始値へ戻す。number入力中のカーソルキーは既存のホバースライダー操作から除外する。個別Resetは既定値0のときdisabledにし、All ResetはDevelop Controls内に残した。画像処理pipelineとrecipe schemaは変更していない。
+
 画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、sRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。alphaを保ち、表示範囲外はclipする。毎回未変更の画素bufferから計算するため、明るくした後で戻しても累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
 
 8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。大画像のmain thread負荷は別途評価し、必要が出てからWorker等を検討する。

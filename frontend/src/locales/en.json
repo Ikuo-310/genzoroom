@@ -74,6 +74,7 @@
       "empty": "No EXIF details are available."
     },
     "exposure": "Exposure",
+    "exposureValue": "Exposure value",
     "exposureReset": "Exposure Reset",
     "allReset": "All Reset",
     "undo": "Undo",

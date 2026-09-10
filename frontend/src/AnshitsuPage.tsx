@@ -131,11 +131,13 @@ export function AnshitsuPage() {
           {editable ? <>
             <AdjustmentSlider key={assetId} label={t('workspace.exposure')} value={session.recipe.adjustments.exposure}
               {...EXPOSURE} valueText={`${formatExposure(session.recipe.adjustments.exposure)} EV`}
+              valueLabel={t('workspace.exposureValue')} unit="EV" precision={2} defaultValue={0}
+              resetLabel={t('workspace.exposureReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
               onChange={(value) => dispatch({ type: 'exposure', value })}
-              onCommit={() => dispatch({ type: 'commit' })} />
-            <div className="edit-actions">
-              <button className="tool-button" onClick={() => dispatch({ type: 'exposureReset' })}>{t('workspace.exposureReset')}</button>
+              onCommit={() => dispatch({ type: 'commit' })}
+              onReset={() => dispatch({ type: 'exposureReset' })} />
+            <div className="all-reset-actions">
               <button className="tool-button" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
             </div>
             <p>{t('workspace.exposureHelp')}</p>

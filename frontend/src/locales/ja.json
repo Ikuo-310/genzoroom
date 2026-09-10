@@ -72,6 +72,7 @@
       "empty": "表示できるEXIF情報がありません。"
     },
     "exposure": "露光量",
+    "exposureValue": "露光量の値",
     "exposureReset": "露光量をリセット",
     "allReset": "すべてリセット",
     "undo": "元に戻す",
