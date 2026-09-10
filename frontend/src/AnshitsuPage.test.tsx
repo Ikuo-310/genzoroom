@@ -2,8 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { ExifDetails, Filmstrip, WorkspaceLayout, WorkspaceSection } from './AnshitsuPage';
+import { EditHistory, ExifDetails, Filmstrip, WorkspaceLayout, WorkspaceSection } from './AnshitsuPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
+import type { EditEntry } from './editing';
 import { ImageViewer } from './ImageViewer';
 import i18n, { formatPhotoDate } from './i18n';
 
@@ -111,6 +112,28 @@ describe('Anshitsu workspace', () => {
     expect(markup.slice(contentStart)).not.toContain('All Reset');
   });
 
+  it('renders History newest first while preserving chronological item numbers', () => {
+    const history = [historyEntry(0, 0.1), historyEntry(0.1, 0.2), historyEntry(0.2, 0.3)];
+    const original = [...history];
+    const markup = renderToStaticMarkup(<EditHistory history={history} cursor={3} />);
+    expect(markup.indexOf('value="3"')).toBeLessThan(markup.indexOf('value="2"'));
+    expect(markup.indexOf('value="2"')).toBeLessThan(markup.indexOf('value="1"'));
+    expect(markup).toContain('<li value="3" aria-current="step">Exposure +0.20 → +0.30</li>');
+    expect(history).toEqual(original);
+  });
+
+  it('keeps newest-first History order across Undo, Redo, and a new edit', () => {
+    const history = [historyEntry(0, 0.1), historyEntry(0.1, 0.2), historyEntry(0.2, 0.3)];
+    const undone = renderToStaticMarkup(<EditHistory history={history} cursor={2} />);
+    expect(undone).toContain('<li value="3" class="undone">Exposure +0.20 → +0.30<span> (Undone)</span></li>');
+    expect(undone).toContain('<li value="2" aria-current="step">Exposure +0.10 → +0.20</li>');
+    const redone = renderToStaticMarkup(<EditHistory history={history} cursor={3} />);
+    expect(redone).toContain('<li value="3" aria-current="step">Exposure +0.20 → +0.30</li>');
+    const withNewEdit = renderToStaticMarkup(<EditHistory history={[...history, historyEntry(0.3, 0.4)]} cursor={4} />);
+    expect(withNewEdit.indexOf('value="4"')).toBeLessThan(withNewEdit.indexOf('value="3"'));
+    expect(withNewEdit).toContain('<li value="4" aria-current="step">Exposure +0.30 → +0.40</li>');
+  });
+
   it('places History and EXIF on the left and Scope above Develop controls on the right', () => {
     const markup = renderWorkspace('en');
     const leftStart = markup.indexOf('class="workspace-side-panel left-panel"');
@@ -155,3 +178,11 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain(`class="sidebar-resize-handle right" role="separator" aria-label="Resize right panel" aria-orientation="vertical"${rightOpen ? '' : ' hidden=""'}`);
   });
 });
+
+function historyEntry(before: number, after: number): EditEntry {
+  return {
+    kind: 'exposure',
+    before: { version: 1, adjustments: { exposure: before } },
+    after: { version: 1, adjustments: { exposure: after } },
+  };
+}

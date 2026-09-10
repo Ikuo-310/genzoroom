@@ -9,7 +9,7 @@ import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { EXPOSURE, formatExposure, supportsEditing } from './editing';
+import { EXPOSURE, formatExposure, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -89,13 +89,8 @@ export function AnshitsuPage() {
             <button className="tool-button" disabled={!editable || (session.cursor === 0 && !session.pending)} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
             <button className="tool-button" disabled={!editable || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
-          {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p> : <ol className="edit-history">
-            {session.history.map((entry, index) => <li key={index} className={index >= session.cursor ? 'undone' : ''}
-              aria-current={index === session.cursor - 1 ? 'step' : undefined}>
-              {t(`workspace.${entry.kind}`)} {formatExposure(entry.before.adjustments.exposure)} → {formatExposure(entry.after.adjustments.exposure)}
-              {index >= session.cursor && <span> ({t('workspace.undone')})</span>}
-            </li>)}
-          </ol>}
+          {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
+            : <EditHistory history={session.history} cursor={session.cursor} />}
         </WorkspaceSection>
         <WorkspaceSection title="EXIF" grow>
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
@@ -221,6 +216,19 @@ export function WorkspaceSection({ title, children, grow = false, className = ''
     </div>
     <div className="workspace-section-content">{children}</div>
   </section>;
+}
+
+export function EditHistory({ history, cursor }: { history: readonly EditEntry[]; cursor: number }) {
+  const { t } = useTranslation();
+  const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
+
+  return <ol className="edit-history">
+    {newestFirst.map(({ entry, index }) => <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
+      aria-current={index === cursor - 1 ? 'step' : undefined}>
+      {t(`workspace.${entry.kind}`)} {formatExposure(entry.before.adjustments.exposure)} → {formatExposure(entry.after.adjustments.exposure)}
+      {index >= cursor && <span> ({t('workspace.undone')})</span>}
+    </li>)}
+  </ol>;
 }
 
 export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif; fallbackDate: string; language: AppLanguage }) {
