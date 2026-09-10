@@ -95,7 +95,7 @@ export function ImageViewer({ src, alt, leftOpen, rightOpen, onToggleLeft, onTog
   return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
     <div className="viewer-toolbar">
       <button type="button" className="tool-button panel-toggle" onClick={onToggleLeft} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')} aria-pressed={leftOpen}>
-        {leftOpen ? '‹' : '›'} <span>{t('workspace.scope')}</span>
+        {leftOpen ? '‹' : '›'} <span>{t('workspace.history')}</span>
       </button>
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
         <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>

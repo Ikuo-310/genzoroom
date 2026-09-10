@@ -7,7 +7,7 @@ This document describes the current minimal implementation and possible future e
 ## Current request flow
 
 ```text
-Browser: http://<NAS-IP>:3190
+Browser: http://<HOSTNAME-OR-IP>:3190
   ↓
 Frontend: nginx on container port 8080
   ├─ /             → built React / TypeScript frontend
@@ -31,7 +31,7 @@ Frontend: nginx on container port 8080
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. It uses only same-origin `/api/` URLs. There is no background polling, pagination, search, or image adjustment.
+React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and reserves the bottom row for the Filmstrip. It uses only same-origin `/api/` URLs. There is no background polling, pagination, search, or image adjustment.
 
 The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 

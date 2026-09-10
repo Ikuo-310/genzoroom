@@ -75,9 +75,6 @@ export function AnshitsuPage() {
       leftOpen={leftOpen}
       rightOpen={rightOpen}
       leftPanel={<>
-        <WorkspaceSection title={t('workspace.scope')}>
-          <p>{t('workspace.scopePlaceholder')}</p>
-        </WorkspaceSection>
         <WorkspaceSection title={t('workspace.history')}>
           <p>{t('workspace.historyPlaceholder')}</p>
         </WorkspaceSection>
@@ -98,17 +95,20 @@ export function AnshitsuPage() {
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
           <div className="viewer-toolbar">
-            <button type="button" className="tool-button panel-toggle" onClick={() => setLeftOpen((value) => !value)} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}>{leftOpen ? '‹' : '›'} <span>{t('workspace.scope')}</span></button>
+            <button type="button" className="tool-button panel-toggle" onClick={() => setLeftOpen((value) => !value)} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}>{leftOpen ? '‹' : '›'} <span>{t('workspace.history')}</span></button>
             <button type="button" className="tool-button panel-toggle right" onClick={() => setRightOpen((value) => !value)} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')}><span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}</button>
           </div>
           <p className={detailState === 'error' ? 'error-text' : ''}>{t(detailState === 'error' ? 'workspace.detailFailed' : 'workspace.loading')}</p>
         </section>
       )}
-      rightPanel={
+      rightPanel={<>
+        <WorkspaceSection title={t('workspace.scope')} className="scope-section">
+          <p>{t('workspace.scopePlaceholder')}</p>
+        </WorkspaceSection>
         <WorkspaceSection title={t('workspace.developControls')} grow>
           <p>{t('workspace.controlsUnavailable')}</p>
         </WorkspaceSection>
-      }
+      </>}
     />
 
     <Filmstrip
@@ -140,8 +140,10 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
   </div>;
 }
 
-function WorkspaceSection({ title, children, grow = false }: { title: string; children: ReactNode; grow?: boolean }) {
-  return <section className={`workspace-section${grow ? ' grow' : ''}`}>
+function WorkspaceSection({ title, children, grow = false, className = '' }: { title: string; children: ReactNode; grow?: boolean; className?: string }) {
+  const sectionClassName = `workspace-section${grow ? ' grow' : ''}${className ? ` ${className}` : ''}`;
+
+  return <section className={sectionClassName}>
     <h2>{title}</h2>
     <div className="workspace-section-content">{children}</div>
   </section>;

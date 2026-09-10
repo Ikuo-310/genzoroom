@@ -96,6 +96,26 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('viewer-viewport');
     expect(markup).toContain('aria-label="Collapse left panel"');
     expect(markup).toContain('aria-label="Collapse right panel"');
+    expect(markup).toContain('<span>History</span>');
+  });
+
+  it('places History and EXIF on the left and Scope above Develop controls on the right', () => {
+    const markup = renderWorkspace('en');
+    const leftStart = markup.indexOf('class="workspace-side-panel left-panel"');
+    const viewerStart = markup.indexOf('class="viewer-panel');
+    const rightStart = markup.indexOf('class="workspace-side-panel right-panel"');
+    const leftPanel = markup.slice(leftStart, viewerStart);
+    const rightPanel = markup.slice(rightStart);
+
+    expect(leftStart).toBeGreaterThanOrEqual(0);
+    expect(viewerStart).toBeGreaterThan(leftStart);
+    expect(rightStart).toBeGreaterThan(viewerStart);
+    expect(leftPanel).toContain('>History</h2>');
+    expect(leftPanel).toContain('>EXIF</h2>');
+    expect(leftPanel).not.toContain('>Scope</h2>');
+    expect(rightPanel).toContain('>Scope</h2>');
+    expect(rightPanel).toContain('>Develop controls</h2>');
+    expect(rightPanel.indexOf('>Scope</h2>')).toBeLessThan(rightPanel.indexOf('>Develop controls</h2>'));
   });
 
   it.each([
@@ -117,5 +137,7 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain(`class="${expectedClass}"`);
     expect(markup).toContain('data-testid="viewer"');
     expect(markup.match(/data-testid="viewer"/g)).toHaveLength(1);
+    expect(markup.indexOf('class="workspace-side-panel left-panel"')).toBeLessThan(markup.indexOf('data-testid="viewer"'));
+    expect(markup.indexOf('data-testid="viewer"')).toBeLessThan(markup.indexOf('class="workspace-side-panel right-panel"'));
   });
 });

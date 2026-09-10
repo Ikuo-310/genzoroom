@@ -93,6 +93,7 @@ h2 { margin: 0; font-size: 1.35rem; }
 .right-panel { grid-area: right; border-left: 1px solid #353537; }
 .workspace-section { display: flex; flex: 0 0 auto; flex-direction: column; min-height: 130px; border-bottom: 1px solid #353537; }
 .workspace-section.grow { flex: 1 0 auto; }
+.right-panel .scope-section { flex: 0 0 34%; min-height: 180px; }
 .workspace-section h2 { padding: 12px 14px 8px; color: #ddd; font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .workspace-section-content { padding: 6px 14px 16px; color: #959598; font-size: 0.78rem; }
 .workspace-section-content p { margin: 0; }
@@ -150,6 +151,7 @@ h2 { margin: 0; font-size: 1.35rem; }
   .workspace-side-panel { overflow: visible; }
   .workspace-section { min-height: 100px; }
   .workspace-section.grow { flex: 0 0 auto; }
+  .right-panel .scope-section { flex-basis: auto; min-height: 100px; }
   .viewer-toolbar { grid-template-columns: 34px minmax(0, 1fr) 34px; }
   .panel-toggle { width: 34px; padding-inline: 6px; }
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
