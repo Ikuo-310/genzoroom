@@ -9,7 +9,7 @@ import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { CONTRAST, EXPOSURE, formatContrast, formatExposure, supportsEditing, type EditEntry } from './editing';
+import { CONTRAST, EXPOSURE, HIGHLIGHTS, formatContrast, formatExposure, formatHighlights, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -142,8 +142,17 @@ export function AnshitsuPage() {
               onChange={(value) => dispatch({ type: 'contrast', value })}
               onCommit={() => dispatch({ type: 'commit', kind: 'contrast' })}
               onReset={() => dispatch({ type: 'contrastReset' })} />
+            <AdjustmentSlider key={`${assetId}-highlights`} label={t('workspace.highlights')} value={session.recipe.adjustments.highlights}
+              {...HIGHLIGHTS} valueText={formatHighlights(session.recipe.adjustments.highlights)}
+              valueLabel={t('workspace.highlightsValue')} precision={0} defaultValue={0}
+              resetLabel={t('workspace.highlightsReset')}
+              onBegin={() => dispatch({ type: 'begin', kind: 'highlights' })}
+              onChange={(value) => dispatch({ type: 'highlights', value })}
+              onCommit={() => dispatch({ type: 'commit', kind: 'highlights' })}
+              onReset={() => dispatch({ type: 'highlightsReset' })} />
             <p>{t('workspace.exposureHelp')}</p>
             <p>{t('workspace.contrastHelp')}</p>
+            <p>{t('workspace.highlightsHelp')}</p>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
@@ -234,12 +243,16 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
   return <ol className="edit-history">
     {newestFirst.map(({ entry, index }) => {
       const isContrast = entry.kind === 'contrast' || entry.kind === 'contrastReset';
-      const before = isContrast ? formatContrast(entry.before.adjustments.contrast) : formatExposure(entry.before.adjustments.exposure);
-      const after = isContrast ? formatContrast(entry.after.adjustments.contrast) : formatExposure(entry.after.adjustments.exposure);
+      const isHighlights = entry.kind === 'highlights' || entry.kind === 'highlightsReset';
+      const before = isContrast ? formatContrast(entry.before.adjustments.contrast)
+        : isHighlights ? formatHighlights(entry.before.adjustments.highlights) : formatExposure(entry.before.adjustments.exposure);
+      const after = isContrast ? formatContrast(entry.after.adjustments.contrast)
+        : isHighlights ? formatHighlights(entry.after.adjustments.highlights) : formatExposure(entry.after.adjustments.exposure);
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
         {t(`workspace.${entry.kind}`)} {entry.kind === 'allReset' && <>{t('workspace.exposure')} </>}{before} → {after}
         {entry.kind === 'allReset' && <>; {t('workspace.contrast')} {formatContrast(entry.before.adjustments.contrast)} → {formatContrast(entry.after.adjustments.contrast)}</>}
+        {entry.kind === 'allReset' && <>; {t('workspace.highlights')} {formatHighlights(entry.before.adjustments.highlights)} → {formatHighlights(entry.after.adjustments.highlights)}</>}
         {index >= cursor && <span> ({t('workspace.undone')})</span>}
       </li>;
     })}

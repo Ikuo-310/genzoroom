@@ -8,7 +8,9 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   const contrast = Number.isFinite(recipe.adjustments.contrast)
     ? Math.max(-100, Math.min(100, recipe.adjustments.contrast)) : 0;
   const contrastFactor = 1 + contrast / 100;
-  if (gain === 1 && contrastFactor === 1) return output;
+  const highlights = Number.isFinite(recipe.adjustments.highlights)
+    ? Math.max(-100, Math.min(100, recipe.adjustments.highlights)) / 100 : 0;
+  if (gain === 1 && contrastFactor === 1 && highlights === 0) return output;
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
     const srgb = i / 255;
@@ -22,6 +24,23 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     output[i] = lut[source[i]];
     output[i + 1] = lut[source[i + 1]];
     output[i + 2] = lut[source[i + 2]];
+    if (highlights === 0) continue;
+
+    const red = output[i] / 255;
+    const green = output[i + 1] / 255;
+    const blue = output[i + 2] / 255;
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    const threshold = Math.max(0, Math.min(1, (luminance - 0.5) * 2));
+    const weight = threshold * threshold * (3 - 2 * threshold);
+    const curvedLuminance = highlights > 0
+      ? 1 - (1 - luminance) ** 2
+      : luminance ** 2;
+    const targetLuminance = Math.max(0, Math.min(1,
+      luminance + Math.abs(highlights) * weight * (curvedLuminance - luminance)));
+    const scale = luminance > 0 ? targetLuminance / luminance : 1;
+    output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
+    output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
+    output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
   }
   return output;
 }

@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 10 recent Immich photos. JPEG Exposure and Contrast adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 10 recent Immich photos. JPEG Exposure, Contrast, and Highlights adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
@@ -79,6 +79,9 @@
     "contrast": "Contrast",
     "contrastValue": "Contrast value",
     "contrastReset": "Contrast Reset",
+    "highlights": "Highlights",
+    "highlightsValue": "Highlights value",
+    "highlightsReset": "Highlights Reset",
     "allReset": "All Reset",
     "undo": "Undo",
     "redo": "Redo",
@@ -87,6 +90,7 @@
     "jpegOnly": "Adjustments are currently available for JPEG only.",
     "exposureHelp": "Hover or focus the slider: ← / → 0.01 EV, ↑ / ↓ 0.10 EV.",
     "contrastHelp": "Contrast: ← / → 1, ↑ / ↓ 10.",
+    "highlightsHelp": "Highlights: ← / → 1, ↑ / ↓ 10.",
     "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."
   },
   "language": {

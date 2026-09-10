@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大10件表示します。暗室でJPEGの露光量とコントラストを調整できます。"
+    "stageNotice": "Immichの最近の写真を最大10件表示します。暗室でJPEGの露光量、コントラスト、ハイライトを調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
@@ -77,6 +77,9 @@
     "contrast": "コントラスト",
     "contrastValue": "コントラストの値",
     "contrastReset": "コントラストをリセット",
+    "highlights": "ハイライト",
+    "highlightsValue": "ハイライトの値",
+    "highlightsReset": "ハイライトをリセット",
     "allReset": "すべてリセット",
     "undo": "元に戻す",
     "redo": "やり直す",
@@ -85,6 +88,7 @@
     "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
     "exposureHelp": "スライダーにホバーまたはフォーカス：← / → 0.01 EV、↑ / ↓ 0.10 EV。",
     "contrastHelp": "コントラスト：← / → 1、↑ / ↓ 10。",
+    "highlightsHelp": "ハイライト：← / → 1、↑ / ↓ 10。",
     "previewEditingNote": "暫定的に既存プレビューを調整しています。編集状態は暗室を離れるか再読み込みすると失われます。"
   },
   "language": {

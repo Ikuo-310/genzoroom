@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Status: Early Development — authenticated photo browsing, Anshitsu, and minimal JPEG Exposure/Contrast adjustments are implemented. RAW development is not implemented.**
+**Status: Early Development — authenticated photo browsing, Anshitsu, and minimal JPEG Exposure/Contrast/Highlights adjustments are implemented. RAW development is not implemented.**
 
 This document describes the current minimal implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -31,7 +31,7 @@ Frontend: nginx on container port 8080
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and reserves the bottom row for the Filmstrip. It uses only same-origin `/api/` URLs. There is no background polling, pagination, or search. JPEG Exposure adjustment runs locally in the browser.
+React renders the title, connection states, and up to 10 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and reserves the bottom row for the Filmstrip. It uses only same-origin `/api/` URLs. There is no background polling, pagination, or search. JPEG Exposure, Contrast, and Highlights adjustments run locally in the browser.
 
 Anshitsu is desktop-first because practical photo development requires adequate space for the Viewer, Scope, Develop controls, and Filmstrip. Narrow layouts should remain usable enough to avoid critical breakage, but a dedicated mobile development workspace, or a Drawer, Tab, or vertically stacked redesign, is outside the current architecture unless explicitly planned separately. Possible future mobile workflows such as asset selection, stack management, preset application, or sending completed results to Immich should be treated separately from the full Anshitsu editing interface.
 
@@ -68,22 +68,22 @@ See the [deployment guide](deployment.md) for startup, verification, troubleshoo
 
 ## JPEG editing foundation
 
-Anshitsu owns an in-memory map keyed by Immich asset ID. Each session contains a JSON-serializable recipe (`{ version: 1, adjustments: { exposure: 0, contrast: 0 } }`), committed history entries (`kind`, `before`, `after`), a history cursor, and an optional pending transaction. Only JPEG assets are editable. Filmstrip switches preserve each asset's recipe and history; leaving Anshitsu or reloading discards them.
+Anshitsu owns an in-memory map keyed by Immich asset ID. Each session contains a JSON-serializable recipe (`{ version: 2, adjustments: { exposure: 0, contrast: 0, highlights: 0 } }`), committed history entries (`kind`, `before`, `after`), a history cursor, and an optional pending transaction. Only JPEG assets are editable. Filmstrip switches preserve each asset's recipe and history; leaving Anshitsu or reloading discards them.
 
-`editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, control unmount, or 500 ms keyboard inactivity commits one operation. Keyboard input resets the timer on every accepted keydown; keyup, pointer leave, and focus changes do not commit it early. No-op operations compare the complete adjustment recipe and do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Exposure Reset, Contrast Reset, and All Reset have separate operation kinds; all are undoable. All Reset restores both parameters in one history operation. History labels are localized at display time rather than stored in recipes.
+`editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, control unmount, or 500 ms keyboard inactivity commits one operation. Keyboard input resets the timer on every accepted keydown; keyup, pointer leave, and focus changes do not commit it early. No-op operations compare the complete adjustment recipe and do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Exposure Reset, Contrast Reset, Highlights Reset, and All Reset have separate operation kinds; all are undoable. All Reset restores all three parameters in one history operation. History labels are localized at display time rather than stored in recipes. Adding the required Highlights field changes the in-memory recipe schema to version 2; persistent migration is still out of scope.
 
-`AdjustmentSlider` supplies a compact reusable adjustment row with its label, native range input, synchronized direct numeric input, optional unit, and inline reset in one responsive grid row. The label truncates when necessary while the range column consumes the remaining sidebar width. Direct input updates the current recipe only for finite normalized values, commits on Enter or blur, and restores its pre-edit value on Escape or invalid input. `editShortcuts.ts` protects text and number inputs, textarea, select, contenteditable, and IME input from the hover/focus slider shortcuts. Focused other sliders retain their own behavior. Exposure is bounded to −5…+5 EV in 0.01 EV increments with two displayed decimal places; Contrast is bounded to −100…+100 in integer steps.
+`AdjustmentSlider` supplies a compact reusable adjustment row with its label, native range input, synchronized direct numeric input, optional fixed-width unit slot, and inline reset in one responsive grid row. The label truncates when necessary while the range column consumes the remaining sidebar width. Direct input updates the current recipe only for finite normalized values, commits on Enter or blur, and restores its pre-edit value on Escape or invalid input. `editShortcuts.ts` protects text and number inputs, textarea, select, contenteditable, and IME input from the hover/focus slider shortcuts. Focused other sliders retain their own behavior. Exposure is bounded to −5…+5 EV in 0.01 EV increments with two displayed decimal places; Contrast and Highlights are bounded to −100…+100 in integer steps.
 
 The current rendering path is:
 
 ```text
 Temporary Immich preview adapter (editImageSource.ts)
   → browser decode into sRGB RGBA
-  → exposurePipeline.ts (immutable source → linear-light Exposure gain 2^EV → sRGB midpoint Contrast)
+  → exposurePipeline.ts (immutable source → linear-light Exposure gain 2^EV → sRGB midpoint Contrast → luminance-weighted Highlights)
   → GenzoRoom Canvas preview → existing Viewer transforms
 ```
 
-The pipeline preserves alpha, clips display output to the sRGB range, and returns exact source bytes when Exposure and Contrast are both zero. Exposure converts sRGB to linear light, applies `2^EV`, and returns to sRGB. Contrast then scales each sRGB channel around the 0.5 midpoint by `1 + contrast / 100`; −100 produces midpoint gray and +100 doubles distance from the midpoint. Each update starts from the untouched decoded buffer, so clipping is not accumulated. Rendering is coalesced with requestAnimationFrame. No CSS filter, GPU, rendered asset, or backend change is involved. Source loads are aborted/ignored on asset changes and decoded bitmap resources are closed. Viewer source identity remains stable during adjustments, preserving Zoom/Pan.
+The pipeline preserves alpha, clips display output to the sRGB range, and returns exact source bytes when Exposure, Contrast, and Highlights are all zero. Exposure converts sRGB to linear light, applies `2^EV`, and returns to sRGB. Contrast then scales each sRGB channel around the 0.5 midpoint by `1 + contrast / 100`; −100 produces midpoint gray and +100 doubles distance from the midpoint. Highlights computes sRGB luminance after those stages, uses smoothstep from luminance 0.5 to 1.0, and interpolates luminance toward a simple brighten or darken curve. Applying the resulting luminance ratio equally to RGB limits hue shifts. Each update starts from the untouched decoded buffer, so clipping is not accumulated. Rendering is coalesced with requestAnimationFrame. No CSS filter, GPU, rendered asset, or backend change is involved. Source loads are aborted/ignored on asset changes and decoded bitmap resources are closed. Viewer source identity remains stable during adjustments, preserving Zoom/Pan.
 
 This is an 8-bit browser-managed sRGB preview, not an original-quality rendering or RAW workflow. Immich-generated preview dimensions still define Viewer 1:1. Full-sized pixel processing runs on the main thread; large-source performance, wide-gamut/HDR fidelity, and color-profile matching need separate work before final rendering. Original acquisition is isolated from recipe and processing code: the next source adapter should provide JPEG original → GenzoRoom pipeline → GenzoRoom preview without silently treating existing preview-based recipes as equivalent original-based results.
 
@@ -104,7 +104,7 @@ Possible extensions include:
 - Non-destructive edit parameter storage separate from original images; storage and schema are undecided.
 - Responsive preview rendering, with client-side GPU assistance only if useful.
 - High-quality server-side final rendering; output storage and export behavior are undecided.
-- Further adjustments beyond JPEG Exposure and Contrast: highlights, shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
+- Further adjustments beyond JPEG Exposure, Contrast, and Highlights: shadows, white balance, tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
 - Explicit Docker volumes if persistent data becomes necessary.
 
 These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated read-only browsing, generated image previews, and the initial Anshitsu workspace described above.

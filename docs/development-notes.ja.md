@@ -1,18 +1,18 @@
 # GenzoRoom 開発ノート
 
-## JPEG Exposure / Contrast編集基盤（最新フェーズ）
+## JPEG Exposure / Contrast / Highlights編集基盤（最新フェーズ）
 
-JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）とコントラスト −100〜+100（1刻み、初期値0）の調整を追加した。RAW/DNG・HEIC処理、Backend、DB、永続保存、Immich書き戻しには変更を加えていない。
+JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）、コントラストとハイライト −100〜+100（1刻み、初期値0）の調整を追加した。RAW/DNG・HEIC処理、Backend、DB、永続保存、Immich書き戻しには変更を加えていない。
 
-編集はAsset IDごとのメモリ上のsessionで保持する。recipeは `{ version: 1, adjustments: { exposure: 0, contrast: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure Reset、Contrast Reset、All Resetは別の操作種別で、いずれもUndo可能。All Resetは両方を1操作で0へ戻す。
+編集はAsset IDごとのメモリ上のsessionで保持する。必須adjustment追加に合わせてrecipeを `{ version: 2, adjustments: { exposure: 0, contrast: 0, highlights: 0 } }` とし、Historyは操作種別・変更前後recipe・cursorを持つ。Filmstrip切替では各Assetの状態を保持し、暗室を離れるかリロードすると消える。Exposure Reset、Contrast Reset、Highlights Reset、All Resetは別の操作種別で、いずれもUndo可能。All Resetは3項目を1操作で0へ戻す。
 
 操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、コントロールのunmount、キーボード入力停止500msでcommitする。キーボード入力では受理したkeydownごとにtimerをresetし、keyup、pointer leave、focus移動では早期commitしない。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
 
 共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
 
-現像項目を増やす前提で、AdjustmentSliderをラベル・range・直接数値入力・任意の単位・小型個別Resetが横並びになる1行グリッドへ整理した。ラベル列は長い場合に省略し、range列が右サイドバーの残り幅へ追従する。Exposureは従来どおり −5〜+5 EV、0.01 EV刻み、表示2桁。直接入力中は有限値をstepと範囲へ正規化してcurrent recipeへ反映し、Enterまたはblurでcommit、Escまたは空・無効入力で編集開始値へ戻す。編集中だけdraft文字列を表示し、確定後はslider、ホバーキー、Reset、Undo/Redoなど全経路のrecipe値へ即時追従する。number入力中のカーソルキーは既存のホバースライダー操作から除外する。個別Resetは既定値0のときdisabledにし、All Resetは個別Resetと区別できるようDevelop Controls見出し右端へ配置する。画像処理pipelineとrecipe schemaは変更していない。
+現像項目を増やす前提で、AdjustmentSliderをラベル・range・直接数値入力・任意の単位・小型個別Resetが横並びになる1行グリッドへ整理した。ラベル列は長い場合に省略し、range列が右サイドバーの残り幅へ追従する。単位は空でも固定幅を予約してslider端を揃え、数値欄は44pxとした。Exposureは −5〜+5 EV、0.01 EV刻み、表示2桁、ContrastとHighlightsは −100〜+100、1刻み、整数表示。直接入力中は有限値をstepと範囲へ正規化してcurrent recipeへ反映し、Enterまたはblurでcommit、Escまたは空・無効入力で編集開始値へ戻す。編集中だけdraft文字列を表示し、確定後はslider、ホバーキー、Reset、Undo/Redoなど全経路のrecipe値へ即時追従する。number入力中のカーソルキーは既存のホバースライダー操作から除外する。個別Resetは既定値0のときdisabledにし、All Resetは個別Resetと区別できるようDevelop Controls見出し右端へ配置する。
 
-画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、まずsRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。その後、各sRGB channelを0.5中心に `1 + contrast / 100` 倍して0〜1へclipする。Contrast 0はidentity、−100は中間gray、+100は中点からの距離を2倍にする。alphaを保ち、毎回未変更の画素bufferからExposure → Contrastの順に計算するため累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
+画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。ブラウザでsRGB RGBAへdecodeし、まずsRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。その後、各sRGB channelを0.5中心に `1 + contrast / 100` 倍して0〜1へclipする。最後にsRGB輝度 `Y = 0.2126R + 0.7152G + 0.0722B` から、0.5〜1.0で0〜1となるsmoothstep重みを求める。正のHighlightsは `1 - (1 - Y)^2`、負は `Y^2` へ重みに応じて補間し、目標輝度と元輝度の比をRGB共通倍率として適用する。0はidentity、0.5以下は無影響で、滑らかな明部選択と色相比の維持を優先した。alphaを保ち、毎回未変更の画素bufferからExposure → Contrast → Highlightsの順に計算するため累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
 
 8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。大画像のmain thread負荷は別途評価し、必要が出てからWorker等を検討する。
 
@@ -20,7 +20,7 @@ DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理v
 
 以下は過去フェーズの記録であり、当時の「未実装」の記述を含む。
 
-検証：Frontendの既存59件と追加26件、計85件のテストおよびproduction buildが成功。DOMテスト用にjsdomを開発依存へ追加した。ローカルの1200×800 JPEG fixtureを使うブラウザ確認では、Exposure表示、ドラッグ/連続キーの履歴集約、ホバー矢印、Undo/Redo、両Reset、Filmstrip復帰、DNG/HEIC対象外表示、英日切替、Fit/1:1/Zoom/Panと左右パネル開閉を確認した。実Immich/NAS接続、実写真の色再現、大画像の性能は今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
+検証：Frontend 129件のテストおよびproduction buildが成功。ローカルの640×360 JPEGグラデーションfixtureを使うChromium確認では、Highlights 0 / +100 / −100の明部変化と暗部維持、直接入力、10-stepキー操作、500ms commit、個別Reset、Undo/Redo、3項目のAll ResetとHistoryを確認した。右パネル230 / 350 / 440pxでは3本のslider端が揃い、横overflowは発生しなかった。既存自動テストでViewer、Sidebar resize、Filmstrip、multi-select等の回帰を確認している。実Immich/NAS接続、実写真の色再現、大画像の性能は今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
 
 この文書は、GenzoRoomの第三段階までに行った実装、実機確認、設計判断、トラブルシュートを後から振り返るための内部向けメモである。公開リポジトリに置くため、APIキーなどの秘密情報は記録しない。
 
