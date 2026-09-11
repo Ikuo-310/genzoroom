@@ -280,30 +280,45 @@ describe('JPEG adjustment pipeline', () => {
     expect(renderAdjustments(source, combined.recipe)).toEqual(sequential);
     expect(Array.from(source)).toEqual([35, 55, 75, 117]);
   });
-  it('lifts or tightens only the black-point region and preserves alpha', () => {
-    const source = new Uint8ClampedArray([0, 0, 0, 31, 12, 12, 12, 47, 31, 31, 31, 63, 128, 128, 128, 79]);
+  it('applies a pedestal offset across the low range and preserves alpha', () => {
+    const source = new Uint8ClampedArray([
+      0, 0, 0, 31,
+      26, 26, 26, 47,
+      51, 51, 51, 63,
+      77, 77, 77, 79,
+      102, 102, 102, 95,
+    ]);
     const positive = renderAdjustments(source, adjustBlacks(newSession(), 100).recipe);
     const negative = renderAdjustments(source, adjustBlacks(newSession(), -100).recipe);
     expect(Array.from(positive.slice(0, 4))).toEqual([26, 26, 26, 31]);
     expect(Array.from(negative.slice(0, 4))).toEqual([0, 0, 0, 31]);
-    expect(positive[4]).toBeGreaterThan(source[4]);
-    expect(negative[4]).toBeLessThan(source[4]);
-    expect(Array.from(positive.slice(8))).toEqual(Array.from(source.slice(8)));
-    expect(Array.from(negative.slice(8))).toEqual(Array.from(source.slice(8)));
+    for (const offset of [4, 8]) {
+      expect(positive[offset]).toBeGreaterThan(source[offset]);
+      expect(negative[offset]).toBeLessThan(source[offset]);
+    }
+    expect(positive[8] - source[8]).toBeGreaterThan(positive[12] - source[12]);
+    expect(source[8] - negative[8]).toBeGreaterThan(source[12] - negative[12]);
+    expect(Math.abs(positive[12] - source[12])).toBeLessThanOrEqual(2);
+    expect(Math.abs(negative[12] - source[12])).toBeLessThanOrEqual(2);
+    expect(Array.from(positive.slice(16))).toEqual(Array.from(source.slice(16)));
+    expect(Array.from(negative.slice(16))).toEqual(Array.from(source.slice(16)));
   });
-  it('leaves the exact 0.10 luminance threshold unchanged in both directions', () => {
-    const source = new Uint8ClampedArray([10, 24, 86, 139]);
-    expect(0.2126 * 10 + 0.7152 * 24 + 0.0722 * 86).toBe(25.5);
+  it('leaves the exact 0.35 fade endpoint unchanged in both directions', () => {
+    const source = new Uint8ClampedArray([1, 104, 203, 139]);
+    expect(0.2126 * 1 + 0.7152 * 104 + 0.0722 * 203).toBeCloseTo(89.25, 10);
     expect(renderAdjustments(source, adjustBlacks(newSession(), 100).recipe)).toEqual(source);
     expect(renderAdjustments(source, adjustBlacks(newSession(), -100).recipe)).toEqual(source);
   });
   it('keeps Blacks finite and preserves RGB proportions for non-black pixels', () => {
-    const source = new Uint8ClampedArray([18, 12, 6, 113]);
+    const source = new Uint8ClampedArray([72, 48, 24, 113]);
+    const sourceTotal = source[0] + source[1] + source[2];
     for (const value of [100, -100]) {
       const result = renderAdjustments(source, adjustBlacks(newSession(), value).recipe);
       expect(Array.from(result).every(Number.isFinite)).toBe(true);
-      expect(result[0] / result[1]).toBeCloseTo(source[0] / source[1], 1);
-      expect(result[1] / result[2]).toBeCloseTo(source[1] / source[2], 1);
+      const resultTotal = result[0] + result[1] + result[2];
+      for (let channel = 0; channel < 3; channel++) {
+        expect(result[channel] / resultTotal).toBeCloseTo(source[channel] / sourceTotal, 2);
+      }
       expect(result[3]).toBe(113);
     }
   });

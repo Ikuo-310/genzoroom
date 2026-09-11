@@ -1,7 +1,8 @@
 import type { EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
-const BLACKS_END_LUMINANCE = 0.1;
+const BLACKS_FADE_END_LUMINANCE = 0.35;
+const BLACKS_MAX_OFFSET = 0.1;
 
 // Pure pixel stage: accepts decoded sRGB RGBA, never changes the source buffer.
 // Later adjustments belong here, independent of the image acquisition adapter.
@@ -88,12 +89,10 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     const green = output[i + 1] / 255;
     const blue = output[i + 2] / 255;
     const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    const threshold = Math.max(0, Math.min(1,
-      (BLACKS_END_LUMINANCE - luminance) / BLACKS_END_LUMINANCE));
-    const weight = threshold * threshold * (3 - 2 * threshold);
-    const targetLuminance = blacks > 0 ? BLACKS_END_LUMINANCE : 0;
+    const threshold = Math.max(0, Math.min(1, luminance / BLACKS_FADE_END_LUMINANCE));
+    const weight = 1 - threshold * threshold * (3 - 2 * threshold);
     const adjustedLuminance = Math.max(0, Math.min(1,
-      luminance + Math.abs(blacks) * weight * (targetLuminance - luminance)));
+      luminance + blacks * BLACKS_MAX_OFFSET * weight));
     if (luminance <= 1e-6) {
       const neutral = Math.round(255 * adjustedLuminance);
       output[i] = neutral;
