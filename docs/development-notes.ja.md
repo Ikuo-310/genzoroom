@@ -8,7 +8,7 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 操作開始時のrecipeをpendingに保持し、操作中はcurrent recipeだけを更新する。ドラッグ終了/cancel、コントロールのunmount、キーボードまたはwheel入力停止500msでcommitする。キーボードとwheelでは受理した入力ごとにtimerをresetし、keyup、pointer leave、focus移動では早期commitしない。細かな入力はHistoryに積まず、同値へ戻る操作も履歴を作らない。Undo後に新しい変更をcommitした場合だけRedo側を破棄する。
 
-共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。range上のwheelはdeltaYの符号だけを使い、上方向を+1 step、下方向を−1 stepとして扱う。実際に値が変わったwheelだけを`preventDefault`し、境界、deltaY=0、disabled、number入力やslider外のwheelは通常のscrollへ渡す。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
+共通AdjustmentSliderはホバーまたはフォーカス中に左右1 step・上下10 stepで操作できる。range上のwheelはdeltaYの符号だけを使い、上方向を加算、下方向を減算として扱う。通常wheelは上下キー相当の10 step、Shift+wheelは左右キー相当の1 stepとする。実際に値が変わったwheelだけを`preventDefault`し、境界、deltaY=0、disabled、number入力やslider外のwheelは通常のscrollへ渡す。別のrangeにフォーカスしている場合はそのrangeを優先する。テキスト入力、textarea、select、contenteditable、IME変換中は独自ショートカットで操作を奪わない。Ctrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Yと画面ボタンを用意した。
 
 現像項目を増やす前提で、AdjustmentSliderをラベル・range・直接数値入力・任意の単位・小型個別Resetが横並びになる1行グリッドへ整理した。6項目は「基本補正」カテゴリ内へ配置し、カテゴリ見出しから折り畳み、ON/OFF、6項目一括Resetを操作できる。折り畳み状態はUIローカルで毎回展開から始まり、recipeへは保存しない。OFF中は値を保持したままpipelineをバイパスし、内部controlをdisabled・dim表示にする。暫定preview注釈はカテゴリ外にあるため、折り畳みやOFFに関係なく表示する。重複していたスライダーのキー操作説明はパネルから削除した。
 
@@ -22,7 +22,7 @@ DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理v
 
 以下は過去フェーズの記録であり、当時の「未実装」の記述を含む。
 
-検証：Frontend 159件のテストおよびproduction buildが成功。純粋画素テストではBlacks 0 / +100 / −100、0.10〜0.20の明確な作用、0.30付近の弱い作用、0.35以上の不変、完全黒のlift、色付き暗部のRGB構成比、他5補正との処理順に加え、基本補正OFF時の完全bypassと値保持を確認した。UIテストではカテゴリの初期展開・折り畳み・再展開、OFF中のcontrol無効化、ON/OFFとカテゴリResetとAll ResetのUndo/Redo・簡潔なHistory、カテゴリ外の暫定注釈を確認した。ローカルの640×360グラデーションfixtureを使うChromium確認では、基本補正のOFF・値保持・control無効化、折り畳み・再展開、カテゴリReset、Undo/Redo、All Reset、History、操作説明の削除、カテゴリ外の暫定注釈を確認した。右パネル230 / 350 / 440pxではカテゴリに横overflowがなく、range幅は約41 / 138 / 228pxへ追従し、ページにも横overflowは発生しなかった。再読み込み後はカテゴリが展開状態から始まり、右パネル幅は保持された。Chromiumではrange上のwheelでExposureが1 eventにつき0.01 EV変化し、500ms後に1件だけHistoryへcommitされること、range外では右パネルが通常scrollし、Basic OFF中のrange wheelは値を変えず通常scrollへ渡ることを確認した。既存自動テストで直接入力、hover/focusキー操作、keyboard/wheelの500ms commit、個別Reset、Viewer、Sidebar resize、Filmstrip、multi-select等の回帰を確認している。実Immich/NAS接続、実写真の色再現、大画像の性能、Firefoxは今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
+検証：Frontend 160件のテストおよびproduction buildが成功。純粋画素テストではBlacks 0 / +100 / −100、0.10〜0.20の明確な作用、0.30付近の弱い作用、0.35以上の不変、完全黒のlift、色付き暗部のRGB構成比、他5補正との処理順に加え、基本補正OFF時の完全bypassと値保持を確認した。UIテストではカテゴリの初期展開・折り畳み・再展開、OFF中のcontrol無効化、ON/OFFとカテゴリResetとAll ResetのUndo/Redo・簡潔なHistory、カテゴリ外の暫定注釈を確認した。ローカルの640×360グラデーションfixtureを使うChromium確認では、基本補正のOFF・値保持・control無効化、折り畳み・再展開、カテゴリReset、Undo/Redo、All Reset、History、操作説明の削除、カテゴリ外の暫定注釈を確認した。右パネル230 / 350 / 440pxではカテゴリに横overflowがなく、range幅は約41 / 138 / 228pxへ追従し、ページにも横overflowは発生しなかった。再読み込み後はカテゴリが展開状態から始まり、右パネル幅は保持された。Chromiumではrange上の通常wheelでExposureが1 eventにつき0.10 EV変化し、500ms後に1件だけHistoryへcommitされること、range外では右パネルが通常scrollし、Basic OFF中のrange wheelは値を変えず通常scrollへ渡ることを確認した。既存自動テストで直接入力、hover/focusキー操作、keyboard/wheelの500ms commit、個別Reset、Viewer、Sidebar resize、Filmstrip、multi-select等の回帰を確認している。実Immich/NAS接続、実写真の色再現、大画像の性能、Firefoxは今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
 
 この文書は、GenzoRoomの第三段階までに行った実装、実機確認、設計判断、トラブルシュートを後から振り返るための内部向けメモである。公開リポジトリに置くため、APIキーなどの秘密情報は記録しない。
 

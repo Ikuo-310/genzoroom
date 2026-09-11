@@ -80,8 +80,8 @@ function key(key: string, target: EventTarget = window, init: KeyboardEventInit 
 function pointer(type: string, target: EventTarget = range()) {
   act(() => { target.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 })); });
 }
-function wheel(deltaY: number, target: EventTarget = range()) {
-  const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+function wheel(deltaY: number, target: EventTarget = range(), init: WheelEventInit = {}) {
+  const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
   return event;
 }
@@ -173,23 +173,27 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(-120).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(300));
     expect(wheel(-1).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments.exposure).toBe(0.03);
+    expect(session().recipe.adjustments.exposure).toBe(0.3);
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS - 1));
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(1));
     expect(session().history).toHaveLength(1);
     expect(session().history[0].before.adjustments.exposure).toBe(0);
-    expect(session().history[0].after.adjustments.exposure).toBe(0.03);
+    expect(session().history[0].after.adjustments.exposure).toBe(0.3);
     key('z', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0);
     key('y', window, { ctrlKey: true });
-    expect(session().recipe.adjustments.exposure).toBe(0.03);
+    expect(session().recipe.adjustments.exposure).toBe(0.3);
   });
-  it('uses the wheel delta sign for one step in either direction and does not consume boundary input', () => {
+  it('uses the wheel delta sign for ten steps normally and one step with Shift', () => {
     expect(wheel(-500).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments.exposure).toBe(0.01);
+    expect(session().recipe.adjustments.exposure).toBe(0.1);
     expect(wheel(0.25).defaultPrevented).toBe(true);
+    expect(session().recipe.adjustments.exposure).toBe(0);
+    expect(wheel(-500, range(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(session().recipe.adjustments.exposure).toBe(0.01);
+    expect(wheel(0.25, range(), { shiftKey: true }).defaultPrevented).toBe(true);
     expect(session().recipe.adjustments.exposure).toBe(0);
     expect(wheel(0).defaultPrevented).toBe(false);
     act(() => number().focus());
@@ -198,7 +202,7 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(-1).defaultPrevented).toBe(false);
     expect(session().recipe.adjustments.exposure).toBe(5);
     expect(wheel(1).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments.exposure).toBe(4.99);
+    expect(session().recipe.adjustments.exposure).toBe(4.9);
     changeNumber('-5');
     key('Enter', number());
     expect(wheel(1).defaultPrevented).toBe(false);
@@ -208,13 +212,13 @@ describe('edit controls DOM interaction', () => {
     act(() => number().focus());
     changeNumber('0.37');
     expect(wheel(-1, range()).defaultPrevented).toBe(true);
-    expect(number().value).toBe('0.38');
+    expect(number().value).toBe('0.47');
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure']);
     expect(session().pending?.kind).toBe('exposure');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
     expect(session().history).toHaveLength(2);
     expect(session().history[1].before.adjustments.exposure).toBe(0.37);
-    expect(session().history[1].after.adjustments.exposure).toBe(0.38);
+    expect(session().history[1].after.adjustments.exposure).toBe(0.47);
   });
   it('steps all adjustment types and commits the previous parameter when wheel input switches controls', () => {
     expect(wheel(-1, range()).defaultPrevented).toBe(true);
@@ -223,11 +227,20 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(-1, whitesRange()).defaultPrevented).toBe(true);
     expect(wheel(-1, shadowsRange()).defaultPrevented).toBe(true);
     expect(wheel(-1, blacksRange()).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments).toEqual({ exposure: 0.01, contrast: 1, highlights: 1, whites: 1, shadows: 1, blacks: 1 });
+    expect(session().recipe.adjustments).toEqual({ exposure: 0.1, contrast: 10, highlights: 10, whites: 10, shadows: 10, blacks: 10 });
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
     expect(session().pending?.kind).toBe('blacks');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+  });
+  it('uses one step for Shift+wheel across all adjustment types', () => {
+    expect(wheel(-100, range(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(wheel(-100, contrastRange(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(wheel(-100, highlightsRange(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(wheel(-100, whitesRange(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(wheel(-100, shadowsRange(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(wheel(-100, blacksRange(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(session().recipe.adjustments).toEqual({ exposure: 0.01, contrast: 1, highlights: 1, whites: 1, shadows: 1, blacks: 1 });
   });
   it('does not treat disabled sliders, number inputs, or content outside a slider as wheel adjustments', () => {
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="Disable Basic"]')!.click());

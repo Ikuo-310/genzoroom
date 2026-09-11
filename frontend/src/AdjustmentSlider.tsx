@@ -129,12 +129,13 @@ export function AdjustmentSlider(props: Props) {
       const current = latest.current;
       if (!element || element.disabled || event.deltaY === 0) return;
       const direction = event.deltaY < 0 ? 1 : -1;
+      const steps = event.shiftKey ? 1 : 10;
       let baseValue = current.value;
       if (interaction.current === 'number') {
         baseValue = readDraft() ?? numberStartValue.current ?? current.value;
         commitNumberEdit();
       }
-      const value = normalizeValue(baseValue + direction * current.step, current);
+      const value = normalizeValue(baseValue + direction * steps * current.step, current);
       if (value === current.value) return;
       event.preventDefault();
       current.onBegin();
