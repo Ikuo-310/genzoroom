@@ -8,7 +8,7 @@ type Props = {
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
 
-export const ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS = 500;
+export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
 
 export function AdjustmentSlider(props: Props) {
   const rangeId = useId();
@@ -17,9 +17,10 @@ export function AdjustmentSlider(props: Props) {
   const latest = useRef(props);
   latest.current = props;
   const hovered = useRef(false);
-  const interaction = useRef<'idle' | 'keyboard' | 'pointer' | 'number'>('idle');
+  const interaction = useRef<'idle' | 'keyboard' | 'wheel' | 'pointer' | 'number'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const numberStartValue = useRef<number | null>(null);
+  const draftValue = useRef<string | null>(null);
   const [numberEditing, setNumberEditing] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -28,14 +29,18 @@ export function AdjustmentSlider(props: Props) {
   }
 
   function normalizeNumber(value: number) {
-    const stepped = props.min + Math.round((value - props.min) / props.step) * props.step;
-    return Number(Math.max(props.min, Math.min(props.max, stepped)).toFixed(props.precision));
+    return normalizeValue(value, props);
   }
 
   function readDraft() {
-    if (draft === null || draft.trim() === '') return null;
-    const value = Number(draft);
+    if (draftValue.current === null || draftValue.current.trim() === '') return null;
+    const value = Number(draftValue.current);
     return Number.isFinite(value) ? normalizeNumber(value) : null;
+  }
+
+  function updateDraft(value: string | null) {
+    draftValue.current = value;
+    setDraft(value);
   }
 
   function beginNumberEdit() {
@@ -56,7 +61,7 @@ export function AdjustmentSlider(props: Props) {
     interaction.current = 'idle';
     numberStartValue.current = null;
     setNumberEditing(false);
-    setDraft(null);
+    updateDraft(null);
   }
 
   function cancelNumberEdit() {
@@ -66,13 +71,13 @@ export function AdjustmentSlider(props: Props) {
     interaction.current = 'idle';
     numberStartValue.current = null;
     setNumberEditing(false);
-    setDraft(null);
+    updateDraft(null);
   }
 
   function changeNumber(event: ChangeEvent<HTMLInputElement>) {
     beginNumberEdit();
     const nextDraft = event.target.value;
-    setDraft(nextDraft);
+    updateDraft(nextDraft);
     if (nextDraft.trim() === '') return;
     const value = Number(nextDraft);
     if (Number.isFinite(value)) latest.current.onChange(normalizeNumber(value));
@@ -88,15 +93,15 @@ export function AdjustmentSlider(props: Props) {
     }
   }
 
-  function commitKeyboardAfterInactivity() {
+  function commitAfterInactivity() {
     clearTimeout(timer.current);
     interaction.current = 'idle';
     latest.current.onCommit();
   }
-  function scheduleCommit() {
+  function scheduleCommit(kind: 'keyboard' | 'wheel' = 'keyboard') {
     clearTimeout(timer.current);
-    interaction.current = 'keyboard';
-    timer.current = setTimeout(commitKeyboardAfterInactivity, ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS);
+    interaction.current = kind;
+    timer.current = setTimeout(commitAfterInactivity, ADJUSTMENT_COMMIT_DELAY_MS);
   }
   function finishPointer() {
     if (interaction.current !== 'pointer') return;
@@ -104,12 +109,13 @@ export function AdjustmentSlider(props: Props) {
     latest.current.onCommit();
   }
   useEffect(() => {
+    const element = range.current;
     const keydown = (event: KeyboardEvent) => {
-      const element = range.current;
-      if (!element || element.disabled || (!hovered.current && document.activeElement !== element) || element.closest('[hidden]')) return;
+      const currentElement = range.current;
+      if (!currentElement || currentElement.disabled || (!hovered.current && document.activeElement !== currentElement) || currentElement.closest('[hidden]')) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       // A focused different slider keeps its own keyboard behavior.
-      if (event.target instanceof HTMLInputElement && event.target.type === 'range' && event.target !== element) return;
+      if (event.target instanceof HTMLInputElement && event.target.type === 'range' && event.target !== currentElement) return;
       const steps = sliderSteps(event.key);
       if (steps === undefined) return;
       event.preventDefault();
@@ -119,13 +125,31 @@ export function AdjustmentSlider(props: Props) {
       current.onChange(value);
       scheduleCommit();
     };
+    const wheel = (event: WheelEvent) => {
+      const current = latest.current;
+      if (!element || element.disabled || event.deltaY === 0) return;
+      const direction = event.deltaY < 0 ? 1 : -1;
+      let baseValue = current.value;
+      if (interaction.current === 'number') {
+        baseValue = readDraft() ?? numberStartValue.current ?? current.value;
+        commitNumberEdit();
+      }
+      const value = normalizeValue(baseValue + direction * current.step, current);
+      if (value === current.value) return;
+      event.preventDefault();
+      current.onBegin();
+      current.onChange(value);
+      scheduleCommit('wheel');
+    };
     const pointerEnd = () => finishPointer();
+    element?.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
     return () => {
       clearTimeout(timer.current);
       latest.current.onCommit();
+      element?.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
       window.removeEventListener('pointercancel', pointerEnd);
@@ -151,11 +175,16 @@ export function AdjustmentSlider(props: Props) {
     <div className="adjustment-value-controls">
       <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
-        onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
+        onFocus={() => { beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
       <span className="adjustment-unit" aria-hidden="true">{props.unit ?? ''}</span>
       <button type="button" className="adjustment-reset" onClick={props.onReset}
         disabled={props.disabled || props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
     </div>
   </div>;
+}
+
+function normalizeValue(value: number, props: Pick<Props, 'min' | 'max' | 'step' | 'precision'>) {
+  const stepped = props.min + Math.round((value - props.min) / props.step) * props.step;
+  return Number(Math.max(props.min, Math.min(props.max, stepped)).toFixed(props.precision));
 }

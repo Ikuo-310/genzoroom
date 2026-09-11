@@ -16,6 +16,7 @@ Internal changes are omitted unless they affect users.
 - Non-destructive JPEG Blacks adjustment (−100 to +100, step 1), using a Master Black / Pedestal-style luminance offset that fades smoothly to zero at luminance 0.35 after Shadows.
 - Grouped edit History, Undo/Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y), individual adjustment resets, and undoable All Reset.
 - Reusable sliders with hover/focus arrow controls: left/right change one step, up/down ten steps. Native form editing keeps its keyboard behavior.
+- Adjustment slider wheel control while the pointer is over the range: each wheel event changes one step and consecutive input commits as one edit after 500 ms of inactivity.
 - Independently resizable Anshitsu side panels with remembered widths, safe sizing limits, and preserved collapse/expand behavior.
 - A compact Basic adjustment category in Anshitsu with non-persistent collapse, an undoable category bypass that preserves values, and an undoable category reset for all six current adjustments.
 
