@@ -6,10 +6,11 @@ import { sliderSteps, undoShortcut } from './editShortcuts';
 const adjustExposure = (state: EditSession, value: number) => editSession(editSession(state, { type: 'exposure', value }), { type: 'commit' });
 const adjustContrast = (state: EditSession, value: number) => editSession(editSession(state, { type: 'contrast', value }), { type: 'commit' });
 const adjustHighlights = (state: EditSession, value: number) => editSession(editSession(state, { type: 'highlights', value }), { type: 'commit' });
+const adjustWhites = (state: EditSession, value: number) => editSession(editSession(state, { type: 'whites', value }), { type: 'commit' });
 const adjustShadows = (state: EditSession, value: number) => editSession(editSession(state, { type: 'shadows', value }), { type: 'commit' });
 describe('non-destructive edit sessions', () => {
   it('starts with a serializable versioned zero recipe', () => {
-    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 3, adjustments: { exposure: 0, contrast: 0, highlights: 0, shadows: 0 } });
+    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 4, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0 } });
   });
   it('coalesces intermediate input and skips no-op gestures', () => {
     let state = newSession();
@@ -26,11 +27,13 @@ describe('non-destructive edit sessions', () => {
     ['exposureReset', 'exposure', 0.35],
     ['contrastReset', 'contrast', 35],
     ['highlightsReset', 'highlights', -45],
+    ['whitesReset', 'whites', -60],
     ['shadowsReset', 'shadows', 55],
   ] as const)('%s is distinct and undoable', (type, adjustment, value) => {
     const adjusted = adjustment === 'exposure' ? adjustExposure(newSession(), value)
       : adjustment === 'contrast' ? adjustContrast(newSession(), value)
-        : adjustment === 'highlights' ? adjustHighlights(newSession(), value) : adjustShadows(newSession(), value);
+        : adjustment === 'highlights' ? adjustHighlights(newSession(), value)
+          : adjustment === 'whites' ? adjustWhites(newSession(), value) : adjustShadows(newSession(), value);
     const state = editSession(adjusted, { type });
     expect(state.recipe.adjustments[adjustment]).toBe(0);
     expect(state.history[1].kind).toBe(type);
@@ -42,13 +45,14 @@ describe('non-destructive edit sessions', () => {
     let state = adjustExposure(newSession(), 0.35);
     state = adjustContrast(state, 40);
     state = adjustHighlights(state, -55);
+    state = adjustWhites(state, 45);
     state = adjustShadows(state, 65);
     state = editSession(state, { type: 'allReset' });
-    expect(state.recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, shadows: 0 });
+    expect(state.recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0 });
     expect(state.history.at(-1)?.kind).toBe('allReset');
     const undone = editSession(state, { type: 'undo' });
-    expect(undone.recipe.adjustments).toEqual({ exposure: 0.35, contrast: 40, highlights: -55, shadows: 65 });
-    expect(editSession(undone, { type: 'redo' }).recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, shadows: 0 });
+    expect(undone.recipe.adjustments).toEqual({ exposure: 0.35, contrast: 40, highlights: -55, whites: 45, shadows: 65 });
+    expect(editSession(undone, { type: 'redo' }).recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0 });
   });
   it('commits pending edits before undo and discards redo only on a new committed edit', () => {
     const pending = editSession(newSession(), { type: 'exposure', value: 1 });
@@ -78,19 +82,22 @@ describe('non-destructive edit sessions', () => {
     let state = adjustExposure(newSession(), 0.5);
     state = adjustContrast(state, 150);
     state = adjustHighlights(state, -150);
+    state = adjustWhites(state, -80);
     state = adjustShadows(state, 150);
     state = adjustExposure(state, -0.25);
-    expect(state.recipe.adjustments).toEqual({ exposure: -0.25, contrast: 100, highlights: -100, shadows: 100 });
-    expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'shadows', 'exposure']);
+    expect(state.recipe.adjustments).toEqual({ exposure: -0.25, contrast: 100, highlights: -100, whites: -80, shadows: 100 });
+    expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'exposure']);
     state = editSession(state, { type: 'undo' });
-    expect(state.recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, shadows: 100 });
+    expect(state.recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100 });
     state = editSession(state, { type: 'undo' });
-    expect(state.recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, shadows: 0 });
-    expect(editSession(state, { type: 'redo' }).recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, shadows: 100 });
+    expect(state.recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 0 });
+    expect(editSession(state, { type: 'redo' }).recipe.adjustments).toEqual({ exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100 });
     expect(adjustContrast(newSession(), -150).recipe.adjustments.contrast).toBe(-100);
     expect(adjustHighlights(newSession(), 150).recipe.adjustments.highlights).toBe(100);
     expect(adjustHighlights(newSession(), Number.NaN).recipe.adjustments.highlights).toBe(0);
     expect(adjustHighlights(newSession(), Number.NEGATIVE_INFINITY).recipe.adjustments.highlights).toBe(0);
+    expect(adjustWhites(newSession(), 150).recipe.adjustments.whites).toBe(100);
+    expect(adjustWhites(newSession(), Number.NaN).recipe.adjustments.whites).toBe(0);
     expect(adjustShadows(newSession(), -150).recipe.adjustments.shadows).toBe(-100);
     expect(adjustShadows(newSession(), Number.POSITIVE_INFINITY).recipe.adjustments.shadows).toBe(0);
   });
@@ -170,6 +177,47 @@ describe('JPEG adjustment pipeline', () => {
     const sequential = renderAdjustments(afterExposureContrast, adjustHighlights(newSession(), -60).recipe);
     expect(renderAdjustments(source, combined.recipe)).toEqual(sequential);
     expect(Array.from(source)).toEqual([140, 170, 200, 123]);
+  });
+  it('applies Whites to the brightest tones while leaving midtones and dark tones unchanged', () => {
+    const source = new Uint8ClampedArray([64, 64, 64, 41, 170, 170, 170, 59, 230, 230, 230, 79]);
+    const positive = renderAdjustments(source, adjustWhites(newSession(), 100).recipe);
+    const negative = renderAdjustments(source, adjustWhites(newSession(), -100).recipe);
+    expect(Array.from(positive.slice(0, 8))).toEqual(Array.from(source.slice(0, 8)));
+    expect(Array.from(negative.slice(0, 8))).toEqual(Array.from(source.slice(0, 8)));
+    expect(positive[8]).toBeGreaterThan(source[8]);
+    expect(negative[8]).toBeLessThan(source[8]);
+    expect(positive[11]).toBe(79);
+    expect(negative[11]).toBe(79);
+  });
+  it('keeps the Whites threshold continuous and handles white without invalid values', () => {
+    const source = new Uint8ClampedArray([4, 243, 230, 91, 255, 255, 255, 107]);
+    const positive = renderAdjustments(source, adjustWhites(newSession(), 100).recipe);
+    const negative = renderAdjustments(source, adjustWhites(newSession(), -100).recipe);
+    expect(Array.from(positive.slice(0, 4))).toEqual([4, 243, 230, 91]);
+    expect(Array.from(negative.slice(0, 4))).toEqual([4, 243, 230, 91]);
+    expect(Array.from(positive.slice(4))).toEqual([255, 255, 255, 107]);
+    expect(Array.from(negative.slice(4))).toEqual([191, 191, 191, 107]);
+    expect(Array.from(positive).every(Number.isFinite)).toBe(true);
+    expect(Array.from(negative).every(Number.isFinite)).toBe(true);
+  });
+  it('applies all adjustments in pipeline order from the untouched source', () => {
+    const source = new Uint8ClampedArray([190, 210, 230, 123, 20, 30, 40, 87]);
+    let combined = adjustExposure(newSession(), -0.25);
+    combined = adjustContrast(combined, 15);
+    combined = adjustHighlights(combined, 30);
+    combined = adjustWhites(combined, -40);
+    combined = adjustShadows(combined, 70);
+    let exposureContrast = adjustExposure(newSession(), -0.25);
+    exposureContrast = adjustContrast(exposureContrast, 15);
+    const stages = [
+      exposureContrast,
+      adjustHighlights(newSession(), 30),
+      adjustWhites(newSession(), -40),
+      adjustShadows(newSession(), 70),
+    ];
+    const sequential = stages.reduce((pixels, stage) => renderAdjustments(pixels, stage.recipe), source);
+    expect(renderAdjustments(source, combined.recipe)).toEqual(sequential);
+    expect(Array.from(source)).toEqual([190, 210, 230, 123, 20, 30, 40, 87]);
   });
   it('applies Shadows to dark pixels while leaving bright pixels unchanged', () => {
     const source = new Uint8ClampedArray([40, 32, 24, 67, 210, 220, 230, 83]);

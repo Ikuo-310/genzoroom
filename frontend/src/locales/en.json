@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 50 recent Immich photos. JPEG Exposure, Contrast, Highlights, and Shadows adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 50 recent Immich photos. JPEG Exposure, Contrast, Highlights, Whites, and Shadows adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
@@ -82,6 +82,9 @@
     "highlights": "Highlights",
     "highlightsValue": "Highlights value",
     "highlightsReset": "Highlights Reset",
+    "whites": "Whites",
+    "whitesValue": "Whites value",
+    "whitesReset": "Whites Reset",
     "shadows": "Shadows",
     "shadowsValue": "Shadows value",
     "shadowsReset": "Shadows Reset",
@@ -94,6 +97,7 @@
     "exposureHelp": "Hover or focus the slider: ← / → 0.01 EV, ↑ / ↓ 0.10 EV.",
     "contrastHelp": "Contrast: ← / → 1, ↑ / ↓ 10.",
     "highlightsHelp": "Highlights: ← / → 1, ↑ / ↓ 10.",
+    "whitesHelp": "Whites: ← / → 1, ↑ / ↓ 10.",
     "shadowsHelp": "Shadows: ← / → 1, ↑ / ↓ 10.",
     "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."
   },

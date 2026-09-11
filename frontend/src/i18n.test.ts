@@ -60,6 +60,8 @@ describe('localized resources', () => {
     expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍');
     expect(i18n.t('workspace.highlights', { lng: 'en' })).toBe('Highlights');
     expect(i18n.t('workspace.highlights', { lng: 'ja' })).toBe('ハイライト');
+    expect(i18n.t('workspace.whites', { lng: 'en' })).toBe('Whites');
+    expect(i18n.t('workspace.whites', { lng: 'ja' })).toBe('ホワイト');
     expect(i18n.t('workspace.shadows', { lng: 'en' })).toBe('Shadows');
     expect(i18n.t('workspace.shadows', { lng: 'ja' })).toBe('シャドウ');
     expect(i18n.t('photos.selectionCount', { lng: 'en', count: 3 })).toBe('3 selected');
