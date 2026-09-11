@@ -21,7 +21,7 @@ Internal changes are omitted unless they affect users.
 - A health endpoint and Docker Compose deployment with a configurable Web UI port (default `3190`) and same-origin API proxying. Immich integration and photo editing are not implemented.
 - An authenticated Immich connectivity check, configured through backend environment variables, with connected, not configured, and failed states in the Web UI. Photo retrieval and editing remain unimplemented.
 - An optional Compose override that connects only the backend to an existing Immich Docker network for same-host deployments.
-- A recent-photo grid that retrieves up to 10 images from Immich and displays proxied thumbnails without exposing the Immich API key to the browser.
+- A recent-photo grid that retrieves up to 50 images from Immich and displays proxied thumbnails without exposing the Immich API key to the browser.
 - English and Japanese UI support with a remembered manual language selection.
 - Locale-aware photo date and time formatting for English and Japanese.
 - Image format badges on photo cards, including distinct RAW format metadata for future filtering.

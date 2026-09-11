@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大10件表示します。暗室でJPEGの露光量、コントラスト、ハイライト、シャドウを調整できます。"
+    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの露光量、コントラスト、ハイライト、シャドウを調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",

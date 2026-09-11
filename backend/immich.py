@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel
 
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
-RECENT_ASSET_LIMIT = 10
+RECENT_ASSET_LIMIT = 50
 FORMAT_ALIASES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",

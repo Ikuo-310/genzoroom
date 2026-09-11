@@ -64,4 +64,21 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('Deselect selected.dng');
   });
+
+  it('renders a fifty-photo grid without dropping cards', () => {
+    const assets = Array.from({ length: 50 }, (_, index): RecentAsset => ({
+      id: `asset-${index + 1}`,
+      filename: `photo-${index + 1}.jpg`,
+      date: '2026-09-08T20:43:43',
+      thumbnail_url: `/api/assets/asset-${index + 1}/thumbnail`,
+      format: 'JPEG',
+      is_raw: false,
+    }));
+    const markup = renderToStaticMarkup(<div className="photo-grid">{assets.map((asset) => (
+      <PhotoCard key={asset.id} asset={asset} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />
+    ))}</div>);
+
+    expect(markup.match(/<article/g)).toHaveLength(50);
+    expect(markup).toContain('photo-50.jpg');
+  });
 });

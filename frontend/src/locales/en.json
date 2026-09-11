@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 10 recent Immich photos. JPEG Exposure, Contrast, Highlights, and Shadows adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 50 recent Immich photos. JPEG Exposure, Contrast, Highlights, and Shadows adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",

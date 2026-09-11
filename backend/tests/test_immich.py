@@ -153,7 +153,7 @@ class ImmichAssetTests(unittest.TestCase):
                 {
                     "filter": {"type": {"eq": "IMAGE"}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
-                    "size": 10,
+                    "size": 50,
                 },
             )
             return httpx.Response(
@@ -187,6 +187,25 @@ class ImmichAssetTests(unittest.TestCase):
             f"/api/assets/{ASSET_ID}/thumbnail",
         )
         self.assertNotIn(API_KEY, result[0].model_dump_json())
+
+    def test_limits_recent_images_to_fifty(self):
+        items = [
+            {
+                "id": str(UUID(int=index + 1)),
+                "type": "IMAGE",
+                "originalFileName": f"photo-{index + 1}.jpg",
+                "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+            }
+            for index in range(51)
+        ]
+
+        result = self.run_recent(
+            lambda request: httpx.Response(200, json={"assets": {"items": items}})
+        )
+
+        self.assertEqual(len(result), 50)
+        self.assertEqual(result[0].filename, "photo-1.jpg")
+        self.assertEqual(result[-1].filename, "photo-50.jpg")
 
     def test_gets_an_empty_asset_list(self):
         result = self.run_recent(

@@ -11,7 +11,7 @@ The name comes from the Japanese word **現像 (genzō)**, meaning photographic 
 GenzoRoom currently provides:
 
 - Authenticated, read-only connectivity to Immich.
-- A grid of up to 10 recent photos with proxied thumbnails.
+- A grid of up to 50 recent photos with proxied thumbnails.
 - Image format badges for JPEG, HEIC, DNG, and other recognized extensions.
 - Client-side RAW and Non-RAW filtering.
 - Ordered multi-photo selection and transfer to the **Anshitsu** development workspace.

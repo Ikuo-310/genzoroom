@@ -88,7 +88,7 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 - `http://<NAS-IP>:3190` を開ける。
 - `Backend: Connected` が表示される。
 - `Immich: Connected` が表示される。
-- 最近の写真が最大10件表示される。
+- 最近の写真が最大50件表示される。
 - 各写真のサムネイルが表示される。
 
 Portainerで再デプロイした直後は、コンテナのbuildと起動が完了してから確認する。問題がある場合は、ブラウザ表示だけで判断せずContainer Logsを確認する。
