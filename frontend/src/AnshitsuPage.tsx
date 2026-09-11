@@ -9,7 +9,7 @@ import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites, supportsEditing, type EditEntry } from './editing';
+import { BLACKS, CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatBlacks, formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -166,11 +166,20 @@ export function AnshitsuPage() {
               onChange={(value) => dispatch({ type: 'shadows', value })}
               onCommit={() => dispatch({ type: 'commit', kind: 'shadows' })}
               onReset={() => dispatch({ type: 'shadowsReset' })} />
+            <AdjustmentSlider key={`${assetId}-blacks`} label={t('workspace.blacks')} value={session.recipe.adjustments.blacks}
+              {...BLACKS} valueText={formatBlacks(session.recipe.adjustments.blacks)}
+              valueLabel={t('workspace.blacksValue')} precision={0} defaultValue={0}
+              resetLabel={t('workspace.blacksReset')}
+              onBegin={() => dispatch({ type: 'begin', kind: 'blacks' })}
+              onChange={(value) => dispatch({ type: 'blacks', value })}
+              onCommit={() => dispatch({ type: 'commit', kind: 'blacks' })}
+              onReset={() => dispatch({ type: 'blacksReset' })} />
             <p>{t('workspace.exposureHelp')}</p>
             <p>{t('workspace.contrastHelp')}</p>
             <p>{t('workspace.highlightsHelp')}</p>
             <p>{t('workspace.whitesHelp')}</p>
             <p>{t('workspace.shadowsHelp')}</p>
+            <p>{t('workspace.blacksHelp')}</p>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
@@ -264,14 +273,17 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
       const isHighlights = entry.kind === 'highlights' || entry.kind === 'highlightsReset';
       const isWhites = entry.kind === 'whites' || entry.kind === 'whitesReset';
       const isShadows = entry.kind === 'shadows' || entry.kind === 'shadowsReset';
+      const isBlacks = entry.kind === 'blacks' || entry.kind === 'blacksReset';
       const before = isContrast ? formatContrast(entry.before.adjustments.contrast)
         : isHighlights ? formatHighlights(entry.before.adjustments.highlights)
           : isWhites ? formatWhites(entry.before.adjustments.whites)
-            : isShadows ? formatShadows(entry.before.adjustments.shadows) : formatExposure(entry.before.adjustments.exposure);
+            : isShadows ? formatShadows(entry.before.adjustments.shadows)
+              : isBlacks ? formatBlacks(entry.before.adjustments.blacks) : formatExposure(entry.before.adjustments.exposure);
       const after = isContrast ? formatContrast(entry.after.adjustments.contrast)
         : isHighlights ? formatHighlights(entry.after.adjustments.highlights)
           : isWhites ? formatWhites(entry.after.adjustments.whites)
-            : isShadows ? formatShadows(entry.after.adjustments.shadows) : formatExposure(entry.after.adjustments.exposure);
+            : isShadows ? formatShadows(entry.after.adjustments.shadows)
+              : isBlacks ? formatBlacks(entry.after.adjustments.blacks) : formatExposure(entry.after.adjustments.exposure);
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
         {t(`workspace.${entry.kind}`)} {entry.kind === 'allReset' && <>{t('workspace.exposure')} </>}{before} → {after}
@@ -279,6 +291,7 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         {entry.kind === 'allReset' && <>; {t('workspace.highlights')} {formatHighlights(entry.before.adjustments.highlights)} → {formatHighlights(entry.after.adjustments.highlights)}</>}
         {entry.kind === 'allReset' && <>; {t('workspace.whites')} {formatWhites(entry.before.adjustments.whites)} → {formatWhites(entry.after.adjustments.whites)}</>}
         {entry.kind === 'allReset' && <>; {t('workspace.shadows')} {formatShadows(entry.before.adjustments.shadows)} → {formatShadows(entry.after.adjustments.shadows)}</>}
+        {entry.kind === 'allReset' && <>; {t('workspace.blacks')} {formatBlacks(entry.before.adjustments.blacks)} → {formatBlacks(entry.after.adjustments.blacks)}</>}
         {index >= cursor && <span> ({t('workspace.undone')})</span>}
       </li>;
     })}

@@ -64,6 +64,8 @@ describe('localized resources', () => {
     expect(i18n.t('workspace.whites', { lng: 'ja' })).toBe('ホワイト');
     expect(i18n.t('workspace.shadows', { lng: 'en' })).toBe('Shadows');
     expect(i18n.t('workspace.shadows', { lng: 'ja' })).toBe('シャドウ');
+    expect(i18n.t('workspace.blacks', { lng: 'en' })).toBe('Blacks');
+    expect(i18n.t('workspace.blacks', { lng: 'ja' })).toBe('ブラック');
     expect(i18n.t('photos.selectionCount', { lng: 'en', count: 3 })).toBe('3 selected');
     expect(i18n.t('photos.selectionCount', { lng: 'ja', count: 3 })).toBe('3枚選択中');
   });

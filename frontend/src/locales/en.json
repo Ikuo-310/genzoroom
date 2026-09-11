@@ -88,6 +88,9 @@
     "shadows": "Shadows",
     "shadowsValue": "Shadows value",
     "shadowsReset": "Shadows Reset",
+    "blacks": "Blacks",
+    "blacksValue": "Blacks value",
+    "blacksReset": "Blacks Reset",
     "allReset": "All Reset",
     "undo": "Undo",
     "redo": "Redo",
@@ -99,6 +102,7 @@
     "highlightsHelp": "Highlights: ← / → 1, ↑ / ↓ 10.",
     "whitesHelp": "Whites: ← / → 1, ↑ / ↓ 10.",
     "shadowsHelp": "Shadows: ← / → 1, ↑ / ↓ 10.",
+    "blacksHelp": "Blacks: ← / → 1, ↑ / ↓ 10.",
     "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."
   },
   "language": {

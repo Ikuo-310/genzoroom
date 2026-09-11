@@ -13,6 +13,7 @@ Internal changes are omitted unless they affect users.
 - Non-destructive JPEG Highlights adjustment (−100 to +100, step 1), using a luminance-weighted smooth highlight curve after Exposure and Contrast.
 - Non-destructive JPEG Whites adjustment (−100 to +100, step 1), using a smooth luminance weight above 0.75 after Highlights.
 - Non-destructive JPEG Shadows adjustment (−100 to +100, step 1), using a luminance-weighted smooth shadow curve after Whites.
+- Non-destructive JPEG Blacks adjustment (−100 to +100, step 1), using a smooth black-point weight below luminance 0.10 after Shadows.
 - Grouped edit History, Undo/Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y), individual adjustment resets, and undoable All Reset.
 - Reusable sliders with hover/focus arrow controls: left/right change one step, up/down ten steps. Native form editing keeps its keyboard behavior.
 - Independently resizable Anshitsu side panels with remembered widths, safe sizing limits, and preserved collapse/expand behavior.

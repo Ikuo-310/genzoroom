@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS, AdjustmentSlider } from './AdjustmentSlider';
-import { CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatContrast, formatHighlights, formatShadows, formatWhites, type EditSession } from './editing';
+import { BLACKS, CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatBlacks, formatContrast, formatHighlights, formatShadows, formatWhites, type EditSession } from './editing';
 import { useAssetEdits } from './useAssetEdits';
 
 let host: HTMLDivElement;
@@ -41,6 +41,12 @@ function Harness({ assetId = 'a' }: { assetId?: string }) {
       onBegin={() => dispatch({ type: 'begin', kind: 'shadows' })}
       onChange={(value) => dispatch({ type: 'shadows', value })} onCommit={() => dispatch({ type: 'commit', kind: 'shadows' })}
       onReset={() => dispatch({ type: 'shadowsReset' })} />
+    <AdjustmentSlider key={`${assetId}-blacks`} label="Blacks" {...BLACKS} value={session.recipe.adjustments.blacks}
+      valueText={formatBlacks(session.recipe.adjustments.blacks)} valueLabel="Blacks value"
+      precision={0} defaultValue={0} resetLabel="Reset Blacks"
+      onBegin={() => dispatch({ type: 'begin', kind: 'blacks' })}
+      onChange={(value) => dispatch({ type: 'blacks', value })} onCommit={() => dispatch({ type: 'commit', kind: 'blacks' })}
+      onReset={() => dispatch({ type: 'blacksReset' })} />
     <pre>{JSON.stringify(session)}</pre>
     <input type="text" /><textarea /><select><option>one</option></select><div contentEditable />
     <button onClick={() => dispatch({ type: 'allReset' })}>All Reset</button>
@@ -57,6 +63,8 @@ const whitesRange = () => host.querySelectorAll<HTMLInputElement>('input[type="r
 const whitesNumber = () => host.querySelectorAll<HTMLInputElement>('input[type="number"]')[3];
 const shadowsRange = () => host.querySelectorAll<HTMLInputElement>('input[type="range"]')[4];
 const shadowsNumber = () => host.querySelectorAll<HTMLInputElement>('input[type="number"]')[4];
+const blacksRange = () => host.querySelectorAll<HTMLInputElement>('input[type="range"]')[5];
+const blacksNumber = () => host.querySelectorAll<HTMLInputElement>('input[type="number"]')[5];
 function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}, type = 'keydown') {
   const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
@@ -101,15 +109,15 @@ afterEach(() => {
 describe('edit controls DOM interaction', () => {
   it('renders every adjustment as one shared label-range-value row', () => {
     const controls = host.querySelectorAll('.adjustment-control');
-    expect(controls).toHaveLength(5);
+    expect(controls).toHaveLength(6);
     for (const control of controls) {
       expect(Array.from(control.children).map((child) => child.tagName)).toEqual(['LABEL', 'INPUT', 'DIV']);
       expect(control.children[1].classList.contains('adjustment-range')).toBe(true);
       expect(control.children[2].classList.contains('adjustment-value-controls')).toBe(true);
     }
     const unitSlots = host.querySelectorAll('.adjustment-unit');
-    expect(unitSlots).toHaveLength(5);
-    expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '', '', '', '']);
+    expect(unitSlots).toHaveLength(6);
+    expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '', '', '', '', '']);
   });
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
@@ -340,6 +348,33 @@ describe('edit controls DOM interaction', () => {
     key('y', window, { ctrlKey: true });
     expect(session().recipe.adjustments.shadows).toBe(0);
   });
+  it('reuses direct input, hover keyboard, grouped commit, reset, undo, and redo for Blacks', () => {
+    const input = blacksNumber();
+    const slider = blacksRange();
+    const reset = host.querySelectorAll<HTMLButtonElement>('.adjustment-reset')[5];
+    expect(input.value).toBe('0');
+    expect(reset.disabled).toBe(true);
+    act(() => input.focus());
+    changeInput(input, '-30');
+    expect(slider.value).toBe('-30');
+    key('Enter', input);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['blacks']);
+    pointer('pointerover', slider);
+    key('ArrowUp');
+    expect(session().recipe.adjustments.blacks).toBe(-20);
+    expect(input.value).toBe('-20');
+    expect(session().history).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    expect(session().history.map((entry) => entry.kind)).toEqual(['blacks', 'blacks']);
+    act(() => reset.click());
+    expect(session().recipe.adjustments.blacks).toBe(0);
+    expect(input.value).toBe('0');
+    expect(reset.disabled).toBe(true);
+    key('z', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.blacks).toBe(-20);
+    key('y', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.blacks).toBe(0);
+  });
   it('keeps rapid alternating edits across all sliders as correctly typed History entries', () => {
     pointer('pointerover');
     key('ArrowRight');
@@ -355,11 +390,14 @@ describe('edit controls DOM interaction', () => {
     pointer('pointerout', whitesRange());
     pointer('pointerover', shadowsRange());
     key('ArrowRight');
-    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites']);
-    expect(session().pending?.kind).toBe('shadows');
-    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    pointer('pointerout', shadowsRange());
+    pointer('pointerover', blacksRange());
+    key('ArrowLeft');
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
-    expect(session().recipe.adjustments).toEqual({ exposure: 0.01, contrast: 1, highlights: -1, whites: 1, shadows: 1 });
+    expect(session().pending?.kind).toBe('blacks');
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS));
+    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+    expect(session().recipe.adjustments).toEqual({ exposure: 0.01, contrast: 1, highlights: -1, whites: 1, shadows: 1, blacks: -1 });
   });
   it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {
     pointer('pointerover');

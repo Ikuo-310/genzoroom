@@ -86,6 +86,9 @@
     "shadows": "シャドウ",
     "shadowsValue": "シャドウの値",
     "shadowsReset": "シャドウをリセット",
+    "blacks": "ブラック",
+    "blacksValue": "ブラックの値",
+    "blacksReset": "ブラックをリセット",
     "allReset": "すべてリセット",
     "undo": "元に戻す",
     "redo": "やり直す",
@@ -97,6 +100,7 @@
     "highlightsHelp": "ハイライト：← / → 1、↑ / ↓ 10。",
     "whitesHelp": "ホワイト：← / → 1、↑ / ↓ 10。",
     "shadowsHelp": "シャドウ：← / → 1、↑ / ↓ 10。",
+    "blacksHelp": "ブラック：← / → 1、↑ / ↓ 10。",
     "previewEditingNote": "暫定的に既存プレビューを調整しています。編集状態は暗室を離れるか再読み込みすると失われます。"
   },
   "language": {

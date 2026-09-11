@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
-export type EditRecipe = { version: 4; adjustments: { exposure: number; contrast: number; highlights: number; whites: number; shadows: number } };
-export type EditKind = 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'allReset';
+export type EditRecipe = { version: 5; adjustments: { exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number } };
+export type EditKind = 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'allReset';
 export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
@@ -14,7 +14,8 @@ export const CONTRAST = { min: -100, max: 100, step: 1 };
 export const HIGHLIGHTS = { min: -100, max: 100, step: 1 };
 export const WHITES = { min: -100, max: 100, step: 1 };
 export const SHADOWS = { min: -100, max: 100, step: 1 };
-export const defaultRecipe = (): EditRecipe => ({ version: 4, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0 } });
+export const BLACKS = { min: -100, max: 100, step: 1 };
+export const defaultRecipe = (): EditRecipe => ({ version: 5, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
 export const newSession = (): EditSession => ({ recipe: defaultRecipe(), history: [], cursor: 0, pending: null });
 export const supportsEditing = (asset: RecentAsset) => !asset.is_raw && asset.format === 'JPEG';
 export const formatExposure = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
@@ -22,6 +23,7 @@ export const formatContrast = (value: number) => `${value > 0 ? '+' : ''}${value
 export const formatHighlights = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatWhites = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatShadows = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
+export const formatBlacks = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const normalizeExposure = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(EXPOSURE.min, Math.min(EXPOSURE.max, value)) * 100) / 100 : 0;
 export const normalizeContrast = (value: number) => Number.isFinite(value)
@@ -32,17 +34,20 @@ export const normalizeWhites = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(WHITES.min, Math.min(WHITES.max, value))) : 0;
 export const normalizeShadows = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(SHADOWS.min, Math.min(SHADOWS.max, value))) : 0;
+export const normalizeBlacks = (value: number) => Number.isFinite(value)
+  ? Math.round(Math.max(BLACKS.min, Math.min(BLACKS.max, value))) : 0;
 
-export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows'; value: number }
+export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks'; value: number }
   | { type: 'commit'; kind?: EditKind }
-  | { type: 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'allReset' };
+  | { type: 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'allReset' };
 
 function recipesEqual(left: EditRecipe, right: EditRecipe) {
   return left.adjustments.exposure === right.adjustments.exposure
     && left.adjustments.contrast === right.adjustments.contrast
     && left.adjustments.highlights === right.adjustments.highlights
     && left.adjustments.whites === right.adjustments.whites
-    && left.adjustments.shadows === right.adjustments.shadows;
+    && left.adjustments.shadows === right.adjustments.shadows
+    && left.adjustments.blacks === right.adjustments.blacks;
 }
 
 function commit(state: EditSession): EditSession {
@@ -79,6 +84,10 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       ...editSession(state, { type: 'begin', kind: 'shadows' }),
       recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, shadows: normalizeShadows(action.value) } },
     };
+    case 'blacks': return {
+      ...editSession(state, { type: 'begin', kind: 'blacks' }),
+      recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, blacks: normalizeBlacks(action.value) } },
+    };
     case 'commit': return action.kind && state.pending?.kind !== action.kind ? state : commit(state);
     case 'undo': {
       const current = commit(state);
@@ -93,6 +102,7 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     case 'highlightsReset':
     case 'whitesReset':
     case 'shadowsReset':
+    case 'blacksReset':
     case 'allReset': {
       const current = commit(state);
       return commit({ ...current, pending: { kind: action.type, before: current.recipe },
@@ -102,7 +112,8 @@ export function editSession(state: EditSession, action: EditAction): EditSession
             [action.type === 'exposureReset' ? 'exposure'
               : action.type === 'contrastReset' ? 'contrast'
                 : action.type === 'highlightsReset' ? 'highlights'
-                  : action.type === 'whitesReset' ? 'whites' : 'shadows']: 0 },
+                  : action.type === 'whitesReset' ? 'whites'
+                    : action.type === 'shadowsReset' ? 'shadows' : 'blacks']: 0 },
         } });
     }
   }
