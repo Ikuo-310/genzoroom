@@ -134,45 +134,69 @@ describe('Anshitsu workspace', () => {
     expect(withNewEdit).toContain('<li value="4" aria-current="step">Exposure +0.30 → +0.40</li>');
   });
 
-  it('renders tonal adjustments and All Reset history values in newest-first order', () => {
+  it('renders adjustment, category, and reset History succinctly in newest-first order', () => {
     const contrast: EditEntry = {
       kind: 'contrast',
-      before: { version: 5, adjustments: { exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
-      after: { version: 5, adjustments: { exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      before: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
     };
     const highlights: EditEntry = {
       kind: 'highlights',
       before: contrast.after,
-      after: { version: 5, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0 } },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0 } },
     };
     const whites: EditEntry = {
       kind: 'whites',
       before: highlights.after,
-      after: { version: 5, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0 } },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0 } },
     };
     const shadows: EditEntry = {
       kind: 'shadows',
       before: whites.after,
-      after: { version: 5, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0 } },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0 } },
     };
     const blacks: EditEntry = {
       kind: 'blacks',
       before: shadows.after,
-      after: { version: 5, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35 } },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35 } },
     };
     const allReset: EditEntry = {
       kind: 'allReset',
-      before: blacks.after,
-      after: { version: 5, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      before: { ...blacks.after, basicEnabled: false },
+      after: { version: 6, basicEnabled: true, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
     };
-    const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, allReset]} cursor={7} />);
-    expect(markup.indexOf('value="7"')).toBeLessThan(markup.indexOf('value="6"'));
-    expect(markup).toContain('All Reset Exposure +0.25 → 0.00; Contrast +30 → 0; Highlights -20 → 0; Whites +15 → 0; Shadows +25 → 0; Blacks -35 → 0');
+    const basicToggle: EditEntry = {
+      kind: 'basicToggle',
+      before: blacks.after,
+      after: { ...blacks.after, basicEnabled: false },
+    };
+    const basicReset: EditEntry = {
+      kind: 'basicReset',
+      before: basicToggle.after,
+      after: { version: 6, basicEnabled: false, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+    };
+    allReset.before = basicReset.after;
+    const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, basicToggle, basicReset, allReset]} cursor={9} />);
+    expect(markup.indexOf('value="9"')).toBeLessThan(markup.indexOf('value="8"'));
+    expect(markup).toContain('<li value="9" aria-current="step">All Reset</li>');
+    expect(markup).toContain('<li value="8">Reset Basic adjustments</li>');
+    expect(markup).toContain('<li value="7">Basic OFF</li>');
+    expect(markup).not.toContain('All Reset Exposure');
     expect(markup).toContain('Blacks 0 → -35');
     expect(markup).toContain('Shadows 0 → +25');
     expect(markup).toContain('Whites 0 → +15');
     expect(markup).toContain('Highlights 0 → -20');
     expect(markup).toContain('Contrast 0 → +30');
+  });
+
+  it('renders Basic ON after an enable operation', () => {
+    const before = { version: 6, basicEnabled: false, adjustments: { exposure: 0.25, contrast: 20, highlights: -30, whites: 10, shadows: 40, blacks: -15 } } as const;
+    const entry: EditEntry = {
+      kind: 'basicToggle',
+      before,
+      after: { ...before, basicEnabled: true },
+    };
+    expect(renderToStaticMarkup(<EditHistory history={[entry]} cursor={1} />)).toContain('Basic ON');
   });
 
   it('places History and EXIF on the left and Scope above Develop controls on the right', () => {
@@ -223,7 +247,7 @@ describe('Anshitsu workspace', () => {
 function historyEntry(before: number, after: number): EditEntry {
   return {
     kind: 'exposure',
-    before: { version: 5, adjustments: { exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
-    after: { version: 5, adjustments: { exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+    before: { version: 6, basicEnabled: true, adjustments: { exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+    after: { version: 6, basicEnabled: true, adjustments: { exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
   };
 }

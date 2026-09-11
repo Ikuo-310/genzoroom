@@ -17,6 +17,7 @@ Internal changes are omitted unless they affect users.
 - Grouped edit History, Undo/Redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y), individual adjustment resets, and undoable All Reset.
 - Reusable sliders with hover/focus arrow controls: left/right change one step, up/down ten steps. Native form editing keeps its keyboard behavior.
 - Independently resizable Anshitsu side panels with remembered widths, safe sizing limits, and preserved collapse/expand behavior.
+- A compact Basic adjustment category in Anshitsu with non-persistent collapse, an undoable category bypass that preserves values, and an undoable category reset for all six current adjustments.
 
 - Initial public project documentation describing the early development status, planned direction, and provisional NAS deployment architecture.
 - A minimal web page showing backend connectivity, including failure feedback and a manual recheck button.
@@ -34,6 +35,8 @@ Internal changes are omitted unless they affect users.
 ### Changed
 
 - Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.
+- Updated in-memory edit recipes to version 6 with a `basicEnabled` bypass flag. All Reset now restores both the six adjustment defaults and the enabled Basic category in one concise History entry.
+- Removed the repeated slider keyboard instructions from the Develop panel while retaining the temporary-preview notice.
 - Reorganized the Anshitsu side panels so History and EXIF remain on the left, while Scope sits above Develop controls on the right.
 - Changed the project license from the MIT License to the GNU Affero General Public License v3.0 (`AGPL-3.0-only`).
 - Reorganized the README around the current feature set and moved detailed deployment guidance to a dedicated document.

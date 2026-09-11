@@ -66,6 +66,10 @@ describe('localized resources', () => {
     expect(i18n.t('workspace.shadows', { lng: 'ja' })).toBe('シャドウ');
     expect(i18n.t('workspace.blacks', { lng: 'en' })).toBe('Blacks');
     expect(i18n.t('workspace.blacks', { lng: 'ja' })).toBe('ブラック');
+    expect(i18n.t('workspace.basic', { lng: 'en' })).toBe('Basic');
+    expect(i18n.t('workspace.basic', { lng: 'ja' })).toBe('基本補正');
+    expect(i18n.t('workspace.basicResetHistory', { lng: 'en' })).toBe('Reset Basic adjustments');
+    expect(i18n.t('workspace.basicResetHistory', { lng: 'ja' })).toBe('基本補正をリセット');
     expect(i18n.t('photos.selectionCount', { lng: 'en', count: 3 })).toBe('3 selected');
     expect(i18n.t('photos.selectionCount', { lng: 'ja', count: 3 })).toBe('3枚選択中');
   });

@@ -8,6 +8,7 @@ const BLACKS_MAX_OFFSET = 0.1;
 // Later adjustments belong here, independent of the image acquisition adapter.
 export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe): Uint8ClampedArray<ArrayBuffer> {
   const output = new Uint8ClampedArray(source);
+  if (!recipe.basicEnabled) return output;
   const gain = 2 ** recipe.adjustments.exposure;
   const contrast = Number.isFinite(recipe.adjustments.contrast)
     ? Math.max(-100, Math.min(100, recipe.adjustments.contrast)) : 0;

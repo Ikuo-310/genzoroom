@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -33,6 +33,7 @@ export function AnshitsuPage() {
   const activeDetail = detail?.id === assetId ? detail : null;
   const editable = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch } = useAssetEdits(assetId, editable);
+  const basicResetDisabled = Object.values(session.recipe.adjustments).every((value) => value === 0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -126,9 +127,17 @@ export function AnshitsuPage() {
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
+            <AdjustmentCategory title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
+              resetDisabled={basicResetDisabled}
+              enableLabel={t('workspace.enableBasic')} disableLabel={t('workspace.disableBasic')}
+              expandLabel={t('workspace.expandBasic')} collapseLabel={t('workspace.collapseBasic')}
+              resetLabel={t('workspace.reset')}
+              onToggle={() => dispatch({ type: 'toggleBasic' })}
+              onReset={() => dispatch({ type: 'basicReset' })}>
             <AdjustmentSlider key={assetId} label={t('workspace.exposure')} value={session.recipe.adjustments.exposure}
               {...EXPOSURE} valueText={`${formatExposure(session.recipe.adjustments.exposure)} EV`}
               valueLabel={t('workspace.exposureValue')} unit="EV" precision={2} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.exposureReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
               onChange={(value) => dispatch({ type: 'exposure', value })}
@@ -137,6 +146,7 @@ export function AnshitsuPage() {
             <AdjustmentSlider key={`${assetId}-contrast`} label={t('workspace.contrast')} value={session.recipe.adjustments.contrast}
               {...CONTRAST} valueText={formatContrast(session.recipe.adjustments.contrast)}
               valueLabel={t('workspace.contrastValue')} precision={0} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.contrastReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'contrast' })}
               onChange={(value) => dispatch({ type: 'contrast', value })}
@@ -145,6 +155,7 @@ export function AnshitsuPage() {
             <AdjustmentSlider key={`${assetId}-highlights`} label={t('workspace.highlights')} value={session.recipe.adjustments.highlights}
               {...HIGHLIGHTS} valueText={formatHighlights(session.recipe.adjustments.highlights)}
               valueLabel={t('workspace.highlightsValue')} precision={0} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.highlightsReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'highlights' })}
               onChange={(value) => dispatch({ type: 'highlights', value })}
@@ -153,6 +164,7 @@ export function AnshitsuPage() {
             <AdjustmentSlider key={`${assetId}-whites`} label={t('workspace.whites')} value={session.recipe.adjustments.whites}
               {...WHITES} valueText={formatWhites(session.recipe.adjustments.whites)}
               valueLabel={t('workspace.whitesValue')} precision={0} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.whitesReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'whites' })}
               onChange={(value) => dispatch({ type: 'whites', value })}
@@ -161,6 +173,7 @@ export function AnshitsuPage() {
             <AdjustmentSlider key={`${assetId}-shadows`} label={t('workspace.shadows')} value={session.recipe.adjustments.shadows}
               {...SHADOWS} valueText={formatShadows(session.recipe.adjustments.shadows)}
               valueLabel={t('workspace.shadowsValue')} precision={0} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.shadowsReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'shadows' })}
               onChange={(value) => dispatch({ type: 'shadows', value })}
@@ -169,17 +182,13 @@ export function AnshitsuPage() {
             <AdjustmentSlider key={`${assetId}-blacks`} label={t('workspace.blacks')} value={session.recipe.adjustments.blacks}
               {...BLACKS} valueText={formatBlacks(session.recipe.adjustments.blacks)}
               valueLabel={t('workspace.blacksValue')} precision={0} defaultValue={0}
+              disabled={!session.recipe.basicEnabled}
               resetLabel={t('workspace.blacksReset')}
               onBegin={() => dispatch({ type: 'begin', kind: 'blacks' })}
               onChange={(value) => dispatch({ type: 'blacks', value })}
               onCommit={() => dispatch({ type: 'commit', kind: 'blacks' })}
               onReset={() => dispatch({ type: 'blacksReset' })} />
-            <p>{t('workspace.exposureHelp')}</p>
-            <p>{t('workspace.contrastHelp')}</p>
-            <p>{t('workspace.highlightsHelp')}</p>
-            <p>{t('workspace.whitesHelp')}</p>
-            <p>{t('workspace.shadowsHelp')}</p>
-            <p>{t('workspace.blacksHelp')}</p>
+            </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
@@ -263,6 +272,31 @@ export function WorkspaceSection({ title, children, grow = false, className = ''
   </section>;
 }
 
+export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel, disableLabel, expandLabel, collapseLabel, resetLabel, onToggle, onReset, children }: {
+  title: string; enabled: boolean; resetDisabled: boolean; enableLabel: string; disableLabel: string;
+  expandLabel: string; collapseLabel: string; resetLabel: string; onToggle: () => void; onReset: () => void; children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const contentId = useId();
+  return <section className={`adjustment-category${enabled ? '' : ' is-disabled'}`}>
+    <div className="adjustment-category-header">
+      <h3>{title}</h3>
+      <div className="adjustment-category-actions">
+        <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`}
+          aria-pressed={enabled} aria-label={enabled ? disableLabel : enableLabel}
+          title={enabled ? disableLabel : enableLabel} onClick={onToggle}>⏻</button>
+        <button type="button" className="adjustment-category-reset" disabled={resetDisabled}
+          onClick={onReset}>{resetLabel}</button>
+        <button type="button" className="adjustment-category-icon" aria-expanded={expanded}
+          aria-controls={contentId} aria-label={expanded ? collapseLabel : expandLabel}
+          title={expanded ? collapseLabel : expandLabel}
+          onClick={() => setExpanded((value) => !value)}>{expanded ? '▾' : '▸'}</button>
+      </div>
+    </div>
+    {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}
+  </section>;
+}
+
 export function EditHistory({ history, cursor }: { history: readonly EditEntry[]; cursor: number }) {
   const { t } = useTranslation();
   const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
@@ -284,14 +318,14 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
           : isWhites ? formatWhites(entry.after.adjustments.whites)
             : isShadows ? formatShadows(entry.after.adjustments.shadows)
               : isBlacks ? formatBlacks(entry.after.adjustments.blacks) : formatExposure(entry.after.adjustments.exposure);
+      const description = entry.kind === 'allReset' ? t('workspace.allReset')
+        : entry.kind === 'basicReset' ? t('workspace.basicResetHistory')
+          : entry.kind === 'basicToggle'
+            ? `${t('workspace.basic')} ${t(entry.after.basicEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`
+            : `${t(`workspace.${entry.kind}`)} ${before} → ${after}`;
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
-        {t(`workspace.${entry.kind}`)} {entry.kind === 'allReset' && <>{t('workspace.exposure')} </>}{before} → {after}
-        {entry.kind === 'allReset' && <>; {t('workspace.contrast')} {formatContrast(entry.before.adjustments.contrast)} → {formatContrast(entry.after.adjustments.contrast)}</>}
-        {entry.kind === 'allReset' && <>; {t('workspace.highlights')} {formatHighlights(entry.before.adjustments.highlights)} → {formatHighlights(entry.after.adjustments.highlights)}</>}
-        {entry.kind === 'allReset' && <>; {t('workspace.whites')} {formatWhites(entry.before.adjustments.whites)} → {formatWhites(entry.after.adjustments.whites)}</>}
-        {entry.kind === 'allReset' && <>; {t('workspace.shadows')} {formatShadows(entry.before.adjustments.shadows)} → {formatShadows(entry.after.adjustments.shadows)}</>}
-        {entry.kind === 'allReset' && <>; {t('workspace.blacks')} {formatBlacks(entry.before.adjustments.blacks)} → {formatBlacks(entry.after.adjustments.blacks)}</>}
+        {description}
         {index >= cursor && <span> ({t('workspace.undone')})</span>}
       </li>;
     })}

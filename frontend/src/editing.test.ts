@@ -11,7 +11,7 @@ const adjustShadows = (state: EditSession, value: number) => editSession(editSes
 const adjustBlacks = (state: EditSession, value: number) => editSession(editSession(state, { type: 'blacks', value }), { type: 'commit' });
 describe('non-destructive edit sessions', () => {
   it('starts with a serializable versioned zero recipe', () => {
-    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 5, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
+    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 6, basicEnabled: true, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
   });
   it('coalesces intermediate input and skips no-op gestures', () => {
     let state = newSession();
@@ -51,12 +51,44 @@ describe('non-destructive edit sessions', () => {
     state = adjustWhites(state, 45);
     state = adjustShadows(state, 65);
     state = adjustBlacks(state, -70);
+    state = editSession(state, { type: 'toggleBasic' });
     state = editSession(state, { type: 'allReset' });
+    expect(state.recipe.basicEnabled).toBe(true);
     expect(state.recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 });
     expect(state.history.at(-1)?.kind).toBe('allReset');
     const undone = editSession(state, { type: 'undo' });
+    expect(undone.recipe.basicEnabled).toBe(false);
     expect(undone.recipe.adjustments).toEqual({ exposure: 0.35, contrast: 40, highlights: -55, whites: 45, shadows: 65, blacks: -70 });
-    expect(editSession(undone, { type: 'redo' }).recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 });
+    const redone = editSession(undone, { type: 'redo' });
+    expect(redone.recipe.basicEnabled).toBe(true);
+    expect(redone.recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 });
+  });
+  it('toggles Basic as one undoable bypass without changing adjustment values', () => {
+    let state = editSession(newSession(), { type: 'exposure', value: 0.5 });
+    state = editSession(state, { type: 'toggleBasic' });
+    expect(state.recipe.basicEnabled).toBe(false);
+    expect(state.recipe.adjustments.exposure).toBe(0.5);
+    expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'basicToggle']);
+    const undone = editSession(state, { type: 'undo' });
+    expect(undone.recipe.basicEnabled).toBe(true);
+    expect(undone.recipe.adjustments.exposure).toBe(0.5);
+    expect(editSession(undone, { type: 'redo' }).recipe.basicEnabled).toBe(false);
+  });
+  it('resets all Basic values in one operation while preserving its enabled state', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = adjustHighlights(state, -30);
+    state = adjustWhites(state, 10);
+    state = adjustShadows(state, 40);
+    state = adjustBlacks(state, -15);
+    state = editSession(state, { type: 'toggleBasic' });
+    const beforeReset = state.recipe;
+    state = editSession(state, { type: 'basicReset' });
+    expect(state.recipe.basicEnabled).toBe(false);
+    expect(state.recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 });
+    expect(state.history.at(-1)?.kind).toBe('basicReset');
+    const undone = editSession(state, { type: 'undo' });
+    expect(undone.recipe).toEqual(beforeReset);
   });
   it('commits pending edits before undo and discards redo only on a new committed edit', () => {
     const pending = editSession(newSession(), { type: 'exposure', value: 1 });
@@ -128,6 +160,21 @@ describe('JPEG adjustment pipeline', () => {
     const result = renderAdjustments(source, adjustExposure(newSession(), 1).recipe);
     expect(Array.from(result)).toEqual([0, 176, 255, 73]);
     expect(Array.from(source)).toEqual([0, 128, 255, 73]);
+  });
+  it('bypasses all Basic adjustments while retaining their recipe values', () => {
+    const source = new Uint8ClampedArray([40, 90, 180, 73]);
+    let enabled = adjustExposure(newSession(), 1);
+    enabled = adjustContrast(enabled, 30);
+    enabled = adjustHighlights(enabled, -20);
+    enabled = adjustWhites(enabled, 15);
+    enabled = adjustShadows(enabled, 40);
+    enabled = adjustBlacks(enabled, -10);
+    const adjusted = renderAdjustments(source, enabled.recipe);
+    const disabled = editSession(enabled, { type: 'toggleBasic' });
+    expect(disabled.recipe.adjustments).toEqual(enabled.recipe.adjustments);
+    expect(renderAdjustments(source, disabled.recipe)).toEqual(source);
+    const restored = editSession(disabled, { type: 'toggleBasic' });
+    expect(renderAdjustments(source, restored.recipe)).toEqual(adjusted);
   });
   it('renders from source without cumulative clipping or rounding', () => {
     const source = new Uint8ClampedArray([128, 64, 255, 255]);

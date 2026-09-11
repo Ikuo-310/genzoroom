@@ -4,6 +4,7 @@ import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 type Props = {
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; unit?: string; precision: number; defaultValue: number; resetLabel: string;
+  disabled?: boolean;
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
 
@@ -105,7 +106,7 @@ export function AdjustmentSlider(props: Props) {
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const element = range.current;
-      if (!element || (!hovered.current && document.activeElement !== element) || element.closest('[hidden]')) return;
+      if (!element || element.disabled || (!hovered.current && document.activeElement !== element) || element.closest('[hidden]')) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       // A focused different slider keeps its own keyboard behavior.
       if (event.target instanceof HTMLInputElement && event.target.type === 'range' && event.target !== element) return;
@@ -133,7 +134,7 @@ export function AdjustmentSlider(props: Props) {
   return <div className="adjustment-control" role="group" aria-labelledby={labelId}>
     <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
     <input ref={range} id={rangeId} className="adjustment-range" type="range" min={props.min} max={props.max} step={props.step}
-      value={props.value} aria-valuetext={props.valueText}
+      value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={() => { hovered.current = true; }}
       onPointerLeave={() => { hovered.current = false; }}
       onPointerDown={() => {
@@ -149,12 +150,12 @@ export function AdjustmentSlider(props: Props) {
       }} />
     <div className="adjustment-value-controls">
       <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
-        value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel}
+        value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
         onFocus={() => { beginNumberEdit(); setDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
       <span className="adjustment-unit" aria-hidden="true">{props.unit ?? ''}</span>
       <button type="button" className="adjustment-reset" onClick={props.onReset}
-        disabled={props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
+        disabled={props.disabled || props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
     </div>
   </div>;
 }

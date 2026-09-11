@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの露光量、コントラスト、ハイライト、ホワイト、シャドウを調整できます。"
+    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの露光量、コントラスト、ハイライト、ホワイト、シャドウ、ブラックを調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
@@ -89,18 +89,21 @@
     "blacks": "ブラック",
     "blacksValue": "ブラックの値",
     "blacksReset": "ブラックをリセット",
+    "basic": "基本補正",
+    "enableBasic": "基本補正を有効にする",
+    "disableBasic": "基本補正を一時的に無効にする",
+    "collapseBasic": "基本補正を折り畳む",
+    "expandBasic": "基本補正を展開する",
+    "reset": "リセット",
+    "basicOn": "ON",
+    "basicOff": "OFF",
+    "basicResetHistory": "基本補正をリセット",
     "allReset": "すべてリセット",
     "undo": "元に戻す",
     "redo": "やり直す",
     "undone": "取り消し済み",
     "historyEmpty": "確定した編集はまだありません。",
     "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
-    "exposureHelp": "スライダーにホバーまたはフォーカス：← / → 0.01 EV、↑ / ↓ 0.10 EV。",
-    "contrastHelp": "コントラスト：← / → 1、↑ / ↓ 10。",
-    "highlightsHelp": "ハイライト：← / → 1、↑ / ↓ 10。",
-    "whitesHelp": "ホワイト：← / → 1、↑ / ↓ 10。",
-    "shadowsHelp": "シャドウ：← / → 1、↑ / ↓ 10。",
-    "blacksHelp": "ブラック：← / → 1、↑ / ↓ 10。",
     "previewEditingNote": "暫定的に既存プレビューを調整しています。編集状態は暗室を離れるか再読み込みすると失われます。"
   },
   "language": {

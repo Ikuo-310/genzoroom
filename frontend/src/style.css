@@ -125,6 +125,19 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .viewer-viewport.pannable:active { cursor: grabbing; }
 .viewer-image-position { position: absolute; top: 50%; left: 50%; line-height: 0; will-change: transform; }
 .viewer-image-position img, .viewer-image-position canvas { display: block; max-width: none; height: auto; box-shadow: 0 4px 24px rgb(0 0 0 / 45%); }
+.adjustment-category { min-width: 0; }
+.adjustment-category-header { display: flex; min-width: 0; min-height: 30px; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; border-bottom: 1px solid #353537; padding-bottom: 5px; }
+.adjustment-category-header h3 { min-width: 0; margin: 0; overflow: hidden; color: #cfcfd1; font-size: 0.75rem; letter-spacing: 0.04em; text-overflow: ellipsis; white-space: nowrap; }
+.adjustment-category-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.adjustment-category-icon, .adjustment-category-reset { height: 26px; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 0; font: inherit; }
+.adjustment-category-icon { width: 26px; font-size: 0.82rem; line-height: 1; }
+.adjustment-category-reset { padding-inline: 6px; font-size: 0.68rem; white-space: nowrap; }
+.adjustment-category-icon:hover:not(:disabled), .adjustment-category-reset:hover:not(:disabled) { background: #303033; }
+.adjustment-category-icon:focus-visible, .adjustment-category-reset:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
+.adjustment-category-icon.is-off { color: #858589; background: #1b1b1d; }
+.adjustment-category-reset:disabled { cursor: default; opacity: 0.35; }
+.adjustment-category-content { min-width: 0; transition: opacity 120ms ease; }
+.adjustment-category.is-disabled .adjustment-category-content { opacity: 0.45; }
 .adjustment-control { display: grid; grid-template-columns: clamp(40px, 22%, 64px) minmax(28px, 1fr) auto; column-gap: 5px; align-items: center; min-width: 0; min-height: 30px; margin-bottom: 4px; color: #ddd; }
 .adjustment-control > label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .adjustment-value-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }

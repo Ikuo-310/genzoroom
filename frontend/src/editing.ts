@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
-export type EditRecipe = { version: 5; adjustments: { exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number } };
-export type EditKind = 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'allReset';
+export type EditRecipe = { version: 6; basicEnabled: boolean; adjustments: { exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number } };
+export type EditKind = 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'allReset';
 export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
@@ -15,7 +15,7 @@ export const HIGHLIGHTS = { min: -100, max: 100, step: 1 };
 export const WHITES = { min: -100, max: 100, step: 1 };
 export const SHADOWS = { min: -100, max: 100, step: 1 };
 export const BLACKS = { min: -100, max: 100, step: 1 };
-export const defaultRecipe = (): EditRecipe => ({ version: 5, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
+export const defaultRecipe = (): EditRecipe => ({ version: 6, basicEnabled: true, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
 export const newSession = (): EditSession => ({ recipe: defaultRecipe(), history: [], cursor: 0, pending: null });
 export const supportsEditing = (asset: RecentAsset) => !asset.is_raw && asset.format === 'JPEG';
 export const formatExposure = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
@@ -39,10 +39,11 @@ export const normalizeBlacks = (value: number) => Number.isFinite(value)
 
 export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks'; value: number }
   | { type: 'commit'; kind?: EditKind }
-  | { type: 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'allReset' };
+  | { type: 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'allReset' };
 
 function recipesEqual(left: EditRecipe, right: EditRecipe) {
-  return left.adjustments.exposure === right.adjustments.exposure
+  return left.basicEnabled === right.basicEnabled
+    && left.adjustments.exposure === right.adjustments.exposure
     && left.adjustments.contrast === right.adjustments.contrast
     && left.adjustments.highlights === right.adjustments.highlights
     && left.adjustments.whites === right.adjustments.whites
@@ -103,10 +104,12 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     case 'whitesReset':
     case 'shadowsReset':
     case 'blacksReset':
+    case 'basicReset':
     case 'allReset': {
       const current = commit(state);
       return commit({ ...current, pending: { kind: action.type, before: current.recipe },
-        recipe: action.type === 'allReset' ? defaultRecipe() : {
+        recipe: action.type === 'allReset' ? defaultRecipe()
+          : action.type === 'basicReset' ? { ...current.recipe, adjustments: defaultRecipe().adjustments } : {
           ...current.recipe,
           adjustments: { ...current.recipe.adjustments,
             [action.type === 'exposureReset' ? 'exposure'
@@ -115,6 +118,11 @@ export function editSession(state: EditSession, action: EditAction): EditSession
                   : action.type === 'whitesReset' ? 'whites'
                     : action.type === 'shadowsReset' ? 'shadows' : 'blacks']: 0 },
         } });
+    }
+    case 'toggleBasic': {
+      const current = commit(state);
+      return commit({ ...current, pending: { kind: 'basicToggle', before: current.recipe },
+        recipe: { ...current.recipe, basicEnabled: !current.recipe.basicEnabled } });
     }
   }
 }

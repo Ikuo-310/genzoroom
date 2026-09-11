@@ -5,48 +5,55 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ADJUSTMENT_KEYBOARD_COMMIT_DELAY_MS, AdjustmentSlider } from './AdjustmentSlider';
 import { BLACKS, CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatBlacks, formatContrast, formatHighlights, formatShadows, formatWhites, type EditSession } from './editing';
 import { useAssetEdits } from './useAssetEdits';
+import { AdjustmentCategory } from './AnshitsuPage';
 
 let host: HTMLDivElement;
 let root: Root;
 function Harness({ assetId = 'a' }: { assetId?: string }) {
   const { session, dispatch } = useAssetEdits(assetId, true);
   return <>
+    <AdjustmentCategory title="Basic" enabled={session.recipe.basicEnabled}
+      resetDisabled={Object.values(session.recipe.adjustments).every((value) => value === 0)}
+      enableLabel="Enable Basic" disableLabel="Disable Basic" expandLabel="Expand Basic" collapseLabel="Collapse Basic"
+      resetLabel="Reset" onToggle={() => dispatch({ type: 'toggleBasic' })} onReset={() => dispatch({ type: 'basicReset' })}>
     <AdjustmentSlider key={assetId} label="Exposure" {...EXPOSURE} value={session.recipe.adjustments.exposure}
       valueText={`${session.recipe.adjustments.exposure} EV`} valueLabel="Exposure value" unit="EV"
-      precision={2} defaultValue={0} resetLabel="Reset Exposure"
+      precision={2} defaultValue={0} resetLabel="Reset Exposure" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
       onChange={(value) => dispatch({ type: 'exposure', value })} onCommit={() => dispatch({ type: 'commit', kind: 'exposure' })}
       onReset={() => dispatch({ type: 'exposureReset' })} />
     <AdjustmentSlider key={`${assetId}-contrast`} label="Contrast" {...CONTRAST} value={session.recipe.adjustments.contrast}
       valueText={formatContrast(session.recipe.adjustments.contrast)} valueLabel="Contrast value"
-      precision={0} defaultValue={0} resetLabel="Reset Contrast"
+      precision={0} defaultValue={0} resetLabel="Reset Contrast" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'contrast' })}
       onChange={(value) => dispatch({ type: 'contrast', value })} onCommit={() => dispatch({ type: 'commit', kind: 'contrast' })}
       onReset={() => dispatch({ type: 'contrastReset' })} />
     <AdjustmentSlider key={`${assetId}-highlights`} label="Highlights" {...HIGHLIGHTS} value={session.recipe.adjustments.highlights}
       valueText={formatHighlights(session.recipe.adjustments.highlights)} valueLabel="Highlights value"
-      precision={0} defaultValue={0} resetLabel="Reset Highlights"
+      precision={0} defaultValue={0} resetLabel="Reset Highlights" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'highlights' })}
       onChange={(value) => dispatch({ type: 'highlights', value })} onCommit={() => dispatch({ type: 'commit', kind: 'highlights' })}
       onReset={() => dispatch({ type: 'highlightsReset' })} />
     <AdjustmentSlider key={`${assetId}-whites`} label="Whites" {...WHITES} value={session.recipe.adjustments.whites}
       valueText={formatWhites(session.recipe.adjustments.whites)} valueLabel="Whites value"
-      precision={0} defaultValue={0} resetLabel="Reset Whites"
+      precision={0} defaultValue={0} resetLabel="Reset Whites" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'whites' })}
       onChange={(value) => dispatch({ type: 'whites', value })} onCommit={() => dispatch({ type: 'commit', kind: 'whites' })}
       onReset={() => dispatch({ type: 'whitesReset' })} />
     <AdjustmentSlider key={`${assetId}-shadows`} label="Shadows" {...SHADOWS} value={session.recipe.adjustments.shadows}
       valueText={formatShadows(session.recipe.adjustments.shadows)} valueLabel="Shadows value"
-      precision={0} defaultValue={0} resetLabel="Reset Shadows"
+      precision={0} defaultValue={0} resetLabel="Reset Shadows" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'shadows' })}
       onChange={(value) => dispatch({ type: 'shadows', value })} onCommit={() => dispatch({ type: 'commit', kind: 'shadows' })}
       onReset={() => dispatch({ type: 'shadowsReset' })} />
     <AdjustmentSlider key={`${assetId}-blacks`} label="Blacks" {...BLACKS} value={session.recipe.adjustments.blacks}
       valueText={formatBlacks(session.recipe.adjustments.blacks)} valueLabel="Blacks value"
-      precision={0} defaultValue={0} resetLabel="Reset Blacks"
+      precision={0} defaultValue={0} resetLabel="Reset Blacks" disabled={!session.recipe.basicEnabled}
       onBegin={() => dispatch({ type: 'begin', kind: 'blacks' })}
       onChange={(value) => dispatch({ type: 'blacks', value })} onCommit={() => dispatch({ type: 'commit', kind: 'blacks' })}
       onReset={() => dispatch({ type: 'blacksReset' })} />
+    </AdjustmentCategory>
+    <p className="edit-source-note">Temporary preview note</p>
     <pre>{JSON.stringify(session)}</pre>
     <input type="text" /><textarea /><select><option>one</option></select><div contentEditable />
     <button onClick={() => dispatch({ type: 'allReset' })}>All Reset</button>
@@ -118,6 +125,19 @@ describe('edit controls DOM interaction', () => {
     const unitSlots = host.querySelectorAll('.adjustment-unit');
     expect(unitSlots).toHaveLength(6);
     expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '', '', '', '', '']);
+  });
+  it('starts Basic expanded, collapses without changing its recipe, and keeps the preview note visible', () => {
+    act(() => number().focus());
+    changeNumber('0.5');
+    key('Enter', number());
+    const before = session().recipe;
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Collapse Basic"]')!.click());
+    expect(host.querySelectorAll('.adjustment-control')).toHaveLength(0);
+    expect(host.querySelector('.edit-source-note')?.textContent).toBe('Temporary preview note');
+    expect(session().recipe).toEqual(before);
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Expand Basic"]')!.click());
+    expect(host.querySelectorAll('.adjustment-control')).toHaveLength(6);
+    expect(number().value).toBe('0.50');
   });
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
@@ -374,6 +394,39 @@ describe('edit controls DOM interaction', () => {
     expect(session().recipe.adjustments.blacks).toBe(-20);
     key('y', window, { ctrlKey: true });
     expect(session().recipe.adjustments.blacks).toBe(0);
+  });
+  it('disables every adjustment control while Basic is bypassed and restores retained values', () => {
+    act(() => number().focus());
+    changeNumber('0.5');
+    key('Enter', number());
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Disable Basic"]')!.click());
+    expect(session().recipe.basicEnabled).toBe(false);
+    expect(session().recipe.adjustments.exposure).toBe(0.5);
+    expect(Array.from(host.querySelectorAll<HTMLInputElement>('input[type="range"], input[type="number"]')).every((input) => input.disabled)).toBe(true);
+    expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.adjustment-reset')).every((button) => button.disabled)).toBe(true);
+    pointer('pointerover');
+    expect(key('ArrowUp').defaultPrevented).toBe(false);
+    expect(session().recipe.adjustments.exposure).toBe(0.5);
+    key('z', window, { ctrlKey: true });
+    expect(session().recipe.basicEnabled).toBe(true);
+    expect(number().value).toBe('0.50');
+    key('y', window, { ctrlKey: true });
+    expect(session().recipe.basicEnabled).toBe(false);
+  });
+  it('resets all Basic controls as one operation and restores them together with Undo', () => {
+    act(() => number().focus());
+    changeNumber('0.5');
+    key('Enter', number());
+    act(() => contrastNumber().focus());
+    changeInput(contrastNumber(), '20');
+    key('Enter', contrastNumber());
+    act(() => host.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.click());
+    expect(session().recipe.adjustments).toEqual({ exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 });
+    expect(session().history.at(-1)?.kind).toBe('basicReset');
+    expect(session().history).toHaveLength(3);
+    key('z', window, { ctrlKey: true });
+    expect(session().recipe.adjustments.exposure).toBe(0.5);
+    expect(session().recipe.adjustments.contrast).toBe(20);
   });
   it('keeps rapid alternating edits across all sliders as correctly typed History entries', () => {
     pointer('pointerover');
