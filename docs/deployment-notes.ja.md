@@ -66,13 +66,13 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 
 ## 5. Immich APIキー権限
 
-第三段階時点で必要な権限は次のとおり。
+現在必要な権限は次のとおり。
 
 - `user.read`: `GET /api/users/me` による接続確認
-- `asset.read`: `POST /api/search/metadata` による最近の写真取得
-- `asset.view`: `GET /api/assets/{id}/thumbnail` によるサムネイル取得
+- `asset.read`: `POST /api/search/metadata` による最近の写真取得と `GET /api/assets/{id}` による詳細・EXIF取得
+- `asset.view`: `GET /api/assets/{id}/thumbnail` によるサムネイル・preview取得
 
-必要以上の権限は付けない。第三段階では、書き込み、アップロード、削除、編集、ダウンロード用の権限は不要。
+必要以上の権限は付けない。現在のJPEG補正はブラウザ内で行うため、Immichへの書き込み、アップロード、削除、編集、originalダウンロード用の権限は不要。
 
 ## 6. 更新手順
 
@@ -83,13 +83,17 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 5. Portainerで対象Stackを開き、**Pull and redeploy** を実行する。
 6. NAS上でコンテナ状態、ログ、Web UI、Immich接続を確認する。
 
-第三段階では、ブラウザで次を確認する。
+再デプロイ後は、ブラウザで次を確認する。
 
 - `http://<NAS-IP>:3190` を開ける。
 - `Backend: Connected` が表示される。
 - `Immich: Connected` が表示される。
 - 最近の写真が最大50件表示される。
 - 各写真のサムネイルが表示される。
+- 写真を開くとAnshitsu（暗室）へ移動し、previewと取得可能なEXIFが表示される。
+- 複数写真を選択して暗室へ入り、Filmstripで切り替えると対象写真のpreview・ファイル名・EXIFへ更新される。
+
+previewはImmich生成画像をBackend経由で表示する。originalやRAW現像結果ではなく、JPEG補正もこのpreviewを暫定入力としている。これらは再デプロイ時の確認項目であり、この文書の更新だけで実機検証済みとは扱わない。
 
 Portainerで再デプロイした直後は、コンテナのbuildと起動が完了してから確認する。問題がある場合は、ブラウザ表示だけで判断せずContainer Logsを確認する。
 

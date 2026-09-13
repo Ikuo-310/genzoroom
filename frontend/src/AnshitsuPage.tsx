@@ -24,7 +24,7 @@ export function AnshitsuPage() {
   const { assetId = '' } = useParams();
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const initialNavigation = useMemo(() => readNavigationState(location.state), [location.state]);
-  // selectedAssets already uses an array even though this phase opens one item at a time.
+  // Preserve selection order for the Filmstrip while the route identifies the active asset.
   const [selectedAssets, setSelectedAssets] = useState<RecentAsset[]>(initialNavigation?.selectedAssets ?? []);
   const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [detailState, setDetailState] = useState<DetailState>('loading');
