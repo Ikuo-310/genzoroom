@@ -35,54 +35,61 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     output[i] = lut[source[i]];
     output[i + 1] = lut[source[i + 1]];
     output[i + 2] = lut[source[i + 2]];
+    // Skip only the inactive stage; later adjustments still use its unchanged bytes.
     if (highlights !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;
       const blue = output[i + 2] / 255;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      const threshold = Math.max(0, Math.min(1, (luminance - 0.5) * 2));
-      const weight = threshold * threshold * (3 - 2 * threshold);
-      const curvedLuminance = highlights > 0
-        ? 1 - (1 - luminance) ** 2
-        : luminance ** 2;
-      const targetLuminance = Math.max(0, Math.min(1,
-        luminance + Math.abs(highlights) * weight * (curvedLuminance - luminance)));
-      const scale = luminance > 0 ? targetLuminance / luminance : 1;
-      output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
-      output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
-      output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      if (luminance > 0.5) {
+        const threshold = Math.max(0, Math.min(1, (luminance - 0.5) * 2));
+        const weight = threshold * threshold * (3 - 2 * threshold);
+        const curvedLuminance = highlights > 0
+          ? 1 - (1 - luminance) ** 2
+          : luminance ** 2;
+        const targetLuminance = Math.max(0, Math.min(1,
+          luminance + Math.abs(highlights) * weight * (curvedLuminance - luminance)));
+        const scale = luminance > 0 ? targetLuminance / luminance : 1;
+        output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
+        output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
+        output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      }
     }
     if (whites !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;
       const blue = output[i + 2] / 255;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      const threshold = Math.max(0, Math.min(1,
-        (luminance - WHITES_START_LUMINANCE) / (1 - WHITES_START_LUMINANCE)));
-      const weight = threshold * threshold * (3 - 2 * threshold);
-      const targetLuminance = whites > 0 ? 1 : WHITES_START_LUMINANCE;
-      const adjustedLuminance = Math.max(0, Math.min(1,
-        luminance + Math.abs(whites) * weight * (targetLuminance - luminance)));
-      const scale = adjustedLuminance / Math.max(luminance, 1e-6);
-      output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
-      output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
-      output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      if (luminance > WHITES_START_LUMINANCE) {
+        const threshold = Math.max(0, Math.min(1,
+          (luminance - WHITES_START_LUMINANCE) / (1 - WHITES_START_LUMINANCE)));
+        const weight = threshold * threshold * (3 - 2 * threshold);
+        const targetLuminance = whites > 0 ? 1 : WHITES_START_LUMINANCE;
+        const adjustedLuminance = Math.max(0, Math.min(1,
+          luminance + Math.abs(whites) * weight * (targetLuminance - luminance)));
+        const scale = adjustedLuminance / Math.max(luminance, 1e-6);
+        output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
+        output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
+        output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      }
     }
     if (shadows !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;
       const blue = output[i + 2] / 255;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      const threshold = Math.max(0, Math.min(1, (0.15 - luminance) / 0.15));
-      const weight = threshold * threshold * (3 - 2 * threshold);
-      const targetLuminance = shadows > 0 ? Math.sqrt(luminance) : luminance ** 2;
-      const amount = Math.abs(shadows) * weight;
-      const adjustedLuminance = Math.max(0, Math.min(1,
-        luminance + amount * (targetLuminance - luminance)));
-      const scale = adjustedLuminance / Math.max(luminance, 1e-6);
-      output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
-      output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
-      output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      if (luminance < 0.15) {
+        const threshold = Math.max(0, Math.min(1, (0.15 - luminance) / 0.15));
+        const weight = threshold * threshold * (3 - 2 * threshold);
+        const targetLuminance = shadows > 0 ? Math.sqrt(luminance) : luminance ** 2;
+        const amount = Math.abs(shadows) * weight;
+        const adjustedLuminance = Math.max(0, Math.min(1,
+          luminance + amount * (targetLuminance - luminance)));
+        const scale = adjustedLuminance / Math.max(luminance, 1e-6);
+        output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
+        output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
+        output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+      }
     }
     if (blacks === 0) continue;
 
@@ -90,6 +97,7 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     const green = output[i + 1] / 255;
     const blue = output[i + 2] / 255;
     const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    if (luminance >= BLACKS_FADE_END_LUMINANCE) continue;
     const threshold = Math.max(0, Math.min(1, luminance / BLACKS_FADE_END_LUMINANCE));
     const weight = 1 - threshold * threshold * (3 - 2 * threshold);
     const adjustedLuminance = Math.max(0, Math.min(1,
