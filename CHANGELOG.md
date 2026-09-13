@@ -35,6 +35,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Reduced JPEG preview processing work by skipping inactive luminance regions in Highlights, Whites, Shadows, and Blacks, preserving pixel output, adjustment order, and intermediate 8-bit rounding.
 - Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.
 - Updated in-memory edit recipes to version 6 with a `basicEnabled` bypass flag. All Reset now restores both the six adjustment defaults and the enabled Basic category in one concise History entry.
 - Removed the repeated slider keyboard instructions from the Develop panel while retaining the temporary-preview notice.

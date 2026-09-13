@@ -24,6 +24,22 @@ DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理v
 
 検証：Frontend 160件のテストおよびproduction buildが成功。純粋画素テストではBlacks 0 / +100 / −100、0.10〜0.20の明確な作用、0.30付近の弱い作用、0.35以上の不変、完全黒のlift、色付き暗部のRGB構成比、他5補正との処理順に加え、基本補正OFF時の完全bypassと値保持を確認した。UIテストではカテゴリの初期展開・折り畳み・再展開、OFF中のcontrol無効化、ON/OFFとカテゴリResetとAll ResetのUndo/Redo・簡潔なHistory、カテゴリ外の暫定注釈を確認した。ローカルの640×360グラデーションfixtureを使うChromium確認では、基本補正のOFF・値保持・control無効化、折り畳み・再展開、カテゴリReset、Undo/Redo、All Reset、History、操作説明の削除、カテゴリ外の暫定注釈を確認した。右パネル230 / 350 / 440pxではカテゴリに横overflowがなく、range幅は約41 / 138 / 228pxへ追従し、ページにも横overflowは発生しなかった。再読み込み後はカテゴリが展開状態から始まり、右パネル幅は保持された。Chromiumではrange上の通常wheelでExposureが1 eventにつき0.10 EV変化し、500ms後に1件だけHistoryへcommitされること、range外では右パネルが通常scrollし、Basic OFF中のrange wheelは値を変えず通常scrollへ渡ることを確認した。既存自動テストで直接入力、hover/focusキー操作、keyboard/wheelの500ms commit、個別Reset、Viewer、Sidebar resize、Filmstrip、multi-select等の回帰を確認している。実Immich/NAS接続、実写真の色再現、大画像の性能、Firefoxは今回未検証。Backendは未変更で、Backendテストは今回再実行していない。
 
+### Issue #2: preview処理の局所最適化
+
+各段階の輝度を計算した後、Highlightsは `Y <= 0.5`、Whitesは `Y <= 0.75`、Shadowsは `Y >= 0.15`、Blacksは `Y >= 0.35` の画素について、その段階の重み・target・倍率計算、丸め、RGB書き戻しを省略した。後続の補正は引き続き実行する。既存の1画素ループ、Exposure / ContrastのLUT、補正順、各段階の8-bit丸めを維持し、AdjustedImage、recipe、History、UI、Backendは変更していない。
+
+変更前 `99c58aae3ec621eddbea0b4d7e5ba76c52be5147` と全16,777,216 RGBを比較し、4補正それぞれの±100と3通りの複数補正（指定6補正、その符号反転、clippingを含む組み合わせ）でbyte単位の一致を確認した。通常の回帰テストには、変更前から採取した固定SHA-256、決定的な色付き画素・全256グレー・可変alpha、対象域内外の確認を追加した。
+
+Node.js 24.19.0上の参考計測。seed 17の疑似乱数RGB・alpha 255、3回ウォームアップ後7回の中央値。変更前後を交互の順番で計測した。6補正値は順に `+0.5 / +20 / -30 / +25 / +40 / -20`、Exposure単独は `+0.5`。単位はms。
+
+| サイズ | 無補正（前→後） | Exposureのみ（前→後） | 6補正（前→後） | 6補正の時間削減率 |
+| --- | --- | --- | --- | --- |
+| 640×360 | 0.16 → 0.17 | 1.69 → 1.72 | 30.08 → 17.85 | 40.7% |
+| 1920×1080 | 1.13 → 1.18 | 17.28 → 17.90 | 269.47 → 159.81 | 40.7% |
+| 2560×1440 | 2.39 → 2.36 | 30.84 → 33.01 | 480.21 → 285.57 | 40.5% |
+
+再計測は `frontend/` から `node scripts/benchmark-preview.mjs 99c58aae3ec621eddbea0b4d7e5ba76c52be5147` を実行する（Node 24と対象commitを含むGit履歴が必要）。無補正・Exposure単独には改善傾向はなく、小幅な増減がある。これは画素処理と出力buffer確保だけの計測であり、decode、Canvas転送、React、requestAnimationFrame、実写真・実機Firefoxの操作時間は含まない。大きなpreviewでは処理時間がまだ長く、実機確認後にWorker化を別途評価する。今回WorkerやGPU処理は導入していない。
+
 ## 過去フェーズの記録
 
 以下は各フェーズで行った実装、実機確認、設計判断、トラブルシュートの記録であり、当時の「未実装」の記述を含む。現在の実装状況は冒頭の最新フェーズと[README](../README.md)を参照する。公開リポジトリに置くため、APIキーなどの秘密情報は記録しない。
