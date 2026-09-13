@@ -27,7 +27,7 @@ export type AssetDetail = RecentAsset & {
 };
 
 export type WorkspaceNavigationState = {
-  // The array shape keeps one-photo navigation compatible with a future multi-selection flow.
+  // Selection order is shared by single-photo and multi-photo workspace navigation.
   selectedAssets: RecentAsset[];
   activeAssetId: string;
 };

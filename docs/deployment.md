@@ -90,18 +90,24 @@ The frontend image uses Vite only during the build. nginx serves the resulting s
 
 ### Optional checks before deployment
 
-Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker or NAS host. The current development toolchain uses Node.js 24 and Python 3.13. Typical checks are:
+Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker or NAS host. The current development toolchain uses Node.js 24 and Python 3.13. Start from the repository root with a Python virtual environment activated:
 
 ```sh
 cd frontend
 npm ci
+npm test
 npm run build
 
+cd ../backend
+python -m pip install -r requirements.txt
+python -m py_compile main.py immich.py
+python -m unittest discover -s tests
+
 cd ..
-python -m py_compile backend/main.py backend/immich.py
-python -m unittest discover -s backend/tests
 docker compose config
 ```
+
+Run the Backend checks from `backend/` so the tests can import `main` and `immich`. For the same-host Immich route, use both Compose files for the final configuration check as shown above.
 
 For optional frontend development, run Uvicorn from `backend/` on loopback port `8000` and `npm run dev` from `frontend/`. Vite proxies `/api/` to that local backend. The Vite development server is not used in the deployed frontend container.
 
