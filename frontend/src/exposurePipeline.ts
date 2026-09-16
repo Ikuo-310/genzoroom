@@ -1,8 +1,9 @@
-import { normalizeTemperature, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeTemperature, normalizeTint, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
 const BLACKS_MAX_OFFSET = 0.1;
+export const TINT_GAIN_BASE = 1.3;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {
@@ -10,7 +11,13 @@ export function temperatureGains(value: number) {
   return { red: 1.5 ** -shift, green: 1, blue: 1.5 ** shift };
 }
 
-function temperatureLut(gain: number) {
+// Reciprocal gains keep equal positive/negative Tint magnitudes perceptually balanced.
+export function tintGains(value: number) {
+  const shift = normalizeTint(value) / 100;
+  return { red: TINT_GAIN_BASE ** shift, green: TINT_GAIN_BASE ** -shift, blue: TINT_GAIN_BASE ** shift };
+}
+
+function linearGainLut(gain: number) {
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
     const srgb = i / 255;
@@ -28,6 +35,7 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   const output = new Uint8ClampedArray(source);
   const adjustments = effectiveAdjustments(recipe);
   const temperature = normalizeTemperature(adjustments.temperature);
+  const tint = normalizeTint(adjustments.tint);
   const gain = 2 ** adjustments.exposure;
   const contrast = Number.isFinite(adjustments.contrast)
     ? Math.max(-100, Math.min(100, adjustments.contrast)) : 0;
@@ -40,12 +48,17 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     ? Math.max(-100, Math.min(100, adjustments.shadows)) / 100 : 0;
   const blacks = Number.isFinite(adjustments.blacks)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
-  if (temperature === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0) return output;
-  const gains = temperatureGains(temperature);
-  // Clip and round Temperature to sRGB bytes before the unchanged Exposure/Contrast LUT.
-  // At zero, skip this round-trip to retain existing byte compatibility.
-  const redTemperature = temperature !== 0 ? temperatureLut(gains.red) : null;
-  const blueTemperature = temperature !== 0 ? temperatureLut(gains.blue) : null;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0) return output;
+  const temperatureGain = temperatureGains(temperature);
+  const tintGain = tintGains(tint);
+  // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
+  // At zero, skip that stage's round-trip to retain existing byte compatibility.
+  const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;
+  const blueTemperature = temperature !== 0 ? linearGainLut(temperatureGain.blue) : null;
+  // Tint is a separate linear-light stage after Temperature, with the same safe clip/encode boundary.
+  const redTint = tint !== 0 ? linearGainLut(tintGain.red) : null;
+  const greenTint = tint !== 0 ? linearGainLut(tintGain.green) : null;
+  const blueTint = tint !== 0 ? linearGainLut(tintGain.blue) : null;
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
     const srgb = i / 255;
@@ -56,9 +69,11 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     lut[i] = Math.round(255 * contrasted);
   }
   for (let i = 0; i < output.length; i += 4) {
-    output[i] = lut[redTemperature ? redTemperature[source[i]] : source[i]];
-    output[i + 1] = lut[source[i + 1]];
-    output[i + 2] = lut[blueTemperature ? blueTemperature[source[i + 2]] : source[i + 2]];
+    const temperatureRed = redTemperature ? redTemperature[source[i]] : source[i];
+    const temperatureBlue = blueTemperature ? blueTemperature[source[i + 2]] : source[i + 2];
+    output[i] = lut[redTint ? redTint[temperatureRed] : temperatureRed];
+    output[i + 1] = lut[greenTint ? greenTint[source[i + 1]] : source[i + 1]];
+    output[i + 2] = lut[blueTint ? blueTint[temperatureBlue] : temperatureBlue];
     // Skip only the inactive stage; later adjustments still use its unchanged bytes.
     if (highlights !== 0) {
       const red = output[i] / 255;

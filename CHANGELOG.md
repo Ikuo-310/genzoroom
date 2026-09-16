@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool, step 1, default 0; no Kelvin units), a warm/neutral/cool slider track, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo. Temperature adjusts reciprocal Red/Blue gains in linear RGB before Exposure, preserving Green and alpha.
+- A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
 
 - Non-destructive JPEG Exposure adjustment (−5 to +5 EV, 0.01 EV steps) in Anshitsu, with per-asset in-memory recipes and a Canvas linear-light preview pipeline. This initial version uses Immich previews as a temporary source.
 - Non-destructive JPEG Contrast adjustment (−100 to +100, step 1), applied after Exposure with the shared slider, recipe, History, Undo/Redo, and reset infrastructure.
@@ -39,7 +39,7 @@ Internal changes are omitted unless they affect users.
 
 - Reduced JPEG preview processing work by skipping inactive luminance regions in Highlights, Whites, Shadows, and Blacks, preserving pixel output, adjustment order, and intermediate 8-bit rounding.
 - Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.
-- Updated flat in-memory edit recipes to version 7 with temperature and independent whiteBalanceEnabled/basicEnabled flags. Category Reset preserves its enabled state and changes only its own values; All Reset restores all seven defaults and enables both categories in one History operation. Recipes are not persisted.
+- Updated flat in-memory edit recipes to version 8 with temperature, tint, and independent whiteBalanceEnabled/basicEnabled flags. White Balance Reset restores Temperature and Tint while preserving its enabled state; Basic Reset leaves both untouched; All Reset restores all eight defaults and enables both categories in one History operation. Recipes are not persisted.
 - Removed the repeated slider keyboard instructions from the Develop panel while retaining the temporary-preview notice.
 - Reorganized the Anshitsu side panels so History and EXIF remain on the left, while Scope sits above Develop controls on the right.
 - Changed the project license from the MIT License to the GNU Affero General Public License v3.0 (`AGPL-3.0-only`).

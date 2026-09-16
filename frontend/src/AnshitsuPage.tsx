@@ -11,7 +11,7 @@ import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatTemperature, isWhiteBalanceDefault, isBasicDefault, supportsEditing, type EditEntry } from './editing';
+import { formatTemperature, formatTint, isWhiteBalanceDefault, isBasicDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -278,6 +278,11 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'temperatureReset':
           description = t(entry.kind === 'temperature' ? 'workspace.temperature' : 'workspace.temperatureReset')
             + ' ' + formatTemperature(entry.before.adjustments.temperature) + ' → ' + formatTemperature(entry.after.adjustments.temperature);
+          break;
+        case 'tint':
+        case 'tintReset':
+          description = t(entry.kind === 'tint' ? 'workspace.tint' : 'workspace.tintReset')
+            + ' ' + formatTint(entry.before.adjustments.tint) + ' → ' + formatTint(entry.after.adjustments.tint);
           break;
         case 'whiteBalanceReset': description = t('workspace.whiteBalanceResetHistory'); break;
         case 'whiteBalanceToggle':

@@ -1,24 +1,24 @@
 # GenzoRoom 開発ノート
 
-## White Balance / Temperature（最新フェーズ）
+## White Balance / Temperature / Tint（最新フェーズ）
 
-右ペインに「色温度補正 / White Balance」をBasicの上へ追加した。所属は色温度 / Temperatureのみで、−100〜+100、step 1、初期値0、単位なし。負値は暖色、正値は寒色、0は無補正。JPEG / Immich previewへの相対シフトであり、Kelvin指定やRAWの絶対WBではない。
+右ペインの「色温度補正 / White Balance」に、Temperature直下の色かぶり補正 / Tintを追加した。TemperatureとTintはいずれも−100〜+100、step 1、初期値0、単位なし。Tintは負値がGreen、正値がMagenta、0が無補正。JPEG / Immich previewへの相対シフトであり、Kelvin指定やRAWの絶対WBではない。
 
-現在のrecipeは `{ version: 7, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
+現在のrecipeは `{ version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
 
-White Balance専用のキー一覧・既定値判定・Reset helperを小さく追加した。effectiveAdjustmentsは各カテゴリがOFFならその所属値だけを既定値へ置き換える。TemperatureはBasic 6項目の一覧には含めない。両方OFFでもカテゴリflagによるpipeline全体の即returnは行わず、有効値の無補正判定で返す。OFF中の値は保持し、ONで再適用する。
+White Balance専用キーはTemperatureとTintで、effectiveAdjustmentsはWhite BalanceがOFFなら両方だけを既定値へ置き換える。両値はBasic 6項目の一覧に含めない。両カテゴリOFFでもカテゴリflagによるpipeline全体の即returnは行わず、有効値の無補正判定で返す。OFF中の値は保持し、ONで再適用する。
 
-処理順は Temperature → Exposure → Contrast → Highlights → Whites → Shadows → Blacks。正規化したtに対して `R gain = 1.5^(-t/100), G gain = 1, B gain = 1.5^(t/100)`。sRGBをlinear RGBへ変換してgainを乗算し、0〜1へclip、sRGBへ戻して8-bitへ丸め、既存Exposure/Contrast LUTへ渡す。Red/Blueそれぞれ256要素のLUTを使用する。t=0ではTemperatureの往復変換自体を省略し、元のbyte互換性を維持する。GreenとalphaはTemperatureでは変更しない。±100のgainは1.5 / 0.666666…で、符号反転時にRed/Blueが入れ替わる。±25は約1.107 / 0.904、±50は約1.225 / 0.816。既存toneの数式・作用域・中間8-bit丸め・Issue #2のskip最適化、Shadows/Blacksのアルゴリズムは変更していない。
+処理順は Temperature → Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks。Temperature式は従来どおり `R = 1.5^(-t/100), G = 1, B = 1.5^(t/100)`。Tintは正規化したuに対して `R = 1.3^(u/100), G = 1.3^(-u/100), B = 1.3^(u/100)` とした。u=+100はR/G/B = 1.3 / 0.769230… / 1.3、u=−100は0.769230… / 1.3 / 0.769230…で、各channelは符号反転時に逆数になる。各stageでsRGBをlinear RGBへ変換してgainを乗算し、0〜1へclip、sRGBへ戻して8-bitへ丸める。値0ではそのstageの往復を省略する。alphaは変更しない。既存toneの数式・作用域・中間8-bit丸め・Issue #2のskip最適化、Temperature式、Shadows/Blacksのアルゴリズムは変更していない。
 
-Temperature個別ResetとWhite Balance Resetは現状temperatureだけを0にし、White Balance ResetはON/OFFを保持する。Basic Resetは既存6項目のみでTemperatureを保持する。All Resetは7項目の既定値と両カテゴリONを復元する。カテゴリ操作前にpendingをcommitし、カテゴリReset / All Reset自体は各1 History operation。Temperature変更・個別Reset・White Balance ON/OFF・カテゴリResetを日英で表示し、最新順と未知kindを既知補正にfallbackしない方針を維持した。
+Temperature/Tint個別Resetは各値だけを0にする。White Balance Resetは両値を0にしてON/OFFを保持し、Basic Resetは両値を保持する。All Resetは8項目の既定値と両カテゴリONを復元する。カテゴリ操作前にpendingをcommitし、カテゴリReset / All Reset自体は各1 History operation。Tint変更・個別Resetも日英Historyへ追加し、Undo/Redo、最新順、未知kindを既知補正にfallbackしない方針を維持した。
 
-共通AdjustmentSliderにoptional trackGradientだけを追加した。指定時だけCSS custom propertyを設定し、Firefoxのrange track/progress/thumbとWebKitのtrack/thumbをopt-in selectorで描画する。左端赤橙 #d86943 → 中央無彩色 #b6b6b6 → 右端青 #4e8ed9で符号と一致させた。Basicのnative range外観と全操作handlerは従来どおり。drag、直接入力、左右1 step・上下10 step、wheel 10 step・Shift+wheel 1 step、500ms inactivity commit、disabledとpending coalescingを共用する。カテゴリのcollapse状態は永続化せず、Anshitsuへ入り直すと展開から開始する。
+共通AdjustmentSliderの既存optional trackGradientを再利用した。Temperatureは赤橙 #d86943 → 無彩色 #b6b6b6 → 青 #4e8ed9、Tintは緑 #4f9b62 → 無彩色 #b6b6b6 → マゼンタ #b05aa0。Basicのnative range外観と全操作handlerは従来どおり。drag、直接入力、左右1 step・上下10 step、wheel 10 step・Shift+wheel 1 step、500ms inactivity commit、disabledとpending coalescingを共用する。
 
-検証：Frontend全253件（既存209件＋追加44件）が成功。Temperatureのbyte identity、正負方向とgain対称性、clip・極端値・alpha・処理順、独立bypass/Reset、Undo/Redo/pending、実際のAnshitsuPageでの入力と日英History・collapse・Filmstrip切替を確認した。既存Basic 6項目、Issue #2固定ハッシュのpixel compatibility、Viewer / Filmstrip / Sidebar / multi-selectも回帰テストを通過。TypeScript/Vite production buildが成功し、git diff --checkも問題なし。main上の未コミット変更として保持し、Commit / Pushは行っていない。
+検証：Frontend全267件が成功。Tintのbyte identity、Green/Magenta方向とgain対称性、clip・極端値・alpha・Temperature → Tint → Exposure順、独立bypass/Reset、Undo/Redo/pending、日英Historyを確認した。既存Temperature、Basic 6項目、Issue #2固定ハッシュのpixel compatibility、Viewer / Filmstrip / Sidebar / multi-selectも回帰テストを通過。TypeScript/Vite production buildとgit diff --checkも成功。手動ブラウザ確認および確認専用fixtureの作成は行っていない。
 
-実機Firefox・実Immichの写真は未確認。肌、白壁、空、暗部、飽和した赤/青で±25/±50/±100の強度とclipを見て調整する。暖色/寒色の符号、中央neutral、thumb視認性、狭いSidebarでのtrack、drag/直接入力/キー/wheel、OFF/Reset/Undo/Redo、Filmstrip切替中のpending、ViewerのZoom/Panも確認する。デプロイ手順は変更していない。
+実機Firefox・実Immichの写真では、肌、白壁、植物、蛍光灯下、暗部、飽和色でTint ±25/±50/±100の強度とclipを確認する。Green/Magentaの符号、中央neutral、Tint gradientとthumb視認性、230 / 313 / 440pxの日英Sidebar、drag/直接入力/キー/wheel、OFF/Reset/Undo/Redo、Filmstrip切替中のpending、ViewerのZoom/Panも確認する。デプロイ手順は変更していない。
 
-Tint追加時はWhite Balance所属キー、recipeの既定値・型・同値判定、action/Reset/History/i18n、control、処理数式・順序とテストを拡張する。Color追加時はAnshitsuPageのBasicの直下へ独立カテゴリを配置し、Color専用の所属値・enabled/default/Reset/effective/Historyと処理順・全体無補正判定を追加する。Basicの6項目の対象範囲は維持し、パネル縦scrollと狭幅表示を実機確認する。今回はTint、Vibrance、Saturation、Colorカテゴリ等は未実装。
+Color追加時はAnshitsuPageのBasicの直下へ独立カテゴリを配置し、Color専用の所属値・enabled/default/Reset/effective/Historyと処理順・全体無補正判定を追加する。Basicの6項目とWhite BalanceのTemperature/Tintの対象範囲は維持し、パネル縦scrollと狭幅表示を実機確認する。今回はVibrance、Saturation、Colorカテゴリ等は未実装。
 
 ## JPEG Exposure / Contrast / Highlights / Whites / Shadows / Blacks編集基盤（以前のフェーズ）
 
