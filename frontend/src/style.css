@@ -128,7 +128,12 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-category { min-width: 0; }
 .adjustment-category + .adjustment-category { margin-top: 10px; }
 .adjustment-category-header { display: flex; min-width: 0; min-height: 30px; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; border-left: 2px solid #626266; border-radius: 3px; background: #232325; padding: 5px 0 5px 7px; }
-.adjustment-category-header h3 { min-width: 0; margin: 0; overflow: hidden; color: #e0e0e2; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-overflow: ellipsis; white-space: nowrap; }
+.adjustment-category-header h3 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; color: #e0e0e2; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; }
+.adjustment-category-title { display: flex; width: 100%; min-width: 0; min-height: 26px; align-items: center; justify-content: space-between; gap: 8px; color: inherit; background: transparent; border: 0; padding: 0 3px 0 0; font: inherit; font-weight: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
+.adjustment-category-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adjustment-category-title:hover { color: #f2f2f3; }
+.adjustment-category-title:focus-visible { border-radius: 2px; outline: 2px solid #f2f2f2; outline-offset: 1px; }
+.adjustment-category-chevron { flex: 0 0 auto; color: #a5a5a8; font-size: 0.72rem; line-height: 1; pointer-events: none; }
 .adjustment-category-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .adjustment-category-icon, .adjustment-category-reset { height: 26px; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 0; font: inherit; }
 .adjustment-category-icon { width: 26px; font-size: 0.82rem; line-height: 1; }

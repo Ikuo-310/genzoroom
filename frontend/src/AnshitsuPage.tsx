@@ -236,19 +236,29 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
 }) {
   const [expanded, setExpanded] = useState(true);
   const contentId = useId();
+  const toggleExpanded = () => setExpanded((value) => !value);
   return <section className={`adjustment-category${enabled ? '' : ' is-disabled'}`}>
     <div className="adjustment-category-header">
-      <h3>{title}</h3>
+      <h3>
+        <button type="button" className="adjustment-category-title" aria-expanded={expanded}
+          aria-controls={contentId}
+          title={expanded ? collapseLabel : expandLabel}
+          onClick={toggleExpanded}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            toggleExpanded();
+          }}>
+          <span>{title}</span>
+          <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+        </button>
+      </h3>
       <div className="adjustment-category-actions">
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`}
           aria-pressed={enabled} aria-label={enabled ? disableLabel : enableLabel}
           title={enabled ? disableLabel : enableLabel} onClick={onToggle}>⏻</button>
         <button type="button" className="adjustment-category-reset" disabled={resetDisabled}
           onClick={onReset}>{resetLabel}</button>
-        <button type="button" className="adjustment-category-icon" aria-expanded={expanded}
-          aria-controls={contentId} aria-label={expanded ? collapseLabel : expandLabel}
-          title={expanded ? collapseLabel : expandLabel}
-          onClick={() => setExpanded((value) => !value)}>{expanded ? '▾' : '▸'}</button>
       </div>
     </div>
     {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}

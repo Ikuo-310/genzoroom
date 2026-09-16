@@ -99,18 +99,26 @@ describe('edit controls DOM interaction', () => {
     expect(unitSlots).toHaveLength(6);
     expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '', '', '', '', '']);
   });
-  it('starts Basic expanded, collapses without changing its recipe, and keeps the preview note visible', () => {
+  it('toggles Basic from the wide title button by click, Enter, and Space without changing its recipe', () => {
     act(() => number().focus());
     changeNumber('0.5');
     key('Enter', number());
     const before = session().recipe;
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Collapse Basic"]')!.click());
+    const title = host.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    expect(title.tagName).toBe('BUTTON');
+    expect(title.textContent).toContain('Basic');
+    act(() => title.click());
     expect(host.querySelectorAll('.adjustment-control')).toHaveLength(0);
     expect(host.querySelector('.edit-source-note')?.textContent).toBe('Temporary preview note');
     expect(session().recipe).toEqual(before);
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Expand Basic"]')!.click());
+    key('Enter', title);
     expect(host.querySelectorAll('.adjustment-control')).toHaveLength(6);
     expect(number().value).toBe('0.50');
+    key(' ', title);
+    expect(host.querySelectorAll('.adjustment-control')).toHaveLength(0);
+    key(' ', title);
+    expect(host.querySelectorAll('.adjustment-control')).toHaveLength(6);
+    expect(session().recipe).toEqual(before);
   });
   it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');

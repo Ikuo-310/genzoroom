@@ -73,8 +73,10 @@ afterEach(() => {
 
 describe('production White Balance controls', () => {
   it('places only White Balance above Basic, expanded, with integer unitless Temperature and opt-in gradient', () => {
-    expect(Array.from(host.querySelectorAll('.adjustment-category h3'), item => item.textContent)).toEqual(['White Balance', 'Basic']);
+    expect(Array.from(host.querySelectorAll('.adjustment-category-title > span:first-child'), item => item.textContent)).toEqual(['White Balance', 'Basic']);
     expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(category().querySelectorAll('.adjustment-category-actions > button')).toHaveLength(2);
+    expect(category().querySelector('.adjustment-category-chevron')?.getAttribute('aria-hidden')).toBe('true');
     expect([slider().min, slider().max, slider().step, slider().value]).toEqual(['-100', '100', '1', '0']);
     expect(category().querySelector('label')?.textContent).toBe('Temperature');
     expect(category().querySelector('.adjustment-unit')?.textContent).toBe('');
@@ -160,8 +162,11 @@ describe('production White Balance controls', () => {
     expect(history().slice(0, 2)).toEqual(['Reset Basic adjustments', 'Temperature +10 → 0']);
   });
   it('keeps category toggles independent and commits pending before disabling', () => {
+    const collapse = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    expect(collapse.getAttribute('aria-expanded')).toBe('true');
     wheel(-1);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
+    expect(collapse.getAttribute('aria-expanded')).toBe('true');
     expect(history()).toEqual(['White Balance OFF', 'Temperature 0 → +10']);
     expect(recipe().whiteBalanceEnabled).toBe(false);
     expect(recipe().basicEnabled).toBe(true);
@@ -176,6 +181,7 @@ describe('production White Balance controls', () => {
     advance();
     expect(recipe().adjustments.exposure).toBe(0.1);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
+    expect(collapse.getAttribute('aria-expanded')).toBe('true');
     expect(history()[0]).toBe('White Balance ON');
     expect(slider().value).toBe('10');
     click(category(1).querySelector<HTMLElement>('[aria-pressed]')!);
@@ -190,6 +196,7 @@ describe('production White Balance controls', () => {
     wheel(-1);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
     click(category().querySelector<HTMLElement>('.adjustment-category-reset')!);
+    expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
     expect(recipe().adjustments.temperature).toBe(0);
     expect(recipe().whiteBalanceEnabled).toBe(false);
     expect(recipe().adjustments.exposure).toBe(0.1);
