@@ -73,10 +73,17 @@ afterEach(() => {
 
 describe('production White Balance controls', () => {
   it('places only White Balance above Basic, expanded, with integer unitless Temperature and opt-in gradient', () => {
-    expect(Array.from(host.querySelectorAll('.adjustment-category-title > span:first-child'), item => item.textContent)).toEqual(['White Balance', 'Basic']);
+    expect(Array.from(host.querySelectorAll('.adjustment-category-label'), item => item.textContent)).toEqual(['White Balance', 'Basic']);
     expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
     expect(category().querySelectorAll('.adjustment-category-actions > button')).toHaveLength(2);
     expect(category().querySelector('.adjustment-category-chevron')?.getAttribute('aria-hidden')).toBe('true');
+    for (const title of host.querySelectorAll<HTMLButtonElement>('.adjustment-category-title')) {
+      expect(title.disabled).toBe(false);
+      expect(title.hasAttribute('title')).toBe(false);
+      expect(title.getAttribute('aria-label')).toMatch(/^Collapse /);
+      expect(title.firstElementChild?.className).toBe('adjustment-category-chevron');
+      expect(title.firstElementChild?.textContent).toBe('▾');
+    }
     expect([slider().min, slider().max, slider().step, slider().value]).toEqual(['-100', '100', '1', '0']);
     expect(category().querySelector('label')?.textContent).toBe('Temperature');
     expect(category().querySelector('.adjustment-unit')?.textContent).toBe('');

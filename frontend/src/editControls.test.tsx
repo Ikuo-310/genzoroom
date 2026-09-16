@@ -108,10 +108,14 @@ describe('edit controls DOM interaction', () => {
     expect(title.tagName).toBe('BUTTON');
     expect(title.textContent).toContain('Basic');
     act(() => title.click());
+    expect(title.querySelector('.adjustment-category-chevron')?.textContent).toBe('▸');
+    expect(title.getAttribute('aria-label')).toBe('Expand Basic');
     expect(host.querySelectorAll('.adjustment-control')).toHaveLength(0);
     expect(host.querySelector('.edit-source-note')?.textContent).toBe('Temporary preview note');
     expect(session().recipe).toEqual(before);
     key('Enter', title);
+    expect(title.querySelector('.adjustment-category-chevron')?.textContent).toBe('▾');
+    expect(title.getAttribute('aria-label')).toBe('Collapse Basic');
     expect(host.querySelectorAll('.adjustment-control')).toHaveLength(6);
     expect(number().value).toBe('0.50');
     key(' ', title);

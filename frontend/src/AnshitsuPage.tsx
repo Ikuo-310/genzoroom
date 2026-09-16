@@ -242,15 +242,15 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
       <h3>
         <button type="button" className="adjustment-category-title" aria-expanded={expanded}
           aria-controls={contentId}
-          title={expanded ? collapseLabel : expandLabel}
+          aria-label={expanded ? collapseLabel : expandLabel}
           onClick={toggleExpanded}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             toggleExpanded();
           }}>
-          <span>{title}</span>
           <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          <span className="adjustment-category-label">{title}</span>
         </button>
       </h3>
       <div className="adjustment-category-actions">
