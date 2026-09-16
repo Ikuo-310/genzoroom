@@ -8,8 +8,9 @@ import { LanguageControl } from './GalleryPage';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
-import { AdjustmentSlider } from './AdjustmentSlider';
-import { BLACKS, CONTRAST, EXPOSURE, HIGHLIGHTS, SHADOWS, WHITES, formatBlacks, formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites, supportsEditing, type EditEntry } from './editing';
+import { BasicAdjustmentControls } from './BasicAdjustmentControls';
+import { basicHistoryControl } from './basicControls';
+import { isBasicDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -33,7 +34,7 @@ export function AnshitsuPage() {
   const activeDetail = detail?.id === assetId ? detail : null;
   const editable = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch } = useAssetEdits(assetId, editable);
-  const basicResetDisabled = Object.values(session.recipe.adjustments).every((value) => value === 0);
+  const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -134,60 +135,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleBasic' })}
               onReset={() => dispatch({ type: 'basicReset' })}>
-            <AdjustmentSlider key={assetId} label={t('workspace.exposure')} value={session.recipe.adjustments.exposure}
-              {...EXPOSURE} valueText={`${formatExposure(session.recipe.adjustments.exposure)} EV`}
-              valueLabel={t('workspace.exposureValue')} unit="EV" precision={2} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.exposureReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'exposure' })}
-              onChange={(value) => dispatch({ type: 'exposure', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'exposure' })}
-              onReset={() => dispatch({ type: 'exposureReset' })} />
-            <AdjustmentSlider key={`${assetId}-contrast`} label={t('workspace.contrast')} value={session.recipe.adjustments.contrast}
-              {...CONTRAST} valueText={formatContrast(session.recipe.adjustments.contrast)}
-              valueLabel={t('workspace.contrastValue')} precision={0} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.contrastReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'contrast' })}
-              onChange={(value) => dispatch({ type: 'contrast', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'contrast' })}
-              onReset={() => dispatch({ type: 'contrastReset' })} />
-            <AdjustmentSlider key={`${assetId}-highlights`} label={t('workspace.highlights')} value={session.recipe.adjustments.highlights}
-              {...HIGHLIGHTS} valueText={formatHighlights(session.recipe.adjustments.highlights)}
-              valueLabel={t('workspace.highlightsValue')} precision={0} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.highlightsReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'highlights' })}
-              onChange={(value) => dispatch({ type: 'highlights', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'highlights' })}
-              onReset={() => dispatch({ type: 'highlightsReset' })} />
-            <AdjustmentSlider key={`${assetId}-whites`} label={t('workspace.whites')} value={session.recipe.adjustments.whites}
-              {...WHITES} valueText={formatWhites(session.recipe.adjustments.whites)}
-              valueLabel={t('workspace.whitesValue')} precision={0} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.whitesReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'whites' })}
-              onChange={(value) => dispatch({ type: 'whites', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'whites' })}
-              onReset={() => dispatch({ type: 'whitesReset' })} />
-            <AdjustmentSlider key={`${assetId}-shadows`} label={t('workspace.shadows')} value={session.recipe.adjustments.shadows}
-              {...SHADOWS} valueText={formatShadows(session.recipe.adjustments.shadows)}
-              valueLabel={t('workspace.shadowsValue')} precision={0} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.shadowsReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'shadows' })}
-              onChange={(value) => dispatch({ type: 'shadows', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'shadows' })}
-              onReset={() => dispatch({ type: 'shadowsReset' })} />
-            <AdjustmentSlider key={`${assetId}-blacks`} label={t('workspace.blacks')} value={session.recipe.adjustments.blacks}
-              {...BLACKS} valueText={formatBlacks(session.recipe.adjustments.blacks)}
-              valueLabel={t('workspace.blacksValue')} precision={0} defaultValue={0}
-              disabled={!session.recipe.basicEnabled}
-              resetLabel={t('workspace.blacksReset')}
-              onBegin={() => dispatch({ type: 'begin', kind: 'blacks' })}
-              onChange={(value) => dispatch({ type: 'blacks', value })}
-              onCommit={() => dispatch({ type: 'commit', kind: 'blacks' })}
-              onReset={() => dispatch({ type: 'blacksReset' })} />
+              <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
@@ -303,26 +251,19 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
 
   return <ol className="edit-history">
     {newestFirst.map(({ entry, index }) => {
-      const isContrast = entry.kind === 'contrast' || entry.kind === 'contrastReset';
-      const isHighlights = entry.kind === 'highlights' || entry.kind === 'highlightsReset';
-      const isWhites = entry.kind === 'whites' || entry.kind === 'whitesReset';
-      const isShadows = entry.kind === 'shadows' || entry.kind === 'shadowsReset';
-      const isBlacks = entry.kind === 'blacks' || entry.kind === 'blacksReset';
-      const before = isContrast ? formatContrast(entry.before.adjustments.contrast)
-        : isHighlights ? formatHighlights(entry.before.adjustments.highlights)
-          : isWhites ? formatWhites(entry.before.adjustments.whites)
-            : isShadows ? formatShadows(entry.before.adjustments.shadows)
-              : isBlacks ? formatBlacks(entry.before.adjustments.blacks) : formatExposure(entry.before.adjustments.exposure);
-      const after = isContrast ? formatContrast(entry.after.adjustments.contrast)
-        : isHighlights ? formatHighlights(entry.after.adjustments.highlights)
-          : isWhites ? formatWhites(entry.after.adjustments.whites)
-            : isShadows ? formatShadows(entry.after.adjustments.shadows)
-              : isBlacks ? formatBlacks(entry.after.adjustments.blacks) : formatExposure(entry.after.adjustments.exposure);
-      const description = entry.kind === 'allReset' ? t('workspace.allReset')
-        : entry.kind === 'basicReset' ? t('workspace.basicResetHistory')
-          : entry.kind === 'basicToggle'
-            ? `${t('workspace.basic')} ${t(entry.after.basicEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`
-            : `${t(`workspace.${entry.kind}`)} ${before} → ${after}`;
+      const control = basicHistoryControl(entry.kind);
+      let description: string;
+      switch (entry.kind) {
+        case 'allReset': description = t('workspace.allReset'); break;
+        case 'basicReset': description = t('workspace.basicResetHistory'); break;
+        case 'basicToggle':
+          description = `${t('workspace.basic')} ${t(entry.after.basicEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
+        default:
+          description = control
+            ? `${t(entry.kind === control.reset ? control.resetLabel : control.label)} ${control.format(entry.before.adjustments[control.key])} → ${control.format(entry.after.adjustments[control.key])}`
+            : entry.kind;
+      }
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
         {description}

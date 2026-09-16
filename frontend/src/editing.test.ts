@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editAsset, editSession, newSession, supportsEditing, type EditSession } from './editing';
+import { editAsset, editSession, newSession, supportsEditing, isBasicDefault, effectiveAdjustments, type EditSession } from './editing';
 import { renderAdjustments } from './exposurePipeline';
 import { sliderSteps, undoShortcut } from './editShortcuts';
 
@@ -389,5 +389,32 @@ describe('edit key mapping', () => {
   it('ignores IME and unrelated keys', () => {
     expect(undoShortcut({ key: 'z', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, isComposing: true })).toBeNull();
     expect(sliderSteps('a')).toBeUndefined();
+  });
+});
+
+// Extra fields model a future category without changing the version 6 production type.
+describe('Basic scope', () => {
+  it.each(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] as const)('includes %s in the default check', (key) => {
+    const adjustments = { ...newSession().recipe.adjustments, futureColor: 42 };
+    expect(isBasicDefault(adjustments)).toBe(true);
+    adjustments[key] = 1;
+    expect(isBasicDefault(adjustments)).toBe(false);
+  });
+  it('preserves non-Basic values through reset, bypass, Undo and Redo', () => {
+    const recipe = { ...newSession().recipe, adjustments: { exposure: 0.5, contrast: 20, highlights: -30, whites: 40, shadows: 50, blacks: -60, futureColor: 42 } };
+    const state = { ...newSession(), recipe };
+    const off = editSession(state, { type: 'toggleBasic' });
+    const expected = { ...newSession().recipe.adjustments, futureColor: 42 };
+    expect(off.recipe.adjustments).toEqual(recipe.adjustments);
+    expect(effectiveAdjustments(off.recipe)).toEqual(expected);
+    expect(effectiveAdjustments(recipe)).toBe(recipe.adjustments);
+    expect(recipe.adjustments.exposure).toBe(0.5);
+    const reset = editSession(off, { type: 'basicReset' });
+    expect(reset.recipe.adjustments).toEqual(expected);
+    expect(reset.recipe.basicEnabled).toBe(false);
+    expect(isBasicDefault(reset.recipe.adjustments)).toBe(true);
+    expect(editSession(reset, { type: 'undo' }).recipe).toEqual(off.recipe);
+    expect(editSession(editSession(reset, { type: 'undo' }), { type: 'redo' }).recipe).toEqual(reset.recipe);
+    expect(editSession(reset, { type: 'basicReset' }).history).toHaveLength(2);
   });
 });

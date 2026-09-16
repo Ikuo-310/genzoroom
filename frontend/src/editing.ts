@@ -16,6 +16,24 @@ export const WHITES = { min: -100, max: 100, step: 1 };
 export const SHADOWS = { min: -100, max: 100, step: 1 };
 export const BLACKS = { min: -100, max: 100, step: 1 };
 export const defaultRecipe = (): EditRecipe => ({ version: 6, basicEnabled: true, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
+
+// Basic membership is deliberately independent of all recipe adjustments.
+export const BASIC_ADJUSTMENT_KEYS = ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] as const;
+export type BasicAdjustmentKey = typeof BASIC_ADJUSTMENT_KEYS[number];
+export function resetBasicAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
+  const result = { ...adjustments };
+  const defaults = defaultRecipe().adjustments;
+  for (const key of BASIC_ADJUSTMENT_KEYS) result[key] = defaults[key];
+  return result;
+}
+export function isBasicDefault(adjustments: EditRecipe['adjustments']): boolean {
+  const defaults = defaultRecipe().adjustments;
+  return BASIC_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
+}
+export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustments'] {
+  return recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);
+}
+
 export const newSession = (): EditSession => ({ recipe: defaultRecipe(), history: [], cursor: 0, pending: null });
 export const supportsEditing = (asset: RecentAsset) => !asset.is_raw && asset.format === 'JPEG';
 export const formatExposure = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
@@ -109,7 +127,7 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const current = commit(state);
       return commit({ ...current, pending: { kind: action.type, before: current.recipe },
         recipe: action.type === 'allReset' ? defaultRecipe()
-          : action.type === 'basicReset' ? { ...current.recipe, adjustments: defaultRecipe().adjustments } : {
+          : action.type === 'basicReset' ? { ...current.recipe, adjustments: resetBasicAdjustments(current.recipe.adjustments) } : {
           ...current.recipe,
           adjustments: { ...current.recipe.adjustments,
             [action.type === 'exposureReset' ? 'exposure'

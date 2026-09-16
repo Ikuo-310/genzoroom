@@ -251,3 +251,33 @@ function historyEntry(before: number, after: number): EditEntry {
     after: { version: 6, basicEnabled: true, adjustments: { exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
   };
 }
+
+describe('explicit Basic History formatting', () => {
+  it.each([
+    ['exposure', 'Exposure', 0.25, '+0.25', '0.00'],
+    ['contrast', 'Contrast', 21, '+21', '0'],
+    ['highlights', 'Highlights', -32, '-32', '0'],
+    ['whites', 'Whites', 43, '+43', '0'],
+    ['shadows', 'Shadows', 54, '+54', '0'],
+    ['blacks', 'Blacks', -65, '-65', '0'],
+  ] as const)('formats %s changes and individual resets', (key, label, value, formatted, zero) => {
+    const before = historyEntry(0, 0).before;
+    const after = { ...before, adjustments: { ...before.adjustments, [key]: value } };
+    const history: EditEntry[] = [
+      { kind: key, before, after },
+      { kind: `${key}Reset`, before: after, after: before },
+    ];
+    const markup = renderToStaticMarkup(<EditHistory history={history} cursor={2} />);
+    expect(markup).toContain(`${label} ${zero} → ${formatted}`);
+    expect(markup).toContain(`${label} Reset ${formatted} → ${zero}`);
+  });
+  it.each(['futureColor', 'futureColorReset', 'toString'])('does not render Exposure values for unknown kind %s', (kind) => {
+    const entry = { ...historyEntry(1.25, 2.5), kind } as EditEntry;
+    const markup = renderToStaticMarkup(<EditHistory history={[entry]} cursor={1} />);
+    expect(markup).toContain(`>${kind}</li>`);
+    expect(markup).not.toContain('Exposure');
+    expect(markup).not.toContain('1.25');
+    expect(markup).not.toContain('2.50');
+    expect(markup).not.toContain('→');
+  });
+});
