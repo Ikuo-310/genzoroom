@@ -164,6 +164,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-range.has-gradient::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; margin-top: -4px; border: 1px solid #333; border-radius: 50%; background: #eee; }
 .adjustment-range.has-gradient::-moz-range-thumb { width: 12px; height: 12px; border: 1px solid #333; border-radius: 50%; background: #eee; }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.edit-actions .tool-button:disabled { cursor: default; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }
