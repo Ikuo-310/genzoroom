@@ -149,6 +149,13 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-reset:hover:not(:disabled) { background: #303033; }
 .adjustment-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-range { min-width: 0; width: 100%; min-height: 28px; margin: 0; accent-color: #bbb; }
+/* Opt-in track only: existing Basic ranges retain their native appearance. */
+.adjustment-range.has-gradient { appearance: none; background: transparent; }
+.adjustment-range.has-gradient::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--adjustment-track-gradient); }
+.adjustment-range.has-gradient::-moz-range-track { height: 6px; border: 0; border-radius: 3px; background: var(--adjustment-track-gradient); }
+.adjustment-range.has-gradient::-moz-range-progress { background: transparent; }
+.adjustment-range.has-gradient::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; margin-top: -4px; border: 1px solid #333; border-radius: 50%; background: #eee; }
+.adjustment-range.has-gradient::-moz-range-thumb { width: 12px; height: 12px; border: 1px solid #333; border-radius: 50%; background: #eee; }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
 .edit-history [aria-current="step"] { color: #eee; }

@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
-export type EditRecipe = { version: 6; basicEnabled: boolean; adjustments: { exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number } };
-export type EditKind = 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'allReset';
+export type EditRecipe = { version: 7; whiteBalanceEnabled: boolean; basicEnabled: boolean; adjustments: { temperature: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number } };
+export type EditKind = 'temperature' | 'temperatureReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'allReset';
 export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
@@ -9,13 +9,14 @@ export type EditSession = {
   cursor: number;
   pending: { kind: EditKind; before: EditRecipe } | null;
 };
+export const TEMPERATURE = { min: -100, max: 100, step: 1 };
 export const EXPOSURE = { min: -5, max: 5, step: 0.01 };
 export const CONTRAST = { min: -100, max: 100, step: 1 };
 export const HIGHLIGHTS = { min: -100, max: 100, step: 1 };
 export const WHITES = { min: -100, max: 100, step: 1 };
 export const SHADOWS = { min: -100, max: 100, step: 1 };
 export const BLACKS = { min: -100, max: 100, step: 1 };
-export const defaultRecipe = (): EditRecipe => ({ version: 6, basicEnabled: true, adjustments: { exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
+export const defaultRecipe = (): EditRecipe => ({ version: 7, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } });
 
 // Basic membership is deliberately independent of all recipe adjustments.
 export const BASIC_ADJUSTMENT_KEYS = ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] as const;
@@ -30,18 +31,31 @@ export function isBasicDefault(adjustments: EditRecipe['adjustments']): boolean 
   const defaults = defaultRecipe().adjustments;
   return BASIC_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
+export const WHITE_BALANCE_ADJUSTMENT_KEYS = ['temperature'] as const;
+export function resetWhiteBalanceAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
+  const result = { ...adjustments };
+  for (const key of WHITE_BALANCE_ADJUSTMENT_KEYS) result[key] = defaultRecipe().adjustments[key];
+  return result;
+}
+export function isWhiteBalanceDefault(adjustments: EditRecipe['adjustments']): boolean {
+  return WHITE_BALANCE_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaultRecipe().adjustments[key]);
+}
 export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustments'] {
-  return recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);
+  const basic = recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);
+  return recipe.whiteBalanceEnabled ? basic : resetWhiteBalanceAdjustments(basic);
 }
 
 export const newSession = (): EditSession => ({ recipe: defaultRecipe(), history: [], cursor: 0, pending: null });
 export const supportsEditing = (asset: RecentAsset) => !asset.is_raw && asset.format === 'JPEG';
+export const formatTemperature = (value: number) => (value > 0 ? '+' : '') + value.toFixed(0);
 export const formatExposure = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
 export const formatContrast = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatHighlights = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatWhites = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatShadows = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatBlacks = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
+export const normalizeTemperature = (value: number) => Number.isFinite(value)
+  ? Math.round(Math.max(TEMPERATURE.min, Math.min(TEMPERATURE.max, value))) : 0;
 export const normalizeExposure = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(EXPOSURE.min, Math.min(EXPOSURE.max, value)) * 100) / 100 : 0;
 export const normalizeContrast = (value: number) => Number.isFinite(value)
@@ -55,12 +69,14 @@ export const normalizeShadows = (value: number) => Number.isFinite(value)
 export const normalizeBlacks = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(BLACKS.min, Math.min(BLACKS.max, value))) : 0;
 
-export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks'; value: number }
+export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperature' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks'; value: number }
   | { type: 'commit'; kind?: EditKind }
-  | { type: 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'allReset' };
+  | { type: 'temperatureReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'allReset' };
 
 function recipesEqual(left: EditRecipe, right: EditRecipe) {
-  return left.basicEnabled === right.basicEnabled
+  return left.whiteBalanceEnabled === right.whiteBalanceEnabled
+    && left.adjustments.temperature === right.adjustments.temperature
+    && left.basicEnabled === right.basicEnabled
     && left.adjustments.exposure === right.adjustments.exposure
     && left.adjustments.contrast === right.adjustments.contrast
     && left.adjustments.highlights === right.adjustments.highlights
@@ -83,6 +99,10 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const current = commit(state);
       return { ...current, pending: { kind: action.kind, before: current.recipe } };
     }
+    case 'temperature': return {
+      ...editSession(state, { type: 'begin', kind: 'temperature' }),
+      recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, temperature: normalizeTemperature(action.value) } },
+    };
     case 'exposure': return {
       ...editSession(state, { type: 'begin', kind: 'exposure' }),
       recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, exposure: normalizeExposure(action.value) } },
@@ -116,6 +136,8 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const current = commit(state);
       return current.cursor === current.history.length ? current : { ...current, cursor: current.cursor + 1, recipe: current.history[current.cursor].after };
     }
+    case 'temperatureReset':
+    case 'whiteBalanceReset':
     case 'exposureReset':
     case 'contrastReset':
     case 'highlightsReset':
@@ -127,15 +149,21 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const current = commit(state);
       return commit({ ...current, pending: { kind: action.type, before: current.recipe },
         recipe: action.type === 'allReset' ? defaultRecipe()
+          : action.type === 'whiteBalanceReset' ? { ...current.recipe, adjustments: resetWhiteBalanceAdjustments(current.recipe.adjustments) }
           : action.type === 'basicReset' ? { ...current.recipe, adjustments: resetBasicAdjustments(current.recipe.adjustments) } : {
           ...current.recipe,
           adjustments: { ...current.recipe.adjustments,
-            [action.type === 'exposureReset' ? 'exposure'
+            [action.type === 'temperatureReset' ? 'temperature' : action.type === 'exposureReset' ? 'exposure'
               : action.type === 'contrastReset' ? 'contrast'
                 : action.type === 'highlightsReset' ? 'highlights'
                   : action.type === 'whitesReset' ? 'whites'
                     : action.type === 'shadowsReset' ? 'shadows' : 'blacks']: 0 },
         } });
+    }
+    case 'toggleWhiteBalance': {
+      const current = commit(state);
+      return commit({ ...current, pending: { kind: 'whiteBalanceToggle', before: current.recipe },
+        recipe: { ...current.recipe, whiteBalanceEnabled: !current.recipe.whiteBalanceEnabled } });
     }
     case 'toggleBasic': {
       const current = commit(state);

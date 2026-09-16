@@ -8,9 +8,10 @@ import { LanguageControl } from './GalleryPage';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
+import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { isBasicDefault, supportsEditing, type EditEntry } from './editing';
+import { formatTemperature, isWhiteBalanceDefault, isBasicDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -128,6 +129,15 @@ export function AnshitsuPage() {
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
+            <AdjustmentCategory title={t('workspace.whiteBalance')} enabled={session.recipe.whiteBalanceEnabled}
+              resetDisabled={isWhiteBalanceDefault(session.recipe.adjustments)}
+              enableLabel={t('workspace.enableWhiteBalance')} disableLabel={t('workspace.disableWhiteBalance')}
+              expandLabel={t('workspace.expandWhiteBalance')} collapseLabel={t('workspace.collapseWhiteBalance')}
+              resetLabel={t('workspace.reset')}
+              onToggle={() => dispatch({ type: 'toggleWhiteBalance' })}
+              onReset={() => dispatch({ type: 'whiteBalanceReset' })}>
+              <WhiteBalanceAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+            </AdjustmentCategory>
             <AdjustmentCategory title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
               resetDisabled={basicResetDisabled}
               enableLabel={t('workspace.enableBasic')} disableLabel={t('workspace.disableBasic')}
@@ -254,6 +264,15 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
       const control = basicHistoryControl(entry.kind);
       let description: string;
       switch (entry.kind) {
+        case 'temperature':
+        case 'temperatureReset':
+          description = t(entry.kind === 'temperature' ? 'workspace.temperature' : 'workspace.temperatureReset')
+            + ' ' + formatTemperature(entry.before.adjustments.temperature) + ' → ' + formatTemperature(entry.after.adjustments.temperature);
+          break;
+        case 'whiteBalanceReset': description = t('workspace.whiteBalanceResetHistory'); break;
+        case 'whiteBalanceToggle':
+          description = t('workspace.whiteBalance') + ' ' + t(entry.after.whiteBalanceEnabled ? 'workspace.basicOn' : 'workspace.basicOff');
+          break;
         case 'allReset': description = t('workspace.allReset'); break;
         case 'basicReset': description = t('workspace.basicResetHistory'); break;
         case 'basicToggle':

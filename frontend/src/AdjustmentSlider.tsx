@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 
 type Props = {
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; unit?: string; precision: number; defaultValue: number; resetLabel: string;
   disabled?: boolean;
+  trackGradient?: string;
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
 
@@ -158,7 +159,8 @@ export function AdjustmentSlider(props: Props) {
   }, []);
   return <div className="adjustment-control" role="group" aria-labelledby={labelId}>
     <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
-    <input ref={range} id={rangeId} className="adjustment-range" type="range" min={props.min} max={props.max} step={props.step}
+    <input ref={range} id={rangeId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
+      style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={() => { hovered.current = true; }}
       onPointerLeave={() => { hovered.current = false; }}
