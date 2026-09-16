@@ -1,4 +1,4 @@
-import type { EditRecipe } from './editing';
+import { effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -8,19 +8,19 @@ const BLACKS_MAX_OFFSET = 0.1;
 // Later adjustments belong here, independent of the image acquisition adapter.
 export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe): Uint8ClampedArray<ArrayBuffer> {
   const output = new Uint8ClampedArray(source);
-  if (!recipe.basicEnabled) return output;
-  const gain = 2 ** recipe.adjustments.exposure;
-  const contrast = Number.isFinite(recipe.adjustments.contrast)
-    ? Math.max(-100, Math.min(100, recipe.adjustments.contrast)) : 0;
+  const adjustments = effectiveAdjustments(recipe);
+  const gain = 2 ** adjustments.exposure;
+  const contrast = Number.isFinite(adjustments.contrast)
+    ? Math.max(-100, Math.min(100, adjustments.contrast)) : 0;
   const contrastFactor = 1 + contrast / 100;
-  const highlights = Number.isFinite(recipe.adjustments.highlights)
-    ? Math.max(-100, Math.min(100, recipe.adjustments.highlights)) / 100 : 0;
-  const whites = Number.isFinite(recipe.adjustments.whites)
-    ? Math.max(-100, Math.min(100, recipe.adjustments.whites)) / 100 : 0;
-  const shadows = Number.isFinite(recipe.adjustments.shadows)
-    ? Math.max(-100, Math.min(100, recipe.adjustments.shadows)) / 100 : 0;
-  const blacks = Number.isFinite(recipe.adjustments.blacks)
-    ? Math.max(-100, Math.min(100, recipe.adjustments.blacks)) / 100 : 0;
+  const highlights = Number.isFinite(adjustments.highlights)
+    ? Math.max(-100, Math.min(100, adjustments.highlights)) / 100 : 0;
+  const whites = Number.isFinite(adjustments.whites)
+    ? Math.max(-100, Math.min(100, adjustments.whites)) / 100 : 0;
+  const shadows = Number.isFinite(adjustments.shadows)
+    ? Math.max(-100, Math.min(100, adjustments.shadows)) / 100 : 0;
+  const blacks = Number.isFinite(adjustments.blacks)
+    ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
   if (gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0) return output;
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {

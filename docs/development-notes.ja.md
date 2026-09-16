@@ -40,6 +40,16 @@ Node.js 24.19.0上の参考計測。seed 17の疑似乱数RGB・alpha 255、3回
 
 再計測は `frontend/` から `node scripts/benchmark-preview.mjs 99c58aae3ec621eddbea0b4d7e5ba76c52be5147` を実行する（Node 24と対象commitを含むGit履歴が必要）。無補正・Exposure単独には改善傾向はなく、小幅な増減がある。これは画素処理と出力buffer確保だけの計測であり、decode、Canvas転送、React、requestAnimationFrame、実写真・実機Firefoxの操作時間は含まない。大きなpreviewでは処理時間がまだ長く、実機確認後にWorker化を別途評価する。今回WorkerやGPU処理は導入していない。
 
+### Issue #3: Basic編集controlsの内部整理
+
+Basic 6項目のkey・翻訳キー・範囲・step・表示桁・単位・formatter・Reset識別をbasicControls.tsへまとめ、BasicAdjustmentControlsを画面とDOM操作テストで共有した。Historyも同じ定義から値を表示し、未知のkindは識別文字列だけを表示してExposureの値へfallbackしない。最新順、Basic ON/OFF・Basic Reset・All Resetの簡潔な表示とHistory構造は維持した。
+
+editing.tsの明示的なBasicキー一覧をReset・既定値判定・bypassへ使用する。Resetとbypassは6項目のみを既定値へ戻し、追加のadjustmentを保持する。pipelineは有効なadjustmentsを受け取る部分のみ変更し、画素計算・処理順・作用域・Issue #2のskip最適化・benchmarkは維持した。recipe version 6、平坦なadjustments、Undo/Redo、pending、AdjustmentSliderの入力仕様は変更していない。
+
+検証：Frontend全209件（既存187件＋追加22件）とTypeScript/Vite production buildが成功。既存の固定ハッシュによる画素互換性、Viewer / Filmstrip / Sidebar / multi-selectの回帰も通過。git diff --checkに問題なし。実機Firefox・実Immich接続は未確認。
+
+将来White Balance / Colorを追加する際は、各カテゴリのUI・History表示・既定値・actionとrecipe全体の同値判定を拡張し、pipelineの処理順と無補正時の早期returnを見直す。Basicのキー一覧へ別カテゴリの項目を追加しない。実機Firefoxではdrag・数値入力・矢印キー・wheel/Shift+wheel・500ms単位のHistory、OFF/Reset/Undo/Redo、Filmstrip切替中のpending、Sidebar resizeとViewerを確認する。
+
 ## 過去フェーズの記録
 
 以下は各フェーズで行った実装、実機確認、設計判断、トラブルシュートの記録であり、当時の「未実装」の記述を含む。現在の実装状況は冒頭の最新フェーズと[README](../README.md)を参照する。公開リポジトリに置くため、APIキーなどの秘密情報は記録しない。
