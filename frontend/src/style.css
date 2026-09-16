@@ -145,7 +145,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-category-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-category-content { min-width: 0; transition: opacity 120ms ease; }
 .adjustment-category.is-disabled .adjustment-category-content { opacity: 0.45; }
-.adjustment-control { display: grid; grid-template-columns: clamp(40px, 22%, 64px) minmax(28px, 1fr) auto; column-gap: 5px; align-items: center; min-width: 0; min-height: 30px; margin-bottom: 4px; color: #ddd; }
+.adjustment-control { display: grid; grid-template-columns: clamp(40px, calc(50% - 60px), 90px) minmax(28px, 1fr) auto; column-gap: 5px; align-items: center; min-width: 0; min-height: 30px; margin-bottom: 4px; color: #ddd; }
 .adjustment-control > label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .adjustment-value-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .adjustment-number { box-sizing: border-box; width: 44px; height: 26px; color: #eee; background: #202022; border: 1px solid #4a4a4d; border-radius: 4px; padding: 2px 5px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; -moz-appearance: textfield; }
