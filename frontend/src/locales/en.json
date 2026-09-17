@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 50 recent Immich photos. JPEG White Balance, Basic, and Color adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 50 recent Immich photos. JPEG White Balance, Basic, Color Grading, and Color adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
@@ -112,6 +112,16 @@
     "basicOn": "ON",
     "basicOff": "OFF",
     "basicResetHistory": "Reset Basic adjustments",
+    "colorGrading": "Color Grading",
+    "shadowsGrading": "Shadows",
+    "shadowsTemperatureValue": "Shadows Temperature value",
+    "shadowsTemperatureReset": "Shadows Temperature Reset",
+    "shadowsTemperatureHistory": "Shadows Temperature",
+    "enableColorGrading": "Enable Color Grading adjustments",
+    "disableColorGrading": "Bypass Color Grading adjustments",
+    "collapseColorGrading": "Collapse Color Grading adjustments",
+    "expandColorGrading": "Expand Color Grading adjustments",
+    "colorGradingResetHistory": "Reset Color Grading adjustments",
     "color": "Color",
     "vibrance": "Vibrance",
     "vibranceValue": "Vibrance value",

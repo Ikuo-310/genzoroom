@@ -1,4 +1,4 @@
-import { normalizeSaturation, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeSaturation, normalizeShadowsTemperature, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -8,6 +8,8 @@ export const VIBRANCE_CHROMA_THRESHOLD = 0.5;
 export const VIBRANCE_POSITIVE_STRENGTH = 0.75;
 export const VIBRANCE_NEGATIVE_STRENGTH = 0.6;
 export const VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT = 0.25;
+export const SHADOWS_GRADING_FULL_STRENGTH_END = 0.2;
+export const SHADOWS_GRADING_FADE_END = 0.5;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {
@@ -33,6 +35,21 @@ function linearGainLut(gain: number) {
   return lut;
 }
 
+export function shadowsGradingWeight(luminance: number) {
+  const position = Math.max(0, Math.min(1,
+    (luminance - SHADOWS_GRADING_FULL_STRENGTH_END)
+      / (SHADOWS_GRADING_FADE_END - SHADOWS_GRADING_FULL_STRENGTH_END)));
+  return 1 - position * position * (3 - 2 * position);
+}
+
+function maskedLinearGain(channel: number, gain: number, weight: number) {
+  const srgb = channel / 255;
+  const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  const shifted = Math.max(0, Math.min(1, linear * gain ** weight));
+  const encoded = shifted <= 0.0031308 ? 12.92 * shifted : 1.055 * shifted ** (1 / 2.4) - 0.055;
+  return Math.round(255 * encoded);
+}
+
 // Pure pixel stage: accepts decoded sRGB RGBA, never changes the source buffer.
 // Later adjustments belong here, independent of the image acquisition adapter.
 export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe): Uint8ClampedArray<ArrayBuffer> {
@@ -52,12 +69,14 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     ? Math.max(-100, Math.min(100, adjustments.shadows)) / 100 : 0;
   const blacks = Number.isFinite(adjustments.blacks)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
+  const shadowsTemperature = normalizeShadowsTemperature(adjustments.shadowsTemperature);
   const vibrance = normalizeVibrance(adjustments.vibrance);
   const saturation = normalizeSaturation(adjustments.saturation);
   const saturationFactor = 1 + saturation / 100;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && vibrance === 0 && saturation === 0) return output;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
+  const shadowsTemperatureGain = temperatureGains(shadowsTemperature);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
   // At zero, skip that stage's round-trip to retain existing byte compatibility.
   const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;
@@ -158,6 +177,17 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
           output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
           output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
         }
+      }
+    }
+    if (shadowsTemperature !== 0) {
+      const red = output[i] / 255;
+      const green = output[i + 1] / 255;
+      const blue = output[i + 2] / 255;
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      const weight = shadowsGradingWeight(luminance);
+      if (weight > 0) {
+        output[i] = maskedLinearGain(output[i], shadowsTemperatureGain.red, weight);
+        output[i + 2] = maskedLinearGain(output[i + 2], shadowsTemperatureGain.blue, weight);
       }
     }
     if (vibrance !== 0) {

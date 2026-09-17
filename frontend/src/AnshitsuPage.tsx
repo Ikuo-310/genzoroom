@@ -11,8 +11,9 @@ import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
+import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatSaturation, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, supportsEditing, type EditEntry } from './editing';
+import { formatSaturation, formatShadowsTemperature, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -37,6 +38,7 @@ export function AnshitsuPage() {
   const editable = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch } = useAssetEdits(assetId, editable);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
+  const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
 
   useEffect(() => {
@@ -148,6 +150,15 @@ export function AnshitsuPage() {
               onToggle={() => dispatch({ type: 'toggleBasic' })}
               onReset={() => dispatch({ type: 'basicReset' })}>
               <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+            </AdjustmentCategory>
+            <AdjustmentCategory title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
+              resetDisabled={colorGradingResetDisabled}
+              enableLabel={t('workspace.enableColorGrading')} disableLabel={t('workspace.disableColorGrading')}
+              expandLabel={t('workspace.expandColorGrading')} collapseLabel={t('workspace.collapseColorGrading')}
+              resetLabel={t('workspace.reset')}
+              onToggle={() => dispatch({ type: 'toggleColorGrading' })}
+              onReset={() => dispatch({ type: 'colorGradingReset' })}>
+              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
             <AdjustmentCategory title={t('workspace.color')} enabled={session.recipe.colorEnabled}
               resetDisabled={colorResetDisabled}
@@ -303,6 +314,15 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'basicReset': description = t('workspace.basicResetHistory'); break;
         case 'basicToggle':
           description = `${t('workspace.basic')} ${t(entry.after.basicEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
+        case 'shadowsTemperature':
+        case 'shadowsTemperatureReset':
+          description = t(entry.kind === 'shadowsTemperature' ? 'workspace.shadowsTemperatureHistory' : 'workspace.shadowsTemperatureReset')
+            + ' ' + formatShadowsTemperature(entry.before.adjustments.shadowsTemperature) + ' → ' + formatShadowsTemperature(entry.after.adjustments.shadowsTemperature);
+          break;
+        case 'colorGradingReset': description = t('workspace.colorGradingResetHistory'); break;
+        case 'colorGradingToggle':
+          description = `${t('workspace.colorGrading')} ${t(entry.after.colorGradingEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
           break;
         case 'saturation':
         case 'saturationReset':

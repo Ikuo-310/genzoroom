@@ -145,6 +145,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-category-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-category-content { min-width: 0; transition: opacity 120ms ease; }
 .adjustment-category.is-disabled .adjustment-category-content { opacity: 0.45; }
+.adjustment-subsection-title { margin: 5px 0 4px; color: #bdbdc0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
 .adjustment-control { display: grid; grid-template-columns: clamp(40px, calc(50% - 60px), 90px) minmax(28px, 1fr) auto; column-gap: 5px; align-items: center; min-width: 0; min-height: 30px; margin-bottom: 4px; color: #ddd; }
 .adjustment-control > label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .adjustment-value-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }

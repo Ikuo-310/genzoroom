@@ -22,7 +22,7 @@ let host: HTMLDivElement;
 let root: Root;
 const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!.textContent!);
 const categories = () => host.querySelectorAll<HTMLElement>('.adjustment-category');
-const color = () => categories()[2];
+const color = () => categories()[3];
 const slider = (index = 0) => color().querySelectorAll<HTMLInputElement>('input[type="range"]')[index]!;
 const number = (index = 0) => color().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
 const history = () => Array.from(host.querySelectorAll('.edit-history li'), (item) => item.textContent);
@@ -67,7 +67,7 @@ afterEach(() => {
 describe('production Color controls', () => {
   it('places Color below Basic and Vibrance above Saturation with unitless normal tracks', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
-      .toEqual(['White Balance', 'Basic', 'Color']);
+      .toEqual(['White Balance', 'Basic', 'Color Grading', 'Color']);
     expect(Array.from(color().querySelectorAll('label'), (item) => item.textContent)).toEqual(['Vibrance', 'Saturation']);
     for (const control of [slider(), slider(1)]) {
       expect([control.min, control.max, control.step, control.value]).toEqual(['-100', '100', '1', '0']);

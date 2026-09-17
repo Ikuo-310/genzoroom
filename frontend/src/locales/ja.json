@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの色温度補正、基本補正、色補正を調整できます。"
+    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの色温度補正、基本補正、カラーグレーディング、色補正を調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
@@ -110,6 +110,16 @@
     "basicOn": "ON",
     "basicOff": "OFF",
     "basicResetHistory": "基本補正をリセット",
+    "colorGrading": "カラーグレーディング",
+    "shadowsGrading": "Shadows",
+    "shadowsTemperatureValue": "Shadowsの色温度の値",
+    "shadowsTemperatureReset": "Shadowsの色温度をリセット",
+    "shadowsTemperatureHistory": "Shadows 色温度",
+    "enableColorGrading": "カラーグレーディングを有効にする",
+    "disableColorGrading": "カラーグレーディングをバイパスする",
+    "collapseColorGrading": "カラーグレーディングを折りたたむ",
+    "expandColorGrading": "カラーグレーディングを展開する",
+    "colorGradingResetHistory": "カラーグレーディングをリセット",
     "color": "色補正",
     "vibrance": "自然な彩度",
     "vibranceValue": "自然な彩度の値",

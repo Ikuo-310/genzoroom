@@ -1,6 +1,6 @@
 # GenzoRoom
 
-**Status: Early Development — Immich browsing and minimal JPEG Temperature/Tint/Exposure/Contrast/Highlights/Whites/Shadows/Blacks/Vibrance/Saturation adjustments are available. RAW development is not implemented.**
+**Status: Early Development — Immich browsing and minimal JPEG White Balance, Basic, Color Grading, and Color adjustments are available. RAW development is not implemented.**
 
 GenzoRoom is a hobby and learning project aiming to become a self-hosted browser interface for developing and color-correcting photos managed by [Immich](https://immich.app/).
 
@@ -17,8 +17,9 @@ GenzoRoom currently provides:
 - Ordered multi-photo selection and transfer to the **Anshitsu** development workspace.
 - A large preview, EXIF display, Filmstrip, and active-photo switching in Anshitsu.
 - Fit, 1:1, zoom, and pan controls, with independently collapsible and resizable desktop side panels whose widths are remembered.
-- Non-destructive JPEG Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both integer steps with default 0, in a White Balance category above Basic. Each has a directional gradient track. White Balance, Basic, and Color have independent collapse, bypass, and reset controls.
+- Non-destructive JPEG Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both integer steps with default 0, in a White Balance category above Basic. Each has a directional gradient track. White Balance, Basic, Color Grading, and Color have independent collapse, bypass, and reset controls.
 - Non-destructive JPEG Exposure, Contrast, Highlights, Whites, Shadows, and Blacks adjustments grouped in a collapsible Basic category, with temporary category bypass, category reset, compact slider/direct-value controls, per-asset in-memory recipes, grouped Undo/Redo and History, individual resets, and All Reset. This initial version uses Immich previews as a temporary input.
+- Non-destructive Shadows Temperature (−100 warm to +100 cool, step 1, default 0) in a Color Grading category between Basic and Color. It applies the existing linear-RGB Temperature direction strongly through low luminance and fades smoothly to zero through the midtones.
 - Non-destructive JPEG Vibrance and Saturation (−100 to +100, step 1) in a Color category below Basic. Vibrance favors low-saturation colors and runs before the uniform Saturation stage.
 - English and Japanese UI, remembered language selection, and locale-aware date and time display.
 
@@ -26,7 +27,7 @@ All current Immich operations are read-only. The browser uses same-origin `/api/
 
 The following are not implemented:
 
-- HEIC adjustments and JPEG adjustments other than Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, Blacks, Vibrance, and Saturation.
+- HEIC adjustments and JPEG adjustments beyond the currently listed White Balance, Basic, Color Grading, and Color controls.
 - RAW development.
 - Persistent storage of non-destructive edit recipes.
 - Scope displays, including Histogram, Waveform, and RGB Parade.
