@@ -8,8 +8,8 @@ export const VIBRANCE_CHROMA_THRESHOLD = 0.5;
 export const VIBRANCE_POSITIVE_STRENGTH = 0.75;
 export const VIBRANCE_NEGATIVE_STRENGTH = 0.6;
 export const VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT = 0.25;
-export const SHADOWS_GRADING_FULL_STRENGTH_END = 0.2;
-export const SHADOWS_GRADING_FADE_END = 0.5;
+export const SHADOWS_GRADING_FULL_STRENGTH_END = 0.15;
+export const SHADOWS_GRADING_FADE_END = 0.35;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {

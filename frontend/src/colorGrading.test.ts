@@ -30,15 +30,15 @@ describe('Shadows Temperature pixel stage', () => {
 
   it('is strong through low luminance, fades smoothly, and is zero in highlights', () => {
     expect(shadowsGradingWeight(0)).toBe(1);
-    expect(shadowsGradingWeight(0.2)).toBe(1);
-    expect(shadowsGradingWeight(0.35)).toBeCloseTo(0.5, 10);
-    expect(shadowsGradingWeight(0.5)).toBe(0);
+    expect(shadowsGradingWeight(0.15)).toBe(1);
+    expect(shadowsGradingWeight(0.25)).toBeCloseTo(0.5, 10);
+    expect(shadowsGradingWeight(0.35)).toBe(0);
     expect(shadowsGradingWeight(1)).toBe(0);
-    const nearLeft = shadowsGradingWeight(0.2 - 1e-6);
-    const nearRight = shadowsGradingWeight(0.2 + 1e-6);
+    const nearLeft = shadowsGradingWeight(0.15 - 1e-6);
+    const nearRight = shadowsGradingWeight(0.15 + 1e-6);
     expect(Math.abs(nearLeft - nearRight)).toBeLessThan(1e-9);
-    const fadeLeft = shadowsGradingWeight(0.5 - 1e-6);
-    const fadeRight = shadowsGradingWeight(0.5 + 1e-6);
+    const fadeLeft = shadowsGradingWeight(0.35 - 1e-6);
+    const fadeRight = shadowsGradingWeight(0.35 + 1e-6);
     expect(Math.abs(fadeLeft - fadeRight)).toBeLessThan(1e-9);
 
     const source = new Uint8ClampedArray([45, 45, 45, 17, 220, 220, 220, 239]);

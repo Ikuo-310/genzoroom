@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- A Color Grading category between Basic and Color with Shadows Temperature (−100 warm to +100 cool, step 1, default 0). It uses the existing Temperature gains in linear RGB, weighted at full strength through luminance 0.20 and smoothly faded to zero at 0.50, with independent bypass, Reset, History, Undo/Redo, and per-asset state.
+- A Color Grading category below Color with Shadows Temperature (−100 warm to +100 cool, step 1, default 0). It uses the existing Temperature gains in linear RGB, weighted at full strength through luminance 0.15 and smoothly faded to zero at 0.35, with independent bypass, Reset, History, Undo/Redo, and per-asset state.
 - A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
 - A Color category below Basic with global JPEG preview Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo, and runs after Blacks while preserving alpha.
 - Low-saturation-priority JPEG preview Vibrance (−100 to +100, step 1, default 0) above Saturation in Color. It uses the shared slider, Reset, History, and Undo/Redo behavior and runs between Blacks and Saturation.

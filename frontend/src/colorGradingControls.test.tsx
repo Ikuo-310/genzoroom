@@ -21,7 +21,7 @@ vi.mock('./ImageViewer', () => ({
 let host: HTMLDivElement;
 let root: Root;
 const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!.textContent!);
-const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')[2];
+const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')[3];
 const slider = () => grading().querySelector<HTMLInputElement>('input[type="range"]')!;
 const history = () => Array.from(host.querySelectorAll('.edit-history li'), (item) => item.textContent);
 function click(element: HTMLElement) { act(() => element.click()); }
@@ -52,13 +52,18 @@ afterEach(() => {
 });
 
 describe('Color Grading controls', () => {
-  it('renders between Basic and Color with a Shadows Temperature slider', () => {
+  it('renders below Color with a Shadows Temperature slider', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
-      .toEqual(['White Balance', 'Basic', 'Color Grading', 'Color']);
+      .toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
     expect(grading().querySelector('.adjustment-subsection-title')?.textContent).toBe('Shadows');
     expect(grading().querySelector('label')?.textContent).toBe('Temperature');
     expect([slider().min, slider().max, slider().step, slider().value]).toEqual(['-100', '100', '1', '0']);
     expect(slider().classList.contains('has-gradient')).toBe(true);
+  });
+
+  it('localizes the Shadows section label in Japanese', async () => {
+    await act(async () => i18n.changeLanguage('ja'));
+    expect(grading().querySelector('.adjustment-subsection-title')?.textContent).toBe('シャドウ');
   });
 
   it('uses existing keyboard coalescing, bypass, Reset, and All Reset behavior', () => {

@@ -151,15 +151,6 @@ export function AnshitsuPage() {
               onReset={() => dispatch({ type: 'basicReset' })}>
               <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
-            <AdjustmentCategory title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
-              resetDisabled={colorGradingResetDisabled}
-              enableLabel={t('workspace.enableColorGrading')} disableLabel={t('workspace.disableColorGrading')}
-              expandLabel={t('workspace.expandColorGrading')} collapseLabel={t('workspace.collapseColorGrading')}
-              resetLabel={t('workspace.reset')}
-              onToggle={() => dispatch({ type: 'toggleColorGrading' })}
-              onReset={() => dispatch({ type: 'colorGradingReset' })}>
-              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
-            </AdjustmentCategory>
             <AdjustmentCategory title={t('workspace.color')} enabled={session.recipe.colorEnabled}
               resetDisabled={colorResetDisabled}
               enableLabel={t('workspace.enableColor')} disableLabel={t('workspace.disableColor')}
@@ -168,6 +159,15 @@ export function AnshitsuPage() {
               onToggle={() => dispatch({ type: 'toggleColor' })}
               onReset={() => dispatch({ type: 'colorReset' })}>
               <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+            </AdjustmentCategory>
+            <AdjustmentCategory title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
+              resetDisabled={colorGradingResetDisabled}
+              enableLabel={t('workspace.enableColorGrading')} disableLabel={t('workspace.disableColorGrading')}
+              expandLabel={t('workspace.expandColorGrading')} collapseLabel={t('workspace.collapseColorGrading')}
+              resetLabel={t('workspace.reset')}
+              onToggle={() => dispatch({ type: 'toggleColorGrading' })}
+              onReset={() => dispatch({ type: 'colorGradingReset' })}>
+              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
