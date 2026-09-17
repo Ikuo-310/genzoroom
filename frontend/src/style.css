@@ -163,6 +163,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-range.has-gradient::-moz-range-progress { background: transparent; }
 .adjustment-range.has-gradient::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; margin-top: -4px; border: 1px solid #333; border-radius: 50%; background: #eee; }
 .adjustment-range.has-gradient::-moz-range-thumb { width: 12px; height: 12px; border: 1px solid #333; border-radius: 50%; background: #eee; }
+/* Neutral hover accents preserve the gradient; focus retains the stronger shared outline. */
+.adjustment-range.has-gradient:hover:not(:disabled)::-webkit-slider-runnable-track { box-shadow: 0 0 0 1px rgb(255 255 255 / 25%); }
+.adjustment-range.has-gradient:hover:not(:disabled)::-moz-range-track { box-shadow: 0 0 0 1px rgb(255 255 255 / 25%); }
+.adjustment-range.has-gradient:hover:not(:disabled)::-webkit-slider-thumb { background: #fff; box-shadow: 0 0 0 2px rgb(255 255 255 / 30%); }
+.adjustment-range.has-gradient:hover:not(:disabled)::-moz-range-thumb { background: #fff; box-shadow: 0 0 0 2px rgb(255 255 255 / 30%); }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-actions .tool-button:disabled { cursor: default; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
