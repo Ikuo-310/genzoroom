@@ -11,6 +11,21 @@ type Props = {
 
 export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
 
+// Only mounted AdjustmentSliders participate; native ranges elsewhere stay independent.
+const adjustments = new Map<HTMLInputElement, () => void>();
+let activeAdjustment: HTMLInputElement | null = null;
+
+function isAvailable(element: HTMLInputElement | null): element is HTMLInputElement {
+  return !!element && adjustments.has(element) && element.isConnected
+    && !element.matches(':disabled') && !element.closest('[hidden], [inert]');
+}
+
+function keyboardAdjustment(): HTMLInputElement | null {
+  if (isAvailable(activeAdjustment)) return activeAdjustment;
+  const focused = document.activeElement;
+  return focused instanceof HTMLInputElement && isAvailable(focused) ? focused : null;
+}
+
 export function AdjustmentSlider(props: Props) {
   const rangeId = useId();
   const labelId = useId();
@@ -111,12 +126,27 @@ export function AdjustmentSlider(props: Props) {
   }
   useEffect(() => {
     const element = range.current;
+    if (element) adjustments.set(element, () => {
+      if (interaction.current === 'keyboard' || interaction.current === 'wheel' || interaction.current === 'pointer') commitAfterInactivity();
+    });
     const keydown = (event: KeyboardEvent) => {
       const currentElement = range.current;
-      if (!currentElement || currentElement.disabled || (!hovered.current && document.activeElement !== currentElement) || currentElement.closest('[hidden]')) return;
+      if (!currentElement || keyboardAdjustment() !== currentElement) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
-      // A focused different slider keeps its own keyboard behavior.
-      if (event.target instanceof HTMLInputElement && event.target.type === 'range' && event.target !== currentElement) return;
+      if (event.target instanceof HTMLInputElement && event.target.type === 'range' && !adjustments.has(event.target)) return;
+      if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        const scope = currentElement.closest('.workspace-side-panel') ?? currentElement.ownerDocument;
+        const ordered = Array.from(scope.querySelectorAll<HTMLInputElement>('.adjustment-range')).filter(isAvailable);
+        const destination = ordered[ordered.indexOf(currentElement) + (event.key === 'ArrowDown' ? 1 : -1)];
+        if (destination) {
+          // Commit existing edits without beginning a value change or History entry.
+          for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
+          activeAdjustment = destination;
+          destination.focus({ preventScroll: true });
+        }
+        return;
+      }
       const steps = sliderSteps(event.key);
       if (steps === undefined) return;
       event.preventDefault();
@@ -129,6 +159,7 @@ export function AdjustmentSlider(props: Props) {
     const wheel = (event: WheelEvent) => {
       const current = latest.current;
       if (!element || element.disabled || event.deltaY === 0) return;
+      activeAdjustment = element;
       const direction = event.deltaY < 0 ? 1 : -1;
       const steps = event.shiftKey ? 1 : 10;
       let baseValue = current.value;
@@ -149,6 +180,8 @@ export function AdjustmentSlider(props: Props) {
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
     return () => {
+      if (element) adjustments.delete(element);
+      if (activeAdjustment === element) activeAdjustment = null;
       clearTimeout(timer.current);
       latest.current.onCommit();
       element?.removeEventListener('wheel', wheel);
@@ -162,9 +195,20 @@ export function AdjustmentSlider(props: Props) {
     <input ref={range} id={rangeId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
-      onPointerEnter={() => { hovered.current = true; }}
-      onPointerLeave={() => { hovered.current = false; }}
+      onPointerEnter={() => {
+        hovered.current = true;
+        if (isAvailable(range.current)) activeAdjustment = range.current;
+      }}
+      onPointerLeave={() => {
+        hovered.current = false;
+        if (activeAdjustment === range.current && document.activeElement !== range.current) activeAdjustment = null;
+      }}
+      onFocus={() => { activeAdjustment = range.current; }}
+      onBlur={() => {
+        if (!hovered.current && activeAdjustment === range.current) activeAdjustment = null;
+      }}
       onPointerDown={() => {
+        if (isAvailable(range.current)) activeAdjustment = range.current;
         clearTimeout(timer.current);
         if (interaction.current === 'number') commitNumberEdit();
         interaction.current = 'pointer';

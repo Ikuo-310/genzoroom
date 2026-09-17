@@ -556,12 +556,12 @@ describe('edit controls DOM interaction', () => {
     expect(session().history[0].before.adjustments.exposure).toBe(0);
     expect(session().history[0].after.adjustments.exposure).toBe(0.3);
   });
-  it.each(['input[type="text"]', 'textarea', 'select', '[contenteditable]'])('preserves native shortcuts in %s while hovered', (selector) => {
+  it.each(['input[type="text"]', 'input[type="number"]', 'textarea', 'select', '[contenteditable]'])('preserves native shortcuts in %s while hovered', (selector) => {
     pointer('pointerover');
     key('ArrowUp');
     const target = host.querySelector<HTMLElement>(selector)!;
     act(() => target.focus());
-    for (const init of [{ key: 'ArrowRight' }, { key: 'z', ctrlKey: true }, { key: 'z', ctrlKey: true, shiftKey: true }, { key: 'y', ctrlKey: true }]) {
+    for (const init of [{ key: 'ArrowRight' }, { key: 'ArrowUp', shiftKey: true }, { key: 'ArrowDown', shiftKey: true }, { key: 'z', ctrlKey: true }, { key: 'z', ctrlKey: true, shiftKey: true }, { key: 'y', ctrlKey: true }]) {
       expect(key(init.key, target, init).defaultPrevented).toBe(false);
     }
     expect(session().recipe.adjustments.exposure).toBe(0.1);

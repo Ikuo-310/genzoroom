@@ -73,6 +73,125 @@ afterEach(() => {
 });
 
 describe('production White Balance controls', () => {
+  const ranges = () => Array.from(host.querySelectorAll<HTMLInputElement>('.adjustment-range'));
+  const navigate = (direction: 'ArrowUp' | 'ArrowDown') => key(direction, document.activeElement!, { shiftKey: true });
+
+  it.each([[0, 3], [9, 1]])('routes arrows and wheel to hovered %s → %s despite old DOM focus', (from, to) => {
+    const items = ranges();
+    pointer('pointerdown', items[from]);
+    act(() => items[from].focus());
+    pointer('pointerup', window);
+    pointer('pointerover', items[to]);
+    expect(document.activeElement).toBe(items[from]);
+    wheel(-1, false, items[to]);
+    wheel(-1, true, items[to]);
+    key('ArrowRight', items[from]);
+    key('ArrowUp', items[from]);
+    key('ArrowLeft', items[from]);
+    key('ArrowDown', items[from]);
+    expect(items[to].value).toBe('11');
+    expect(items[from].value).toBe('0');
+    advance();
+    expect(history()).toHaveLength(1);
+  });
+
+  it('navigates every gradient, Basic and Color slider in UI order without values or History changes or wrapping', () => {
+    const items = ranges();
+    const before = recipe();
+    act(() => items[0].focus());
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(items[0]);
+    for (const item of items.slice(1)) {
+      navigate('ArrowDown');
+      expect(document.activeElement).toBe(item);
+    }
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(items.at(-1));
+    for (const item of items.slice(0, -1).reverse()) {
+      navigate('ArrowUp');
+      expect(document.activeElement).toBe(item);
+    }
+    advance();
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual([]);
+  });
+
+  it('keeps the keyboard destination active until another hover and commits pending edits on navigation', () => {
+    const items = ranges();
+    act(() => items[0].focus());
+    pointer('pointerover', items[0]);
+    key('ArrowUp', items[0]);
+    advance(300);
+    navigate('ArrowDown');
+    expect(history()).toEqual(['Temperature 0 → +10']);
+    expect(items[1].value).toBe('0');
+    key('ArrowRight', items[1]);
+    advance(499);
+    expect(history()).toHaveLength(1);
+    advance(1);
+    expect(history()).toEqual(['Tint 0 → +1', 'Temperature 0 → +10']);
+    pointer('pointerout', items[0]);
+    pointer('pointerover', items[3]);
+    key('ArrowUp', items[1]);
+    expect(items[3].value).toBe('10');
+    expect(items[1].value).toBe('1');
+    // Navigation also flushes a pending edit on a previously hovered adjustment.
+    pointer('pointerout', items[3]);
+    pointer('pointerover', items[8]);
+    key('ArrowDown', items[1], { shiftKey: true });
+    expect(document.activeElement).toBe(items[9]);
+    expect(history()[0]).toBe('Contrast 0 → +10');
+    advance();
+    expect(history()).toHaveLength(3);
+    key('z', items[9], { ctrlKey: true });
+    expect(items[3].value).toBe('0');
+    key('z', items[9], { ctrlKey: true, shiftKey: true });
+    expect(items[3].value).toBe('10');
+  });
+
+  it.each([1, 7, 8])('applies the next arrow only to the destination after navigating from UI index %s', (index) => {
+    const items = ranges();
+    act(() => items[index].focus());
+    pointer('pointerover', items[index]);
+    navigate('ArrowDown');
+    const destination = items[index + 1];
+    key('ArrowRight', destination);
+    expect(Number(destination.value)).toBe(Number(destination.step));
+    for (const item of items.filter(item => item !== destination)) expect(item.value).toBe('0');
+    advance();
+    expect(history()).toHaveLength(1);
+  });
+
+  it.each(['collapse', 'disable'])('skips a %s category in both directions', (mode) => {
+    click(category(1).querySelector<HTMLElement>(mode === 'collapse' ? '[aria-expanded]' : '[aria-pressed]')!);
+    const before = recipe();
+    const beforeHistory = history();
+    act(() => tintSlider().focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(slider(2));
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(tintSlider());
+    advance();
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual(beforeHistory);
+  });
+
+  it('skips individually disabled and hidden sliders and releases an unmounted active target', () => {
+    const items = ranges();
+    items[1].disabled = true;
+    items[2].closest<HTMLElement>('.adjustment-control')!.hidden = true;
+    act(() => items[0].focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(items[3]);
+    click(category(1).querySelector<HTMLElement>('[aria-expanded]')!);
+    const before = recipe();
+    key('ArrowUp', window);
+    expect(recipe()).toEqual(before);
+    act(() => slider(2).focus());
+    key('ArrowRight', slider(2));
+    expect(slider(2).value).toBe('1');
+  });
+
   it('places White Balance above Basic with unitless Temperature and Tint gradients', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), item => item.textContent)).toEqual(['White Balance', 'Basic', 'Color']);
     expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
