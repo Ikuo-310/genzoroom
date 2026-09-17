@@ -1,18 +1,18 @@
 # GenzoRoom 開発ノート
 
-## Color / Saturation（最新フェーズ）
+## Color / Vibrance / Saturation（最新フェーズ）
 
-右ペインのBasic直下へ「色補正 / Color」カテゴリを追加し、彩度 / Saturationだけを実装した。Saturationは−100〜+100、step 1、初期値0、単位なしで、既存AdjustmentSliderの通常trackとdrag・直接入力・キー・wheel・500ms inactivity commitを共用する。カテゴリ順はWhite Balance → Basic → Colorで、Colorも見出し全体の開閉、左chevron、独立ON/OFF、Reset、dark hover、focus-visibleを既存AdjustmentCategoryから継承する。
+右ペインの「色補正 / Color」で、彩度 / Saturationの上へ自然な彩度 / Vibranceを追加した。両方とも−100〜+100、step 1、初期値0、単位なしで、既存AdjustmentSliderの通常trackとdrag・直接入力・キー・wheel・500ms inactivity commitを共用する。カテゴリ順はWhite Balance → Basic → Color、Color内はVibrance → Saturation。既存の開閉、左chevron、独立ON/OFF、Reset、dark hover、focus-visibleは維持した。
 
-現在のrecipeは `{ version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
+現在のrecipeは `{ version: 10, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, vibrance: 0, saturation: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
 
-処理順は Temperature → Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Saturation。SaturationはBlacks後の8-bit sRGB値を0〜1へ正規化し、`Y = 0.2126R + 0.7152G + 0.0722B`、`factor = 1 + saturation / 100`、各channelを `outC = clamp(Y + (C - Y) × factor, 0, 1)` として8-bitへ丸める。−100は完全な無彩色、0はstageをskipしてbyte-identical、+100はclip前のchromaを2倍にする。alphaは変更しない。既存tone数式、作用域、中間8-bit方針、Issue #2のskip最適化は維持した。
+処理順は Temperature → Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Vibrance → Saturation。VibranceはBlacks後の8-bit sRGBに対して、`Y = 0.2126R + 0.7152G + 0.0722B`、`chroma = max(|R-Y|, |G-Y|, |B-Y|)`、`lowSatWeight = 1 - clamp(chroma / 0.5, 0, 1)`を使う。正値では`strength = 0.75 × lowSatWeight`、負値では`strength = 0.6 × (0.25 + 0.75 × lowSatWeight)`、`factor = 1 + vibrance / 100 × strength`、`outC = clamp(Y + (C-Y) × factor, 0, 1)`とする。正方向は低彩度を優先しSaturation +100より穏やか、負方向は−100でもfactorを0にせず完全グレー化を避ける。Vibranceを8-bitへ丸めた後、既存Saturationを適用する。各値0ではstageをskipし、alphaは変更しない。既存tone・Saturation数式、作用域、Issue #2のskip最適化は維持した。
 
-Color OFFはSaturationだけを既定値として扱い、値はrecipeに保持してONで再適用する。White Balance、Basic、Colorは互いに独立し、すべてOFFでもflagだけを理由にpipeline全体を即returnしない。Saturation個別ResetとColor ResetはSaturationだけを0へ戻し、Color ResetはcolorEnabledを維持する。White Balance ResetとBasic ResetはSaturationを保持する。All Resetは9値と3カテゴリのenabledを一操作で既定値へ戻す。Saturation変更、個別Reset、Color ON/OFF、Color Resetは日英Historyへ記録され、pending commit、Undo/Redo、最新順、未知kind非fallbackを維持する。
+Color OFFはVibranceとSaturationだけを既定値として扱い、両値はrecipeに保持してONで再適用する。White Balance、Basic、Colorは互いに独立し、すべてOFFでもflagだけを理由にpipeline全体を即returnしない。個別Resetは各値だけ、Color Resetは両値を0へ戻してcolorEnabledを維持する。White Balance ResetとBasic Resetは両値を保持する。All Resetは10値と3カテゴリのenabledを一操作で既定値へ戻す。Vibrance変更・個別Resetも日英Historyへ追加し、pending commit、Undo/Redo、最新順、未知kind非fallbackを維持した。
 
-検証：Frontend全283件、TypeScript/Vite production build、git diff --checkを実行した。Saturationのbyte identity、grayscale、彩度低下・増加、gray不変、alpha、clip、Blacks → Saturation順、3カテゴリの独立bypassと値保持、Reset、History、Undo/Redo、pending commit、UIの範囲・順序・開閉・disabled・キー・wheel・直接入力を自動テストで確認した。ブラウザ手動確認、手動確認用fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+検証：Frontend全292件、TypeScript/Vite production build、git diff --checkを実行した。Vibranceのbyte identity、低彩度優先、高彩度抑制、負方向、0付近の連続性、gray不変、alpha、clip、Vibrance → Saturation順、3カテゴリの独立bypassと値保持、Reset、History、Undo/Redo、pending commit、UIの範囲・順序・disabled・キー・wheel・直接入力を自動テストで確認した。既存Saturationと各回帰テストも成功した。ブラウザ手動確認、手動確認用fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
-実機Firefox・実Immichの写真では、ColorがBasic直下にあること、狭幅とリサイズ時の行レイアウト、−100の完全な無彩色、0の無変化、正値の飽和色clip、Color OFF中の値保持と再適用、他カテゴリとの独立性、各Reset、History、Undo/Redo、drag・直接入力・キー・wheel、Filmstrip切替、ViewerのZoom/Panを確認する。
+実機Firefox・実Immichの写真では、Color内がVibrance → Saturation順であること、狭幅とリサイズ時の行レイアウト、Vibrance正値が低彩度色へ優先的に作用すること、高彩度色の増加がSaturationより穏やかなこと、負値で完全グレーにならないこと、Color OFF中の両値保持と再適用、他カテゴリとの独立性、各Reset、History、Undo/Redo、drag・直接入力・キー・wheel、Filmstrip切替、ViewerのZoom/Panを確認する。
 
 ## White Balance / Temperature / Tint（以前のフェーズ）
 

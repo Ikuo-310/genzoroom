@@ -59,24 +59,31 @@ describe('Saturation pixel stage', () => {
 });
 
 describe('Color category recipe and History', () => {
-  it('bypasses only Saturation while retaining and reapplying its value', () => {
+  it('bypasses both Color values while retaining and reapplying them', () => {
     const recipe = withSaturation(70);
+    recipe.adjustments.vibrance = 45;
+    recipe.adjustments.temperature = 30;
     recipe.adjustments.exposure = 0.5;
     const enabled = renderAdjustments(pixels, recipe);
     recipe.colorEnabled = false;
+    expect(recipe.adjustments.vibrance).toBe(45);
     expect(recipe.adjustments.saturation).toBe(70);
     const bypassed = renderAdjustments(pixels, recipe);
     const expected = defaultRecipe();
+    expected.adjustments.temperature = 30;
     expected.adjustments.exposure = 0.5;
     expect(bypassed).toEqual(renderAdjustments(pixels, expected));
     recipe.colorEnabled = true;
     expect(renderAdjustments(pixels, recipe)).toEqual(enabled);
   });
 
-  it('applies Saturation independently when Basic or White Balance is off', () => {
-    const expected = renderAdjustments(pixels, withSaturation(65));
+  it('applies Vibrance and Saturation independently when Basic or White Balance is off', () => {
+    const color = withSaturation(65);
+    color.adjustments.vibrance = 40;
+    const expected = renderAdjustments(pixels, color);
     for (const disabled of ['basicEnabled', 'whiteBalanceEnabled'] as const) {
       const recipe = withSaturation(65);
+      recipe.adjustments.vibrance = 40;
       recipe[disabled] = false;
       expect(renderAdjustments(pixels, recipe)).toEqual(expected);
     }
@@ -84,20 +91,21 @@ describe('Color category recipe and History', () => {
 
   it('uses Color only in its effective scope', () => {
     const recipe = withSaturation(40);
+    recipe.adjustments.vibrance = 30;
     recipe.adjustments.temperature = 30;
     recipe.adjustments.exposure = 0.4;
     recipe.colorEnabled = false;
-    expect(effectiveAdjustments(recipe)).toMatchObject({ temperature: 30, exposure: 0.4, saturation: 0 });
+    expect(effectiveAdjustments(recipe)).toMatchObject({ temperature: 30, exposure: 0.4, vibrance: 0, saturation: 0 });
   });
 
-  it('coalesces Saturation, commits pending before category actions, and supports Undo/Redo', () => {
+  it('coalesces Vibrance, commits pending before category actions, and supports Undo/Redo', () => {
     let state = newSession();
-    state = editSession(state, { type: 'saturation', value: 10 });
-    state = editSession(state, { type: 'saturation', value: 35 });
-    expect(state.pending?.kind).toBe('saturation');
+    state = editSession(state, { type: 'vibrance', value: 10 });
+    state = editSession(state, { type: 'vibrance', value: 35 });
+    expect(state.pending?.kind).toBe('vibrance');
     state = editSession(state, { type: 'toggleColor' });
-    expect(state.history.map((entry) => entry.kind)).toEqual(['saturation', 'colorToggle']);
-    expect(state.recipe.adjustments.saturation).toBe(35);
+    expect(state.history.map((entry) => entry.kind)).toEqual(['vibrance', 'colorToggle']);
+    expect(state.recipe.adjustments.vibrance).toBe(35);
     expect(state.recipe.colorEnabled).toBe(false);
     state = editSession(state, { type: 'undo' });
     expect(state.recipe.colorEnabled).toBe(true);
@@ -105,25 +113,30 @@ describe('Color category recipe and History', () => {
     expect(state.recipe.colorEnabled).toBe(false);
   });
 
-  it('resets Saturation and Color without changing other categories', () => {
+  it('resets Vibrance, Saturation, and Color without changing other categories', () => {
     let state = newSession();
-    Object.assign(state.recipe.adjustments, { temperature: 20, exposure: 0.5, saturation: 55 });
+    Object.assign(state.recipe.adjustments, { temperature: 20, exposure: 0.5, vibrance: 35, saturation: 55 });
     state.recipe.colorEnabled = false;
+    state = editSession(state, { type: 'vibranceReset' });
+    expect(state.recipe.adjustments).toMatchObject({ temperature: 20, exposure: 0.5, vibrance: 0, saturation: 55 });
+    state = editSession(state, { type: 'undo' });
     state = editSession(state, { type: 'saturationReset' });
-    expect(state.recipe.adjustments).toMatchObject({ temperature: 20, exposure: 0.5, saturation: 0 });
+    expect(state.recipe.adjustments).toMatchObject({ temperature: 20, exposure: 0.5, vibrance: 35, saturation: 0 });
     state = editSession(state, { type: 'undo' });
     state = editSession(state, { type: 'colorReset' });
-    expect(state.recipe.adjustments).toMatchObject({ temperature: 20, exposure: 0.5, saturation: 0 });
+    expect(state.recipe.adjustments).toMatchObject({ temperature: 20, exposure: 0.5, vibrance: 0, saturation: 0 });
     expect(state.recipe.colorEnabled).toBe(false);
     expect(state.history.at(-1)?.kind).toBe('colorReset');
   });
 
-  it('preserves Saturation in White Balance and Basic Reset and resets it in All Reset', () => {
+  it('preserves both Color values in White Balance and Basic Reset and resets them in All Reset', () => {
     let state = newSession();
-    Object.assign(state.recipe.adjustments, { temperature: 20, exposure: 0.5, saturation: 55 });
+    Object.assign(state.recipe.adjustments, { temperature: 20, exposure: 0.5, vibrance: 35, saturation: 55 });
     state = editSession(state, { type: 'whiteBalanceReset' });
+    expect(state.recipe.adjustments.vibrance).toBe(35);
     expect(state.recipe.adjustments.saturation).toBe(55);
     state = editSession(state, { type: 'basicReset' });
+    expect(state.recipe.adjustments.vibrance).toBe(35);
     expect(state.recipe.adjustments.saturation).toBe(55);
     state = editSession(state, { type: 'toggleWhiteBalance' });
     state = editSession(state, { type: 'toggleBasic' });

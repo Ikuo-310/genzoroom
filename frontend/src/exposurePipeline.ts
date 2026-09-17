@@ -1,9 +1,13 @@
-import { normalizeSaturation, normalizeTemperature, normalizeTint, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeSaturation, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
 const BLACKS_MAX_OFFSET = 0.1;
 export const TINT_GAIN_BASE = 1.3;
+export const VIBRANCE_CHROMA_THRESHOLD = 0.5;
+export const VIBRANCE_POSITIVE_STRENGTH = 0.75;
+export const VIBRANCE_NEGATIVE_STRENGTH = 0.6;
+export const VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT = 0.25;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {
@@ -48,9 +52,10 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     ? Math.max(-100, Math.min(100, adjustments.shadows)) / 100 : 0;
   const blacks = Number.isFinite(adjustments.blacks)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
+  const vibrance = normalizeVibrance(adjustments.vibrance);
   const saturation = normalizeSaturation(adjustments.saturation);
   const saturationFactor = 1 + saturation / 100;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && saturation === 0) return output;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
@@ -154,6 +159,26 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
           output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
         }
       }
+    }
+    if (vibrance !== 0) {
+      const red = output[i] / 255;
+      const green = output[i + 1] / 255;
+      const blue = output[i + 2] / 255;
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      const chroma = Math.max(
+        Math.abs(red - luminance),
+        Math.abs(green - luminance),
+        Math.abs(blue - luminance),
+      );
+      const lowSaturationWeight = 1 - Math.max(0, Math.min(1, chroma / VIBRANCE_CHROMA_THRESHOLD));
+      const strength = vibrance > 0
+        ? VIBRANCE_POSITIVE_STRENGTH * lowSaturationWeight
+        : VIBRANCE_NEGATIVE_STRENGTH * (VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT
+          + (1 - VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT) * lowSaturationWeight);
+      const factor = 1 + vibrance / 100 * strength;
+      output[i] = Math.round(255 * Math.max(0, Math.min(1, luminance + (red - luminance) * factor)));
+      output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, luminance + (green - luminance) * factor)));
+      output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, luminance + (blue - luminance) * factor)));
     }
     if (saturation !== 0) {
       const red = output[i] / 255;

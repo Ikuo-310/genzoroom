@@ -12,7 +12,7 @@ import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatSaturation, formatTemperature, formatTint, isWhiteBalanceDefault, isBasicDefault, isColorDefault, supportsEditing, type EditEntry } from './editing';
+import { formatSaturation, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -308,6 +308,11 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'saturationReset':
           description = t(entry.kind === 'saturation' ? 'workspace.saturation' : 'workspace.saturationReset')
             + ' ' + formatSaturation(entry.before.adjustments.saturation) + ' → ' + formatSaturation(entry.after.adjustments.saturation);
+          break;
+        case 'vibrance':
+        case 'vibranceReset':
+          description = t(entry.kind === 'vibrance' ? 'workspace.vibrance' : 'workspace.vibranceReset')
+            + ' ' + formatVibrance(entry.before.adjustments.vibrance) + ' → ' + formatVibrance(entry.after.adjustments.vibrance);
           break;
         case 'colorReset': description = t('workspace.colorResetHistory'); break;
         case 'colorToggle':
