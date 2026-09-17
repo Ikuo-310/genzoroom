@@ -1,6 +1,6 @@
 # GenzoRoom
 
-**Status: Early Development — Immich browsing and minimal JPEG Temperature/Tint/Exposure/Contrast/Highlights/Whites/Shadows/Blacks adjustments are available. RAW development is not implemented.**
+**Status: Early Development — Immich browsing and minimal JPEG Temperature/Tint/Exposure/Contrast/Highlights/Whites/Shadows/Blacks/Saturation adjustments are available. RAW development is not implemented.**
 
 GenzoRoom is a hobby and learning project aiming to become a self-hosted browser interface for developing and color-correcting photos managed by [Immich](https://immich.app/).
 
@@ -17,15 +17,16 @@ GenzoRoom currently provides:
 - Ordered multi-photo selection and transfer to the **Anshitsu** development workspace.
 - A large preview, EXIF display, Filmstrip, and active-photo switching in Anshitsu.
 - Fit, 1:1, zoom, and pan controls, with independently collapsible and resizable desktop side panels whose widths are remembered.
-- Non-destructive JPEG Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both integer steps with default 0, in a White Balance category above Basic. Each has a directional gradient track. Both categories have independent collapse, bypass, and reset controls.
+- Non-destructive JPEG Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both integer steps with default 0, in a White Balance category above Basic. Each has a directional gradient track. White Balance, Basic, and Color have independent collapse, bypass, and reset controls.
 - Non-destructive JPEG Exposure, Contrast, Highlights, Whites, Shadows, and Blacks adjustments grouped in a collapsible Basic category, with temporary category bypass, category reset, compact slider/direct-value controls, per-asset in-memory recipes, grouped Undo/Redo and History, individual resets, and All Reset. This initial version uses Immich previews as a temporary input.
+- Non-destructive JPEG Saturation (−100 to +100, step 1) in a Color category below Basic, applied after Blacks with a luminance-preserving chroma scale.
 - English and Japanese UI, remembered language selection, and locale-aware date and time display.
 
 All current Immich operations are read-only. The browser uses same-origin `/api/` routes through GenzoRoom, and the Immich API key remains in the backend.
 
 The following are not implemented:
 
-- HEIC adjustments and JPEG adjustments other than Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, and Blacks.
+- HEIC adjustments and JPEG adjustments other than Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, Blacks, and Saturation.
 - RAW development.
 - Persistent storage of non-destructive edit recipes.
 - Scope displays, including Histogram, Waveform, and RGB Parade.

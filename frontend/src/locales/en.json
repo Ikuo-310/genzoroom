@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 50 recent Immich photos. JPEG Exposure, Contrast, Highlights, Whites, Shadows, and Blacks adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 50 recent Immich photos. JPEG White Balance, Basic, and Color adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
@@ -112,6 +112,15 @@
     "basicOn": "ON",
     "basicOff": "OFF",
     "basicResetHistory": "Reset Basic adjustments",
+    "color": "Color",
+    "saturation": "Saturation",
+    "saturationValue": "Saturation value",
+    "saturationReset": "Saturation Reset",
+    "enableColor": "Enable Color adjustments",
+    "disableColor": "Bypass Color adjustments",
+    "collapseColor": "Collapse Color adjustments",
+    "expandColor": "Expand Color adjustments",
+    "colorResetHistory": "Reset Color adjustments",
     "allReset": "All Reset",
     "undo": "Undo",
     "redo": "Redo",

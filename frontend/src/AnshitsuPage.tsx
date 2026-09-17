@@ -10,8 +10,9 @@ import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
+import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatTemperature, formatTint, isWhiteBalanceDefault, isBasicDefault, supportsEditing, type EditEntry } from './editing';
+import { formatSaturation, formatTemperature, formatTint, isWhiteBalanceDefault, isBasicDefault, isColorDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -36,6 +37,7 @@ export function AnshitsuPage() {
   const editable = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch } = useAssetEdits(assetId, editable);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
+  const colorResetDisabled = isColorDefault(session.recipe.adjustments);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -146,6 +148,15 @@ export function AnshitsuPage() {
               onToggle={() => dispatch({ type: 'toggleBasic' })}
               onReset={() => dispatch({ type: 'basicReset' })}>
               <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+            </AdjustmentCategory>
+            <AdjustmentCategory title={t('workspace.color')} enabled={session.recipe.colorEnabled}
+              resetDisabled={colorResetDisabled}
+              enableLabel={t('workspace.enableColor')} disableLabel={t('workspace.disableColor')}
+              expandLabel={t('workspace.expandColor')} collapseLabel={t('workspace.collapseColor')}
+              resetLabel={t('workspace.reset')}
+              onToggle={() => dispatch({ type: 'toggleColor' })}
+              onReset={() => dispatch({ type: 'colorReset' })}>
+              <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : <p>{t('workspace.jpegOnly')}</p>}
@@ -292,6 +303,15 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'basicReset': description = t('workspace.basicResetHistory'); break;
         case 'basicToggle':
           description = `${t('workspace.basic')} ${t(entry.after.basicEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
+        case 'saturation':
+        case 'saturationReset':
+          description = t(entry.kind === 'saturation' ? 'workspace.saturation' : 'workspace.saturationReset')
+            + ' ' + formatSaturation(entry.before.adjustments.saturation) + ' → ' + formatSaturation(entry.after.adjustments.saturation);
+          break;
+        case 'colorReset': description = t('workspace.colorResetHistory'); break;
+        case 'colorToggle':
+          description = `${t('workspace.color')} ${t(entry.after.colorEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
           break;
         default:
           description = control

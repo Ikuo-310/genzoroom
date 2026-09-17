@@ -1,4 +1,4 @@
-import { normalizeTemperature, normalizeTint, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeSaturation, normalizeTemperature, normalizeTint, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -48,7 +48,9 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     ? Math.max(-100, Math.min(100, adjustments.shadows)) / 100 : 0;
   const blacks = Number.isFinite(adjustments.blacks)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0) return output;
+  const saturation = normalizeSaturation(adjustments.saturation);
+  const saturationFactor = 1 + saturation / 100;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
@@ -130,28 +132,38 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
         output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
       }
     }
-    if (blacks === 0) continue;
-
-    const red = output[i] / 255;
-    const green = output[i + 1] / 255;
-    const blue = output[i + 2] / 255;
-    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    if (luminance >= BLACKS_FADE_END_LUMINANCE) continue;
-    const threshold = Math.max(0, Math.min(1, luminance / BLACKS_FADE_END_LUMINANCE));
-    const weight = 1 - threshold * threshold * (3 - 2 * threshold);
-    const adjustedLuminance = Math.max(0, Math.min(1,
-      luminance + blacks * BLACKS_MAX_OFFSET * weight));
-    if (luminance <= 1e-6) {
-      const neutral = Math.round(255 * adjustedLuminance);
-      output[i] = neutral;
-      output[i + 1] = neutral;
-      output[i + 2] = neutral;
-      continue;
+    if (blacks !== 0) {
+      const red = output[i] / 255;
+      const green = output[i + 1] / 255;
+      const blue = output[i + 2] / 255;
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      if (luminance < BLACKS_FADE_END_LUMINANCE) {
+        const threshold = Math.max(0, Math.min(1, luminance / BLACKS_FADE_END_LUMINANCE));
+        const weight = 1 - threshold * threshold * (3 - 2 * threshold);
+        const adjustedLuminance = Math.max(0, Math.min(1,
+          luminance + blacks * BLACKS_MAX_OFFSET * weight));
+        if (luminance <= 1e-6) {
+          const neutral = Math.round(255 * adjustedLuminance);
+          output[i] = neutral;
+          output[i + 1] = neutral;
+          output[i + 2] = neutral;
+        } else {
+          const scale = adjustedLuminance / luminance;
+          output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
+          output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
+          output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+        }
+      }
     }
-    const scale = adjustedLuminance / luminance;
-    output[i] = Math.round(255 * Math.max(0, Math.min(1, red * scale)));
-    output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, green * scale)));
-    output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, blue * scale)));
+    if (saturation !== 0) {
+      const red = output[i] / 255;
+      const green = output[i + 1] / 255;
+      const blue = output[i + 2] / 255;
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      output[i] = Math.round(255 * Math.max(0, Math.min(1, luminance + (red - luminance) * saturationFactor)));
+      output[i + 1] = Math.round(255 * Math.max(0, Math.min(1, luminance + (green - luminance) * saturationFactor)));
+      output[i + 2] = Math.round(255 * Math.max(0, Math.min(1, luminance + (blue - luminance) * saturationFactor)));
+    }
   }
   return output;
 }

@@ -1,10 +1,24 @@
 # GenzoRoom 開発ノート
 
-## White Balance / Temperature / Tint（最新フェーズ）
+## Color / Saturation（最新フェーズ）
+
+右ペインのBasic直下へ「色補正 / Color」カテゴリを追加し、彩度 / Saturationだけを実装した。Saturationは−100〜+100、step 1、初期値0、単位なしで、既存AdjustmentSliderの通常trackとdrag・直接入力・キー・wheel・500ms inactivity commitを共用する。カテゴリ順はWhite Balance → Basic → Colorで、Colorも見出し全体の開閉、左chevron、独立ON/OFF、Reset、dark hover、focus-visibleを既存AdjustmentCategoryから継承する。
+
+現在のrecipeは `{ version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
+
+処理順は Temperature → Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Saturation。SaturationはBlacks後の8-bit sRGB値を0〜1へ正規化し、`Y = 0.2126R + 0.7152G + 0.0722B`、`factor = 1 + saturation / 100`、各channelを `outC = clamp(Y + (C - Y) × factor, 0, 1)` として8-bitへ丸める。−100は完全な無彩色、0はstageをskipしてbyte-identical、+100はclip前のchromaを2倍にする。alphaは変更しない。既存tone数式、作用域、中間8-bit方針、Issue #2のskip最適化は維持した。
+
+Color OFFはSaturationだけを既定値として扱い、値はrecipeに保持してONで再適用する。White Balance、Basic、Colorは互いに独立し、すべてOFFでもflagだけを理由にpipeline全体を即returnしない。Saturation個別ResetとColor ResetはSaturationだけを0へ戻し、Color ResetはcolorEnabledを維持する。White Balance ResetとBasic ResetはSaturationを保持する。All Resetは9値と3カテゴリのenabledを一操作で既定値へ戻す。Saturation変更、個別Reset、Color ON/OFF、Color Resetは日英Historyへ記録され、pending commit、Undo/Redo、最新順、未知kind非fallbackを維持する。
+
+検証：Frontend全283件、TypeScript/Vite production build、git diff --checkを実行した。Saturationのbyte identity、grayscale、彩度低下・増加、gray不変、alpha、clip、Blacks → Saturation順、3カテゴリの独立bypassと値保持、Reset、History、Undo/Redo、pending commit、UIの範囲・順序・開閉・disabled・キー・wheel・直接入力を自動テストで確認した。ブラウザ手動確認、手動確認用fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+
+実機Firefox・実Immichの写真では、ColorがBasic直下にあること、狭幅とリサイズ時の行レイアウト、−100の完全な無彩色、0の無変化、正値の飽和色clip、Color OFF中の値保持と再適用、他カテゴリとの独立性、各Reset、History、Undo/Redo、drag・直接入力・キー・wheel、Filmstrip切替、ViewerのZoom/Panを確認する。
+
+## White Balance / Temperature / Tint（以前のフェーズ）
 
 右ペインの「色温度補正 / White Balance」に、Temperature直下の色かぶり補正 / Tintを追加した。TemperatureとTintはいずれも−100〜+100、step 1、初期値0、単位なし。Tintは負値がGreen、正値がMagenta、0が無補正。JPEG / Immich previewへの相対シフトであり、Kelvin指定やRAWの絶対WBではない。
 
-現在のrecipeは `{ version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
+このフェーズのrecipeは `{ version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } }`。adjustmentsはflatのまま、永続化・migration framework・generic category frameworkは追加していない。
 
 White Balance専用キーはTemperatureとTintで、effectiveAdjustmentsはWhite BalanceがOFFなら両方だけを既定値へ置き換える。両値はBasic 6項目の一覧に含めない。両カテゴリOFFでもカテゴリflagによるpipeline全体の即returnは行わず、有効値の無補正判定で返す。OFF中の値は保持し、ONで再適用する。
 
@@ -18,7 +32,7 @@ Temperature/Tint個別Resetは各値だけを0にする。White Balance Resetは
 
 実機Firefox・実Immichの写真では、肌、白壁、植物、蛍光灯下、暗部、飽和色でTint ±25/±50/±100の強度とclipを確認する。Green/Magentaの符号、中央neutral、Tint gradientとthumb視認性、230 / 313 / 440pxの日英Sidebar、drag/直接入力/キー/wheel、OFF/Reset/Undo/Redo、Filmstrip切替中のpending、ViewerのZoom/Panも確認する。デプロイ手順は変更していない。
 
-Color追加時はAnshitsuPageのBasicの直下へ独立カテゴリを配置し、Color専用の所属値・enabled/default/Reset/effective/Historyと処理順・全体無補正判定を追加する。Basicの6項目とWhite BalanceのTemperature/Tintの対象範囲は維持し、パネル縦scrollと狭幅表示を実機確認する。今回はVibrance、Saturation、Colorカテゴリ等は未実装。
+この時点ではColorカテゴリとSaturationは未実装だった。後続フェーズでもBasicの6項目とWhite BalanceのTemperature/Tintの対象範囲は維持する方針とした。
 
 ## JPEG Exposure / Contrast / Highlights / Whites / Shadows / Blacks編集基盤（以前のフェーズ）
 

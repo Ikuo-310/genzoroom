@@ -137,33 +137,33 @@ describe('Anshitsu workspace', () => {
   it('renders adjustment, category, and reset History succinctly in newest-first order', () => {
     const contrast: EditEntry = {
       kind: 'contrast',
-      before: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      before: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
     };
     const highlights: EditEntry = {
       kind: 'highlights',
       before: contrast.after,
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
     };
     const whites: EditEntry = {
       kind: 'whites',
       before: highlights.after,
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0, saturation: 0 } },
     };
     const shadows: EditEntry = {
       kind: 'shadows',
       before: whites.after,
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0, saturation: 0 } },
     };
     const blacks: EditEntry = {
       kind: 'blacks',
       before: shadows.after,
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35, saturation: 0 } },
     };
     const allReset: EditEntry = {
       kind: 'allReset',
       before: { ...blacks.after, basicEnabled: false },
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
     };
     const basicToggle: EditEntry = {
       kind: 'basicToggle',
@@ -173,7 +173,7 @@ describe('Anshitsu workspace', () => {
     const basicReset: EditEntry = {
       kind: 'basicReset',
       before: basicToggle.after,
-      after: { version: 8, whiteBalanceEnabled: true, basicEnabled: false, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+      after: { version: 9, whiteBalanceEnabled: true, basicEnabled: false, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
     };
     allReset.before = basicReset.after;
     const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, basicToggle, basicReset, allReset]} cursor={9} />);
@@ -190,7 +190,7 @@ describe('Anshitsu workspace', () => {
   });
 
   it('renders Basic ON after an enable operation', () => {
-    const before = { version: 8, whiteBalanceEnabled: true, basicEnabled: false, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 20, highlights: -30, whites: 10, shadows: 40, blacks: -15 } } as const;
+    const before = { version: 9, whiteBalanceEnabled: true, basicEnabled: false, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 20, highlights: -30, whites: 10, shadows: 40, blacks: -15, saturation: 0 } } as const;
     const entry: EditEntry = {
       kind: 'basicToggle',
       before,
@@ -247,8 +247,8 @@ describe('Anshitsu workspace', () => {
 function historyEntry(before: number, after: number): EditEntry {
   return {
     kind: 'exposure',
-    before: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
-    after: { version: 8, whiteBalanceEnabled: true, basicEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0 } },
+    before: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
+    after: { version: 9, whiteBalanceEnabled: true, basicEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, saturation: 0 } },
   };
 }
 

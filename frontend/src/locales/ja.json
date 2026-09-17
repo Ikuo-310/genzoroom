@@ -3,7 +3,7 @@
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
     "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの露光量、コントラスト、ハイライト、ホワイト、シャドウ、ブラックを調整できます。"
+    "stageNotice": "Immichの最近の写真を最大50件表示します。暗室でJPEGの色温度補正、基本補正、色補正を調整できます。"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
@@ -110,6 +110,15 @@
     "basicOn": "ON",
     "basicOff": "OFF",
     "basicResetHistory": "基本補正をリセット",
+    "color": "色補正",
+    "saturation": "彩度",
+    "saturationValue": "彩度の値",
+    "saturationReset": "彩度をリセット",
+    "enableColor": "色補正を有効にする",
+    "disableColor": "色補正をバイパスする",
+    "collapseColor": "色補正を折りたたむ",
+    "expandColor": "色補正を展開する",
+    "colorResetHistory": "色補正をリセット",
     "allReset": "すべてリセット",
     "undo": "元に戻す",
     "redo": "やり直す",
