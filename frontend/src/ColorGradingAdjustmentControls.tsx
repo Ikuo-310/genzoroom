@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { TEMPERATURE, formatShadowsTemperature, type EditAction, type EditRecipe } from './editing';
-import { TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
+import { TEMPERATURE, TINT, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
+import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 
 export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
   assetId: string; recipe: EditRecipe; dispatch: (action: EditAction) => void;
@@ -18,5 +18,14 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'shadowsTemperature', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'shadowsTemperature' })}
       onReset={() => dispatch({ type: 'shadowsTemperatureReset' })} />
+    <AdjustmentSlider key={`${assetId}-shadows-tint`} label={t('workspace.tint')} {...TINT}
+      value={recipe.adjustments.shadowsTint} valueText={formatShadowsTint(recipe.adjustments.shadowsTint)}
+      valueLabel={t('workspace.shadowsTintValue')} precision={0} defaultValue={0}
+      disabled={!recipe.colorGradingEnabled} resetLabel={t('workspace.shadowsTintReset')}
+      trackGradient={TINT_TRACK_GRADIENT}
+      onBegin={() => dispatch({ type: 'begin', kind: 'shadowsTint' })}
+      onChange={(value) => dispatch({ type: 'shadowsTint', value })}
+      onCommit={() => dispatch({ type: 'commit', kind: 'shadowsTint' })}
+      onReset={() => dispatch({ type: 'shadowsTintReset' })} />
   </>;
 }

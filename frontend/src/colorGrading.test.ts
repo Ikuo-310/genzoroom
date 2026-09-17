@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { defaultRecipe, editAsset, editSession, effectiveAdjustments, newSession } from './editing';
-import { renderAdjustments, shadowsGradingWeight, temperatureGains } from './exposurePipeline';
+import { renderAdjustments, shadowsGradingWeight, temperatureGains, tintGains } from './exposurePipeline';
 
 function withShadowsTemperature(value: number) {
   const recipe = defaultRecipe();
   recipe.adjustments.shadowsTemperature = value;
+  return recipe;
+}
+
+function withShadowsTint(value: number) {
+  const recipe = defaultRecipe();
+  recipe.adjustments.shadowsTint = value;
   return recipe;
 }
 
@@ -62,46 +68,144 @@ describe('Shadows Temperature pixel stage', () => {
   });
 });
 
+describe('Shadows Tint pixel stage', () => {
+  it('defaults to zero and remains byte-identical', () => {
+    const source = new Uint8ClampedArray([31, 47, 63, 79, 220, 210, 200, 191]);
+    expect(defaultRecipe().adjustments.shadowsTint).toBe(0);
+    expect(renderAdjustments(source, withShadowsTint(0))).toEqual(source);
+  });
+
+  it('uses the global Tint direction and endpoint gains in low luminance', () => {
+    const source = new Uint8ClampedArray([35, 35, 35, 123]);
+    const green = renderAdjustments(source, withShadowsTint(-100));
+    const magenta = renderAdjustments(source, withShadowsTint(100));
+    expect(tintGains(-100)).toEqual({ red: 1 / 1.3, green: 1.3, blue: 1 / 1.3 });
+    expect(tintGains(100)).toEqual({ red: 1.3, green: 1 / 1.3, blue: 1.3 });
+    expect(green[1]).toBeGreaterThan(source[1]);
+    expect(green[0]).toBeLessThan(source[0]);
+    expect(green[2]).toBeLessThan(source[2]);
+    expect(magenta[0]).toBeGreaterThan(source[0]);
+    expect(magenta[2]).toBeGreaterThan(source[2]);
+    expect(magenta[1]).toBeLessThan(source[1]);
+    expect([green[3], magenta[3]]).toEqual([123, 123]);
+  });
+
+  it('uses the shared Shadows weight, fades continuously, and is zero outside the range', () => {
+    const source = new Uint8ClampedArray([
+      38, 38, 38, 10,
+      64, 64, 64, 20,
+      90, 90, 90, 30,
+      220, 220, 220, 40,
+    ]);
+    const result = renderAdjustments(source, withShadowsTint(100));
+    const chroma = (offset: number) => Math.abs(result[offset] - result[offset + 1]);
+    expect(chroma(0)).toBeGreaterThan(chroma(4));
+    expect(chroma(4)).toBeGreaterThan(0);
+    expect(Array.from(result.slice(8, 12))).toEqual(Array.from(source.slice(8, 12)));
+    expect(Array.from(result.slice(12, 16))).toEqual(Array.from(source.slice(12, 16)));
+  });
+
+  it('preserves alpha and clips every output channel safely', () => {
+    const source = new Uint8ClampedArray([75, 2, 75, 17, 2, 75, 2, 239]);
+    for (const value of [-100, 100]) {
+      const result = renderAdjustments(source, withShadowsTint(value));
+      expect([result[3], result[7]]).toEqual([17, 239]);
+      expect(Array.from(result).every((channel) => channel >= 0 && channel <= 255)).toBe(true);
+    }
+  });
+
+  it('runs immediately after Shadows Temperature', () => {
+    const source = new Uint8ClampedArray([0, 0, 2, 97]);
+    const combined = defaultRecipe();
+    Object.assign(combined.adjustments, { shadowsTemperature: -100, shadowsTint: 100 });
+    const temperature = withShadowsTemperature(-100);
+    const tint = withShadowsTint(100);
+    expect(renderAdjustments(source, combined)).toEqual(
+      renderAdjustments(renderAdjustments(source, temperature), tint),
+    );
+    expect(renderAdjustments(source, combined)).not.toEqual(
+      renderAdjustments(renderAdjustments(source, tint), temperature),
+    );
+  });
+});
+
 describe('Color Grading recipe and History', () => {
-  it('bypasses while OFF without losing the value', () => {
+  it('bypasses both adjustments while OFF without losing their values or other categories', () => {
     const source = new Uint8ClampedArray([40, 50, 60, 255]);
     const recipe = withShadowsTemperature(70);
+    Object.assign(recipe.adjustments, { exposure: 0.4, shadowsTint: -65, saturation: 20 });
     const enabled = renderAdjustments(source, recipe);
     recipe.colorGradingEnabled = false;
     expect(effectiveAdjustments(recipe).shadowsTemperature).toBe(0);
+    expect(effectiveAdjustments(recipe).shadowsTint).toBe(0);
     expect(recipe.adjustments.shadowsTemperature).toBe(70);
-    expect(renderAdjustments(source, recipe)).toEqual(source);
+    expect(recipe.adjustments.shadowsTint).toBe(-65);
+    const withoutGrading = defaultRecipe();
+    Object.assign(withoutGrading.adjustments, { exposure: 0.4, saturation: 20 });
+    expect(renderAdjustments(source, recipe)).toEqual(renderAdjustments(source, withoutGrading));
     recipe.colorGradingEnabled = true;
     expect(renderAdjustments(source, recipe)).toEqual(enabled);
   });
 
-  it('coalesces changes and supports category Reset, All Reset, Undo, and Redo', () => {
+  it('coalesces Shadows Tint changes and supports Undo and Redo', () => {
     let state = newSession();
-    state = editSession(state, { type: 'shadowsTemperature', value: 10 });
+    state = editSession(state, { type: 'shadowsTint', value: 10 });
+    state = editSession(state, { type: 'shadowsTint', value: 40 });
+    state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
+    expect(state.history.map((entry) => entry.kind)).toEqual(['shadowsTint']);
+    expect(editSession(state, { type: 'undo' }).recipe.adjustments.shadowsTint).toBe(0);
+    state = editSession(state, { type: 'undo' });
+    expect(editSession(state, { type: 'redo' }).recipe.adjustments.shadowsTint).toBe(40);
+  });
+
+  it('resets individual and category values without crossing category boundaries', () => {
+    let state = newSession();
     state = editSession(state, { type: 'shadowsTemperature', value: 40 });
     state = editSession(state, { type: 'commit', kind: 'shadowsTemperature' });
-    expect(state.history.map((entry) => entry.kind)).toEqual(['shadowsTemperature']);
+    state = editSession(state, { type: 'shadowsTint', value: -30 });
+    state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
+    state = editSession(state, { type: 'shadowsTintReset' });
+    expect(state.recipe.adjustments.shadowsTemperature).toBe(40);
+    expect(state.recipe.adjustments.shadowsTint).toBe(0);
+    state = editSession(state, { type: 'shadowsTint', value: -30 });
+    state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
+    for (const action of [{ type: 'whiteBalanceReset' }, { type: 'basicReset' }, { type: 'colorReset' }] as const) {
+      state = editSession(state, action);
+      expect(state.recipe.adjustments.shadowsTint).toBe(-30);
+    }
     state = editSession(state, { type: 'toggleColorGrading' });
-    expect(state.recipe.colorGradingEnabled).toBe(false);
     state = editSession(state, { type: 'colorGradingReset' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(0);
+    expect(state.recipe.adjustments.shadowsTint).toBe(0);
     expect(state.recipe.colorGradingEnabled).toBe(false);
+    expect(state.history.at(-1)?.kind).toBe('colorGradingReset');
     state = editSession(state, { type: 'undo' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(40);
+    expect(state.recipe.adjustments.shadowsTint).toBe(-30);
     state = editSession(state, { type: 'redo' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(0);
-    state = editSession(state, { type: 'undo' });
+    expect(state.recipe.adjustments.shadowsTint).toBe(0);
+  });
+
+  it('includes Shadows Tint in one-operation All Reset', () => {
+    let state = newSession();
+    state = editSession(state, { type: 'shadowsTint', value: 40 });
+    state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
+    state = editSession(state, { type: 'toggleColorGrading' });
     state = editSession(state, { type: 'allReset' });
     expect(state.recipe).toEqual(defaultRecipe());
-    expect(editSession(state, { type: 'undo' }).recipe.adjustments.shadowsTemperature).toBe(40);
+    expect(state.history.at(-1)?.kind).toBe('allReset');
+    const undone = editSession(state, { type: 'undo' }).recipe;
+    expect(undone.adjustments.shadowsTint).toBe(40);
+    expect(undone.colorGradingEnabled).toBe(false);
   });
 
   it('round-trips recipe JSON and keeps state per asset', () => {
-    let sessions = editAsset({}, 'a', { type: 'shadowsTemperature', value: -35 });
-    sessions = editAsset(sessions, 'a', { type: 'commit', kind: 'shadowsTemperature' });
-    sessions = editAsset(sessions, 'b', { type: 'shadowsTemperature', value: 65 });
-    expect(sessions.a.recipe.adjustments.shadowsTemperature).toBe(-35);
-    expect(sessions.b.recipe.adjustments.shadowsTemperature).toBe(65);
+    let sessions = editAsset({}, 'a', { type: 'shadowsTint', value: -35 });
+    sessions = editAsset(sessions, 'a', { type: 'commit', kind: 'shadowsTint' });
+    sessions = editAsset(sessions, 'b', { type: 'shadowsTint', value: 65 });
+    expect(sessions.a.recipe.adjustments.shadowsTint).toBe(-35);
+    expect(sessions.b.recipe.adjustments.shadowsTint).toBe(65);
     expect(JSON.parse(JSON.stringify(sessions.a.recipe))).toEqual(sessions.a.recipe);
   });
 });

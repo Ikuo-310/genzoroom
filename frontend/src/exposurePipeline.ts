@@ -1,4 +1,4 @@
-import { normalizeSaturation, normalizeShadowsTemperature, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeSaturation, normalizeShadowsTemperature, normalizeShadowsTint, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -70,13 +70,15 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   const blacks = Number.isFinite(adjustments.blacks)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
   const shadowsTemperature = normalizeShadowsTemperature(adjustments.shadowsTemperature);
+  const shadowsTint = normalizeShadowsTint(adjustments.shadowsTint);
   const vibrance = normalizeVibrance(adjustments.vibrance);
   const saturation = normalizeSaturation(adjustments.saturation);
   const saturationFactor = 1 + saturation / 100;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && vibrance === 0 && saturation === 0) return output;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
   const shadowsTemperatureGain = temperatureGains(shadowsTemperature);
+  const shadowsTintGain = tintGains(shadowsTint);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
   // At zero, skip that stage's round-trip to retain existing byte compatibility.
   const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;
@@ -179,15 +181,22 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
         }
       }
     }
-    if (shadowsTemperature !== 0) {
+    if (shadowsTemperature !== 0 || shadowsTint !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;
       const blue = output[i + 2] / 255;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
       const weight = shadowsGradingWeight(luminance);
       if (weight > 0) {
-        output[i] = maskedLinearGain(output[i], shadowsTemperatureGain.red, weight);
-        output[i + 2] = maskedLinearGain(output[i + 2], shadowsTemperatureGain.blue, weight);
+        if (shadowsTemperature !== 0) {
+          output[i] = maskedLinearGain(output[i], shadowsTemperatureGain.red, weight);
+          output[i + 2] = maskedLinearGain(output[i + 2], shadowsTemperatureGain.blue, weight);
+        }
+        if (shadowsTint !== 0) {
+          output[i] = maskedLinearGain(output[i], shadowsTintGain.red, weight);
+          output[i + 1] = maskedLinearGain(output[i + 1], shadowsTintGain.green, weight);
+          output[i + 2] = maskedLinearGain(output[i + 2], shadowsTintGain.blue, weight);
+        }
       }
     }
     if (vibrance !== 0) {

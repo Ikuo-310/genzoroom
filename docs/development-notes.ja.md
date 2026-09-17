@@ -1,16 +1,16 @@
 # GenzoRoom 開発ノート
 
-## Color Grading / Shadows Temperature（最新フェーズ）
+## Color Grading / Shadows Temperature + Tint（最新フェーズ）
 
-右ペインのColorの下に「カラーグレーディング / Color Grading」を配置し、Shadows（日本語UIでは「シャドウ」）セクションへTemperatureだけを実装した。範囲−100〜+100、step 1、初期値0、負方向が暖色、正方向が寒色で、既存Temperatureと同じAdjustmentSlider、方向gradient、drag・直接入力・keyboard・wheel・500ms inactivity commitを使う。カテゴリは独立して開閉、ON/OFF、Resetでき、OFF中も値を保持する。表示順はWhite Balance → Basic → Color → Color Gradingだが、pixel pipelineの順序には影響しない。
+右ペインのColorの下に「カラーグレーディング / Color Grading」を配置し、Shadows（日本語UIでは「シャドウ」）セクションへTemperatureとTint（日本語UIでは「色かぶり補正」）を実装した。どちらも範囲−100〜+100、step 1、初期値0。Temperatureは負が暖色・正が寒色、Tintは負がGreen・正がMagentaで、既存global調整と同じAdjustmentSliderと方向gradient、drag・直接入力・keyboard・wheel・500ms inactivity commitを使う。カテゴリは独立して開閉、ON/OFF、Resetでき、OFF中も両値を保持する。表示順はWhite Balance → Basic → Color → Color Gradingだが、pixel pipelineの順序には影響しない。
 
-recipeはflat構造を維持してv11へ進め、`colorGradingEnabled: true`と`adjustments.shadowsTemperature: 0`を追加した。Color Grading ResetはShadows Temperatureだけを0へ戻してenabledを保持し、All Resetは11値と4カテゴリを既定状態へ戻す。変更、個別Reset、カテゴリReset、ON/OFFは既存粒度のHistory、Undo/Redo、pending/coalescingへ統合し、Asset ID別sessionに含めた。
+recipeはflat構造を維持してv12へ進め、`adjustments.shadowsTint: 0`を追加した。Color Grading ResetはShadows TemperatureとShadows Tintを0へ戻してenabledを保持し、All Resetは12値と4カテゴリを既定状態へ戻す。各変更、個別Reset、カテゴリReset、ON/OFFは既存粒度のHistory、Undo/Redo、pending/coalescingへ統合し、Asset ID別sessionに含めた。
 
-処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Vibrance → Saturation。Shadows Temperature stageの入力（Blacks後）の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を求め、`x = clamp((Y - 0.15) / 0.20, 0, 1)`、`weight = 1 - x²(3 - 2x)`とする。Y≤0.15はweight 1、0.15〜0.35はsmoothstepで連続的に減衰し、Y≥0.35は0。既存Temperatureのlinear RGB gainを`effectiveGain = gain^weight`で重み付けし、暖色/寒色の逆数関係を維持してclip・sRGB encode・8-bit丸めを行う。値0ではstage全体をskipするため既存出力はbyte-identical。Basic Shadowsの輝度補正とは独立している。
+処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Vibrance → Saturation。Blacks後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を一度求め、`x = clamp((Y - 0.15) / 0.20, 0, 1)`、`weight = 1 - x²(3 - 2x)`を両Shadows補正で共有する。Y≤0.15はweight 1、0.15〜0.35はsmoothstepで連続的に減衰し、Y≥0.35は0。Temperatureは既存Temperature gainを、Tintはglobal Tintと同じ`t = shadowsTint / 100`、`R = B = 1.3^t`、`G = 1.3^-t`を使い、いずれもlinear RGBで`effectiveGain = gain^weight`としてclip・sRGB encode・8-bit丸めを行う。Tintの±100では強めるchannelが最大1.3、弱めるchannelが1/1.3。各値0では該当stageをskipするため既存出力はbyte-identicalで、Basic Shadowsの輝度補正とは独立している。
 
-検証：Frontend全315件、TypeScript/Vite production build、git diff --checkを実行した。default 0とbyte identity、±100の方向とgain、低輝度での作用、高輝度での無作用、mask境界の連続性、Basic後かつVibrance/Saturation前の順序、bypassと値保持、個別/category/All Reset、History、Undo/Redo、pending coalescing、recipe JSON round-trip、Filmstrip相当のper-asset session、UIのカテゴリ順・範囲・gradient・keyboardを自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+検証：Frontend全326件、TypeScript/Vite production build、git diff --checkを実行した。Shadows Tintのdefault 0とbyte identity、±100の方向とgain、低輝度・fade・作用域外、alpha、clip、grayscale、Temperature → Tint順、bypassと値保持、個別/category/All Reset、他カテゴリResetとの独立性、History、Undo/Redo、pending coalescing、recipe JSON round-trip、Filmstrip相当のper-asset session、UIの順序・範囲・gradient・disabled・keyboard・wheel・直接入力を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
-実機Firefox・実Immichの写真では、暗部の暖色/寒色方向、黒〜低輝度で十分作用して中間調へ自然に抜けること、明部や肌の明るい部分への不要な色変化がないこと、Basic Shadowsとの独立性、Color Grading OFF中の値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
+実機Firefox・実Immichの写真では、暗部の暖色/寒色とGreen/Magenta方向、両補正が黒〜低輝度で十分作用して中間調へ自然に抜けること、明部や肌の明るい部分への不要な色変化がないこと、Basic Shadowsとの独立性、Color Grading OFF中の両値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
 
 ## Color / Vibrance / Saturation（以前のフェーズ）
 

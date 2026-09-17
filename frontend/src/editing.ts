@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
-export type EditRecipe = { version: 11; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; vibrance: number; saturation: number } };
-export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'colorGradingToggle' | 'colorGradingReset' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset';
+export type EditRecipe = { version: 12; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; shadowsTint: number; vibrance: number; saturation: number } };
+export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset';
 export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
@@ -19,7 +19,7 @@ export const SHADOWS = { min: -100, max: 100, step: 1 };
 export const BLACKS = { min: -100, max: 100, step: 1 };
 export const VIBRANCE = { min: -100, max: 100, step: 1 };
 export const SATURATION = { min: -100, max: 100, step: 1 };
-export const defaultRecipe = (): EditRecipe => ({ version: 11, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, vibrance: 0, saturation: 0 } });
+export const defaultRecipe = (): EditRecipe => ({ version: 12, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, vibrance: 0, saturation: 0 } });
 
 // Basic membership is deliberately independent of all recipe adjustments.
 export const BASIC_ADJUSTMENT_KEYS = ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] as const;
@@ -43,7 +43,7 @@ export function resetWhiteBalanceAdjustments<T extends EditRecipe['adjustments']
 export function isWhiteBalanceDefault(adjustments: EditRecipe['adjustments']): boolean {
   return WHITE_BALANCE_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaultRecipe().adjustments[key]);
 }
-export const COLOR_GRADING_ADJUSTMENT_KEYS = ['shadowsTemperature'] as const;
+export const COLOR_GRADING_ADJUSTMENT_KEYS = ['shadowsTemperature', 'shadowsTint'] as const;
 export function resetColorGradingAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
   for (const key of COLOR_GRADING_ADJUSTMENT_KEYS) result[key] = defaultRecipe().adjustments[key];
@@ -81,6 +81,7 @@ export const formatBlacks = (value: number) => `${value > 0 ? '+' : ''}${value.t
 export const formatVibrance = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatSaturation = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(0)}`;
 export const formatShadowsTemperature = formatTemperature;
+export const formatShadowsTint = formatTint;
 export const normalizeTemperature = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(TEMPERATURE.min, Math.min(TEMPERATURE.max, value))) : 0;
 export const normalizeTint = (value: number) => Number.isFinite(value)
@@ -102,10 +103,11 @@ export const normalizeVibrance = (value: number) => Number.isFinite(value)
 export const normalizeSaturation = (value: number) => Number.isFinite(value)
   ? Math.round(Math.max(SATURATION.min, Math.min(SATURATION.max, value))) : 0;
 export const normalizeShadowsTemperature = normalizeTemperature;
+export const normalizeShadowsTint = normalizeTint;
 
-export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'vibrance' | 'saturation'; value: number }
+export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'vibrance' | 'saturation'; value: number }
   | { type: 'commit'; kind?: EditKind }
-  | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'toggleColorGrading' | 'colorGradingReset' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
+  | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
 function recipesEqual(left: EditRecipe, right: EditRecipe) {
   return left.whiteBalanceEnabled === right.whiteBalanceEnabled
@@ -120,6 +122,7 @@ function recipesEqual(left: EditRecipe, right: EditRecipe) {
     && left.adjustments.blacks === right.adjustments.blacks
     && left.colorGradingEnabled === right.colorGradingEnabled
     && left.adjustments.shadowsTemperature === right.adjustments.shadowsTemperature
+    && left.adjustments.shadowsTint === right.adjustments.shadowsTint
     && left.colorEnabled === right.colorEnabled
     && left.adjustments.vibrance === right.adjustments.vibrance
     && left.adjustments.saturation === right.adjustments.saturation;
@@ -175,6 +178,10 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       ...editSession(state, { type: 'begin', kind: 'shadowsTemperature' }),
       recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, shadowsTemperature: normalizeShadowsTemperature(action.value) } },
     };
+    case 'shadowsTint': return {
+      ...editSession(state, { type: 'begin', kind: 'shadowsTint' }),
+      recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, shadowsTint: normalizeShadowsTint(action.value) } },
+    };
     case 'saturation': return {
       ...editSession(state, { type: 'begin', kind: 'saturation' }),
       recipe: { ...state.recipe, adjustments: { ...state.recipe.adjustments, saturation: normalizeSaturation(action.value) } },
@@ -203,6 +210,7 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     case 'blacksReset':
     case 'basicReset':
     case 'shadowsTemperatureReset':
+    case 'shadowsTintReset':
     case 'colorGradingReset':
     case 'vibranceReset':
     case 'saturationReset':
@@ -224,6 +232,7 @@ export function editSession(state: EditSession, action: EditAction): EditSession
                     : action.type === 'shadowsReset' ? 'shadows'
                       : action.type === 'blacksReset' ? 'blacks'
                         : action.type === 'shadowsTemperatureReset' ? 'shadowsTemperature'
+                          : action.type === 'shadowsTintReset' ? 'shadowsTint'
                         : action.type === 'vibranceReset' ? 'vibrance' : 'saturation']: 0 },
         } });
     }
