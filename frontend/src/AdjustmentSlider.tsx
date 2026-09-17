@@ -26,6 +26,13 @@ function keyboardAdjustment(): HTMLInputElement | null {
   return focused instanceof HTMLInputElement && isAvailable(focused) ? focused : null;
 }
 
+function activateFromMouse(element: HTMLInputElement) {
+  activeAdjustment = element;
+  const focused = element.ownerDocument.activeElement;
+  // Release stale slider focus without moving focus to the hover target or ending text edits.
+  if (focused instanceof HTMLInputElement && focused !== element && adjustments.has(focused)) focused.blur();
+}
+
 export function AdjustmentSlider(props: Props) {
   const rangeId = useId();
   const labelId = useId();
@@ -159,7 +166,7 @@ export function AdjustmentSlider(props: Props) {
     const wheel = (event: WheelEvent) => {
       const current = latest.current;
       if (!element || element.disabled || event.deltaY === 0) return;
-      activeAdjustment = element;
+      activateFromMouse(element);
       const direction = event.deltaY < 0 ? 1 : -1;
       const steps = event.shiftKey ? 1 : 10;
       let baseValue = current.value;
@@ -197,7 +204,7 @@ export function AdjustmentSlider(props: Props) {
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={() => {
         hovered.current = true;
-        if (isAvailable(range.current)) activeAdjustment = range.current;
+        if (isAvailable(range.current)) activateFromMouse(range.current);
       }}
       onPointerLeave={() => {
         hovered.current = false;

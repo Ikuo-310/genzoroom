@@ -561,6 +561,9 @@ describe('edit controls DOM interaction', () => {
     key('ArrowUp');
     const target = host.querySelector<HTMLElement>(selector)!;
     act(() => target.focus());
+    pointer('pointerout');
+    pointer('pointerover', contrastRange());
+    expect(document.activeElement).toBe(target);
     for (const init of [{ key: 'ArrowRight' }, { key: 'ArrowUp', shiftKey: true }, { key: 'ArrowDown', shiftKey: true }, { key: 'z', ctrlKey: true }, { key: 'z', ctrlKey: true, shiftKey: true }, { key: 'y', ctrlKey: true }]) {
       expect(key(init.key, target, init).defaultPrevented).toBe(false);
     }

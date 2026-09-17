@@ -82,7 +82,8 @@ describe('production White Balance controls', () => {
     act(() => items[from].focus());
     pointer('pointerup', window);
     pointer('pointerover', items[to]);
-    expect(document.activeElement).toBe(items[from]);
+    expect(document.activeElement).not.toBe(items[from]);
+    expect(document.activeElement).not.toBe(items[to]);
     wheel(-1, false, items[to]);
     wheel(-1, true, items[to]);
     key('ArrowRight', items[from]);
@@ -93,6 +94,42 @@ describe('production White Balance controls', () => {
     expect(items[from].value).toBe('0');
     advance();
     expect(history()).toHaveLength(1);
+  });
+
+  it.each([0, 2, 8])('releases keyboard focus for mouse hover and restores it on Shift navigation from %s', (index) => {
+    const items = ranges();
+    act(() => items[index].focus());
+    navigate('ArrowDown');
+    const previous = items[index + 1];
+    expect(document.activeElement).toBe(previous);
+    key('ArrowRight', previous);
+    const beforeHover = recipe();
+    pointer('pointerover', items[index]);
+    expect(document.activeElement).not.toBe(previous);
+    expect(document.activeElement).not.toBe(items[index]);
+    expect(recipe()).toEqual(beforeHover);
+    expect(history()).toHaveLength(0);
+    advance(499);
+    expect(history()).toHaveLength(0);
+    advance(1);
+    expect(history()).toHaveLength(1);
+    key('ArrowRight', document.activeElement!);
+    wheel(-1, false, items[index]);
+    wheel(-1, true, items[index]);
+    expect(Number(items[index].value)).toBeCloseTo(12 * Number(items[index].step));
+    expect(previous.value).toBe('1');
+    expect(document.activeElement).not.toBe(items[index]);
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(previous);
+    expect(history()).toHaveLength(2);
+    key('ArrowRight', previous);
+    expect(previous.value).toBe('2');
+    advance();
+    expect(history()).toHaveLength(3);
+    key('z', previous, { ctrlKey: true });
+    expect(previous.value).toBe('1');
+    key('z', previous, { ctrlKey: true, shiftKey: true });
+    expect(previous.value).toBe('2');
   });
 
   it('navigates every gradient, Basic and Color slider in UI order without values or History changes or wrapping', () => {
