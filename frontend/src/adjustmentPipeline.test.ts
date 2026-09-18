@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultRecipe, type EditRecipe } from './editing';
-import { renderAdjustments } from './exposurePipeline';
+import { renderAdjustments } from './adjustmentPipeline';
 
 function compatibilityPixels() {
   const pixels = new Uint8ClampedArray((4096 + 256) * 4);
@@ -16,6 +16,15 @@ function compatibilityPixels() {
 // Frozen outputs from pre-optimization commit 99c58aae3ec621eddbea0b4d7e5ba76c52be5147.
 // Mixed RGB/alpha plus all 256 grayscale levels; do not regenerate from the optimized pipeline.
 const compatibilityCases: Array<{ name: string; adjustments: Partial<EditRecipe['adjustments']>; hash: string }> = [
+  // Frozen separately from e21dafc6d513733595ddb20a9c2bbcaadc762fe7, before decode LUT.
+  { name: 'grading -100/-100', adjustments: { shadowsTemperature: -100, shadowsTint: -100 }, hash: 'c13c74cb8b2d1f107d52e25aaec856d892b90e633a690966e1882838c39d4c2c' },
+  { name: 'grading -100/0', adjustments: { shadowsTemperature: -100, shadowsTint: 0 }, hash: '8f032e6bdf0d4e05798d76016116493a2dd02d7d48a10264522cfb94e3e44df9' },
+  { name: 'grading -100/100', adjustments: { shadowsTemperature: -100, shadowsTint: 100 }, hash: '6d09adf6c097b5b7fe25d2c54edad80509777382c483985ee7fda9e49163e218' },
+  { name: 'grading 0/-100', adjustments: { shadowsTemperature: 0, shadowsTint: -100 }, hash: 'b6971ec129bfed755c6a8863e8d72c3a8fc2a69a9cafb347d971df3a12c2fab1' },
+  { name: 'grading 0/100', adjustments: { shadowsTemperature: 0, shadowsTint: 100 }, hash: 'fc8cdf2078ddf73d102c80183874bd87160c6eaa1978be211a99d3384fe5367c' },
+  { name: 'grading 100/-100', adjustments: { shadowsTemperature: 100, shadowsTint: -100 }, hash: '7af1b415bd96968e81b389f0609353a40eeef4e64e4fc80c0ef068b8a0d5c6b1' },
+  { name: 'grading 100/0', adjustments: { shadowsTemperature: 100, shadowsTint: 0 }, hash: 'ba7b21717337846349b548ac7cc0851029bcea1618dcdad28e6690754ff8c07e' },
+  { name: 'grading 100/100', adjustments: { shadowsTemperature: 100, shadowsTint: 100 }, hash: '456d2e6839c7975f731752eb862a35e183687a4eb04a5b186f3261a02dde459c' },
   { name: "identity", adjustments: {}, hash: '32dc59115896b5af444fc62db05c6c47fcc24260a1d0aef1211a5627f339cc9e' },
   { name: "exposure", adjustments: {"exposure":0.5}, hash: 'ff9bfc9222ac55ea7050a20ca2ebe020ca63c2071ade2e10f15c009f9d281e36' },
   { name: "highlights -100", adjustments: {"highlights":-100}, hash: 'bd5bceddac4bdb7b8766fd5d4349457785e3baec04c7b1ade64fbb466af90726' },

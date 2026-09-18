@@ -42,15 +42,21 @@ export function shadowsGradingWeight(luminance: number) {
   return 1 - position * position * (3 - 2 * position);
 }
 
-function maskedLinearGain(channel: number, gain: number, weight: number) {
+// Stage inputs are rounded bytes. Float64 retains the exact original decode results
+// while avoiding up to five repeated decode powers per Shadows pixel.
+const srgbDecode = Float64Array.from({ length: 256 }, (_, channel) => {
   const srgb = channel / 255;
-  const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+});
+
+function maskedLinearGain(channel: number, gain: number, weight: number) {
+  const linear = srgbDecode[channel];
   const shifted = Math.max(0, Math.min(1, linear * gain ** weight));
   const encoded = shifted <= 0.0031308 ? 12.92 * shifted : 1.055 * shifted ** (1 / 2.4) - 0.055;
   return Math.round(255 * encoded);
 }
 
-// Pure pixel stage: accepts decoded sRGB RGBA, never changes the source buffer.
+// Pure adjustment pipeline: accepts decoded sRGB RGBA, never changes the source buffer.
 // Later adjustments belong here, independent of the image acquisition adapter.
 export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe): Uint8ClampedArray<ArrayBuffer> {
   const output = new Uint8ClampedArray(source);

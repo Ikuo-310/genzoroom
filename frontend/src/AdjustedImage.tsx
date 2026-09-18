@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EditRecipe } from './editing';
 import { decodeEditSource, type EditImageSource } from './editImageSource';
-import { renderAdjustments } from './exposurePipeline';
+import { renderAdjustments } from './adjustmentPipeline';
 
 type Props = {
   source: EditImageSource; recipe: EditRecipe; alt: string; width?: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BASIC_ADJUSTMENT_KEYS, defaultRecipe, editSession, effectiveAdjustments, isBasicDefault, isWhiteBalanceDefault, newSession, normalizeTemperature, normalizeTint, type EditAction } from './editing';
-import { renderAdjustments, temperatureGains, tintGains } from './exposurePipeline';
+import { renderAdjustments, temperatureGains, tintGains } from './adjustmentPipeline';
 
 function recipe(temperature = 0, exposure = 0) {
   const result = defaultRecipe();

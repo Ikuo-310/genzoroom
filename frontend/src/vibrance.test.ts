@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultRecipe } from './editing';
-import { VIBRANCE_CHROMA_THRESHOLD, renderAdjustments } from './exposurePipeline';
+import { VIBRANCE_CHROMA_THRESHOLD, renderAdjustments } from './adjustmentPipeline';
 
 const withVibrance = (value: number) => {
   const recipe = defaultRecipe();

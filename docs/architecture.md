@@ -79,7 +79,7 @@ The current rendering path is:
 ```text
 Temporary Immich preview adapter (editImageSource.ts)
   → browser decode into sRGB RGBA
-  → exposurePipeline.ts (immutable source → linear-light Temperature → linear-light Tint → linear-light Exposure gain 2^EV → sRGB midpoint Contrast → Highlights → Whites → Shadows → Blacks → masked linear-light Shadows Temperature → masked linear-light Shadows Tint → Vibrance → Saturation)
+  → adjustmentPipeline.ts (immutable source → linear-light Temperature → linear-light Tint → linear-light Exposure gain 2^EV → sRGB midpoint Contrast → Highlights → Whites → Shadows → Blacks → masked linear-light Shadows Temperature → masked linear-light Shadows Tint → Vibrance → Saturation)
   → GenzoRoom Canvas preview → existing Viewer transforms
 ```
 

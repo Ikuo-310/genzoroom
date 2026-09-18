@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultRecipe, editAsset, editSession, effectiveAdjustments, newSession } from './editing';
-import { renderAdjustments, shadowsGradingWeight, temperatureGains, tintGains } from './exposurePipeline';
+import { renderAdjustments, shadowsGradingWeight, temperatureGains, tintGains } from './adjustmentPipeline';
 
 function withShadowsTemperature(value: number) {
   const recipe = defaultRecipe();

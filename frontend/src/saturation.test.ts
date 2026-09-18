@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultRecipe, editSession, effectiveAdjustments, newSession } from './editing';
-import { renderAdjustments } from './exposurePipeline';
+import { renderAdjustments } from './adjustmentPipeline';
 
 const pixels = new Uint8ClampedArray([220, 80, 30, 17, 48, 150, 210, 239]);
 const withSaturation = (value: number) => {

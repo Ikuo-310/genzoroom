@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { editAsset, editSession, newSession, supportsEditing, isBasicDefault, effectiveAdjustments, type EditSession } from './editing';
-import { renderAdjustments } from './exposurePipeline';
+import { renderAdjustments } from './adjustmentPipeline';
 import { sliderSteps, undoShortcut } from './editShortcuts';
 
 const adjustExposure = (state: EditSession, value: number) => editSession(editSession(state, { type: 'exposure', value }), { type: 'commit' });
