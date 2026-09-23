@@ -1,16 +1,16 @@
 # GenzoRoom 開発ノート
 
-## Color Grading / Shadows Temperature + Tint（最新フェーズ）
+## Color Grading / Midtones Temperature（最新フェーズ）
 
-右ペインのColorの下に「カラーグレーディング / Color Grading」を配置し、Shadows（日本語UIでは「シャドウ」）セクションへTemperatureとTint（日本語UIでは「色かぶり補正」）を実装した。どちらも範囲−100〜+100、step 1、初期値0。Temperatureは負が暖色・正が寒色、Tintは負がGreen・正がMagentaで、既存global調整と同じAdjustmentSliderと方向gradient、drag・直接入力・keyboard・wheel・500ms inactivity commitを使う。カテゴリは独立して開閉、ON/OFF、Resetでき、OFF中も両値を保持する。表示順はWhite Balance → Basic → Color → Color Gradingだが、pixel pipelineの順序には影響しない。
+Color GradingのShadows Temperature / Tintの下にMidtones（中間調）Temperature（色温度）を追加した。範囲−100〜+100、step 1、初期値0、単位なし。負が暖色、正が寒色。既存AdjustmentSliderとTemperature gradientを再利用し、drag・直接入力・keyboard・wheel・500ms inactivity commitを共有する。カテゴリOFF中も3値を保持する。
 
-recipeはflat構造を維持してv12へ進め、`adjustments.shadowsTint: 0`を追加した。Color Grading ResetはShadows TemperatureとShadows Tintを0へ戻してenabledを保持し、All Resetは12値と4カテゴリを既定状態へ戻す。各変更、個別Reset、カテゴリReset、ON/OFFは既存粒度のHistory、Undo/Redo、pending/coalescingへ統合し、Asset ID別sessionに含めた。
+recipeはflat構造のv13で`adjustments.midtonesTemperature: 0`を追加した。Color Grading Resetは3値を0へ戻してenabledを保持し、All Resetは13値と4カテゴリを既定状態へ戻す。個別Reset、カテゴリReset、ON/OFF、History、Undo/Redo、Asset ID別sessionは既存方式を使う。
 
-処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Vibrance → Saturation。Blacks後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を一度求め、`x = clamp((Y - 0.15) / 0.20, 0, 1)`、`weight = 1 - x²(3 - 2x)`を両Shadows補正で共有する。Y≤0.15はweight 1、0.15〜0.35はsmoothstepで連続的に減衰し、Y≥0.35は0。Temperatureは既存Temperature gainを、Tintはglobal Tintと同じ`t = shadowsTint / 100`、`R = B = 1.3^t`、`G = 1.3^-t`を使い、いずれもlinear RGBで`effectiveGain = gain^weight`としてclip・sRGB encode・8-bit丸めを行う。Tintの±100では強めるchannelが最大1.3、弱めるchannelが1/1.3。各値0では該当stageをskipするため既存出力はbyte-identicalで、Basic Shadowsの輝度補正とは独立している。
+処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Vibrance → Saturation。MidtonesではShadows Tint後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を求め、`weight = smoothstep(0.15, 0.35, Y) × (1 - smoothstep(0.65, 0.85, Y))`とする。0.15以下と0.85以上は0、0.35〜0.65は1、両端の間は滑らかに変化する。既存Temperature gainのlinear RGBで`effectiveGain = gain^weight`を使い、clip・sRGB encode・8-bit丸めを行う。Shadowsのweightとstageは変更していない。
 
-検証：Frontend全326件、TypeScript/Vite production build、git diff --checkを実行した。Shadows Tintのdefault 0とbyte identity、±100の方向とgain、低輝度・fade・作用域外、alpha、clip、grayscale、Temperature → Tint順、bypassと値保持、個別/category/All Reset、他カテゴリResetとの独立性、History、Undo/Redo、pending coalescing、recipe JSON round-trip、Filmstrip相当のper-asset session、UIの順序・範囲・gradient・disabled・keyboard・wheel・直接入力を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+検証：Frontend全テストとTypeScript/Vite production buildが成功した。Midtonesの0でのbyte identity、±100の方向、weight境界、alpha、clip、処理順、bypass、Reset、History、Undo/Redo、UI操作、Worker経由の一致を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
-実機Firefox・実Immichの写真では、暗部の暖色/寒色とGreen/Magenta方向、両補正が黒〜低輝度で十分作用して中間調へ自然に抜けること、明部や肌の明るい部分への不要な色変化がないこと、Basic Shadowsとの独立性、Color Grading OFF中の両値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
+実機Firefox・実Immichでは、中間調の暖色/寒色、暗部・明部への作用がないこと、fadeの自然さ、Shadowsとの重なり、Color Grading OFF中の3値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
 
 ## Color / Vibrance / Saturation（以前のフェーズ）
 
@@ -62,7 +62,7 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。`basicEnabled`がfalseなら未変更sourceを返し、6項目の値は書き換えない。有効時はブラウザでsRGB RGBAへdecodeし、まずsRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。その後、各sRGB channelを0.5中心に `1 + contrast / 100` 倍して0〜1へclipする。HighlightsはsRGB輝度 `Y = 0.2126R + 0.7152G + 0.0722B` から0.5〜1.0のsmoothstep重みを求め、正値では `1 - (1 - Y)^2`、負値では `Y^2` へ補間する。WhitesはHighlights後の輝度0.75〜1.0をsmoothstepで選び、正値では1.0、負値では0.75へ補間する。ShadowsはWhites後の輝度から0〜0.15のsmoothstep重みを求め、正値では `sqrt(Y)`、負値では `Y^2` へ補間する。BlacksはShadows後にMaster Black / Pedestalとして、`weight = 1 - smoothstep(0, 0.35, Y)`、`newY = clamp(Y + blacks / 100 × 0.10 × weight, 0, 1)`を適用する。作用は黒で最大、0.10〜0.20でも明確に残り、0.30付近で弱まり、0.35で連続的に0になる。非ゼロ輝度には目標輝度と元輝度の比をRGB共通倍率として適用し、倍率では持ち上げられない完全な黒だけは色相が定義されないため無彩色として扱う。Shadowsは暗部階調を曲線で起こす／沈める操作、Blacksは低域全体の基準レベルを加算offsetで上下する操作として分けた。alphaを維持し、毎回未変更の画素bufferからExposure → Contrast → Highlights → Whites → Shadows → Blacksの順に計算するため累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
 
-8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。大画像のmain thread負荷は別途評価し、必要が出てからWorker等を検討する。
+8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。このフェーズ当時は大画像のmain thread負荷を課題としていた。現在の画素処理はWorker経路を持つ。
 
 DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理versionの紐付け、commit時の原子的保存を設計する。previewベースのレシピをoriginalへ無条件に適用して同じ見え方になるとは扱わない。pending操作やCanvas bufferは永続化対象にせず、Historyを保存するかは別に決める。
 
@@ -84,7 +84,7 @@ Node.js 24.19.0上の参考計測。seed 17の疑似乱数RGB・alpha 255、3回
 | 1920×1080 | 1.13 → 1.18 | 17.28 → 17.90 | 269.47 → 159.81 | 40.7% |
 | 2560×1440 | 2.39 → 2.36 | 30.84 → 33.01 | 480.21 → 285.57 | 40.5% |
 
-再計測は `frontend/` から `node scripts/benchmark-preview.mjs 99c58aae3ec621eddbea0b4d7e5ba76c52be5147` を実行する（Node 24と対象commitを含むGit履歴が必要）。無補正・Exposure単独には改善傾向はなく、小幅な増減がある。これは画素処理と出力buffer確保だけの計測であり、decode、Canvas転送、React、requestAnimationFrame、実写真・実機Firefoxの操作時間は含まない。大きなpreviewでは処理時間がまだ長く、実機確認後にWorker化を別途評価する。今回WorkerやGPU処理は導入していない。
+再計測は `frontend/` から `node scripts/benchmark-preview.mjs 99c58aae3ec621eddbea0b4d7e5ba76c52be5147` を実行する（Node 24と対象commitを含むGit履歴が必要）。無補正・Exposure単独には改善傾向はなく、小幅な増減がある。これは画素処理と出力buffer確保だけの計測であり、decode、Canvas転送、React、requestAnimationFrame、実写真・実機Firefoxの操作時間は含まない。当時は大きなpreviewの処理時間を課題としており、この計測フェーズではWorkerやGPU処理を導入していなかった。現在はWorker経路を使用する。
 
 ### Issue #3: Basic編集controlsの内部整理
 

@@ -34,7 +34,7 @@ Editing is currently available for JPEG assets only and uses the Immich-generate
 | White Balance | Temperature, Tint |
 | Basic | Exposure, Contrast, Highlights, Whites, Shadows, Blacks |
 | Color | Vibrance, Saturation |
-| Color Grading | Shadows Temperature, Shadows Tint |
+| Color Grading | Shadows Temperature, Shadows Tint, Midtones Temperature |
 
 Each category can be collapsed, temporarily bypassed without losing its values, and reset independently. Adjustment changes and category operations participate in History and Undo / Redo. Processing is performed locally in the browser; Immich originals are not modified.
 

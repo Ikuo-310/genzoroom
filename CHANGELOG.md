@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Midtones Temperature (−100 warm to +100 cool) in Color Grading, using the existing Temperature gains with a smooth midtone band from luminance 0.15 to 0.85. It shares the category's bypass, Reset, History, Undo/Redo, and per-asset behavior.
 - A Color Grading category below Color with Shadows Temperature (−100 warm to +100 cool) and Shadows Tint (−100 green to +100 magenta), both step 1 and default 0. They use the global Temperature and Tint gain directions in linear RGB with one shared Shadows weight: full strength through luminance 0.15 and smoothly faded to zero at 0.35. Independent bypass, Reset, History, Undo/Redo, and per-asset state are included.
 - A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
 - A Color category below Basic with global JPEG preview Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo, and runs after Blacks while preserving alpha.
@@ -40,6 +41,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Advanced the flat in-memory recipe to version 13 with `midtonesTemperature`. Color Grading Reset and All Reset now include all three grading values.
 - Updated flat in-memory edit recipes to version 12 with `shadowsTint` alongside `colorGradingEnabled` and `shadowsTemperature`. All Reset restores twelve values and enables all four categories; Color Grading OFF retains both Shadows values while bypassing only those stages.
 - Reduced JPEG preview processing work by skipping inactive luminance regions in Highlights, Whites, Shadows, and Blacks, preserving pixel output, adjustment order, and intermediate 8-bit rounding.
 - Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.

@@ -1,4 +1,4 @@
-import { normalizeSaturation, normalizeShadowsTemperature, normalizeShadowsTint, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeMidtonesTemperature, normalizeSaturation, normalizeShadowsTemperature, normalizeShadowsTint, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -10,6 +10,10 @@ export const VIBRANCE_NEGATIVE_STRENGTH = 0.6;
 export const VIBRANCE_NEGATIVE_HIGH_CHROMA_WEIGHT = 0.25;
 export const SHADOWS_GRADING_FULL_STRENGTH_END = 0.15;
 export const SHADOWS_GRADING_FADE_END = 0.35;
+export const MIDTONES_GRADING_FADE_IN_START = 0.15;
+export const MIDTONES_GRADING_FULL_STRENGTH_START = 0.35;
+export const MIDTONES_GRADING_FULL_STRENGTH_END = 0.65;
+export const MIDTONES_GRADING_FADE_OUT_END = 0.85;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {
@@ -40,6 +44,18 @@ export function shadowsGradingWeight(luminance: number) {
     (luminance - SHADOWS_GRADING_FULL_STRENGTH_END)
       / (SHADOWS_GRADING_FADE_END - SHADOWS_GRADING_FULL_STRENGTH_END)));
   return 1 - position * position * (3 - 2 * position);
+}
+
+export function midtonesGradingWeight(luminance: number) {
+  const lowPosition = Math.max(0, Math.min(1,
+    (luminance - MIDTONES_GRADING_FADE_IN_START)
+      / (MIDTONES_GRADING_FULL_STRENGTH_START - MIDTONES_GRADING_FADE_IN_START)));
+  const highPosition = Math.max(0, Math.min(1,
+    (luminance - MIDTONES_GRADING_FULL_STRENGTH_END)
+      / (MIDTONES_GRADING_FADE_OUT_END - MIDTONES_GRADING_FULL_STRENGTH_END)));
+  const low = lowPosition * lowPosition * (3 - 2 * lowPosition);
+  const high = 1 - highPosition * highPosition * (3 - 2 * highPosition);
+  return low * high;
 }
 
 // Stage inputs are rounded bytes. Float64 retains the exact original decode results
@@ -77,14 +93,16 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
     ? Math.max(-100, Math.min(100, adjustments.blacks)) / 100 : 0;
   const shadowsTemperature = normalizeShadowsTemperature(adjustments.shadowsTemperature);
   const shadowsTint = normalizeShadowsTint(adjustments.shadowsTint);
+  const midtonesTemperature = normalizeMidtonesTemperature(adjustments.midtonesTemperature);
   const vibrance = normalizeVibrance(adjustments.vibrance);
   const saturation = normalizeSaturation(adjustments.saturation);
   const saturationFactor = 1 + saturation / 100;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && vibrance === 0 && saturation === 0) return output;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && midtonesTemperature === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
   const shadowsTemperatureGain = temperatureGains(shadowsTemperature);
   const shadowsTintGain = tintGains(shadowsTint);
+  const midtonesTemperatureGain = temperatureGains(midtonesTemperature);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
   // At zero, skip that stage's round-trip to retain existing byte compatibility.
   const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;
@@ -203,6 +221,17 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
           output[i + 1] = maskedLinearGain(output[i + 1], shadowsTintGain.green, weight);
           output[i + 2] = maskedLinearGain(output[i + 2], shadowsTintGain.blue, weight);
         }
+      }
+    }
+    if (midtonesTemperature !== 0) {
+      const red = output[i] / 255;
+      const green = output[i + 1] / 255;
+      const blue = output[i + 2] / 255;
+      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      const weight = midtonesGradingWeight(luminance);
+      if (weight > 0) {
+        output[i] = maskedLinearGain(output[i], midtonesTemperatureGain.red, weight);
+        output[i + 2] = maskedLinearGain(output[i + 2], midtonesTemperatureGain.blue, weight);
       }
     }
     if (vibrance !== 0) {
