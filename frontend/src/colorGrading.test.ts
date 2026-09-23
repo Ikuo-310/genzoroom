@@ -40,22 +40,22 @@ describe('Midtones Temperature pixel stage', () => {
 
   it('has continuous fade-in, full plateau, and fade-out at the specified boundaries', () => {
     for (const [y, weight] of [[0, 0], [0.15, 0], [0.25, 0.5], [0.35, 1],
-      [0.5, 1], [0.65, 1], [0.75, 0.5], [0.85, 0], [1, 0]]) {
+      [0.5, 1], [0.60, 1], [0.69, 0.5], [0.78, 0], [1, 0]]) {
       expect(midtonesGradingWeight(y)).toBeCloseTo(weight, 10);
     }
-    for (const boundary of [0.15, 0.35, 0.65, 0.85]) {
+    for (const boundary of [0.15, 0.35, 0.60, 0.78]) {
       expect(Math.abs(midtonesGradingWeight(boundary - 1e-6)
         - midtonesGradingWeight(boundary + 1e-6))).toBeLessThan(1e-9);
     }
     expect(midtonesGradingWeight(0.2)).toBeLessThan(midtonesGradingWeight(0.3));
-    expect(midtonesGradingWeight(0.7)).toBeGreaterThan(midtonesGradingWeight(0.8));
+    expect(midtonesGradingWeight(0.65)).toBeGreaterThan(midtonesGradingWeight(0.73));
     expect(shadowsGradingWeight(0.15)).toBe(1);
     expect(shadowsGradingWeight(0.35)).toBe(0);
   });
 
   it('skips pixels outside its band, preserves alpha, and clips grayscale endpoints safely', () => {
     const source = new Uint8ClampedArray([38, 38, 38, 11, 64, 64, 64, 22,
-      127, 127, 127, 33, 191, 191, 191, 44, 217, 217, 217, 55,
+      127, 127, 127, 33, 176, 176, 176, 44, 199, 199, 199, 55,
       250, 2, 127, 66, 2, 127, 250, 77]);
     for (const value of [-100, 100]) {
       const result = renderAdjustments(source, withMidtonesTemperature(value));

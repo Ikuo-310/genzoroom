@@ -12,8 +12,8 @@ export const SHADOWS_GRADING_FULL_STRENGTH_END = 0.15;
 export const SHADOWS_GRADING_FADE_END = 0.35;
 export const MIDTONES_GRADING_FADE_IN_START = 0.15;
 export const MIDTONES_GRADING_FULL_STRENGTH_START = 0.35;
-export const MIDTONES_GRADING_FULL_STRENGTH_END = 0.65;
-export const MIDTONES_GRADING_FADE_OUT_END = 0.85;
+export const MIDTONES_GRADING_FULL_STRENGTH_END = 0.60;
+export const MIDTONES_GRADING_FADE_OUT_END = 0.78;
 
 // Relative JPEG preview white balance: reciprocal gains, with Green as reference.
 export function temperatureGains(value: number) {

@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Midtones Temperature (−100 warm to +100 cool) in Color Grading, using the existing Temperature gains with a smooth midtone band from luminance 0.15 to 0.85. It shares the category's bypass, Reset, History, Undo/Redo, and per-asset behavior.
+- Midtones Temperature (−100 warm to +100 cool) in Color Grading, using the existing Temperature gains with a smooth midtone band from luminance 0.15 to 0.78. It shares the category's bypass, Reset, History, Undo/Redo, and per-asset behavior.
 - A Color Grading category below Color with Shadows Temperature (−100 warm to +100 cool) and Shadows Tint (−100 green to +100 magenta), both step 1 and default 0. They use the global Temperature and Tint gain directions in linear RGB with one shared Shadows weight: full strength through luminance 0.15 and smoothly faded to zero at 0.35. Independent bypass, Reset, History, Undo/Redo, and per-asset state are included.
 - A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
 - A Color category below Basic with global JPEG preview Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo, and runs after Blacks while preserving alpha.

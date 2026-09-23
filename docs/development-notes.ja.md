@@ -8,7 +8,7 @@ Color GradingのShadows Temperature / Tintの下にMidtones（中間調）Temper
 
 recipeはflat構造のv13で`adjustments.midtonesTemperature: 0`を追加した。Color Grading Resetは3値を0へ戻してenabledを保持し、All Resetは13値と4カテゴリを既定状態へ戻す。個別Reset、カテゴリReset、ON/OFF、History、Undo/Redo、Asset ID別sessionは既存方式を使う。
 
-処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Vibrance → Saturation。MidtonesではShadows Tint後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を求め、`weight = smoothstep(0.15, 0.35, Y) × (1 - smoothstep(0.65, 0.85, Y))`とする。0.15以下と0.85以上は0、0.35〜0.65は1、両端の間は滑らかに変化する。既存Temperature gainのlinear RGBで`effectiveGain = gain^weight`を使い、clip・sRGB encode・8-bit丸めを行う。Shadowsのweightとstageは変更していない。
+処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Vibrance → Saturation。MidtonesではShadows Tint後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を求め、`weight = smoothstep(0.15, 0.35, Y) × (1 - smoothstep(0.60, 0.78, Y))`とする。0.15以下と0.78以上は0、0.35〜0.60は1、両端の間は滑らかに変化する。既存Temperature gainのlinear RGBで`effectiveGain = gain^weight`を使い、clip・sRGB encode・8-bit丸めを行う。Shadowsのweightとstageは変更していない。
 
 検証：Frontend全テストとTypeScript/Vite production buildが成功した。Midtonesの0でのbyte identity、±100の方向、weight境界、alpha、clip、処理順、bypass、Reset、History、Undo/Redo、UI操作、Worker経由の一致を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
