@@ -65,8 +65,8 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('Deselect selected.dng');
   });
 
-  it('renders a fifty-photo grid without dropping cards', () => {
-    const assets = Array.from({ length: 50 }, (_, index): RecentAsset => ({
+  it('renders a hundred-photo grid without dropping cards', () => {
+    const assets = Array.from({ length: 100 }, (_, index): RecentAsset => ({
       id: `asset-${index + 1}`,
       filename: `photo-${index + 1}.jpg`,
       date: '2026-09-08T20:43:43',
@@ -78,7 +78,7 @@ describe('PhotoCard format badge', () => {
       <PhotoCard key={asset.id} asset={asset} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />
     ))}</div>);
 
-    expect(markup.match(/<article/g)).toHaveLength(50);
-    expect(markup).toContain('photo-50.jpg');
+    expect(markup.match(/<article/g)).toHaveLength(100);
+    expect(markup).toContain('photo-100.jpg');
   });
 });

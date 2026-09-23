@@ -31,7 +31,7 @@ Internal changes are omitted unless they affect users.
 - A health endpoint and Docker Compose deployment with a configurable Web UI port (default `3190`) and same-origin API proxying.
 - An authenticated Immich connectivity check, configured through backend environment variables, with connected, not configured, and failed states in the Web UI.
 - An optional Compose override that connects only the backend to an existing Immich Docker network for same-host deployments.
-- A recent-photo grid that retrieves up to 50 images from Immich and displays proxied thumbnails without exposing the Immich API key to the browser.
+- An initial recent-photo grid that retrieved up to 50 images from Immich and displayed proxied thumbnails without exposing the Immich API key to the browser.
 - English and Japanese UI support with a remembered manual language selection.
 - Locale-aware photo date and time formatting for English and Japanese.
 - Image format badges on photo cards, including distinct RAW format metadata used by client-side filtering.
@@ -41,6 +41,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Increased the recent Immich photo limit from 50 to 100, including the search size and returned result cap.
 - Advanced the flat in-memory recipe to version 13 with `midtonesTemperature`. Color Grading Reset and All Reset now include all three grading values.
 - Updated flat in-memory edit recipes to version 12 with `shadowsTint` alongside `colorGradingEnabled` and `shadowsTemperature`. All Reset restores twelve values and enables all four categories; Color Grading OFF retains both Shadows values while bypassing only those stages.
 - Reduced JPEG preview processing work by skipping inactive luminance regions in Highlights, Whites, Shadows, and Blacks, preserving pixel output, adjustment order, and intermediate 8-bit rounding.

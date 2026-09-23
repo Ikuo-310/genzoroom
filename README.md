@@ -13,7 +13,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 ### Immich browsing and Anshitsu
 
 - Authenticated, read-only Immich connectivity.
-- Up to 50 recent photos with proxied thumbnails and format badges.
+- Up to 100 recent photos with proxied thumbnails and format badges.
 - Client-side RAW / Non-RAW filtering.
 - Ordered multi-photo selection into the **Anshitsu** development workspace.
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
@@ -44,7 +44,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
 - The preview pipeline is browser-managed 8-bit sRGB; wide-gamut, HDR, color-profile matching, and large-image performance need further work.
 - Edit recipes and History are session-only and are not persisted to a database or browser storage.
-- Recent Photos is limited to 50 items and currently has no pagination or search.
+- Recent Photos is limited to 100 items and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
 - Immich asset Stack handling is not implemented.
 

@@ -1,5 +1,7 @@
 # GenzoRoom 開発ノート
 
+現在の最近の写真取得上限は100件。以下の過去フェーズに記した50件は、当時の仕様を示す。
+
 ## Color Grading / Midtones Temperature（最新フェーズ）
 
 Color GradingのShadows Temperature / Tintの下にMidtones（中間調）Temperature（色温度）を追加した。範囲−100〜+100、step 1、初期値0、単位なし。負が暖色、正が寒色。既存AdjustmentSliderとTemperature gradientを再利用し、drag・直接入力・keyboard・wheel・500ms inactivity commitを共有する。カテゴリOFF中も3値を保持する。
@@ -318,7 +320,7 @@ Frontendは現時点ではこれらを形式バッジの表示にだけ使用す
 
 ## 14. RAW / 非RAWフィルター
 
-最近の写真APIが返した最大50件のAssetに対し、Frontendが `is_raw` を使って表示だけを絞り込む。フィルター変更時にBackendやImmichへ再取得せず、取得件数と検索条件も変更しない。
+このフェーズ当時、最近の写真APIが返した最大50件のAssetに対し、Frontendが `is_raw` を使って表示だけを絞り込んだ。フィルター変更時にBackendやImmichへ再取得しない動作は現在も同じ。
 
 RAWとRAW以外の2つのチェックボックスは初期状態で両方ONとし、片方だけがONになった場合は最後のチェックを外せないようにした。フィルター結果が0件の場合は、Immichからの取得結果自体が0件の場合とは別のメッセージを表示する。フィルター状態は保存せず、再読み込み時には両方ONへ戻る。
 

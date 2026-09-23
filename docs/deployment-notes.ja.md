@@ -88,7 +88,7 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 - `http://<NAS-IP>:3190` を開ける。
 - `Backend: Connected` が表示される。
 - `Immich: Connected` が表示される。
-- 最近の写真が最大50件表示される。
+- 最近の写真が最大100件表示される。
 - 各写真のサムネイルが表示される。
 - 写真を開くとAnshitsu（暗室）へ移動し、previewと取得可能なEXIFが表示される。
 - 複数写真を選択して暗室へ入り、Filmstripで切り替えると対象写真のpreview・ファイル名・EXIFへ更新される。

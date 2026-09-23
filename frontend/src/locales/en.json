@@ -4,7 +4,7 @@
     "eyebrow": "A photo development room",
     "statusLabel": "Status",
     "earlyDevelopment": "Early Development",
-    "stageNotice": "Browse up to 50 recent Immich photos. JPEG White Balance, Basic, Color Grading, and Color adjustments are available in Anshitsu."
+    "stageNotice": "Browse up to 100 recent Immich photos. JPEG White Balance, Basic, Color Grading, and Color adjustments are available in Anshitsu."
   },
   "connection": {
     "sectionLabel": "Service connections",
