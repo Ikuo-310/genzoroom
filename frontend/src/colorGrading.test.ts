@@ -20,6 +20,76 @@ function withMidtonesTemperature(value: number) {
   return recipe;
 }
 
+function withMidtonesTint(value: number) {
+  const recipe = defaultRecipe();
+  recipe.adjustments.midtonesTint = value;
+  return recipe;
+}
+
+describe('Midtones Tint pixel stage', () => {
+  it('skips zero and uses the existing reciprocal Tint gains at both endpoints', () => {
+    const source = new Uint8ClampedArray([127, 127, 127, 91]);
+    expect(defaultRecipe().adjustments.midtonesTint).toBe(0);
+    expect(renderAdjustments(source, withMidtonesTint(0))).toEqual(source);
+    expect(tintGains(-100)).toEqual({ red: 1 / 1.3, green: 1.3, blue: 1 / 1.3 });
+    expect(tintGains(100)).toEqual({ red: 1.3, green: 1 / 1.3, blue: 1.3 });
+    const green = renderAdjustments(source, withMidtonesTint(-100));
+    const magenta = renderAdjustments(source, withMidtonesTint(100));
+    expect(green[0]).toBeLessThan(127);
+    expect(green[1]).toBeGreaterThan(127);
+    expect(green[2]).toBeLessThan(127);
+    expect(magenta[0]).toBeGreaterThan(127);
+    expect(magenta[1]).toBeLessThan(127);
+    expect(magenta[2]).toBeGreaterThan(127);
+    expect([green[3], magenta[3]]).toEqual([91, 91]);
+  });
+
+  it('uses the Midtones band and preserves alpha, grayscale handling, and clipping', () => {
+    const source = new Uint8ClampedArray([38, 38, 38, 11, 64, 64, 64, 22,
+      127, 127, 127, 33, 176, 176, 176, 44, 199, 199, 199, 55,
+      250, 2, 127, 66, 2, 127, 250, 77]);
+    for (const value of [-100, 100]) {
+      const result = renderAdjustments(source, withMidtonesTint(value));
+      expect(Array.from(result.slice(0, 4))).toEqual(Array.from(source.slice(0, 4)));
+      expect(Array.from(result.slice(16, 20))).toEqual(Array.from(source.slice(16, 20)));
+      for (const offset of [4, 8, 12]) expect(result[offset]).not.toBe(source[offset]);
+      for (let i = 3; i < result.length; i += 4) expect(result[i]).toBe(source[i]);
+      expect(Array.from(result).every((channel) => channel >= 0 && channel <= 255)).toBe(true);
+    }
+    expect(midtonesGradingWeight(0.15)).toBe(0);
+    expect(midtonesGradingWeight(0.25)).toBeCloseTo(0.5);
+    expect(midtonesGradingWeight(0.35)).toBe(1);
+    expect(midtonesGradingWeight(0.60)).toBe(1);
+    expect(midtonesGradingWeight(0.69)).toBeCloseTo(0.5);
+    expect(midtonesGradingWeight(0.78)).toBe(0);
+  });
+
+  it('shares one pre-Midtones luminance weight with Temperature and follows it', () => {
+    const source = new Uint8ClampedArray([176, 176, 176, 97]);
+    const combined = defaultRecipe();
+    Object.assign(combined.adjustments, { midtonesTemperature: 100, midtonesTint: 100 });
+    const result = renderAdjustments(source, combined);
+    expect(result).not.toEqual(renderAdjustments(source, withMidtonesTemperature(100)));
+    expect(result).not.toEqual(renderAdjustments(source, withMidtonesTint(100)));
+    // Separate renders recompute Y after Temperature; the combined stage intentionally shares its initial Y.
+    expect(result).not.toEqual(renderAdjustments(
+      renderAdjustments(source, withMidtonesTemperature(100)), withMidtonesTint(100)));
+    const plateau = new Uint8ClampedArray([127, 127, 127, 91]);
+    expect(renderAdjustments(plateau, combined)).toEqual(renderAdjustments(
+      renderAdjustments(plateau, withMidtonesTemperature(100)), withMidtonesTint(100)));
+  });
+
+  it('runs after Shadows Tint and before Vibrance and Saturation', () => {
+    const source = new Uint8ClampedArray([70, 70, 70, 97]);
+    const combined = defaultRecipe();
+    Object.assign(combined.adjustments, { shadowsTint: 100, midtonesTint: -100, vibrance: 40, saturation: -20 });
+    const color = defaultRecipe();
+    Object.assign(color.adjustments, { vibrance: 40, saturation: -20 });
+    expect(renderAdjustments(source, combined)).toEqual(renderAdjustments(
+      renderAdjustments(renderAdjustments(source, withShadowsTint(100)), withMidtonesTint(-100)), color));
+  });
+});
+
 describe('Midtones Temperature pixel stage', () => {
   it('is byte-identical at zero and uses global Temperature gains at both endpoints', () => {
     const source = new Uint8ClampedArray([127, 127, 127, 91, 255, 255, 255, 213]);
@@ -202,18 +272,20 @@ describe('Shadows Tint pixel stage', () => {
 });
 
 describe('Color Grading recipe and History', () => {
-  it('bypasses all three adjustments while OFF without losing their values or other categories', () => {
+  it('bypasses all four adjustments while OFF without losing their values or other categories', () => {
     const source = new Uint8ClampedArray([40, 50, 60, 255]);
     const recipe = withShadowsTemperature(70);
-    Object.assign(recipe.adjustments, { exposure: 0.4, shadowsTint: -65, midtonesTemperature: 85, saturation: 20 });
+    Object.assign(recipe.adjustments, { exposure: 0.4, shadowsTint: -65, midtonesTemperature: 85, midtonesTint: 75, saturation: 20 });
     const enabled = renderAdjustments(source, recipe);
     recipe.colorGradingEnabled = false;
     expect(effectiveAdjustments(recipe).shadowsTemperature).toBe(0);
     expect(effectiveAdjustments(recipe).shadowsTint).toBe(0);
     expect(effectiveAdjustments(recipe).midtonesTemperature).toBe(0);
+    expect(effectiveAdjustments(recipe).midtonesTint).toBe(0);
     expect(recipe.adjustments.shadowsTemperature).toBe(70);
     expect(recipe.adjustments.shadowsTint).toBe(-65);
     expect(recipe.adjustments.midtonesTemperature).toBe(85);
+    expect(recipe.adjustments.midtonesTint).toBe(75);
     const withoutGrading = defaultRecipe();
     Object.assign(withoutGrading.adjustments, { exposure: 0.4, saturation: 20 });
     expect(renderAdjustments(source, recipe)).toEqual(renderAdjustments(source, withoutGrading));
@@ -221,14 +293,37 @@ describe('Color Grading recipe and History', () => {
     expect(renderAdjustments(source, recipe)).toEqual(enabled);
   });
 
-  it('keeps Midtones Temperature active when another category is disabled', () => {
+  it('coalesces Midtones Tint edits and supports Undo, Redo, and individual Reset', () => {
+    let state = newSession();
+    state = editSession(state, { type: 'midtonesTemperature', value: 35 });
+    state = editSession(state, { type: 'commit', kind: 'midtonesTemperature' });
+    state = editSession(state, { type: 'midtonesTint', value: 10 });
+    state = editSession(state, { type: 'midtonesTint', value: 40 });
+    expect(state.pending?.kind).toBe('midtonesTint');
+    expect(state.history.map((entry) => entry.kind)).toEqual(['midtonesTemperature']);
+    state = editSession(state, { type: 'commit', kind: 'midtonesTint' });
+    expect(state.history.map((entry) => entry.kind)).toEqual(['midtonesTemperature', 'midtonesTint']);
+    state = editSession(state, { type: 'undo' });
+    expect(state.recipe.adjustments.midtonesTint).toBe(0);
+    state = editSession(state, { type: 'redo' });
+    expect(state.recipe.adjustments.midtonesTint).toBe(40);
+    state = editSession(state, { type: 'midtonesTintReset' });
+    expect(state.history.at(-1)?.kind).toBe('midtonesTintReset');
+    expect(state.recipe.adjustments.midtonesTint).toBe(0);
+    expect(state.recipe.adjustments.midtonesTemperature).toBe(35);
+  });
+
+  it('keeps both Midtones adjustments active when another category is disabled', () => {
     const source = new Uint8ClampedArray([127, 127, 127, 255]);
     const midtones = withMidtonesTemperature(-80);
+    midtones.adjustments.midtonesTint = 50;
     const expected = renderAdjustments(source, midtones);
     for (const category of ['whiteBalanceEnabled', 'basicEnabled', 'colorEnabled'] as const) {
       const recipe = withMidtonesTemperature(-80);
+      recipe.adjustments.midtonesTint = 50;
       recipe[category] = false;
       expect(effectiveAdjustments(recipe).midtonesTemperature).toBe(-80);
+      expect(effectiveAdjustments(recipe).midtonesTint).toBe(50);
       expect(renderAdjustments(source, recipe)).toEqual(expected);
     }
   });
@@ -270,6 +365,8 @@ describe('Color Grading recipe and History', () => {
     state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
     state = editSession(state, { type: 'midtonesTemperature', value: 55 });
     state = editSession(state, { type: 'commit', kind: 'midtonesTemperature' });
+    state = editSession(state, { type: 'midtonesTint', value: 65 });
+    state = editSession(state, { type: 'commit', kind: 'midtonesTint' });
     state = editSession(state, { type: 'shadowsTintReset' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(40);
     expect(state.recipe.adjustments.shadowsTint).toBe(0);
@@ -285,30 +382,36 @@ describe('Color Grading recipe and History', () => {
       state = editSession(state, action);
       expect(state.recipe.adjustments.shadowsTint).toBe(-30);
       expect(state.recipe.adjustments.midtonesTemperature).toBe(55);
+      expect(state.recipe.adjustments.midtonesTint).toBe(65);
     }
     state = editSession(state, { type: 'toggleColorGrading' });
     state = editSession(state, { type: 'colorGradingReset' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(0);
     expect(state.recipe.adjustments.shadowsTint).toBe(0);
     expect(state.recipe.adjustments.midtonesTemperature).toBe(0);
+    expect(state.recipe.adjustments.midtonesTint).toBe(0);
     expect(state.recipe.colorGradingEnabled).toBe(false);
     expect(state.history.at(-1)?.kind).toBe('colorGradingReset');
     state = editSession(state, { type: 'undo' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(40);
     expect(state.recipe.adjustments.shadowsTint).toBe(-30);
     expect(state.recipe.adjustments.midtonesTemperature).toBe(55);
+    expect(state.recipe.adjustments.midtonesTint).toBe(65);
     state = editSession(state, { type: 'redo' });
     expect(state.recipe.adjustments.shadowsTemperature).toBe(0);
     expect(state.recipe.adjustments.shadowsTint).toBe(0);
     expect(state.recipe.adjustments.midtonesTemperature).toBe(0);
+    expect(state.recipe.adjustments.midtonesTint).toBe(0);
   });
 
-  it('includes all three Color Grading values in one-operation All Reset', () => {
+  it('includes all four Color Grading values in one-operation All Reset', () => {
     let state = newSession();
     state = editSession(state, { type: 'shadowsTint', value: 40 });
     state = editSession(state, { type: 'commit', kind: 'shadowsTint' });
     state = editSession(state, { type: 'midtonesTemperature', value: -60 });
     state = editSession(state, { type: 'commit', kind: 'midtonesTemperature' });
+    state = editSession(state, { type: 'midtonesTint', value: 70 });
+    state = editSession(state, { type: 'commit', kind: 'midtonesTint' });
     state = editSession(state, { type: 'toggleColorGrading' });
     state = editSession(state, { type: 'allReset' });
     expect(state.recipe).toEqual(defaultRecipe());
@@ -316,6 +419,7 @@ describe('Color Grading recipe and History', () => {
     const undone = editSession(state, { type: 'undo' }).recipe;
     expect(undone.adjustments.shadowsTint).toBe(40);
     expect(undone.adjustments.midtonesTemperature).toBe(-60);
+    expect(undone.adjustments.midtonesTint).toBe(70);
     expect(undone.colorGradingEnabled).toBe(false);
   });
 

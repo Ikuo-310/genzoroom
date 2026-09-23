@@ -13,7 +13,7 @@ import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatMidtonesTemperature, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
+import { formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -329,6 +329,11 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'midtonesTemperatureReset':
           description = t(entry.kind === 'midtonesTemperature' ? 'workspace.midtonesTemperatureHistory' : 'workspace.midtonesTemperatureReset')
             + ' ' + formatMidtonesTemperature(entry.before.adjustments.midtonesTemperature) + ' → ' + formatMidtonesTemperature(entry.after.adjustments.midtonesTemperature);
+          break;
+        case 'midtonesTint':
+        case 'midtonesTintReset':
+          description = t(entry.kind === 'midtonesTint' ? 'workspace.midtonesTintHistory' : 'workspace.midtonesTintReset')
+            + ' ' + formatMidtonesTint(entry.before.adjustments.midtonesTint) + ' → ' + formatMidtonesTint(entry.after.adjustments.midtonesTint);
           break;
         case 'colorGradingReset': description = t('workspace.colorGradingResetHistory'); break;
         case 'colorGradingToggle':

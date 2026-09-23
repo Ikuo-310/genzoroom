@@ -207,7 +207,7 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(-1, whitesRange()).defaultPrevented).toBe(true);
     expect(wheel(-1, shadowsRange()).defaultPrevented).toBe(true);
     expect(wheel(-1, blacksRange()).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.1, contrast: 10, highlights: 10, whites: 10, shadows: 10, blacks: 10, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, vibrance: 0, saturation: 0 });
+    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.1, contrast: 10, highlights: 10, whites: 10, shadows: 10, blacks: 10, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
     expect(session().pending?.kind).toBe('blacks');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
@@ -220,7 +220,7 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(-100, whitesRange(), { shiftKey: true }).defaultPrevented).toBe(true);
     expect(wheel(-100, shadowsRange(), { shiftKey: true }).defaultPrevented).toBe(true);
     expect(wheel(-100, blacksRange(), { shiftKey: true }).defaultPrevented).toBe(true);
-    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.01, contrast: 1, highlights: 1, whites: 1, shadows: 1, blacks: 1, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, vibrance: 0, saturation: 0 });
+    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.01, contrast: 1, highlights: 1, whites: 1, shadows: 1, blacks: 1, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
   });
   it('does not treat disabled sliders, number inputs, or content outside a slider as wheel adjustments', () => {
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="Disable Basic"]')!.click());
@@ -490,7 +490,7 @@ describe('edit controls DOM interaction', () => {
     changeInput(contrastNumber(), '20');
     key('Enter', contrastNumber());
     act(() => host.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.click());
-    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, vibrance: 0, saturation: 0 });
+    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
     expect(session().history.at(-1)?.kind).toBe('basicReset');
     expect(session().history).toHaveLength(3);
     key('z', window, { ctrlKey: true });
@@ -519,7 +519,7 @@ describe('edit controls DOM interaction', () => {
     expect(session().pending?.kind).toBe('blacks');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
-    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.01, contrast: 1, highlights: -1, whites: 1, shadows: 1, blacks: -1, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, vibrance: 0, saturation: 0 });
+    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.01, contrast: 1, highlights: -1, whites: 1, shadows: 1, blacks: -1, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
   });
   it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {
     pointer('pointerover');
@@ -623,7 +623,7 @@ describe('production Basic control wiring', () => {
     act(() => input.focus());
     changeInput(input, value);
     key('Enter', input);
-    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, vibrance: 0, saturation: 0, [adjustment]: Number(value) });
+    expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0, [adjustment]: Number(value) });
     expect(slider.getAttribute('aria-valuetext')).toBe(valueText);
     expect(session().history.map((entry) => entry.kind)).toEqual([adjustment]);
     expect(host.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.disabled).toBe(false);
