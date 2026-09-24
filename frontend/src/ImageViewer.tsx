@@ -29,21 +29,21 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [slashHeld, setSlashHeld] = useState(false);
-  const showBeforeAdjustments = persistentBeforeAdjustments || slashHeld;
+  const [backslashHeld, setBackslashHeld] = useState(false);
+  const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const insideInput = event.target instanceof Element && !!event.target.closest('input');
-      if (event.key !== '/' || event.defaultPrevented || event.isComposing
+      if (event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
         || event.ctrlKey || event.metaKey || event.altKey || insideInput || isNativeEditingTarget(event.target)) return;
       event.preventDefault();
-      if (!event.repeat) setSlashHeld(true);
+      if (!event.repeat) setBackslashHeld(true);
     };
     const keyup = (event: KeyboardEvent) => {
-      if (event.key === '/') setSlashHeld(false);
+      if (event.code === 'Backslash') setBackslashHeld(false);
     };
-    const release = () => setSlashHeld(false);
+    const release = () => setBackslashHeld(false);
     const visibilityChange = () => { if (document.hidden) release(); };
     window.addEventListener('keydown', keydown);
     window.addEventListener('keyup', keyup);

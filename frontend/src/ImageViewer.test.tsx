@@ -40,7 +40,7 @@ function Harness({ src = '/first' }: { src?: string }) {
 }
 
 function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: KeyboardEventInit = {}) {
-  const event = new KeyboardEvent(type, { key: '/', bubbles: true, cancelable: true, ...init });
+  const event = new KeyboardEvent(type, { key: '\\', code: 'Backslash', bubbles: true, cancelable: true, ...init });
   act(() => target.dispatchEvent(event));
   return event;
 }
@@ -77,8 +77,11 @@ describe('Before / After viewer state', () => {
     expect(image().dataset.before).toBe('false');
   });
 
-  it('shows Before only while slash is held, then returns to the persistent choice', () => {
+  it('shows Before only while Backslash is held, then returns to the persistent choice', () => {
     act(() => root.render(<Harness />));
+    expect(key('keydown', window, { key: '/', code: 'Slash' }).defaultPrevented).toBe(false);
+    expect(image().dataset.before).toBe('false');
+    expect(key('keydown', window, { key: '¥' }).defaultPrevented).toBe(true);
     expect(key('keydown').defaultPrevented).toBe(true);
     expect(image().dataset.before).toBe('true');
     expect(key('keydown', window, { repeat: true }).defaultPrevented).toBe(true);
@@ -91,7 +94,7 @@ describe('Before / After viewer state', () => {
     expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('leaves native fields and IME alone, and clears a held slash on blur and visibility loss', () => {
+  it('leaves native fields and IME alone, and clears a held Backslash on blur and visibility loss', () => {
     act(() => root.render(<Harness />));
     const fields = [document.createElement('input'), document.createElement('input'), document.createElement('textarea'), document.createElement('select'), document.createElement('div')];
     fields[1].setAttribute('type', 'range');
