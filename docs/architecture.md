@@ -16,7 +16,8 @@ Frontend: nginx on container port 8080
   ├─ /api/assets/recent        → internal Docker network
   ├─ /api/assets/{id}          → internal Docker network
   ├─ /api/assets/{id}/thumbnail → internal Docker network
-  └─ /api/assets/{id}/preview  → internal Docker network
+  ├─ /api/assets/{id}/preview  → internal Docker network
+  └─ /api/assets/{id}/edit-state → internal Docker network
                        ↓
                      Backend: Uvicorn / FastAPI on port 8000
                        ├─ GET /health → {"status":"ok"}
@@ -24,7 +25,8 @@ Frontend: nginx on container port 8080
                        ├─ GET /assets/recent
                        ├─ GET /assets/{id}
                        ├─ GET /assets/{id}/thumbnail
-                       └─ GET /assets/{id}/preview
+                       ├─ GET /assets/{id}/preview
+                       └─ GET/PUT /assets/{id}/edit-state → SQLite /data/genzoroom.db
                             ↓ x-api-key (server-side only)
                           Immich: authenticated read-only API
                             via LAN / routed network,
@@ -52,13 +54,13 @@ For optional local development, Vite provides the same `/api/` prefix mapping to
 | Service | Container port | Host exposure | Role |
 | --- | --- | --- | --- |
 | `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
-| `backend` | `8000` | None | Connectivity checks, asset metadata, EXIF filtering, and image proxying. |
+| `backend` | `8000` | None | Immich proxying and SQLite edit-state API. |
 
-Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. There is no host networking, GPU requirement, privileged mode, or host directory bind mount.
+Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. The backend bind-mounts one host data directory at `/data`; no host networking, GPU, or privileged mode is used.
 
 The standard `docker-compose.yml` has no dependency on an Immich Docker network. The optional `docker-compose.immich-network.yml` attaches only the backend to an existing external network selected with `IMMICH_DOCKER_NETWORK`. This enables Docker DNS access to an Immich service on the same host without exposing the backend or attaching the frontend to Immich. The external network and Immich service name belong to the deployment environment and are never hardcoded by GenzoRoom. The application still receives only `IMMICH_URL` and `IMMICH_API_KEY`; `IMMICH_DOCKER_NETWORK` is consumed by Compose.
 
-Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. Runtime temporary files stay inside containers. No persistent application state or volumes are needed at this stage. `.env` can provide local Compose inputs for the host port and Immich connection, but it is not mounted into the application; Portainer can supply the same values through stack environment variables.
+Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. The backend runs as UID/GID 10001:10001 and requires a writable host data directory. `.env` provides Compose inputs for the host port, Immich connection, and persistence root, but it is not mounted into the application; Portainer can supply the same values through stack environment variables.
 
 Compose starts the backend before the frontend but does not wait for API readiness. Startup failures are visible in container logs and the UI; the user can check again after services become ready. Both services use `restart: unless-stopped`.
 
@@ -77,7 +79,7 @@ Anshitsu owns an in-memory map keyed by Immich asset ID. Each session contains a
 | Color Grading | `shadowsTemperature`, `shadowsTint`, `midtonesTemperature`, `midtonesTint`, `highlightsTemperature`, `highlightsTint` | `colorGradingEnabled`, plus the three range flags above |
 | Color | `vibrance`, `saturation` | `colorEnabled` |
 
-The frontend now defines a persistence snapshot foundation in `frontend/src/editState.ts`; it is not connected to storage or navigation yet. Snapshot format version 1 is independent of recipe version 17, a future database schema version, and `jpeg-preview-srgb8-v1` processing version. The snapshot contains the current recipe, full History and cursor, and Immich preview source identity. Creating it commits pending work on a copied session, leaving the live editing gesture unchanged. Validation rejects unsupported versions, malformed recipes or entries, broken History continuity, and a cursor/current-recipe mismatch without replacing or discarding data.
+The frontend defines a persistence snapshot in `frontend/src/editState.ts`; Anshitsu does not call the API yet. Snapshot format version 1 is independent of recipe version 17, database schema version 1, and `jpeg-preview-srgb8-v1` processing version. The snapshot contains the current recipe, full History and cursor, and Immich preview source identity. Creating it commits pending work on a copied session, leaving the live editing gesture unchanged. Frontend and Backend validation reject unsupported versions, malformed recipes or entries, kind/diff mismatches, broken History continuity, and a cursor/current-recipe mismatch without replacing or discarding data.
 
 Pure History compaction processes the applied and Redo branches independently, preserves the current recipe, and recalculates the cursor. Consecutive operations on one numeric adjustment or one enabled flag collapse to their first before / last after; a round trip disappears. If a run disappears, newly adjacent matching operations are considered again. Reset kinds and unknown future operation kinds stay independent, so a future Paste can remain one compound History entry. `COMPACT_HISTORY_ON_EXIT` defaults to true as a policy value for future navigation integration; no persistence, autosave, or exit compaction is active yet.
 
@@ -85,7 +87,7 @@ Increment `processingVersion` only when the intended output pixels for the same 
 
 Individual adjustment Reset changes only its value. Color Grading Reset changes its six values in one History operation and preserves the parent and all three range flags. All Reset restores every value and all seven flags. Range toggles commit pending adjustment edits first, then commit one separate toggle operation without changing values. The parent can be off while a child switch is changed; the child setting takes effect when the parent is enabled again.
 
-`editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, control unmount, or 500 ms keyboard/wheel inactivity commits one operation. Keyboard input resets the timer on every accepted keydown; keyup, pointer leave, and focus changes do not commit it early. No-op operations compare the complete recipe, including all four category flags, three Color Grading range flags, and sixteen adjustment values, and do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Each adjustment Reset, category toggle, range toggle, category Reset, and All Reset has a separate operation kind; all are undoable. White Balance, Basic, Color Grading, and Color Reset affect only their own values and preserve their enabled flags. All Reset restores all sixteen values and all seven enabled flags to defaults in one operation. Their History labels stay concise and are localized at display time rather than stored in recipes. The flat in-memory schema is version 17. No storage or migration framework is connected yet.
+`editing.ts` provides pure begin/update/commit/reset/undo/redo transitions. Preview changes use the current recipe immediately. Pointer release/cancel, control unmount, or 500 ms keyboard/wheel inactivity commits one operation. Keyboard input resets the timer on every accepted keydown; keyup, pointer leave, and focus changes do not commit it early. No-op operations compare the complete recipe, including all four category flags, three Color Grading range flags, and sixteen adjustment values, and do not create history or discard redo. A new committed edit after Undo replaces the redo branch. Each adjustment Reset, category toggle, range toggle, category Reset, and All Reset has a separate operation kind; all are undoable. White Balance, Basic, Color Grading, and Color Reset affect only their own values and preserve their enabled flags. All Reset restores all sixteen values and all seven enabled flags to defaults in one operation. Their History labels stay concise and are localized at display time rather than stored in recipes. The flat in-memory schema is version 17. The Backend SQLite layer exists, while Anshitsu still keeps live edits in memory.
 
 `AdjustmentSlider` supplies a compact reusable adjustment row with its label, native range input, synchronized direct numeric input, optional fixed-width unit slot, and inline reset in one responsive grid row. The label truncates when necessary while the range column consumes the remaining sidebar width. Direct input updates the current recipe only for finite normalized values, commits on Enter or blur, and restores its pre-edit value on Escape or invalid input. `editShortcuts.ts` protects text and number inputs, textarea, select, contenteditable, and IME input from the hover/focus slider shortcuts. Focused other sliders retain their own behavior. Exposure is bounded to −5…+5 EV in 0.01 EV increments with two displayed decimal places; every other current adjustment uses −100…+100 integer steps. Temperature and Tint controls use their corresponding directional gradient tracks. Color Grading controls are ordered Shadows Temperature/Tint, Midtones Temperature/Tint, Highlights Temperature/Tint; each group header has a compact ON/OFF button that disables only its two sliders while preserving their values. Vibrance and Saturation use normal tracks with no unit. The categories appear as White Balance, Basic, Color, then Color Grading; this display order is independent from the pixel pipeline order. Each category’s expanded state is local UI state that starts expanded on every Anshitsu entry and is not persisted. When a category is disabled, only its controls are disabled and dimmed while its values remain intact; only that category’s adjustments are bypassed. The temporary-preview notice remains outside the collapsible categories.
 
@@ -134,7 +136,7 @@ The client permits one in-flight render and one pending latest recipe. When a ne
 
 Each render still needs one output buffer of `4 × width × height` bytes, including an identity result: transferring the retained source would detach it. Main-thread fallback storage, the Worker's retained source, and the additional Before Canvas backing store for immediate comparison are intentional. Small gain/tone LUTs have 256 entries; there are no full-image per-stage buffers. Stage-specific encode/round/decode boundaries preserve current output and cannot be fused without reconsidering that behavior. Full-size CPU pixel work and Canvas upload remain proportional to pixel count. Worker scheduling improves responsiveness but cannot cancel a render already running or reduce its pixel count; sustained latency may require a separately designed reduced-resolution interaction path. No end-to-end Firefox performance claim is made from unit tests.
 
-Future persistence should validate/migrate recipe versions, associate recipes with stable asset and source identity (including processing/color-space version), and save committed recipes atomically. Decide separately whether to persist undo history and its cursor. Do not serialize transient decoded buffers, pending gestures, or translated labels. There is currently no DB, localStorage recipe storage, container volume, original mutation, or Immich write-back.
+The Backend stores the current recipe, full Undo/Redo History and cursor, source identity, four separate version domains, revision, timestamp, and last save ID atomically in one SQLite row per Immich asset. `PRAGMA user_version=1` tracks table structure; later schema migrations can be added sequentially. Connections are opened per operation with WAL, `synchronous=FULL`, and a 3000 ms busy timeout. The GET route returns `{ state: null }` only for an absent row. PUT accepts the Phase 1 snapshot plus `expectedRevision` and UUID `saveId`, returns revision and UTC timestamp, rejects stale revisions, and recognizes an identical retry of the latest save ID. Requests are limited to 8 MiB at nginx and Backend. Validation is repeated when reading stored JSON. DB errors return safe 503 codes without affecting Immich routes. No frontend save/restore calls, autosave, navigation saving, or image write-back are connected yet.
 
 ## Future direction (not implemented)
 
@@ -148,17 +150,17 @@ Possible extensions include:
 
 - Expanded Immich asset browsing; connection credentials currently come only from backend environment variables.
 - Original-based JPEG processing, HEIC handling, and later RAW / DNG processing, potentially using LibRaw or rawpy.
-- Non-destructive edit parameter storage separate from original images; storage and schema are undecided.
+- Frontend save/restore and autosave integration with the existing edit-state API.
 - Responsive preview rendering, with client-side GPU assistance only if useful.
 - High-quality server-side final rendering; output storage and export behavior are undecided.
 - Further adjustments beyond JPEG Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, Blacks, Vibrance, and Saturation: tone curve, HSL, and histogram tools, with waveform and RGB parade as later possibilities.
-- Explicit Docker volumes if persistent data becomes necessary.
+- Future config, logs, and file-export storage paths as needed; only data is mounted today.
 
 These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated read-only browsing, generated image previews, and the initial Anshitsu workspace described above.
 
 ## Portability and validation
 
-The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify NAS host OS settings or install application files into host system directories. Future persistent data must use explicitly declared container storage or Docker volumes.
+The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify NAS host OS settings or install application files into host system directories. Persistent data uses the explicitly declared `/data` bind mount.
 
 The validation workflow is to develop locally, copy or deploy the required files to the NAS, start them with Docker Compose / Portainer, and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 

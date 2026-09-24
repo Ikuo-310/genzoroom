@@ -16,6 +16,12 @@ services:
 
   backend:
     build: ./backend
+    volumes:
+      - type: bind
+        source: ${GENZOROOM_DATA_PATH:-${GENZOROOM_PERSIST_ROOT:-/share/Container/genzoroom}/data}
+        target: /data
+        bind:
+          create_host_path: false
     environment:
       IMMICH_URL: ${IMMICH_URL:-}
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}

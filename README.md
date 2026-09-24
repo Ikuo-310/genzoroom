@@ -45,7 +45,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 - Adjustments operate on Immich-generated JPEG previews, not original files or an original-quality rendering path.
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
 - The preview pipeline is browser-managed 8-bit sRGB; wide-gamut, HDR, color-profile matching, and large-image performance need further work.
-- Edit recipes and History are session-only and are not persisted to a database or browser storage.
+- The SQLite edit-state store and API exist, but Anshitsu does not call them yet; editing still resumes only within the current browser session.
 - Recent Photos is limited to 100 items and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
 - Immich asset Stack handling is not implemented.
@@ -53,7 +53,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 ## Not implemented
 
 - RAW development pipeline.
-- Persistent edit recipes.
+- Frontend save/restore and autosave integration for the existing SQLite edit-state API.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
 - Export or write-back to Immich.
 - Scopes such as Histogram, Waveform, and RGB Parade; the current Scope area is a placeholder.
@@ -71,7 +71,7 @@ These are current boundaries, not release commitments or a promised roadmap.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
 - The provided containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
-- GenzoRoom does not currently modify originals, persist edit data, or call Immich write endpoints.
+- GenzoRoom does not modify originals or call Immich write endpoints. Its SQLite edit-state API is not yet connected to the Anshitsu UI.
 
 Never commit a real API key or bake one into a container image. See the [deployment guide](docs/deployment.md) for configuration and network options.
 
@@ -85,7 +85,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 ## Quick start
 
 1. Create a dedicated Immich API key with the minimum permissions listed above.
-2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
+2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Prepare the host data directory under `GENZOROOM_PERSIST_ROOT` and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
 3. From a repository checkout, build and start the standard Docker Compose deployment:
 
    ```sh

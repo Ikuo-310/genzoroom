@@ -47,6 +47,7 @@ PortainerのSourceとしてGitHub Repositoryを登録する。
 
 ```env
 GENZOROOM_PORT=3190
+GENZOROOM_PERSIST_ROOT=/share/Container/genzoroom
 IMMICH_URL=<GenzoRoom Backendから到達可能なImmich URL>
 IMMICH_API_KEY=<GenzoRoom用APIキー>
 ```
@@ -159,6 +160,8 @@ IMMICH_URL=http://immich_server:2283
 
 アプリ固有設定はPortainer Stack、Environment variables、Docker Composeの範囲に閉じ込める。NASホストOSのcron、システム設定ファイル、ネットワーク設定をGenzoRoomのために直接変更しない。
 
-第三段階時点では、GenzoRoomは大きな永続データやアプリ用Volumeを持っていない。Stackを削除しても、GitHubリポジトリやImmich内の写真は削除されない。ローカルに残るDocker imageなどは必要に応じて別途管理する。
+現在はBackendのSQLite用に、ホストの`/share/Container/genzoroom/data`をコンテナの`/data`へbind mountする。事前にホスト側ディレクトリを作り、BackendのUID/GID `10001:10001`が書き込める権限を設定する。Composeは存在しないホスト側ディレクトリをroot権限で自動作成しない。dataを別ストレージに置く場合はStack環境変数`GENZOROOM_DATA_PATH`を指定する。SQLiteのWAL/SHMも同じ場所にできるためDBファイル単体はmountしない。Frontendはまだ保存APIに接続しておらず、通常の暗室編集はセッション中だけ保持される。
 
-将来、非破壊編集パラメータやキャッシュをVolumeへ保存する段階になったら、Containerの削除とVolumeの削除を明確に分ける。復旧に必要なデータを確認せずVolumeを削除しない運用にする。
+Stack削除後もホスト側dataは残る。バックアップはBackend停止後にdataディレクトリ全体をコピーする。稼働中の`genzoroom.db`単体コピーは避ける。
+
+Containerの削除とdataディレクトリの削除を明確に分ける。復旧に必要なデータを確認せずdataを削除しない。

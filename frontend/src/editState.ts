@@ -43,6 +43,7 @@ export type EditStateIssueCode =
   | 'invalid_source_identity'
   | 'invalid_recipe'
   | 'invalid_history'
+  | 'invalid_history_semantics'
   | 'invalid_history_cursor'
   | 'history_discontinuity'
   | 'current_recipe_mismatch';
@@ -98,6 +99,20 @@ const TOGGLE_EDIT_KEYS: Partial<Record<EditKind, keyof EditRecipe>> = {
   colorGradingToggle: 'colorGradingEnabled', gradingShadowsToggle: 'gradingShadowsEnabled',
   gradingMidtonesToggle: 'gradingMidtonesEnabled', gradingHighlightsToggle: 'gradingHighlightsEnabled',
   colorToggle: 'colorEnabled',
+};
+
+const RESET_EDIT_KEYS: Partial<Record<EditKind, readonly (keyof EditRecipe['adjustments'])[]>> = {
+  temperatureReset: ['temperature'], tintReset: ['tint'], exposureReset: ['exposure'],
+  contrastReset: ['contrast'], highlightsReset: ['highlights'], whitesReset: ['whites'],
+  shadowsReset: ['shadows'], blacksReset: ['blacks'],
+  shadowsTemperatureReset: ['shadowsTemperature'], shadowsTintReset: ['shadowsTint'],
+  midtonesTemperatureReset: ['midtonesTemperature'], midtonesTintReset: ['midtonesTint'],
+  highlightsTemperatureReset: ['highlightsTemperature'], highlightsTintReset: ['highlightsTint'],
+  vibranceReset: ['vibrance'], saturationReset: ['saturation'],
+  whiteBalanceReset: ['temperature', 'tint'],
+  basicReset: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'],
+  colorGradingReset: ['shadowsTemperature', 'shadowsTint', 'midtonesTemperature', 'midtonesTint', 'highlightsTemperature', 'highlightsTint'],
+  colorReset: ['vibrance', 'saturation'],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -169,10 +184,23 @@ function validateEntry(value: unknown, index: number): EditStateIssue[] {
   if (!isRecord(value) || !hasExactKeys(value, ENTRY_KEYS) || !EDIT_KINDS.includes(value.kind as EditKind)) {
     return [issue('invalid_history', path, 'History entry must contain a supported kind, before recipe, and after recipe.')];
   }
-  return [
+  const errors = [
     ...validateRecipe(value.before, `${path}.before`),
     ...validateRecipe(value.after, `${path}.after`),
   ];
+  if (errors.length > 0) return errors;
+  const kind = value.kind as EditKind;
+  const before = value.before as EditRecipe;
+  const after = value.after as EditRecipe;
+  const changedAdjustments = ADJUSTMENT_KEYS.filter((key) => before.adjustments[key] !== after.adjustments[key]);
+  const changedFlags = ENABLED_KEYS.filter((key) => before[key] !== after[key]);
+  const numeric = NUMERIC_EDIT_KEYS[kind];
+  const toggle = TOGGLE_EDIT_KEYS[kind];
+  const reset = RESET_EDIT_KEYS[kind];
+  const valid = kind === 'allReset' || (numeric && changedFlags.length === 0 && changedAdjustments.every((key) => key === numeric))
+    || (toggle && changedAdjustments.length === 0 && changedFlags.every((key) => key === toggle))
+    || (reset && changedFlags.length === 0 && changedAdjustments.every((key) => reset.includes(key)));
+  return valid ? [] : [issue('invalid_history_semantics', path, 'History kind does not match changed recipe fields.')];
 }
 
 /** Validates untrusted JSON without coercing, defaulting, or discarding any state. */

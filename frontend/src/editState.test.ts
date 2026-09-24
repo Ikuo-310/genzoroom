@@ -105,6 +105,12 @@ describe('edit state snapshot', () => {
     expect(validateEditStateSnapshot({ ...saved, currentRecipe: defaultRecipe() })).toMatchObject({ ok: false, issues: expect.arrayContaining([expect.objectContaining({ code: 'current_recipe_mismatch' })]) });
     expect(restoreEditSession(brokenContinuity)).toMatchObject({ ok: false });
   });
+
+  it('rejects a History kind whose recipe diff changes another control', () => {
+    const saved = snapshot(edit(newSession(), 'exposure', 0.5));
+    saved.history[0].kind = 'temperature';
+    expect(validateEditStateSnapshot(saved)).toMatchObject({ ok: false, issues: [{ code: 'invalid_history_semantics' }] });
+  });
 });
 
 describe('history compaction', () => {

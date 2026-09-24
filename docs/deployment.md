@@ -23,9 +23,13 @@ GenzoRoom currently uses read-only Immich endpoints. Do not grant upload, update
 | `IMMICH_URL` | Yes | Immich base URL as reached from the backend container. |
 | `IMMICH_API_KEY` | Yes | Dedicated Immich API key. Keep the real value outside the repository. |
 | `GENZOROOM_PORT` | No | Frontend host port; defaults to `3190`. |
+| `GENZOROOM_PERSIST_ROOT` | No | Host persistence root; defaults to `/share/Container/genzoroom`. |
+| `GENZOROOM_DATA_PATH` | No | Override the host data directory; otherwise `${GENZOROOM_PERSIST_ROOT}/data`. |
 | `IMMICH_DOCKER_NETWORK` | Same-host route only | Existing external Docker network used by Immich. |
 
 For command-line Compose, these values can be supplied by the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Never commit a real API key or bake it into a container image.
+
+Before deployment, create the host data directory, for example `/share/Container/genzoroom/data`. The backend container runs as UID/GID `10001:10001`; grant that user/group write access to the directory, including permission to create SQLite's database, WAL, and SHM files. The bind mount requires the directory to exist and does not create it as root. `GENZOROOM_DATA_PATH` can place only data on another host storage location. The container path is always `/data`, and the DB is `/data/genzoroom.db`. Do not mount the DB file alone. The host filesystem should support local SQLite WAL locking; verify this on the target NAS. Config, logs, and exports directories are not created or mounted at this stage.
 
 ## Choose an Immich connection route
 
@@ -100,7 +104,7 @@ npm run build
 
 cd ../backend
 python -m pip install -r requirements.txt
-python -m py_compile main.py immich.py
+python -m py_compile main.py immich.py edit_state.py edit_store.py
 python -m unittest discover -s tests
 
 cd ..
@@ -118,7 +122,7 @@ Portainer can fetch, build, and deploy GenzoRoom directly from any Git repositor
 1. Create a Stack using a Git repository as its source or build method.
 2. Enter the repository URL and select the required branch or reference.
 3. Set the Compose path to `docker-compose.yml`.
-4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Add `GENZOROOM_PORT` only to change the default port.
+4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Set `GENZOROOM_PERSIST_ROOT` to the prepared host directory if different from the default. Add `GENZOROOM_DATA_PATH` only when data belongs elsewhere. Add `GENZOROOM_PORT` only to change the default port.
 5. Build and deploy the Stack.
 
 For same-host Immich networking, add `docker-compose.immich-network.yml` as an additional Compose path and set `IMMICH_DOCKER_NETWORK` to the existing Immich network name. The Stack must target the Docker endpoint where that network exists.
@@ -175,7 +179,7 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 - The Immich API key is supplied only to the backend and must not be stored in the repository.
 - The optional same-host override attaches only the backend to the Immich network; the frontend remains isolated.
 - Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
-- The Compose files do not use privileged mode, host networking, or host directory bind mounts.
+- The Compose files do not use privileged mode or host networking. Only the backend's `/data` directory uses a host bind mount.
 - TLS certificate verification for HTTPS Immich URLs remains enabled.
 - GenzoRoom does not require changes to NAS host OS settings or system files.
 
@@ -195,4 +199,4 @@ docker compose -f docker-compose.yml -f docker-compose.immich-network.yml down
 
 In Portainer, remove the GenzoRoom Stack. The shared Immich network is external and is not removed by GenzoRoom Compose commands.
 
-GenzoRoom currently creates no application volumes, persistent application data, or host bind mounts. Repository files and built images remain until explicitly removed. Future persistent-data features must distinguish container removal from volume removal.
+The backend data bind mount remains on the host when the Stack is removed; do not remove it without checking saved edits. The current Anshitsu UI does not call the edit-state API yet, so ordinary browser editing remains session-only. For backup, stop the backend container and copy the entire data directory. Do not recommend copying a live `genzoroom.db` alone while WAL is active; a future online backup may use SQLite's backup API.
