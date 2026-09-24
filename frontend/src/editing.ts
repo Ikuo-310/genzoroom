@@ -37,29 +37,35 @@ export function isBasicDefault(adjustments: EditRecipe['adjustments']): boolean 
 export const WHITE_BALANCE_ADJUSTMENT_KEYS = ['temperature', 'tint'] as const;
 export function resetWhiteBalanceAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
-  for (const key of WHITE_BALANCE_ADJUSTMENT_KEYS) result[key] = defaultRecipe().adjustments[key];
+  const defaults = defaultRecipe().adjustments;
+  for (const key of WHITE_BALANCE_ADJUSTMENT_KEYS) result[key] = defaults[key];
   return result;
 }
 export function isWhiteBalanceDefault(adjustments: EditRecipe['adjustments']): boolean {
-  return WHITE_BALANCE_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaultRecipe().adjustments[key]);
+  const defaults = defaultRecipe().adjustments;
+  return WHITE_BALANCE_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export const COLOR_GRADING_ADJUSTMENT_KEYS = ['shadowsTemperature', 'shadowsTint', 'midtonesTemperature', 'midtonesTint', 'highlightsTemperature', 'highlightsTint'] as const;
 export function resetColorGradingAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
-  for (const key of COLOR_GRADING_ADJUSTMENT_KEYS) result[key] = defaultRecipe().adjustments[key];
+  const defaults = defaultRecipe().adjustments;
+  for (const key of COLOR_GRADING_ADJUSTMENT_KEYS) result[key] = defaults[key];
   return result;
 }
 export function isColorGradingDefault(adjustments: EditRecipe['adjustments']): boolean {
-  return COLOR_GRADING_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaultRecipe().adjustments[key]);
+  const defaults = defaultRecipe().adjustments;
+  return COLOR_GRADING_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export const COLOR_ADJUSTMENT_KEYS = ['vibrance', 'saturation'] as const;
 export function resetColorAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
-  for (const key of COLOR_ADJUSTMENT_KEYS) result[key] = defaultRecipe().adjustments[key];
+  const defaults = defaultRecipe().adjustments;
+  for (const key of COLOR_ADJUSTMENT_KEYS) result[key] = defaults[key];
   return result;
 }
 export function isColorDefault(adjustments: EditRecipe['adjustments']): boolean {
-  return COLOR_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaultRecipe().adjustments[key]);
+  const defaults = defaultRecipe().adjustments;
+  return COLOR_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustments'] {
   const basic = recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);

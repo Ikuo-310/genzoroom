@@ -1,8 +1,32 @@
 # GenzoRoom 開発ノート
 
-現在の最近の写真取得上限は100件。以下の過去フェーズに記した50件は、当時の仕様を示す。
+現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
-## Color Grading / range個別ON/OFF（最新フェーズ）
+## 3WAY Color Grading監査（2026-09-24・現在仕様）
+
+recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、永続化、export、Histogram等は未実装。
+
+処理順はGlobal Temperature → Global Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Shadows Temperature/Tint → Midtones Temperature/Tint → Highlights Temperature/Tint → Vibrance → Saturation。各range内ではTemperature適用前の同じsRGB由来Yからweightを一度計算し、Tintにも使う。range間では直前rangeの丸め済み画素からYを求め直す。
+
+- Shadows：`1 - smoothstep(0.15, 0.35, Y)`。0.15以下でfull、0.15〜0.35でfade out、0.35以上で0。
+- Midtones：`smoothstep(0.15, 0.35, Y) * (1 - smoothstep(0.60, 0.78, Y))`。0.35〜0.60でfull。
+- Highlights：`smoothstep(0.55, 0.75, Y)`。0.55以下で0、0.75以上でfull。
+
+全体OFFでは全rangeをbypassし、全体ONでは各range flagに従う。いずれも値は保持する。個別adjustment ResetとColor Grading Resetはenabledを保持し、All Resetのみすべてtrueへ戻す。range切替はpending編集を先にcommitしてから独立した1操作になる。
+
+監査で重大な整合性問題は見つからなかった。小規模修正として、Global Tintの同一R/B LUTを共用し、gain LUTとExposureも既存Float64 decode表を再利用した。linear gainのclip/encode/丸めを共通helperへまとめ、weighted TintのR/Bで同じべき乗を二度計算しないようにした。カテゴリReset・既定値判定でdefaultRecipeをキーごとに生成していた箇所も1回へ減らした。schema、gain式、weight、処理順、UI表示・操作は維持する。既存テストの画素列を用い、修正前v17の3種類の出力ハッシュを固定してbyte互換性を検証する。
+
+Workerはsourceを初期化時に1回だけcopyしてtransferし、以後はrecipeのみ送る。runtimeは共通renderAdjustmentsを呼び、結果bufferをtransferする。1 in-flight＋pending latest 1、requestId / assetGeneration検査、fallback、unmount時の終了を確認した。sourceのmain-thread保持はfallbackに必要で、毎renderの出力bufferもsourceをdetachしないために必要。画素数に比例するCPU処理とCanvas転送は残り、Worker化だけでは進行中renderの計算時間は短縮・中断できない。今回の演算回数削減から実写真Firefoxの応答時間改善率は断定しない。
+
+editing.tsの列挙は長いが、現在の16値・7flagのReset/equality/Historyは整合している。ColorGradingAdjustmentControlsは3 propsで画素処理を持たず、6sliderの明示的な重複は現段階では許容した。AdjustmentSliderのmodule-level Map/activeAdjustmentと各sliderのwindow listenerは、単一workspace内では既存テストで保護されている。複数workspaceの同時mount、可変slider構成、別document対応が必要になった際は、操作対象管理をworkspace単位へ分離する。今すぐ大規模分割は行わない。
+
+将来Point / Width化では、3つの純粋weight helperと定数が変更箇所になる。ただしShadows/Highlightsの片側範囲とMidtonesのplateauをどのようにPoint / Widthへ対応させるか、境界・最小幅を先に定義する必要がある。現時点のための汎用frameworkやrecipe項目は追加していない。
+
+過去の最大10/50件、古いrecipe、当時の未実装・手動検証記録は以下に保持した。今回ブラウザ手動確認やfixture・画像の作成は行っていない。
+
+検証：Frontend 23ファイル・396テスト成功、TypeScriptチェックとVite production build成功、`git diff --check`で空白エラーなし。過去のテスト件数は各フェーズ当時の記録として残す。追加は修正前v17出力の固定ハッシュ3件とWorker起動不可・初期化失敗のfallback2件。既存latest-onlyテストもv17のrange flagを含むrecipeへ更新した。
+
+## Color Grading / range個別ON/OFF（以前のフェーズ）
 
 flat recipeをv17へ上げ、`gradingShadowsEnabled`、`gradingMidtonesEnabled`、`gradingHighlightsEnabled`を追加した。初期値はすべてtrue。各見出しの小型電源ボタンでTemperature / Tintの処理をrange単位で切り替える。OFFでも値を保持し、その2つのsliderをdisabled表示にする。Color Grading全体をOFFにすると3rangeすべてをbypassし、ONに戻しても個別ON/OFF状態は保持する。
 
@@ -16,7 +40,7 @@ recipeはflat構造のv16で`adjustments.highlightsTint: 0`を追加した。Col
 
 処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Midtones Tint → Highlights Temperature → Highlights Tint → Vibrance → Saturation。Highlights TintはMidtones Tint後の画素からHighlights用Yと`weight = smoothstep(0.55, 0.75, Y)`を一度計算し、TemperatureとTintで共用する。Tint targetは`R = B = 1.3^u`、`G = 1.3^-u`、`u = highlightsTint / 100`。weight適用は`effectiveGain = targetGain^weight`。Temperature後にTintを適用し、各stageでclip・sRGB encode・8-bit丸めを行う。Shadows / Midtonesのweightおよびstageは変更していない。
 
-検証：このフェーズのFrontendテスト、TypeScript/Vite production build、`git diff --check`の結果を以下の完了記録に記載する。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+この過去フェーズ節には当時のテスト件数・実行結果の詳細を記録していない。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
 実機Firefox・実Immichでは、ハイライトのTemperature/Tint方向と0.55〜0.75のfade、Color Grading OFF中の6値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
 

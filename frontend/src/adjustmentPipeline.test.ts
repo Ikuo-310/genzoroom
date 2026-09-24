@@ -16,6 +16,10 @@ function compatibilityPixels() {
 // Frozen outputs from pre-optimization commit 99c58aae3ec621eddbea0b4d7e5ba76c52be5147.
 // Mixed RGB/alpha plus all 256 grayscale levels; do not regenerate from the optimized pipeline.
 const compatibilityCases: Array<{ name: string; adjustments: Partial<EditRecipe['adjustments']>; hash: string }> = [
+  // Frozen from v17 commit 3cf71a873099df50afb8e5775229c05eb3c0fbc8 before the 3WAY audit cleanup.
+  { name: 'global Temperature/Tint endpoints', adjustments: { temperature: 100, tint: -100 }, hash: 'fd3a6939bce3efbc07ec0d521440240e409aeb4ceab99f1c9ca7f7e6f95d5125' },
+  { name: 'all three grading pairs', adjustments: { shadowsTemperature: -100, shadowsTint: 100, midtonesTemperature: 100, midtonesTint: -100, highlightsTemperature: -100, highlightsTint: 100 }, hash: '507131fed025d623d64d882e5e5149201e5407c7f5e3afa451950424e5fba584' },
+  { name: 'all sixteen adjustments', adjustments: { temperature: -25, tint: 15, exposure: 0.5, contrast: 20, highlights: -30, whites: 25, shadows: 40, blacks: -20, shadowsTemperature: 60, shadowsTint: -45, midtonesTemperature: -70, midtonesTint: 65, highlightsTemperature: 80, highlightsTint: -90, vibrance: 25, saturation: 15 }, hash: '992c0c018728d043f04e930266518f8b8a4565cc6117be241ffe5eb93414af4e' },
   // Frozen separately from e21dafc6d513733595ddb20a9c2bbcaadc762fe7, before decode LUT.
   { name: 'grading -100/-100', adjustments: { shadowsTemperature: -100, shadowsTint: -100 }, hash: 'c13c74cb8b2d1f107d52e25aaec856d892b90e633a690966e1882838c39d4c2c' },
   { name: 'grading -100/0', adjustments: { shadowsTemperature: -100, shadowsTint: 0 }, hash: '8f032e6bdf0d4e05798d76016116493a2dd02d7d48a10264522cfb94e3e44df9' },

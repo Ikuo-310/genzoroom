@@ -32,11 +32,7 @@ export function tintGains(value: number) {
 function linearGainLut(gain: number) {
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
-    const srgb = i / 255;
-    const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
-    const shifted = Math.max(0, Math.min(1, linear * gain));
-    const encoded = shifted <= 0.0031308 ? 12.92 * shifted : 1.055 * shifted ** (1 / 2.4) - 0.055;
-    lut[i] = Math.round(255 * encoded);
+    lut[i] = linearChannelGain(i, gain);
   }
   return lut;
 }
@@ -68,15 +64,15 @@ export function highlightsGradingWeight(luminance: number) {
 }
 
 // Stage inputs are rounded bytes. Float64 retains the exact original decode results
-// while avoiding up to five repeated decode powers per Shadows pixel.
+// and is shared by global gain LUTs, Exposure, and all Color Grading ranges.
 const srgbDecode = Float64Array.from({ length: 256 }, (_, channel) => {
   const srgb = channel / 255;
   return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
 });
 
-function maskedLinearGain(channel: number, gain: number, weight: number) {
+function linearChannelGain(channel: number, gain: number) {
   const linear = srgbDecode[channel];
-  const shifted = Math.max(0, Math.min(1, linear * gain ** weight));
+  const shifted = Math.max(0, Math.min(1, linear * gain));
   const encoded = shifted <= 0.0031308 ? 12.92 * shifted : 1.055 * shifted ** (1 / 2.4) - 0.055;
   return Math.round(255 * encoded);
 }
@@ -126,11 +122,11 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   // Tint is a separate linear-light stage after Temperature, with the same safe clip/encode boundary.
   const redTint = tint !== 0 ? linearGainLut(tintGain.red) : null;
   const greenTint = tint !== 0 ? linearGainLut(tintGain.green) : null;
-  const blueTint = tint !== 0 ? linearGainLut(tintGain.blue) : null;
+  // Tint targets are identical for red and blue; share the exact same LUT.
+  const blueTint = redTint;
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
-    const srgb = i / 255;
-    const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    const linear = srgbDecode[i];
     const exposed = Math.min(1, linear * gain);
     const exposedSrgb = exposed <= 0.0031308 ? 12.92 * exposed : 1.055 * exposed ** (1 / 2.4) - 0.055;
     const contrasted = Math.max(0, Math.min(1, 0.5 + (exposedSrgb - 0.5) * contrastFactor));
@@ -229,13 +225,14 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
       const weight = shadowsGradingWeight(luminance);
       if (weight > 0) {
         if (shadowsTemperature !== 0) {
-          output[i] = maskedLinearGain(output[i], shadowsTemperatureGain.red, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], shadowsTemperatureGain.blue, weight);
+          output[i] = linearChannelGain(output[i], shadowsTemperatureGain.red ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], shadowsTemperatureGain.blue ** weight);
         }
         if (shadowsTint !== 0) {
-          output[i] = maskedLinearGain(output[i], shadowsTintGain.red, weight);
-          output[i + 1] = maskedLinearGain(output[i + 1], shadowsTintGain.green, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], shadowsTintGain.blue, weight);
+          const redBlueGain = shadowsTintGain.red ** weight;
+          output[i] = linearChannelGain(output[i], redBlueGain);
+          output[i + 1] = linearChannelGain(output[i + 1], shadowsTintGain.green ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], redBlueGain);
         }
       }
     }
@@ -247,13 +244,14 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
       const weight = midtonesGradingWeight(luminance);
       if (weight > 0) {
         if (midtonesTemperature !== 0) {
-          output[i] = maskedLinearGain(output[i], midtonesTemperatureGain.red, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], midtonesTemperatureGain.blue, weight);
+          output[i] = linearChannelGain(output[i], midtonesTemperatureGain.red ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], midtonesTemperatureGain.blue ** weight);
         }
         if (midtonesTint !== 0) {
-          output[i] = maskedLinearGain(output[i], midtonesTintGain.red, weight);
-          output[i + 1] = maskedLinearGain(output[i + 1], midtonesTintGain.green, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], midtonesTintGain.blue, weight);
+          const redBlueGain = midtonesTintGain.red ** weight;
+          output[i] = linearChannelGain(output[i], redBlueGain);
+          output[i + 1] = linearChannelGain(output[i + 1], midtonesTintGain.green ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], redBlueGain);
         }
       }
     }
@@ -265,13 +263,14 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
       const weight = highlightsGradingWeight(luminance);
       if (weight > 0) {
         if (highlightsTemperature !== 0) {
-          output[i] = maskedLinearGain(output[i], highlightsTemperatureGain.red, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], highlightsTemperatureGain.blue, weight);
+          output[i] = linearChannelGain(output[i], highlightsTemperatureGain.red ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], highlightsTemperatureGain.blue ** weight);
         }
         if (highlightsTint !== 0) {
-          output[i] = maskedLinearGain(output[i], highlightsTintGain.red, weight);
-          output[i + 1] = maskedLinearGain(output[i + 1], highlightsTintGain.green, weight);
-          output[i + 2] = maskedLinearGain(output[i + 2], highlightsTintGain.blue, weight);
+          const redBlueGain = highlightsTintGain.red ** weight;
+          output[i] = linearChannelGain(output[i], redBlueGain);
+          output[i + 1] = linearChannelGain(output[i + 1], highlightsTintGain.green ** weight);
+          output[i + 2] = linearChannelGain(output[i + 2], redBlueGain);
         }
       }
     }

@@ -9,14 +9,10 @@ Internal changes are omitted unless they affect users.
 ### Added
 
 - Separate Shadows, Midtones, and Highlights ON/OFF switches within Color Grading. Each bypasses its own Temperature and Tint while retaining both values; the parent Color Grading switch still bypasses all three. Switching is undoable.
-- Highlights Temperature (−100 warm to +100 cool) after Midtones Tint, using the existing Temperature gains and a smooth luminance fade from 0.55 to 0.75. It shares Color Grading bypass, Reset, History, Undo/Redo, and Worker rendering.
-- Highlights Tint (−100 green to +100 magenta) after Highlights Temperature, sharing the same pre-Temperature Highlights luminance weight and existing Tint gains, category bypass, Reset, History, Undo/Redo, and Worker rendering. The flat in-memory recipe advances to version 16.
-- Midtones Tint (−100 green to +100 magenta) after Midtones Temperature, sharing its luminance weight and the existing Tint gains, slider, category bypass, Reset, History, Undo/Redo, and Worker path.
-- Midtones Temperature (−100 warm to +100 cool) in Color Grading, using the existing Temperature gains with a smooth midtone band from luminance 0.15 to 0.78. It shares the category's bypass, Reset, History, Undo/Redo, and per-asset behavior.
-- A Color Grading category below Color with Shadows Temperature (−100 warm to +100 cool) and Shadows Tint (−100 green to +100 magenta), both step 1 and default 0. They use the global Temperature and Tint gain directions in linear RGB with one shared Shadows weight: full strength through luminance 0.15 and smoothly faded to zero at 0.35. Independent bypass, Reset, History, Undo/Redo, and per-asset state are included.
+- 3WAY Color Grading with Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta) for Shadows, Midtones, and Highlights. The six controls use integer steps, default to zero, and share each range's luminance weight. Category bypass, value resets, localized History, Undo/Redo, and per-photo session state are supported.
+- Worker-based JPEG preview rendering with one in-flight request and only the latest pending recipe, stale-result rejection, and a main-thread fallback.
 - A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
-- A Color category below Basic with global JPEG preview Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo, and runs after Blacks while preserving alpha.
-- Low-saturation-priority JPEG preview Vibrance (−100 to +100, step 1, default 0) above Saturation in Color. It uses the shared slider, Reset, History, and Undo/Redo behavior and runs between Blacks and Saturation.
+- A Color category below Basic with global JPEG preview Vibrance and Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo. After Color Grading, low-saturation-priority Vibrance runs before Saturation while preserving alpha.
 
 - Non-destructive JPEG Exposure adjustment (−5 to +5 EV, 0.01 EV steps) in Anshitsu, with per-asset in-memory recipes and a Canvas linear-light preview pipeline. This initial version uses Immich previews as a temporary source.
 - Non-destructive JPEG Contrast adjustment (−100 to +100, step 1), applied after Exposure with the shared slider, recipe, History, Undo/Redo, and reset infrastructure.
@@ -46,12 +42,12 @@ Internal changes are omitted unless they affect users.
 ### Changed
 
 - Advanced the flat in-memory recipe to version 17 with `gradingShadowsEnabled`, `gradingMidtonesEnabled`, and `gradingHighlightsEnabled`. Color Grading Reset preserves these switches; All Reset enables all three.
-- Advanced the flat in-memory recipe to version 15 with `highlightsTemperature`; Color Grading Reset and All Reset now include all five grading values.
-- Advanced the flat in-memory recipe to version 16 with `highlightsTint`; Color Grading Reset and All Reset now include all six grading values.
-- Advanced the flat in-memory recipe to version 14 with `midtonesTint`; Color Grading Reset and All Reset now include all four grading values.
+- Earlier recipe v15 added `highlightsTemperature`; at that stage, Color Grading Reset and All Reset included five grading values.
+- Earlier recipe v16 added `highlightsTint`, completing the six grading values included in Color Grading Reset and All Reset.
+- Earlier recipe v14 added `midtonesTint`; at that stage, Color Grading Reset and All Reset included four grading values.
 - Increased the recent Immich photo limit from 50 to 100, including the search size and returned result cap.
-- Advanced the flat in-memory recipe to version 13 with `midtonesTemperature`. Color Grading Reset and All Reset now include all three grading values.
-- Updated flat in-memory edit recipes to version 12 with `shadowsTint` alongside `colorGradingEnabled` and `shadowsTemperature`. All Reset restores twelve values and enables all four categories; Color Grading OFF retains both Shadows values while bypassing only those stages.
+- Earlier recipe v13 added `midtonesTemperature`; at that stage, Color Grading Reset and All Reset included three grading values.
+- Earlier recipe v12 added `shadowsTint` alongside `colorGradingEnabled` and `shadowsTemperature`. At that stage, All Reset restored twelve values and enabled four categories; Color Grading OFF retained both Shadows values while bypassing those stages.
 - Reduced JPEG preview processing work by skipping inactive luminance regions in Highlights, Whites, Shadows, and Blacks, preserving pixel output, adjustment order, and intermediate 8-bit rounding.
 - Made Anshitsu adjustments single-row controls with a responsive label, slider, synchronized numeric input, optional unit, and inline per-adjustment reset; All Reset remains in the Develop controls heading.
 - Removed the repeated slider keyboard instructions from the Develop panel while retaining the temporary-preview notice.

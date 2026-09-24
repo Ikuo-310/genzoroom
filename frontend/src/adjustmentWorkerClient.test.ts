@@ -59,14 +59,17 @@ describe('AdjustmentWorkerClient', () => {
     client.render(withExposure(1));
     client.render(withExposure(2));
     client.render(withExposure(3));
-    client.render(withExposure(4));
+    const latest = withExposure(4);
+    latest.adjustments.shadowsTint = 60;
+    latest.gradingShadowsEnabled = false;
+    client.render(latest);
     expect(worker.sent).toHaveLength(1);
 
     worker.emit(result(1));
     expect(onResult).not.toHaveBeenCalled();
     expect(worker.sent).toHaveLength(2);
     expect(worker.sent[1]).toMatchObject({
-      message: { type: 'render', requestId: 2, assetGeneration: 12, recipe: withExposure(4) },
+      message: { type: 'render', requestId: 2, assetGeneration: 12, recipe: latest },
     });
 
     worker.emit(result(2));

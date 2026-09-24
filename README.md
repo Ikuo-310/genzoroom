@@ -19,6 +19,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
 - Per-photo edit recipes and History during the current Anshitsu session.
 - Undo / Redo, individual adjustment Reset, category Reset, and All Reset.
+- Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
@@ -52,6 +53,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 
 - RAW development pipeline.
 - Persistent edit recipes.
+- Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
 - Export or write-back to Immich.
 - Scopes such as Histogram, Waveform, and RGB Parade; the current Scope area is a placeholder.
 - Masking or local adjustments.

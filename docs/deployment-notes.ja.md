@@ -92,6 +92,7 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 - 各写真のサムネイルが表示される。
 - 写真を開くとAnshitsu（暗室）へ移動し、previewと取得可能なEXIFが表示される。
 - 複数写真を選択して暗室へ入り、Filmstripで切り替えると対象写真のpreview・ファイル名・EXIFへ更新される。
+- JPEGの3WAY Color Gradingで各Temperature / Tintとrange ON/OFF、全体OFF→ON後の状態保持、Reset、Undo / Redoを確認する。Workerでのpreview更新とFilmstrip切替後の編集状態も確認する。
 
 previewはImmich生成画像をBackend経由で表示する。originalやRAW現像結果ではなく、JPEG補正もこのpreviewを暫定入力としている。これらは再デプロイ時の確認項目であり、この文書の更新だけで実機検証済みとは扱わない。
 

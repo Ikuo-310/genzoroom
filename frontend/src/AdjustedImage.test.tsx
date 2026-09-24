@@ -82,6 +82,23 @@ afterEach(() => {
 });
 
 describe('AdjustedImage Worker lifecycle', () => {
+  it.each(['unavailable', 'initialization failure'])('falls back when Worker startup has %s', async (failure) => {
+    vi.mocked(decodeEditSource).mockResolvedValue(secondPixels);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    if (failure === 'unavailable') vi.stubGlobal('Worker', undefined);
+    else vi.spyOn(FakeWorker.prototype, 'postMessage').mockImplementationOnce(() => { throw new Error('init failed'); });
+    const recipe = defaultRecipe();
+    recipe.adjustments.temperature = 30;
+    recipe.adjustments.midtonesTint = 75;
+    recipe.gradingMidtonesEnabled = false;
+    render(secondSource, recipe);
+    await act(async () => {});
+    flushFrames();
+    expect(putImageData).toHaveBeenCalledOnce();
+    expect((putImageData.mock.calls[0][0] as TestImageData).data).toEqual(renderAdjustments(secondPixels.data, recipe));
+    if (failure === 'initialization failure') expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
+  });
+
   it('terminates the old asset Worker, ignores its result, and cleans up on unmount', async () => {
     vi.mocked(decodeEditSource)
       .mockResolvedValueOnce(firstPixels)

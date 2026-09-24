@@ -489,7 +489,7 @@ describe('Color Grading recipe and History', () => {
     expect(renderAdjustments(source, recipe)).toEqual(enabled);
   });
 
-  it('bypasses all five adjustments while OFF without losing their values or other categories', () => {
+  it('bypasses all six adjustments while OFF without losing their values or other categories', () => {
     const source = new Uint8ClampedArray([40, 50, 60, 255]);
     const recipe = withShadowsTemperature(70);
     Object.assign(recipe.adjustments, { exposure: 0.4, shadowsTint: -65, midtonesTemperature: 85, midtonesTint: 75, highlightsTemperature: -90, highlightsTint: 55, saturation: 20 });
