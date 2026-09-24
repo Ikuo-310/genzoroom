@@ -96,8 +96,11 @@ describe('Before / After viewer state', () => {
 
   it('leaves native fields and IME alone, and clears a held Backslash on blur and visibility loss', () => {
     act(() => root.render(<Harness />));
-    const fields = [document.createElement('input'), document.createElement('input'), document.createElement('textarea'), document.createElement('select'), document.createElement('div')];
-    fields[1].setAttribute('type', 'range');
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    const numberInput = document.createElement('input');
+    numberInput.type = 'number';
+    const fields = [textInput, numberInput, document.createElement('textarea'), document.createElement('select'), document.createElement('div')];
     fields[4].setAttribute('contenteditable', 'true');
     fields.forEach((field) => document.body.append(field));
     for (const field of fields) {
@@ -114,6 +117,33 @@ describe('Before / After viewer state', () => {
     expect(image().dataset.before).toBe('false');
     Reflect.deleteProperty(document, 'hidden');
     fields.forEach((field) => field.remove());
+  });
+
+  it('allows Before comparison with a focused range slider and preserves focus and value', () => {
+    act(() => root.render(<Harness />));
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.value = '37';
+    range.classList.add('focus-visible');
+    document.body.append(range);
+    range.focus();
+    expect(document.activeElement).toBe(range);
+    expect(key('keydown', range).defaultPrevented).toBe(true);
+    expect(image().dataset.before).toBe('true');
+    expect(range.value).toBe('37');
+    expect(document.activeElement).toBe(range);
+    key('keyup', range);
+    expect(image().dataset.before).toBe('false');
+    expect(range.value).toBe('37');
+    expect(document.activeElement).toBe(range);
+    click(beforeButton());
+    range.focus();
+    key('keydown', range);
+    key('keyup', range);
+    expect(image().dataset.before).toBe('true');
+    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(range);
+    range.remove();
   });
 
   it('preserves zoom and pan while comparing', () => {
@@ -160,6 +190,22 @@ describe('Before / After viewer state', () => {
     expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
     expect(image().dataset.before).toBe('true');
     expect(mockImage.recipe).toEqual(defaultRecipe());
+    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    click(afterButton());
+    const sliders = host.querySelectorAll<HTMLInputElement>('input[type="range"]');
+    const firstSlider = sliders[0];
+    const focusedSlider = sliders[1];
+    act(() => firstSlider.focus());
+    key('keydown', firstSlider, { key: 'ArrowDown', code: 'ArrowDown', shiftKey: true });
+    expect(document.activeElement).toBe(focusedSlider);
+    focusedSlider.classList.add('focus-visible');
+    const value = focusedSlider.value;
+    expect(key('keydown', focusedSlider).defaultPrevented).toBe(true);
+    expect(image().dataset.before).toBe('true');
+    expect(focusedSlider.value).toBe(value);
+    key('keyup', focusedSlider);
+    expect(image().dataset.before).toBe('false');
+    expect(document.activeElement).toBe(focusedSlider);
     expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
   });
 });

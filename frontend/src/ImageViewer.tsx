@@ -34,9 +34,8 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      const insideInput = event.target instanceof Element && !!event.target.closest('input');
       if (event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
-        || event.ctrlKey || event.metaKey || event.altKey || insideInput || isNativeEditingTarget(event.target)) return;
+        || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       event.preventDefault();
       if (!event.repeat) setBackslashHeld(true);
     };
