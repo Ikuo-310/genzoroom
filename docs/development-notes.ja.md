@@ -2,17 +2,17 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した50件は、当時の仕様を示す。
 
-## Color Grading / Midtones Tint（最新フェーズ）
+## Color Grading / Highlights Temperature（最新フェーズ）
 
-Midtones（中間調）のTemperature（色温度）の下へTint（色かぶり補正）を追加した。範囲−100〜+100、step 1、初期値0、単位なし。負がGreen、正がMagenta。既存AdjustmentSliderとTint gradientを再利用し、drag・直接入力・keyboard・wheel・500ms inactivity commitを共有する。カテゴリOFF中もShadowsとMidtonesの4値を保持する。
+Color GradingのMidtones Temperature / Tintの下にHighlights（ハイライト）Temperature（色温度）を追加した。範囲−100〜+100、step 1、初期値0、単位なし。負が暖色、正が寒色。既存AdjustmentSliderとTemperature gradientを再利用し、drag・直接入力・keyboard・wheel・500ms inactivity commitを共有する。カテゴリOFF中もShadows、Midtones、Highlightsの5値を保持する。
 
-recipeはflat構造のv14で`adjustments.midtonesTint: 0`を追加した。Color Grading Resetは4値を0へ戻してenabledを保持し、All Resetは14値と4カテゴリを既定状態へ戻す。個別Reset、カテゴリReset、ON/OFF、History、Undo/Redo、Asset ID別sessionは既存方式を使う。
+recipeはflat構造のv15で`adjustments.highlightsTemperature: 0`を追加した。Color Grading Resetは5値を0へ戻してenabledを保持し、All Resetは15値と4カテゴリを既定状態へ戻す。個別Reset、カテゴリReset、ON/OFF、History、Undo/Redo、Asset ID別sessionは既存方式を使う。
 
-処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Midtones Tint → Vibrance → Saturation。Midtonesの2項目は、Shadows Tint後の8-bit sRGBから求めた同じ`Y = 0.2126R + 0.7152G + 0.0722B`と`weight = smoothstep(0.15, 0.35, Y) × (1 - smoothstep(0.60, 0.78, Y))`を共有する。0.15以下と0.78以上は0、0.35〜0.60は1。Tintは既存の`u = midtonesTint / 100`、`R = B = 1.3^u`、`G = 1.3^-u`をlinear RGBで`effectiveGain = gain^weight`として適用し、clip・sRGB encode・8-bit丸めを行う。Shadowsのweightとstageは変更していない。
+処理順はGlobal Temperature → Global Tint → Basic tone controls → Shadows Temperature → Shadows Tint → Midtones Temperature → Midtones Tint → Highlights Temperature → Vibrance → Saturation。HighlightsはMidtones Tint後の8-bit sRGBから`Y = 0.2126R + 0.7152G + 0.0722B`を求め、`weight = smoothstep(0.55, 0.75, Y)`とする。0.55以下は0、0.55〜0.75は滑らかに増え、0.75以上は1。既存Temperature gainをlinear RGBで`effectiveGain = gain^weight`として適用し、clip・sRGB encode・8-bit丸めを行う。ShadowsとMidtonesのweightおよびstageは変更していない。
 
-検証：Frontend全テストとTypeScript/Vite production buildが成功した。Midtones Tintの0でのbyte identity、±100の方向、weight境界、alpha、clip、処理順、bypass、Reset、History、Undo/Redo、UI操作、Worker経由の一致を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
+検証：Frontend全テストとTypeScript/Vite production buildが成功した。Highlights Temperatureの0でのbyte identity、±100の方向、weight境界、alpha、clip、処理順、bypass、Reset、History、Undo/Redo、UI操作、Worker経由の一致を自動テストで確認した。ブラウザ手動確認、fixture・画像・モックデータ作成、Commit / Pushは行っていない。
 
-実機Firefox・実Immichでは、中間調のGreen/Magenta方向、暗部・明部への作用がないこと、fadeの自然さ、TemperatureとTintの同時適用、Color Grading OFF中の4値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
+実機Firefox・実Immichでは、ハイライトの暖色/寒色方向、低輝度への作用がないこと、0.55〜0.75のfadeとMidtonesとの重なり、Color Grading OFF中の5値保持と再適用、各Reset、History、Undo/Redo、Filmstrip切替を確認する。
 
 ## Color / Vibrance / Saturation（以前のフェーズ）
 

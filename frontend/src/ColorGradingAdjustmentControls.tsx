@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { TEMPERATURE, TINT, formatMidtonesTemperature, formatMidtonesTint, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
+import { TEMPERATURE, TINT, formatHighlightsTemperature, formatMidtonesTemperature, formatMidtonesTint, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
 import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 
 export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
@@ -46,5 +46,15 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'midtonesTint', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'midtonesTint' })}
       onReset={() => dispatch({ type: 'midtonesTintReset' })} />
+    <h4 className="adjustment-subsection-title">{t('workspace.highlightsGrading')}</h4>
+    <AdjustmentSlider key={`${assetId}-highlights-temperature`} label={t('workspace.temperature')} {...TEMPERATURE}
+      value={recipe.adjustments.highlightsTemperature} valueText={formatHighlightsTemperature(recipe.adjustments.highlightsTemperature)}
+      valueLabel={t('workspace.highlightsTemperatureValue')} precision={0} defaultValue={0}
+      disabled={!recipe.colorGradingEnabled} resetLabel={t('workspace.highlightsTemperatureReset')}
+      trackGradient={TEMPERATURE_TRACK_GRADIENT}
+      onBegin={() => dispatch({ type: 'begin', kind: 'highlightsTemperature' })}
+      onChange={(value) => dispatch({ type: 'highlightsTemperature', value })}
+      onCommit={() => dispatch({ type: 'commit', kind: 'highlightsTemperature' })}
+      onReset={() => dispatch({ type: 'highlightsTemperatureReset' })} />
   </>;
 }

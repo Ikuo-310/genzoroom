@@ -11,7 +11,7 @@ const adjustShadows = (state: EditSession, value: number) => editSession(editSes
 const adjustBlacks = (state: EditSession, value: number) => editSession(editSession(state, { type: 'blacks', value }), { type: 'commit' });
 describe('non-destructive edit sessions', () => {
   it('starts with a serializable versioned zero recipe', () => {
-    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 14, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 } });
+    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 15, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 } });
   });
   it('coalesces intermediate input and skips no-op gestures', () => {
     let state = newSession();
@@ -54,14 +54,14 @@ describe('non-destructive edit sessions', () => {
     state = editSession(state, { type: 'toggleBasic' });
     state = editSession(state, { type: 'allReset' });
     expect(state.recipe.basicEnabled).toBe(true);
-    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     expect(state.history.at(-1)?.kind).toBe('allReset');
     const undone = editSession(state, { type: 'undo' });
     expect(undone.recipe.basicEnabled).toBe(false);
-    expect(undone.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.35, contrast: 40, highlights: -55, whites: 45, shadows: 65, blacks: -70, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(undone.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.35, contrast: 40, highlights: -55, whites: 45, shadows: 65, blacks: -70, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     const redone = editSession(undone, { type: 'redo' });
     expect(redone.recipe.basicEnabled).toBe(true);
-    expect(redone.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(redone.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
   });
   it('toggles Basic as one undoable bypass without changing adjustment values', () => {
     let state = editSession(newSession(), { type: 'exposure', value: 0.5 });
@@ -85,7 +85,7 @@ describe('non-destructive edit sessions', () => {
     const beforeReset = state.recipe;
     state = editSession(state, { type: 'basicReset' });
     expect(state.recipe.basicEnabled).toBe(false);
-    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     expect(state.history.at(-1)?.kind).toBe('basicReset');
     const undone = editSession(state, { type: 'undo' });
     expect(undone.recipe).toEqual(beforeReset);
@@ -122,13 +122,13 @@ describe('non-destructive edit sessions', () => {
     state = adjustShadows(state, 150);
     state = adjustBlacks(state, -150);
     state = adjustExposure(state, -0.25);
-    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: -0.25, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: -0.25, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks', 'exposure']);
     state = editSession(state, { type: 'undo' });
-    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     state = editSession(state, { type: 'undo' });
-    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
-    expect(editSession(state, { type: 'redo' }).recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0 });
+    expect(state.recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
+    expect(editSession(state, { type: 'redo' }).recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.5, contrast: 100, highlights: -100, whites: -80, shadows: 100, blacks: -100, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0 });
     expect(adjustContrast(newSession(), -150).recipe.adjustments.contrast).toBe(-100);
     expect(adjustHighlights(newSession(), 150).recipe.adjustments.highlights).toBe(100);
     expect(adjustHighlights(newSession(), Number.NaN).recipe.adjustments.highlights).toBe(0);
@@ -401,7 +401,7 @@ describe('Basic scope', () => {
     expect(isBasicDefault(adjustments)).toBe(false);
   });
   it('preserves non-Basic values through reset, bypass, Undo and Redo', () => {
-    const recipe = { ...newSession().recipe, adjustments: { temperature: 0, tint: 25, exposure: 0.5, contrast: 20, highlights: -30, whites: 40, shadows: 50, blacks: -60, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, vibrance: 0, saturation: 0, futureColor: 42 } };
+    const recipe = { ...newSession().recipe, adjustments: { temperature: 0, tint: 25, exposure: 0.5, contrast: 20, highlights: -30, whites: 40, shadows: 50, blacks: -60, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, vibrance: 0, saturation: 0, futureColor: 42 } };
     const state = { ...newSession(), recipe };
     const off = editSession(state, { type: 'toggleBasic' });
     const expected = { ...newSession().recipe.adjustments, tint: 25, futureColor: 42 };

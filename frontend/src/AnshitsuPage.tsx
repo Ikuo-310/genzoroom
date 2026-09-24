@@ -13,7 +13,7 @@ import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
+import { formatHighlightsTemperature, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -334,6 +334,11 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'midtonesTintReset':
           description = t(entry.kind === 'midtonesTint' ? 'workspace.midtonesTintHistory' : 'workspace.midtonesTintReset')
             + ' ' + formatMidtonesTint(entry.before.adjustments.midtonesTint) + ' → ' + formatMidtonesTint(entry.after.adjustments.midtonesTint);
+          break;
+        case 'highlightsTemperature':
+        case 'highlightsTemperatureReset':
+          description = t(entry.kind === 'highlightsTemperature' ? 'workspace.highlightsTemperatureHistory' : 'workspace.highlightsTemperatureReset')
+            + ' ' + formatHighlightsTemperature(entry.before.adjustments.highlightsTemperature) + ' → ' + formatHighlightsTemperature(entry.after.adjustments.highlightsTemperature);
           break;
         case 'colorGradingReset': description = t('workspace.colorGradingResetHistory'); break;
         case 'colorGradingToggle':
