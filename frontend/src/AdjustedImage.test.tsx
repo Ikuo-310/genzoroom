@@ -41,9 +41,9 @@ let frames: Array<{ id: number; callback: FrameRequestCallback }>;
 let nextFrame: number;
 let putImageData: ReturnType<typeof vi.fn>;
 
-function render(source: EditImageSource, recipe = defaultRecipe()) {
+function render(source: EditImageSource, recipe = defaultRecipe(), showBeforeAdjustments = false) {
   act(() => root.render(<AdjustedImage source={source} recipe={recipe} alt="preview"
-    onLoad={vi.fn()} onError={vi.fn()} />));
+    showBeforeAdjustments={showBeforeAdjustments} onLoad={vi.fn()} onError={vi.fn()} />));
 }
 
 function flushFrames() {
@@ -94,8 +94,9 @@ describe('AdjustedImage Worker lifecycle', () => {
     render(secondSource, recipe);
     await act(async () => {});
     flushFrames();
-    expect(putImageData).toHaveBeenCalledOnce();
-    expect((putImageData.mock.calls[0][0] as TestImageData).data).toEqual(renderAdjustments(secondPixels.data, recipe));
+    expect(putImageData).toHaveBeenCalledTimes(2);
+    expect((putImageData.mock.calls[0][0] as TestImageData).data).toEqual(secondPixels.data);
+    expect((putImageData.mock.calls[1][0] as TestImageData).data).toEqual(renderAdjustments(secondPixels.data, recipe));
     if (failure === 'initialization failure') expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
   });
 
@@ -113,15 +114,20 @@ describe('AdjustedImage Worker lifecycle', () => {
     expect(firstRender.type).toBe('render');
     if (firstInit.type !== 'init' || firstRender.type !== 'render') throw new Error('Expected init and render');
     const staleHandler = firstWorker.onmessage;
+    firstWorker.emit({
+      type: 'result', requestId: firstRender.requestId, assetGeneration: firstInit.assetGeneration,
+      pixelBuffer: new Uint8ClampedArray([5, 6, 7, 255]).buffer, width: 1, height: 1,
+    });
 
     render(secondSource);
+    expect(host.querySelectorAll('canvas')[1].width).toBe(0);
     await act(async () => {});
     expect(firstWorker.terminate).toHaveBeenCalledOnce();
     staleHandler?.({ data: {
       type: 'result', requestId: firstRender.requestId, assetGeneration: firstInit.assetGeneration,
       pixelBuffer: new Uint8ClampedArray([1, 2, 3, 4]).buffer, width: 1, height: 1,
     } } as MessageEvent<AdjustmentWorkerResponse>);
-    expect(putImageData).not.toHaveBeenCalled();
+    expect(putImageData).toHaveBeenCalledTimes(3);
 
     flushFrames();
     const secondWorker = FakeWorker.instances[1];
@@ -135,7 +141,7 @@ describe('AdjustedImage Worker lifecycle', () => {
       type: 'result', requestId: secondRender.requestId, assetGeneration: secondInit.assetGeneration,
       pixelBuffer: new Uint8ClampedArray([9, 8, 7, 73]).buffer, width: 1, height: 1,
     });
-    expect(putImageData).toHaveBeenCalledOnce();
+    expect(putImageData).toHaveBeenCalledTimes(4);
 
     act(() => root.unmount());
     expect(secondWorker.terminate).toHaveBeenCalledOnce();
@@ -158,8 +164,38 @@ describe('AdjustedImage Worker lifecycle', () => {
       'Adjustment worker failed; using main-thread fallback.',
       expect.objectContaining({ message: 'worker crash' }),
     );
-    expect(putImageData).toHaveBeenCalledOnce();
-    const rendered = putImageData.mock.calls[0][0] as TestImageData;
+    expect(putImageData).toHaveBeenCalledTimes(2);
+    const rendered = putImageData.mock.calls[1][0] as TestImageData;
     expect(rendered.data).toEqual(renderAdjustments(firstPixels.data, recipe));
+  });
+
+  it('switches cached source and adjusted canvases without a Worker render or recipe change', async () => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    const recipe = defaultRecipe();
+    recipe.adjustments.tint = 40;
+    render(firstSource, recipe);
+    await act(async () => {});
+    flushFrames();
+    const worker = FakeWorker.instances[0];
+    const initialRequests = worker.sent.length;
+    const sourceCanvas = host.querySelectorAll('canvas')[0];
+    const adjustedCanvas = host.querySelectorAll('canvas')[1];
+    expect((putImageData.mock.calls[0][0] as TestImageData).data).toEqual(firstPixels.data);
+    render(firstSource, recipe, true);
+    expect(adjustedCanvas.classList.contains('comparison-hidden')).toBe(true);
+    expect(sourceCanvas.classList.contains('comparison-hidden')).toBe(false);
+    const init = worker.sent[0];
+    const request = worker.sent[1];
+    if (init.type !== 'init' || request.type !== 'render') throw new Error('Expected init and render');
+    worker.emit({
+      type: 'result', requestId: request.requestId, assetGeneration: init.assetGeneration,
+      pixelBuffer: new Uint8ClampedArray([9, 8, 7, 255]).buffer, width: 1, height: 1,
+    });
+    expect((putImageData.mock.calls[1][0] as TestImageData).data).toEqual(new Uint8ClampedArray([9, 8, 7, 255]));
+    render(firstSource, recipe, false);
+    expect(adjustedCanvas.classList.contains('comparison-hidden')).toBe(false);
+    expect(worker.sent).toHaveLength(initialRequests);
+    expect(putImageData).toHaveBeenCalledTimes(2);
+    expect(recipe.adjustments.tint).toBe(40);
   });
 });

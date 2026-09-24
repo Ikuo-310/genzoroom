@@ -34,6 +34,7 @@ export function AnshitsuPage() {
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   const activeDetail = detail?.id === assetId ? detail : null;
   const editable = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch } = useAssetEdits(assetId, editable);
@@ -113,6 +114,8 @@ export function AnshitsuPage() {
           alt={activeDetail.filename}
           leftOpen={leftOpen}
           rightOpen={rightOpen}
+          persistentBeforeAdjustments={persistentBeforeAdjustments}
+          onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
         />

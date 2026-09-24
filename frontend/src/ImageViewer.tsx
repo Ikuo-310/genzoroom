@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
+import { isNativeEditingTarget } from './editShortcuts';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 
@@ -12,11 +13,13 @@ type ImageViewerProps = {
   alt: string;
   leftOpen: boolean;
   rightOpen: boolean;
+  persistentBeforeAdjustments?: boolean;
+  onBeforeAdjustmentsChange?: (value: boolean) => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
 };
 
-export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, onToggleLeft, onToggleRight }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
@@ -26,6 +29,33 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [slashHeld, setSlashHeld] = useState(false);
+  const showBeforeAdjustments = persistentBeforeAdjustments || slashHeld;
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const insideInput = event.target instanceof Element && !!event.target.closest('input');
+      if (event.key !== '/' || event.defaultPrevented || event.isComposing
+        || event.ctrlKey || event.metaKey || event.altKey || insideInput || isNativeEditingTarget(event.target)) return;
+      event.preventDefault();
+      if (!event.repeat) setSlashHeld(true);
+    };
+    const keyup = (event: KeyboardEvent) => {
+      if (event.key === '/') setSlashHeld(false);
+    };
+    const release = () => setSlashHeld(false);
+    const visibilityChange = () => { if (document.hidden) release(); };
+    window.addEventListener('keydown', keydown);
+    window.addEventListener('keyup', keyup);
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', visibilityChange);
+    return () => {
+      window.removeEventListener('keydown', keydown);
+      window.removeEventListener('keyup', keyup);
+      window.removeEventListener('blur', release);
+      document.removeEventListener('visibilitychange', visibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     setImageState('loading');
@@ -109,9 +139,17 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
       </div>
-      <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
-        <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
-      </button>
+      <div className="viewer-toolbar-right">
+        <div className="before-after-controls" role="group" aria-label={t('workspace.beforeAfter')}>
+          <button type="button" className="tool-button" aria-pressed={showBeforeAdjustments}
+            onClick={() => onBeforeAdjustmentsChange?.(true)}>{t('workspace.before')}</button>
+          <button type="button" className="tool-button" aria-pressed={!showBeforeAdjustments}
+            onClick={() => onBeforeAdjustmentsChange?.(false)}>{t('workspace.after')}</button>
+        </div>
+        <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
+          <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
+        </button>
+      </div>
     </div>
     <div
       ref={viewportRef}
@@ -123,7 +161,7 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
       onPointerCancel={stopPan}
     >
       <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}>
-        {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt}
+        {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
           onError={() => setImageState('error')} /> : <img

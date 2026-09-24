@@ -21,6 +21,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Undo / Redo, individual adjustment Reset, category Reset, and All Reset.
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
+- Before / After display toggle and hold `/` for temporary Before; comparison bypasses develop adjustments without changing edits or zoom/pan.
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
 

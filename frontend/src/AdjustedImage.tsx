@@ -5,27 +5,40 @@ import { renderAdjustments } from './adjustmentPipeline';
 import { AdjustmentWorkerClient } from './adjustmentWorkerClient';
 
 type Props = {
-  source: EditImageSource; recipe: EditRecipe; alt: string; width?: number;
+  source: EditImageSource; recipe: EditRecipe; alt: string; width?: number; showBeforeAdjustments?: boolean;
   onLoad: (width: number, height: number) => void; onError: () => void;
 };
 
-export function AdjustedImage({ source, recipe, alt, width, onLoad, onError }: Props) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [pixels, setPixels] = useState<ImageData | null>(null);
+export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustments = false, onLoad, onError }: Props) {
+  const beforeCanvas = useRef<HTMLCanvasElement>(null);
+  const afterCanvas = useRef<HTMLCanvasElement>(null);
+  const sourceKey = `${source.kind}:${source.url}`;
+  const currentSourceKey = useRef(sourceKey);
+  currentSourceKey.current = sourceKey;
+  const [decoded, setDecoded] = useState<{ sourceKey: string; pixels: ImageData } | null>(null);
+  const pixels = decoded?.sourceKey === sourceKey ? decoded.pixels : null;
   const [workerFailure, setWorkerFailure] = useState(0);
   const workerClient = useRef<AdjustmentWorkerClient | null>(null);
   const callbacks = useRef({ onLoad, onError });
   callbacks.current = { onLoad, onError };
   useEffect(() => {
     const controller = new AbortController();
-    setPixels(null);
+    setDecoded(null);
     void decodeEditSource(source, controller.signal).then((decoded) => {
       if (controller.signal.aborted) return;
-      setPixels(decoded);
+      setDecoded({ sourceKey, pixels: decoded });
       callbacks.current.onLoad(decoded.width, decoded.height);
     }).catch(() => { if (!controller.signal.aborted) callbacks.current.onError(); });
     return () => controller.abort();
   }, [source.kind, source.url]);
+  useEffect(() => {
+    if (!pixels) return;
+    try {
+      const context = beforeCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
+      if (!context) throw new Error('Canvas unavailable');
+      context.putImageData(pixels, 0, 0);
+    } catch { callbacks.current.onError(); }
+  }, [pixels]);
   useEffect(() => {
     if (!pixels) return;
     const assetGeneration = nextAssetGeneration++;
@@ -34,8 +47,9 @@ export function AdjustedImage({ source, recipe, alt, width, onLoad, onError }: P
       const worker = new Worker(new URL('./adjustmentWorker.ts', import.meta.url), { type: 'module' });
       client = new AdjustmentWorkerClient(worker, assetGeneration, {
         onResult: (result) => {
+          if (currentSourceKey.current !== sourceKey) return;
           try {
-            const context = canvas.current?.getContext('2d', { colorSpace: 'srgb' });
+            const context = afterCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
             if (!context) throw new Error('Canvas unavailable');
             context.putImageData(new ImageData(new Uint8ClampedArray(result.pixelBuffer), result.width, result.height), 0, 0);
           } catch { callbacks.current.onError(); }
@@ -59,7 +73,7 @@ export function AdjustedImage({ source, recipe, alt, width, onLoad, onError }: P
       if (workerClient.current === client) workerClient.current = null;
       client?.dispose();
     };
-  }, [pixels]);
+  }, [pixels, sourceKey]);
   useEffect(() => {
     if (!pixels) return;
     // Coalesce recipe changes within a frame before issuing a Worker request.
@@ -70,15 +84,19 @@ export function AdjustedImage({ source, recipe, alt, width, onLoad, onError }: P
         return;
       }
       try {
-        const context = canvas.current?.getContext('2d', { colorSpace: 'srgb' });
+        const context = afterCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
         if (!context) throw new Error('Canvas unavailable');
         context.putImageData(new ImageData(renderAdjustments(pixels.data, recipe), pixels.width, pixels.height), 0, 0);
       } catch { callbacks.current.onError(); }
     });
     return () => cancelAnimationFrame(frame);
   }, [pixels, recipe, workerFailure]);
-  return <canvas ref={canvas} role="img" aria-label={alt} width={pixels?.width ?? 0} height={pixels?.height ?? 0}
-    style={{ width: width ? `${width}px` : undefined }} />;
+  return <div className="viewer-comparison-image" role="img" aria-label={alt}
+    style={{ width: width ? `${width}px` : undefined }}>
+    <canvas ref={beforeCanvas} aria-hidden="true" width={pixels?.width ?? 0} height={pixels?.height ?? 0} />
+    <canvas ref={afterCanvas} aria-hidden="true" width={pixels?.width ?? 0} height={pixels?.height ?? 0}
+      className={showBeforeAdjustments ? 'comparison-hidden' : undefined} />
+  </div>;
 }
 
 let nextAssetGeneration = 1;
