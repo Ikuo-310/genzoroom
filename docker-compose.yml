@@ -17,8 +17,9 @@ services:
   backend:
     build: ./backend
     volumes:
+      # Prepare the host data directory and grant UID/GID 10001:10001 write access.
       - type: bind
-        source: ${GENZOROOM_DATA_PATH:-${GENZOROOM_PERSIST_ROOT:-/share/Container/genzoroom}/data}
+        source: ${GENZOROOM_DATA_PATH:-${GENZOROOM_PERSIST_ROOT:?Set GENZOROOM_PERSIST_ROOT or GENZOROOM_DATA_PATH}/data}
         target: /data
         bind:
           create_host_path: false

@@ -28,7 +28,7 @@ Internal changes are omitted unless they affect users.
 - Independently resizable Anshitsu side panels with remembered widths, safe sizing limits, and preserved collapse/expand behavior.
 - A compact Basic adjustment category in Anshitsu with non-persistent collapse, an undoable category bypass that preserves values, and an undoable category reset for all six current adjustments.
 
-- Initial public project documentation describing the early development status, planned direction, and provisional NAS deployment architecture.
+- Initial public project documentation describing the early development status, planned direction, and provisional Docker deployment architecture.
 - A minimal web page showing backend connectivity, including failure feedback and a manual recheck button.
 - A health endpoint and Docker Compose deployment with a configurable Web UI port (default `3190`) and same-origin API proxying.
 - An authenticated Immich connectivity check, configured through backend environment variables, with connected, not configured, and failed states in the Web UI.

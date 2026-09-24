@@ -1,6 +1,6 @@
 # Deployment
 
-This guide covers the supported Docker Compose and Portainer deployment workflows for GenzoRoom. It is written for general Docker and self-hosted NAS environments; exact host, repository, network, and container names depend on the deployment.
+This guide covers the supported Docker Compose workflow and the optional Portainer workflow for GenzoRoom. Exact host, repository, network, and container names depend on the deployment.
 
 GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. nginx serves the built frontend and forwards same-origin `/api/` requests to the backend over an internal Docker network. Backend port `8000` is not published to the host, and the frontend does not receive the Immich API key.
 
@@ -23,13 +23,13 @@ GenzoRoom currently uses read-only Immich endpoints. Do not grant upload, update
 | `IMMICH_URL` | Yes | Immich base URL as reached from the backend container. |
 | `IMMICH_API_KEY` | Yes | Dedicated Immich API key. Keep the real value outside the repository. |
 | `GENZOROOM_PORT` | No | Frontend host port; defaults to `3190`. |
-| `GENZOROOM_PERSIST_ROOT` | No | Host persistence root; defaults to `/share/Container/genzoroom`. |
-| `GENZOROOM_DATA_PATH` | No | Override the host data directory; otherwise `${GENZOROOM_PERSIST_ROOT}/data`. |
+| `GENZOROOM_PERSIST_ROOT` | Required unless `GENZOROOM_DATA_PATH` is set | Host persistence root; set it to a writable directory such as `/path/to/genzoroom`. The data directory is `${GENZOROOM_PERSIST_ROOT}/data`. |
+| `GENZOROOM_DATA_PATH` | No | Use this host data directory directly, overriding `GENZOROOM_PERSIST_ROOT/data`. |
 | `IMMICH_DOCKER_NETWORK` | Same-host route only | Existing external Docker network used by Immich. |
 
-For command-line Compose, these values can be supplied by the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Never commit a real API key or bake it into a container image.
+Set at least one of `GENZOROOM_PERSIST_ROOT` or `GENZOROOM_DATA_PATH`. Compose uses `GENZOROOM_DATA_PATH` when supplied; otherwise it requires `GENZOROOM_PERSIST_ROOT` and uses its `data` subdirectory. With neither set, `docker compose config` fails instead of selecting a host-specific path. For command-line Compose, supply these values through the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Never commit a real API key or bake it into a container image.
 
-Before deployment, create the host data directory, for example `/share/Container/genzoroom/data`. The backend container runs as UID/GID `10001:10001`; grant that user/group write access to the directory, including permission to create SQLite's database, WAL, and SHM files. The bind mount requires the directory to exist and does not create it as root. `GENZOROOM_DATA_PATH` can place only data on another host storage location. The container path is always `/data`, and the DB is `/data/genzoroom.db`. Do not mount the DB file alone. The host filesystem should support local SQLite WAL locking; verify this on the target NAS. Config, logs, and exports directories are not created or mounted at this stage.
+Before deployment, create the host data directory, for example `/path/to/genzoroom/data`. The backend container runs as UID/GID `10001:10001`; grant that user/group write access to the directory, including permission to create SQLite's database, WAL, and SHM files. The bind mount requires the directory to exist and does not create it as root. `GENZOROOM_DATA_PATH` can place only data on another host storage location. The container path is always `/data`, and the DB is `/data/genzoroom.db`. Do not mount the DB file alone. The host filesystem should support local SQLite WAL locking; verify this on the target Docker host. Config, logs, and exports directories are not created or mounted at this stage.
 
 ## Choose an Immich connection route
 
@@ -94,7 +94,7 @@ The frontend image uses Vite only during the build. nginx serves the resulting s
 
 ### Optional checks before deployment
 
-Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker or NAS host. The current development toolchain uses Node.js 24 and Python 3.13. Start from the repository root with a Python virtual environment activated:
+Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker host. The current development toolchain uses Node.js 24 and Python 3.13. Start from the repository root with a Python virtual environment activated:
 
 ```sh
 cd frontend
@@ -122,7 +122,7 @@ Portainer can fetch, build, and deploy GenzoRoom directly from any Git repositor
 1. Create a Stack using a Git repository as its source or build method.
 2. Enter the repository URL and select the required branch or reference.
 3. Set the Compose path to `docker-compose.yml`.
-4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Set `GENZOROOM_PERSIST_ROOT` to the prepared host directory if different from the default. Add `GENZOROOM_DATA_PATH` only when data belongs elsewhere. Add `GENZOROOM_PORT` only to change the default port.
+4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Set `GENZOROOM_PERSIST_ROOT` to the prepared host root, or set `GENZOROOM_DATA_PATH` to the prepared data directory directly. Add `GENZOROOM_PORT` only to change the default port.
 5. Build and deploy the Stack.
 
 For same-host Immich networking, add `docker-compose.immich-network.yml` as an additional Compose path and set `IMMICH_DOCKER_NETWORK` to the existing Immich network name. The Stack must target the Docker endpoint where that network exists.
@@ -151,7 +151,7 @@ The current configuration targets Docker Standalone and is not a Docker Swarm de
 
 Missing connection variables produce `Immich: Not configured`. Rejected credentials, unreachable servers, insufficient permissions, or unexpected Immich responses produce a failed connection or photo-loading state without exposing the API key.
 
-Successful execution in a local development environment does not establish NAS compatibility. Verify container startup, proxy behavior, browser access, photo loading, and failure recovery on the target host.
+Successful execution in a local development environment does not establish deployment compatibility. Verify container startup, proxy behavior, browser access, photo loading, and failure recovery on the target Docker host.
 
 ## Logs and troubleshooting
 
@@ -181,7 +181,7 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 - Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
 - The Compose files do not use privileged mode or host networking. Only the backend's `/data` directory uses a host bind mount.
 - TLS certificate verification for HTTPS Immich URLs remains enabled.
-- GenzoRoom does not require changes to NAS host OS settings or system files.
+- GenzoRoom does not require changes to Docker host OS settings or system files.
 
 ## Stop or remove GenzoRoom
 

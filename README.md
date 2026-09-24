@@ -85,7 +85,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 ## Quick start
 
 1. Create a dedicated Immich API key with the minimum permissions listed above.
-2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Prepare the host data directory under `GENZOROOM_PERSIST_ROOT` and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
+2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Set `GENZOROOM_PERSIST_ROOT` or `GENZOROOM_DATA_PATH`, then prepare the resulting host data directory and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
 3. From a repository checkout, build and start the standard Docker Compose deployment:
 
    ```sh
@@ -101,7 +101,7 @@ If Immich runs on the same Docker host and is not reachable through the host LAN
 - [Architecture](docs/architecture.md) — request flow, container boundaries, editing model, and current technical limitations.
 - [Deployment](docs/deployment.md) — Docker Compose, Portainer, Immich network routes, verification, troubleshooting, and removal.
 - [Development notes (Japanese)](docs/development-notes.ja.md) — implementation history and design decisions.
-- [Deployment notes (Japanese)](docs/deployment-notes.ja.md) — notes for the currently validated NAS environment.
+- [Deployment notes (Japanese)](docs/deployment-notes.ja.md) — notes for the currently validated deployment, including one observed QNAP networking issue.
 
 ## License
 

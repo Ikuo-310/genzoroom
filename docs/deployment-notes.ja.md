@@ -1,16 +1,14 @@
 # GenzoRoom デプロイノート
 
-この文書は、現在のQNAP / Portainer環境へGenzoRoomを再デプロイするときの内部向け手順である。公開リポジトリに置くため、APIキーの実値は記載しない。
+この文書は、検証済みのDocker環境へGenzoRoomを再デプロイするときの内部向け手順である。Portainerを使う場合の手順も含む。公開リポジトリに置くため、APIキーの実値は記載しない。
 
 ## 1. 前提
 
-- NASはQNAPを使用する。
-- DockerとPortainerを使用する。
-- GitHub RepositoryからPortainer Stackとしてデプロイする。
+- Docker host上でDocker Composeを使用する。Portainerを使う場合はGitHub Repository Stackとしてデプロイする。
 - Windows上のローカルフォルダは開発と差分確認に使う。
-- 正式な実機検証はNAS上で行う。
+- 実機検証は実際のdeployment host上で行う。
 
-ローカルで構文確認やFrontend buildが成功しても、NAS上のDocker network、名前解決、nginx proxy、Immich APIまで動作したことにはならない。最終確認はPortainerでデプロイしたコンテナとブラウザから行う。
+ローカルで構文確認やFrontend buildが成功しても、deployment host上のDocker network、名前解決、nginx proxy、Immich APIまで動作したことにはならない。最終確認はDocker Compose（Portainerを使う場合はPortainer）でデプロイしたコンテナとブラウザから行う。
 
 ## 2. GitHub Source
 
@@ -33,7 +31,7 @@ PortainerのSourceとしてGitHub Repositoryを登録する。
 | Repository reference | `refs/heads/main` |
 | Compose path | `docker-compose.yml` |
 
-同一Dockerホスト上のImmichへ接続する現在のQNAP環境では、次も設定する。
+同一Docker host上のImmichへ接続する現在の検証環境では、次も設定する。
 
 | 項目 | 値 |
 | --- | --- |
@@ -43,16 +41,16 @@ PortainerのSourceとしてGitHub Repositoryを登録する。
 
 ## 4. Environment variables
 
-通常はPortainer StackのEnvironment variablesへ次を設定する。
+Docker Composeの環境変数または`.env`へ設定する。Portainerを使う場合はStackのEnvironment variablesへ設定する。
 
 ```env
 GENZOROOM_PORT=3190
-GENZOROOM_PERSIST_ROOT=/share/Container/genzoroom
+GENZOROOM_PERSIST_ROOT=/path/to/genzoroom
 IMMICH_URL=<GenzoRoom Backendから到達可能なImmich URL>
 IMMICH_API_KEY=<GenzoRoom用APIキー>
 ```
 
-同一QNAP上にある現在の実機環境では、次の接続先とnetworkを使用している。
+現在の実機環境では、次のImmich接続先とDocker networkを使用している。
 
 ```env
 GENZOROOM_PORT=3190
@@ -61,9 +59,9 @@ IMMICH_DOCKER_NETWORK=immich_immich-net
 IMMICH_API_KEY=<Portainer上で設定するGenzoRoom用APIキー>
 ```
 
-`immich_server` と `immich_immich-net` は現在のQNAP環境に固有の値。他の環境へそのまま転用せず、Portainerで実際のコンテナ名とnetwork名を確認する。
+`immich_server` と `immich_immich-net` は現在検証したQNAP環境の具体値であり、他の環境へそのまま転用しない。実際のコンテナ名とnetwork名はDocker hostで確認する。Portainerを使う場合はそのNetworks画面でも確認できる。
 
-APIキーの実値はPortainerだけで管理する。GitHub、ドキュメント、Composeファイル、Dockerfile、スクリーンショットへ記録しない。
+APIキーの実値は環境変数として管理する。Portainer利用時はStack設定で管理する。GitHub、ドキュメント、Composeファイル、Dockerfile、スクリーンショットへ記録しない。
 
 ## 5. Immich APIキー権限
 
@@ -81,12 +79,12 @@ APIキーの実値はPortainerだけで管理する。GitHub、ドキュメン�
 2. VS Codeで変更ファイルと差分を確認する。
 3. 自分でcommitする。
 4. 自分でGitHubへpushする。
-5. Portainerで対象Stackを開き、**Pull and redeploy** を実行する。
-6. NAS上でコンテナ状態、ログ、Web UI、Immich接続を確認する。
+5. Portainerを使う場合は対象Stackを開き、**Pull and redeploy** を実行する。Compose利用時は最新ファイルで再build・起動する。
+6. deployment host上でコンテナ状態、ログ、Web UI、Immich接続を確認する。
 
 再デプロイ後は、ブラウザで次を確認する。
 
-- `http://<NAS-IP>:3190` を開ける。
+- `http://<HOST-IP>:3190` を開ける。
 - `Backend: Connected` が表示される。
 - `Immich: Connected` が表示される。
 - 最近の写真が最大100件表示される。
@@ -129,7 +127,7 @@ ModuleNotFoundError: No module named 'immich'
 - サムネイルだけ失敗する場合は `asset.view` があるか。
 - URL末尾やポートが実際のImmich構成と一致しているか。
 
-現在のQNAP環境では、コンテナからQNAP自身のLAN IPへの折り返し接続がTimeoutした。QNAP自身のLAN IPでImmichへ接続できない場合、Immich固有の障害と決めつけず、別のLAN機器へ接続できるかを確認する。同一Dockerホスト上のImmichなら、共有Docker network経由の接続を確認する。
+既知のQNAP固有事例として、検証したQNAP環境ではコンテナからQNAP自身のLAN IPへの折り返し接続がTimeoutした。QNAP自身のLAN IPでImmichへ接続できない場合、Immich固有の障害と決めつけず、別のLAN機器へ接続できるかを確認する。同一Docker host上のImmichなら、共有Docker network経由の接続を確認する。
 
 ### 共有Docker networkを確認する場合
 
@@ -140,7 +138,7 @@ ModuleNotFoundError: No module named 'immich'
 5. Additional pathsに `docker-compose.immich-network.yml` が入っているか確認する。
 6. 再デプロイ後、BackendだけがImmich networkへ参加していることを確認する。
 
-現在のQNAP環境では次の組み合わせで接続できている。
+このQNAP環境では次の組み合わせで接続を確認した。
 
 ```env
 IMMICH_DOCKER_NETWORK=immich_immich-net
@@ -158,9 +156,9 @@ IMMICH_URL=http://immich_server:2283
 
 ## 8. 削除・復旧方針
 
-アプリ固有設定はPortainer Stack、Environment variables、Docker Composeの範囲に閉じ込める。NASホストOSのcron、システム設定ファイル、ネットワーク設定をGenzoRoomのために直接変更しない。
+アプリ固有設定はDocker Composeの範囲に閉じ込める。Portainerを使う場合はStackのEnvironment variablesも利用できる。Docker host OSのcron、システム設定ファイル、ネットワーク設定をGenzoRoomのために直接変更しない。
 
-現在はBackendのSQLite用に、ホストの`/share/Container/genzoroom/data`をコンテナの`/data`へbind mountする。事前にホスト側ディレクトリを作り、BackendのUID/GID `10001:10001`が書き込める権限を設定する。Composeは存在しないホスト側ディレクトリをroot権限で自動作成しない。dataを別ストレージに置く場合はStack環境変数`GENZOROOM_DATA_PATH`を指定する。SQLiteのWAL/SHMも同じ場所にできるためDBファイル単体はmountしない。Frontendはまだ保存APIに接続しておらず、通常の暗室編集はセッション中だけ保持される。
+現在はBackendのSQLite用に、ホストの`/path/to/genzoroom/data`をコンテナの`/data`へbind mountする。事前にホスト側ディレクトリを作り、BackendのUID/GID `10001:10001`が書き込める権限を設定する。Composeは存在しないホスト側ディレクトリをroot権限で自動作成しない。dataを別ストレージに置く場合は環境変数`GENZOROOM_DATA_PATH`を指定する（Portainer利用時はStack環境変数）。SQLiteのWAL/SHMも同じ場所にできるためDBファイル単体はmountしない。Frontendはまだ保存APIに接続しておらず、通常の暗室編集はセッション中だけ保持される。
 
 Stack削除後もホスト側dataは残る。バックアップはBackend停止後にdataディレクトリ全体をコピーする。稼働中の`genzoroom.db`単体コピーは避ける。
 
