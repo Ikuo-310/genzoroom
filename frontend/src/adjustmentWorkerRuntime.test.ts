@@ -34,7 +34,9 @@ const cases: Array<[string, EditRecipe]> = [
   ['midtones tint', recipe({ midtonesTint: 100 })],
   ['midtones temperature and tint', recipe({ midtonesTemperature: -100, midtonesTint: 100 })],
   ['highlights temperature', recipe({ highlightsTemperature: -100 })],
-  ['all categories', recipe({ temperature: -50, tint: 35, exposure: -0.4, contrast: 25, highlights: 80, whites: -55, shadows: 65, blacks: 40, shadowsTemperature: -75, shadowsTint: 90, midtonesTemperature: 100, midtonesTint: -100, highlightsTemperature: 100, vibrance: 60, saturation: -45 })],
+  ['highlights tint', recipe({ highlightsTint: 100 })],
+  ['highlights temperature and tint', recipe({ highlightsTemperature: -100, highlightsTint: 100 })],
+  ['all categories', recipe({ temperature: -50, tint: 35, exposure: -0.4, contrast: 25, highlights: 80, whites: -55, shadows: 65, blacks: 40, shadowsTemperature: -75, shadowsTint: 90, midtonesTemperature: 100, midtonesTint: -100, highlightsTemperature: 100, highlightsTint: -100, vibrance: 60, saturation: -45 })],
 ];
 
 describe('adjustment Worker runtime', () => {

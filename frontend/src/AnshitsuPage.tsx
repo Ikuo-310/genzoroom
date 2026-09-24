@@ -13,7 +13,7 @@ import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
-import { formatHighlightsTemperature, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
+import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -339,6 +339,11 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'highlightsTemperatureReset':
           description = t(entry.kind === 'highlightsTemperature' ? 'workspace.highlightsTemperatureHistory' : 'workspace.highlightsTemperatureReset')
             + ' ' + formatHighlightsTemperature(entry.before.adjustments.highlightsTemperature) + ' → ' + formatHighlightsTemperature(entry.after.adjustments.highlightsTemperature);
+          break;
+        case 'highlightsTint':
+        case 'highlightsTintReset':
+          description = t(entry.kind === 'highlightsTint' ? 'workspace.highlightsTintHistory' : 'workspace.highlightsTintReset')
+            + ' ' + formatHighlightsTint(entry.before.adjustments.highlightsTint) + ' → ' + formatHighlightsTint(entry.after.adjustments.highlightsTint);
           break;
         case 'colorGradingReset': description = t('workspace.colorGradingResetHistory'); break;
         case 'colorGradingToggle':

@@ -1,4 +1,4 @@
-import { normalizeHighlightsTemperature, normalizeMidtonesTemperature, normalizeMidtonesTint, normalizeSaturation, normalizeShadowsTemperature, normalizeShadowsTint, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
+import { normalizeHighlightsTemperature, normalizeHighlightsTint, normalizeMidtonesTemperature, normalizeMidtonesTint, normalizeSaturation, normalizeShadowsTemperature, normalizeShadowsTint, normalizeTemperature, normalizeTint, normalizeVibrance, effectiveAdjustments, type EditRecipe } from './editing';
 
 const WHITES_START_LUMINANCE = 0.75;
 const BLACKS_FADE_END_LUMINANCE = 0.35;
@@ -105,10 +105,11 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   const midtonesTemperature = normalizeMidtonesTemperature(adjustments.midtonesTemperature);
   const midtonesTint = normalizeMidtonesTint(adjustments.midtonesTint);
   const highlightsTemperature = normalizeHighlightsTemperature(adjustments.highlightsTemperature);
+  const highlightsTint = normalizeHighlightsTint(adjustments.highlightsTint);
   const vibrance = normalizeVibrance(adjustments.vibrance);
   const saturation = normalizeSaturation(adjustments.saturation);
   const saturationFactor = 1 + saturation / 100;
-  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && midtonesTemperature === 0 && midtonesTint === 0 && highlightsTemperature === 0 && vibrance === 0 && saturation === 0) return output;
+  if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && midtonesTemperature === 0 && midtonesTint === 0 && highlightsTemperature === 0 && highlightsTint === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
   const shadowsTemperatureGain = temperatureGains(shadowsTemperature);
@@ -116,6 +117,7 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   const midtonesTemperatureGain = temperatureGains(midtonesTemperature);
   const midtonesTintGain = tintGains(midtonesTint);
   const highlightsTemperatureGain = temperatureGains(highlightsTemperature);
+  const highlightsTintGain = tintGains(highlightsTint);
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
   // At zero, skip that stage's round-trip to retain existing byte compatibility.
   const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;
@@ -254,15 +256,22 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
         }
       }
     }
-    if (highlightsTemperature !== 0) {
+    if (highlightsTemperature !== 0 || highlightsTint !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;
       const blue = output[i + 2] / 255;
       const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
       const weight = highlightsGradingWeight(luminance);
       if (weight > 0) {
-        output[i] = maskedLinearGain(output[i], highlightsTemperatureGain.red, weight);
-        output[i + 2] = maskedLinearGain(output[i + 2], highlightsTemperatureGain.blue, weight);
+        if (highlightsTemperature !== 0) {
+          output[i] = maskedLinearGain(output[i], highlightsTemperatureGain.red, weight);
+          output[i + 2] = maskedLinearGain(output[i + 2], highlightsTemperatureGain.blue, weight);
+        }
+        if (highlightsTint !== 0) {
+          output[i] = maskedLinearGain(output[i], highlightsTintGain.red, weight);
+          output[i + 1] = maskedLinearGain(output[i + 1], highlightsTintGain.green, weight);
+          output[i + 2] = maskedLinearGain(output[i + 2], highlightsTintGain.blue, weight);
+        }
       }
     }
     if (vibrance !== 0) {

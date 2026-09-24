@@ -65,12 +65,12 @@ afterEach(() => {
 });
 
 describe('Color Grading controls', () => {
-  it('renders Shadows and Midtones Temperature/Tint, then Highlights Temperature', () => {
+  it('renders Temperature/Tint in each Shadows, Midtones, and Highlights group', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
       .toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
     expect(Array.from(grading().querySelectorAll('.adjustment-subsection-title'), (item) => item.textContent)).toEqual(['Shadows', 'Midtones', 'Highlights']);
-    expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['Temperature', 'Tint', 'Temperature', 'Tint', 'Temperature']);
-    for (const control of [slider(), slider(1), slider(2), slider(3), slider(4)]) {
+    expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['Temperature', 'Tint', 'Temperature', 'Tint', 'Temperature', 'Tint']);
+    for (const control of [slider(), slider(1), slider(2), slider(3), slider(4), slider(5)]) {
       expect([control.min, control.max, control.step, control.value]).toEqual(['-100', '100', '1', '0']);
       expect(control.classList.contains('has-gradient')).toBe(true);
     }
@@ -79,13 +79,14 @@ describe('Color Grading controls', () => {
     expect(slider(2).style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(slider(3).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider(4).style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
-    expect(Array.from(grading().querySelectorAll('.adjustment-unit'), (item) => item.textContent)).toEqual(['', '', '', '', '']);
+    expect(slider(5).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
+    expect(Array.from(grading().querySelectorAll('.adjustment-unit'), (item) => item.textContent)).toEqual(['', '', '', '', '', '']);
   });
 
   it('localizes the Shadows section label in Japanese', async () => {
     await act(async () => i18n.changeLanguage('ja'));
     expect(Array.from(grading().querySelectorAll('.adjustment-subsection-title'), (item) => item.textContent)).toEqual(['シャドウ', '中間調', 'ハイライト']);
-    expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['色温度', '色かぶり補正', '色温度', '色かぶり補正', '色温度']);
+    expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['色温度', '色かぶり補正', '色温度', '色かぶり補正', '色温度', '色かぶり補正']);
     wheel(-1, false, slider(1));
     act(() => vi.advanceTimersByTime(500));
     expect(history()[0]).toBe('シャドウ 色かぶり補正 0 → +10');
@@ -98,6 +99,27 @@ describe('Color Grading controls', () => {
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
     expect(history()[0]).toBe('ハイライト 色温度 0 → +10');
+    wheel(-1, false, slider(5));
+    act(() => vi.advanceTimersByTime(500));
+    expect(history()[0]).toBe('ハイライト 色かぶり補正 0 → +10');
+  });
+
+  it('supports Highlights Tint numeric, keyboard, wheel, history, and Reset', () => {
+    act(() => slider(5).focus());
+    key('ArrowRight', slider(5));
+    key('ArrowUp', slider(5));
+    expect(wheel(1, true, slider(5)).defaultPrevented).toBe(true);
+    expect(recipe().adjustments.highlightsTint).toBe(10);
+    act(() => vi.advanceTimersByTime(500));
+    expect(history()[0]).toBe('Highlights Tint 0 → +10');
+    act(() => number(5).focus());
+    change(number(5), '-25.6');
+    key('Enter', number(5));
+    expect(recipe().adjustments.highlightsTint).toBe(-26);
+    expect(history()[0]).toBe('Highlights Tint +10 → -26');
+    click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[5]);
+    expect(recipe().adjustments.highlightsTint).toBe(0);
+    expect(history()[0]).toBe('Highlights Tint Reset -26 → 0');
   });
 
   it('supports Highlights Temperature keyboard, wheel, direct input, grouped commit, and Reset', () => {
@@ -199,6 +221,10 @@ describe('Color Grading controls', () => {
     expect(document.activeElement).toBe(slider(3));
     key('ArrowDown', slider(3), { shiftKey: true });
     expect(document.activeElement).toBe(slider(4));
+    key('ArrowDown', slider(4), { shiftKey: true });
+    expect(document.activeElement).toBe(slider(5));
+    key('ArrowUp', slider(5), { shiftKey: true });
+    expect(document.activeElement).toBe(slider(4));
     key('ArrowUp', slider(4), { shiftKey: true });
     expect(document.activeElement).toBe(slider(3));
     key('ArrowUp', slider(3), { shiftKey: true });
@@ -230,12 +256,13 @@ describe('Color Grading controls', () => {
     expect(document.activeElement).toBe(slider());
   });
 
-  it('bypasses and disables all five controls while preserving values across OFF/ON', () => {
+  it('bypasses and disables all six controls while preserving values across OFF/ON', () => {
     wheel(-1);
     wheel(1, false, slider(1));
     wheel(-1, false, slider(2));
     wheel(1, false, slider(3));
     wheel(-1, false, slider(4));
+    wheel(1, false, slider(5));
     act(() => vi.advanceTimersByTime(500));
 
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
@@ -245,24 +272,27 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.midtonesTemperature).toBe(10);
     expect(recipe().adjustments.midtonesTint).toBe(-10);
     expect(recipe().adjustments.highlightsTemperature).toBe(10);
+    expect(recipe().adjustments.highlightsTint).toBe(-10);
     expect(slider().disabled).toBe(true);
     expect(slider(1).disabled).toBe(true);
     expect(slider(2).disabled).toBe(true);
     expect(slider(3).disabled).toBe(true);
     expect(slider(4).disabled).toBe(true);
+    expect(slider(5).disabled).toBe(true);
     expect(number(1).disabled).toBe(true);
     expect(wheel(-1, false, slider(1)).defaultPrevented).toBe(false);
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
     expect(recipe().colorGradingEnabled).toBe(true);
-    expect([slider().value, slider(1).value, slider(2).value, slider(3).value, slider(4).value]).toEqual(['10', '-10', '10', '-10', '10']);
+    expect([slider().value, slider(1).value, slider(2).value, slider(3).value, slider(4).value, slider(5).value]).toEqual(['10', '-10', '10', '-10', '10', '-10']);
   });
 
-  it('resets all five grading values as one operation and includes Highlights in All Reset', () => {
+  it('resets all six grading values as one operation and includes Highlights in All Reset', () => {
     wheel(-1);
     wheel(-1, false, slider(1));
     wheel(-1, false, slider(2));
     wheel(-1, false, slider(3));
     wheel(-1, false, slider(4));
+    wheel(-1, false, slider(5));
     act(() => vi.advanceTimersByTime(500));
     click(grading().querySelector<HTMLElement>('.adjustment-category-reset')!);
     expect(recipe().adjustments.shadowsTemperature).toBe(0);
@@ -270,6 +300,7 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.midtonesTemperature).toBe(0);
     expect(recipe().adjustments.midtonesTint).toBe(0);
     expect(recipe().adjustments.highlightsTemperature).toBe(0);
+    expect(recipe().adjustments.highlightsTint).toBe(0);
     expect(history()[0]).toBe('Reset Color Grading adjustments');
     click(Array.from(host.querySelectorAll('button')).find((item) => item.textContent === 'Undo')!);
     expect(recipe().adjustments.shadowsTemperature).toBe(10);
@@ -277,13 +308,14 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.midtonesTemperature).toBe(10);
     expect(recipe().adjustments.midtonesTint).toBe(10);
     expect(recipe().adjustments.highlightsTemperature).toBe(10);
+    expect(recipe().adjustments.highlightsTint).toBe(10);
     click(Array.from(host.querySelectorAll('button')).find((item) => item.textContent === 'Redo')!);
     expect(recipe().adjustments.shadowsTint).toBe(0);
 
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
     click(host.querySelector<HTMLButtonElement>('.workspace-section-action')!);
-    expect(recipe()).toEqual(expect.objectContaining({ version: 15, colorGradingEnabled: true }));
+    expect(recipe()).toEqual(expect.objectContaining({ version: 16, colorGradingEnabled: true }));
     expect(Object.values(recipe().adjustments).every((value) => value === 0)).toBe(true);
   });
 });
