@@ -36,6 +36,10 @@ const cases: Array<[string, EditRecipe]> = [
   ['highlights temperature', recipe({ highlightsTemperature: -100 })],
   ['highlights tint', recipe({ highlightsTint: 100 })],
   ['highlights temperature and tint', recipe({ highlightsTemperature: -100, highlightsTint: 100 })],
+  ['shadows disabled', { ...recipe({ shadowsTemperature: -80, shadowsTint: 60, midtonesTint: 30 }), gradingShadowsEnabled: false }],
+  ['midtones disabled', { ...recipe({ midtonesTemperature: 90, midtonesTint: -60, highlightsTint: 50 }), gradingMidtonesEnabled: false }],
+  ['highlights disabled', { ...recipe({ highlightsTemperature: -90, highlightsTint: 75, midtonesTint: 40 }), gradingHighlightsEnabled: false }],
+  ['parent grading disabled', { ...recipe({ shadowsTint: 60, midtonesTint: -40, highlightsTint: 80 }), colorGradingEnabled: false, gradingShadowsEnabled: false }],
   ['all categories', recipe({ temperature: -50, tint: 35, exposure: -0.4, contrast: 25, highlights: 80, whites: -55, shadows: 65, blacks: 40, shadowsTemperature: -75, shadowsTint: 90, midtonesTemperature: 100, midtonesTint: -100, highlightsTemperature: 100, highlightsTint: -100, vibrance: 60, saturation: -45 })],
 ];
 

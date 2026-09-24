@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Separate Shadows, Midtones, and Highlights ON/OFF switches within Color Grading. Each bypasses its own Temperature and Tint while retaining both values; the parent Color Grading switch still bypasses all three. Switching is undoable.
 - Highlights Temperature (−100 warm to +100 cool) after Midtones Tint, using the existing Temperature gains and a smooth luminance fade from 0.55 to 0.75. It shares Color Grading bypass, Reset, History, Undo/Redo, and Worker rendering.
 - Highlights Tint (−100 green to +100 magenta) after Highlights Temperature, sharing the same pre-Temperature Highlights luminance weight and existing Tint gains, category bypass, Reset, History, Undo/Redo, and Worker rendering. The flat in-memory recipe advances to version 16.
 - Midtones Tint (−100 green to +100 magenta) after Midtones Temperature, sharing its luminance weight and the existing Tint gains, slider, category bypass, Reset, History, Undo/Redo, and Worker path.
@@ -44,6 +45,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Advanced the flat in-memory recipe to version 17 with `gradingShadowsEnabled`, `gradingMidtonesEnabled`, and `gradingHighlightsEnabled`. Color Grading Reset preserves these switches; All Reset enables all three.
 - Advanced the flat in-memory recipe to version 15 with `highlightsTemperature`; Color Grading Reset and All Reset now include all five grading values.
 - Advanced the flat in-memory recipe to version 16 with `highlightsTint`; Color Grading Reset and All Reset now include all six grading values.
 - Advanced the flat in-memory recipe to version 14 with `midtonesTint`; Color Grading Reset and All Reset now include all four grading values.

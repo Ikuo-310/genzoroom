@@ -349,6 +349,15 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
         case 'colorGradingToggle':
           description = `${t('workspace.colorGrading')} ${t(entry.after.colorGradingEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
           break;
+        case 'gradingShadowsToggle':
+          description = `${t('workspace.shadowsGrading')} ${t(entry.after.gradingShadowsEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
+        case 'gradingMidtonesToggle':
+          description = `${t('workspace.midtonesGrading')} ${t(entry.after.gradingMidtonesEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
+        case 'gradingHighlightsToggle':
+          description = `${t('workspace.highlightsGrading')} ${t(entry.after.gradingHighlightsEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
+          break;
         case 'saturation':
         case 'saturationReset':
           description = t(entry.kind === 'saturation' ? 'workspace.saturation' : 'workspace.saturationReset')

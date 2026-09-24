@@ -25,6 +25,7 @@ const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!
 const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')[3];
 const slider = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="range"]')[index]!;
 const number = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
+const rangeToggle = (index: number) => grading().querySelectorAll<HTMLButtonElement>('.grading-range-toggle')[index]!;
 const history = () => Array.from(host.querySelectorAll('.edit-history li'), (item) => item.textContent);
 function click(element: HTMLElement) { act(() => element.click()); }
 function key(value: string, target: EventTarget, init: KeyboardEventInit = {}) {
@@ -65,6 +66,62 @@ afterEach(() => {
 });
 
 describe('Color Grading controls', () => {
+  it('renders three compact range switches and disables only the selected pair', () => {
+    expect(Array.from(grading().querySelectorAll('.grading-range-header h4'), (item) => item.textContent))
+      .toEqual(['Shadows', 'Midtones', 'Highlights']);
+    expect([0, 1, 2].map((index) => [rangeToggle(index).getAttribute('aria-pressed'), rangeToggle(index).getAttribute('aria-label')]))
+      .toEqual([['true', 'Bypass Shadows grading'], ['true', 'Bypass Midtones grading'], ['true', 'Bypass Highlights grading']]);
+    wheel(-1, false, slider(2));
+    wheel(1, false, slider(3));
+    click(rangeToggle(1));
+    expect(history().slice(0, 3)).toEqual(['Midtones OFF', 'Midtones Tint 0 → -10', 'Midtones Temperature 0 → +10']);
+    expect(recipe().gradingMidtonesEnabled).toBe(false);
+    expect([recipe().adjustments.midtonesTemperature, recipe().adjustments.midtonesTint]).toEqual([10, -10]);
+    expect([slider(2).disabled, slider(3).disabled, number(2).disabled, number(3).disabled]).toEqual([true, true, true, true]);
+    expect([slider(0).disabled, slider(1).disabled, slider(4).disabled, slider(5).disabled]).toEqual([false, false, false, false]);
+    expect([slider(2).value, slider(3).value]).toEqual(['10', '-10']);
+    expect(rangeToggle(1).getAttribute('aria-label')).toBe('Enable Midtones grading');
+    act(() => slider(1).focus());
+    key('ArrowDown', slider(1), { shiftKey: true });
+    expect(document.activeElement).toBe(slider(4));
+    click(rangeToggle(1));
+    expect([slider(2).disabled, slider(3).disabled]).toEqual([false, false]);
+    expect([slider(2).value, slider(3).value]).toEqual(['10', '-10']);
+    expect(history()[0]).toBe('Midtones ON');
+  });
+
+  it('keeps child switches and values when the parent category is turned off and on', () => {
+    wheel(-1, false, slider(0));
+    wheel(-1, false, slider(2));
+    wheel(-1, false, slider(4));
+    click(rangeToggle(0));
+    click(rangeToggle(2));
+    expect([rangeToggle(0).getAttribute('aria-pressed'), rangeToggle(1).getAttribute('aria-pressed'), rangeToggle(2).getAttribute('aria-pressed')])
+      .toEqual(['false', 'true', 'false']);
+    click(grading().querySelector<HTMLElement>('.adjustment-category-header [aria-pressed]')!);
+    expect([slider(0).disabled, slider(2).disabled, slider(4).disabled]).toEqual([true, true, true]);
+    expect([recipe().gradingShadowsEnabled, recipe().gradingMidtonesEnabled, recipe().gradingHighlightsEnabled]).toEqual([false, true, false]);
+    click(grading().querySelector<HTMLElement>('.adjustment-category-header [aria-pressed]')!);
+    expect([slider(0).disabled, slider(2).disabled, slider(4).disabled]).toEqual([true, false, true]);
+    expect([slider(0).value, slider(2).value, slider(4).value]).toEqual(['10', '10', '10']);
+    click(grading().querySelector<HTMLElement>('.adjustment-category-reset')!);
+    expect([recipe().gradingShadowsEnabled, recipe().gradingMidtonesEnabled, recipe().gradingHighlightsEnabled]).toEqual([false, true, false]);
+    click(host.querySelector<HTMLButtonElement>('.workspace-section-action')!);
+    expect([recipe().gradingShadowsEnabled, recipe().gradingMidtonesEnabled, recipe().gradingHighlightsEnabled]).toEqual([true, true, true]);
+  });
+
+  it('shows localized range history and restores switch state with Undo/Redo', async () => {
+    await act(async () => i18n.changeLanguage('ja'));
+    click(rangeToggle(0));
+    click(rangeToggle(1));
+    click(rangeToggle(2));
+    expect(history().slice(0, 3)).toEqual(['ハイライト OFF', '中間調 OFF', 'シャドウ OFF']);
+    click(Array.from(host.querySelectorAll('button')).find((item) => item.textContent === '元に戻す')!);
+    expect(recipe().gradingHighlightsEnabled).toBe(true);
+    click(Array.from(host.querySelectorAll('button')).find((item) => item.textContent === 'やり直す')!);
+    expect(recipe().gradingHighlightsEnabled).toBe(false);
+  });
+
   it('renders Temperature/Tint in each Shadows, Midtones, and Highlights group', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
       .toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
@@ -315,7 +372,7 @@ describe('Color Grading controls', () => {
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
     click(host.querySelector<HTMLButtonElement>('.workspace-section-action')!);
-    expect(recipe()).toEqual(expect.objectContaining({ version: 16, colorGradingEnabled: true }));
+    expect(recipe()).toEqual(expect.objectContaining({ version: 17, colorGradingEnabled: true }));
     expect(Object.values(recipe().adjustments).every((value) => value === 0)).toBe(true);
   });
 });

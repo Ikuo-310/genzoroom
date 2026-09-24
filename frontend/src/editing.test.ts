@@ -11,7 +11,7 @@ const adjustShadows = (state: EditSession, value: number) => editSession(editSes
 const adjustBlacks = (state: EditSession, value: number) => editSession(editSession(state, { type: 'blacks', value }), { type: 'commit' });
 describe('non-destructive edit sessions', () => {
   it('starts with a serializable versioned zero recipe', () => {
-    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 16, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } });
+    expect(JSON.parse(JSON.stringify(newSession().recipe))).toEqual({ version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } });
   });
   it('coalesces intermediate input and skips no-op gestures', () => {
     let state = newSession();

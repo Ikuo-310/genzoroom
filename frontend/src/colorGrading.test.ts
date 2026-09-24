@@ -404,6 +404,79 @@ describe('Shadows Tint pixel stage', () => {
 });
 
 describe('Color Grading recipe and History', () => {
+  it('bypasses each range independently while retaining all six values and category precedence', () => {
+    const source = new Uint8ClampedArray([35, 35, 35, 17, 125, 125, 125, 31, 218, 218, 218, 47]);
+    const recipe = defaultRecipe();
+    expect([recipe.gradingShadowsEnabled, recipe.gradingMidtonesEnabled, recipe.gradingHighlightsEnabled]).toEqual([true, true, true]);
+    Object.assign(recipe.adjustments, { shadowsTemperature: -90, shadowsTint: 80,
+      midtonesTemperature: 85, midtonesTint: -70, highlightsTemperature: -75, highlightsTint: 95 });
+    const allEnabled = renderAdjustments(source, recipe);
+    for (const [flag, temperature, tint] of [
+      ['gradingShadowsEnabled', 'shadowsTemperature', 'shadowsTint'],
+      ['gradingMidtonesEnabled', 'midtonesTemperature', 'midtonesTint'],
+      ['gradingHighlightsEnabled', 'highlightsTemperature', 'highlightsTint'],
+    ] as const) {
+      const disabled = { ...recipe, [flag]: false };
+      const expected = { ...recipe, adjustments: { ...recipe.adjustments, [temperature]: 0, [tint]: 0 } };
+      expect(effectiveAdjustments(disabled)[temperature]).toBe(0);
+      expect(effectiveAdjustments(disabled)[tint]).toBe(0);
+      expect(disabled.adjustments[temperature]).toBe(recipe.adjustments[temperature]);
+      expect(disabled.adjustments[tint]).toBe(recipe.adjustments[tint]);
+      expect(renderAdjustments(source, disabled)).toEqual(renderAdjustments(source, expected));
+      expect(renderAdjustments(source, disabled)).not.toEqual(allEnabled);
+    }
+    recipe.gradingShadowsEnabled = false;
+    recipe.colorGradingEnabled = false;
+    expect(renderAdjustments(source, recipe)).toEqual(source);
+    expect([recipe.gradingShadowsEnabled, recipe.gradingMidtonesEnabled, recipe.gradingHighlightsEnabled]).toEqual([false, true, true]);
+    recipe.colorGradingEnabled = true;
+    const withoutShadows = { ...recipe, adjustments: { ...recipe.adjustments, shadowsTemperature: 0, shadowsTint: 0 } };
+    expect(renderAdjustments(source, recipe)).toEqual(renderAdjustments(source, withoutShadows));
+  });
+
+  it('commits range toggles separately, restores them with Undo/Redo, and preserves them across value resets', () => {
+    const zeroValues = editSession(newSession(), { type: 'toggleGradingShadows' });
+    expect(zeroValues.history.map((entry) => entry.kind)).toEqual(['gradingShadowsToggle']);
+    expect(editSession(zeroValues, { type: 'colorGradingReset' }).history).toHaveLength(1);
+
+    let state = newSession();
+    state = editSession(state, { type: 'midtonesTemperature', value: 40 });
+    state = editSession(state, { type: 'midtonesTint', value: -20 });
+    state = editSession(state, { type: 'toggleGradingMidtones' });
+    expect(state.history.map((entry) => entry.kind)).toEqual(['midtonesTemperature', 'midtonesTint', 'gradingMidtonesToggle']);
+    expect(state.recipe.gradingMidtonesEnabled).toBe(false);
+    expect([state.recipe.adjustments.midtonesTemperature, state.recipe.adjustments.midtonesTint]).toEqual([40, -20]);
+    state = editSession(state, { type: 'toggleGradingShadows' });
+    state = editSession(state, { type: 'toggleGradingHighlights' });
+    expect(state.history.at(-1)?.kind).toBe('gradingHighlightsToggle');
+    expect([state.recipe.gradingShadowsEnabled, state.recipe.gradingMidtonesEnabled, state.recipe.gradingHighlightsEnabled]).toEqual([false, false, false]);
+    state = editSession(state, { type: 'undo' });
+    expect(state.recipe.gradingHighlightsEnabled).toBe(true);
+    state = editSession(state, { type: 'undo' });
+    expect(state.recipe.gradingShadowsEnabled).toBe(true);
+    state = editSession(state, { type: 'redo' });
+    state = editSession(state, { type: 'redo' });
+    expect([state.recipe.gradingShadowsEnabled, state.recipe.gradingMidtonesEnabled, state.recipe.gradingHighlightsEnabled]).toEqual([false, false, false]);
+    state = editSession(state, { type: 'highlightsTint', value: 30 });
+    state = editSession(state, { type: 'commit', kind: 'highlightsTint' });
+
+    state = editSession(state, { type: 'midtonesTemperatureReset' });
+    expect(state.recipe.adjustments.midtonesTemperature).toBe(0);
+    expect(state.recipe.gradingMidtonesEnabled).toBe(false);
+    state = editSession(state, { type: 'midtonesTintReset' });
+    expect(state.recipe.adjustments.midtonesTint).toBe(0);
+    expect(state.recipe.gradingMidtonesEnabled).toBe(false);
+    state = editSession(state, { type: 'colorGradingReset' });
+    expect(state.recipe.adjustments).toEqual(defaultRecipe().adjustments);
+    expect([state.recipe.gradingShadowsEnabled, state.recipe.gradingMidtonesEnabled, state.recipe.gradingHighlightsEnabled]).toEqual([false, false, false]);
+    expect(state.history.at(-1)?.kind).toBe('colorGradingReset');
+    const beforeAll = state.recipe;
+    state = editSession(state, { type: 'allReset' });
+    expect(state.recipe).toEqual(defaultRecipe());
+    state = editSession(state, { type: 'undo' });
+    expect(state.recipe).toEqual(beforeAll);
+  });
+
   it('bypasses and reapplies Highlights Temperature on bright pixels without losing its value', () => {
     const source = new Uint8ClampedArray([210, 210, 210, 255]);
     const recipe = withHighlightsTemperature(80);

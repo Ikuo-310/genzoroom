@@ -36,7 +36,7 @@ Editing is currently available for JPEG assets only and uses the Immich-generate
 | Color | Vibrance, Saturation |
 | Color Grading | Shadows Temperature, Shadows Tint, Midtones Temperature, Midtones Tint, Highlights Temperature, Highlights Tint |
 
-Each category can be collapsed, temporarily bypassed without losing its values, and reset independently. Adjustment changes and category operations participate in History and Undo / Redo. Processing is performed locally in the browser; Immich originals are not modified.
+Each category can be collapsed, temporarily bypassed without losing its values, and reset independently. Shadows, Midtones, and Highlights also have separate ON/OFF switches within Color Grading; switching one off preserves its Temperature and Tint values. Adjustment changes and ON/OFF operations participate in History and Undo / Redo. Processing is performed locally in the browser; Immich originals are not modified.
 
 ## Current limitations
 

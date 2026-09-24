@@ -112,12 +112,13 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
   if (temperature === 0 && tint === 0 && gain === 1 && contrastFactor === 1 && highlights === 0 && whites === 0 && shadows === 0 && blacks === 0 && shadowsTemperature === 0 && shadowsTint === 0 && midtonesTemperature === 0 && midtonesTint === 0 && highlightsTemperature === 0 && highlightsTint === 0 && vibrance === 0 && saturation === 0) return output;
   const temperatureGain = temperatureGains(temperature);
   const tintGain = tintGains(tint);
-  const shadowsTemperatureGain = temperatureGains(shadowsTemperature);
-  const shadowsTintGain = tintGains(shadowsTint);
-  const midtonesTemperatureGain = temperatureGains(midtonesTemperature);
-  const midtonesTintGain = tintGains(midtonesTint);
-  const highlightsTemperatureGain = temperatureGains(highlightsTemperature);
-  const highlightsTintGain = tintGains(highlightsTint);
+  const neutralGain = { red: 1, green: 1, blue: 1 };
+  const shadowsTemperatureGain = shadowsTemperature !== 0 ? temperatureGains(shadowsTemperature) : neutralGain;
+  const shadowsTintGain = shadowsTint !== 0 ? tintGains(shadowsTint) : neutralGain;
+  const midtonesTemperatureGain = midtonesTemperature !== 0 ? temperatureGains(midtonesTemperature) : neutralGain;
+  const midtonesTintGain = midtonesTint !== 0 ? tintGains(midtonesTint) : neutralGain;
+  const highlightsTemperatureGain = highlightsTemperature !== 0 ? temperatureGains(highlightsTemperature) : neutralGain;
+  const highlightsTintGain = highlightsTint !== 0 ? tintGains(highlightsTint) : neutralGain;
   // Clip and round each active White Balance stage to sRGB bytes before the unchanged Exposure/Contrast LUT.
   // At zero, skip that stage's round-trip to retain existing byte compatibility.
   const redTemperature = temperature !== 0 ? linearGainLut(temperatureGain.red) : null;

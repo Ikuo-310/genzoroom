@@ -2,7 +2,13 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した50件は、当時の仕様を示す。
 
-## Color Grading / Highlights Tint（最新フェーズ）
+## Color Grading / range個別ON/OFF（最新フェーズ）
+
+flat recipeをv17へ上げ、`gradingShadowsEnabled`、`gradingMidtonesEnabled`、`gradingHighlightsEnabled`を追加した。初期値はすべてtrue。各見出しの小型電源ボタンでTemperature / Tintの処理をrange単位で切り替える。OFFでも値を保持し、その2つのsliderをdisabled表示にする。Color Grading全体をOFFにすると3rangeすべてをbypassし、ONに戻しても個別ON/OFF状態は保持する。
+
+各range切替は1件のHistory操作としてUndo / Redoできる。個別adjustment ResetとColor Grading Resetはenabled状態を保持し、All Resetは3rangeをtrueへ戻す。pipelineの順序、weight式、Temperature / Tint gain式、Worker protocolは変更していない。
+
+## Color Grading / Highlights Tint（以前のフェーズ）
 
 Color GradingのHighlightsグループへTint（色かぶり補正）を追加し、Shadows / Midtones / HighlightsそれぞれにTemperature / Tintの6項目が揃った。Highlights Tintは範囲−100〜+100、step 1、初期値0、単位なしで、負がGreen、正がMagenta。既存AdjustmentSliderとGreen→Neutral→Magenta gradientを再利用する。カテゴリOFF中も6値を保持する。
 

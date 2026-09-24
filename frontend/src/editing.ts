@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
-export type EditRecipe = { version: 16; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; shadowsTint: number; midtonesTemperature: number; midtonesTint: number; highlightsTemperature: number; highlightsTint: number; vibrance: number; saturation: number } };
-export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset';
+export type EditRecipe = { version: 17; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; gradingShadowsEnabled: boolean; gradingMidtonesEnabled: boolean; gradingHighlightsEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; shadowsTint: number; midtonesTemperature: number; midtonesTint: number; highlightsTemperature: number; highlightsTint: number; vibrance: number; saturation: number } };
+export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'gradingShadowsToggle' | 'gradingMidtonesToggle' | 'gradingHighlightsToggle' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset';
 export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
@@ -19,7 +19,7 @@ export const SHADOWS = { min: -100, max: 100, step: 1 };
 export const BLACKS = { min: -100, max: 100, step: 1 };
 export const VIBRANCE = { min: -100, max: 100, step: 1 };
 export const SATURATION = { min: -100, max: 100, step: 1 };
-export const defaultRecipe = (): EditRecipe => ({ version: 16, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } });
+export const defaultRecipe = (): EditRecipe => ({ version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } });
 
 // Basic membership is deliberately independent of all recipe adjustments.
 export const BASIC_ADJUSTMENT_KEYS = ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] as const;
@@ -64,7 +64,12 @@ export function isColorDefault(adjustments: EditRecipe['adjustments']): boolean 
 export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustments'] {
   const basic = recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);
   const whiteBalance = recipe.whiteBalanceEnabled ? basic : resetWhiteBalanceAdjustments(basic);
-  const colorGrading = recipe.colorGradingEnabled ? whiteBalance : resetColorGradingAdjustments(whiteBalance);
+  let colorGrading = recipe.colorGradingEnabled ? whiteBalance : resetColorGradingAdjustments(whiteBalance);
+  if (recipe.colorGradingEnabled) {
+    if (!recipe.gradingShadowsEnabled) colorGrading = { ...colorGrading, shadowsTemperature: 0, shadowsTint: 0 };
+    if (!recipe.gradingMidtonesEnabled) colorGrading = { ...colorGrading, midtonesTemperature: 0, midtonesTint: 0 };
+    if (!recipe.gradingHighlightsEnabled) colorGrading = { ...colorGrading, highlightsTemperature: 0, highlightsTint: 0 };
+  }
   return recipe.colorEnabled ? colorGrading : resetColorAdjustments(colorGrading);
 }
 
@@ -115,7 +120,7 @@ export const normalizeHighlightsTint = normalizeTint;
 
 export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
   | { type: 'commit'; kind?: EditKind }
-  | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
+  | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
 function recipesEqual(left: EditRecipe, right: EditRecipe) {
   return left.whiteBalanceEnabled === right.whiteBalanceEnabled
@@ -129,6 +134,9 @@ function recipesEqual(left: EditRecipe, right: EditRecipe) {
     && left.adjustments.shadows === right.adjustments.shadows
     && left.adjustments.blacks === right.adjustments.blacks
     && left.colorGradingEnabled === right.colorGradingEnabled
+    && left.gradingShadowsEnabled === right.gradingShadowsEnabled
+    && left.gradingMidtonesEnabled === right.gradingMidtonesEnabled
+    && left.gradingHighlightsEnabled === right.gradingHighlightsEnabled
     && left.adjustments.shadowsTemperature === right.adjustments.shadowsTemperature
     && left.adjustments.shadowsTint === right.adjustments.shadowsTint
     && left.adjustments.midtonesTemperature === right.adjustments.midtonesTemperature
@@ -286,6 +294,17 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const current = commit(state);
       return commit({ ...current, pending: { kind: 'colorGradingToggle', before: current.recipe },
         recipe: { ...current.recipe, colorGradingEnabled: !current.recipe.colorGradingEnabled } });
+    }
+    case 'toggleGradingShadows':
+    case 'toggleGradingMidtones':
+    case 'toggleGradingHighlights': {
+      const current = commit(state);
+      const field = action.type === 'toggleGradingShadows' ? 'gradingShadowsEnabled'
+        : action.type === 'toggleGradingMidtones' ? 'gradingMidtonesEnabled' : 'gradingHighlightsEnabled';
+      const kind = action.type === 'toggleGradingShadows' ? 'gradingShadowsToggle'
+        : action.type === 'toggleGradingMidtones' ? 'gradingMidtonesToggle' : 'gradingHighlightsToggle';
+      return commit({ ...current, pending: { kind, before: current.recipe },
+        recipe: { ...current.recipe, [field]: !current.recipe[field] } });
     }
     case 'toggleColor': {
       const current = commit(state);
