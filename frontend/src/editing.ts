@@ -128,7 +128,7 @@ export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperatur
   | { type: 'commit'; kind?: EditKind }
   | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
-function recipesEqual(left: EditRecipe, right: EditRecipe) {
+export function recipesEqual(left: EditRecipe, right: EditRecipe) {
   return left.whiteBalanceEnabled === right.whiteBalanceEnabled
     && left.adjustments.temperature === right.adjustments.temperature
     && left.adjustments.tint === right.adjustments.tint
