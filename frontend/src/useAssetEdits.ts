@@ -35,6 +35,7 @@ type AssetEditRecord = {
   savedFingerprint: string | null;
   retrySave?: RetrySave;
   autosaveError?: EditStateApiError['kind'] | null;
+  autosaveErrorGeneration?: number;
   loadError?: EditStateApiError['kind'];
   editedThisSession: boolean;
   needsCompaction: boolean;
@@ -64,6 +65,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   }>>());
   const loads = useRef<Record<string, LoadOperation>>({});
   const saves = useRef<Partial<Record<string, Promise<SaveResult>>>>({});
+  const saveGeneration = useRef(0);
+  const assetSaveGeneration = useRef<Partial<Record<string, number>>>({});
   const autosaveTimers = useRef<Partial<Record<string, AutosaveTimer>>>({});
   const autosaveGeneration = useRef(0);
   const autosavePaused = useRef(new Set<string>());
@@ -216,6 +219,12 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     if (current.loadStatus !== 'ready' && !canUseInactiveSession) {
       return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
     }
+    const operationGeneration = ++saveGeneration.current;
+    assetSaveGeneration.current[id] = operationGeneration;
+    const clearResolvedWarning = (record: AssetEditRecord): AssetEditRecord => {
+      if (!record.autosaveError || (record.autosaveErrorGeneration ?? 0) > operationGeneration) return record;
+      return { ...record, autosaveError: null, autosaveErrorGeneration: undefined };
+    };
     // A network failure may have hidden a committed PUT. Replaying that exact
     // request must precede any newer snapshot, even when local edits diverged.
     const send = async (request: RetrySave): Promise<SaveResult> => {
@@ -225,13 +234,15 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         const latest = getRecord(id);
         const canSyncSession = request.syncSession && fingerprintFor(latest) === request.liveFingerprint;
         const restored = canSyncSession ? restoreEditSession(request.snapshot) : null;
-        const next = { ...latest, session: restored?.ok ? restored.value : latest.session,
+        let next: AssetEditRecord = { ...latest, session: restored?.ok ? restored.value : latest.session,
           revision: response.revision, updatedAt: response.updatedAt,
           lastSaveId: response.lastSaveId, savedFingerprint: request.fingerprint,
           retrySave: undefined, saveStatus: 'idle' as const };
         if (canSyncSession && restored?.ok) next.needsCompaction = false;
+        const clean = fingerprintFor(next) === request.fingerprint;
+        if (clean) next = clearResolvedWarning(next);
         setRecord(id, next);
-        return { ok: true, clean: fingerprintFor(next) === request.fingerprint };
+        return { ok: true, clean };
       } catch (cause) {
         const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
         const latest = getRecord(id);
@@ -245,8 +256,13 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         if (!confirmed.ok || snapshotValue === null) return confirmed;
       }
       if (snapshotValue === null) {
-        const latest = getRecord(id);
-        return { ok: true, clean: fingerprintFor(latest) === latest.savedFingerprint };
+        let latest = getRecord(id);
+        const clean = !latest.retrySave && fingerprintFor(latest) === latest.savedFingerprint;
+        if (clean && latest.autosaveError) {
+          latest = clearResolvedWarning(latest);
+          setRecord(id, latest);
+        }
+        return { ok: true, clean };
       }
       const candidate = options.latestSession ? snapshotFor(getRecord(id)) : snapshotValue;
       const validated = candidate && validateEditStateSnapshot(candidate);
@@ -255,7 +271,9 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const fingerprint = JSON.stringify(snapshot);
       const latest = getRecord(id);
       if (fingerprint === latest.savedFingerprint) {
-        return { ok: true, clean: fingerprintFor(latest) === fingerprint };
+        const clean = !latest.retrySave && fingerprintFor(latest) === fingerprint;
+        if (clean && latest.autosaveError) setRecord(id, clearResolvedWarning(latest));
+        return { ok: true, clean };
       }
       return send({ fingerprint, expectedRevision: latest.revision, saveId: createEditStateSaveId(),
         snapshot, syncSession: options.syncSession ?? false, liveFingerprint: fingerprintFor(latest) });
@@ -289,11 +307,15 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       if (latest.loadStatus !== 'ready' || (fingerprintFor(latest) === latest.savedFingerprint && !latest.retrySave)
         || saves.current[id]) return;
 
-      void save(id).then((result) => {
+      const pendingSave = save(id);
+      const operationGeneration = assetSaveGeneration.current[id];
+      void pendingSave.then((result) => {
         if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id)) return;
         if (!result.ok) {
+          if (assetSaveGeneration.current[id] !== operationGeneration) return;
           const record = getRecord(id);
-          setRecord(id, { ...record, autosaveError: result.error.kind });
+          setRecord(id, { ...record, autosaveError: result.error.kind,
+            autosaveErrorGeneration: operationGeneration });
         } else if (!result.clean && !autosaveTimers.current[id]) {
           // A newer edit's timer may have expired while the previous PUT was in
           // flight. Give that newer state a fresh quiet period after the PUT.

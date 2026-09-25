@@ -186,7 +186,7 @@
     "redo": "Redo",
     "historyEmpty": "No committed edits yet.",
     "jpegOnly": "Adjustments are currently available for JPEG only.",
-    "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."
+    "previewEditingNote": "Original photo files are unchanged. Edit settings autosave after five seconds and History is compacted when you leave through Home."
   },
   "language": {
     "label": "Language",

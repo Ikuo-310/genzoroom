@@ -27,7 +27,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
 
-Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. The **Back to photos** control performs a final sequential save for every photo edited in that Anshitsu session and compacts each History. Reloading or closing the browser during the debounce or an in-flight save can still lose the latest edits; browser Back and tab-close interception are not implemented.
+Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. The **Back to photos** control performs a final sequential save for every photo edited in that Anshitsu session and compacts each History. If a save response is lost, GenzoRoom retries that exact snapshot, revision, and save ID before sending a newer snapshot; genuine revision conflicts are reported without merging. Reloading or closing the browser during the debounce or an in-flight save can still lose the latest edits; Browser Back and tab-close interception are not implemented. A failed final save offers the choice to stay in Anshitsu or exit without saving.
 
 ### Current adjustments
 

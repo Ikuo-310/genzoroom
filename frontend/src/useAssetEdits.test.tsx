@@ -34,6 +34,7 @@ function useCasStore() {
   let loseAfterCommit = false;
   let loseBeforeCommit = false;
   let holdReplay: ReturnType<typeof deferred<ReturnType<typeof response>>> | null = null;
+  let holdCommittedWrite: ReturnType<typeof deferred<ReturnType<typeof response>>> | null = null;
   api.get.mockImplementation(async (id: string) => {
     const row = rows.get(id);
     return row ? response(row.state, row.revision) : { state: null };
@@ -59,6 +60,11 @@ function useCasStore() {
       loseAfterCommit = false;
       throw new EditStateApiError('network');
     }
+    if (holdCommittedWrite) {
+      const held = holdCommittedWrite;
+      holdCommittedWrite = null;
+      return held.promise;
+    }
     return response(state, expectedRevision + 1);
   });
   return {
@@ -66,6 +72,7 @@ function useCasStore() {
     loseNextResponse: () => { loseAfterCommit = true; },
     failBeforeCommit: () => { loseBeforeCommit = true; },
     holdNextReplay: () => { holdReplay = deferred<ReturnType<typeof response>>(); return holdReplay; },
+    holdNextCommittedWrite: () => { holdCommittedWrite = deferred<ReturnType<typeof response>>(); return holdCommittedWrite; },
     externalWrite: (id: string, state: editStateModule.EditStateSnapshot) => {
       const previous = rows.get(id);
       rows.set(id, { state, revision: (previous?.revision ?? 0) + 1,
@@ -545,7 +552,8 @@ describe('useAssetEdits persistence', () => {
 
   it('keeps failed autosaves dirty, exposes a nonblocking error, and does not retry until another edit', async () => {
     vi.useFakeTimers();
-    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'))
+      .mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount(); await flush(); editTemperature(14);
     await advance(5000); await flush();
     expect(latest.dirty).toBe(true);
@@ -557,7 +565,131 @@ describe('useAssetEdits persistence', () => {
     editTemperature(15);
     await advance(5000);
     expect(api.put).toHaveBeenCalledTimes(2);
+    expect(latest.dirty).toBe(true);
+    expect(latest.autosaveError).toBe('unavailable');
     expect(api.put.mock.calls[1][3]).not.toBe(api.put.mock.calls[0][3]);
+    editTemperature(16);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(latest.dirty).toBe(false);
+    expect(latest.autosaveError).toBeNull();
+  });
+
+  it('clears the autosave warning when the next edited snapshot is saved', async () => {
+    vi.useFakeTimers();
+    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(latest.autosaveError).toBe('unavailable');
+    expect(latest.dirty).toBe(true);
+    editTemperature(20); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(latest.dirty).toBe(false);
+    expect(latest.autosaveError).toBeNull();
+  });
+
+  it('keeps the warning and dirty state after confirming an old retry until the newer snapshot is saved', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    store.loseNextResponse();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(latest.autosaveError).toBe('network');
+    expect(latest.dirty).toBe(true);
+
+    editTemperature(20); commitEdit();
+    const heldLatestResponse = store.holdNextCommittedWrite();
+    await advance(5000); await flush();
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(20);
+    expect(latest.revision).toBe(1);
+    expect(latest.dirty).toBe(true);
+    expect(latest.autosaveError).toBe('network');
+
+    await act(async () => {
+      heldLatestResponse.resolve(response(store.rows.get(first)?.state, 2));
+      await heldLatestResponse.promise;
+    });
+    await flush();
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+    expect(latest.autosaveError).toBeNull();
+  });
+
+  it('keeps a newer autosave failure after an older in-flight save completes', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    const heldOldResponse = store.holdNextCommittedWrite();
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    await advance(5000); await flush();
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(store.rows.get(first)?.revision).toBe(1);
+
+    editTemperature(20); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    store.failBeforeCommit();
+    await act(async () => {
+      heldOldResponse.resolve(response(store.rows.get(first)?.state, 1));
+      await heldOldResponse.promise;
+    });
+    await flush();
+    expect(latest.dirty).toBe(true);
+    await advance(5000); await flush();
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(latest.dirty).toBe(true);
+    expect(latest.autosaveError).toBe('network');
+  });
+
+  it('clears an autosave warning after a successful Filmstrip save', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    store.failBeforeCommit();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(latest.autosaveError).toBe('network');
+    expect(latest.dirty).toBe(true);
+    act(() => latest.pauseAutosave(first));
+    await act(async () => { expect(await latest.save(first)).toEqual({ ok: true, clean: true }); });
+    expect(store.rows.get(first)?.revision).toBe(1);
+    expect(latest.dirty).toBe(false);
+    expect(latest.autosaveError).toBeNull();
+  });
+
+  it('clears an autosave warning after a successful Home exit save', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    store.failBeforeCommit();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(latest.autosaveError).toBe('network');
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+    expect(result?.ok).toBe(true);
+    expect(store.rows.get(first)?.revision).toBe(1);
+    expect(latest.dirty).toBe(false);
+    expect(latest.autosaveError).toBeNull();
+  });
+
+  it('keeps autosave warnings scoped to the active asset', async () => {
+    vi.useFakeTimers();
+    api.put.mockRejectedValueOnce(new EditStateApiError('network'));
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(latest.autosaveError).toBe('network');
+    await mount(second); await flush();
+    expect(latest.autosaveError).toBeNull();
+    await mount(first);
+    expect(latest.autosaveError).toBe('network');
   });
 
   it('reuses the autosave saveId for an unchanged network retry and keeps conflicts local', async () => {
