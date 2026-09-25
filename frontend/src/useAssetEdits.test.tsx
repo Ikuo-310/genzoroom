@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAssetEdits } from './useAssetEdits';
 import { EditStateApiError } from './editStateApi';
+import * as editStateModule from './editState';
 import { createEditStateSnapshot } from './editState';
 import { editSession, newSession } from './editing';
 
@@ -40,6 +41,12 @@ async function flush() { await act(async () => { await Promise.resolve(); }); }
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 function editTemperature(value: number) {
   act(() => { latest.dispatch({ type: 'temperature', value }); });
+}
+function editExposure(value: number) {
+  act(() => { latest.dispatch({ type: 'exposure', value }); });
+}
+function commitEdit() {
+  act(() => { latest.dispatch({ type: 'commit' }); });
 }
 
 beforeEach(() => {
@@ -348,5 +355,223 @@ describe('useAssetEdits persistence', () => {
     await advance(15000);
     expect(api.put).toHaveBeenCalledTimes(1);
     expect(api.put.mock.calls[0][0]).toBe(first);
+  });
+
+  it('compacts every asset edited this session, including autosaved clean assets, but skips viewed-only assets', async () => {
+    const database = new Map<string, ReturnType<typeof response>>();
+    api.get.mockImplementation(async (id: string) => database.get(id) ?? { state: null });
+    api.put.mockImplementation(async (id: string, snapshot: any, revision: number, saveId: string) => {
+      const saved = response(snapshot, revision + 1);
+      database.set(id, saved);
+      return saved;
+    });
+
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(5); commitEdit(); editTemperature(12); commitEdit();
+    await act(async () => { await latest.save(first); });
+    expect(latest.dirty).toBe(false);
+
+    await mount(second); await flush();
+    editExposure(0.1); commitEdit(); editExposure(0.2); commitEdit(); editExposure(0.35); commitEdit();
+    await act(async () => { await latest.save(second); });
+    expect(latest.dirty).toBe(false);
+
+    const third = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+    await mount(third); await flush();
+    api.put.mockClear();
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, compactFallbackAssetIds: [] });
+    expect(api.put.mock.calls.map(([id]) => id)).toEqual([first, second]);
+    expect(api.put.mock.calls[0][1].history).toHaveLength(1);
+    expect(api.put.mock.calls[0][1].history[0].before.adjustments.temperature).toBe(0);
+    expect(api.put.mock.calls[0][1].history[0].after.adjustments.temperature).toBe(12);
+    expect(api.put.mock.calls[1][1].history).toHaveLength(1);
+    expect(api.put.mock.calls[1][1].history[0].after.adjustments.exposure).toBe(0.35);
+    expect(api.put.mock.calls.every(([, , revision]) => revision === 1)).toBe(true);
+  });
+
+  it('keeps a pending live gesture untouched until compact save succeeds, then syncs the compact session', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    await mount(); await flush(); editTemperature(10);
+    expect(latest.session.pending?.kind).toBe('temperature');
+    let finishing!: ReturnType<typeof latest.saveEditedAssetsForExit>;
+    act(() => { finishing = latest.saveEditedAssetsForExit(); });
+    await flush();
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].history).toHaveLength(1);
+    expect(latest.session.pending?.kind).toBe('temperature');
+
+    let result: Awaited<typeof finishing> | undefined;
+    await act(async () => {
+      pending.resolve(response(api.put.mock.calls[0][1], 1));
+      result = await finishing;
+    });
+    expect(result?.ok).toBe(true);
+    expect(latest.session.pending).toBeNull();
+    expect(latest.session.history).toHaveLength(1);
+    expect(latest.session.cursor).toBe(1);
+    expect(latest.revision).toBe(1);
+    expect(latest.dirty).toBe(false);
+    await advance(10000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a failed exit asset local edit when revisiting it after choosing to stay', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush();
+    await mount(second); await flush();
+    editExposure(0.25); commitEdit();
+    await mount(first); await flush();
+    const getsBeforeExit = api.get.mock.calls.length;
+    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+    expect(result).toMatchObject({ ok: false, assetId: second });
+    act(() => latest.resumeAfterExitFailure());
+
+    await mount(second);
+    expect(latest.loadStatus).toBe('ready');
+    expect(api.get).toHaveBeenCalledTimes(getsBeforeExit);
+    expect(latest.session.recipe.adjustments.exposure).toBe(0.25);
+    expect(latest.session.history).toHaveLength(1);
+
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+    expect(result?.ok).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the original uncompressed snapshot when compaction reports failure', async () => {
+    const compact = vi.spyOn(editStateModule, 'compactEditStateSnapshot')
+      .mockReturnValueOnce({ ok: false, issues: [] });
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+    expect(result).toMatchObject({ ok: true, compactFallbackAssetIds: [first] });
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].history).toHaveLength(2);
+    compact.mockRestore();
+  });
+
+  it('keeps the full History when exit compaction policy is disabled', async () => {
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(false); });
+    expect(result?.ok).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].history).toHaveLength(2);
+  });
+
+  it('waits for an in-flight autosave before compact-saving the latest session and leaves no old timer', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    let finishing!: ReturnType<typeof latest.saveEditedAssetsForExit>;
+    act(() => { finishing = latest.saveEditedAssetsForExit(); });
+    await flush();
+    expect(api.put).toHaveBeenCalledTimes(1);
+    let result: Awaited<typeof finishing> | undefined;
+    await act(async () => {
+      pending.resolve(response(api.put.mock.calls[0][1], 1));
+      result = await finishing;
+    });
+    expect(result?.ok).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1][2]).toBe(1);
+    expect(api.put.mock.calls[1][1].history).toHaveLength(1);
+    await advance(10000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves an uncertain in-flight autosave with the same request before compact-saving newer edits', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    editTemperature(20); commitEdit();
+
+    let finishing!: ReturnType<typeof latest.saveEditedAssetsForExit>;
+    act(() => { finishing = latest.saveEditedAssetsForExit(); });
+    await flush();
+    await act(async () => {
+      pending.reject(new EditStateApiError('network'));
+      try { await pending.promise; } catch { /* the request result is handled by the hook */ }
+      await Promise.resolve();
+    });
+    let result: Awaited<typeof finishing> | undefined;
+    await act(async () => { result = await finishing; });
+
+    expect(result?.ok).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1][1]).toEqual(api.put.mock.calls[0][1]);
+    expect(api.put.mock.calls[1][2]).toBe(api.put.mock.calls[0][2]);
+    expect(api.put.mock.calls[1][3]).toBe(api.put.mock.calls[0][3]);
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(api.put.mock.calls[2][3]).not.toBe(api.put.mock.calls[1][3]);
+    expect(api.put.mock.calls[2][1].currentRecipe.adjustments.temperature).toBe(20);
+    expect(api.put.mock.calls[2][1].history).toHaveLength(1);
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('does not compact-save an already confirmed asset again after partial failure and stay', async () => {
+    const database = new Map<string, ReturnType<typeof response>>();
+    let failSecondAssetOnce = false;
+    api.get.mockImplementation(async (id: string) => database.get(id) ?? { state: null });
+    api.put.mockImplementation(async (id: string, snapshot: any, revision: number, saveId: string) => {
+      if (id === second && failSecondAssetOnce) {
+        failSecondAssetOnce = false;
+        throw new EditStateApiError('unavailable');
+      }
+      const saved = response(snapshot, revision + 1);
+      database.set(id, saved);
+      return saved;
+    });
+
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit(); editTemperature(30); commitEdit();
+    await act(async () => { await latest.save(first); });
+    await mount(second); await flush();
+    editExposure(0.1); commitEdit(); editExposure(0.2); commitEdit(); editExposure(0.3); commitEdit();
+    await act(async () => { await latest.save(second); });
+    await mount(first); await flush();
+
+    const initialCalls = api.put.mock.calls.length;
+    failSecondAssetOnce = true;
+    let failedExit: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { failedExit = await latest.saveEditedAssetsForExit(); });
+    expect(failedExit).toMatchObject({ ok: false, assetId: second });
+    expect(latest.session.history).toHaveLength(1);
+    expect(latest.session.history[0].after.adjustments.temperature).toBe(30);
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+    const afterPartialSuccess = api.put.mock.calls.length;
+    expect(afterPartialSuccess).toBe(initialCalls + 2);
+
+    act(() => latest.resumeAfterExitFailure());
+    await mount(second); await flush();
+    expect(latest.session.history).toHaveLength(3);
+    expect(latest.revision).toBe(1);
+    let retryExit: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { retryExit = await latest.saveEditedAssetsForExit(); });
+    expect(retryExit?.ok).toBe(true);
+    expect(api.put.mock.calls.length).toBe(afterPartialSuccess + 1);
+    expect(api.put.mock.calls.at(-1)?.[0]).toBe(second);
+    expect((database.get(first)?.state as { history: unknown[] }).history).toHaveLength(1);
+    expect((database.get(second)?.state as { history: unknown[] }).history).toHaveLength(1);
   });
 });

@@ -219,4 +219,73 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe('second.jpg');
     expect(mocked.put).toHaveBeenCalledTimes(1);
   });
+
+  it('compacts and saves before the existing Home navigation', async () => {
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
+    if (!home) throw new Error('Missing Home navigation button');
+    await act(async () => { home.click(); });
+    await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][1].history).toHaveLength(1);
+    expect(container.querySelector('.workspace-page')).toBeNull();
+    expect(container.textContent).toContain('Recent photos');
+  });
+
+  it('offers stay or exit without saving when final exit save fails', async () => {
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
+    if (!home) throw new Error('Missing Home navigation button');
+    await act(async () => { home.click(); }); await flush();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain('could not be saved');
+
+    const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find((button) => button.textContent === 'Stay in Anshitsu');
+    if (!stay) throw new Error('Missing stay button');
+    await act(async () => { stay.click(); });
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+  });
+
+  it('discards local edits without another write when the user exits after a failed final save', async () => {
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('network'));
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
+    if (!home) throw new Error('Missing Home navigation button');
+    await act(async () => { home.click(); }); await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    const exit = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find((button) => button.textContent === 'Exit without saving');
+    if (!exit) throw new Error('Missing discard exit button');
+    await act(async () => { exit.click(); }); await flush();
+    expect(container.querySelector('.workspace-page')).toBeNull();
+    expect(container.textContent).toContain('Recent photos');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables repeated Home requests while the final save is in flight', async () => {
+    const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
+    mocked.put.mockImplementationOnce(() => pending.promise);
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
+    if (!home) throw new Error('Missing Home navigation button');
+    await act(async () => { home.click(); });
+    expect(home.disabled).toBe(true);
+    expect(container.textContent).toContain('Saving edits before leaving Anshitsu');
+    await act(async () => { home.click(); });
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve({ state: mocked.put.mock.calls[0][1], revision: 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] });
+      await pending.promise;
+    });
+    await flush();
+    expect(container.querySelector('.workspace-page')).toBeNull();
+  });
 });

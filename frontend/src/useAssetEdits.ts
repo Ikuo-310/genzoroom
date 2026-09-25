@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createEditStateSnapshot, restoreEditSession, type EditSourceIdentity, type EditStateSnapshot } from './editState';
+import {
+  COMPACT_HISTORY_ON_EXIT,
+  compactEditStateSnapshot,
+  createEditStateSnapshot,
+  restoreEditSession,
+  validateEditStateSnapshot,
+  type EditSourceIdentity,
+  type EditStateSnapshot,
+} from './editState';
 import { createEditStateSaveId, EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
 import { editSession, newSession, type EditAction, type EditSession } from './editing';
 import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
 type LoadStatus = 'unloaded' | 'loading' | 'ready' | 'error';
 type SaveStatus = 'idle' | 'saving';
-type RetrySave = { fingerprint: string; expectedRevision: number; saveId: string };
+type RetrySave = { fingerprint: string; expectedRevision: number; saveId: string; snapshot: EditStateSnapshot };
 type AutosaveTimer = { timeout: number; generation: number };
+type LoadOperation = { controller: AbortController; generation: number; timeout: number; promise: Promise<void> };
 type AssetEditRecord = {
   session: EditSession;
   loadStatus: LoadStatus;
@@ -19,16 +28,22 @@ type AssetEditRecord = {
   savedFingerprint: string | null;
   retrySave?: RetrySave;
   autosaveError?: EditStateApiError['kind'] | null;
+  loadError?: EditStateApiError['kind'];
+  editedThisSession: boolean;
+  needsCompaction: boolean;
 };
 
 export type SaveResult = { ok: true; clean: boolean } | { ok: false; error: EditStateApiError };
+export type ExitSaveResult =
+  | { ok: true; compactFallbackAssetIds: string[] }
+  | { ok: false; assetId: string; error: EditStateApiError; compactFallbackAssetIds: string[] };
 export const EDIT_STATE_AUTOSAVE_DELAY_MS = 5000;
 
 function freshRecord(assetId: string): AssetEditRecord {
   return {
     session: newSession(), loadStatus: 'unloaded', saveStatus: 'idle', revision: 0,
     sourceIdentity: { provider: 'immich', assetId, inputKind: 'immich-preview' },
-    savedFingerprint: null,
+    savedFingerprint: null, editedThisSession: false, needsCompaction: false,
   };
 }
 
@@ -44,11 +59,12 @@ function fingerprintFor(record: AssetEditRecord): string | null {
 
 export function useAssetEdits(assetId: string, enabled: boolean) {
   const records = useRef<Record<string, AssetEditRecord>>({});
-  const loads = useRef<Record<string, { controller: AbortController; generation: number; timeout: number }>>({});
+  const loads = useRef<Record<string, LoadOperation>>({});
   const saves = useRef<Partial<Record<string, Promise<SaveResult>>>>({});
   const autosaveTimers = useRef<Partial<Record<string, AutosaveTimer>>>({});
   const autosaveGeneration = useRef(0);
   const autosavePaused = useRef(new Set<string>());
+  const exitSaving = useRef(false);
   const scheduleAutosaveRef = useRef<(id: string) => void>(() => undefined);
   const activeAssetId = useRef<string | null>(enabled ? assetId : null);
   activeAssetId.current = enabled ? assetId : null;
@@ -75,26 +91,45 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       loads.current[id].controller.abort();
       window.clearTimeout(loads.current[id].timeout);
     }
+    const existingRecord = getRecord(id);
+    if (existingRecord.editedThisSession && existingRecord.savedFingerprint !== null
+      && fingerprintFor(existingRecord) !== existingRecord.savedFingerprint) {
+      // A failed exit save leaves valuable local edits that must survive a
+      // Filmstrip revisit. Keep that dirty session instead of replacing it with
+      // a GET result; discard explicitly removes the record and still forces GET.
+      const retained = { ...existingRecord, loadStatus: 'ready' as const, loadError: undefined };
+      setRecord(id, retained);
+      scheduleAutosaveRef.current(id);
+      return () => {
+        autosavePaused.current.add(id);
+        cancelAutosave(id);
+        if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded' };
+      };
+    }
     const controller = new AbortController();
     const generation = (loads.current[id]?.generation ?? 0) + 1;
     const timeout = window.setTimeout(() => controller.abort(), 8000);
-    loads.current[id] = { controller, generation, timeout };
+    loads.current[id] = { controller, generation, timeout, promise: Promise.resolve() };
     setRecord(id, { ...getRecord(id), loadStatus: 'loading' });
-    void getAssetEditState(id, controller.signal).then((response) => {
+    const promise = getAssetEditState(id, controller.signal).then((response) => {
       if (loads.current[id]?.generation !== generation || controller.signal.aborted) return;
       const restored = response.state === null ? { ok: true as const, value: newSession() } : restoreEditSession(response.state);
       if (!restored.ok) throw new EditStateApiError('invalid_state');
+      const previous = getRecord(id);
       const next: AssetEditRecord = {
-        ...freshRecord(id), session: restored.value, loadStatus: 'ready', revision: response.revision ?? 0,
+        ...freshRecord(id), editedThisSession: previous.editedThisSession, needsCompaction: previous.needsCompaction,
+        session: restored.value, loadStatus: 'ready', revision: response.revision ?? 0,
         updatedAt: response.updatedAt, lastSaveId: response.lastSaveId,
         sourceIdentity: response.state?.sourceIdentity ?? freshRecord(id).sourceIdentity,
       };
       setRecord(id, { ...next, savedFingerprint: fingerprintFor(next) });
-    }).catch(() => {
+    }).catch((cause) => {
       if (loads.current[id]?.generation === generation) {
-        setRecord(id, { ...getRecord(id), loadStatus: 'error' });
+        const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
+        setRecord(id, { ...getRecord(id), loadStatus: 'error', loadError: error.kind });
       }
     }).finally(() => window.clearTimeout(timeout));
+    loads.current[id] = { controller, generation, timeout, promise };
     return () => {
       autosavePaused.current.add(id);
       cancelAutosave(id);
@@ -119,16 +154,22 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
 
   const dispatch = useCallback((action: EditAction) => {
     const current = getRecord(assetId);
-    if (!enabled || current.loadStatus !== 'ready') return;
+    if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return;
     const session = editSession(current.session, action);
     if (session !== current.session) {
       const next = { ...current, session };
-      if (current.retrySave && fingerprintFor(next) !== current.retrySave.fingerprint) next.retrySave = undefined;
+      const currentFingerprint = fingerprintFor(current);
+      const nextFingerprint = fingerprintFor(next);
+      if (current.retrySave && nextFingerprint !== current.retrySave.fingerprint) next.retrySave = undefined;
+      if (currentFingerprint !== nextFingerprint) {
+        next.editedThisSession = true;
+        next.needsCompaction = true;
+      }
       setRecord(assetId, next);
       // Only changes to the persisted snapshot reset the debounce. Pending UI
       // gestures and viewer-only controls do not change this fingerprint.
-      if (fingerprintFor(current) !== fingerprintFor(next)) {
-        if (fingerprintFor(next) === next.savedFingerprint) cancelAutosave(assetId);
+      if (currentFingerprint !== nextFingerprint) {
+        if (nextFingerprint === next.savedFingerprint) cancelAutosave(assetId);
         else scheduleAutosaveRef.current(assetId);
       }
     }
@@ -147,38 +188,56 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     return () => window.removeEventListener('keydown', keydown);
   }, [dispatch, enabled]);
 
-  const save = useCallback((id: string): Promise<SaveResult> => {
+  const writeSnapshot = useCallback((id: string, snapshotValue: EditStateSnapshot, options: { allowUnloaded?: boolean; syncSession?: boolean } = {}): Promise<SaveResult> => {
     if (saves.current[id]) return saves.current[id];
     const current = getRecord(id);
-    if (current.loadStatus !== 'ready') return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
-    const snapshot = snapshotFor(current);
-    if (!snapshot) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
+    const canUseInactiveSession = options.allowUnloaded && current.loadStatus === 'unloaded' && current.savedFingerprint !== null;
+    if (current.loadStatus !== 'ready' && !canUseInactiveSession) {
+      return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
+    }
+    const validated = validateEditStateSnapshot(snapshotValue);
+    if (!validated.ok) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
+    const snapshot = validated.value;
+    const restored = options.syncSession ? restoreEditSession(snapshot) : null;
+    if (restored && !restored.ok) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
     const fingerprint = JSON.stringify(snapshot);
     if (fingerprint === current.savedFingerprint) return Promise.resolve({ ok: true, clean: true });
     const expectedRevision = current.revision;
     const saveId = current.retrySave?.fingerprint === fingerprint && current.retrySave.expectedRevision === expectedRevision
       ? current.retrySave.saveId : createEditStateSaveId();
-    setRecord(id, { ...current, saveStatus: 'saving', retrySave: { fingerprint, expectedRevision, saveId } });
+    const retryRequest: RetrySave = { fingerprint, expectedRevision, saveId, snapshot };
+    setRecord(id, { ...current, saveStatus: 'saving', retrySave: retryRequest });
     const operation = putAssetEditState(id, snapshot, expectedRevision, saveId).then((response): SaveResult => {
       const latest = getRecord(id);
-      const next = { ...latest, revision: response.revision, updatedAt: response.updatedAt,
+      const next = { ...latest, session: restored?.ok ? restored.value : latest.session,
+        revision: response.revision, updatedAt: response.updatedAt,
         lastSaveId: response.lastSaveId, savedFingerprint: fingerprint, retrySave: undefined, saveStatus: 'idle' as const };
+      if (options.syncSession) next.needsCompaction = false;
       setRecord(id, next);
       return { ok: true, clean: fingerprintFor(next) === fingerprint };
     }).catch((cause): SaveResult => {
       const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
       const latest = getRecord(id);
-      setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.kind === 'network' ? latest.retrySave : undefined });
+      setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.kind === 'network' ? retryRequest : undefined });
       return { ok: false, error };
     }).finally(() => { delete saves.current[id]; });
     saves.current[id] = operation;
     return operation;
   }, [getRecord, setRecord]);
 
+  const save = useCallback((id: string): Promise<SaveResult> => {
+    if (saves.current[id]) return saves.current[id];
+    const current = getRecord(id);
+    if (current.loadStatus !== 'ready') return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
+    const snapshot = snapshotFor(current);
+    if (!snapshot) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
+    return writeSnapshot(id, snapshot);
+  }, [getRecord, writeSnapshot]);
+
   const scheduleAutosave = useCallback((id: string) => {
     cancelAutosave(id);
     const current = getRecord(id);
-    if (activeAssetId.current !== id || autosavePaused.current.has(id) || current.loadStatus !== 'ready'
+    if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id) || current.loadStatus !== 'ready'
       || fingerprintFor(current) === current.savedFingerprint) return;
 
     const generation = ++autosaveGeneration.current;
@@ -186,12 +245,12 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const timer = autosaveTimers.current[id];
       if (!timer || timer.generation !== generation) return;
       delete autosaveTimers.current[id];
-      if (activeAssetId.current !== id || autosavePaused.current.has(id)) return;
+      if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id)) return;
       const latest = getRecord(id);
       if (latest.loadStatus !== 'ready' || fingerprintFor(latest) === latest.savedFingerprint || saves.current[id]) return;
 
       void save(id).then((result) => {
-        if (activeAssetId.current !== id || autosavePaused.current.has(id)) return;
+        if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id)) return;
         if (!result.ok) {
           const record = getRecord(id);
           setRecord(id, { ...record, autosaveError: result.error.kind });
@@ -216,6 +275,106 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     scheduleAutosave(id);
   }, [scheduleAutosave]);
 
+  const saveEditedAssetsForExit = useCallback(async (compactHistory = COMPACT_HISTORY_ON_EXIT): Promise<ExitSaveResult> => {
+    if (exitSaving.current) return { ok: false, assetId, error: new EditStateApiError('unexpected'), compactFallbackAssetIds: [] };
+    exitSaving.current = true;
+    const assetIds = Object.entries(records.current)
+      .filter(([, record]) => record.editedThisSession)
+      .map(([id]) => id);
+    const pauseIds = new Set([...assetIds, assetId, ...Object.keys(autosaveTimers.current)]);
+    for (const id of pauseIds) pauseAutosave(id);
+
+    const compactFallbackAssetIds: string[] = [];
+    const failure = (id: string, error: EditStateApiError): ExitSaveResult => ({
+      ok: false, assetId: id, error, compactFallbackAssetIds,
+    });
+
+    for (const id of assetIds) {
+      let current = getRecord(id);
+      if (current.loadStatus === 'loading') {
+        await loads.current[id]?.promise;
+        current = getRecord(id);
+      }
+      if (current.loadStatus === 'error') return failure(id, new EditStateApiError(current.loadError ?? 'invalid_state'));
+      if (current.loadStatus === 'loading' || current.savedFingerprint === null) {
+        return failure(id, new EditStateApiError('invalid_state'));
+      }
+
+      const existingSave = saves.current[id];
+      if (existingSave) {
+        const inFlightResult = await existingSave;
+        if (!inFlightResult.ok) {
+          // Resolve an uncertain autosave with its exact snapshot/saveId before
+          // issuing a different compacted snapshot against the same revision.
+          const latest = getRecord(id);
+          const retryRequest = latest.retrySave;
+          if (inFlightResult.error.kind !== 'network' || !retryRequest) return failure(id, inFlightResult.error);
+          const retryResult = await writeSnapshot(id, retryRequest.snapshot, { allowUnloaded: true });
+          if (!retryResult.ok) return failure(id, retryResult.error);
+        }
+      }
+
+      current = getRecord(id);
+      if (current.loadStatus === 'error' || current.loadStatus === 'loading') {
+        return failure(id, new EditStateApiError(current.loadError ?? 'invalid_state'));
+      }
+      const normalResult = createEditStateSnapshot(current.session, current.sourceIdentity);
+      if (!normalResult.ok) return failure(id, new EditStateApiError('invalid_state'));
+
+      let selectedSnapshot = normalResult.value;
+      let compactedSuccessfully = false;
+      let compactionFailed = false;
+      if (compactHistory && current.needsCompaction) {
+        try {
+          const compacted = compactEditStateSnapshot(normalResult.value);
+          if (compacted.ok) {
+            const validated = validateEditStateSnapshot(compacted.value);
+            if (validated.ok) {
+              selectedSnapshot = validated.value;
+              compactedSuccessfully = true;
+            } else compactionFailed = true;
+          } else compactionFailed = true;
+        } catch {
+          compactionFailed = true;
+        }
+        if (compactionFailed) compactFallbackAssetIds.push(id);
+      }
+
+      const selectedFingerprint = JSON.stringify(selectedSnapshot);
+      if (selectedFingerprint === current.savedFingerprint) {
+        if (compactedSuccessfully) {
+          const restored = restoreEditSession(selectedSnapshot);
+          if (!restored.ok) return failure(id, new EditStateApiError('invalid_state'));
+          setRecord(id, { ...current, session: restored.value, needsCompaction: false });
+        } else if (!compactHistory && current.needsCompaction) {
+          setRecord(id, { ...current, needsCompaction: false });
+        }
+        continue;
+      }
+
+      const saved = await writeSnapshot(id, selectedSnapshot, {
+        allowUnloaded: true,
+        syncSession: compactedSuccessfully,
+      });
+      if (!saved.ok) return failure(id, saved.error);
+      if (!saved.clean) return failure(id, new EditStateApiError('invalid_state'));
+      if (!compactHistory || compactedSuccessfully) {
+        const latest = getRecord(id);
+        setRecord(id, { ...latest, needsCompaction: false });
+      }
+    }
+    return { ok: true, compactFallbackAssetIds };
+  }, [assetId, getRecord, pauseAutosave, setRecord, writeSnapshot]);
+
+  const resumeAfterExitFailure = useCallback(() => {
+    exitSaving.current = false;
+    for (const [id, record] of Object.entries(records.current)) {
+      if (!record.editedThisSession) continue;
+      autosavePaused.current.delete(id);
+      scheduleAutosave(id);
+    }
+  }, [scheduleAutosave]);
+
   const discard = useCallback((id: string) => {
     cancelAutosave(id);
     autosavePaused.current.delete(id);
@@ -234,5 +393,6 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     session: current.session, dispatch, loadStatus: current.loadStatus, saveStatus: current.saveStatus,
     revision: current.revision, dirty, save, discard, retryLoad: () => load(assetId),
     pauseAutosave, resumeAutosave, autosaveError: current.autosaveError ?? null,
+    saveEditedAssetsForExit, resumeAfterExitFailure,
   };
 }

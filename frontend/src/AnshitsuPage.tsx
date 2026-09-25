@@ -39,9 +39,13 @@ export function AnshitsuPage() {
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
   const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
+  const [exitSaving, setExitSaving] = useState(false);
+  const exitRef = useRef(false);
+  const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
-  const { session, dispatch, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError } = useAssetEdits(assetId, canEdit);
+  const { session, dispatch, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
+    saveEditedAssetsForExit, resumeAfterExitFailure } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
@@ -54,7 +58,7 @@ export function AnshitsuPage() {
   }
 
   async function activateAsset(nextId: string) {
-    if (nextId === assetId || switchingRef.current || failedSwitch) return;
+    if (nextId === assetId || switchingRef.current || exitRef.current || failedSwitch) return;
     if (!editable) { navigateToAsset(nextId); return; }
     switchingRef.current = true;
     pauseAutosave(assetId);
@@ -78,6 +82,31 @@ export function AnshitsuPage() {
       switchingRef.current = false;
       setSwitching(false);
     }
+  }
+
+  async function exitToHome() {
+    if (exitRef.current || switchingRef.current || failedSwitch) return;
+    exitRef.current = true;
+    setExitSaving(true);
+    try {
+      const result = await saveEditedAssetsForExit();
+      if (!result.ok) {
+        setExitFailure({ assetId: result.assetId, error: result.error.kind, code: result.error.code });
+        setExitSaving(false);
+        return;
+      }
+      navigate('/');
+    } catch {
+      setExitFailure({ assetId, error: 'unexpected' });
+      setExitSaving(false);
+    }
+  }
+
+  function stayInAnshitsu() {
+    resumeAfterExitFailure();
+    exitRef.current = false;
+    setExitFailure(null);
+    setExitSaving(false);
   }
 
   useEffect(() => {
@@ -121,7 +150,8 @@ export function AnshitsuPage() {
         {summary && <time dateTime={summary.date}>{formatPhotoDate(summary.date, language)}</time>}
       </div>
       <div className="workspace-actions">
-        <button type="button" className="tool-button" onClick={() => navigate('/')}>{t('workspace.backToPhotos')}</button>
+        <button type="button" className="tool-button" disabled={exitSaving || exitFailure !== null}
+          onClick={() => { void exitToHome(); }}>{t('workspace.backToPhotos')}</button>
         <LanguageControl language={language} compact />
       </div>
     </header>
@@ -222,11 +252,14 @@ export function AnshitsuPage() {
     <Filmstrip
       assets={selectedAssets}
       activeAssetId={assetId}
-      disabled={switching || failedSwitch !== null}
+      disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {autosaveError && <p className="workspace-autosave-warning" role="alert">{t('workspace.autosaveFailed')}</p>}
+    {exitSaving && <div className="workspace-save-backdrop"><section role="status" className="workspace-save-dialog">
+      <p>{t('workspace.exitSaving')}</p>
+    </section></div>}
     {failedSwitch && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
       aria-labelledby="save-failure-title" className="workspace-save-dialog">
       <h2 id="save-failure-title">{t('workspace.editStateSaveFailed')}</h2>
@@ -241,6 +274,15 @@ export function AnshitsuPage() {
           navigateToAsset(failedSwitch.nextId);
           setFailedSwitch(null);
         }}>{t('workspace.moveWithoutSaving')}</button>
+      </div>
+    </section></div>}
+    {exitFailure && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
+      aria-labelledby="exit-save-failure-title" className="workspace-save-dialog">
+      <h2 id="exit-save-failure-title">{t('workspace.exitSaveFailed')}</h2>
+      <p>{t(exitFailure.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${exitFailure.error}`)}</p>
+      <div className="edit-actions">
+        <button type="button" autoFocus className="tool-button" onClick={stayInAnshitsu}>{t('workspace.stayInAnshitsu')}</button>
+        <button type="button" className="tool-button" onClick={() => navigate('/')}>{t('workspace.exitWithoutSaving')}</button>
       </div>
     </section></div>}
   </main>;

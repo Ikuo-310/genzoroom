@@ -19,6 +19,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
 - Per-photo JPEG edit recipes and History restored from SQLite when a photo is opened and saved before a dirty Filmstrip switch.
 - Dirty JPEG edits are autosaved after five seconds without an editing change; Filmstrip switches still save immediately.
+- Returning Home from Anshitsu saves every photo edited during that Anshitsu session and compacts its History.
 - Undo / Redo, individual adjustment Reset, category Reset, and All Reset.
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
@@ -26,7 +27,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
 
-Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. Leaving Anshitsu or reloading during the five-second debounce or an in-flight save can still lose the latest edits; exit-specific saving and History compaction are not implemented.
+Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. The **Back to photos** control performs a final sequential save for every photo edited in that Anshitsu session and compacts each History. Reloading or closing the browser during the debounce or an in-flight save can still lose the latest edits; browser Back and tab-close interception are not implemented.
 
 ### Current adjustments
 
@@ -46,7 +47,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 - Adjustments operate on Immich-generated JPEG previews, not original files or an original-quality rendering path.
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
 - The preview pipeline is browser-managed 8-bit sRGB; wide-gamut, HDR, color-profile matching, and large-image performance need further work.
-- Edits made within the five-second debounce or during an in-flight save can be lost on reload or when leaving Anshitsu; exit-specific saving is not implemented.
+- Edits made within the five-second debounce or during an in-flight save can be lost on reload or tab close; these browser events are not intercepted.
 - Recent Photos is limited to 100 items and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
 - Immich asset Stack handling is not implemented.
@@ -54,7 +55,6 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 ## Not implemented
 
 - RAW development pipeline.
-- Saving on Anshitsu exit, including History compaction.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
 - Export or write-back to Immich.
 - Scopes such as Histogram, Waveform, and RGB Parade; the current Scope area is a placeholder.
