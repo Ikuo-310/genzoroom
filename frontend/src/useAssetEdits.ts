@@ -14,7 +14,14 @@ import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
 type LoadStatus = 'unloaded' | 'loading' | 'ready' | 'error';
 type SaveStatus = 'idle' | 'saving';
-type RetrySave = { fingerprint: string; expectedRevision: number; saveId: string; snapshot: EditStateSnapshot };
+type RetrySave = {
+  fingerprint: string;
+  expectedRevision: number;
+  saveId: string;
+  snapshot: EditStateSnapshot;
+  syncSession: boolean;
+  liveFingerprint: string | null;
+};
 type AutosaveTimer = { timeout: number; generation: number };
 type LoadOperation = { controller: AbortController; generation: number; timeout: number; promise: Promise<void> };
 type AssetEditRecord = {
@@ -93,7 +100,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     }
     const existingRecord = getRecord(id);
     if (existingRecord.editedThisSession && existingRecord.savedFingerprint !== null
-      && fingerprintFor(existingRecord) !== existingRecord.savedFingerprint) {
+      && (existingRecord.retrySave || fingerprintFor(existingRecord) !== existingRecord.savedFingerprint)) {
       // A failed exit save leaves valuable local edits that must survive a
       // Filmstrip revisit. Keep that dirty session instead of replacing it with
       // a GET result; discard explicitly removes the record and still forces GET.
@@ -160,7 +167,6 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const next = { ...current, session };
       const currentFingerprint = fingerprintFor(current);
       const nextFingerprint = fingerprintFor(next);
-      if (current.retrySave && nextFingerprint !== current.retrySave.fingerprint) next.retrySave = undefined;
       if (currentFingerprint !== nextFingerprint) {
         next.editedThisSession = true;
         next.needsCompaction = true;
@@ -169,7 +175,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       // Only changes to the persisted snapshot reset the debounce. Pending UI
       // gestures and viewer-only controls do not change this fingerprint.
       if (currentFingerprint !== nextFingerprint) {
-        if (nextFingerprint === next.savedFingerprint) cancelAutosave(assetId);
+        if (nextFingerprint === next.savedFingerprint && !next.retrySave) cancelAutosave(assetId);
         else scheduleAutosaveRef.current(assetId);
       }
     }
@@ -188,39 +194,59 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     return () => window.removeEventListener('keydown', keydown);
   }, [dispatch, enabled]);
 
-  const writeSnapshot = useCallback((id: string, snapshotValue: EditStateSnapshot, options: { allowUnloaded?: boolean; syncSession?: boolean } = {}): Promise<SaveResult> => {
+  const writeSnapshot = useCallback((id: string, snapshotValue: EditStateSnapshot | null, options: {
+    allowUnloaded?: boolean; syncSession?: boolean; latestSession?: boolean;
+  } = {}): Promise<SaveResult> => {
     if (saves.current[id]) return saves.current[id];
     const current = getRecord(id);
     const canUseInactiveSession = options.allowUnloaded && current.loadStatus === 'unloaded' && current.savedFingerprint !== null;
     if (current.loadStatus !== 'ready' && !canUseInactiveSession) {
       return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
     }
-    const validated = validateEditStateSnapshot(snapshotValue);
-    if (!validated.ok) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
-    const snapshot = validated.value;
-    const restored = options.syncSession ? restoreEditSession(snapshot) : null;
-    if (restored && !restored.ok) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
-    const fingerprint = JSON.stringify(snapshot);
-    if (fingerprint === current.savedFingerprint) return Promise.resolve({ ok: true, clean: true });
-    const expectedRevision = current.revision;
-    const saveId = current.retrySave?.fingerprint === fingerprint && current.retrySave.expectedRevision === expectedRevision
-      ? current.retrySave.saveId : createEditStateSaveId();
-    const retryRequest: RetrySave = { fingerprint, expectedRevision, saveId, snapshot };
-    setRecord(id, { ...current, saveStatus: 'saving', retrySave: retryRequest });
-    const operation = putAssetEditState(id, snapshot, expectedRevision, saveId).then((response): SaveResult => {
+    // A network failure may have hidden a committed PUT. Replaying that exact
+    // request must precede any newer snapshot, even when local edits diverged.
+    const send = async (request: RetrySave): Promise<SaveResult> => {
+      setRecord(id, { ...getRecord(id), saveStatus: 'saving', retrySave: request });
+      try {
+        const response = await putAssetEditState(id, request.snapshot, request.expectedRevision, request.saveId);
+        const latest = getRecord(id);
+        const canSyncSession = request.syncSession && fingerprintFor(latest) === request.liveFingerprint;
+        const restored = canSyncSession ? restoreEditSession(request.snapshot) : null;
+        const next = { ...latest, session: restored?.ok ? restored.value : latest.session,
+          revision: response.revision, updatedAt: response.updatedAt,
+          lastSaveId: response.lastSaveId, savedFingerprint: request.fingerprint,
+          retrySave: undefined, saveStatus: 'idle' as const };
+        if (canSyncSession && restored?.ok) next.needsCompaction = false;
+        setRecord(id, next);
+        return { ok: true, clean: fingerprintFor(next) === request.fingerprint };
+      } catch (cause) {
+        const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
+        const latest = getRecord(id);
+        setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.kind === 'network' ? request : undefined });
+        return { ok: false, error };
+      }
+    };
+    const operation = (async (): Promise<SaveResult> => {
+      if (current.retrySave) {
+        const confirmed = await send(current.retrySave);
+        if (!confirmed.ok || snapshotValue === null) return confirmed;
+      }
+      if (snapshotValue === null) {
+        const latest = getRecord(id);
+        return { ok: true, clean: fingerprintFor(latest) === latest.savedFingerprint };
+      }
+      const candidate = options.latestSession ? snapshotFor(getRecord(id)) : snapshotValue;
+      const validated = candidate && validateEditStateSnapshot(candidate);
+      if (!validated?.ok) return { ok: false, error: new EditStateApiError('invalid_state') };
+      const snapshot = validated.value;
+      const fingerprint = JSON.stringify(snapshot);
       const latest = getRecord(id);
-      const next = { ...latest, session: restored?.ok ? restored.value : latest.session,
-        revision: response.revision, updatedAt: response.updatedAt,
-        lastSaveId: response.lastSaveId, savedFingerprint: fingerprint, retrySave: undefined, saveStatus: 'idle' as const };
-      if (options.syncSession) next.needsCompaction = false;
-      setRecord(id, next);
-      return { ok: true, clean: fingerprintFor(next) === fingerprint };
-    }).catch((cause): SaveResult => {
-      const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
-      const latest = getRecord(id);
-      setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.kind === 'network' ? retryRequest : undefined });
-      return { ok: false, error };
-    }).finally(() => { delete saves.current[id]; });
+      if (fingerprint === latest.savedFingerprint) {
+        return { ok: true, clean: fingerprintFor(latest) === fingerprint };
+      }
+      return send({ fingerprint, expectedRevision: latest.revision, saveId: createEditStateSaveId(),
+        snapshot, syncSession: options.syncSession ?? false, liveFingerprint: fingerprintFor(latest) });
+    })().finally(() => { delete saves.current[id]; });
     saves.current[id] = operation;
     return operation;
   }, [getRecord, setRecord]);
@@ -231,14 +257,14 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     if (current.loadStatus !== 'ready') return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
     const snapshot = snapshotFor(current);
     if (!snapshot) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
-    return writeSnapshot(id, snapshot);
+    return writeSnapshot(id, snapshot, { latestSession: true });
   }, [getRecord, writeSnapshot]);
 
   const scheduleAutosave = useCallback((id: string) => {
     cancelAutosave(id);
     const current = getRecord(id);
     if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id) || current.loadStatus !== 'ready'
-      || fingerprintFor(current) === current.savedFingerprint) return;
+      || (fingerprintFor(current) === current.savedFingerprint && !current.retrySave)) return;
 
     const generation = ++autosaveGeneration.current;
     const timeout = window.setTimeout(() => {
@@ -247,7 +273,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       delete autosaveTimers.current[id];
       if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id)) return;
       const latest = getRecord(id);
-      if (latest.loadStatus !== 'ready' || fingerprintFor(latest) === latest.savedFingerprint || saves.current[id]) return;
+      if (latest.loadStatus !== 'ready' || (fingerprintFor(latest) === latest.savedFingerprint && !latest.retrySave)
+        || saves.current[id]) return;
 
       void save(id).then((result) => {
         if (exitSaving.current || activeAssetId.current !== id || autosavePaused.current.has(id)) return;
@@ -303,16 +330,13 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const existingSave = saves.current[id];
       if (existingSave) {
         const inFlightResult = await existingSave;
-        if (!inFlightResult.ok) {
-          // Resolve an uncertain autosave with its exact snapshot/saveId before
-          // issuing a different compacted snapshot against the same revision.
-          const latest = getRecord(id);
-          const retryRequest = latest.retrySave;
-          if (inFlightResult.error.kind !== 'network' || !retryRequest) return failure(id, inFlightResult.error);
-          const retryResult = await writeSnapshot(id, retryRequest.snapshot, { allowUnloaded: true });
-          if (!retryResult.ok) return failure(id, retryResult.error);
-        }
+        if (!inFlightResult.ok && inFlightResult.error.kind !== 'network') return failure(id, inFlightResult.error);
       }
+
+      // This also covers a network failure that settled before exit began.
+      // The compact target is computed only after the old request is confirmed.
+      const confirmed = await writeSnapshot(id, null, { allowUnloaded: true });
+      if (!confirmed.ok) return failure(id, confirmed.error);
 
       current = getRecord(id);
       if (current.loadStatus === 'error' || current.loadStatus === 'loading') {
@@ -388,7 +412,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   }, [cancelAutosave, changed]);
 
   const current = getRecord(assetId);
-  const dirty = current.loadStatus === 'ready' && fingerprintFor(current) !== current.savedFingerprint;
+  const dirty = current.loadStatus === 'ready'
+    && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
     session: current.session, dispatch, loadStatus: current.loadStatus, saveStatus: current.saveStatus,
     revision: current.revision, dirty, save, discard, retryLoad: () => load(assetId),

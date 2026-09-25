@@ -95,6 +95,40 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe('second.jpg');
   });
 
+  it('confirms a lost autosave response before saving newer edits and switching photos', async () => {
+    vi.useFakeTimers();
+    let stored: { state: any; revision: number; saveId: string; expectedRevision: number } | null = null;
+    let loseResponse = true;
+    mocked.put.mockImplementation(async (_id: string, state: any, expectedRevision: number, saveId: string) => {
+      if (stored?.saveId === saveId) {
+        if (stored.expectedRevision !== expectedRevision || JSON.stringify(stored.state) !== JSON.stringify(state)) {
+          throw new EditStateApiError('conflict', 409, 'save_id_reused');
+        }
+        return { state: stored.state, revision: stored.revision, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId };
+      }
+      if (expectedRevision !== (stored?.revision ?? 0)) {
+        throw new EditStateApiError('conflict', 409, 'revision_conflict');
+      }
+      stored = { state, revision: expectedRevision + 1, saveId, expectedRevision };
+      if (loseResponse) {
+        loseResponse = false;
+        throw new EditStateApiError('network');
+      }
+      return { state, revision: stored.revision, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId };
+    });
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    await advance(5000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await click('button[aria-label="Enable Basic adjustments"]');
+    await click('button[aria-label="second.jpg"]'); await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(3);
+    expect(mocked.put.mock.calls[1].slice(1, 4)).toEqual(mocked.put.mock.calls[0].slice(1, 4));
+    expect(mocked.put.mock.calls[2][2]).toBe(1);
+    expect((stored as { revision: number } | null)?.revision).toBe(2);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
   it('switches after a successful PUT for a numeric adjustment edit', async () => {
     await mount();
     vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);

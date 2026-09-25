@@ -26,6 +26,54 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// Mirrors the store's last-save-id check and revision compare-and-swap. A
+// response can be lost either before or after the row was committed.
+function useCasStore() {
+  type Row = { state: editStateModule.EditStateSnapshot; revision: number; saveId: string; expectedRevision: number };
+  const rows = new Map<string, Row>();
+  let loseAfterCommit = false;
+  let loseBeforeCommit = false;
+  let holdReplay: ReturnType<typeof deferred<ReturnType<typeof response>>> | null = null;
+  api.get.mockImplementation(async (id: string) => {
+    const row = rows.get(id);
+    return row ? response(row.state, row.revision) : { state: null };
+  });
+  api.put.mockImplementation(async (id: string, state: editStateModule.EditStateSnapshot, expectedRevision: number, saveId: string) => {
+    if (loseBeforeCommit) {
+      loseBeforeCommit = false;
+      throw new EditStateApiError('network');
+    }
+    const row = rows.get(id);
+    if (row?.saveId === saveId) {
+      if (expectedRevision !== row.revision - 1 || JSON.stringify(state) !== JSON.stringify(row.state)) {
+        throw new EditStateApiError('conflict', 409, 'save_id_reused');
+      }
+      if (holdReplay) return holdReplay.promise;
+      return response(row.state, row.revision);
+    }
+    if (expectedRevision !== (row?.revision ?? 0)) {
+      throw new EditStateApiError('conflict', 409, 'revision_conflict');
+    }
+    rows.set(id, { state, revision: expectedRevision + 1, saveId, expectedRevision });
+    if (loseAfterCommit) {
+      loseAfterCommit = false;
+      throw new EditStateApiError('network');
+    }
+    return response(state, expectedRevision + 1);
+  });
+  return {
+    rows,
+    loseNextResponse: () => { loseAfterCommit = true; },
+    failBeforeCommit: () => { loseBeforeCommit = true; },
+    holdNextReplay: () => { holdReplay = deferred<ReturnType<typeof response>>(); return holdReplay; },
+    externalWrite: (id: string, state: editStateModule.EditStateSnapshot) => {
+      const previous = rows.get(id);
+      rows.set(id, { state, revision: (previous?.revision ?? 0) + 1,
+        saveId: crypto.randomUUID(), expectedRevision: previous?.revision ?? 0 });
+    },
+  };
+}
+
 let latest: ReturnType<typeof useAssetEdits>;
 let root: Root;
 let container: HTMLDivElement;
@@ -185,7 +233,168 @@ describe('useAssetEdits persistence', () => {
     const previousId = api.put.mock.calls[2][3];
     editTemperature(21);
     await act(async () => { await latest.save(first); });
-    expect(api.put.mock.calls[3][3]).not.toBe(previousId);
+    expect(api.put.mock.calls[3][3]).toBe(previousId);
+    expect(api.put.mock.calls[4][3]).not.toBe(previousId);
+  });
+
+  it('confirms a committed but unanswered autosave before saving later edits', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    store.loseNextResponse();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(store.rows.get(first)?.revision).toBe(1);
+    expect(latest.revision).toBe(0);
+    editTemperature(20); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(api.put.mock.calls[2][3]).not.toBe(api.put.mock.calls[0][3]);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(20);
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('replays the same request when the first PUT never reached the database', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    store.failBeforeCommit();
+    await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'network' } }); });
+    expect(store.rows.has(first)).toBe(false);
+    await act(async () => { expect(await latest.save(first)).toEqual({ ok: true, clean: true }); });
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(store.rows.get(first)?.revision).toBe(1);
+  });
+
+  it('models Backend CAS rejection for a changed request with the same saveId or an old revision', async () => {
+    const store = useCasStore();
+    const original = createEditStateSnapshot(newSession(), source(first));
+    if (!original.ok) throw new Error('Invalid test state');
+    const changedSession = editSession(newSession(), { type: 'temperature', value: 10 });
+    const changed = createEditStateSnapshot(changedSession, source(first));
+    if (!changed.ok) throw new Error('Invalid changed state');
+    const saveId = crypto.randomUUID();
+    await api.put(first, original.value, 0, saveId);
+    await expect(api.put(first, changed.value, 0, saveId))
+      .rejects.toMatchObject({ code: 'save_id_reused' });
+    await expect(api.put(first, changed.value, 0, crypto.randomUUID()))
+      .rejects.toMatchObject({ code: 'revision_conflict' });
+    expect(store.rows.get(first)?.state).toEqual(original.value);
+  });
+
+  it('keeps an unanswered save dirty even if a pending gesture returns to its old baseline', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10);
+    store.loseNextResponse();
+    await act(async () => { await latest.save(first); });
+    editTemperature(0);
+    expect(latest.session.recipe.adjustments.temperature).toBe(0);
+    expect(latest.dirty).toBe(true);
+    await act(async () => { expect(await latest.save(first)).toEqual({ ok: true, clean: true }); });
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1][3]).toBe(api.put.mock.calls[0][3]);
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(0);
+  });
+
+  it('confirms an unanswered normal save before compacting on Home exit', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    store.loseNextResponse();
+    await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'network' } }); });
+    let exit: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { exit = await latest.saveEditedAssetsForExit(); });
+    expect(exit?.ok).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(api.put.mock.calls[2][1].history).toHaveLength(1);
+    expect(store.rows.get(first)?.revision).toBe(2);
+  });
+
+  it('confirms an unanswered compact save before autosave and another Home exit', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    store.loseNextResponse();
+    await act(async () => { expect(await latest.saveEditedAssetsForExit()).toMatchObject({ ok: false, error: { kind: 'network' } }); });
+    expect(api.put.mock.calls[0][1].history).toHaveLength(1);
+    act(() => latest.resumeAfterExitFailure());
+    await advance(5000);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(store.rows.get(first)?.revision).toBe(1);
+    expect(latest.session.history).toHaveLength(1);
+    expect(latest.dirty).toBe(false);
+    await act(async () => { expect(await latest.saveEditedAssetsForExit()).toMatchObject({ ok: true }); });
+    expect(api.put).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps later edits when an unanswered compact save is confirmed', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    store.loseNextResponse();
+    await act(async () => { await latest.saveEditedAssetsForExit(); });
+    act(() => latest.resumeAfterExitFailure());
+    editTemperature(30); commitEdit();
+    await act(async () => { expect(await latest.save(first)).toEqual({ ok: true, clean: true }); });
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(30);
+    expect(latest.session.history).toHaveLength(3);
+    expect(latest.dirty).toBe(false);
+    await act(async () => { expect(await latest.saveEditedAssetsForExit()).toMatchObject({ ok: true }); });
+    expect(store.rows.get(first)?.state.history).toHaveLength(1);
+  });
+
+  it('does not send newer state until the uncertain request has resolved, and preserves edits during replay', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    store.loseNextResponse();
+    await act(async () => { await latest.save(first); });
+    editTemperature(20); commitEdit();
+    const replay = store.holdNextReplay();
+    let saving!: ReturnType<typeof latest.save>;
+    act(() => { saving = latest.save(first); });
+    await flush();
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    editTemperature(30); commitEdit();
+    expect(latest.dirty).toBe(true);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    await act(async () => { replay.resolve(response(api.put.mock.calls[0][1], 1)); await saving; });
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[2][1].currentRecipe.adjustments.temperature).toBe(30);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(30);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('treats a real external revision change as conflict without overwriting the other save', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    editTemperature(10); commitEdit();
+    store.failBeforeCommit();
+    await act(async () => { await latest.save(first); });
+    const external = createEditStateSnapshot(newSession(), source(first));
+    if (!external.ok) throw new Error('Invalid external state');
+    store.externalWrite(first, external.value);
+    editTemperature(20); commitEdit();
+    await act(async () => {
+      expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'conflict', code: 'revision_conflict' } });
+    });
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1][3]).toBe(api.put.mock.calls[0][3]);
+    expect(store.rows.get(first)?.state).toEqual(external.value);
+    expect(latest.revision).toBe(0);
+    expect(latest.session.recipe.adjustments.temperature).toBe(20);
+    expect(latest.dirty).toBe(true);
   });
 
   it('discards local edits without a rollback and fetches again on revisit', async () => {
