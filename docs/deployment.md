@@ -199,4 +199,4 @@ docker compose -f docker-compose.yml -f docker-compose.immich-network.yml down
 
 In Portainer, remove the GenzoRoom Stack. The shared Immich network is external and is not removed by GenzoRoom Compose commands.
 
-The backend data bind mount remains on the host when the Stack is removed; do not remove it without checking saved edits. The current Anshitsu UI does not call the edit-state API yet, so ordinary browser editing remains session-only. For backup, stop the backend container and copy the entire data directory. Do not recommend copying a live `genzoroom.db` alone while WAL is active; a future online backup may use SQLite's backup API.
+The backend data bind mount remains on the host when the Stack is removed; do not remove it without checking saved edits. Anshitsu loads saved JPEG edits when a photo opens and saves dirty state on Filmstrip switches; changes since the last successful save may be lost on exit or reload. For backup, stop the backend container and copy the entire data directory. Do not recommend copying a live `genzoroom.db` alone while WAL is active; a future online backup may use SQLite's backup API.

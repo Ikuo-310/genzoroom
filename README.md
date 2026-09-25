@@ -17,7 +17,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Client-side RAW / Non-RAW filtering.
 - Ordered multi-photo selection into the **Anshitsu** development workspace.
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
-- Per-photo edit recipes and History during the current Anshitsu session.
+- Per-photo JPEG edit recipes and History restored from SQLite when a photo is opened and saved before a dirty Filmstrip switch.
 - Undo / Redo, individual adjustment Reset, category Reset, and All Reset.
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
@@ -25,7 +25,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
 
-Edit state is held in browser memory per photo. Filmstrip switching preserves it during the session; leaving Anshitsu or reloading discards it.
+Anshitsu loads saved JPEG edit state before enabling Develop controls. A dirty photo is saved with its full History before a Filmstrip switch. Leaving Anshitsu or reloading before that switch can still lose unsaved edits; autosave and exit saving are not implemented.
 
 ### Current adjustments
 
@@ -45,7 +45,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 - Adjustments operate on Immich-generated JPEG previews, not original files or an original-quality rendering path.
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
 - The preview pipeline is browser-managed 8-bit sRGB; wide-gamut, HDR, color-profile matching, and large-image performance need further work.
-- The SQLite edit-state store and API exist, but Anshitsu does not call them yet; editing still resumes only within the current browser session.
+- Edits are saved only when switching photos in the Filmstrip. Leaving Anshitsu or reloading can discard changes made since the last successful save.
 - Recent Photos is limited to 100 items and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
 - Immich asset Stack handling is not implemented.
@@ -53,7 +53,7 @@ Each category can be collapsed, temporarily bypassed without losing its values, 
 ## Not implemented
 
 - RAW development pipeline.
-- Frontend save/restore and autosave integration for the existing SQLite edit-state API.
+- Five-second autosave and saving on Anshitsu exit, including History compaction.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
 - Export or write-back to Immich.
 - Scopes such as Histogram, Waveform, and RGB Parade; the current Scope area is a placeholder.
@@ -71,7 +71,7 @@ These are current boundaries, not release commitments or a promised roadmap.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
 - The provided containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
-- GenzoRoom does not modify originals or call Immich write endpoints. Its SQLite edit-state API is not yet connected to the Anshitsu UI.
+- GenzoRoom does not modify originals or call Immich write endpoints. Its SQLite edit-state API stores only GenzoRoom recipes and History.
 
 Never commit a real API key or bake one into a container image. See the [deployment guide](docs/deployment.md) for configuration and network options.
 

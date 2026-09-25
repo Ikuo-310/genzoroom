@@ -9,10 +9,22 @@ import i18n from './i18n';
 import { useAssetEdits } from './useAssetEdits';
 import { AdjustmentCategory } from './AnshitsuPage';
 
+const savedEdits = vi.hoisted(() => new Map<string, { state: unknown; revision: number; updatedAt: string; lastSaveId: string }>());
+vi.mock('./editStateApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./editStateApi')>(),
+  getAssetEditState: vi.fn(async (id: string) => savedEdits.get(id) ?? { state: null }),
+  putAssetEditState: vi.fn(async (id: string, state: unknown, revision: number, saveId: string) => {
+    const result = { state, revision: revision + 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId };
+    savedEdits.set(id, result); return result;
+  }),
+}));
+
 let host: HTMLDivElement;
 let root: Root;
+let saveCurrent: ReturnType<typeof useAssetEdits>['save'];
 function Harness({ assetId = 'a' }: { assetId?: string }) {
-  const { session, dispatch } = useAssetEdits(assetId, true);
+  const { session, dispatch, save } = useAssetEdits(assetId, true);
+  saveCurrent = save;
   return <>
     <AdjustmentCategory title="Basic" enabled={session.recipe.basicEnabled}
       resetDisabled={isBasicDefault(session.recipe.adjustments)}
@@ -70,14 +82,15 @@ function changeInput(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
-beforeEach(() => {
+beforeEach(async () => {
+  savedEdits.clear();
   void i18n.changeLanguage('en');
   vi.useFakeTimers();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  act(() => root.render(<Harness />));
+  await act(async () => root.render(<Harness />));
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -587,13 +600,14 @@ describe('edit controls DOM interaction', () => {
     expect(key('ArrowUp').defaultPrevented).toBe(false);
     expect(session().recipe.adjustments.exposure).toBe(0);
   });
-  it('commits pending edits to the old asset when switching, and restores its history', () => {
+  it('saves pending edits from a copy and restores their history after switching', async () => {
     pointer('pointerover'); key('ArrowUp');
-    act(() => root.render(<Harness assetId="b" />));
+    await act(async () => { await saveCurrent('a'); });
+    await act(async () => root.render(<Harness assetId="b" />));
     expect(session().recipe.adjustments.exposure).toBe(0);
     act(() => vi.advanceTimersByTime(500));
     expect(session().history).toHaveLength(0);
-    act(() => root.render(<Harness assetId="a" />));
+    await act(async () => root.render(<Harness assetId="a" />));
     expect(session().recipe.adjustments.exposure).toBe(0.1);
     expect(session().history).toHaveLength(1);
   });

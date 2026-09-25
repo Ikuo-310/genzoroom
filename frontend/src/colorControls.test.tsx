@@ -7,6 +7,16 @@ import { AnshitsuPage } from './AnshitsuPage';
 import type { EditRecipe } from './editing';
 import i18n from './i18n';
 
+const savedEdits = vi.hoisted(() => new Map<string, { state: unknown; revision: number; updatedAt: string; lastSaveId: string }>());
+vi.mock('./editStateApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./editStateApi')>(),
+  getAssetEditState: vi.fn(async (id: string) => savedEdits.get(id) ?? { state: null }),
+  putAssetEditState: vi.fn(async (id: string, state: unknown, revision: number, saveId: string) => {
+    const result = { state, revision: revision + 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId };
+    savedEdits.set(id, result); return result;
+  }),
+}));
+
 vi.mock('./api', async (importOriginal) => ({
   ...await importOriginal<typeof import('./api')>(),
   fetchAssetDetail: vi.fn(async (id: string) => ({
@@ -43,6 +53,7 @@ function change(target: HTMLInputElement, value: string) {
 }
 
 beforeEach(async () => {
+  savedEdits.clear();
   await i18n.changeLanguage('en');
   vi.useFakeTimers();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

@@ -15,6 +15,7 @@ import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls
 import { basicHistoryControl } from './basicControls';
 import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
+import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
@@ -35,12 +36,46 @@ export function AnshitsuPage() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+  const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
   const activeDetail = detail?.id === assetId ? detail : null;
-  const editable = !!activeDetail && supportsEditing(activeDetail);
-  const { session, dispatch } = useAssetEdits(assetId, editable);
+  const canEdit = !!activeDetail && supportsEditing(activeDetail);
+  const { session, dispatch, loadStatus, save, discard, retryLoad } = useAssetEdits(assetId, canEdit);
+  const editable = canEdit && loadStatus === 'ready';
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
+
+  function navigateToAsset(nextId: string) {
+    const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId };
+    const nextState = activateWorkspaceAsset(currentState, nextId);
+    navigate(workspacePath(nextState.activeAssetId), { state: nextState });
+  }
+
+  async function activateAsset(nextId: string) {
+    if (nextId === assetId || switchingRef.current || failedSwitch) return;
+    if (!editable) { navigateToAsset(nextId); return; }
+    switchingRef.current = true;
+    setSwitching(true);
+    try {
+      // An edit made while PUT is in flight must be saved by a subsequent PUT before leaving.
+      for (;;) {
+        const result = await save(assetId);
+        if (!result.ok) {
+          setFailedSwitch({ nextId, error: result.error.kind, code: result.error.code });
+          return;
+        }
+        if (result.clean) {
+          navigateToAsset(nextId);
+          return;
+        }
+      }
+    } finally {
+      switchingRef.current = false;
+      setSwitching(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -173,7 +208,10 @@ export function AnshitsuPage() {
               <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
-          </> : <p>{t('workspace.jpegOnly')}</p>}
+          </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
+            <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
+            {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
+          </div> : <p>{t('workspace.jpegOnly')}</p>}
         </WorkspaceSection>
       </>}
     />
@@ -181,12 +219,23 @@ export function AnshitsuPage() {
     <Filmstrip
       assets={selectedAssets}
       activeAssetId={assetId}
-      onActivate={(nextId) => {
-        const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId };
-        const nextState = activateWorkspaceAsset(currentState, nextId);
-        navigate(workspacePath(nextState.activeAssetId), { state: nextState });
-      }}
+      disabled={switching || failedSwitch !== null}
+      onActivate={(nextId) => { void activateAsset(nextId); }}
     />
+    {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
+    {failedSwitch && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
+      aria-labelledby="save-failure-title" className="workspace-save-dialog">
+      <h2 id="save-failure-title">{t('workspace.editStateSaveFailed')}</h2>
+      <p>{t(failedSwitch.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${failedSwitch.error}`)}</p>
+      <div className="edit-actions">
+        <button type="button" autoFocus className="tool-button" onClick={() => setFailedSwitch(null)}>{t('workspace.stayOnPhoto')}</button>
+        <button type="button" className="tool-button" onClick={() => {
+          discard(assetId);
+          navigateToAsset(failedSwitch.nextId);
+          setFailedSwitch(null);
+        }}>{t('workspace.moveWithoutSaving')}</button>
+      </div>
+    </section></div>}
   </main>;
 }
 
@@ -409,13 +458,14 @@ export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif;
   ))}</dl> : <p>{t('workspace.exif.empty')}</p>;
 }
 
-export function Filmstrip({ assets, activeAssetId, onActivate }: { assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void }) {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false }: { assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean }) {
   const { t } = useTranslation();
   return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
     <div className="filmstrip-scroll">
       {assets.map((asset) => <button
         key={asset.id}
         type="button"
+        disabled={disabled}
         className={`filmstrip-item${asset.id === activeAssetId ? ' active' : ''}`}
         onClick={() => onActivate(asset.id)}
         aria-current={asset.id === activeAssetId ? 'true' : undefined}

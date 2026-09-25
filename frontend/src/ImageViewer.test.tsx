@@ -8,6 +8,11 @@ import { ImageViewer } from './ImageViewer';
 import { defaultRecipe } from './editing';
 import i18n from './i18n';
 
+vi.mock('./editStateApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./editStateApi')>(),
+  getAssetEditState: vi.fn(async () => ({ state: null })),
+}));
+
 const mockImage = vi.hoisted(() => ({
   onLoad: undefined as undefined | ((width: number, height: number) => void),
   recipe: undefined as unknown,

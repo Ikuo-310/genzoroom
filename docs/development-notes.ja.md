@@ -2,9 +2,13 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 永続化 Phase 3（現在仕様）
+
+JPEG写真を暗室でactiveにするとedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。取得失敗時は空の編集状態として扱わず、再試行するまで編集できない。Filmstripでdirtyな写真から移るときだけ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きで保存する。失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。破棄後の再訪はDBから再取得する。5秒autosaveと暗室退出時の保存・History圧縮は今後の段階である。
+
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 
-recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、永続化、export、Histogram等は未実装。
+recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、export、Histogram等は未実装。
 
 処理順はGlobal Temperature → Global Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Shadows Temperature/Tint → Midtones Temperature/Tint → Highlights Temperature/Tint → Vibrance → Saturation。各range内ではTemperature適用前の同じsRGB由来Yからweightを一度計算し、Tintにも使う。range間では直前rangeの丸め済み画素からYを求め直す。
 

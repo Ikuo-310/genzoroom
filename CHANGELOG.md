@@ -8,7 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- A backend SQLite edit-state store and GET/PUT API with versioned snapshot validation, optimistic revision checks, safe last-save-ID retries, and a configurable host data bind mount. Anshitsu save/restore UI integration is still pending.
+- Anshitsu loads saved JPEG edits before editing and saves dirty photos before Filmstrip switches. Failed saves let the user stay or discard local changes and move; revision conflicts are reported without automatic merging.
+- A backend SQLite edit-state store and GET/PUT API with versioned snapshot validation, optimistic revision checks, safe last-save-ID retries, and a configurable host data bind mount.
 - Before / After comparison in the Anshitsu viewer, including a hold-Backslash shortcut. It switches the displayed preview without changing the recipe or History.
 - Separate Shadows, Midtones, and Highlights ON/OFF switches within Color Grading. Each bypasses its own Temperature and Tint while retaining both values; the parent Color Grading switch still bypasses all three. Switching is undoable.
 - 3WAY Color Grading with Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta) for Shadows, Midtones, and Highlights. The six controls use integer steps, default to zero, and share each range's luminance weight. Category bypass, value resets, localized History, Undo/Redo, and per-photo session state are supported.

@@ -158,7 +158,7 @@ IMMICH_URL=http://immich_server:2283
 
 アプリ固有設定はDocker Composeの範囲に閉じ込める。Portainerを使う場合はStackのEnvironment variablesも利用できる。Docker host OSのcron、システム設定ファイル、ネットワーク設定をGenzoRoomのために直接変更しない。
 
-現在はBackendのSQLite用に、ホストの`/path/to/genzoroom/data`をコンテナの`/data`へbind mountする。事前にホスト側ディレクトリを作り、BackendのUID/GID `10001:10001`が書き込める権限を設定する。Composeは存在しないホスト側ディレクトリをroot権限で自動作成しない。dataを別ストレージに置く場合は環境変数`GENZOROOM_DATA_PATH`を指定する（Portainer利用時はStack環境変数）。SQLiteのWAL/SHMも同じ場所にできるためDBファイル単体はmountしない。Frontendはまだ保存APIに接続しておらず、通常の暗室編集はセッション中だけ保持される。
+現在はBackendのSQLite用に、ホストの`/path/to/genzoroom/data`をコンテナの`/data`へbind mountする。事前にホスト側ディレクトリを作り、BackendのUID/GID `10001:10001`が書き込める権限を設定する。Composeは存在しないホスト側ディレクトリをroot権限で自動作成しない。dataを別ストレージに置く場合は環境変数`GENZOROOM_DATA_PATH`を指定する（Portainer利用時はStack環境変数）。SQLiteのWAL/SHMも同じ場所にできるためDBファイル単体はmountしない。暗室はJPEG写真を開くと保存済み編集状態を取得し、dirtyな写真からFilmstripで移る前に保存する。暗室退出・再読み込み時の保存はまだなく、直近の未保存編集は失われる可能性がある。
 
 Stack削除後もホスト側dataは残る。バックアップはBackend停止後にdataディレクトリ全体をコピーする。稼働中の`genzoroom.db`単体コピーは避ける。
 
