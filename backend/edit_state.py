@@ -64,7 +64,13 @@ def _recipe(value: object) -> dict:
     adjustments = _record(recipe["adjustments"], frozenset(BOUNDS), "invalid_recipe")
     for key, (low, high) in BOUNDS.items():
         number = adjustments[key]
-        if type(number) not in (int, float) or not math.isfinite(number) or not low <= number <= high:
+        try:
+            valid_number = type(number) in (int, float) and math.isfinite(number) and low <= number <= high
+        except OverflowError:
+            # math.isfinite converts integers to float; sufficiently large JSON
+            # integers cannot be represented there and are invalid by range.
+            valid_number = False
+        if not valid_number:
             raise InvalidEditState("invalid_recipe")
     return recipe
 

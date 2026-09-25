@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from uuid import UUID, uuid4
 import httpx
 
 from edit_state import validate_snapshot
-from edit_store import SCHEMA_VERSION
+from edit_store import SCHEMA, SCHEMA_VERSION
 from main import app
 
 ASSET_ID = UUID("12345678-1234-4234-9234-123456789abc")
@@ -178,6 +179,58 @@ class EditStateApiTests(unittest.TestCase):
                 response = self.request("PUT", payload(invalid))
                 self.assertEqual(response.status_code, 422)
                 self.assertEqual(self.code(response), code)
+
+    def test_huge_integer_is_rejected_without_changing_saved_state(self):
+        original = self.request("PUT", payload()).json()
+        invalid = state()
+        invalid["currentRecipe"]["adjustments"]["temperature"] = 10**400
+        response = self.request("PUT", payload(invalid, revision=1))
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.code(response), "invalid_recipe")
+        self.assertEqual(self.request("GET").json(), original)
+
+    def test_deeply_nested_json_is_rejected_without_changing_saved_state(self):
+        original = self.request("PUT", payload()).json()
+        encoded = json.dumps(payload(revision=1), separators=(",", ":")).encode()
+        marker = b'"temperature":0'
+        self.assertIn(marker, encoded)
+        deeply_nested = b'[' * 20000 + b'0' + b']' * 20000
+        body = encoded.replace(marker, b'"temperature":' + deeply_nested, 1)
+
+        async def send():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+                return await client.put(PATH, content=body, headers={"content-type": "application/json"})
+
+        response = asyncio.run(send())
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.code(response), "invalid_payload")
+        self.assertEqual(self.request("GET").json(), original)
+
+    def test_missing_column_in_version_one_database_returns_503_without_repair(self):
+        schema = SCHEMA.replace("    history_cursor INTEGER NOT NULL CHECK (history_cursor >= 0),\n", "")
+        with self.database() as connection:
+            connection.executescript(schema)
+            connection.execute("PRAGMA user_version=1")
+            connection.execute(
+                """INSERT INTO asset_edit_states (
+                    asset_id, state_format_version, recipe_version, processing_version,
+                    current_recipe_json, history_json, source_identity_json, revision, updated_at, last_save_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(ASSET_ID), 1, 17, "jpeg-preview-srgb8-v1", json.dumps(recipe(temperature=12)), "[]",
+                 json.dumps(state()["sourceIdentity"]), 1, "2026-09-25T00:00:00Z", str(uuid4())),
+            )
+
+        with self.database() as connection:
+            columns_before = connection.execute("PRAGMA table_info(asset_edit_states)").fetchall()
+            row_before = connection.execute("SELECT * FROM asset_edit_states").fetchone()
+        response = self.request("GET")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.code(response), "persistence_unavailable")
+        self.assertTrue(self.db_path.exists())
+        with self.database() as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(connection.execute("PRAGMA table_info(asset_edit_states)").fetchall(), columns_before)
+            self.assertEqual(connection.execute("SELECT * FROM asset_edit_states").fetchone(), row_before)
 
     def test_checksum_pair_is_optional_and_preserved(self):
         saved = state()

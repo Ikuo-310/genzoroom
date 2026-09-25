@@ -114,17 +114,20 @@ def _snapshot(row: sqlite3.Row, asset_id: UUID) -> dict:
             "sourceIdentity": json.loads(row["source_identity_json"]),
         }
         return validate_snapshot(state, asset_id)
-    except (ValueError, TypeError, KeyError, InvalidEditState) as error:
+    except (ValueError, TypeError, KeyError, IndexError, RecursionError, InvalidEditState) as error:
         raise StoreUnavailable() from error
 
 
 def _result(row: sqlite3.Row, asset_id: UUID) -> dict:
-    return {
-        "state": _snapshot(row, asset_id),
-        "revision": row["revision"],
-        "updatedAt": row["updated_at"],
-        "lastSaveId": row["last_save_id"],
-    }
+    try:
+        return {
+            "state": _snapshot(row, asset_id),
+            "revision": row["revision"],
+            "updatedAt": row["updated_at"],
+            "lastSaveId": row["last_save_id"],
+        }
+    except (IndexError, KeyError, TypeError, ValueError, RecursionError) as error:
+        raise StoreUnavailable() from error
 
 
 def get_edit_state(asset_id: UUID) -> dict:

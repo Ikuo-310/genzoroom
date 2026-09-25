@@ -52,7 +52,7 @@ async def save_asset_edit_state(asset_id: UUID, request: Request) -> dict:
             raise _edit_error(413, "payload_too_large")
     try:
         payload = json.loads(body)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         raise _edit_error(422, "invalid_payload") from None
     if not isinstance(payload, dict) or payload.keys() != {
         "expectedRevision", "saveId", "stateFormatVersion", "recipeVersion",
