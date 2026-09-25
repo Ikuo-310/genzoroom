@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createEditStateSnapshot, restoreEditSession, type EditSourceIdentity, type EditStateSnapshot } from './editState';
-import { EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
+import { createEditStateSaveId, EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
 import { editSession, newSession, type EditAction, type EditSession } from './editing';
 import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
@@ -126,7 +126,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     if (fingerprint === current.savedFingerprint) return Promise.resolve({ ok: true, clean: true });
     const expectedRevision = current.revision;
     const saveId = current.retrySave?.fingerprint === fingerprint && current.retrySave.expectedRevision === expectedRevision
-      ? current.retrySave.saveId : crypto.randomUUID();
+      ? current.retrySave.saveId : createEditStateSaveId();
     setRecord(id, { ...current, saveStatus: 'saving', retrySave: { fingerprint, expectedRevision, saveId } });
     const operation = putAssetEditState(id, snapshot, expectedRevision, saveId).then((response): SaveResult => {
       const latest = getRecord(id);

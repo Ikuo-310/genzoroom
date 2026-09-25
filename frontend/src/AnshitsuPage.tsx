@@ -71,6 +71,8 @@ export function AnshitsuPage() {
           return;
         }
       }
+    } catch {
+      setFailedSwitch({ nextId, error: 'unexpected' });
     } finally {
       switchingRef.current = false;
       setSwitching(false);

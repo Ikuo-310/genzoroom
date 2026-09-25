@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getAssetEditState, putAssetEditState, EditStateApiError } from './editStateApi';
+import { createEditStateSaveId, getAssetEditState, putAssetEditState, EditStateApiError } from './editStateApi';
 import { createEditStateSnapshot } from './editState';
 import { newSession } from './editing';
 
@@ -13,6 +13,12 @@ const saved = { state: snapshot, revision: 2, updatedAt: '2026-09-25T00:00:00Z',
 afterEach(() => vi.unstubAllGlobals());
 
 describe('edit-state API client', () => {
+  it('creates UUID save IDs when randomUUID is unavailable in an insecure context', () => {
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);
+    const id = createEditStateSaveId();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
   it('reads an absent or saved state and rejects a mismatched source identity', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ state: null }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 200 }))

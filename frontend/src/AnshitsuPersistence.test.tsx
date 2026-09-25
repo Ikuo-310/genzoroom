@@ -64,6 +64,20 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
   });
 
+  it('marks the target active while its GET is pending and enables Develop after restore', async () => {
+    let resolveLoad!: (result: { state: null }) => void;
+    const pendingGet = new Promise<{ state: null }>((resolve) => { resolveLoad = resolve; });
+    mocked.get.mockResolvedValueOnce({ state: null }).mockReturnValueOnce(pendingGet);
+    await mount();
+    await click('button[aria-label="second.jpg"]');
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).toBeNull();
+    expect(container.textContent).toContain('Loading saved edits');
+    await act(async () => { resolveLoad({ state: null }); await pendingGet; });
+    await flush();
+    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+  });
+
   it('saves a dirty photo before switching and uses the full uncompressed History', async () => {
     await mount();
     await click('button[aria-label="Bypass Basic adjustments"]');
@@ -71,6 +85,22 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(mocked.put).toHaveBeenCalledTimes(1);
     expect(mocked.put.mock.calls[0][1].history).toHaveLength(1);
     expect(mocked.put.mock.calls[0][2]).toBe(0);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
+  it('switches after a successful PUT for a numeric adjustment edit', async () => {
+    await mount();
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);
+    const exposure = container.querySelectorAll<HTMLInputElement>('.adjustment-category input[type="range"]')[2];
+    if (!exposure) throw new Error('Missing Exposure slider');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(exposure, '0.5');
+      exposure.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(exposure.value).toBe('0.5');
+    await click('button[aria-label="second.jpg"]'); await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][1].currentRecipe.adjustments.exposure).toBe(0.5);
     expect(currentPhoto()).toBe('second.jpg');
   });
 
