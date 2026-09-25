@@ -54,18 +54,14 @@ function freshRecord(assetId: string): AssetEditRecord {
   };
 }
 
-function snapshotFor(record: AssetEditRecord): EditStateSnapshot | null {
-  const result = createEditStateSnapshot(record.session, record.sourceIdentity);
-  return result.ok ? result.value : null;
-}
-
-function fingerprintFor(record: AssetEditRecord): string | null {
-  const snapshot = snapshotFor(record);
-  return snapshot ? JSON.stringify(snapshot) : null;
-}
-
 export function useAssetEdits(assetId: string, enabled: boolean) {
   const records = useRef<Record<string, AssetEditRecord>>({});
+  // editSession and restoreEditSession replace the session rather than mutating
+  // it. Keep one validated snapshot per session/source pair; status-only
+  // rerenders and async save responses can reuse its fingerprint.
+  const snapshotCache = useRef(new WeakMap<EditSession, Map<string, {
+    snapshot: EditStateSnapshot | null; fingerprint: string | null;
+  }>>());
   const loads = useRef<Record<string, LoadOperation>>({});
   const saves = useRef<Partial<Record<string, Promise<SaveResult>>>>({});
   const autosaveTimers = useRef<Partial<Record<string, AutosaveTimer>>>({});
@@ -78,6 +74,23 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   const [, render] = useState(0);
   const changed = useCallback(() => render((count) => count + 1), []);
   const getRecord = useCallback((id: string) => records.current[id] ?? freshRecord(id), []);
+  const snapshotDataFor = useCallback((record: AssetEditRecord) => {
+    const sourceKey = JSON.stringify(record.sourceIdentity);
+    let bySource = snapshotCache.current.get(record.session);
+    const cached = bySource?.get(sourceKey);
+    if (cached) return cached;
+    const result = createEditStateSnapshot(record.session, record.sourceIdentity);
+    const snapshot = result.ok ? result.value : null;
+    const data = { snapshot, fingerprint: snapshot ? JSON.stringify(snapshot) : null };
+    if (!bySource) {
+      bySource = new Map();
+      snapshotCache.current.set(record.session, bySource);
+    }
+    bySource.set(sourceKey, data);
+    return data;
+  }, []);
+  const snapshotFor = useCallback((record: AssetEditRecord) => snapshotDataFor(record).snapshot, [snapshotDataFor]);
+  const fingerprintFor = useCallback((record: AssetEditRecord) => snapshotDataFor(record).fingerprint, [snapshotDataFor]);
   const setRecord = useCallback((id: string, record: AssetEditRecord) => {
     records.current[id] = record;
     changed();
@@ -148,7 +161,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       // Re-entering this asset must wait for a fresh GET, even if it was loaded earlier.
       if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded' };
     };
-  }, [cancelAutosave, getRecord, setRecord]);
+  }, [cancelAutosave, fingerprintFor, getRecord, setRecord]);
 
   useEffect(() => {
     if (!enabled) {
@@ -179,7 +192,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         else scheduleAutosaveRef.current(assetId);
       }
     }
-  }, [assetId, cancelAutosave, enabled, getRecord, setRecord]);
+  }, [assetId, cancelAutosave, enabled, fingerprintFor, getRecord, setRecord]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -249,7 +262,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     })().finally(() => { delete saves.current[id]; });
     saves.current[id] = operation;
     return operation;
-  }, [getRecord, setRecord]);
+  }, [fingerprintFor, getRecord, setRecord, snapshotFor]);
 
   const save = useCallback((id: string): Promise<SaveResult> => {
     if (saves.current[id]) return saves.current[id];
@@ -258,7 +271,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     const snapshot = snapshotFor(current);
     if (!snapshot) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
     return writeSnapshot(id, snapshot, { latestSession: true });
-  }, [getRecord, writeSnapshot]);
+  }, [getRecord, snapshotFor, writeSnapshot]);
 
   const scheduleAutosave = useCallback((id: string) => {
     cancelAutosave(id);
@@ -289,7 +302,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       });
     }, EDIT_STATE_AUTOSAVE_DELAY_MS);
     autosaveTimers.current[id] = { timeout, generation };
-  }, [cancelAutosave, getRecord, save, setRecord]);
+  }, [cancelAutosave, fingerprintFor, getRecord, save, setRecord]);
   scheduleAutosaveRef.current = scheduleAutosave;
 
   const pauseAutosave = useCallback((id: string) => {
@@ -342,15 +355,15 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       if (current.loadStatus === 'error' || current.loadStatus === 'loading') {
         return failure(id, new EditStateApiError(current.loadError ?? 'invalid_state'));
       }
-      const normalResult = createEditStateSnapshot(current.session, current.sourceIdentity);
-      if (!normalResult.ok) return failure(id, new EditStateApiError('invalid_state'));
+      const normalSnapshot = snapshotFor(current);
+      if (!normalSnapshot) return failure(id, new EditStateApiError('invalid_state'));
 
-      let selectedSnapshot = normalResult.value;
+      let selectedSnapshot = normalSnapshot;
       let compactedSuccessfully = false;
       let compactionFailed = false;
       if (compactHistory && current.needsCompaction) {
         try {
-          const compacted = compactEditStateSnapshot(normalResult.value);
+          const compacted = compactEditStateSnapshot(normalSnapshot);
           if (compacted.ok) {
             const validated = validateEditStateSnapshot(compacted.value);
             if (validated.ok) {
@@ -388,7 +401,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       }
     }
     return { ok: true, compactFallbackAssetIds };
-  }, [assetId, getRecord, pauseAutosave, setRecord, writeSnapshot]);
+  }, [assetId, getRecord, pauseAutosave, setRecord, snapshotFor, writeSnapshot]);
 
   const resumeAfterExitFailure = useCallback(() => {
     exitSaving.current = false;

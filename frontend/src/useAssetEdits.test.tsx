@@ -458,6 +458,59 @@ describe('useAssetEdits persistence', () => {
     expect(api.put).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses a validated snapshot across UI-only rerenders and within an edit dispatch with long History', async () => {
+    let session = newSession();
+    for (let index = 0; index < 1000; index += 1) {
+      session = editSession(editSession(session, { type: 'temperature', value: index % 2 === 0 ? 1 : 0 }), { type: 'commit' });
+    }
+    const stored = createEditStateSnapshot(session, source(first));
+    if (!stored.ok) throw new Error('Invalid long History');
+    api.get.mockResolvedValue(response(stored.value));
+    await mount(); await flush();
+    const create = vi.spyOn(editStateModule, 'createEditStateSnapshot');
+    try {
+      const viewerOnly = container.querySelector('button');
+      if (!viewerOnly) throw new Error('Missing viewer-only button');
+      for (let index = 0; index < 5; index += 1) act(() => viewerOnly.click());
+      expect(latest.dirty).toBe(false);
+      expect(create).not.toHaveBeenCalled();
+
+      editTemperature(30);
+      expect(latest.dirty).toBe(true);
+      // The old session is already cached, and the new one is evaluated once.
+      // The render's dirty check reuses the result of that same dispatch.
+      expect(create).toHaveBeenCalledTimes(1);
+      act(() => viewerOnly.click());
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      create.mockRestore();
+    }
+  });
+
+  it('updates cached dirty state for pending commit, Undo, Redo, and Reset', async () => {
+    await mount(); await flush();
+    editTemperature(10);
+    expect(latest.dirty).toBe(true);
+    await act(async () => { await latest.save(first); });
+    expect(latest.dirty).toBe(false);
+    expect(latest.session.pending?.kind).toBe('temperature');
+
+    commitEdit();
+    expect(latest.session.pending).toBeNull();
+    expect(latest.dirty).toBe(false);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session.cursor).toBe(0);
+    expect(latest.dirty).toBe(true);
+    act(() => latest.dispatch({ type: 'redo' }));
+    expect(latest.session.cursor).toBe(1);
+    expect(latest.dirty).toBe(false);
+    act(() => latest.dispatch({ type: 'temperatureReset' }));
+    expect(latest.session.recipe.adjustments.temperature).toBe(0);
+    expect(latest.dirty).toBe(true);
+    await act(async () => { await latest.save(first); });
+    expect(latest.dirty).toBe(false);
+  });
+
   it('saves pending edits on a copied session without compressing History or committing the live gesture', async () => {
     vi.useFakeTimers();
     await mount(); await flush(); editTemperature(12);
