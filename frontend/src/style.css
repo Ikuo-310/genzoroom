@@ -200,6 +200,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .filmstrip-item .format-badge { top: 5px; right: 5px; }
 .filmstrip-item .format-badge.raw { background: rgb(28 28 30 / 88%); }
 .workspace-save-status { position: fixed; right: 20px; bottom: 145px; z-index: 20; padding: 8px 12px; border: 1px solid #555; border-radius: 5px; background: #202023; }
+.workspace-autosave-warning { position: fixed; right: 20px; bottom: 105px; z-index: 20; max-width: min(420px, calc(100vw - 40px)); padding: 8px 12px; border: 1px solid #875d44; border-radius: 5px; background: #30251f; color: #ffd3b5; }
 .workspace-save-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 65%); }
 .workspace-save-dialog { width: min(100%, 420px); padding: 22px; border: 1px solid #666; border-radius: 8px; background: #242426; box-shadow: 0 10px 30px #0008; }
 .workspace-save-dialog h2 { margin-top: 0; font-size: 1.1rem; }

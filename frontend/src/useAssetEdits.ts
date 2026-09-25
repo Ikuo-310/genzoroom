@@ -7,6 +7,7 @@ import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 type LoadStatus = 'unloaded' | 'loading' | 'ready' | 'error';
 type SaveStatus = 'idle' | 'saving';
 type RetrySave = { fingerprint: string; expectedRevision: number; saveId: string };
+type AutosaveTimer = { timeout: number; generation: number };
 type AssetEditRecord = {
   session: EditSession;
   loadStatus: LoadStatus;
@@ -17,9 +18,11 @@ type AssetEditRecord = {
   sourceIdentity: EditSourceIdentity;
   savedFingerprint: string | null;
   retrySave?: RetrySave;
+  autosaveError?: EditStateApiError['kind'] | null;
 };
 
 export type SaveResult = { ok: true; clean: boolean } | { ok: false; error: EditStateApiError };
+export const EDIT_STATE_AUTOSAVE_DELAY_MS = 5000;
 
 function freshRecord(assetId: string): AssetEditRecord {
   return {
@@ -43,6 +46,12 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   const records = useRef<Record<string, AssetEditRecord>>({});
   const loads = useRef<Record<string, { controller: AbortController; generation: number; timeout: number }>>({});
   const saves = useRef<Partial<Record<string, Promise<SaveResult>>>>({});
+  const autosaveTimers = useRef<Partial<Record<string, AutosaveTimer>>>({});
+  const autosaveGeneration = useRef(0);
+  const autosavePaused = useRef(new Set<string>());
+  const scheduleAutosaveRef = useRef<(id: string) => void>(() => undefined);
+  const activeAssetId = useRef<string | null>(enabled ? assetId : null);
+  activeAssetId.current = enabled ? assetId : null;
   const [, render] = useState(0);
   const changed = useCallback(() => render((count) => count + 1), []);
   const getRecord = useCallback((id: string) => records.current[id] ?? freshRecord(id), []);
@@ -51,7 +60,17 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     changed();
   }, [changed]);
 
+  const cancelAutosave = useCallback((id: string) => {
+    const timer = autosaveTimers.current[id];
+    if (timer) window.clearTimeout(timer.timeout);
+    delete autosaveTimers.current[id];
+    autosaveGeneration.current += 1;
+  }, []);
+
   const load = useCallback((id: string) => {
+    // A previous Filmstrip transition may have paused this asset's timer. Once
+    // it becomes active again, a fresh GET establishes the state to autosave.
+    autosavePaused.current.delete(id);
     if (loads.current[id]) {
       loads.current[id].controller.abort();
       window.clearTimeout(loads.current[id].timeout);
@@ -77,6 +96,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       }
     }).finally(() => window.clearTimeout(timeout));
     return () => {
+      autosavePaused.current.add(id);
+      cancelAutosave(id);
       const active = loads.current[id];
       if (!active) return;
       window.clearTimeout(active.timeout);
@@ -85,12 +106,16 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       // Re-entering this asset must wait for a fresh GET, even if it was loaded earlier.
       if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded' };
     };
-  }, [getRecord, setRecord]);
+  }, [cancelAutosave, getRecord, setRecord]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      autosavePaused.current.add(assetId);
+      cancelAutosave(assetId);
+      return;
+    }
     return load(assetId);
-  }, [assetId, enabled, load]);
+  }, [assetId, cancelAutosave, enabled, load]);
 
   const dispatch = useCallback((action: EditAction) => {
     const current = getRecord(assetId);
@@ -100,8 +125,14 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const next = { ...current, session };
       if (current.retrySave && fingerprintFor(next) !== current.retrySave.fingerprint) next.retrySave = undefined;
       setRecord(assetId, next);
+      // Only changes to the persisted snapshot reset the debounce. Pending UI
+      // gestures and viewer-only controls do not change this fingerprint.
+      if (fingerprintFor(current) !== fingerprintFor(next)) {
+        if (fingerprintFor(next) === next.savedFingerprint) cancelAutosave(assetId);
+        else scheduleAutosaveRef.current(assetId);
+      }
     }
-  }, [assetId, enabled, getRecord, setRecord]);
+  }, [assetId, cancelAutosave, enabled, getRecord, setRecord]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -144,7 +175,50 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     return operation;
   }, [getRecord, setRecord]);
 
+  const scheduleAutosave = useCallback((id: string) => {
+    cancelAutosave(id);
+    const current = getRecord(id);
+    if (activeAssetId.current !== id || autosavePaused.current.has(id) || current.loadStatus !== 'ready'
+      || fingerprintFor(current) === current.savedFingerprint) return;
+
+    const generation = ++autosaveGeneration.current;
+    const timeout = window.setTimeout(() => {
+      const timer = autosaveTimers.current[id];
+      if (!timer || timer.generation !== generation) return;
+      delete autosaveTimers.current[id];
+      if (activeAssetId.current !== id || autosavePaused.current.has(id)) return;
+      const latest = getRecord(id);
+      if (latest.loadStatus !== 'ready' || fingerprintFor(latest) === latest.savedFingerprint || saves.current[id]) return;
+
+      void save(id).then((result) => {
+        if (activeAssetId.current !== id || autosavePaused.current.has(id)) return;
+        if (!result.ok) {
+          const record = getRecord(id);
+          setRecord(id, { ...record, autosaveError: result.error.kind });
+        } else if (!result.clean && !autosaveTimers.current[id]) {
+          // A newer edit's timer may have expired while the previous PUT was in
+          // flight. Give that newer state a fresh quiet period after the PUT.
+          scheduleAutosave(id);
+        }
+      });
+    }, EDIT_STATE_AUTOSAVE_DELAY_MS);
+    autosaveTimers.current[id] = { timeout, generation };
+  }, [cancelAutosave, getRecord, save, setRecord]);
+  scheduleAutosaveRef.current = scheduleAutosave;
+
+  const pauseAutosave = useCallback((id: string) => {
+    autosavePaused.current.add(id);
+    cancelAutosave(id);
+  }, [cancelAutosave]);
+
+  const resumeAutosave = useCallback((id: string) => {
+    autosavePaused.current.delete(id);
+    scheduleAutosave(id);
+  }, [scheduleAutosave]);
+
   const discard = useCallback((id: string) => {
+    cancelAutosave(id);
+    autosavePaused.current.delete(id);
     if (loads.current[id]) {
       loads.current[id].controller.abort();
       window.clearTimeout(loads.current[id].timeout);
@@ -152,12 +226,13 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     }
     delete records.current[id];
     changed();
-  }, [changed]);
+  }, [cancelAutosave, changed]);
 
   const current = getRecord(assetId);
   const dirty = current.loadStatus === 'ready' && fingerprintFor(current) !== current.savedFingerprint;
   return {
     session: current.session, dispatch, loadStatus: current.loadStatus, saveStatus: current.saveStatus,
     revision: current.revision, dirty, save, discard, retryLoad: () => load(assetId),
+    pauseAutosave, resumeAutosave, autosaveError: current.autosaveError ?? null,
   };
 }

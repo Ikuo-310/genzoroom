@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAssetEdits } from './useAssetEdits';
@@ -30,12 +30,14 @@ let root: Root;
 let container: HTMLDivElement;
 function Harness({ id }: { id: string }) {
   latest = useAssetEdits(id, true);
-  return null;
+  const [, setUiState] = useState(false);
+  return <button type="button" onClick={() => setUiState((value) => !value)}>Viewer-only state</button>;
 }
 async function mount(id = first) {
   await act(async () => { root.render(<Harness id={id} />); });
 }
 async function flush() { await act(async () => { await Promise.resolve(); }); }
+async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 function editTemperature(value: number) {
   act(() => { latest.dispatch({ type: 'temperature', value }); });
 }
@@ -55,6 +57,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.useRealTimers();
 });
 
 describe('useAssetEdits persistence', () => {
@@ -186,5 +189,164 @@ describe('useAssetEdits persistence', () => {
     expect(api.get).toHaveBeenCalledTimes(3);
     expect(latest.session).toEqual(newSession());
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('debounces edits for five seconds and resets the deadline after a later edit', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush();
+    editTemperature(10);
+    await advance(3000);
+    editTemperature(20);
+    await advance(4999);
+    expect(api.put).not.toHaveBeenCalled();
+    await advance(1);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].currentRecipe.adjustments.temperature).toBe(20);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('does not PUT at 4.999 seconds and starts autosave at five seconds', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush(); editTemperature(9);
+    await advance(4999);
+    expect(api.put).not.toHaveBeenCalled();
+    await advance(1);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not autosave while the edit-state GET is loading or has failed', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<{ state: null }>();
+    api.get.mockReturnValueOnce(pending.promise);
+    await mount();
+    editTemperature(9);
+    await advance(10000);
+    expect(api.put).not.toHaveBeenCalled();
+    pending.reject(new EditStateApiError('unavailable'));
+    await flush();
+    expect(latest.loadStatus).toBe('error');
+    await advance(10000);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('does not let UI-only rerenders reset the edit debounce', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush(); editTemperature(12);
+    await advance(3000);
+    const viewerOnly = container.querySelector('button');
+    if (!viewerOnly) throw new Error('Missing viewer-only button');
+    act(() => viewerOnly.click());
+    await advance(1999);
+    expect(api.put).not.toHaveBeenCalled();
+    await advance(1);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves pending edits on a copied session without compressing History or committing the live gesture', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush(); editTemperature(12);
+    expect(latest.session.pending?.kind).toBe('temperature');
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].history).toHaveLength(1);
+    expect(latest.session.pending?.kind).toBe('temperature');
+    expect(latest.session.history).toHaveLength(0);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('keeps edits made during autosave dirty and starts another debounce after the in-flight save', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    await mount(); await flush(); editTemperature(10);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    editTemperature(20);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(response(api.put.mock.calls[0][1], 1)); await pending.promise; });
+    expect(latest.revision).toBe(1);
+    expect(latest.dirty).toBe(true);
+    await advance(4999);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1][1].currentRecipe.adjustments.temperature).toBe(20);
+  });
+
+  it('keeps failed autosaves dirty, exposes a nonblocking error, and does not retry until another edit', async () => {
+    vi.useFakeTimers();
+    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount(); await flush(); editTemperature(14);
+    await advance(5000); await flush();
+    expect(latest.dirty).toBe(true);
+    expect(latest.revision).toBe(0);
+    expect(latest.autosaveError).toBe('unavailable');
+    expect(api.put).toHaveBeenCalledTimes(1);
+    await advance(15000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    editTemperature(15);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1][3]).not.toBe(api.put.mock.calls[0][3]);
+  });
+
+  it('reuses the autosave saveId for an unchanged network retry and keeps conflicts local', async () => {
+    vi.useFakeTimers();
+    api.put.mockRejectedValueOnce(new EditStateApiError('network'));
+    await mount(); await flush(); editTemperature(16);
+    await advance(5000); await flush();
+    const failedSaveId = api.put.mock.calls[0][3];
+    await advance(10000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    await act(async () => { await latest.save(first); });
+    expect(api.put.mock.calls[1][3]).toBe(failedSaveId);
+
+    const localRecipe = latest.session.recipe;
+    api.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, 'revision_conflict'));
+    editTemperature(17);
+    await advance(5000); await flush();
+    expect(latest.session.recipe).not.toEqual(localRecipe);
+    expect(latest.session.recipe.adjustments.temperature).toBe(17);
+    expect(latest.revision).toBe(1);
+  });
+
+  it('pauses the active timer for a Filmstrip transition and resumes only when asked', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush(); editTemperature(10);
+    act(() => latest.pauseAutosave(first));
+    await advance(10000);
+    expect(api.put).not.toHaveBeenCalled();
+    act(() => latest.resumeAutosave(first));
+    await advance(4999);
+    expect(api.put).not.toHaveBeenCalled();
+    await advance(1);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows autosave again when a previously paused asset is activated and loaded later', async () => {
+    vi.useFakeTimers();
+    await mount(); await flush(); editTemperature(10);
+    act(() => latest.pauseAutosave(first));
+    await mount(second); await flush();
+    await mount(first); await flush();
+    editTemperature(11);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][0]).toBe(first);
+  });
+
+  it('does not continue autosaving an old asset after a delayed save resolves following a switch', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    await mount(); await flush(); editTemperature(10);
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    await mount(second); await flush();
+    await act(async () => { pending.resolve(response(api.put.mock.calls[0][1], 1)); await pending.promise; });
+    await advance(15000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][0]).toBe(first);
   });
 });

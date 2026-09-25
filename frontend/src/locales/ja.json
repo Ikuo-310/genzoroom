@@ -44,6 +44,7 @@
     "editStateLoading": "保存済みの編集状態を読み込んでいます…",
     "editStateLoadFailed": "保存済みの編集状態を読み込めませんでした。再試行するまで編集できません。",
     "editStateSaving": "編集内容を保存しています…",
+    "autosaveFailed": "自動保存に失敗しました。最新の編集内容はまだ保存されていません。",
     "editStateSaveFailed": "編集内容を保存できませんでした",
     "retry": "再試行",
     "stayOnPhoto": "この写真に留まる",

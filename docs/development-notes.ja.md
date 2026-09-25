@@ -2,9 +2,9 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
-## 永続化 Phase 3（現在仕様）
+## 永続化 Phase 4（現在仕様）
 
-JPEG写真を暗室でactiveにするとedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。取得失敗時は空の編集状態として扱わず、再試行するまで編集できない。Filmstripでdirtyな写真から移るときだけ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きで保存する。失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。破棄後の再訪はDBから再取得する。5秒autosaveと暗室退出時の保存・History圧縮は今後の段階である。
+JPEG写真を暗室でactiveにするとedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。取得失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryは行わない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。破棄後の再訪はDBから再取得する。暗室退出時の複数写真保存・History圧縮は今後の段階である。
 
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 

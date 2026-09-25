@@ -46,6 +46,7 @@
     "editStateLoading": "Loading saved edits…",
     "editStateLoadFailed": "Saved edits could not be loaded. Editing is unavailable until you retry.",
     "editStateSaving": "Saving edits…",
+    "autosaveFailed": "Autosave failed. Your latest edits are not saved yet.",
     "editStateSaveFailed": "Edits could not be saved",
     "retry": "Retry",
     "stayOnPhoto": "Stay on this photo",

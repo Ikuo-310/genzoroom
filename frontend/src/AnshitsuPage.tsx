@@ -41,7 +41,7 @@ export function AnshitsuPage() {
   const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
-  const { session, dispatch, loadStatus, save, discard, retryLoad } = useAssetEdits(assetId, canEdit);
+  const { session, dispatch, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
@@ -57,6 +57,7 @@ export function AnshitsuPage() {
     if (nextId === assetId || switchingRef.current || failedSwitch) return;
     if (!editable) { navigateToAsset(nextId); return; }
     switchingRef.current = true;
+    pauseAutosave(assetId);
     setSwitching(true);
     try {
       // An edit made while PUT is in flight must be saved by a subsequent PUT before leaving.
@@ -225,12 +226,16 @@ export function AnshitsuPage() {
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
+    {autosaveError && <p className="workspace-autosave-warning" role="alert">{t('workspace.autosaveFailed')}</p>}
     {failedSwitch && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
       aria-labelledby="save-failure-title" className="workspace-save-dialog">
       <h2 id="save-failure-title">{t('workspace.editStateSaveFailed')}</h2>
       <p>{t(failedSwitch.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${failedSwitch.error}`)}</p>
       <div className="edit-actions">
-        <button type="button" autoFocus className="tool-button" onClick={() => setFailedSwitch(null)}>{t('workspace.stayOnPhoto')}</button>
+        <button type="button" autoFocus className="tool-button" onClick={() => {
+          setFailedSwitch(null);
+          resumeAutosave(assetId);
+        }}>{t('workspace.stayOnPhoto')}</button>
         <button type="button" className="tool-button" onClick={() => {
           discard(assetId);
           navigateToAsset(failedSwitch.nextId);

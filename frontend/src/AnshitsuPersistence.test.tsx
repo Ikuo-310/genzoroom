@@ -27,6 +27,12 @@ const second: AssetDetail = { ...first, id: '87654321-4321-4321-8321-cba98765432
 let root: Root;
 let container: HTMLDivElement;
 async function flush() { await act(async () => { await Promise.resolve(); }); }
+async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
 async function click(selector: string) {
   const button = container.querySelector<HTMLButtonElement>(selector);
   if (!button) throw new Error(`Missing button: ${selector}`);
@@ -53,7 +59,7 @@ beforeEach(async () => {
     state: snapshot, revision: revision + 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId,
   }));
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
   it('switches a clean photo without PUT and loads the next photo', async () => {
@@ -146,5 +152,71 @@ describe('Anshitsu Filmstrip persistence', () => {
     if (!retry) throw new Error('Missing retry button');
     await act(async () => { retry.click(); }); await flush();
     expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+  });
+
+  it('shows a nonblocking localized warning when autosave fails and keeps Develop available', async () => {
+    vi.useFakeTimers();
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    await advance(5000); await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Autosave failed');
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await advance(15000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the debounce before a Filmstrip save so the same dirty state is not PUT twice', async () => {
+    vi.useFakeTimers();
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    await advance(4999);
+    await click('button[aria-label="second.jpg"]'); await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(currentPhoto()).toBe('second.jpg');
+    await advance(5000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('joins an in-flight autosave and saves edits made during it before switching', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
+    mocked.put.mockImplementationOnce(() => pending.promise);
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    await advance(5000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await click('button[aria-label="Enable Basic adjustments"]');
+    await click('button[aria-label="second.jpg"]');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve({ state: mocked.put.mock.calls[0][1], revision: 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] });
+      await pending.promise;
+    });
+    await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(2);
+    expect(mocked.put.mock.calls[1][2]).toBe(1);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
+  it('does not start a second autosave while the transition PUT is in flight', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
+    mocked.put.mockImplementationOnce(() => pending.promise);
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="second.jpg"]');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await advance(5000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve({ state: mocked.put.mock.calls[0][1], revision: 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] });
+      await pending.promise;
+    });
+    await flush();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
   });
 });
