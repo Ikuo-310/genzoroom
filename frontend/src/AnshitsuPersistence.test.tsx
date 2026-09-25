@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { AssetDetail, WorkspaceNavigationState } from './assets';
+import * as editStateModule from './editState';
 import { EditStateApiError } from './editStateApi';
 import i18n from './i18n';
 
@@ -241,7 +242,8 @@ describe('Anshitsu Filmstrip persistence', () => {
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); }); await flush();
     expect(currentPhoto()).toBe('first.jpg');
-    expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain('could not be saved');
+    expect(container.querySelector('[role="alertdialog"]')?.textContent)
+      .toContain('Some edits could not be saved.');
 
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Stay in Anshitsu');
@@ -287,5 +289,19 @@ describe('Anshitsu Filmstrip persistence', () => {
     });
     await flush();
     expect(container.querySelector('.workspace-page')).toBeNull();
+  });
+
+  it('does not show the exit save failure message when compaction fails but the fallback save succeeds', async () => {
+    const compact = vi.spyOn(editStateModule, 'compactEditStateSnapshot')
+      .mockReturnValueOnce({ ok: false, issues: [] });
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
+    if (!home) throw new Error('Missing Home navigation button');
+    await act(async () => { home.click(); }); await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.textContent).toContain('Recent photos');
+    compact.mockRestore();
   });
 });

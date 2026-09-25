@@ -481,7 +481,6 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
         {description}
-        {index >= cursor && <span> ({t('workspace.undone')})</span>}
       </li>;
     })}
   </ol>;

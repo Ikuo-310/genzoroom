@@ -46,7 +46,7 @@
     "editStateSaving": "編集内容を保存しています…",
     "autosaveFailed": "自動保存に失敗しました。最新の編集内容はまだ保存されていません。",
     "exitSaving": "暗室を終了する前に編集内容を保存しています…",
-    "exitSaveFailed": "編集した写真の一部を保存できませんでした。",
+    "exitSaveFailed": "一部の編集内容を保存できませんでした。",
     "stayInAnshitsu": "暗室に留まる",
     "exitWithoutSaving": "保存せず退出する",
     "editStateSaveFailed": "編集内容を保存できませんでした",
@@ -182,7 +182,6 @@
     "allReset": "すべてリセット",
     "undo": "元に戻す",
     "redo": "やり直す",
-    "undone": "取り消し済み",
     "historyEmpty": "確定した編集はまだありません。",
     "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
     "previewEditingNote": "暫定的に既存プレビューを調整しています。編集状態は暗室を離れるか再読み込みすると失われます。"

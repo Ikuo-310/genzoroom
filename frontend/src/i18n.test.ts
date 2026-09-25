@@ -70,6 +70,10 @@ describe('localized resources', () => {
     expect(i18n.t('workspace.basic', { lng: 'ja' })).toBe('基本補正');
     expect(i18n.t('workspace.basicResetHistory', { lng: 'en' })).toBe('Reset Basic adjustments');
     expect(i18n.t('workspace.basicResetHistory', { lng: 'ja' })).toBe('基本補正をリセット');
+    expect(i18n.t('workspace.exitSaveFailed', { lng: 'en' })).toBe('Some edits could not be saved.');
+    expect(i18n.t('workspace.exitSaveFailed', { lng: 'ja' })).toBe('一部の編集内容を保存できませんでした。');
+    expect(i18n.exists('workspace.undone', { lng: 'en' })).toBe(false);
+    expect(i18n.exists('workspace.undone', { lng: 'ja' })).toBe(false);
     expect(i18n.t('photos.selectionCount', { lng: 'en', count: 3 })).toBe('3 selected');
     expect(i18n.t('photos.selectionCount', { lng: 'ja', count: 3 })).toBe('3枚選択中');
   });

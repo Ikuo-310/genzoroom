@@ -48,7 +48,7 @@
     "editStateSaving": "Saving edits…",
     "autosaveFailed": "Autosave failed. Your latest edits are not saved yet.",
     "exitSaving": "Saving edits before leaving Anshitsu…",
-    "exitSaveFailed": "Some edited photos could not be saved.",
+    "exitSaveFailed": "Some edits could not be saved.",
     "stayInAnshitsu": "Stay in Anshitsu",
     "exitWithoutSaving": "Exit without saving",
     "editStateSaveFailed": "Edits could not be saved",
@@ -184,7 +184,6 @@
     "allReset": "All Reset",
     "undo": "Undo",
     "redo": "Redo",
-    "undone": "Undone",
     "historyEmpty": "No committed edits yet.",
     "jpegOnly": "Adjustments are currently available for JPEG only.",
     "previewEditingNote": "Temporary preview-based adjustment. Edits stay in memory until you leave Anshitsu or reload."

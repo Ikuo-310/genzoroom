@@ -125,7 +125,8 @@ describe('Anshitsu workspace', () => {
   it('keeps newest-first History order across Undo, Redo, and a new edit', () => {
     const history = [historyEntry(0, 0.1), historyEntry(0.1, 0.2), historyEntry(0.2, 0.3)];
     const undone = renderToStaticMarkup(<EditHistory history={history} cursor={2} />);
-    expect(undone).toContain('<li value="3" class="undone">Exposure +0.20 → +0.30<span> (Undone)</span></li>');
+    expect(undone).toContain('<li value="3" class="undone">Exposure +0.20 → +0.30</li>');
+    expect(undone).not.toContain('Undone');
     expect(undone).toContain('<li value="2" aria-current="step">Exposure +0.10 → +0.20</li>');
     const redone = renderToStaticMarkup(<EditHistory history={history} cursor={3} />);
     expect(redone).toContain('<li value="3" aria-current="step">Exposure +0.20 → +0.30</li>');
