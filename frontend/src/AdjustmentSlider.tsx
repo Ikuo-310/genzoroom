@@ -16,6 +16,7 @@ export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
 // Only mounted AdjustmentSliders participate; native ranges elsewhere stay independent.
 const adjustments = new Map<HTMLInputElement, () => void>();
 let activeAdjustment: HTMLInputElement | null = null;
+let hoveredAdjustment: HTMLInputElement | null = null;
 
 function isAvailable(element: HTMLInputElement | null): element is HTMLInputElement {
   return !!element && adjustments.has(element) && element.isConnected
@@ -28,11 +29,17 @@ function keyboardAdjustment(): HTMLInputElement | null {
   return focused instanceof HTMLInputElement && isAvailable(focused) ? focused : null;
 }
 
-export function focusedAdjustmentId(): AdjustmentId | null {
-  const focused = document.activeElement;
-  if (!(focused instanceof HTMLInputElement) || focused.type !== 'range' || !isAvailable(focused)) return null;
-  const id = focused.dataset.adjustmentId;
+function adjustmentIdOf(element: HTMLInputElement | null): AdjustmentId | null {
+  if (!isAvailable(element)) return null;
+  const id = element.dataset.adjustmentId;
   return ADJUSTMENT_IDS.find((candidate) => candidate === id) ?? null;
+}
+
+export function copyTargetAdjustmentId(): AdjustmentId | null {
+  const hoveredId = adjustmentIdOf(hoveredAdjustment);
+  if (hoveredId) return hoveredId;
+  const focused = document.activeElement;
+  return focused instanceof HTMLInputElement && focused.type === 'range' ? adjustmentIdOf(focused) : null;
 }
 
 function activateFromMouse(element: HTMLInputElement) {
@@ -198,6 +205,7 @@ export function AdjustmentSlider(props: Props) {
     return () => {
       if (element) adjustments.delete(element);
       if (activeAdjustment === element) activeAdjustment = null;
+      if (hoveredAdjustment === element) hoveredAdjustment = null;
       clearTimeout(timer.current);
       latest.current.onCommit();
       element?.removeEventListener('wheel', wheel);
@@ -213,10 +221,14 @@ export function AdjustmentSlider(props: Props) {
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={() => {
         hovered.current = true;
-        if (isAvailable(range.current)) activateFromMouse(range.current);
+        if (isAvailable(range.current)) {
+          hoveredAdjustment = range.current;
+          activateFromMouse(range.current);
+        }
       }}
       onPointerLeave={() => {
         hovered.current = false;
+        if (hoveredAdjustment === range.current) hoveredAdjustment = null;
         if (activeAdjustment === range.current && document.activeElement !== range.current) activeAdjustment = null;
       }}
       onFocus={() => { activeAdjustment = range.current; }}

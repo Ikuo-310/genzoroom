@@ -156,6 +156,36 @@ describe('workspace full-settings clipboard', () => {
     expect(rendered.recipe!.adjustments).toEqual(original.adjustments);
   });
 
+  it('prefers a hovered slider over a different focused slider, then clears hover on leave and photo switch', async () => {
+    const original = defaultRecipe();
+    original.adjustments.exposure = 1.5; original.adjustments.shadowsTemperature = 42;
+    const destination = defaultRecipe(); destination.adjustments.exposure = -2;
+    rows.set(first.id, stored(first.id, original)); rows.set(second.id, stored(second.id, destination));
+    await mount();
+    const viewport = activatePreview();
+    const hovered = host.querySelector<HTMLInputElement>('[data-adjustment-id="shadowsTemperature"]')!;
+    act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+    expect(document.activeElement).toBe(viewport);
+    expect(key(viewport, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 42 });
+
+    const focused = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => focused.focus());
+    expect(key(focused, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 42 });
+
+    act(() => hovered.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
+    expect(key(focused, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()?.values).toEqual({ exposure: 1.5 });
+
+    act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+    await click('button[aria-label="destination.jpg"]');
+    const targetViewport = activatePreview();
+    expect(key(targetViewport, 'c').defaultPrevented).toBe(true);
+    expect(Object.keys(readEditClipboard()!.values)).toEqual([...ADJUSTMENT_IDS]);
+    expect(readEditClipboard()?.sourceAssetId).toBe(second.id);
+  });
+
   it('keeps copy independent after the source is edited and uses Filmstrip save and autosave for Paste', async () => {
     vi.useFakeTimers();
     const original = defaultRecipe(); original.adjustments.exposure = 1;
@@ -282,6 +312,8 @@ describe('single-slider clipboard', () => {
     act(() => slider.focus()); key(slider, 'c');
     const copied = readEditClipboard();
     const number = host.querySelector<HTMLInputElement>('input[aria-label="Exposure value"]')!;
+    const hovered = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
+    act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
     act(() => number.focus());
     expect(key(number, 'c').defaultPrevented).toBe(false);
     expect(key(number, 'v').defaultPrevented).toBe(false);
