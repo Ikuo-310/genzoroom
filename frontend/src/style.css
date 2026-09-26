@@ -113,7 +113,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .history-scroll-region { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
 .left-panel .left-exif-section { flex: 0 1 auto; min-height: 42px; max-height: 45%; }
 .left-exif-section .exif-heading { flex: 0 0 auto; margin: 0; overflow: visible; }
-.exif-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 42px; padding: 8px 14px; border: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.exif-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 42px; padding: 8px 14px; border: 0; border-radius: 3px; color: #e0e0e2; background: #232325; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.exif-toggle:hover:not(:disabled) { color: #f2f2f3; background: #2b2b2e; }
 .exif-toggle:focus-visible { outline: 2px solid #f2f2f2; outline-offset: -2px; }
 .exif-scroll-region { min-height: 0; overflow-y: auto; }
 .exif-scroll-region[hidden] { display: none; }
