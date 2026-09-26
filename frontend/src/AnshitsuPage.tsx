@@ -82,10 +82,15 @@ export function AnshitsuPage() {
     const keydown = (event: KeyboardEvent) => {
       const shortcut = editClipboardShortcut(event);
       if (!shortcut || isNativeEditingTarget(event.target)) return;
-      const adjustmentId = activeAdjustmentId();
-      if (!adjustmentId) return;
-      const handled = shortcut === 'copy' ? copySettings([adjustmentId]) : pasteSettings();
-      if (handled) event.preventDefault();
+      // Copy is contextual to the current slider operation target. Paste is
+      // contextual to the active photo and must also work after photo changes
+      // when no slider or preview has regained focus.
+      if (shortcut === 'copy') {
+        const adjustmentId = activeAdjustmentId();
+        if (adjustmentId && copySettings([adjustmentId])) event.preventDefault();
+        return;
+      }
+      if (pasteSettings()) event.preventDefault();
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);

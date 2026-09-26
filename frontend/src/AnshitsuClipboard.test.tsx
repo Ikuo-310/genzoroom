@@ -221,7 +221,7 @@ describe('workspace full-settings clipboard', () => {
     expect(rows.get(second.id)!.state.history.map((entry) => entry.kind)).toEqual(['paste']);
   });
 
-  it.each(['input[type="number"]', 'input[type="search"]', 'textarea', '[contenteditable="true"]', '[role="textbox"]', 'input[type="range"]'])
+  it.each(['input[type="number"]', 'input[type="search"]', 'textarea', '[contenteditable="true"]', '[role="textbox"]'])
     ('preserves native or non-photo shortcuts in %s', async (selector) => {
       const recipe = defaultRecipe(); recipe.adjustments.tint = 10;
       rows.set(first.id, stored(first.id, recipe));
@@ -236,6 +236,18 @@ describe('workspace full-settings clipboard', () => {
       expect(key(field, 'v').defaultPrevented).toBe(false);
       expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
     });
+
+  it('allows Ctrl+V from an unrelated range input now that paste does not require a slider target', async () => {
+    const recipe = defaultRecipe(); recipe.adjustments.tint = 10;
+    rows.set(first.id, stored(first.id, recipe));
+    copyEditSettings(defaultRecipe(), 'other', 'other.jpg');
+    await mount(); activatePreview();
+    const range = document.createElement('input'); range.type = 'range'; range.tabIndex = 0; host.append(range); range.focus();
+    expect(key(range, 'c').defaultPrevented).toBe(false);
+    expect(key(range, 'v').defaultPrevented).toBe(true);
+    expect(rendered.recipe!.adjustments.tint).toBe(0);
+    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+  });
 
   it.each([
     { isComposing: true }, { repeat: true }, { altKey: true, shiftKey: true }, { metaKey: true },
@@ -266,7 +278,8 @@ describe('workspace full-settings clipboard', () => {
 });
 
 describe('single-slider clipboard', () => {
-  it('replaces a multi-item copy, pastes by source adjustment despite another focused slider, and supports Undo/Redo and save', async () => {
+  it.each(['no focus after switch', 'non-input button focus'] as const)(
+    'replaces a multi-item copy, pastes by source adjustment with %s, and supports Undo/Redo and save', async (focusMode) => {
     const source = defaultRecipe(); source.adjustments.exposure = 1.25; source.adjustments.tint = 8;
     const destination = defaultRecipe(); destination.adjustments.exposure = -2; destination.adjustments.tint = 35;
     destination.basicEnabled = false;
@@ -280,8 +293,12 @@ describe('single-slider clipboard', () => {
 
     await click('button[aria-label="destination.jpg"]');
     const otherSlider = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
-    act(() => otherSlider.focus());
-    expect(key(otherSlider, 'v').defaultPrevented).toBe(true);
+    const pasteTarget = focusMode === 'no focus after switch'
+      ? document.body
+      : host.querySelector<HTMLButtonElement>('.workspace-actions button')!;
+    if (focusMode === 'no focus after switch') expect(document.activeElement).toBe(document.body);
+    if (focusMode === 'non-input button focus') act(() => pasteTarget.focus());
+    expect(key(pasteTarget, 'v').defaultPrevented).toBe(true);
     expect(rendered.recipe!.adjustments.exposure).toBe(1.25);
     expect(rendered.recipe!.adjustments.tint).toBe(35);
     expect(rendered.recipe!.basicEnabled).toBe(false);
