@@ -100,7 +100,11 @@ h2 { margin: 0; font-size: 1.35rem; }
 body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
 .workspace-section { display: flex; flex: 0 0 auto; flex-direction: column; min-height: 130px; border-bottom: 1px solid #353537; }
 .workspace-section.grow { flex: 1 0 auto; }
-.right-panel .scope-section { flex: 0 0 34%; min-height: 180px; }
+.right-panel .scope-section { flex: 0 1 34%; min-height: 100px; }
+.right-panel .develop-panel { flex: 1 1 0; min-height: 90px; }
+.right-panel .workspace-section-header { flex: 0 0 auto; }
+.develop-panel > .workspace-section-content { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; padding: 0; }
+.develop-scroll-region { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 6px 14px 16px; }
 .workspace-section-header { display: flex; min-width: 0; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px 4px; }
 .workspace-section h2 { min-width: 0; overflow: hidden; color: #ddd; font-size: 0.82rem; letter-spacing: 0.06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .workspace-section-action { flex: 0 0 auto; min-height: 26px; padding: 3px 7px; font-size: 0.7rem; white-space: nowrap; }
@@ -292,6 +296,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .workspace-section { min-height: 100px; }
   .workspace-section.grow { flex: 0 0 auto; }
   .right-panel .scope-section { flex-basis: auto; min-height: 100px; }
+  .right-panel .develop-panel { flex: 0 0 auto; min-height: 0; }
+  .develop-panel > .workspace-section-content { flex: 0 0 auto; }
+  .develop-scroll-region { flex: 0 0 auto; overflow: visible; }
   .panel-toggle { width: 34px; padding-inline: 6px; }
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .zoom-controls { justify-content: center; }

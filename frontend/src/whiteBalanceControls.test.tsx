@@ -402,6 +402,35 @@ describe('production White Balance controls', () => {
     advance();
     expect(recipe().adjustments.temperature).toBe(20);
   });
+  it('separates Scope and Develop header from the category scroll region while preserving the left panel', () => {
+    const right = host.querySelector('.right-panel')!;
+    const scope = right.querySelector('.scope-section')!;
+    const develop = right.querySelector('.develop-panel')!;
+    const header = develop.querySelector('.workspace-section-header')!;
+    const scroll = develop.querySelector('.develop-scroll-region')!;
+    expect(scope.parentElement).toBe(right);
+    expect(develop.parentElement).toBe(right);
+    expect(scope.nextElementSibling).toBe(develop);
+    expect(scope.textContent).toContain('Scope');
+    expect(header.querySelector('h2')?.textContent).toBe('Develop controls');
+    expect(header.querySelector('button')?.textContent).toBe('Reset all');
+    expect(scroll.contains(header)).toBe(false);
+    expect(scroll.contains(scope)).toBe(false);
+    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(4);
+    const left = host.querySelector('.left-panel')!;
+    expect(left.querySelector('.history-scroll-region')).not.toBeNull();
+    expect(left.querySelector('.exif-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(left.querySelector('.develop-scroll-region')).toBeNull();
+    const initialRecipe = recipe();
+    click(category().querySelector<HTMLElement>('.adjustment-category-title')!);
+    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(4);
+    expect(category().querySelector('input')).toBeNull();
+    expect(recipe()).toEqual(initialRecipe);
+    click(category().querySelector<HTMLElement>('.adjustment-category-title')!);
+    expect(category().querySelector('input')).not.toBeNull();
+    expect(develop.querySelector('.workspace-section-header')).toBe(header);
+  });
+
   it('resets White Balance while OFF in one operation, preserves Basic and supports Undo/Redo and All Reset', () => {
     wheel(-1, false, slider(1));
     wheel(-1);

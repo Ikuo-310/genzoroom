@@ -312,7 +312,7 @@ export function AnshitsuPage() {
         <WorkspaceSection title={t('workspace.scope')} className="scope-section">
           <p>{t('workspace.scopePlaceholder')}</p>
         </WorkspaceSection>
-        <WorkspaceSection title={t('workspace.developControls')} grow headerAction={editable
+        <DevelopPanel headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
@@ -357,7 +357,7 @@ export function AnshitsuPage() {
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
           </div> : <p>{t('workspace.jpegOnly')}</p>}
-        </WorkspaceSection>
+        </DevelopPanel>
       </>}
     />
 
@@ -461,6 +461,13 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
       hidden={!rightOpen} onResize={resize} onResizeEnd={() => saveSidebarWidths(widthsRef.current)} />
     <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>{rightPanel}</aside>
   </div>;
+}
+
+export function DevelopPanel({ children, headerAction }: { children: ReactNode; headerAction?: ReactNode }) {
+  const { t } = useTranslation();
+  return <WorkspaceSection title={t('workspace.developControls')} className="develop-panel" headerAction={headerAction}>
+    <div className="develop-scroll-region">{children}</div>
+  </WorkspaceSection>;
 }
 
 export function ExifSection({ children }: { children: ReactNode }) {
