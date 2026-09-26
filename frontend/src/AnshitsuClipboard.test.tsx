@@ -159,20 +159,20 @@ describe('History organization menus and confirmation', () => {
     expect(rendered.recipe!.adjustments.temperature).toBe(20);
   });
 
-  it.each(['Clear all history', 'Reset edits'])('confirms %s with No focused, cancellation unchanged, Yes applied and focus restored', async (label) => {
+  it.each(['Clear all history', 'Reset edits'])('confirms %s with Cancel focused, cancellation unchanged, Continue applied and focus restored', async (label) => {
     const original = await mountHistory();
     const trigger = headerHistoryMenu();
     historyMenuAction(label);
-    expect(document.activeElement).toBe(dialogButton('No'));
+    expect(document.activeElement).toBe(dialogButton('Cancel'));
     expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your current edits will be kept.');
     expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
       .toBe(label === 'Reset edits' ? '⚠This action cannot be undone.' : null);
-    act(() => dialogButton('No').click());
+    act(() => dialogButton('Cancel').click());
     expect(rendered.recipe).toEqual(original.recipe);
     expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
     expect(document.activeElement).toBe(trigger);
     headerHistoryMenu(); historyMenuAction(label);
-    act(() => dialogButton('Yes').click());
+    act(() => dialogButton('Continue').click());
     expect(host.querySelector('dialog')).toBeNull();
     expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(0);
     expect(rendered.recipe).toEqual(label === 'Reset edits' ? defaultRecipe() : original.recipe);
@@ -185,11 +185,11 @@ describe('History organization menus and confirmation', () => {
     const open = () => { headerHistoryMenu(); historyMenuAction('Clear all history'); };
     open();
     key(document.activeElement!, 'Tab', { ctrlKey: false });
-    expect(document.activeElement).toBe(dialogButton('Yes'));
+    expect(document.activeElement).toBe(dialogButton('Continue'));
     key(document.activeElement!, 'Tab', { ctrlKey: false });
-    expect(document.activeElement).toBe(dialogButton('No'));
+    expect(document.activeElement).toBe(dialogButton('Cancel'));
     key(document.activeElement!, 'Tab', { ctrlKey: false, shiftKey: true });
-    expect(document.activeElement).toBe(dialogButton('Yes'));
+    expect(document.activeElement).toBe(dialogButton('Continue'));
     key(document.activeElement!, 'Tab', { ctrlKey: false, shiftKey: true });
     key(document.activeElement!, 'Enter', { ctrlKey: false });
     expect(host.querySelector('dialog')).toBeNull();
@@ -264,7 +264,7 @@ describe('History organization menus and confirmation', () => {
     } finally { spy.mockRestore(); }
   });
 
-  it('localizes both confirmation titles and messages in Japanese while keeping No/Yes', async () => {
+  it('localizes both confirmation titles, messages, and buttons in Japanese', async () => {
     await mountHistory();
     await act(async () => { await i18n.changeLanguage('ja'); });
     for (const [label, message] of [['履歴をすべて削除', '全履歴を削除します。現在の編集内容は失われません。'],
@@ -274,8 +274,10 @@ describe('History organization menus and confirmation', () => {
       expect(host.querySelector('dialog p')!.textContent).toBe(message);
       expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
         .toBe(label === '編集を初期化' ? '⚠この操作は元に戻せません。' : null);
-      expect(document.activeElement).toBe(dialogButton('No'));
-      act(() => dialogButton('No').click());
+      expect(Array.from(host.querySelectorAll<HTMLButtonElement>('dialog button')).map((button) => button.textContent))
+        .toEqual(['キャンセル', '続行']);
+      expect(document.activeElement).toBe(dialogButton('キャンセル'));
+      act(() => dialogButton('キャンセル').click());
     }
   });
 
@@ -295,7 +297,7 @@ describe('History organization menus and confirmation', () => {
     headerHistoryMenu(); historyMenuAction('Clear all history');
     key(window, 'c', { altKey: true });
     expect(host.querySelectorAll('dialog')).toHaveLength(1);
-    act(() => dialogButton('No').click());
+    act(() => dialogButton('Cancel').click());
     menuAction('Copy selected settings…');
     expect(host.querySelectorAll('dialog')).toHaveLength(1);
     expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);

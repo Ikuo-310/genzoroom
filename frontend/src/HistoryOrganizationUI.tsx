@@ -110,8 +110,8 @@ export function HistoryConfirmationDialog({ operation, onConfirm, onCancel, retu
       {t('workspace.historyResetWarning')}
     </p>}
     <div className="selection-confirm-actions">
-      <button ref={no} type="button" className="tool-button" onClick={onCancel}>No</button>
-      <button type="button" className="tool-button" onClick={onConfirm}>Yes</button>
+      <button ref={no} type="button" className="tool-button" onClick={onCancel}>{t('workspace.historyCancel')}</button>
+      <button type="button" className="tool-button" onClick={onConfirm}>{t('workspace.historyContinue')}</button>
     </div>
   </dialog>;
 }
