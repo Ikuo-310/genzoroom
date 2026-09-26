@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   COMPACT_HISTORY_ON_EXIT,
   compactEditStateSnapshot,
+  compactEditSession,
   createEditStateSnapshot,
   restoreEditSession,
   validateEditStateSnapshot,
@@ -21,6 +22,7 @@ type RetrySave = {
   snapshot: EditStateSnapshot;
   syncSession: boolean;
   liveFingerprint: string | null;
+  liveSession: EditSession;
 };
 type AutosaveTimer = { timeout: number; generation: number };
 type LoadOperation = { controller: AbortController; generation: number; timeout: number; promise: Promise<void> };
@@ -39,6 +41,7 @@ type AssetEditRecord = {
   loadError?: EditStateApiError['kind'];
   editedThisSession: boolean;
   needsCompaction: boolean;
+  organizationUndo?: EditSession;
 };
 
 export type SaveResult = { ok: true; clean: boolean } | { ok: false; error: EditStateApiError };
@@ -126,7 +129,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       return () => {
         autosavePaused.current.add(id);
         cancelAutosave(id);
-        if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded' };
+        if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded', organizationUndo: undefined };
       };
     }
     const controller = new AbortController();
@@ -162,7 +165,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       active.controller.abort();
       active.generation += 1;
       // Re-entering this asset must wait for a fresh GET, even if it was loaded earlier.
-      if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded' };
+      if (records.current[id]) records.current[id] = { ...records.current[id], loadStatus: 'unloaded', organizationUndo: undefined };
     };
   }, [cancelAutosave, fingerprintFor, getRecord, setRecord]);
 
@@ -175,12 +178,9 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     return load(assetId);
   }, [assetId, cancelAutosave, enabled, load]);
 
-  const dispatch = useCallback((action: EditAction) => {
-    const current = getRecord(assetId);
-    if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return;
-    const session = editSession(current.session, action);
-    if (session !== current.session) {
-      const next = { ...current, session };
+  const updateSession = useCallback((current: AssetEditRecord, session: EditSession, organizationUndo?: EditSession) => {
+    if (session !== current.session || organizationUndo !== current.organizationUndo) {
+      const next = { ...current, session, organizationUndo };
       const currentFingerprint = fingerprintFor(current);
       const nextFingerprint = fingerprintFor(next);
       if (currentFingerprint !== nextFingerprint) {
@@ -195,7 +195,50 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         else scheduleAutosaveRef.current(assetId);
       }
     }
-  }, [assetId, cancelAutosave, enabled, fingerprintFor, getRecord, setRecord]);
+  }, [assetId, cancelAutosave, fingerprintFor, setRecord]);
+
+  const dispatch = useCallback((action: EditAction) => {
+    const current = getRecord(assetId);
+    if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return;
+    if (action.type === 'undo' && current.organizationUndo) {
+      updateSession(current, current.organizationUndo);
+      return;
+    }
+    const session = editSession(current.session, action);
+    const organizing = action.type === 'clearHistory' || action.type === 'trimHistory';
+    const historyChanged = organizing && session.history.length !== current.session.history.length;
+    // User edit intentions invalidate restoration even when their value is a
+    // no-op. Internal commit callbacks preserve it, including stale callbacks.
+    const backup = historyChanged ? structuredClone(current.session)
+      : action.type === 'commit' ? current.organizationUndo : undefined;
+    updateSession(current, session, backup);
+  }, [assetId, enabled, getRecord, updateSession]);
+
+  const organizeHistory = useCallback((operation: 'clearHistory' | 'trimHistory' | 'resetEdits' | 'compactHistory'): boolean => {
+    const current = getRecord(assetId);
+    if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return false;
+    if (operation !== 'compactHistory') {
+      dispatch({ type: operation });
+      return true;
+    }
+    // A new organization attempt consumes the previous restoration right,
+    // including no-op and failed attempts. A failure leaves the session intact.
+    try {
+      const result = compactEditSession(current.session, current.sourceIdentity);
+      if (!result.ok) {
+        updateSession(current, current.session);
+        return false;
+      }
+      const changedHistory = JSON.stringify(result.value.history) !== JSON.stringify(current.session.history)
+        || result.value.cursor !== current.session.cursor;
+      updateSession(current, changedHistory ? result.value : current.session,
+        changedHistory ? structuredClone(current.session) : undefined);
+      return true;
+    } catch {
+      updateSession(current, current.session);
+      return false;
+    }
+  }, [assetId, dispatch, enabled, getRecord, updateSession]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -232,7 +275,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       try {
         const response = await putAssetEditState(id, request.snapshot, request.expectedRevision, request.saveId);
         const latest = getRecord(id);
-        const canSyncSession = request.syncSession && fingerprintFor(latest) === request.liveFingerprint;
+        const canSyncSession = request.syncSession && latest.session === request.liveSession
+          && fingerprintFor(latest) === request.liveFingerprint;
         const restored = canSyncSession ? restoreEditSession(request.snapshot) : null;
         let next: AssetEditRecord = { ...latest, session: restored?.ok ? restored.value : latest.session,
           revision: response.revision, updatedAt: response.updatedAt,
@@ -276,7 +320,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         return { ok: true, clean };
       }
       return send({ fingerprint, expectedRevision: latest.revision, saveId: createEditStateSaveId(),
-        snapshot, syncSession: options.syncSession ?? false, liveFingerprint: fingerprintFor(latest) });
+        snapshot, syncSession: options.syncSession ?? false, liveFingerprint: fingerprintFor(latest), liveSession: latest.session });
     })().finally(() => { delete saves.current[id]; });
     saves.current[id] = operation;
     return operation;
@@ -340,6 +384,10 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   const saveEditedAssetsForExit = useCallback(async (compactHistory = COMPACT_HISTORY_ON_EXIT): Promise<ExitSaveResult> => {
     if (exitSaving.current) return { ok: false, assetId, error: new EditStateApiError('unexpected'), compactFallbackAssetIds: [] };
     exitSaving.current = true;
+    for (const [id, record] of Object.entries(records.current)) {
+      records.current[id] = { ...record, organizationUndo: undefined };
+    }
+    changed();
     const assetIds = Object.entries(records.current)
       .filter(([, record]) => record.editedThisSession)
       .map(([id]) => id);
@@ -423,7 +471,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       }
     }
     return { ok: true, compactFallbackAssetIds };
-  }, [assetId, getRecord, pauseAutosave, setRecord, snapshotFor, writeSnapshot]);
+  }, [assetId, changed, getRecord, pauseAutosave, setRecord, snapshotFor, writeSnapshot]);
 
   const resumeAfterExitFailure = useCallback(() => {
     exitSaving.current = false;
@@ -450,7 +498,10 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   const dirty = current.loadStatus === 'ready'
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
-    session: current.session, dispatch, loadStatus: current.loadStatus, saveStatus: current.saveStatus,
+    session: current.session, dispatch, organizeHistory,
+    hasOrganizationUndo: !!current.organizationUndo,
+    canUndo: !!current.organizationUndo || current.session.cursor > 0 || !!current.session.pending,
+    loadStatus: current.loadStatus, saveStatus: current.saveStatus,
     revision: current.revision, dirty, save, discard, retryLoad: () => load(assetId),
     pauseAutosave, resumeAutosave, autosaveError: current.autosaveError ?? null,
     saveEditedAssetsForExit, resumeAfterExitFailure,

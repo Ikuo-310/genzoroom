@@ -104,6 +104,232 @@ function commitEdit() {
   act(() => { latest.dispatch({ type: 'commit' }); });
 }
 
+async function loadHistory(cursor = 2) {
+  let session = newSession();
+  for (const value of [10, 20, 30, 40]) {
+    session = editSession(editSession(session, { type: 'temperature', value }), { type: 'commit' });
+  }
+  session = editSession(session, { type: 'jumpToHistory', cursor });
+  const stored = createEditStateSnapshot(session, source(first));
+  if (!stored.ok) throw new Error('Invalid history fixture');
+  api.get.mockResolvedValue(response(stored.value, 3));
+  await mount();
+  return session;
+}
+
+describe('temporary History organization Undo', () => {
+  it.each(['clearHistory', 'trimHistory', 'compactHistory'] as const)('restores the complete session after %s, then uses normal Undo/Redo', async (operation) => {
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory(operation); });
+    expect(latest.hasOrganizationUndo).toBe(true);
+    expect(latest.canUndo).toBe(true);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(original);
+    expect(latest.session.history).not.toBe(original.history);
+    expect(latest.hasOrganizationUndo).toBe(false);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session.cursor).toBe(1);
+    act(() => latest.dispatch({ type: 'redo' }));
+    expect(latest.session).toEqual(original);
+  });
+
+  it('uses Ctrl+Z for organization restoration even at cursor zero', async () => {
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    expect(latest.session.cursor).toBe(0);
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(latest.session).toEqual(original);
+  });
+
+  it.each(['clearHistory', 'trimHistory', 'compactHistory'] as const)('restores pending work after %s and supports its later commit', async (operation) => {
+    await loadHistory();
+    editExposure(0.5);
+    const original = structuredClone(latest.session);
+    act(() => { latest.organizeHistory(operation); });
+    expect(latest.session.recipe).toEqual(original.recipe);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(original);
+    commitEdit();
+    expect(latest.session.pending).toBeNull();
+    expect(latest.session.history).toHaveLength(3);
+    expect(latest.session.history[2].kind).toBe('exposure');
+    expect(latest.session.recipe).toEqual(original.recipe);
+  });
+
+  it.each([
+    { type: 'temperature', value: 20 },
+    { type: 'paste', values: {}, sourceAssetId: second, sourceFilename: 'other.jpg' },
+    { type: 'redo' },
+    { type: 'jumpToHistory', cursor: 0 },
+    { type: 'resetEdits' },
+  ] as const)('invalidates restoration on user intent $type, including no-op actions', async (action) => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    act(() => latest.dispatch(action));
+    expect(latest.hasOrganizationUndo).toBe(false);
+  });
+
+  it('updates the backup on another organization and consumes it on repeated no-op organization', async () => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('trimHistory'); });
+    const trimmed = structuredClone(latest.session);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(trimmed);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    act(() => { latest.organizeHistory('clearHistory'); });
+    expect(latest.hasOrganizationUndo).toBe(false);
+    expect(latest.canUndo).toBe(false);
+  });
+
+  it('preserves restoration through rerenders, focus and stale commit callbacks', async () => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    act(() => { container.querySelector('button')!.focus(); container.querySelector('button')!.click(); });
+    commitEdit();
+    expect(latest.hasOrganizationUndo).toBe(true);
+  });
+
+  it('creates no restoration for no-op compression or clearing only a pending gesture without History', async () => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('compactHistory'); });
+    expect(latest.hasOrganizationUndo).toBe(true);
+    const compacted = latest.session;
+    act(() => { latest.organizeHistory('compactHistory'); });
+    expect(latest.session).toBe(compacted);
+    expect(latest.hasOrganizationUndo).toBe(false);
+    act(() => { latest.organizeHistory('resetEdits'); });
+    editExposure(0.5);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    expect(latest.session.recipe.adjustments.exposure).toBe(0.5);
+    expect(latest.hasOrganizationUndo).toBe(false);
+  });
+
+  it('isolates the backup from later mutations of the original session objects', async () => {
+    await loadHistory();
+    const original = latest.session;
+    const expected = structuredClone(original);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    original.history[0].after.adjustments.temperature = 99;
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(expected);
+  });
+
+  it('leaves the live session intact on compaction failure and consumes the previous restoration right', async () => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('trimHistory'); });
+    const original = structuredClone(latest.session);
+    const compact = vi.spyOn(editStateModule, 'compactEditSession').mockReturnValueOnce({ ok: false, issues: [] });
+    try {
+      act(() => { expect(latest.organizeHistory('compactHistory')).toBe(false); });
+      expect(latest.session).toEqual(original);
+      expect(latest.hasOrganizationUndo).toBe(false);
+    } finally { compact.mockRestore(); }
+  });
+
+  it('drops restoration when switching photos, returning to the original photo, or leaving through Home', async () => {
+    await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    await mount(second);
+    expect(latest.hasOrganizationUndo).toBe(false);
+    await mount(first);
+    expect(latest.hasOrganizationUndo).toBe(false);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    await act(async () => { await latest.saveEditedAssetsForExit(); });
+    expect(latest.hasOrganizationUndo).toBe(false);
+  });
+
+  it('cancels autosave when Undo restores the confirmed state before the debounce fires', async () => {
+    vi.useFakeTimers();
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    act(() => latest.dispatch({ type: 'undo' }));
+    await advance(5000);
+    expect(api.put).not.toHaveBeenCalled();
+    expect(latest.session).toEqual(original);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('keeps Undo during autosave live and saves the restored history after the old PUT completes', async () => {
+    vi.useFakeTimers();
+    const original = await loadHistory();
+    const pending = deferred<ReturnType<typeof response>>();
+    api.put.mockReturnValueOnce(pending.promise);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    await advance(5000);
+    expect(api.put.mock.calls[0][1].history).toEqual([]);
+    act(() => latest.dispatch({ type: 'undo' }));
+    await act(async () => { pending.resolve(response(api.put.mock.calls[0][1], 4)); await pending.promise; });
+    expect(latest.session).toEqual(original);
+    expect(latest.dirty).toBe(true);
+    await advance(5000);
+    expect(api.put.mock.calls[1][1].history).toEqual(original.history);
+    expect(api.put.mock.calls[1][2]).toBe(4);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('saves Undo after successful autosave and reloads the restored Recipe, History and cursor', async () => {
+    vi.useFakeTimers();
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    await advance(5000);
+    expect(latest.hasOrganizationUndo).toBe(true);
+    act(() => latest.dispatch({ type: 'undo' }));
+    await advance(5000);
+    const stored = api.put.mock.calls[1][1];
+    expect(stored.history).toEqual(original.history);
+    expect(stored.historyCursor).toBe(original.cursor);
+    expect(stored.currentRecipe).toEqual(original.recipe);
+    api.get.mockResolvedValue(response(stored, 5));
+    await mount(second); await mount(first);
+    expect(latest.session).toEqual(original);
+    expect(latest.hasOrganizationUndo).toBe(false);
+  });
+
+  it.each(['network', 'conflict', 'unavailable'] as const)('retains restoration after a %s save failure and saves the restored state in order', async (kind) => {
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory('clearHistory'); });
+    api.put.mockRejectedValueOnce(new EditStateApiError(kind));
+    await act(async () => { expect((await latest.save(first)).ok).toBe(false); });
+    expect(latest.hasOrganizationUndo).toBe(true);
+    act(() => latest.dispatch({ type: 'undo' }));
+    await act(async () => { await latest.save(first); });
+    expect(latest.session).toEqual(original);
+    if (kind === 'network') {
+      expect(api.put.mock.calls[1].slice(1)).toEqual(api.put.mock.calls[0].slice(1));
+      expect(api.put.mock.calls[2][1].history).toEqual(original.history);
+      expect(api.put.mock.calls[2][2]).toBe(4);
+    } else {
+      // A definite failure never changed the confirmed snapshot. Undo returns
+      // to it, so there is no extra PUT or automatic conflict merge.
+      expect(api.put).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('resolves a lost committed PUT before saving Undo as a new revision', async () => {
+    const store = useCasStore();
+    await mount();
+    for (const value of [10, 20, 30, 40]) { editTemperature(value); commitEdit(); }
+    act(() => latest.dispatch({ type: 'jumpToHistory', cursor: 2 }));
+    await act(async () => { await latest.save(first); });
+    const original = structuredClone(latest.session);
+    act(() => { latest.organizeHistory('clearHistory'); });
+    store.loseNextResponse();
+    await act(async () => { expect((await latest.save(first)).ok).toBe(false); });
+    expect(store.rows.get(first)?.state.history).toEqual([]);
+    act(() => latest.dispatch({ type: 'undo' }));
+    // Undo changes only the live session; the committed row remains organized
+    // until the unknown PUT is confirmed and a newer revision is written.
+    expect(store.rows.get(first)?.state.history).toEqual([]);
+    await act(async () => { await latest.save(first); });
+    expect(api.put.mock.calls[2].slice(1)).toEqual(api.put.mock.calls[1].slice(1));
+    expect(store.rows.get(first)?.revision).toBe(3);
+    expect(store.rows.get(first)?.state.history).toEqual(original.history);
+    expect(latest.session).toEqual(original);
+    expect(latest.dirty).toBe(false);
+  });
+});
+
 beforeEach(() => {
   // React's act environment is set explicitly for createRoot tests.
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

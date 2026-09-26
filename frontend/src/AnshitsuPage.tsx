@@ -53,7 +53,7 @@ export function AnshitsuPage() {
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
-  const { session, dispatch, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
+  const { session, dispatch, canUndo, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
@@ -228,7 +228,7 @@ export function AnshitsuPage() {
       leftPanel={<>
         <WorkspaceSection title={t('workspace.history')}>
           <div className="edit-actions">
-            <button className="tool-button" disabled={!editable || (session.cursor === 0 && !session.pending)} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+            <button className="tool-button" disabled={!editable || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
             <button className="tool-button" disabled={!editable || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
