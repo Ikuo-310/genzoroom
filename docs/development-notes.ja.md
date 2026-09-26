@@ -18,6 +18,16 @@ Pasteは値を選んだ1回の`paste` actionで適用し、コピー項目が複
 
 永続snapshotはRecipe v17、`stateFormatVersion` 2、`processingVersion` `jpeg-preview-srgb8-v1`、SQLite schema 1。Frontend／Backendはv1を完全検証して読み込めるが、Paste entryはv2にのみ許可する。v1を読むだけではDBを更新せず、その後に変更を保存するとv2になる。v2 snapshot保存後にv1のみ対応する旧版へrollbackすると、その編集状態を読めない可能性がある。DB schema、Recipe、画素処理versionはCopy / Pasteのために変更していない。HSL、カーブ、シャープネス等は将来候補で、現時点ではRecipe v17の16数値項目以外のCopy / Pasteは未実装。
 
+## History完成後の確認・英語ロケール監査（2026-09-26・現在仕様）
+
+History行の通常クリックはその時点のRecipeへ直接移動し、Historyを追加・削除せずRedo側を保持する。右クリックまたはShift+F10の行メニューで行う部分削除は、メニューを開いた行を基準とし、その行を含む古いHistoryを削除する。右クリック時点ではcursorを動かさない。現在位置が指定行より新しければRecipeとpendingを維持してcursorを更新し、それより古ければ指定行のafter Recipeを編集開始時としてcursorを0にする。圧縮・全削除・部分削除の直後Undoは、その写真のセッション内だけで保持する整理前EditSessionを一度復元する一時機能である。新しい編集、Redo、History移動、別の整理などで復元権は破棄または更新される。編集初期化は整理Undoの対象外である。
+
+全履歴削除と編集初期化の確認ボタンは日本語が「キャンセル／続行」、英語が「Cancel／Continue」で、キャンセル側が初期フォーカスとなる。フォーカス中はキャンセルを赤系、続行をグレー系で強調する。Tab／Shift+TabとEnterに加えてYで続行、NまたはEscapeでキャンセルする。「この操作は元に戻せません。」（英語 “This action cannot be undone.”）と警告アイコンを表示するのは編集初期化だけ。全履歴削除は整理直後のUndoで復元できるため警告を出さない。
+
+英語ロケール監査では、個別調整とColor Grading各調整のResetラベルを「Reset + 調整名」へ統一し、全体Reset、History部分削除、全履歴削除・編集初期化の確認文言、ギャラリーのJPEG対応説明と暗室の自動保存・Home退出時の圧縮説明を更新した。`app.title`はギャラリーのGenzoRoom見出し、`workspace.subtitle`は英語表示時の暗室見出し下で実際に使われているため維持した。日本語側への説明文追加やタイトル変更は行っていない。
+
+ユーザーによるNAS／Firefox実機確認では、History整理の各操作と整理直後のUndoが正常に動作することを確認済み。英語UI全体のレイアウトを網羅的に確認したという意味ではない。
+
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 
 recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、export、Histogram等は未実装。
