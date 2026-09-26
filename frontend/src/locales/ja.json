@@ -180,6 +180,7 @@
     "expandColor": "色補正を展開する",
     "colorResetHistory": "色補正をリセット",
     "allReset": "すべてリセット",
+    "pasteHistory": "{{filename}}からペースト",
     "undo": "元に戻す",
     "redo": "やり直す",
     "historyEmpty": "確定した編集はまだありません。",

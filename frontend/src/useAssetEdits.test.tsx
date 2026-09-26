@@ -123,6 +123,48 @@ afterEach(() => {
 });
 
 describe('useAssetEdits persistence', () => {
+  it('reads v1 without a write, then saves an edited session as v2 with the loaded revision', async () => {
+    const edited = editSession(editSession(newSession(), { type: 'temperature', value: 8 }), { type: 'commit' });
+    const snapshot = createEditStateSnapshot(edited, source(first));
+    if (!snapshot.ok) throw new Error('Invalid test snapshot');
+    const legacy = { ...snapshot.value, stateFormatVersion: 1 as const };
+    api.get.mockResolvedValue(response(legacy, 4));
+    await mount(); await flush();
+    expect(latest.dirty).toBe(false);
+    expect(latest.session.history).toEqual(edited.history);
+    expect(await latest.save(first)).toEqual({ ok: true, clean: true });
+    expect(api.put).not.toHaveBeenCalled();
+    act(() => latest.dispatch({ type: 'paste', values: { tint: 10 }, sourceAssetId: second, sourceFilename: 'second.jpg' }));
+    await act(async () => { await latest.save(first); });
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put.mock.calls[0][1].stateFormatVersion).toBe(2);
+    expect(api.put.mock.calls[0][1].history.map((entry: { kind: string }) => entry.kind)).toEqual(['temperature', 'paste']);
+    expect(api.put.mock.calls[0][2]).toBe(4);
+    expect(latest.revision).toBe(5);
+    expect(legacy.stateFormatVersion).toBe(1);
+  });
+
+  it('replays a lost Paste snapshot before saving newer local edits and preserves metadata', async () => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    await mount(); await flush();
+    store.loseNextResponse();
+    act(() => latest.dispatch({ type: 'paste', values: { exposure: 1, tint: 10 }, sourceAssetId: second, sourceFilename: 'second.jpg' }));
+    await advance(5000);
+    expect(latest.dirty).toBe(true);
+    expect(latest.autosaveError).toBe('network');
+    editExposure(2); commitEdit();
+    await act(async () => { await latest.save(first); });
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[0][1].currentRecipe.adjustments.exposure).toBe(1);
+    expect(api.put.mock.calls[2][1].currentRecipe.adjustments.exposure).toBe(2);
+    expect(store.rows.get(first)!.state.history.map((entry) => entry.kind)).toEqual(['paste', 'exposure']);
+    expect(store.rows.get(first)!.state.history[0]).toMatchObject({ metadata: { sourceFilename: 'second.jpg' } });
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+  });
+
   it('starts a new session for state:null and skips PUT when clean', async () => {
     await mount(); await flush();
     expect(latest.loadStatus).toBe('ready');

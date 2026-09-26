@@ -17,6 +17,7 @@ import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemper
 import { getEditImageSource } from './editImageSource';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
+import { copyEditSettings, readEditClipboard } from './editClipboard';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
 
@@ -186,6 +187,18 @@ export function AnshitsuPage() {
           onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
+          onCopyAdjustments={() => {
+            if (!editable || switching || exitSaving || failedSwitch || exitFailure) return false;
+            copyEditSettings(session.recipe, assetId, activeDetail.filename);
+            return true;
+          }}
+          onPasteAdjustments={() => {
+            if (!editable || switching || exitSaving || failedSwitch || exitFailure) return false;
+            const clipboard = readEditClipboard();
+            if (!clipboard) return false;
+            dispatch({ type: 'paste', ...clipboard });
+            return true;
+          }}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -397,6 +410,7 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
       const control = basicHistoryControl(entry.kind);
       let description: string;
       switch (entry.kind) {
+        case 'paste': description = t('workspace.pasteHistory', { filename: entry.metadata.sourceFilename }); break;
         case 'temperature':
         case 'temperatureReset':
           description = t(entry.kind === 'temperature' ? 'workspace.temperature' : 'workspace.temperatureReset')
@@ -479,8 +493,9 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
             : entry.kind;
       }
       return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
+        title={entry.kind === 'paste' ? description : undefined}
         aria-current={index === cursor - 1 ? 'step' : undefined}>
-        {description}
+        {entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description}
       </li>;
     })}
   </ol>;

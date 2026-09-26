@@ -14,3 +14,11 @@ export function undoShortcut(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'met
 export function sliderSteps(key: string) {
   return ({ ArrowLeft: -1, ArrowRight: 1, ArrowUp: 10, ArrowDown: -10 } as Record<string, number>)[key];
 }
+
+export function editClipboardShortcut(event: Pick<KeyboardEvent,
+  'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'defaultPrevented' | 'getModifierState'>) {
+  if (event.defaultPrevented || event.isComposing || event.repeat || !event.ctrlKey
+    || event.metaKey || event.altKey || event.shiftKey || event.getModifierState('AltGraph')) return null;
+  const key = event.key.toLowerCase();
+  return key === 'c' ? 'copy' : key === 'v' ? 'paste' : null;
+}

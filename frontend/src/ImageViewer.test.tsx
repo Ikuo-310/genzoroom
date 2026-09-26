@@ -169,6 +169,36 @@ describe('Before / After viewer state', () => {
     expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(pan);
   });
 
+  it('focuses the photo while starting a captured pan and preserves comparison and zoom', () => {
+    act(() => root.render(<Harness />));
+    act(() => mockImage.onLoad?.(400, 300));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    const capture = vi.fn();
+    Object.defineProperty(viewport, 'setPointerCapture', { value: capture });
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 })));
+    const zoom = host.querySelector('.zoom-controls output')!.textContent;
+    const before = position.style.transform;
+    function pointer(type: string, target: EventTarget, x: number) {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 20 });
+      Object.defineProperty(event, 'pointerId', { value: 7 });
+      act(() => target.dispatchEvent(event));
+    }
+    pointer('pointerdown', image(), 10);
+    expect(document.activeElement).toBe(viewport);
+    expect(capture).toHaveBeenCalledWith(7);
+    pointer('pointermove', viewport, 60);
+    expect(position.style.transform).not.toBe(before);
+    const pan = position.style.transform;
+    key('keydown', viewport);
+    expect(image().dataset.before).toBe('true');
+    key('keyup', viewport);
+    pointer('pointerup', viewport, 60);
+    pointer('pointermove', viewport, 100);
+    expect(position.style.transform).toBe(pan);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
+  });
+
   it('keeps the persistent choice across a keyed asset switch and does not retain the old image', () => {
     act(() => root.render(<Harness />));
     click(beforeButton());

@@ -3,7 +3,7 @@
 import math
 from uuid import UUID
 
-STATE_FORMAT_VERSION = 1
+STATE_FORMAT_VERSION = 2
 RECIPE_VERSION = 17
 PROCESSING_VERSION = "jpeg-preview-srgb8-v1"
 
@@ -81,14 +81,26 @@ def _changed_fields(before: dict, after: dict) -> tuple[set[str], set[str]]:
     return values, flags
 
 
-def _entry(value: object) -> dict:
-    entry = _record(value, frozenset(("kind", "before", "after")), "invalid_history")
+def _entry(value: object, state_format_version: int) -> dict:
+    paste = isinstance(value, dict) and value.get("kind") == "paste"
+    keys = ("kind", "before", "after", "metadata") if paste else ("kind", "before", "after")
+    entry = _record(value, frozenset(keys), "invalid_history")
     kind = entry["kind"]
-    if type(kind) is not str or kind not in KINDS:
+    if type(kind) is not str or (kind not in KINDS and not paste) or (paste and state_format_version != 2):
         raise InvalidEditState("invalid_history")
+    if paste:
+        metadata = _record(entry["metadata"], frozenset(("sourceAssetId", "sourceFilename", "adjustmentIds")), "invalid_history")
+        ids = metadata["adjustmentIds"]
+        if type(metadata["sourceAssetId"]) is not str or type(metadata["sourceFilename"]) is not str \
+            or not isinstance(ids, list) or not ids \
+            or any(type(key) is not str or key not in BOUNDS for key in ids) \
+            or len(set(ids)) != len(ids):
+            raise InvalidEditState("invalid_history")
     before, after = _recipe(entry["before"]), _recipe(entry["after"])
     values, flags = _changed_fields(before, after)
-    if kind in SCALAR_KINDS:
+    if paste:
+        valid = not flags and bool(values) and values <= set(ids)
+    elif kind in SCALAR_KINDS:
         valid = not flags and values <= {kind}
     elif kind in TOGGLE_FIELDS:
         valid = not values and flags <= {TOGGLE_FIELDS[kind]}
@@ -101,8 +113,11 @@ def _entry(value: object) -> dict:
 
 def validate_snapshot(value: object, asset_id: UUID | None = None) -> dict:
     state = _record(value, SNAPSHOT_KEYS, "invalid_snapshot")
+    # Preserve the original version: GET and identical saveId retries must not
+    # rewrite stored v1 JSON. The frontend creates v2 on its next changed save.
+    if type(state["stateFormatVersion"]) is not int or state["stateFormatVersion"] not in (1, STATE_FORMAT_VERSION):
+        raise InvalidEditState("unsupported_state_format_version")
     for key, expected in (
-        ("stateFormatVersion", STATE_FORMAT_VERSION),
         ("recipeVersion", RECIPE_VERSION),
         ("processingVersion", PROCESSING_VERSION),
     ):
@@ -132,7 +147,7 @@ def validate_snapshot(value: object, asset_id: UUID | None = None) -> dict:
         raise InvalidEditState("invalid_history")
     previous = None
     for item in history:
-        entry = _entry(item)
+        entry = _entry(item, state["stateFormatVersion"])
         if previous is not None and previous["after"] != entry["before"]:
             raise InvalidEditState("history_discontinuity")
         previous = entry

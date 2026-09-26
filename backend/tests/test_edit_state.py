@@ -142,7 +142,7 @@ class EditStateApiTests(unittest.TestCase):
 
     def test_versions_and_invalid_payload(self):
         for field, value, code in (
-            ("stateFormatVersion", 2, "unsupported_state_format_version"),
+            ("stateFormatVersion", 3, "unsupported_state_format_version"),
             ("recipeVersion", 18, "unsupported_recipe_version"),
             ("processingVersion", "future", "unsupported_processing_version"),
         ):
@@ -303,6 +303,101 @@ class EditStateApiTests(unittest.TestCase):
         saved["history"] = []
         saved["historyCursor"] = 0
         self.assertEqual(validate_snapshot(saved, ASSET_ID), saved)
+
+    def paste_state(self):
+        saved = state()
+        saved["stateFormatVersion"] = 2
+        before = saved["currentRecipe"]
+        after = copy.deepcopy(before)
+        after["adjustments"].update(tint=8, exposure=0.4)
+        saved["history"].append({
+            "kind": "paste", "before": before, "after": after,
+            "metadata": {"sourceAssetId": "source-photo", "sourceFilename": "PXL_20260920_050929890.jpg",
+                         "adjustmentIds": ["tint", "exposure", "temperature"]},
+        })
+        saved["historyCursor"] = 2
+        saved["currentRecipe"] = after
+        return saved
+
+    def test_v2_paste_sqlite_roundtrip_with_applied_and_redo_metadata(self):
+        saved = self.paste_state()
+        before = saved["currentRecipe"]
+        after = copy.deepcopy(before)
+        after["adjustments"]["tint"] = 12
+        saved["history"].append({"kind": "paste", "before": before, "after": after,
+                                 "metadata": {"sourceAssetId": "other", "sourceFilename": "other.jpg", "adjustmentIds": ["tint"]}})
+        self.assertEqual(validate_snapshot(saved, ASSET_ID), saved)
+        request = payload(saved)
+        first = self.request("PUT", request)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.request("GET").json(), first.json())
+        self.assertEqual(self.request("GET").json()["state"], saved)
+        self.assertEqual(self.request("PUT", request).json(), first.json())
+        with self.database() as connection:
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 1)
+            row = connection.execute("SELECT state_format_version, history_json, history_cursor FROM asset_edit_states").fetchone()
+            self.assertEqual(row[0], 2)
+            self.assertEqual(json.loads(row[1]), saved["history"])
+            self.assertEqual(row[2], 2)
+
+    def test_paste_metadata_and_semantics_rejections_preserve_saved_state(self):
+        valid = self.paste_state()
+        self.assertEqual(self.request("PUT", payload(valid)).status_code, 200)
+        metadata = valid["history"][-1]["metadata"]
+        bad_metadata = [None, [], {}, {**metadata, "extra": 1},
+                        {**metadata, "sourceAssetId": 1}, {**metadata, "sourceFilename": False},
+                        {**metadata, "adjustmentIds": "tint"}, {**metadata, "adjustmentIds": []},
+                        {**metadata, "adjustmentIds": ["unknown"]}, {**metadata, "adjustmentIds": [["tint"]]},
+                        {**metadata, "adjustmentIds": ["tint", "tint"]}]
+        cases = []
+        for bad in bad_metadata:
+            invalid = copy.deepcopy(valid)
+            invalid["history"][-1]["metadata"] = bad
+            cases.append((invalid, "invalid_history"))
+        for bad in ("flag", "outside", "noop", "recipe", "v1", "unknown", "missing_metadata", "extra_entry"):
+            invalid = copy.deepcopy(valid)
+            entry = invalid["history"][-1]
+            if bad == "flag": entry["after"]["gradingShadowsEnabled"] = False
+            if bad == "outside": entry["after"]["adjustments"]["contrast"] = 1
+            if bad == "noop": entry["after"] = copy.deepcopy(entry["before"])
+            if bad == "recipe": entry["after"]["adjustments"]["exposure"] = 6
+            if bad == "v1": invalid["stateFormatVersion"] = 1
+            if bad == "unknown": entry["kind"] = "unknown"
+            if bad == "missing_metadata": del entry["metadata"]
+            if bad == "extra_entry": entry["extra"] = True
+            invalid["currentRecipe"] = entry["after"]
+            code = "invalid_history_semantics" if bad in ("flag", "outside", "noop") \
+                else "invalid_recipe" if bad == "recipe" else "invalid_history"
+            cases.append((invalid, code))
+        for invalid, code in cases:
+            with self.subTest(invalid=invalid):
+                response = self.request("PUT", payload(invalid, revision=1))
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(self.code(response), code)
+                self.assertEqual(self.request("GET").json()["state"], valid)
+                self.assertEqual(self.request("GET").json()["revision"], 1)
+
+    def test_v1_read_and_identical_retry_then_v2_save_preserve_revision_rules(self):
+        legacy = state()
+        request = payload(legacy)
+        first = self.request("PUT", request).json()
+        self.assertEqual(first["state"], legacy)
+        self.assertEqual(self.request("GET").json(), first)
+        self.assertEqual(self.request("PUT", request).json(), first)
+        upgraded = self.paste_state()
+        new_request = payload(upgraded, revision=1)
+        second = self.request("PUT", new_request)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["revision"], 2)
+        self.assertEqual(second.json()["lastSaveId"], new_request["saveId"])
+        self.assertEqual(self.request("GET").json()["state"], upgraded)
+        self.assertEqual(self.request("PUT", new_request).json(), second.json())
+        self.assertEqual(self.request("PUT", request).status_code, 409)
+
+    def test_v1_does_not_accept_metadata_on_legacy_entry(self):
+        invalid = state()
+        invalid["history"][0]["metadata"] = {"sourceAssetId": "source", "sourceFilename": "source.jpg", "adjustmentIds": ["temperature"]}
+        self.assertEqual(self.request("PUT", payload(invalid)).status_code, 422)
 
 
 if __name__ == "__main__":

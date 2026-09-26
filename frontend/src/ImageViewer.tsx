@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
-import { isNativeEditingTarget } from './editShortcuts';
+import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 
@@ -17,9 +17,11 @@ type ImageViewerProps = {
   onBeforeAdjustmentsChange?: (value: boolean) => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  onCopyAdjustments?: () => boolean;
+  onPasteAdjustments?: () => boolean;
 };
 
-export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
@@ -152,14 +154,27 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
     </div>
     <div
       ref={viewportRef}
+      tabIndex={0}
+      aria-label={alt}
       className={`viewer-viewport${scale > fitScale ? ' pannable' : ''}`}
+      onKeyDown={(event) => {
+        // Only actual photo focus participates; hovering a slider does not.
+        if (document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
+        const shortcut = editClipboardShortcut(event.nativeEvent);
+        const handled = shortcut === 'copy' ? onCopyAdjustments?.()
+          : shortcut === 'paste' ? onPasteAdjustments?.() : false;
+        if (handled) event.preventDefault();
+      }}
       onWheel={handleWheel}
       onPointerDown={startPan}
       onPointerMove={movePan}
       onPointerUp={stopPan}
       onPointerCancel={stopPan}
     >
-      <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}>
+      <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+        onPointerDown={(event) => {
+          if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
+        }}>
         {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}

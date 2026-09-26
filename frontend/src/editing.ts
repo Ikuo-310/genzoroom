@@ -1,13 +1,17 @@
 import type { RecentAsset } from './assets';
 
 export type EditRecipe = { version: 17; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; gradingShadowsEnabled: boolean; gradingMidtonesEnabled: boolean; gradingHighlightsEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; shadowsTint: number; midtonesTemperature: number; midtonesTint: number; highlightsTemperature: number; highlightsTint: number; vibrance: number; saturation: number } };
-export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'gradingShadowsToggle' | 'gradingMidtonesToggle' | 'gradingHighlightsToggle' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset';
-export type EditEntry = { kind: EditKind; before: EditRecipe; after: EditRecipe };
+export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'gradingShadowsToggle' | 'gradingMidtonesToggle' | 'gradingHighlightsToggle' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset' | 'paste';
+export type AdjustmentId = keyof EditRecipe['adjustments'];
+export type PasteMetadata = { sourceAssetId: string; sourceFilename: string; adjustmentIds: AdjustmentId[] };
+type EditOperation = { kind: Exclude<EditKind, 'paste'>; before: EditRecipe }
+  | { kind: 'paste'; before: EditRecipe; metadata: PasteMetadata };
+export type EditEntry = EditOperation & { after: EditRecipe };
 export type EditSession = {
   recipe: EditRecipe;
   history: EditEntry[];
   cursor: number;
-  pending: { kind: EditKind; before: EditRecipe } | null;
+  pending: EditOperation | null;
 };
 export const TEMPERATURE = { min: -100, max: 100, step: 1 };
 export const TINT = { min: -100, max: 100, step: 1 };
@@ -57,6 +61,11 @@ export function isColorGradingDefault(adjustments: EditRecipe['adjustments']): b
   return COLOR_GRADING_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export const COLOR_ADJUSTMENT_KEYS = ['vibrance', 'saturation'] as const;
+// Reuse category membership for all copy modes; never include enabled flags.
+export const ADJUSTMENT_IDS = [
+  ...WHITE_BALANCE_ADJUSTMENT_KEYS, ...BASIC_ADJUSTMENT_KEYS,
+  ...COLOR_ADJUSTMENT_KEYS, ...COLOR_GRADING_ADJUSTMENT_KEYS,
+] as const satisfies readonly AdjustmentId[];
 export function resetColorAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
   const defaults = defaultRecipe().adjustments;
@@ -124,7 +133,8 @@ export const normalizeMidtonesTint = normalizeTint;
 export const normalizeHighlightsTemperature = normalizeTemperature;
 export const normalizeHighlightsTint = normalizeTint;
 
-export type EditAction = { type: 'begin'; kind: EditKind } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
+export type EditAction = { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
+  | { type: 'paste'; values: Partial<EditRecipe['adjustments']>; sourceAssetId: string; sourceFilename: string }
   | { type: 'commit'; kind?: EditKind }
   | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
@@ -163,6 +173,19 @@ function commit(state: EditSession): EditSession {
 
 export function editSession(state: EditSession, action: EditAction): EditSession {
   switch (action.type) {
+    case 'paste': {
+      const current = commit(state);
+      const adjustmentIds = ADJUSTMENT_IDS.filter((id) => Object.hasOwn(action.values, id));
+      if (adjustmentIds.length === 0) return current;
+      const adjustments = { ...current.recipe.adjustments };
+      for (const id of adjustmentIds) adjustments[id] = action.values[id]!;
+      const recipe = { ...current.recipe, adjustments };
+      if (recipesEqual(current.recipe, recipe)) return current;
+      return commit({ ...current, recipe, pending: {
+        kind: 'paste', before: current.recipe,
+        metadata: { sourceAssetId: action.sourceAssetId, sourceFilename: action.sourceFilename, adjustmentIds },
+      } });
+    }
     case 'begin': {
       if (state.pending?.kind === action.kind) return state;
       const current = commit(state);

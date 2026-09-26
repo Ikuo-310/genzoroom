@@ -182,6 +182,7 @@
     "expandColor": "Expand Color adjustments",
     "colorResetHistory": "Reset Color adjustments",
     "allReset": "All Reset",
+    "pasteHistory": "Pasted from {{filename}}",
     "undo": "Undo",
     "redo": "Redo",
     "historyEmpty": "No committed edits yet.",

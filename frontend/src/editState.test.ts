@@ -45,13 +45,13 @@ function compact(session: EditSession): EditStateSnapshot {
   return result.value;
 }
 
-function entry(kind: EditKind, before: EditRecipe, after: EditRecipe) {
+function entry(kind: Exclude<EditKind, 'paste'>, before: EditRecipe, after: EditRecipe) {
   return { kind, before, after };
 }
 
 describe('edit state snapshot', () => {
   it('defines independent state format, processing version, and exit policy constants', () => {
-    expect(EDIT_STATE_FORMAT_VERSION).toBe(1);
+    expect(EDIT_STATE_FORMAT_VERSION).toBe(2);
     expect(PROCESSING_VERSION).toBe('jpeg-preview-srgb8-v1');
     expect(COMPACT_HISTORY_ON_EXIT).toBe(true);
   });
@@ -87,7 +87,7 @@ describe('edit state snapshot', () => {
 
   it('detects unsupported state and recipe versions and malformed recipes', () => {
     const saved = snapshot(newSession());
-    expect(validateEditStateSnapshot({ ...saved, stateFormatVersion: 2 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_state_format_version' }] });
+    expect(validateEditStateSnapshot({ ...saved, stateFormatVersion: 3 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_state_format_version' }] });
     expect(validateEditStateSnapshot({ ...saved, recipeVersion: 18 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
     expect(validateEditStateSnapshot({ ...saved, currentRecipe: { ...saved.currentRecipe, version: 18 } })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
     expect(validateEditStateSnapshot({ ...saved, processingVersion: 'future' })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_processing_version' }] });

@@ -7,8 +7,8 @@ import {
   type EditSession,
 } from './editing';
 
-/** Version of the JSON envelope persisted by a future backend. Independent of recipe and DB versions. */
-export const EDIT_STATE_FORMAT_VERSION = 1 as const;
+/** Current write format. Legacy v1 is strictly validated before restoring. */
+export const EDIT_STATE_FORMAT_VERSION = 2 as const;
 
 /** Bump only when a recipe's intended output pixels change. */
 export const PROCESSING_VERSION = 'jpeg-preview-srgb8-v1' as const;
@@ -26,7 +26,7 @@ export type EditSourceIdentity = {
 
 /** Frontend state payload only. Backend-owned revision, timestamps and save IDs are separate. */
 export type EditStateSnapshot = {
-  stateFormatVersion: typeof EDIT_STATE_FORMAT_VERSION;
+  stateFormatVersion: 1 | typeof EDIT_STATE_FORMAT_VERSION;
   recipeVersion: EditRecipe['version'];
   processingVersion: typeof PROCESSING_VERSION;
   currentRecipe: EditRecipe;
@@ -82,7 +82,7 @@ const EDIT_KINDS: readonly EditKind[] = [
   'highlightsTemperature', 'highlightsTemperatureReset', 'highlightsTint', 'highlightsTintReset',
   'colorGradingToggle', 'colorGradingReset', 'gradingShadowsToggle', 'gradingMidtonesToggle',
   'gradingHighlightsToggle', 'vibrance', 'vibranceReset', 'saturation', 'saturationReset',
-  'colorToggle', 'colorReset', 'allReset',
+  'colorToggle', 'colorReset', 'allReset', 'paste',
 ];
 
 const NUMERIC_EDIT_KEYS: Partial<Record<EditKind, keyof EditRecipe['adjustments']>> = {
@@ -134,7 +134,10 @@ function cloneRecipe(recipe: EditRecipe): EditRecipe {
 }
 
 function cloneEntry(entry: EditEntry): EditEntry {
-  return { kind: entry.kind, before: cloneRecipe(entry.before), after: cloneRecipe(entry.after) };
+  const recipes = { before: cloneRecipe(entry.before), after: cloneRecipe(entry.after) };
+  return entry.kind === 'paste'
+    ? { ...recipes, kind: 'paste', metadata: { ...entry.metadata, adjustmentIds: [...entry.metadata.adjustmentIds] } }
+    : { ...recipes, kind: entry.kind };
 }
 
 function cloneSourceIdentity(source: EditSourceIdentity): EditSourceIdentity {
@@ -179,10 +182,22 @@ function validateSourceIdentity(value: unknown): EditStateIssue[] {
   return [];
 }
 
-function validateEntry(value: unknown, index: number): EditStateIssue[] {
+function validateEntry(value: unknown, index: number, stateFormatVersion: unknown): EditStateIssue[] {
   const path = `history[${index}]`;
-  if (!isRecord(value) || !hasExactKeys(value, ENTRY_KEYS) || !EDIT_KINDS.includes(value.kind as EditKind)) {
+  const paste = isRecord(value) && value.kind === 'paste';
+  if (!isRecord(value) || !hasExactKeys(value, paste ? [...ENTRY_KEYS, 'metadata'] : ENTRY_KEYS)
+    || !EDIT_KINDS.includes(value.kind as EditKind) || (paste && stateFormatVersion !== 2)) {
     return [issue('invalid_history', path, 'History entry must contain a supported kind, before recipe, and after recipe.')];
+  }
+  if (paste) {
+    const metadata = value.metadata;
+    if (!isRecord(metadata) || !hasExactKeys(metadata, ['sourceAssetId', 'sourceFilename', 'adjustmentIds'])
+      || typeof metadata.sourceAssetId !== 'string' || typeof metadata.sourceFilename !== 'string'
+      || !Array.isArray(metadata.adjustmentIds) || metadata.adjustmentIds.length === 0
+      || metadata.adjustmentIds.some((id) => typeof id !== 'string' || !ADJUSTMENT_KEYS.includes(id as keyof EditRecipe['adjustments']))
+      || new Set(metadata.adjustmentIds).size !== metadata.adjustmentIds.length) {
+      return [issue('invalid_history', `${path}.metadata`, 'Paste metadata must identify its source and distinct supported adjustments.')];
+    }
   }
   const errors = [
     ...validateRecipe(value.before, `${path}.before`),
@@ -194,6 +209,11 @@ function validateEntry(value: unknown, index: number): EditStateIssue[] {
   const after = value.after as EditRecipe;
   const changedAdjustments = ADJUSTMENT_KEYS.filter((key) => before.adjustments[key] !== after.adjustments[key]);
   const changedFlags = ENABLED_KEYS.filter((key) => before[key] !== after[key]);
+  if (paste) {
+    const ids = (value as unknown as Extract<EditEntry, { kind: 'paste' }>).metadata.adjustmentIds;
+    return changedFlags.length === 0 && changedAdjustments.length > 0 && changedAdjustments.every((key) => ids.includes(key))
+      ? [] : [issue('invalid_history_semantics', path, 'Paste must change only selected adjustment values and preserve enabled flags.')];
+  }
   const numeric = NUMERIC_EDIT_KEYS[kind];
   const toggle = TOGGLE_EDIT_KEYS[kind];
   const reset = RESET_EDIT_KEYS[kind];
@@ -210,8 +230,8 @@ export function validateEditStateSnapshot(value: unknown): EditStateResult<EditS
   }
 
   const errors: EditStateIssue[] = [];
-  if (value.stateFormatVersion !== EDIT_STATE_FORMAT_VERSION) {
-    errors.push(issue('unsupported_state_format_version', 'stateFormatVersion', 'Only state format version 1 is supported.'));
+  if (value.stateFormatVersion !== 1 && value.stateFormatVersion !== EDIT_STATE_FORMAT_VERSION) {
+    errors.push(issue('unsupported_state_format_version', 'stateFormatVersion', 'Only state format versions 1 and 2 are supported.'));
   }
   if (value.recipeVersion !== 17) {
     errors.push(issue('unsupported_recipe_version', 'recipeVersion', 'Only recipe version 17 is supported.'));
@@ -225,7 +245,7 @@ export function validateEditStateSnapshot(value: unknown): EditStateResult<EditS
   if (!Array.isArray(value.history)) {
     errors.push(issue('invalid_history', 'history', 'History must be an array.'));
   } else {
-    value.history.forEach((entry, index) => errors.push(...validateEntry(entry, index)));
+    value.history.forEach((entry, index) => errors.push(...validateEntry(entry, index, value.stateFormatVersion)));
   }
 
   if (!Number.isInteger(value.historyCursor) || (value.historyCursor as number) < 0
@@ -267,7 +287,7 @@ function isRecipe(value: unknown): value is EditRecipe {
 
 function cloneSnapshot(snapshot: EditStateSnapshot): EditStateSnapshot {
   return {
-    stateFormatVersion: EDIT_STATE_FORMAT_VERSION,
+    stateFormatVersion: snapshot.stateFormatVersion,
     recipeVersion: snapshot.recipeVersion,
     processingVersion: PROCESSING_VERSION,
     currentRecipe: cloneRecipe(snapshot.currentRecipe),
@@ -325,6 +345,7 @@ function compactOperations(entries: readonly EditEntry[]): EditEntry[] {
       merged = false;
       const right = stack[stack.length - 1];
       const left = stack[stack.length - 2];
+      if (left.kind === 'paste' || right.kind === 'paste') continue;
       if (!sameMergeTarget(left, right) || !recipesEqual(left.after, right.before)) continue;
 
       const combined: EditEntry = { kind: left.kind, before: left.before, after: right.after };

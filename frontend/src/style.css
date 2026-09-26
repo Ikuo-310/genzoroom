@@ -127,6 +127,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .zoom-controls output { min-width: 48px; color: #aaa; font-variant-numeric: tabular-nums; text-align: center; font-size: 0.72rem; }
 .icon-button { min-width: 31px; padding-inline: 7px; font-size: 1rem; }
 .viewer-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; }
+.viewer-viewport:focus { outline: none; }
 .viewer-viewport.pannable { cursor: grab; }
 .viewer-viewport.pannable:active { cursor: grabbing; }
 .viewer-image-position { position: absolute; top: 50%; left: 50%; line-height: 0; will-change: transform; }
@@ -185,6 +186,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-actions .tool-button:disabled { cursor: default; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
+.edit-history-paste { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }
 .workspace-section-content .edit-source-note { margin-top: 14px; }
