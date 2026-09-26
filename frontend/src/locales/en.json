@@ -203,7 +203,7 @@
     "historyTrim": "Delete history below this point",
     "historyClear": "Clear all history",
     "historyReset": "Reset edits",
-    "historyClearConfirm": "All history will be deleted. Your current edits will be kept.",
+    "historyClearConfirm": "All history will be deleted. Your edits will remain.",
     "historyResetConfirm": "All edits and history will be deleted.",
     "historyResetWarning": "This action cannot be undone.",
     "historyCancel": "Cancel",

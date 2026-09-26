@@ -164,7 +164,7 @@ describe('History organization menus and confirmation', () => {
     const trigger = headerHistoryMenu();
     historyMenuAction(label);
     expect(document.activeElement).toBe(dialogButton('Cancel'));
-    expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your current edits will be kept.');
+    expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your edits will remain.');
     expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
       .toBe(label === 'Reset edits' ? '⚠This action cannot be undone.' : null);
     act(() => dialogButton('Cancel').click());
