@@ -205,6 +205,7 @@
     "historyReset": "Reset edits",
     "historyClearConfirm": "All history will be deleted. Your current edits will be kept.",
     "historyResetConfirm": "All edits and history will be deleted.",
+    "historyResetWarning": "This action cannot be undone.",
     "historyFailed": "Could not organize history.",
     "jpegOnly": "Adjustments are currently available for JPEG only.",
     "previewEditingNote": "Original photo files are unchanged. Edit settings autosave after five seconds and History is compacted when you leave through Home."

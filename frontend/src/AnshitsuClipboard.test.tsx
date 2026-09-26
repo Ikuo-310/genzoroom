@@ -165,6 +165,8 @@ describe('History organization menus and confirmation', () => {
     historyMenuAction(label);
     expect(document.activeElement).toBe(dialogButton('No'));
     expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your current edits will be kept.');
+    expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
+      .toBe(label === 'Reset edits' ? '⚠This action cannot be undone.' : null);
     act(() => dialogButton('No').click());
     expect(rendered.recipe).toEqual(original.recipe);
     expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
@@ -270,6 +272,8 @@ describe('History organization menus and confirmation', () => {
       headerHistoryMenu(); historyMenuAction(label);
       expect(host.querySelector('dialog h2')!.textContent).toBe(label);
       expect(host.querySelector('dialog p')!.textContent).toBe(message);
+      expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
+        .toBe(label === '編集を初期化' ? '⚠この操作は元に戻せません。' : null);
       expect(document.activeElement).toBe(dialogButton('No'));
       act(() => dialogButton('No').click());
     }

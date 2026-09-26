@@ -223,6 +223,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .history-organization-menu button:hover:not(:disabled), .history-organization-menu button:focus-visible { background: #3b3b3e; }
 .history-organization-menu button:disabled { color: #777; cursor: default; }
 .history-confirmation-dialog { width: min(420px, calc(100vw - 40px)); }
+.history-confirmation-warning { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 0; color: #ffb38a; font-weight: 700; }
+.history-confirmation-warning-icon { flex: none; color: inherit; }
 .workspace-section-content .edit-source-note { margin-top: 14px; }
 .viewer-image-status { position: absolute; top: 50%; left: 50%; margin: 0; color: #aaa; transform: translate(-50%, -50%); }
 .viewer-message { position: relative; }

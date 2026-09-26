@@ -203,6 +203,7 @@
     "historyReset": "編集を初期化",
     "historyClearConfirm": "全履歴を削除します。現在の編集内容は失われません。",
     "historyResetConfirm": "編集結果と履歴をすべて削除します。",
+    "historyResetWarning": "この操作は元に戻せません。",
     "historyFailed": "履歴を整理できませんでした。",
     "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
     "previewEditingNote": "写真の元データは変更しません。編集設定は5秒後に自動保存され、Home操作で履歴を整理して保存します。"

@@ -105,6 +105,10 @@ export function HistoryConfirmationDialog({ operation, onConfirm, onCancel, retu
     }}>
     <h2 id={titleId}>{t(operation === 'clearHistory' ? 'workspace.historyClear' : 'workspace.historyReset')}</h2>
     <p id={bodyId}>{t(operation === 'clearHistory' ? 'workspace.historyClearConfirm' : 'workspace.historyResetConfirm')}</p>
+    {operation === 'resetEdits' && <p className="history-confirmation-warning">
+      <span className="history-confirmation-warning-icon" aria-hidden="true">⚠</span>
+      {t('workspace.historyResetWarning')}
+    </p>}
     <div className="selection-confirm-actions">
       <button ref={no} type="button" className="tool-button" onClick={onCancel}>No</button>
       <button type="button" className="tool-button" onClick={onConfirm}>Yes</button>
