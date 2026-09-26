@@ -214,11 +214,11 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     updateSession(current, session, backup);
   }, [assetId, enabled, getRecord, updateSession]);
 
-  const organizeHistory = useCallback((operation: 'clearHistory' | 'trimHistory' | 'resetEdits' | 'compactHistory'): boolean => {
+  const organizeHistory = useCallback((operation: 'clearHistory' | 'trimHistory' | 'resetEdits' | 'compactHistory', cursor?: number): boolean => {
     const current = getRecord(assetId);
     if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return false;
     if (operation !== 'compactHistory') {
-      dispatch({ type: operation });
+      dispatch(operation === 'trimHistory' ? { type: operation, cursor } : { type: operation });
       return true;
     }
     // A new organization attempt consumes the previous restoration right,

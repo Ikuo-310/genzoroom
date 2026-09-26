@@ -5,7 +5,8 @@ import { Link, MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { AssetDetail, WorkspaceNavigationState } from './assets';
-import { ADJUSTMENT_IDS, defaultRecipe, newSession, type EditRecipe } from './editing';
+import { ADJUSTMENT_IDS, defaultRecipe, editSession, newSession, type EditRecipe } from './editing';
+import * as editStateModule from './editState';
 import { createEditStateSnapshot, type EditStateSnapshot } from './editState';
 import i18n from './i18n';
 import { copyEditSettings, readEditClipboard } from './editClipboard';
@@ -79,6 +80,225 @@ beforeEach(async () => {
     const row = { state, revision: revision + 1, lastSaveId: saveId, updatedAt: '2026-09-26T00:00:00Z' };
     rows.set(id, row);
     return row;
+  });
+});
+
+async function mountHistory(cursor = 2) {
+  let session = newSession();
+  for (const value of [10, 20, 30, 40]) session = editSession(editSession(session, { type: 'temperature', value }), { type: 'commit' });
+  session = editSession(session, { type: 'jumpToHistory', cursor });
+  const snapshot = createEditStateSnapshot(session, { provider: 'immich', assetId: first.id, inputKind: 'immich-preview' });
+  if (!snapshot.ok) throw new Error('Invalid History fixture');
+  rows.set(first.id, { state: snapshot.value, revision: 1, lastSaveId: 'initial', updatedAt: '2026-09-26T00:00:00Z' });
+  await mount();
+  return session;
+}
+function headerHistoryMenu() {
+  const trigger = host.querySelector<HTMLButtonElement>('.history-menu-trigger')!;
+  act(() => { trigger.focus(); trigger.click(); });
+  return trigger;
+}
+function rowHistoryMenu(cursor: number, keyboard = false) {
+  const trigger = host.querySelector<HTMLButtonElement>(`.edit-history li[value="${cursor}"] button`)!;
+  act(() => {
+    trigger.focus();
+    if (keyboard) trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    else trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }));
+  });
+  return trigger;
+}
+function historyMenuAction(label: string) {
+  const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.history-organization-menu button')).find((item) => item.textContent === label)!;
+  act(() => button.click());
+  return button;
+}
+
+describe('History organization menus and confirmation', () => {
+  it('offers three header actions, compacts without confirmation, and restores with Undo', async () => {
+    const original = await mountHistory();
+    headerHistoryMenu();
+    expect(Array.from(document.querySelectorAll('.history-organization-menu button'), (item) => item.textContent))
+      .toEqual(['Compact history', 'Clear all history', 'Reset edits']);
+    historyMenuAction('Compact history');
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(2);
+    expect(rendered.recipe).toEqual(original.recipe);
+    act(() => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent === 'Undo')!.click());
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    expect(rendered.recipe).toEqual(original.recipe);
+  });
+
+  it.each([1, 3])('trims atomically at right-clicked row %s without moving on right-click and restores its prior cursor', async (target) => {
+    const original = await mountHistory();
+    rowHistoryMenu(target);
+    expect(rendered.recipe).toEqual(original.recipe);
+    expect(host.querySelector('.edit-history button[aria-current]')!.textContent).toContain('→ +20');
+    expect(document.querySelectorAll('.history-organization-menu button')).toHaveLength(4);
+    historyMenuAction('Delete history below this point');
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4 - target);
+    expect(rendered.recipe!.adjustments.temperature).toBe(target <= 2 ? 20 : 30);
+    key(window, 'z');
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    expect(rendered.recipe).toEqual(original.recipe);
+    expect(host.querySelector('.edit-history button[aria-current]')!.textContent).toContain('→ +20');
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('supports Shift+F10, disables Initial State trimming at cursor zero, and preserves ordinary row click', async () => {
+    await mountHistory(0);
+    rowHistoryMenu(2, true);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    const initial = host.querySelector<HTMLButtonElement>('.initial-state button')!;
+    act(() => initial.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const trim = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((item) => item.textContent === 'Delete history below this point')!;
+    expect(trim.disabled).toBe(true);
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    act(() => host.querySelector<HTMLButtonElement>('.edit-history li[value="2"] button')!.click());
+    expect(rendered.recipe!.adjustments.temperature).toBe(20);
+  });
+
+  it.each(['Clear all history', 'Reset edits'])('confirms %s with No focused, cancellation unchanged, Yes applied and focus restored', async (label) => {
+    const original = await mountHistory();
+    const trigger = headerHistoryMenu();
+    historyMenuAction(label);
+    expect(document.activeElement).toBe(dialogButton('No'));
+    expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your current edits will be kept.');
+    act(() => dialogButton('No').click());
+    expect(rendered.recipe).toEqual(original.recipe);
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    expect(document.activeElement).toBe(trigger);
+    headerHistoryMenu(); historyMenuAction(label);
+    act(() => dialogButton('Yes').click());
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(0);
+    expect(rendered.recipe).toEqual(label === 'Reset edits' ? defaultRecipe() : original.recipe);
+    const undo = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent === 'Undo')!;
+    expect(undo.disabled).toBe(label === 'Reset edits');
+  });
+
+  it('handles Tab, Shift+Tab, Enter, Y, N and Escape with dialog isolation', async () => {
+    const original = await mountHistory();
+    const open = () => { headerHistoryMenu(); historyMenuAction('Clear all history'); };
+    open();
+    key(document.activeElement!, 'Tab', { ctrlKey: false });
+    expect(document.activeElement).toBe(dialogButton('Yes'));
+    key(document.activeElement!, 'Tab', { ctrlKey: false });
+    expect(document.activeElement).toBe(dialogButton('No'));
+    key(document.activeElement!, 'Tab', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(dialogButton('Yes'));
+    key(document.activeElement!, 'Tab', { ctrlKey: false, shiftKey: true });
+    key(document.activeElement!, 'Enter', { ctrlKey: false });
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(rendered.recipe).toEqual(original.recipe);
+    for (const cancel of ['n', 'Escape']) {
+      open(); key(document.activeElement!, cancel, { ctrlKey: false });
+      expect(host.querySelector('dialog')).toBeNull();
+      expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    }
+    open(); key(document.activeElement!, 'y', { ctrlKey: false });
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(0);
+    key(window, 'z');
+    open(); key(document.activeElement!, 'Tab', { ctrlKey: false });
+    key(document.activeElement!, 'Enter', { ctrlKey: false });
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(0);
+  });
+
+  it('ignores IME, AltGraph, modifiers, repeats and handled Y/N events and blocks background shortcuts', async () => {
+    const original = await mountHistory();
+    headerHistoryMenu(); historyMenuAction('Clear all history');
+    for (const options of [{ isComposing: true }, { repeat: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      for (const letter of ['y', 'n']) key(document.activeElement!, letter, { ctrlKey: false, ...options });
+      expect(host.querySelector('dialog')).not.toBeNull();
+    }
+    key(document.activeElement!, 'y', { ctrlKey: false }, true);
+    const handled = new KeyboardEvent('keydown', { key: 'y', bubbles: true, cancelable: true });
+    handled.preventDefault(); act(() => document.activeElement!.dispatchEvent(handled));
+    key(window, 'z'); key(window, 'y'); key(window, 'v'); key(window, 'c', { altKey: true });
+    expect(host.querySelector('dialog')).not.toBeNull();
+    expect(rendered.recipe).toEqual(original.recipe);
+    expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.edit-actions button')).every((item) => item.disabled)).toBe(true);
+  });
+
+  it('closes on outside pointer, Escape, Tab, or photo switch and drops pending confirmation on switch', async () => {
+    await mountHistory();
+    headerHistoryMenu();
+    act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    headerHistoryMenu(); key(document.activeElement!, 'Escape', { ctrlKey: false });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    headerHistoryMenu(); key(document.activeElement!, 'Tab', { ctrlKey: false });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    headerHistoryMenu(); historyMenuAction('Reset edits');
+    await click('button[aria-label="destination.jpg"]');
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(rendered.recipe).toEqual(defaultRecipe());
+    expect(rows.get(first.id)!.state.history).toHaveLength(4);
+  });
+
+  it('disables empty-history actions and prohibits menus before edit-state load', async () => {
+    await mount();
+    headerHistoryMenu();
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).every((item) => item.disabled)).toBe(true);
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    api.get.mockImplementation(() => new Promise(() => {}));
+    await click('button[aria-label="destination.jpg"]');
+    expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);
+    headerHistoryMenu();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('shows a concise error for failed compaction without changing History', async () => {
+    const original = await mountHistory();
+    const spy = vi.spyOn(editStateModule, 'compactEditSession').mockReturnValueOnce({ ok: false, issues: [] });
+    try {
+      headerHistoryMenu(); historyMenuAction('Compact history');
+      expect(host.querySelector('[role="alert"]')!.textContent).toBe('Could not organize history.');
+      expect(rendered.recipe).toEqual(original.recipe);
+      expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('localizes both confirmation titles and messages in Japanese while keeping No/Yes', async () => {
+    await mountHistory();
+    await act(async () => { await i18n.changeLanguage('ja'); });
+    for (const [label, message] of [['履歴をすべて削除', '全履歴を削除します。現在の編集内容は失われません。'],
+      ['編集を初期化', '編集結果と履歴をすべて削除します。']]) {
+      headerHistoryMenu(); historyMenuAction(label);
+      expect(host.querySelector('dialog h2')!.textContent).toBe(label);
+      expect(host.querySelector('dialog p')!.textContent).toBe(message);
+      expect(document.activeElement).toBe(dialogButton('No'));
+      act(() => dialogButton('No').click());
+    }
+  });
+
+  it('blocks header and row menus after a failed Filmstrip save', async () => {
+    await mountHistory();
+    headerHistoryMenu(); historyMenuAction('Compact history');
+    api.put.mockRejectedValueOnce(new Error('Unavailable'));
+    await click('button[aria-label="destination.jpg"]');
+    expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);
+    headerHistoryMenu(); rowHistoryMenu(1);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('keeps History confirmation and the Copy/Paste selection dialog mutually exclusive', async () => {
+    await mountHistory();
+    headerHistoryMenu(); historyMenuAction('Clear all history');
+    key(window, 'c', { altKey: true });
+    expect(host.querySelectorAll('dialog')).toHaveLength(1);
+    act(() => dialogButton('No').click());
+    menuAction('Copy selected settings…');
+    expect(host.querySelectorAll('dialog')).toHaveLength(1);
+    expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    expect(host.querySelector('dialog')).toBeNull();
+    headerHistoryMenu();
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
   });
 });
 
@@ -547,6 +767,9 @@ describe('selected settings clipboard', () => {
     api.put.mockImplementationOnce((_id, state: EditStateSnapshot, revision: number, lastSaveId: string) =>
       new Promise((resolve) => { finish = () => resolve({ state, revision: revision + 1, lastSaveId, updatedAt: '2026-09-26T00:00:00Z' }); }));
     await click(transition === 'home' ? '.workspace-actions button' : 'button[aria-label="destination.jpg"]');
+    expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);
+    headerHistoryMenu();
+    expect(document.querySelector('.history-organization-menu')).toBeNull();
     expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')).every((button) => button.disabled)).toBe(true);
     expect(key(viewport, 'c', { altKey: true }).defaultPrevented).toBe(false);
     expect(key(viewport, 'v', { altKey: true }).defaultPrevented).toBe(false);

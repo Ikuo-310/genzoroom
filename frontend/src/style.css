@@ -215,6 +215,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-history-paste { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }
+.history-organization-menu { position: fixed; z-index: 50; display: grid; box-sizing: border-box; min-width: min(190px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; padding: 4px; border: 1px solid #555; border-radius: 5px; background: #242426; box-shadow: 0 4px 14px #0008; }
+.history-organization-menu button { padding: 7px 10px; border: 0; border-radius: 3px; text-align: left; font: inherit; color: #ddd; background: transparent; cursor: pointer; }
+.history-organization-menu button:hover:not(:disabled), .history-organization-menu button:focus-visible { background: #3b3b3e; }
+.history-organization-menu button:disabled { color: #777; cursor: default; }
+.history-confirmation-dialog { width: min(420px, calc(100vw - 40px)); }
 .workspace-section-content .edit-source-note { margin-top: 14px; }
 .viewer-image-status { position: absolute; top: 50%; left: 50%; margin: 0; color: #aaa; transform: translate(-50%, -50%); }
 .viewer-message { position: relative; }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -18,7 +18,8 @@ import { getEditImageSource } from './editImageSource';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
-import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
+import { ADJUSTMENT_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
+import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { activeAdjustmentId } from './AdjustmentSlider';
 import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
@@ -50,28 +51,60 @@ export function AnshitsuPage() {
   const exitRef = useRef(false);
   const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
+  const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
+  const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits'; trigger: HTMLElement } | null>(null);
+  const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
-  const { session, dispatch, canUndo, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
+  const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
+  const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
+  const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
+  const closeHistoryMenu = useCallback(() => setHistoryMenu(null), []);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
 
-  useEffect(() => { setSelection(null); }, [assetId]);
+  useEffect(() => { setSelection(null); setHistoryMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
+  useEffect(() => {
+    if (!historyEnabled) setHistoryMenu(null);
+    if (!clipboardEnabled) setHistoryConfirmation(null);
+  }, [historyEnabled, clipboardEnabled]);
+
+  function openHistoryMenu(cursor: number | undefined, trigger: HTMLElement, x?: number, y?: number) {
+    if (!historyEnabled || switchingRef.current || exitRef.current) return;
+    const rect = trigger.getBoundingClientRect();
+    setHistoryMenu({ assetId, cursor, trigger, x: x ?? rect.left, y: y ?? rect.bottom });
+  }
+
+  function requestHistoryOperation(operation: HistoryOperation) {
+    if (!historyMenu || historyMenu.assetId !== assetId || !historyEnabled || switchingRef.current || exitRef.current) return;
+    setHistoryError(false);
+    if (operation === 'clearHistory' || operation === 'resetEdits') {
+      setHistoryConfirmation({ assetId, operation, trigger: historyMenu.trigger });
+    } else if (!organizeHistory(operation, historyMenu.cursor)) setHistoryError(true);
+  }
+
+  function confirmHistoryOperation() {
+    const request = historyConfirmation;
+    if (request && request.assetId === assetId && clipboardEnabled && !selection && !switchingRef.current && !exitRef.current) {
+      if (!organizeHistory(request.operation)) setHistoryError(true);
+    }
+    setHistoryConfirmation(null);
+  }
 
   function copySettings(ids: readonly AdjustmentId[] = ADJUSTMENT_IDS) {
-    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || !activeDetail) return false;
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation || !activeDetail) return false;
     copyEditSettings(session.recipe, assetId, activeDetail.filename, ids);
     setHasClipboard(true);
     return true;
   }
 
   function pasteSettings() {
-    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection) return false;
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     const clipboard = readEditClipboard();
     if (!clipboard) return false;
     dispatch({ type: 'paste', ...clipboard });
@@ -97,7 +130,7 @@ export function AnshitsuPage() {
   }, [copySettings, pasteSettings]);
 
   function openSelection(mode: 'copy' | 'paste') {
-    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection) return false;
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     if (mode === 'copy') setSelection({ mode, assetId });
     else {
       const clipboard = readEditClipboard();
@@ -226,14 +259,17 @@ export function AnshitsuPage() {
       leftOpen={leftOpen}
       rightOpen={rightOpen}
       leftPanel={<>
-        <WorkspaceSection title={t('workspace.history')}>
+        <WorkspaceSection title={t('workspace.history')} headerAction={<button type="button" className="tool-button workspace-section-action history-menu-trigger"
+          disabled={!historyEnabled} aria-label={t('workspace.historyMenu')} aria-haspopup="menu" aria-expanded={!!historyMenu}
+          onClick={(event) => { if (historyMenu) closeHistoryMenu(); else openHistoryMenu(undefined, event.currentTarget); }}>⋯</button>}>
           <div className="edit-actions">
-            <button className="tool-button" disabled={!editable || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
-            <button className="tool-button" disabled={!editable || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
+            <button className="tool-button" disabled={!historyEnabled || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+            <button className="tool-button" disabled={!historyEnabled || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
-            : <EditHistory history={session.history} cursor={session.cursor} disabled={!editable || switching || exitSaving || !!failedSwitch || !!exitFailure}
-              onJump={(cursor) => dispatch({ type: 'jumpToHistory', cursor })} />}
+            : <EditHistory history={session.history} cursor={session.cursor} disabled={!historyEnabled}
+              onMenu={(cursor, trigger, x, y) => openHistoryMenu(cursor, trigger, x, y)}
+              onJump={(cursor) => { if (historyEnabled) dispatch({ type: 'jumpToHistory', cursor }); }} />}
         </WorkspaceSection>
         <WorkspaceSection title="EXIF" grow>
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
@@ -257,9 +293,9 @@ export function AnshitsuPage() {
           onPasteAdjustments={pasteSettings}
           onSelectCopyAdjustments={() => openSelection('copy')}
           onSelectPasteAdjustments={() => openSelection('paste')}
-          editClipboardDisabled={!clipboardEnabled || selection !== null}
+          editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null}
+          keyboardBlocked={selection !== null || historyConfirmation !== null}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -334,6 +370,11 @@ export function AnshitsuPage() {
       availableIds={selection.mode === 'copy' ? ADJUSTMENT_IDS
         : ADJUSTMENT_IDS.filter((id) => Object.hasOwn(selection.clipboard.values, id))}
       onConfirm={confirmSelection} onCancel={() => setSelection(null)} />}
+    {historyMenu && historyMenu.assetId === assetId && historyEnabled && <HistoryOrganizationMenu target={historyMenu}
+      hasHistory={session.history.length > 0} canReset={canResetHistory} onClose={closeHistoryMenu} onSelect={requestHistoryOperation} />}
+    {historyConfirmation && historyConfirmation.assetId === assetId && <HistoryConfirmationDialog
+      operation={historyConfirmation.operation} returnFocus={historyConfirmation.trigger} onConfirm={confirmHistoryOperation} onCancel={() => setHistoryConfirmation(null)} />}
+    {historyError && <p className="workspace-autosave-warning" role="alert">{t('workspace.historyFailed')}</p>}
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {autosaveError && <p className="workspace-autosave-warning" role="alert">{t('workspace.autosaveFailed')}</p>}
     {exitSaving && <div className="workspace-save-backdrop"><section role="status" className="workspace-save-dialog">
@@ -467,8 +508,9 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
   </section>;
 }
 
-export function EditHistory({ history, cursor, disabled = false, onJump = () => undefined }: {
+export function EditHistory({ history, cursor, disabled = false, onJump = () => undefined, onMenu }: {
   history: readonly EditEntry[]; cursor: number; disabled?: boolean; onJump?: (cursor: number) => void;
+  onMenu?: (cursor: number, trigger: HTMLElement, x?: number, y?: number) => void;
 }) {
   const { t } = useTranslation();
   const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
@@ -565,6 +607,10 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
         title={entry.kind === 'paste' ? description : undefined}
       >
         <button type="button" disabled={disabled} aria-current={index + 1 === cursor ? 'step' : undefined}
+          onContextMenu={(event) => { if (!disabled && onMenu) { event.preventDefault(); onMenu(index + 1, event.currentTarget, event.clientX, event.clientY); } }}
+          onKeyDown={(event) => { if (!disabled && onMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+            event.preventDefault(); onMenu(index + 1, event.currentTarget);
+          } }}
           onClick={() => onJump(index + 1)}>
           {entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description}
         </button>
@@ -572,6 +618,10 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
     })}
     <li className={`initial-state${cursor === 0 ? ' current' : ''}`}>
       <button type="button" disabled={disabled} aria-current={cursor === 0 ? 'step' : undefined}
+        onContextMenu={(event) => { if (!disabled && onMenu) { event.preventDefault(); onMenu(cursor, event.currentTarget, event.clientX, event.clientY); } }}
+        onKeyDown={(event) => { if (!disabled && onMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+          event.preventDefault(); onMenu(cursor, event.currentTarget);
+        } }}
         onClick={() => onJump(0)}>{t('workspace.initialState')}</button>
     </li>
   </ol>;

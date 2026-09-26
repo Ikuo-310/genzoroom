@@ -137,7 +137,8 @@ export type EditAction = { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | {
   | { type: 'paste'; values: Partial<EditRecipe['adjustments']>; sourceAssetId: string; sourceFilename: string }
   | { type: 'commit'; kind?: EditKind }
   | { type: 'jumpToHistory'; cursor: number }
-  | { type: 'clearHistory' | 'resetEdits' | 'trimHistory' }
+  | { type: 'clearHistory' | 'resetEdits' }
+  | { type: 'trimHistory'; cursor?: number }
   | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
 export function recipesEqual(left: EditRecipe, right: EditRecipe) {
@@ -281,9 +282,14 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       return recipesEqual(state.recipe, defaultRecipe()) && state.history.length === 0
         && state.cursor === 0 && state.pending === null
         ? state : { ...state, recipe: defaultRecipe(), history: [], cursor: 0, pending: null };
-    case 'trimHistory':
-      if (!Number.isInteger(state.cursor) || state.cursor <= 0 || state.cursor > state.history.length) return state;
-      return { ...state, history: state.history.slice(state.cursor), cursor: 0 };
+    case 'trimHistory': {
+      const cursor = action.cursor ?? state.cursor;
+      if (!Number.isInteger(cursor) || cursor <= 0 || cursor > state.history.length) return state;
+      if (cursor <= state.cursor) return { ...state, history: state.history.slice(cursor), cursor: state.cursor - cursor };
+      // Selecting a newer starting point explicitly replaces the live preview;
+      // the organization backup retains any pending gesture for Undo.
+      return { ...state, history: state.history.slice(cursor), cursor: 0, recipe: state.history[cursor - 1].after, pending: null };
+    }
     case 'temperatureReset':
     case 'tintReset':
     case 'whiteBalanceReset':

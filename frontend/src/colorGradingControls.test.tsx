@@ -117,7 +117,7 @@ describe('Color Grading controls', () => {
     expect([slider(0).value, slider(2).value, slider(4).value]).toEqual(['10', '10', '10']);
     click(grading().querySelector<HTMLElement>('.adjustment-category-reset')!);
     expect([recipe().gradingShadowsEnabled, recipe().gradingMidtonesEnabled, recipe().gradingHighlightsEnabled]).toEqual([false, true, false]);
-    click(host.querySelector<HTMLButtonElement>('.workspace-section-action')!);
+    click(host.querySelector<HTMLButtonElement>('.workspace-section-action:not(.history-menu-trigger)')!);
     expect([recipe().gradingShadowsEnabled, recipe().gradingMidtonesEnabled, recipe().gradingHighlightsEnabled]).toEqual([true, true, true]);
   });
 
@@ -382,7 +382,7 @@ describe('Color Grading controls', () => {
 
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
-    click(host.querySelector<HTMLButtonElement>('.workspace-section-action')!);
+    click(host.querySelector<HTMLButtonElement>('.workspace-section-action:not(.history-menu-trigger)')!);
     expect(recipe()).toEqual(expect.objectContaining({ version: 17, colorGradingEnabled: true }));
     expect(Object.values(recipe().adjustments).every((value) => value === 0)).toBe(true);
   });

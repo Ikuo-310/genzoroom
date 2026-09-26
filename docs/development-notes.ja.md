@@ -395,3 +395,13 @@ Anshitsuはdesktop-firstとし、スマートフォン向けの本格的な現�
 通常状態でカード本体を押すと、従来どおりその1枚だけを暗室へ渡す。チェックから最初の1枚を選ぶと選択モードになり、以後はカード本体でも選択と解除を切り替える。Desktopでは通常時のチェックをホバーまたはキーボードフォーカス時に表示し、hoverのないモバイルではチェックを常時表示して単写真遷移と複数選択開始を分ける。
 
 「暗室へ」では、選択順に解決した `selectedAssets` と先頭Assetの `activeAssetId` をReact Routerのnavigation stateで渡す。Filmstripで別の写真を押したときは `activeAssetId` とURLだけを切り替え、`selectedAssets` は維持する。再読み込み時にnavigation stateが失われた場合は、URLのactiveAsset 1枚をImmichから再取得する既存挙動へ戻る。
+
+## 17. History整理メニュー（2026-09-26）
+
+Phase 1・2の整理ロジックと一時的な整理Undoを使い、Historyヘッダーの「⋯」と履歴行の右クリックメニューを追加した。ヘッダーは圧縮・全削除・編集初期化、履歴行はこれらに「ここより下の履歴を削除」を加える。Shift+F10とコンテキストメニューキーにも対応し、通常の行クリックによる移動は維持する。
+
+部分削除は右クリックした行を基準とする。右クリック時には移動せず、指定cursorを受け取るtrimHistoryを一度だけ実行する。現在位置が新しければRecipeとpendingを保ってcursorを減らし、古ければ指定行のafterを新しい開始時にしてcursorを0にする。この場合のpendingプレビューも含め、直後のUndoは整理前の状態全体を復元する。「編集開始時」のメニューだけは現在cursorを基準とし、cursorが0なら部分削除を無効にする。
+
+全削除と編集初期化は日本語・英語のネイティブmodal dialogで確認する。Noを初期フォーカスとし、Tab／Shift+Tab、Enter、Y／N、Escapeに対応する。IME・AltGraph・修飾キー・リピート・処理済みのY／Nイベントを抑止し、背景のUndo／RedoとCopy／Pasteを遮断する。Yes時に写真IDと編集可否を再確認し、閉じた後は呼び出し元が再有効化されてからフォーカスを戻す。
+
+メニューはviewport内に収める固定配置のportalとし、外側クリック・Escape・Tab・写真切替で閉じる。圧縮失敗は簡潔なalertで伝える。保存経路、圧縮アルゴリズム、各version、SQLite schemaは変更していない。ブラウザの手動確認はユーザー側のNAS／Firefoxで実施する。

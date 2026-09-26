@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- History organization menus in the panel header and on right-clicked rows, including Shift+F10 access. Compaction, clear, and row-based partial deletion support immediate Undo; clear and edit initialization use localized modal confirmations with No initially focused and keyboard controls.
 - A shared tab-local clipboard for all 16 JPEG recipe values, with full, selected, and single-slider Copy; full and selected Paste; and all four actions in the Viewer menu. `Ctrl+C` follows the active slider operation target (hover or focus) or copies all values from the focused Viewer; `Ctrl+V` works without slider or Viewer focus. `Ctrl+Alt+C` and `Ctrl+Alt+V` open the selection dialog. Changed Paste creates one filename-labelled, undoable History operation, preserves enabled flags, and uses the existing save path.
 - Final Anshitsu exit save for every asset edited in the session, with validated History compaction, uncompressed fallback, and stay-or-exit handling for save failures.
 - Five-second debounced autosave for dirty JPEG edit states, with nonblocking failure feedback and serialized saves shared with Filmstrip transitions.

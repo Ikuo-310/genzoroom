@@ -118,6 +118,32 @@ async function loadHistory(cursor = 2) {
 }
 
 describe('temporary History organization Undo', () => {
+  it.each([1, 2, 3, 4])('trims at an explicit cursor %s in one transition and restores the original session', async (cursor) => {
+    const original = await loadHistory();
+    act(() => { latest.organizeHistory('trimHistory', cursor); });
+    expect(latest.session.history).toEqual(original.history.slice(cursor));
+    expect(latest.session.cursor).toBe(Math.max(0, original.cursor - cursor));
+    expect(latest.session.recipe).toEqual(cursor <= original.cursor ? original.recipe : original.history[cursor - 1].after);
+    const stored = createEditStateSnapshot(latest.session, source(first));
+    expect(stored.ok).toBe(true);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(original);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 3])('retains pending in the current branch or restores it after moving the starting point to %s', async (cursor) => {
+    await loadHistory();
+    editExposure(0.5);
+    const original = structuredClone(latest.session);
+    act(() => { latest.organizeHistory('trimHistory', cursor); });
+    expect(latest.session.pending !== null).toBe(cursor < original.cursor);
+    expect(createEditStateSnapshot(latest.session, source(first)).ok).toBe(true);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session).toEqual(original);
+    commitEdit();
+    expect(latest.session.recipe).toEqual(original.recipe);
+  });
+
   it.each(['clearHistory', 'trimHistory', 'compactHistory'] as const)('restores the complete session after %s, then uses normal Undo/Redo', async (operation) => {
     const original = await loadHistory();
     act(() => { latest.organizeHistory(operation); });
