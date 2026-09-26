@@ -36,7 +36,7 @@ const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')
 const slider = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="range"]')[index]!;
 const number = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
 const rangeToggle = (index: number) => grading().querySelectorAll<HTMLButtonElement>('.grading-range-toggle')[index]!;
-const history = () => Array.from(host.querySelectorAll('.edit-history li'), (item) => item.textContent);
+const history = () => Array.from(host.querySelectorAll('.edit-history li:not(.initial-state)'), (item) => item.textContent);
 function click(element: HTMLElement) { act(() => element.click()); }
 function key(value: string, target: EventTarget, init: KeyboardEventInit = {}) {
   act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init })));

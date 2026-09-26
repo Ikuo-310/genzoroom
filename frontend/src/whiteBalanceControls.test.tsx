@@ -36,7 +36,7 @@ const category = (index = 0) => host.querySelectorAll<HTMLElement>('.adjustment-
 const slider = (index = 0) => category(index).querySelector<HTMLInputElement>('input[type="range"]')!;
 const tintSlider = () => category().querySelectorAll<HTMLInputElement>('input[type="range"]')[1]!;
 const number = (index = 0) => category().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
-const history = () => Array.from(host.querySelectorAll('.edit-history li'), item => item.textContent);
+const history = () => Array.from(host.querySelectorAll('.edit-history li:not(.initial-state)'), item => item.textContent);
 function click(element: HTMLElement) { act(() => element.click()); }
 function key(value: string, target: EventTarget = slider(), init: KeyboardEventInit = {}) {
   act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init })));

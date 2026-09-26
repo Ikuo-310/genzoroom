@@ -232,7 +232,8 @@ export function AnshitsuPage() {
             <button className="tool-button" disabled={!editable || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
-            : <EditHistory history={session.history} cursor={session.cursor} />}
+            : <EditHistory history={session.history} cursor={session.cursor} disabled={!editable || switching || exitSaving || !!failedSwitch || !!exitFailure}
+              onJump={(cursor) => dispatch({ type: 'jumpToHistory', cursor })} />}
         </WorkspaceSection>
         <WorkspaceSection title="EXIF" grow>
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
@@ -466,7 +467,9 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
   </section>;
 }
 
-export function EditHistory({ history, cursor }: { history: readonly EditEntry[]; cursor: number }) {
+export function EditHistory({ history, cursor, disabled = false, onJump = () => undefined }: {
+  history: readonly EditEntry[]; cursor: number; disabled?: boolean; onJump?: (cursor: number) => void;
+}) {
   const { t } = useTranslation();
   const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
 
@@ -557,12 +560,20 @@ export function EditHistory({ history, cursor }: { history: readonly EditEntry[]
             ? `${t(entry.kind === control.reset ? control.resetLabel : control.label)} ${control.format(entry.before.adjustments[control.key])} → ${control.format(entry.after.adjustments[control.key])}`
             : entry.kind;
       }
-      return <li key={index} value={index + 1} className={index >= cursor ? 'undone' : undefined}
+      const className = [index >= cursor ? 'undone' : '', index + 1 === cursor ? 'current' : ''].filter(Boolean).join(' ') || undefined;
+      return <li key={index} value={index + 1} className={className}
         title={entry.kind === 'paste' ? description : undefined}
-        aria-current={index === cursor - 1 ? 'step' : undefined}>
-        {entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description}
+      >
+        <button type="button" disabled={disabled} aria-current={index + 1 === cursor ? 'step' : undefined}
+          onClick={() => onJump(index + 1)}>
+          {entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description}
+        </button>
       </li>;
     })}
+    <li className={`initial-state${cursor === 0 ? ' current' : ''}`}>
+      <button type="button" disabled={disabled} aria-current={cursor === 0 ? 'step' : undefined}
+        onClick={() => onJump(0)}>{t('workspace.initialState')}</button>
+    </li>
   </ol>;
 }
 

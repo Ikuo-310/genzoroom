@@ -197,6 +197,7 @@
     "undo": "Undo",
     "redo": "Redo",
     "historyEmpty": "No committed edits yet.",
+    "initialState": "Initial State",
     "jpegOnly": "Adjustments are currently available for JPEG only.",
     "previewEditingNote": "Original photo files are unchanged. Edit settings autosave after five seconds and History is compacted when you leave through Home."
   },

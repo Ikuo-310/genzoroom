@@ -100,6 +100,60 @@ describe('non-destructive edit sessions', () => {
     expect(branch.history).toHaveLength(1);
     expect(editSession(branch, { type: 'redo' })).toEqual(branch);
   });
+  it('jumps to applied or redo history, keeps the branch, and restores the matching recipe', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = adjustExposure(state, 1.25);
+    const fullHistory = state.history;
+
+    state = editSession(state, { type: 'jumpToHistory', cursor: 1 });
+    expect(state.cursor).toBe(1);
+    expect(state.recipe.adjustments.exposure).toBe(0.5);
+    expect(state.history).toBe(fullHistory);
+    state = editSession(state, { type: 'undo' });
+    expect(state.cursor).toBe(0);
+    expect(state.recipe.adjustments.exposure).toBe(0);
+    state = editSession(state, { type: 'redo' });
+    expect(state.cursor).toBe(1);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 3 });
+    expect(state.cursor).toBe(3);
+    expect(state.recipe.adjustments.exposure).toBe(1.25);
+    expect(state.history).toEqual(fullHistory);
+    expect(editSession(state, { type: 'jumpToHistory', cursor: 3 })).toBe(state);
+  });
+  it('jumps to Initial State and bounds cursor after committing pending work', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 0 });
+    expect(state.cursor).toBe(0);
+    expect(state.recipe.adjustments.exposure).toBe(0);
+    expect(editSession(state, { type: 'jumpToHistory', cursor: -10 }).cursor).toBe(0);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 100 });
+    expect(state.cursor).toBe(2);
+
+    state = editSession(state, { type: 'exposure', value: 0.75 });
+    state = editSession(state, { type: 'jumpToHistory', cursor: 3 });
+    expect(state.history).toHaveLength(3);
+    expect(state.cursor).toBe(3);
+    expect(state.recipe.adjustments.exposure).toBe(0.75);
+    expect(state.pending).toBeNull();
+  });
+  it('jumps across compound Paste entries and a new edit after a jump drops Redo', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = editSession(state, { type: 'paste', values: { exposure: 1, tint: 30 }, sourceAssetId: 'source', sourceFilename: 'source.jpg' });
+    state = adjustContrast(state, 15);
+    expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'paste', 'contrast']);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 2 });
+    expect(state.recipe.adjustments.exposure).toBe(1);
+    expect(state.recipe.adjustments.tint).toBe(30);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 1 });
+    expect(state.recipe.adjustments.tint).toBe(0);
+    expect(state.history).toHaveLength(3);
+    state = adjustExposure(state, -0.25);
+    expect(state.history).toHaveLength(2);
+    expect(state.cursor).toBe(2);
+    expect(editSession(state, { type: 'redo' })).toBe(state);
+  });
   it('isolates recipes and histories by asset ID', () => {
     let sessions = editAsset({}, 'a', { type: 'exposure', value: 0.3 });
     sessions = editAsset(sessions, 'a', { type: 'commit' });

@@ -205,6 +205,13 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .edit-actions .tool-button:disabled { cursor: default; }
 .edit-history { padding-left: 18px; line-height: 1.7; }
+.edit-history li { border-radius: 3px; }
+.edit-history .initial-state { list-style: none; }
+.edit-history li.current { background: #303033; }
+.edit-history li > button { display: block; width: 100%; padding: 0 4px; border: 0; border-radius: 3px; color: inherit; text-align: left; background: transparent; font: inherit; cursor: pointer; }
+.edit-history li > button:hover:not(:disabled) { background: #29292c; }
+.edit-history li > button:focus-visible { outline: 1px solid #aaa; outline-offset: 1px; }
+.edit-history li > button:disabled { cursor: default; }
 .edit-history-paste { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }

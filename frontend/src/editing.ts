@@ -136,6 +136,7 @@ export const normalizeHighlightsTint = normalizeTint;
 export type EditAction = { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
   | { type: 'paste'; values: Partial<EditRecipe['adjustments']>; sourceAssetId: string; sourceFilename: string }
   | { type: 'commit'; kind?: EditKind }
+  | { type: 'jumpToHistory'; cursor: number }
   | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
 export function recipesEqual(left: EditRecipe, right: EditRecipe) {
@@ -263,6 +264,14 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     case 'redo': {
       const current = commit(state);
       return current.cursor === current.history.length ? current : { ...current, cursor: current.cursor + 1, recipe: current.history[current.cursor].after };
+    }
+    case 'jumpToHistory': {
+      const current = commit(state);
+      const requested = Number.isFinite(action.cursor) ? Math.trunc(action.cursor) : current.cursor;
+      const cursor = Math.max(0, Math.min(current.history.length, requested));
+      if (cursor === current.cursor) return current;
+      const recipe = cursor === 0 ? current.history[0]?.before ?? current.recipe : current.history[cursor - 1].after;
+      return { ...current, cursor, recipe };
     }
     case 'temperatureReset':
     case 'tintReset':

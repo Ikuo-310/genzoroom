@@ -79,6 +79,17 @@ describe('edit state snapshot', () => {
     expect(restored).toEqual({ ok: true, value: { recipe: saved.currentRecipe, history: saved.history, cursor: 1, pending: null } });
   });
 
+  it('persists a jumped cursor with the matching recipe and preserves the Redo branch', () => {
+    let session = edit(newSession(), 'temperature', 8);
+    session = edit(session, 'exposure', 0.5);
+    session = action(session, { type: 'jumpToHistory', cursor: 1 });
+    const saved = snapshot(session);
+    expect(saved.history).toHaveLength(2);
+    expect(saved.historyCursor).toBe(1);
+    expect(saved.currentRecipe).toEqual(saved.history[0].after);
+    expect(restoreEditSession(saved)).toMatchObject({ ok: true, value: { cursor: 1, recipe: saved.history[0].after, history: saved.history } });
+  });
+
   it('allows a valid empty history and preserves its current recipe', () => {
     const saved = snapshot(newSession());
     expect(validateEditStateSnapshot(saved).ok).toBe(true);

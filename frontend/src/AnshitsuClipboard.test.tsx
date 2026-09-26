@@ -112,7 +112,7 @@ describe('workspace full-settings clipboard', () => {
     expect(key(activatePreview(), 'v', { altKey: true }).defaultPrevented).toBe(false);
     expect(host.querySelector('dialog')).toBeNull();
     expect(Array.from(host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')).slice(2).every((button) => button.disabled)).toBe(true);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     expect(api.put).not.toHaveBeenCalled();
   });
 
@@ -135,8 +135,8 @@ describe('workspace full-settings clipboard', () => {
     const target = activatePreview();
     expect(key(target, 'v').defaultPrevented).toBe(true);
     expect(rendered.recipe).toEqual({ ...destination, adjustments: original.adjustments });
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
-    const history = host.querySelector('.edit-history li')!;
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    const history = host.querySelector('.edit-history li:not(.initial-state)')!;
     expect(history.textContent).toBe(`Pasted from ${first.filename}`);
     expect(history.getAttribute('title')).toBe(history.textContent);
     expect(key(target, 'z').defaultPrevented).toBe(true);
@@ -152,7 +152,7 @@ describe('workspace full-settings clipboard', () => {
     expect(saved.state.history).toHaveLength(1);
     expect(saved.state.history[0]).toMatchObject({ kind: 'paste', metadata: { sourceAssetId: first.id, sourceFilename: first.filename, adjustmentIds: ADJUSTMENT_IDS } });
     await click('a');
-    expect(host.querySelector('.edit-history li')!.textContent).toBe(`${first.filename}からペースト`);
+    expect(host.querySelector('.edit-history li:not(.initial-state)')!.textContent).toBe(`${first.filename}からペースト`);
     expect(rendered.recipe!.adjustments).toEqual(original.adjustments);
   });
 
@@ -234,7 +234,7 @@ describe('workspace full-settings clipboard', () => {
       field.tabIndex = 0; host.append(field); field.focus();
       expect(key(field, 'c').defaultPrevented).toBe(false);
       expect(key(field, 'v').defaultPrevented).toBe(false);
-      expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+      expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     });
 
   it('allows Ctrl+V from an unrelated range input now that paste does not require a slider target', async () => {
@@ -246,7 +246,7 @@ describe('workspace full-settings clipboard', () => {
     expect(key(range, 'c').defaultPrevented).toBe(false);
     expect(key(range, 'v').defaultPrevented).toBe(true);
     expect(rendered.recipe!.adjustments.tint).toBe(0);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
   });
 
   it.each([
@@ -259,7 +259,7 @@ describe('workspace full-settings clipboard', () => {
     await mount(); const viewport = activatePreview();
     expect(key(viewport, 'c', options).defaultPrevented).toBe(false);
     expect(key(viewport, 'v', options).defaultPrevented).toBe(false);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
   });
 
   it('ignores AltGraph and already prevented events', async () => {
@@ -273,7 +273,7 @@ describe('workspace full-settings clipboard', () => {
     viewport.addEventListener('keydown', cancel, { capture: true });
     key(viewport, 'v');
     viewport.removeEventListener('keydown', cancel, { capture: true });
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
   });
 });
 
@@ -302,7 +302,7 @@ describe('single-slider clipboard', () => {
     expect(rendered.recipe!.adjustments.exposure).toBe(1.25);
     expect(rendered.recipe!.adjustments.tint).toBe(35);
     expect(rendered.recipe!.basicEnabled).toBe(false);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
     expect(api.put).not.toHaveBeenCalled();
 
     key(otherSlider, 'z'); expect(rendered.recipe).toEqual(destination);
@@ -328,7 +328,7 @@ describe('single-slider clipboard', () => {
     const viewport = activatePreview();
     expect(key(viewport, 'v').defaultPrevented).toBe(true);
     expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(24);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     expect(api.put).not.toHaveBeenCalled();
   });
 
@@ -347,7 +347,7 @@ describe('single-slider clipboard', () => {
     expect(key(number, 'v').defaultPrevented).toBe(false);
     expect(readEditClipboard()).toEqual(copied);
     expect(rendered.recipe!.adjustments.exposure).toBe(1.5);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
   });
 });
 
@@ -390,7 +390,7 @@ describe('selected settings clipboard', () => {
     const adjustments = { ...destination.adjustments };
     for (const id of pastedIds) adjustments[id] = original.adjustments[id];
     expect(rendered.recipe).toEqual({ ...destination, adjustments });
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
     expect(readEditClipboard()).toEqual(copied);
     key(target, 'z'); expect(rendered.recipe).toEqual(destination);
     key(target, 'y'); expect(rendered.recipe).toEqual({ ...destination, adjustments });
@@ -433,7 +433,7 @@ describe('selected settings clipboard', () => {
     key(dialogButton('Cancel'), 'Escape', { ctrlKey: false });
     expect(rendered.recipe).toEqual(defaultRecipe());
     expect(readEditClipboard()).toEqual(copied);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     key(viewport, 'v', { altKey: true });
     expect(host.querySelector<HTMLInputElement>('dialog input[name="tint"]')!.checked).toBe(true);
   });
@@ -446,7 +446,7 @@ describe('selected settings clipboard', () => {
     await mount(); key(activatePreview(), 'v', { altKey: true }); choose(['tint']); confirm('Paste');
     expect(rendered.recipe).toEqual(recipe);
     expect(readEditClipboard()).toEqual(copied);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     await click('.workspace-actions button'); expect(api.put).not.toHaveBeenCalled();
   });
 
@@ -468,7 +468,7 @@ describe('selected settings clipboard', () => {
     menuAction('Paste copied settings');
     expect(rendered.recipe!.adjustments.exposure).toBe(2);
     expect(rendered.recipe!.adjustments.tint).toBe(10);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
   });
 
   it('blocks background Undo/Redo, clipboard, hovered slider arrows, and Backslash while modal', async () => {
@@ -491,7 +491,7 @@ describe('selected settings clipboard', () => {
     }
     expect(rendered.recipe).toEqual(before);
     expect(readEditClipboard()).toEqual(copied);
-    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
     expect(host.querySelector('[data-testid="preview"]')!.getAttribute('data-before')).toBe('false');
     key(control, 'Escape', { ctrlKey: false });
     expect(document.activeElement).toBe(viewport);

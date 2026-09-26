@@ -118,21 +118,30 @@ describe('Anshitsu workspace', () => {
     const markup = renderToStaticMarkup(<EditHistory history={history} cursor={3} />);
     expect(markup.indexOf('value="3"')).toBeLessThan(markup.indexOf('value="2"'));
     expect(markup.indexOf('value="2"')).toBeLessThan(markup.indexOf('value="1"'));
-    expect(markup).toContain('<li value="3" aria-current="step">Exposure +0.20 → +0.30</li>');
+    expect(markup).toContain('<li value="3" class="current"><button type="button" aria-current="step">Exposure +0.20 → +0.30</button></li>');
+    expect(markup).toContain('>Initial State</button>');
     expect(history).toEqual(original);
   });
 
   it('keeps newest-first History order across Undo, Redo, and a new edit', () => {
     const history = [historyEntry(0, 0.1), historyEntry(0.1, 0.2), historyEntry(0.2, 0.3)];
     const undone = renderToStaticMarkup(<EditHistory history={history} cursor={2} />);
-    expect(undone).toContain('<li value="3" class="undone">Exposure +0.20 → +0.30</li>');
+    expect(undone).toContain('<li value="3" class="undone"><button type="button">Exposure +0.20 → +0.30</button></li>');
     expect(undone).not.toContain('Undone');
-    expect(undone).toContain('<li value="2" aria-current="step">Exposure +0.10 → +0.20</li>');
+    expect(undone).toContain('<li value="2" class="current"><button type="button" aria-current="step">Exposure +0.10 → +0.20</button></li>');
     const redone = renderToStaticMarkup(<EditHistory history={history} cursor={3} />);
-    expect(redone).toContain('<li value="3" aria-current="step">Exposure +0.20 → +0.30</li>');
+    expect(redone).toContain('<li value="3" class="current"><button type="button" aria-current="step">Exposure +0.20 → +0.30</button></li>');
     const withNewEdit = renderToStaticMarkup(<EditHistory history={[...history, historyEntry(0.3, 0.4)]} cursor={4} />);
     expect(withNewEdit.indexOf('value="4"')).toBeLessThan(withNewEdit.indexOf('value="3"'));
-    expect(withNewEdit).toContain('<li value="4" aria-current="step">Exposure +0.30 → +0.40</li>');
+    expect(withNewEdit).toContain('<li value="4" class="current"><button type="button" aria-current="step">Exposure +0.30 → +0.40</button></li>');
+  });
+
+  it('shows Initial State as current at cursor zero and disables every row while editing is unavailable', () => {
+    const history = [historyEntry(0, 0.1), historyEntry(0.1, 0.2)];
+    const markup = renderToStaticMarkup(<EditHistory history={history} cursor={0} disabled />);
+    expect(markup).toContain('<li class="initial-state current"><button type="button" disabled="" aria-current="step">Initial State</button></li>');
+    expect(markup.match(/<button type="button" disabled=""/g)).toHaveLength(3);
+    expect(markup).toContain('<li value="2" class="undone"><button type="button" disabled="">Exposure +0.10 → +0.20</button></li>');
   });
 
   it('renders adjustment, category, and reset History succinctly in newest-first order', () => {
@@ -179,9 +188,9 @@ describe('Anshitsu workspace', () => {
     allReset.before = basicReset.after;
     const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, basicToggle, basicReset, allReset]} cursor={9} />);
     expect(markup.indexOf('value="9"')).toBeLessThan(markup.indexOf('value="8"'));
-    expect(markup).toContain('<li value="9" aria-current="step">All Reset</li>');
-    expect(markup).toContain('<li value="8">Reset Basic adjustments</li>');
-    expect(markup).toContain('<li value="7">Basic OFF</li>');
+    expect(markup).toContain('<li value="9" class="current"><button type="button" aria-current="step">All Reset</button></li>');
+    expect(markup).toContain('<li value="8"><button type="button">Reset Basic adjustments</button></li>');
+    expect(markup).toContain('<li value="7"><button type="button">Basic OFF</button></li>');
     expect(markup).not.toContain('All Reset Exposure');
     expect(markup).toContain('Blacks 0 → -35');
     expect(markup).toContain('Shadows 0 → +25');
@@ -275,7 +284,7 @@ describe('explicit Basic History formatting', () => {
   it.each(['futureColor', 'futureColorReset', 'toString'])('does not render Exposure values for unknown kind %s', (kind) => {
     const entry = { ...historyEntry(1.25, 2.5), kind } as EditEntry;
     const markup = renderToStaticMarkup(<EditHistory history={[entry]} cursor={1} />);
-    expect(markup).toContain(`>${kind}</li>`);
+    expect(markup).toContain(`>${kind}</button></li>`);
     expect(markup).not.toContain('Exposure');
     expect(markup).not.toContain('1.25');
     expect(markup).not.toContain('2.50');
