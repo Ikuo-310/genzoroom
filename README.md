@@ -21,6 +21,8 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Dirty JPEG edits are autosaved after five seconds without an editing change; Filmstrip switches still save immediately.
 - Returning Home from Anshitsu saves every photo edited during that Anshitsu session and compacts its History.
 - Undo / Redo, individual adjustment Reset, category Reset, and All Reset.
+- Copy and paste adjustment values between photos: `Ctrl+C` copies the current slider operation target, or all values when the Viewer is the target; `Ctrl+V` applies the copied values to the active photo without requiring slider or Viewer focus. `Ctrl+Alt+C` and `Ctrl+Alt+V` open item-selection dialogs, and the Viewer’s `⋯` menu offers all four actions.
+- Copy / Paste uses one tab-local GenzoRoom clipboard for all 16 numeric adjustments. Enabled flags are never copied, the clipboard survives navigation Home and back within the tab, and it is cleared by a page reload or tab close. OS clipboard contents are not used.
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
 - Before / After display toggle and hold the Backslash key for temporary Before; comparison bypasses develop adjustments without changing edits or zoom/pan.
@@ -41,6 +43,8 @@ Editing is currently available for JPEG assets only and uses the Immich-generate
 | Color Grading | Shadows Temperature, Shadows Tint, Midtones Temperature, Midtones Tint, Highlights Temperature, Highlights Tint |
 
 Each category can be collapsed, temporarily bypassed without losing its values, and reset independently. Shadows, Midtones, and Highlights also have separate ON/OFF switches within Color Grading; switching one off preserves its Temperature and Tint values. Adjustment changes and ON/OFF operations participate in History and Undo / Redo. Processing is performed locally in the browser; Immich originals are not modified.
+
+Copy / Paste transfers saved numeric values, including values in disabled categories or Color Grading ranges. Paste changes only the copied adjustment values and keeps the destination photo’s seven enabled flags. A selected Paste can apply any subset without changing the clipboard. Each changed Paste appears as one undoable History entry labelled with the source filename; repeating values already present creates no new entry. Text and numeric editing fields keep their native browser Copy / Paste behavior.
 
 ## Current limitations
 

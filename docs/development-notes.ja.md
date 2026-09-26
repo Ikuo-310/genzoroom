@@ -6,6 +6,18 @@
 
 JPEG写真を暗室でactiveにすると通常はedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。退出保存失敗後に暗室へ留まり、assetにdirtyなlocal stateまたは未確認saveが残っている場合は、再activation時にそのstateを保持してGETで上書きしない。明示的にdiscardしたassetは記録を破棄し、再訪時にDBから取得する。GET失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryを行わない。失敗後に最新snapshotまで保存できたら警告を解除する。通信結果が不明な保存は、DBで成功済みの可能性があるため、元のsnapshot・expectedRevision・saveIdを変更せず先に再送する。確認後に追加編集を保存する。別タブ等によるrevision conflictは自動mergeしない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。Home controlで暗室を退出すると、そのAnshitsu session中に永続化対象の編集を行った全assetを順次処理する。最新snapshotをcopy上で作り、`COMPACT_HISTORY_ON_EXIT`が有効ならapplied / redoを分離したpure compactionとvalidation後に保存する。圧縮失敗時は非圧縮snapshotへfallbackする。成功済みassetはlive sessionも保存済みHistoryへ同期し、後続assetの失敗で詳細Historyが再autosaveされないようにする。最終保存失敗時は暗室に留まるか、rollback / DELETEなしで退出するかを選ぶ。Browser Back、reload、tab close時の同期保存・interceptは未実装。
 
+## Copy / Paste（現行仕様）
+
+recipe v17の16数値項目を、`frontend/src/editClipboard.ts`の同一タブ内メモリ上のクリップボードで共有する。通常コピーは16項目、選択コピーは選んだ項目、単一スライダーコピーは対象の1項目を保存し、いずれも以前のコピーを置き換える。値は`effectiveAdjustments()`ではなくrecipeからコピー時点で複製し、source asset IDとfilenameも保持する。カテゴリ4個とColor Grading range3個のON/OFFは含めず、OFF中に保存されている数値も対象とする。Homeへ戻るなどのroute変更後も同じタブ内では保持するが、reload・タブ終了後は残さない。OS clipboard APIは使わない。
+
+プレビューがViewerの操作対象で`Ctrl+C`を押すと全項目をコピーし、AdjustmentSliderの操作対象があればその1項目をコピーする。操作対象は`keyboardAdjustment()`で共有し、マウスホバーとキーボードフォーカス、Shift＋上下キーで移した既存の対象に従う。対象を別途記憶するCopy専用状態はない。`Ctrl+V`はスライダー／Viewerのfocusを要求せず、編集可能な現在の写真にクリップボード内容を適用する。写真切替中、編集状態の読み込み前、退出保存中、選択dialog表示中などは実行できない。数値・テキスト入力中はブラウザ標準操作を優先する。
+
+`Ctrl+Alt+C`／`Ctrl+Alt+V`はViewerがキーボード操作対象のとき、共通の選択dialogを開く。White Balance、Basic、Color、Color Gradingのカテゴリに分け、Color GradingはShadows／Midtones／Highlights単位で区分する。Copyは全16項目を初期選択し、Pasteはクリップボード内の候補を全て初期選択する。ゼロ値も通常の候補である。カテゴリ一括選択、部分選択表示、全選択／全解除、確定・キャンセルを備え、0件では確定できない。確定ボタンを初期focusとし、候補がない場合は全選択ボタンへfocusする。Escapeでキャンセルし、checkbox上のEnterで確定する（0件またはIME変換中、Enter repeat中は確定しない）。Spaceでチェックを切り替える。ボタン上のEnterはそのボタンの標準操作を使い、Tab／Shift+Tabはdialog内を循環し、閉じた後は接続中の元focusへ戻る。AltGraphとIME等を誤認しない。Viewerの「⋯」menuにも全コピー、選択コピー、通常ペースト、選択ペーストを用意する。
+
+Pasteは値を選んだ1回の`paste` actionで適用し、コピー項目が複数でも変更があれば1件のcompound Historyとなる。同値Paste自体はHistoryを作らず、Redoも破棄しない。Paste開始前の未確定スライダー操作は先にcommitし、そのHistoryとは別扱いにする。クリップボードも減らさない。`before`／`after`は完全recipe、metadataはsource asset ID・filenameと指定されたadjustment ID一覧を保持する。HistoryからUndo／Redoでき、表示にはコピー元filenameを使う。History compactionはPasteを前後の編集操作と結合しない。通常のdirty判定、5秒autosave、Filmstrip切替前save、Home退出時のsave・compactionを通る。
+
+永続snapshotはRecipe v17、`stateFormatVersion` 2、`processingVersion` `jpeg-preview-srgb8-v1`、SQLite schema 1。Frontend／Backendはv1を完全検証して読み込めるが、Paste entryはv2にのみ許可する。v1を読むだけではDBを更新せず、その後に変更を保存するとv2になる。v2 snapshot保存後にv1のみ対応する旧版へrollbackすると、その編集状態を読めない可能性がある。DB schema、Recipe、画素処理versionはCopy / Pasteのために変更していない。HSL、カーブ、シャープネス等は将来候補で、現時点ではRecipe v17の16数値項目以外のCopy / Pasteは未実装。
+
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 
 recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、export、Histogram等は未実装。
