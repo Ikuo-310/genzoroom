@@ -187,7 +187,7 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Highlights Tint +10 → -26');
     click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[5]);
     expect(recipe().adjustments.highlightsTint).toBe(0);
-    expect(history()[0]).toBe('Highlights Tint Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Highlights Tint -26 → 0');
   });
 
   it('supports Highlights Temperature keyboard, wheel, direct input, grouped commit, and Reset', () => {
@@ -209,7 +209,7 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Highlights Temperature +20 → -26');
     click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[4]);
     expect(recipe().adjustments.highlightsTemperature).toBe(0);
-    expect(history()[0]).toBe('Highlights Temperature Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Highlights Temperature -26 → 0');
   });
 
   it('supports Midtones Tint keyboard, wheel, direct input, grouped commit, and Reset', () => {
@@ -231,7 +231,7 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Midtones Tint +20 → -26');
     click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[3]);
     expect(recipe().adjustments.midtonesTint).toBe(0);
-    expect(history()[0]).toBe('Midtones Tint Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Midtones Tint -26 → 0');
   });
 
   it('supports Midtones keyboard, wheel, direct input, pending commit, and individual Reset', () => {
@@ -254,7 +254,7 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Midtones Temperature +20 → -26');
     click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[2]);
     expect(recipe().adjustments.midtonesTemperature).toBe(0);
-    expect(history()[0]).toBe('Midtones Temperature Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Midtones Temperature -26 → 0');
   });
 
   it('supports Tint keyboard, wheel, direct input, pending commit, and individual Reset', () => {
@@ -276,7 +276,7 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Shadows Tint +20 → -26');
     click(grading().querySelectorAll<HTMLElement>('.adjustment-reset')[1]);
     expect(recipe().adjustments.shadowsTint).toBe(0);
-    expect(history()[0]).toBe('Shadows Tint Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Shadows Tint -26 → 0');
   });
 
   it('uses Shift+Arrow navigation in DOM order through Midtones without changing values', () => {

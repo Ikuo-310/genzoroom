@@ -188,7 +188,7 @@ describe('Anshitsu workspace', () => {
     allReset.before = basicReset.after;
     const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, basicToggle, basicReset, allReset]} cursor={9} />);
     expect(markup.indexOf('value="9"')).toBeLessThan(markup.indexOf('value="8"'));
-    expect(markup).toContain('<li value="9" class="current"><button type="button" aria-current="step">All Reset</button></li>');
+    expect(markup).toContain('<li value="9" class="current"><button type="button" aria-current="step">Reset all</button></li>');
     expect(markup).toContain('<li value="8"><button type="button">Reset Basic adjustments</button></li>');
     expect(markup).toContain('<li value="7"><button type="button">Basic OFF</button></li>');
     expect(markup).not.toContain('All Reset Exposure');
@@ -279,7 +279,7 @@ describe('explicit Basic History formatting', () => {
     ];
     const markup = renderToStaticMarkup(<EditHistory history={history} cursor={2} />);
     expect(markup).toContain(`${label} ${zero} → ${formatted}`);
-    expect(markup).toContain(`${label} Reset ${formatted} → ${zero}`);
+    expect(markup).toContain(`Reset ${label} ${formatted} → ${zero}`);
   });
   it.each(['futureColor', 'futureColorReset', 'toString'])('does not render Exposure values for unknown kind %s', (kind) => {
     const entry = { ...historyEntry(1.25, 2.5), kind } as EditEntry;

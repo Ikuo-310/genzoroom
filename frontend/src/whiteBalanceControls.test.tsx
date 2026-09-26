@@ -282,7 +282,7 @@ describe('production White Balance controls', () => {
     expect(history()[0]).toBe('Tint +10 → -26');
     click(category().querySelectorAll<HTMLElement>('.adjustment-reset')[1]);
     expect(recipe().adjustments.tint).toBe(0);
-    expect(history()[0]).toBe('Tint Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Tint -26 → 0');
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
     expect(tintSlider().disabled).toBe(true);
     expect(number(1).disabled).toBe(true);
@@ -355,7 +355,7 @@ describe('production White Balance controls', () => {
     expect(recipe().adjustments.temperature).toBe(100);
     click(category().querySelector<HTMLElement>('.adjustment-reset')!);
     expect(recipe().adjustments.temperature).toBe(0);
-    expect(history()[0]).toBe('Temperature Reset +100 → 0');
+    expect(history()[0]).toBe('Reset Temperature +100 → 0');
     expect(category().querySelector<HTMLButtonElement>('.adjustment-reset')!.disabled).toBe(true);
   });
   it('commits pending input across adjustments and ignores stale debounce callbacks', () => {
@@ -419,11 +419,11 @@ describe('production White Balance controls', () => {
     click(button('Redo'));
     expect(recipe().adjustments.temperature).toBe(0);
     click(category(1).querySelector<HTMLElement>('[aria-pressed]')!);
-    click(button('All Reset'));
+    click(button('Reset all'));
     expect(recipe().whiteBalanceEnabled).toBe(true);
     expect(recipe().basicEnabled).toBe(true);
     expect(Object.values(recipe().adjustments).every(value => value === 0)).toBe(true);
-    expect(history()[0]).toBe('All Reset');
+    expect(history()[0]).toBe('Reset all');
     click(button('Undo'));
     expect(recipe().whiteBalanceEnabled).toBe(false);
     expect(recipe().basicEnabled).toBe(false);

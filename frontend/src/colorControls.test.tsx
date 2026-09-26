@@ -108,7 +108,7 @@ describe('production Color controls', () => {
 
     click(color().querySelector<HTMLElement>('.adjustment-reset')!);
     expect(recipe().adjustments.vibrance).toBe(0);
-    expect(history()[0]).toBe('Vibrance Reset -26 → 0');
+    expect(history()[0]).toBe('Reset Vibrance -26 → 0');
   });
 
   it('collapses independently and disables controls while preserving the value across OFF/ON', () => {

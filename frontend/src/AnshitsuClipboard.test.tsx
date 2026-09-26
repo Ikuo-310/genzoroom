@@ -134,7 +134,7 @@ describe('History organization menus and confirmation', () => {
     expect(rendered.recipe).toEqual(original.recipe);
     expect(host.querySelector('.edit-history button[aria-current]')!.textContent).toContain('→ +20');
     expect(document.querySelectorAll('.history-organization-menu button')).toHaveLength(4);
-    historyMenuAction('Delete history below this point');
+    historyMenuAction('Delete this and earlier history');
     expect(host.querySelector('dialog')).toBeNull();
     expect(host.querySelectorAll('.edit-history li[value]')).toHaveLength(4 - target);
     expect(rendered.recipe!.adjustments.temperature).toBe(target <= 2 ? 20 : 30);
@@ -152,7 +152,7 @@ describe('History organization menus and confirmation', () => {
     key(document.activeElement!, 'Escape', { ctrlKey: false });
     const initial = host.querySelector<HTMLButtonElement>('.initial-state button')!;
     act(() => initial.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
-    const trim = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((item) => item.textContent === 'Delete history below this point')!;
+    const trim = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((item) => item.textContent === 'Delete this and earlier history')!;
     expect(trim.disabled).toBe(true);
     key(document.activeElement!, 'Escape', { ctrlKey: false });
     act(() => host.querySelector<HTMLButtonElement>('.edit-history li[value="2"] button')!.click());
@@ -164,7 +164,7 @@ describe('History organization menus and confirmation', () => {
     const trigger = headerHistoryMenu();
     historyMenuAction(label);
     expect(document.activeElement).toBe(dialogButton('Cancel'));
-    expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All edits and history will be deleted.' : 'Your edits will remain.');
+    expect(host.querySelector('dialog')!.textContent).toContain(label === 'Reset edits' ? 'All adjustments and edit history will be deleted.' : 'Your edits will remain.');
     expect(host.querySelector('.history-confirmation-warning')?.textContent.trim() ?? null)
       .toBe(label === 'Reset edits' ? '⚠This action cannot be undone.' : null);
     act(() => dialogButton('Cancel').click());

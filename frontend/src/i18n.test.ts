@@ -47,6 +47,35 @@ describe('language selection', () => {
 });
 
 describe('localized resources', () => {
+  it('uses the revised English history, reset, and workspace wording', () => {
+    const expected: Record<string, string> = {
+      'app.stageNotice': 'Browse up to 100 recent Immich photos. White Balance, Basic, Color Grading, and Color adjustments are available for JPEG photos in Anshitsu.',
+      'workspace.allReset': 'Reset all',
+      'workspace.historyTrim': 'Delete this and earlier history',
+      'workspace.historyResetConfirm': 'All adjustments and edit history will be deleted.',
+      'workspace.previewEditingNote': 'Original photo files are unchanged. Edit settings autosave after five seconds, and edit history is compacted when you return Home.',
+      'workspace.exposureReset': 'Reset Exposure',
+      'workspace.temperatureReset': 'Reset Temperature',
+      'workspace.tintReset': 'Reset Tint',
+      'workspace.contrastReset': 'Reset Contrast',
+      'workspace.highlightsReset': 'Reset Highlights',
+      'workspace.whitesReset': 'Reset Whites',
+      'workspace.shadowsReset': 'Reset Shadows',
+      'workspace.blacksReset': 'Reset Blacks',
+      'workspace.vibranceReset': 'Reset Vibrance',
+      'workspace.saturationReset': 'Reset Saturation',
+      'workspace.shadowsTemperatureReset': 'Reset Shadows Temperature',
+      'workspace.shadowsTintReset': 'Reset Shadows Tint',
+      'workspace.midtonesTemperatureReset': 'Reset Midtones Temperature',
+      'workspace.midtonesTintReset': 'Reset Midtones Tint',
+      'workspace.highlightsTemperatureReset': 'Reset Highlights Temperature',
+      'workspace.highlightsTintReset': 'Reset Highlights Tint',
+    };
+    for (const [key, value] of Object.entries(expected)) {
+      expect(i18n.t(key, { lng: 'en' })).toBe(value);
+    }
+  });
+
   it('provides English and Japanese UI text', () => {
     expect(i18n.t('connection.connected', { lng: 'en' })).toBe('Connected');
     expect(i18n.t('connection.connected', { lng: 'ja' })).toBe('接続済み');

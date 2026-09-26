@@ -628,7 +628,7 @@ describe('production Basic control wiring', () => {
     const reset = row.querySelector<HTMLButtonElement>('button')!;
     expect(row.querySelector('label')!.textContent).toBe(label);
     expect(input.getAttribute('aria-label')).toBe(`${label} value`);
-    expect(reset.getAttribute('aria-label')).toBe(`${label} Reset`);
+    expect(reset.getAttribute('aria-label')).toBe(`Reset ${label}`);
     expect(row.querySelector('.adjustment-unit')!.textContent).toBe(unit);
     for (const element of [slider, input]) {
       expect([element.min, element.max, element.step]).toEqual([min, max, step]);
