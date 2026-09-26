@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 
 type Props = {
+  adjustmentId: AdjustmentId;
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; unit?: string; precision: number; defaultValue: number; resetLabel: string;
   disabled?: boolean;
@@ -24,6 +26,13 @@ function keyboardAdjustment(): HTMLInputElement | null {
   if (isAvailable(activeAdjustment)) return activeAdjustment;
   const focused = document.activeElement;
   return focused instanceof HTMLInputElement && isAvailable(focused) ? focused : null;
+}
+
+export function focusedAdjustmentId(): AdjustmentId | null {
+  const focused = document.activeElement;
+  if (!(focused instanceof HTMLInputElement) || focused.type !== 'range' || !isAvailable(focused)) return null;
+  const id = focused.dataset.adjustmentId;
+  return ADJUSTMENT_IDS.find((candidate) => candidate === id) ?? null;
 }
 
 function activateFromMouse(element: HTMLInputElement) {
@@ -199,7 +208,7 @@ export function AdjustmentSlider(props: Props) {
   }, []);
   return <div className="adjustment-control" role="group" aria-labelledby={labelId}>
     <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
-    <input ref={range} id={rangeId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
+    <input ref={range} id={rangeId} data-adjustment-id={props.adjustmentId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={() => {

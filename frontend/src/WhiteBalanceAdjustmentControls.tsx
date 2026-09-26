@@ -11,7 +11,7 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch }: {
 }) {
   const { t } = useTranslation();
   return <>
-    <AdjustmentSlider key={`${assetId}-temperature`} label={t('workspace.temperature')} {...TEMPERATURE}
+    <AdjustmentSlider key={`${assetId}-temperature`} adjustmentId="temperature" label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.temperature} valueText={formatTemperature(recipe.adjustments.temperature)}
       valueLabel={t('workspace.temperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.whiteBalanceEnabled} resetLabel={t('workspace.temperatureReset')}
@@ -20,7 +20,7 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'temperature', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'temperature' })}
       onReset={() => dispatch({ type: 'temperatureReset' })} />
-    <AdjustmentSlider key={`${assetId}-tint`} label={t('workspace.tint')} {...TINT}
+    <AdjustmentSlider key={`${assetId}-tint`} adjustmentId="tint" label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.tint} valueText={formatTint(recipe.adjustments.tint)}
       valueLabel={t('workspace.tintValue')} precision={0} defaultValue={0}
       disabled={!recipe.whiteBalanceEnabled} resetLabel={t('workspace.tintReset')}

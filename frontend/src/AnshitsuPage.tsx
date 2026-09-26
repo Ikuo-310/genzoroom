@@ -20,6 +20,8 @@ import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
 import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
+import { focusedAdjustmentId } from './AdjustmentSlider';
+import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
 
@@ -75,6 +77,19 @@ export function AnshitsuPage() {
     dispatch({ type: 'paste', ...clipboard });
     return true;
   }
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const shortcut = editClipboardShortcut(event);
+      if (!shortcut || isNativeEditingTarget(event.target)) return;
+      const adjustmentId = focusedAdjustmentId();
+      if (!adjustmentId) return;
+      const handled = shortcut === 'copy' ? copySettings([adjustmentId]) : pasteSettings();
+      if (handled) event.preventDefault();
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [copySettings, pasteSettings]);
 
   function openSelection(mode: 'copy' | 'paste') {
     if (!clipboardEnabled || switchingRef.current || exitRef.current || selection) return false;

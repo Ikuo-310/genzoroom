@@ -13,7 +13,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
         aria-pressed={recipe.gradingShadowsEnabled}
         aria-label={t(recipe.gradingShadowsEnabled ? 'workspace.disableShadowsGrading' : 'workspace.enableShadowsGrading')}
         onClick={() => dispatch({ type: 'toggleGradingShadows' })}>⏻</button></div>
-    <AdjustmentSlider key={`${assetId}-shadows-temperature`} label={t('workspace.temperature')} {...TEMPERATURE}
+    <AdjustmentSlider key={`${assetId}-shadows-temperature`} adjustmentId="shadowsTemperature" label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.shadowsTemperature} valueText={formatShadowsTemperature(recipe.adjustments.shadowsTemperature)}
       valueLabel={t('workspace.shadowsTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingShadowsEnabled} resetLabel={t('workspace.shadowsTemperatureReset')}
@@ -22,7 +22,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'shadowsTemperature', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'shadowsTemperature' })}
       onReset={() => dispatch({ type: 'shadowsTemperatureReset' })} />
-    <AdjustmentSlider key={`${assetId}-shadows-tint`} label={t('workspace.tint')} {...TINT}
+    <AdjustmentSlider key={`${assetId}-shadows-tint`} adjustmentId="shadowsTint" label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.shadowsTint} valueText={formatShadowsTint(recipe.adjustments.shadowsTint)}
       valueLabel={t('workspace.shadowsTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingShadowsEnabled} resetLabel={t('workspace.shadowsTintReset')}
@@ -36,7 +36,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
         aria-pressed={recipe.gradingMidtonesEnabled}
         aria-label={t(recipe.gradingMidtonesEnabled ? 'workspace.disableMidtonesGrading' : 'workspace.enableMidtonesGrading')}
         onClick={() => dispatch({ type: 'toggleGradingMidtones' })}>⏻</button></div>
-    <AdjustmentSlider key={`${assetId}-midtones-temperature`} label={t('workspace.temperature')} {...TEMPERATURE}
+    <AdjustmentSlider key={`${assetId}-midtones-temperature`} adjustmentId="midtonesTemperature" label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.midtonesTemperature} valueText={formatMidtonesTemperature(recipe.adjustments.midtonesTemperature)}
       valueLabel={t('workspace.midtonesTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingMidtonesEnabled} resetLabel={t('workspace.midtonesTemperatureReset')}
@@ -45,7 +45,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'midtonesTemperature', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'midtonesTemperature' })}
       onReset={() => dispatch({ type: 'midtonesTemperatureReset' })} />
-    <AdjustmentSlider key={`${assetId}-midtones-tint`} label={t('workspace.tint')} {...TINT}
+    <AdjustmentSlider key={`${assetId}-midtones-tint`} adjustmentId="midtonesTint" label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.midtonesTint} valueText={formatMidtonesTint(recipe.adjustments.midtonesTint)}
       valueLabel={t('workspace.midtonesTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingMidtonesEnabled} resetLabel={t('workspace.midtonesTintReset')}
@@ -59,7 +59,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
         aria-pressed={recipe.gradingHighlightsEnabled}
         aria-label={t(recipe.gradingHighlightsEnabled ? 'workspace.disableHighlightsGrading' : 'workspace.enableHighlightsGrading')}
         onClick={() => dispatch({ type: 'toggleGradingHighlights' })}>⏻</button></div>
-    <AdjustmentSlider key={`${assetId}-highlights-temperature`} label={t('workspace.temperature')} {...TEMPERATURE}
+    <AdjustmentSlider key={`${assetId}-highlights-temperature`} adjustmentId="highlightsTemperature" label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.highlightsTemperature} valueText={formatHighlightsTemperature(recipe.adjustments.highlightsTemperature)}
       valueLabel={t('workspace.highlightsTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingHighlightsEnabled} resetLabel={t('workspace.highlightsTemperatureReset')}
@@ -68,7 +68,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'highlightsTemperature', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'highlightsTemperature' })}
       onReset={() => dispatch({ type: 'highlightsTemperatureReset' })} />
-    <AdjustmentSlider key={`${assetId}-highlights-tint`} label={t('workspace.tint')} {...TINT}
+    <AdjustmentSlider key={`${assetId}-highlights-tint`} adjustmentId="highlightsTint" label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.highlightsTint} valueText={formatHighlightsTint(recipe.adjustments.highlightsTint)}
       valueLabel={t('workspace.highlightsTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingHighlightsEnabled} resetLabel={t('workspace.highlightsTintReset')}

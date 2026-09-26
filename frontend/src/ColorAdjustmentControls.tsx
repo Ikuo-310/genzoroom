@@ -7,7 +7,7 @@ export function ColorAdjustmentControls({ assetId, recipe, dispatch }: {
 }) {
   const { t } = useTranslation();
   return <>
-    <AdjustmentSlider key={`${assetId}-vibrance`} label={t('workspace.vibrance')} {...VIBRANCE}
+    <AdjustmentSlider key={`${assetId}-vibrance`} adjustmentId="vibrance" label={t('workspace.vibrance')} {...VIBRANCE}
       value={recipe.adjustments.vibrance} valueText={formatVibrance(recipe.adjustments.vibrance)}
       valueLabel={t('workspace.vibranceValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorEnabled} resetLabel={t('workspace.vibranceReset')}
@@ -15,7 +15,7 @@ export function ColorAdjustmentControls({ assetId, recipe, dispatch }: {
       onChange={(value) => dispatch({ type: 'vibrance', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'vibrance' })}
       onReset={() => dispatch({ type: 'vibranceReset' })} />
-    <AdjustmentSlider key={`${assetId}-saturation`} label={t('workspace.saturation')} {...SATURATION}
+    <AdjustmentSlider key={`${assetId}-saturation`} adjustmentId="saturation" label={t('workspace.saturation')} {...SATURATION}
       value={recipe.adjustments.saturation} valueText={formatSaturation(recipe.adjustments.saturation)}
       valueLabel={t('workspace.saturationValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorEnabled} resetLabel={t('workspace.saturationReset')}

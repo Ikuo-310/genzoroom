@@ -10,7 +10,7 @@ export function BasicAdjustmentControls({ assetId, recipe, dispatch }: {
   return BASIC_ADJUSTMENT_KEYS.map((key) => {
     const control = BASIC_CONTROLS[key];
     const value = recipe.adjustments[key];
-    return <AdjustmentSlider key={`${assetId}-${key}`} label={t(control.label)} value={value}
+    return <AdjustmentSlider key={`${assetId}-${key}`} adjustmentId={key} label={t(control.label)} value={value}
       min={control.min} max={control.max} step={control.step}
       valueText={`${control.format(value)}${control.unit ? ` ${control.unit}` : ''}`}
       valueLabel={t(control.valueLabel)} unit={control.unit} precision={control.precision}

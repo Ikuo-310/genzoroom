@@ -224,6 +224,73 @@ describe('workspace full-settings clipboard', () => {
   });
 });
 
+describe('single-slider clipboard', () => {
+  it('replaces a multi-item copy, pastes by source adjustment despite another focused slider, and supports Undo/Redo and save', async () => {
+    const source = defaultRecipe(); source.adjustments.exposure = 1.25; source.adjustments.tint = 8;
+    const destination = defaultRecipe(); destination.adjustments.exposure = -2; destination.adjustments.tint = 35;
+    destination.basicEnabled = false;
+    rows.set(first.id, stored(first.id, source)); rows.set(second.id, stored(second.id, destination));
+    copyEditSettings(source, 'older', 'older.jpg');
+    await mount();
+    const sourceSlider = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => sourceSlider.focus());
+    expect(key(sourceSlider, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()).toEqual({ values: { exposure: 1.25 }, sourceAssetId: first.id, sourceFilename: first.filename });
+
+    await click('button[aria-label="destination.jpg"]');
+    const otherSlider = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
+    act(() => otherSlider.focus());
+    expect(key(otherSlider, 'v').defaultPrevented).toBe(true);
+    expect(rendered.recipe!.adjustments.exposure).toBe(1.25);
+    expect(rendered.recipe!.adjustments.tint).toBe(35);
+    expect(rendered.recipe!.basicEnabled).toBe(false);
+    expect(host.querySelectorAll('.edit-history li')).toHaveLength(1);
+    expect(api.put).not.toHaveBeenCalled();
+
+    key(otherSlider, 'z'); expect(rendered.recipe).toEqual(destination);
+    key(otherSlider, 'y'); expect(rendered.recipe!.adjustments.exposure).toBe(1.25);
+    expect(rendered.recipe!.adjustments.tint).toBe(35);
+    expect(readEditClipboard()?.values).toEqual({ exposure: 1.25 });
+    await click('.workspace-actions button');
+    const saved = rows.get(second.id)!.state;
+    expect(saved.currentRecipe.adjustments.exposure).toBe(1.25);
+    expect(saved.history).toHaveLength(1);
+    expect(saved.history[0]).toMatchObject({ kind: 'paste', metadata: { sourceAssetId: first.id,
+      sourceFilename: first.filename, adjustmentIds: ['exposure'] } });
+  });
+
+  it('pastes with preview focus and leaves History unchanged when the copied value already matches', async () => {
+    const source = defaultRecipe(); source.adjustments.shadowsTemperature = 24;
+    rows.set(first.id, stored(first.id, source)); rows.set(second.id, stored(second.id, source));
+    await mount();
+    const slider = host.querySelector<HTMLInputElement>('[data-adjustment-id="shadowsTemperature"]')!;
+    act(() => slider.focus()); key(slider, 'c');
+    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 24 });
+    await click('button[aria-label="destination.jpg"]');
+    const viewport = activatePreview();
+    expect(key(viewport, 'v').defaultPrevented).toBe(true);
+    expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(24);
+    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('preserves the clipboard and native Ctrl+C/Ctrl+V while a numeric input is focused', async () => {
+    const recipe = defaultRecipe(); recipe.adjustments.exposure = 1.5;
+    rows.set(first.id, stored(first.id, recipe));
+    await mount();
+    const slider = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => slider.focus()); key(slider, 'c');
+    const copied = readEditClipboard();
+    const number = host.querySelector<HTMLInputElement>('input[aria-label="Exposure value"]')!;
+    act(() => number.focus());
+    expect(key(number, 'c').defaultPrevented).toBe(false);
+    expect(key(number, 'v').defaultPrevented).toBe(false);
+    expect(readEditClipboard()).toEqual(copied);
+    expect(rendered.recipe!.adjustments.exposure).toBe(1.5);
+    expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+  });
+});
+
 describe('selected settings clipboard', () => {
   it.each([
     ['B', false, true], ['C', true, false], ['D', true, true],
