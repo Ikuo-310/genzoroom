@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
-import { copyTargetAdjustmentId } from './AdjustmentSlider';
+import { activeAdjustmentId } from './AdjustmentSlider';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
@@ -179,9 +179,8 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
           return;
         }
         const shortcut = editClipboardShortcut(event.nativeEvent);
-        // Let the page's focused-slider handler consume this after bubbling,
-        // so a hovered slider takes precedence over the photo-level copy.
-        if (shortcut === 'copy' && copyTargetAdjustmentId()) return;
+        // Let the page copy the slider currently targeted by adjustment controls.
+        if (shortcut === 'copy' && activeAdjustmentId()) return;
         const handled = shortcut === 'copy' ? onCopyAdjustments?.()
           : shortcut === 'paste' ? onPasteAdjustments?.() : false;
         if (handled) event.preventDefault();

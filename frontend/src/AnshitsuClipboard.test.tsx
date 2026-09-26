@@ -156,7 +156,7 @@ describe('workspace full-settings clipboard', () => {
     expect(rendered.recipe!.adjustments).toEqual(original.adjustments);
   });
 
-  it('prefers a hovered slider over a different focused slider, then clears hover on leave and photo switch', async () => {
+  it('copies the existing operation target on hover and clears it on leave and photo switch', async () => {
     const original = defaultRecipe();
     original.adjustments.exposure = 1.5; original.adjustments.shadowsTemperature = 42;
     const destination = defaultRecipe(); destination.adjustments.exposure = -2;
@@ -169,14 +169,9 @@ describe('workspace full-settings clipboard', () => {
     expect(key(viewport, 'c').defaultPrevented).toBe(true);
     expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 42 });
 
-    const focused = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
-    act(() => focused.focus());
-    expect(key(focused, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 42 });
-
     act(() => hovered.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
-    expect(key(focused, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()?.values).toEqual({ exposure: 1.5 });
+    expect(key(viewport, 'c').defaultPrevented).toBe(true);
+    expect(Object.keys(readEditClipboard()!.values)).toEqual([...ADJUSTMENT_IDS]);
 
     act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
     await click('button[aria-label="destination.jpg"]');
@@ -184,6 +179,22 @@ describe('workspace full-settings clipboard', () => {
     expect(key(targetViewport, 'c').defaultPrevented).toBe(true);
     expect(Object.keys(readEditClipboard()!.values)).toEqual([...ADJUSTMENT_IDS]);
     expect(readEditClipboard()?.sourceAssetId).toBe(second.id);
+  });
+
+  it('copies the slider selected by Shift+Arrow using the active slider target', async () => {
+    const original = defaultRecipe();
+    original.adjustments.temperature = 12; original.adjustments.tint = -8;
+    rows.set(first.id, stored(first.id, original));
+    await mount();
+    const temperature = host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!;
+    const tint = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
+    act(() => temperature.focus());
+    expect(key(temperature, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()?.values).toEqual({ temperature: 12 });
+    key(temperature, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(tint);
+    expect(key(tint, 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()?.values).toEqual({ tint: -8 });
   });
 
   it('keeps copy independent after the source is edited and uses Filmstrip save and autosave for Paste', async () => {
