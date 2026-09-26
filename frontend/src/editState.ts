@@ -386,3 +386,32 @@ export function compactEditStateSnapshot(snapshot: unknown): EditStateResult<Edi
   };
   return validateEditStateSnapshot(compacted);
 }
+
+/** Compacts a session through the validated snapshot path while keeping any live slider gesture separate. */
+export function compactEditSession(
+  session: EditSession,
+  sourceIdentity: EditSourceIdentity,
+): EditStateResult<EditSession> {
+  // Validate the session as it would be saved, including the pending operation,
+  // without changing the caller's session or its Redo branch.
+  const checkedSession = createEditStateSnapshot(session, sourceIdentity);
+  if (!checkedSession.ok) return checkedSession;
+
+  // Compact the committed timeline at the pending operation's baseline. This
+  // keeps the live recipe/pending gesture out of History and retains its Redo.
+  const baseline = session.pending
+    ? { ...session, recipe: session.pending.before, pending: null }
+    : session;
+  const source = createEditStateSnapshot(baseline, sourceIdentity);
+  if (!source.ok) return source;
+  const compacted = compactEditStateSnapshot(source.value);
+  if (!compacted.ok) return compacted;
+  const restored = restoreEditSession(compacted.value);
+  if (!restored.ok) return restored;
+  return {
+    ok: true,
+    value: session.pending
+      ? { ...restored.value, recipe: session.recipe, pending: session.pending }
+      : restored.value,
+  };
+}

@@ -154,6 +154,85 @@ describe('non-destructive edit sessions', () => {
     expect(state.cursor).toBe(2);
     expect(editSession(state, { type: 'redo' })).toBe(state);
   });
+  it('clears applied and Redo history while preserving the current recipe and pending value', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 1 });
+    const currentRecipe = state.recipe;
+    expect(state.history).toHaveLength(2);
+    state = editSession(state, { type: 'clearHistory' });
+    expect(state).toMatchObject({ recipe: currentRecipe, history: [], cursor: 0, pending: null });
+    expect(editSession(state, { type: 'redo' })).toBe(state);
+
+    const pending = editSession(newSession(), { type: 'exposure', value: 0.75 });
+    const clearedPending = editSession(pending, { type: 'clearHistory' });
+    expect(clearedPending.recipe.adjustments.exposure).toBe(0.75);
+    expect(clearedPending).toMatchObject({ history: [], cursor: 0, pending: null });
+  });
+  it('resets the recipe, pending work, applied history, and Redo history without recording Reset', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 1 });
+    state = editSession(state, { type: 'temperature', value: 12 });
+    state = editSession(state, { type: 'resetEdits' });
+    expect(state).toEqual(newSession());
+  });
+  it('trims only applied history and leaves the current recipe and Redo operations intact', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = adjustContrast(state, 20);
+    state = adjustHighlights(state, -30);
+    state = adjustExposure(state, 1.25);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 2 });
+    const currentRecipe = state.recipe;
+    const oldRedo = state.history.slice(2);
+    state = editSession(state, { type: 'trimHistory' });
+    expect(state.recipe).toEqual(currentRecipe);
+    expect(state.cursor).toBe(0);
+    expect(state.history).toEqual(oldRedo);
+    expect(state.history[0].before).toEqual(currentRecipe);
+    expect(editSession(state, { type: 'undo' })).toBe(state);
+    state = editSession(state, { type: 'redo' });
+    expect(state.recipe).toEqual(oldRedo[0].after);
+    state = editSession(state, { type: 'redo' });
+    expect(state.recipe).toEqual(oldRedo[1].after);
+    expect(state.cursor).toBe(2);
+  });
+  it('does nothing to an empty applied branch, trims everything at latest, and keeps pending work consistent', () => {
+    const start = newSession();
+    expect(editSession(start, { type: 'trimHistory' })).toBe(start);
+
+    let latest = adjustExposure(newSession(), 0.5);
+    latest = adjustContrast(latest, 20);
+    const latestRecipe = latest.recipe;
+    latest = editSession(latest, { type: 'trimHistory' });
+    expect(latest).toMatchObject({ recipe: latestRecipe, history: [], cursor: 0, pending: null });
+
+    let pending = adjustExposure(newSession(), 0.5);
+    pending = adjustContrast(pending, 20);
+    pending = editSession(pending, { type: 'jumpToHistory', cursor: 1 });
+    pending = editSession(pending, { type: 'temperature', value: 12 });
+    const liveRecipe = pending.recipe;
+    pending = editSession(pending, { type: 'trimHistory' });
+    expect(pending).toMatchObject({ recipe: liveRecipe, cursor: 0, pending: { kind: 'temperature' } });
+    expect(pending.history).toHaveLength(1);
+    expect(pending.history[0].before).toEqual(pending.pending!.before);
+    const committed = editSession(pending, { type: 'commit' });
+    expect(committed.history).toHaveLength(1);
+    expect(committed.history[0].after).toEqual(liveRecipe);
+  });
+  it('trims across a compound Paste without splitting it or changing its applied recipe', () => {
+    let state = adjustExposure(newSession(), 0.5);
+    state = editSession(state, { type: 'paste', values: { exposure: 1, tint: 30 }, sourceAssetId: 'source', sourceFilename: 'source.jpg' });
+    state = adjustContrast(state, 15);
+    state = editSession(state, { type: 'jumpToHistory', cursor: 2 });
+    const recipe = state.recipe;
+    state = editSession(state, { type: 'trimHistory' });
+    expect(state.recipe).toEqual(recipe);
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0].kind).toBe('contrast');
+    expect(state.history[0].before).toEqual(recipe);
+    expect(editSession(state, { type: 'redo' }).recipe.adjustments.contrast).toBe(15);
+  });
   it('isolates recipes and histories by asset ID', () => {
     let sessions = editAsset({}, 'a', { type: 'exposure', value: 0.3 });
     sessions = editAsset(sessions, 'a', { type: 'commit' });

@@ -137,6 +137,7 @@ export type EditAction = { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | {
   | { type: 'paste'; values: Partial<EditRecipe['adjustments']>; sourceAssetId: string; sourceFilename: string }
   | { type: 'commit'; kind?: EditKind }
   | { type: 'jumpToHistory'; cursor: number }
+  | { type: 'clearHistory' | 'resetEdits' | 'trimHistory' }
   | { type: 'temperatureReset' | 'tintReset' | 'whiteBalanceReset' | 'toggleWhiteBalance' | 'undo' | 'redo' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'toggleBasic' | 'basicReset' | 'shadowsTemperatureReset' | 'shadowsTintReset' | 'midtonesTemperatureReset' | 'midtonesTintReset' | 'highlightsTemperatureReset' | 'highlightsTintReset' | 'toggleColorGrading' | 'colorGradingReset' | 'toggleGradingShadows' | 'toggleGradingMidtones' | 'toggleGradingHighlights' | 'vibranceReset' | 'saturationReset' | 'toggleColor' | 'colorReset' | 'allReset' };
 
 export function recipesEqual(left: EditRecipe, right: EditRecipe) {
@@ -273,6 +274,16 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       const recipe = cursor === 0 ? current.history[0]?.before ?? current.recipe : current.history[cursor - 1].after;
       return { ...current, cursor, recipe };
     }
+    case 'clearHistory':
+      return state.history.length === 0 && state.cursor === 0 && state.pending === null
+        ? state : { ...state, history: [], cursor: 0, pending: null };
+    case 'resetEdits':
+      return recipesEqual(state.recipe, defaultRecipe()) && state.history.length === 0
+        && state.cursor === 0 && state.pending === null
+        ? state : { ...state, recipe: defaultRecipe(), history: [], cursor: 0, pending: null };
+    case 'trimHistory':
+      if (!Number.isInteger(state.cursor) || state.cursor <= 0 || state.cursor > state.history.length) return state;
+      return { ...state, history: state.history.slice(state.cursor), cursor: 0 };
     case 'temperatureReset':
     case 'tintReset':
     case 'whiteBalanceReset':

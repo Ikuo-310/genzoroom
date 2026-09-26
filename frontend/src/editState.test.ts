@@ -4,6 +4,7 @@ import {
   COMPACT_HISTORY_ON_EXIT,
   EDIT_STATE_FORMAT_VERSION,
   PROCESSING_VERSION,
+  compactEditSession,
   compactEditStateSnapshot,
   createEditStateSnapshot,
   restoreEditSession,
@@ -22,7 +23,7 @@ function action(session: EditSession, value: EditAction): EditSession {
   return editSession(session, value);
 }
 
-function edit(session: EditSession, kind: 'temperature' | 'exposure', value: number): EditSession {
+function edit(session: EditSession, kind: 'temperature' | 'exposure' | 'tint', value: number): EditSession {
   const updated = action(session, { type: kind, value });
   return action(updated, { type: 'commit', kind });
 }
@@ -248,5 +249,38 @@ describe('history compaction', () => {
     const invalid = snapshot(edit(edit(newSession(), 'temperature', 8), 'exposure', 0.35));
     invalid.history[1].before = defaultRecipe();
     expect(compactEditStateSnapshot(invalid)).toMatchObject({ ok: false, issues: expect.arrayContaining([expect.objectContaining({ code: 'history_discontinuity' })]) });
+  });
+
+  it('compacts an EditSession through snapshots while preserving its Recipe, cursor, Redo branch, and pending gesture', () => {
+    let session = edit(newSession(), 'exposure', 0.1);
+    session = edit(session, 'temperature', 2);
+    session = edit(session, 'temperature', 5);
+    session = action(action(session, { type: 'undo' }), { type: 'undo' });
+    session = action(session, { type: 'tint', value: 10 });
+    const recipe = structuredClone(session.recipe);
+    const pending = structuredClone(session.pending);
+
+    const result = compactEditSession(session, sourceIdentity);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.recipe).toEqual(recipe);
+    expect(result.value.cursor).toBe(1);
+    expect(result.value.history.map((item) => item.kind)).toEqual(['exposure', 'temperature']);
+    expect(result.value.history[1].before).toEqual(result.value.history[0].after);
+    expect(result.value.history[1].after.adjustments.temperature).toBe(5);
+    expect(result.value.pending).toEqual(pending);
+    expect(result.value.history[1].before).toEqual(result.value.pending!.before);
+    expect(session.history).toHaveLength(3);
+  });
+
+  it('does not mutate an invalid session when session compaction fails validation', () => {
+    let session = edit(newSession(), 'exposure', 0.5);
+    session = edit(session, 'temperature', 10);
+    const invalid = structuredClone(session);
+    invalid.history[0].after.adjustments.exposure = 500;
+    const original = structuredClone(invalid);
+    const result = compactEditSession(invalid, sourceIdentity);
+    expect(result.ok).toBe(false);
+    expect(invalid).toEqual(original);
   });
 });
