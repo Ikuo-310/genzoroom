@@ -23,13 +23,15 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
   const { t } = useTranslation();
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  const selectAllButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState(() => new Set(availableIds));
 
   useLayoutEffect(() => {
     const element = dialog.current!;
     const previousFocus = document.activeElement;
     element.showModal();
-    element.querySelector<HTMLButtonElement>('button')?.focus();
+    (availableIds.length > 0 ? confirmButton.current : selectAllButton.current)?.focus();
     // Native modal inertness blocks interaction, but window key listeners still
     // need isolation. Block events aimed outside; inside events stop at React.
     const blockOutside = (event: KeyboardEvent) => {
@@ -79,7 +81,7 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     }}>
     <h2 id={titleId}>{t(mode === 'copy' ? 'workspace.selectCopy' : 'workspace.selectPaste')}</h2>
     <div className="selection-all-actions">
-      <button type="button" className="tool-button" onClick={() => select(availableIds, true)}>{t('workspace.selectAllAdjustments')}</button>
+      <button ref={selectAllButton} type="button" className="tool-button" onClick={() => select(availableIds, true)}>{t('workspace.selectAllAdjustments')}</button>
       <button type="button" className="tool-button" onClick={() => select(availableIds, false)}>{t('workspace.clearAllAdjustments')}</button>
     </div>
     <div className="adjustment-selection-categories">
@@ -112,7 +114,7 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     </div>
     <div className="selection-confirm-actions">
       <button type="button" className="tool-button" onClick={onCancel}>{t('workspace.cancelSelection')}</button>
-      <button type="button" className="tool-button" disabled={selected.size === 0}
+      <button ref={confirmButton} type="button" className="tool-button" disabled={selected.size === 0}
         onClick={() => onConfirm(ADJUSTMENT_IDS.filter((id) => availableIds.includes(id) && selected.has(id)))}>
         {t(mode === 'copy' ? 'workspace.confirmCopy' : 'workspace.confirmPaste')}
       </button>

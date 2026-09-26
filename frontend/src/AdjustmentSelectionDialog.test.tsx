@@ -45,7 +45,7 @@ describe('adjustment selection dialog', () => {
   it('opens modal with sixteen selected values and distinct grading ranges, without enabled flags', () => {
     mount();
     expect(host.querySelector('dialog')!.open).toBe(true);
-    expect(document.activeElement).toBe(button('Select all'));
+    expect(document.activeElement).toBe(button('Copy'));
     expect(host.querySelectorAll('input[name]')).toHaveLength(16);
     expect(ADJUSTMENT_IDS.every((id) => item(id).checked && !item(id).disabled)).toBe(true);
     expect(categories().every((input) => input.checked && !input.indeterminate)).toBe(true);
@@ -75,6 +75,7 @@ describe('adjustment selection dialog', () => {
   });
   it('shows only copied items and selects every candidate again on a fresh open', () => {
     mount('paste', ['temperature', 'shadowsTint']);
+    expect(document.activeElement).toBe(button('Paste'));
     expect(host.querySelectorAll('input[name]')).toHaveLength(2);
     expect(host.querySelectorAll('fieldset')).toHaveLength(2);
     expect(Array.from(host.querySelectorAll('h3')).map((heading) => heading.textContent)).toEqual(['Shadows']);
@@ -82,6 +83,11 @@ describe('adjustment selection dialog', () => {
     expect(confirmed).toHaveBeenCalledWith(['temperature']);
     act(() => root.render(null)); mount('paste', ['temperature', 'shadowsTint']);
     expect(item('temperature').checked && item('shadowsTint').checked).toBe(true);
+  });
+  it('focuses Select all when there are no available items', () => {
+    mount('paste', []);
+    expect(document.activeElement).toBe(button('Select all'));
+    expect(button('Paste').disabled).toBe(true);
   });
   it('cancels on Escape and native cancel, then restores the prior focus on close', () => {
     mount(); key(button('Select all'), 'Escape');
@@ -127,6 +133,16 @@ describe('adjustment selection dialog', () => {
     expect(key(cancel, 'Enter').defaultPrevented).toBe(false);
     click(cancel);
     expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+  it.each(['copy', 'paste'] as const)('confirms %s with Enter from its initial focus', (mode) => {
+    mount(mode);
+    const confirm = button(mode === 'copy' ? 'Copy' : 'Paste');
+    expect(document.activeElement).toBe(confirm);
+    expect(key(confirm, 'Enter').defaultPrevented).toBe(false);
+    // The browser's native button activation follows Enter; jsdom needs it simulated.
+    click(confirm);
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    expect(confirmed).toHaveBeenCalledWith(ADJUSTMENT_IDS);
   });
   it('wraps Tab and Shift+Tab at modal boundaries, including a disabled confirm button', () => {
     mount(); const first = button('Select all'); const last = button('Copy');
