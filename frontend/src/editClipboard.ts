@@ -22,3 +22,10 @@ export function copyEditSettings(
 export function readEditClipboard(): EditClipboard | null {
   return clipboard ? { ...clipboard, values: { ...clipboard.values } } : null;
 }
+
+// Selection is a new payload, never a change to the shared clipboard.
+export function selectEditClipboardItems(copy: EditClipboard, ids: readonly AdjustmentId[]): EditClipboard {
+  const values: EditClipboard['values'] = {};
+  for (const id of ids) if (Object.hasOwn(copy.values, id)) values[id] = copy.values[id];
+  return { ...copy, values };
+}

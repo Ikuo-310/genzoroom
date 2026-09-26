@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
-import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
+import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } from './editShortcuts';
+import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 
@@ -19,9 +20,14 @@ type ImageViewerProps = {
   onToggleRight: () => void;
   onCopyAdjustments?: () => boolean;
   onPasteAdjustments?: () => boolean;
+  onSelectCopyAdjustments?: () => boolean;
+  onSelectPasteAdjustments?: () => boolean;
+  editClipboardDisabled?: boolean;
+  hasEditClipboard?: boolean;
+  keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
@@ -35,8 +41,9 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
   const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
 
   useEffect(() => {
+    if (keyboardBlocked) setBackslashHeld(false);
     const keydown = (event: KeyboardEvent) => {
-      if (event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
+      if (keyboardBlocked || event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
         || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       event.preventDefault();
       if (!event.repeat) setBackslashHeld(true);
@@ -56,7 +63,7 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
       window.removeEventListener('blur', release);
       document.removeEventListener('visibilitychange', visibilityChange);
     };
-  }, []);
+  }, [keyboardBlocked]);
 
   useEffect(() => {
     setImageState('loading');
@@ -141,6 +148,10 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
       </div>
       <div className="viewer-toolbar-right">
+        {onCopyAdjustments && onPasteAdjustments && onSelectCopyAdjustments && onSelectPasteAdjustments && <EditSettingsMenu
+          disabled={editClipboardDisabled} hasClipboard={hasEditClipboard}
+          onCopy={onCopyAdjustments} onPaste={onPasteAdjustments}
+          onSelectCopy={onSelectCopyAdjustments} onSelectPaste={onSelectPasteAdjustments} />}
         <div className="before-after-controls" role="group" aria-label={t('workspace.beforeAfter')}>
           <button type="button" className="tool-button" aria-pressed={showBeforeAdjustments}
             onClick={() => onBeforeAdjustmentsChange?.(true)}>{t('workspace.before')}</button>
@@ -159,7 +170,13 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
       className={`viewer-viewport${scale > fitScale ? ' pannable' : ''}`}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
-        if (document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
+        if (keyboardBlocked || document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
+        const selection = editSelectionShortcut(event.nativeEvent);
+        if (selection) {
+          const handled = selection === 'copy' ? onSelectCopyAdjustments?.() : onSelectPasteAdjustments?.();
+          if (handled) event.preventDefault();
+          return;
+        }
         const shortcut = editClipboardShortcut(event.nativeEvent);
         const handled = shortcut === 'copy' ? onCopyAdjustments?.()
           : shortcut === 'paste' ? onPasteAdjustments?.() : false;

@@ -119,6 +119,25 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .panel-toggle.right { justify-self: end; }
 .zoom-controls { display: flex; align-items: center; gap: 5px; margin-inline: auto; }
 .viewer-toolbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.edit-settings-menu { position: relative; }
+.edit-settings-menu summary { display: grid; place-items: center; min-width: 30px; cursor: pointer; list-style: none; font-size: 1rem; }
+.edit-settings-menu summary::-webkit-details-marker { display: none; }
+.edit-settings-menu-actions { position: absolute; top: calc(100% + 5px); right: 0; z-index: 25; display: grid; gap: 4px; width: max-content; max-width: 280px; padding: 6px; border: 1px solid #48484b; border-radius: 5px; background: #202023; box-shadow: 0 6px 18px #0008; }
+.edit-settings-menu-actions .tool-button { text-align: left; }
+.adjustment-selection-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); box-sizing: border-box; overflow: auto; color: #ddd; background: #242426; border: 1px solid #666; border-radius: 8px; padding: 20px; box-shadow: 0 10px 30px #0008; }
+.adjustment-selection-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.adjustment-selection-dialog h2 { margin: 0 0 14px; font-size: 1rem; }
+.selection-all-actions, .selection-confirm-actions { display: flex; gap: 8px; }
+.selection-confirm-actions { justify-content: flex-end; margin-top: 16px; }
+.adjustment-selection-categories { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.adjustment-selection-categories fieldset { min-width: 0; margin: 0; padding: 10px; border: 1px solid #48484b; border-radius: 5px; }
+.adjustment-selection-dialog label { display: flex; align-items: center; gap: 7px; font-size: 0.8rem; padding: 3px 0; }
+.adjustment-selection-dialog legend label { font-weight: 600; }
+.adjustment-selection-group { display: grid; gap: 3px; }
+.adjustment-selection-group h3 { margin: 10px 0 4px; font-size: 0.75rem; color: #aaa; }
+.adjustment-selection-group:first-of-type h3 { margin-top: 0; }
+.adjustment-selection-dialog input { accent-color: #aaa; }
+@media (max-width: 460px) { .adjustment-selection-categories { grid-template-columns: 1fr; } }
 .before-after-controls { display: flex; align-items: center; }
 .before-after-controls .tool-button { border-radius: 0; padding-inline: 7px; }
 .before-after-controls .tool-button:first-child { border-radius: 5px 0 0 5px; }

@@ -22,3 +22,13 @@ export function editClipboardShortcut(event: Pick<KeyboardEvent,
   const key = event.key.toLowerCase();
   return key === 'c' ? 'copy' : key === 'v' ? 'paste' : null;
 }
+
+export function editSelectionShortcut(event: Pick<KeyboardEvent,
+  'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'defaultPrevented' | 'getModifierState'>) {
+  // On Windows AltGraph may report both Ctrl and Alt. It is text input, not
+  // this explicit Ctrl+Alt shortcut.
+  if (event.defaultPrevented || event.isComposing || event.repeat || !event.ctrlKey || !event.altKey
+    || event.metaKey || event.shiftKey || event.getModifierState('AltGraph')) return null;
+  const key = event.key.toLowerCase();
+  return key === 'c' ? 'copy' : key === 'v' ? 'paste' : null;
+}

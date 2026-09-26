@@ -17,11 +17,15 @@ import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemper
 import { getEditImageSource } from './editImageSource';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
-import { copyEditSettings, readEditClipboard } from './editClipboard';
+import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
+import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
+import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
 
 type DetailState = 'loading' | 'ready' | 'error';
+type SelectionRequest = { mode: 'copy'; assetId: string }
+  | { mode: 'paste'; assetId: string; clipboard: EditClipboard };
 
 export function AnshitsuPage() {
   const { t, i18n } = useTranslation();
@@ -43,14 +47,55 @@ export function AnshitsuPage() {
   const [exitSaving, setExitSaving] = useState(false);
   const exitRef = useRef(false);
   const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
+  const [selection, setSelection] = useState<SelectionRequest | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
+  const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
+
+  useEffect(() => { setSelection(null); }, [assetId]);
+
+  function copySettings(ids: readonly AdjustmentId[] = ADJUSTMENT_IDS) {
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || !activeDetail) return false;
+    copyEditSettings(session.recipe, assetId, activeDetail.filename, ids);
+    setHasClipboard(true);
+    return true;
+  }
+
+  function pasteSettings() {
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection) return false;
+    const clipboard = readEditClipboard();
+    if (!clipboard) return false;
+    dispatch({ type: 'paste', ...clipboard });
+    return true;
+  }
+
+  function openSelection(mode: 'copy' | 'paste') {
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection) return false;
+    if (mode === 'copy') setSelection({ mode, assetId });
+    else {
+      const clipboard = readEditClipboard();
+      if (!clipboard || !ADJUSTMENT_IDS.some((id) => Object.hasOwn(clipboard.values, id))) return false;
+      setSelection({ mode, assetId, clipboard });
+    }
+    return true;
+  }
+
+  function confirmSelection(ids: AdjustmentId[]) {
+    if (!selection || selection.assetId !== assetId || !clipboardEnabled
+      || switchingRef.current || exitRef.current || ids.length === 0 || !activeDetail) return;
+    if (selection.mode === 'copy') {
+      copyEditSettings(session.recipe, assetId, activeDetail.filename, ids);
+      setHasClipboard(true);
+    } else dispatch({ type: 'paste', ...selectEditClipboardItems(selection.clipboard, ids) });
+    setSelection(null);
+  }
 
   function navigateToAsset(nextId: string) {
     const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId };
@@ -187,18 +232,13 @@ export function AnshitsuPage() {
           onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
-          onCopyAdjustments={() => {
-            if (!editable || switching || exitSaving || failedSwitch || exitFailure) return false;
-            copyEditSettings(session.recipe, assetId, activeDetail.filename);
-            return true;
-          }}
-          onPasteAdjustments={() => {
-            if (!editable || switching || exitSaving || failedSwitch || exitFailure) return false;
-            const clipboard = readEditClipboard();
-            if (!clipboard) return false;
-            dispatch({ type: 'paste', ...clipboard });
-            return true;
-          }}
+          onCopyAdjustments={() => copySettings()}
+          onPasteAdjustments={pasteSettings}
+          onSelectCopyAdjustments={() => openSelection('copy')}
+          onSelectPasteAdjustments={() => openSelection('paste')}
+          editClipboardDisabled={!clipboardEnabled || selection !== null}
+          hasEditClipboard={hasClipboard}
+          keyboardBlocked={selection !== null}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -268,6 +308,11 @@ export function AnshitsuPage() {
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
+    {selection && selection.assetId === assetId && <AdjustmentSelectionDialog
+      mode={selection.mode}
+      availableIds={selection.mode === 'copy' ? ADJUSTMENT_IDS
+        : ADJUSTMENT_IDS.filter((id) => Object.hasOwn(selection.clipboard.values, id))}
+      onConfirm={confirmSelection} onCancel={() => setSelection(null)} />}
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {autosaveError && <p className="workspace-autosave-warning" role="alert">{t('workspace.autosaveFailed')}</p>}
     {exitSaving && <div className="workspace-save-backdrop"><section role="status" className="workspace-save-dialog">
