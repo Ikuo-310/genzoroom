@@ -63,6 +63,13 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
       if (event.defaultPrevented || event.nativeEvent.isComposing) return;
       if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.metaKey) {
         event.preventDefault(); onCancel();
+      } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        // Let focused buttons keep their native Enter behavior. Enter on a
+        // checkbox confirms the selection (Space remains its native toggle).
+        if (event.repeat || event.target instanceof HTMLButtonElement) return;
+        if (!(event.target instanceof HTMLInputElement) || event.target.type !== 'checkbox' || selected.size === 0) return;
+        event.preventDefault();
+        onConfirm(ADJUSTMENT_IDS.filter((id) => availableIds.includes(id) && selected.has(id)));
       } else if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) {
         const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'));
         const first = controls[0]; const last = controls[controls.length - 1];

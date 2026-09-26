@@ -36,8 +36,8 @@ function button(text: string) {
 const item = (id: AdjustmentId) => host.querySelector<HTMLInputElement>(`input[name="${id}"]`)!;
 const categories = () => Array.from(host.querySelectorAll<HTMLInputElement>('legend input'));
 function click(element: HTMLElement) { act(() => element.click()); }
-function key(target: EventTarget, key: string, shiftKey = false) {
-  const event = new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true });
+function key(target: EventTarget, key: string, shiftKey = false, extra: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true, ...extra });
   act(() => target.dispatchEvent(event)); return event;
 }
 
@@ -91,6 +91,42 @@ describe('adjustment selection dialog', () => {
     expect(cancel.defaultPrevented).toBe(true);
     expect(cancelled).toHaveBeenCalledTimes(2);
     act(() => root.render(null)); expect(document.activeElement).toBe(opener);
+  });
+  it.each(['copy', 'paste'] as const)('confirms a %s selection with Enter from a checkbox', (mode) => {
+    mount(mode, ['temperature', 'shadowsTint']);
+    const checkbox = item('temperature');
+    act(() => checkbox.focus());
+    const event = key(checkbox, 'Enter');
+    expect(event.defaultPrevented).toBe(true);
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    expect(confirmed).toHaveBeenCalledWith(['temperature', 'shadowsTint']);
+  });
+  it('does not confirm an empty selection, IME Enter, or repeated Enter', () => {
+    mount();
+    click(button('Clear all'));
+    const checkbox = item('exposure');
+    act(() => checkbox.focus());
+    expect(key(checkbox, 'Enter').defaultPrevented).toBe(false);
+    expect(confirmed).not.toHaveBeenCalled();
+    click(button('Select all'));
+    expect(key(item('exposure'), 'Enter', false, { isComposing: true }).defaultPrevented).toBe(false);
+    expect(key(item('exposure'), 'Enter', false, { repeat: true }).defaultPrevented).toBe(false);
+    expect(confirmed).not.toHaveBeenCalled();
+  });
+  it('leaves Enter on action buttons to their native button behavior', () => {
+    mount();
+    const clear = button('Clear all');
+    act(() => clear.focus());
+    expect(key(clear, 'Enter').defaultPrevented).toBe(false);
+    // jsdom does not synthesize native keyboard activation; click represents
+    // the browser's default action after the key event is left untouched.
+    click(clear);
+    expect(item('exposure').checked).toBe(false);
+    const cancel = button('Cancel');
+    act(() => cancel.focus());
+    expect(key(cancel, 'Enter').defaultPrevented).toBe(false);
+    click(cancel);
+    expect(cancelled).toHaveBeenCalledTimes(1);
   });
   it('wraps Tab and Shift+Tab at modal boundaries, including a disabled confirm button', () => {
     mount(); const first = button('Select all'); const last = button('Copy');
