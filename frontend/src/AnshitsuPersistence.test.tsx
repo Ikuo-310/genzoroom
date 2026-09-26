@@ -63,6 +63,39 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('keeps History controls and cursor unchanged when EXIF is collapsed and expanded', async () => {
+    vi.useFakeTimers();
+    await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]');
+    const history = container.querySelector('.left-history-section')!;
+    const scroll = history.querySelector('.history-scroll-region')!;
+    const actions = history.querySelector('.edit-actions')!;
+    expect(history.querySelector('h2')?.textContent).toBe('History');
+    expect(history.querySelector('.history-menu-trigger')).not.toBeNull();
+    expect(actions.textContent).toBe('UndoRedo');
+    expect(scroll.contains(actions)).toBe(false);
+    expect(scroll.contains(history.querySelector('.workspace-section-header'))).toBe(false);
+    const toggle = container.querySelector<HTMLButtonElement>('.exif-toggle')!;
+    const content = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(content.hidden).toBe(false);
+    expect(content.querySelector('.exif-list')).not.toBeNull();
+    const before = scroll.innerHTML;
+    for (const expanded of [false, true]) {
+      await click('.exif-toggle');
+      expect(toggle.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(content.hidden).toBe(!expanded);
+      expect(scroll.innerHTML).toBe(before);
+      expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    }
+    expect(mocked.put).not.toHaveBeenCalled();
+    await act(async () => { (actions.querySelectorAll('button')[0] as HTMLButtonElement).click(); });
+    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+    await click('.exif-toggle');
+    await act(async () => { (actions.querySelectorAll('button')[1] as HTMLButtonElement).click(); });
+    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+  });
+
   it('switches a clean photo without PUT and loads the next photo', async () => {
     await mount();
     await click('button[aria-label="second.jpg"]'); await flush();

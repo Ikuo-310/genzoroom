@@ -259,22 +259,24 @@ export function AnshitsuPage() {
       leftOpen={leftOpen}
       rightOpen={rightOpen}
       leftPanel={<>
-        <WorkspaceSection title={t('workspace.history')} headerAction={<button type="button" className="tool-button workspace-section-action history-menu-trigger"
+        <WorkspaceSection title={t('workspace.history')} className="left-history-section" headerAction={<button type="button" className="tool-button workspace-section-action history-menu-trigger"
           disabled={!historyEnabled} aria-label={t('workspace.historyMenu')} aria-haspopup="menu" aria-expanded={!!historyMenu}
           onClick={(event) => { if (historyMenu) closeHistoryMenu(); else openHistoryMenu(undefined, event.currentTarget); }}>⋯</button>}>
           <div className="edit-actions">
             <button className="tool-button" disabled={!historyEnabled || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
             <button className="tool-button" disabled={!historyEnabled || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
+          <div className="history-scroll-region">
           {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
             : <EditHistory history={session.history} cursor={session.cursor} disabled={!historyEnabled}
               onMenu={(cursor, trigger, x, y) => openHistoryMenu(cursor, trigger, x, y)}
               onJump={(cursor) => { if (historyEnabled) dispatch({ type: 'jumpToHistory', cursor }); }} />}
+          </div>
         </WorkspaceSection>
-        <WorkspaceSection title="EXIF" grow>
+        <ExifSection>
           {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
             : <p>{detailState === 'error' ? t('workspace.detailFailed') : t('workspace.loading')}</p>}
-        </WorkspaceSection>
+        </ExifSection>
       </>}
       viewer={detailState === 'ready' && activeDetail ? (
         <ImageViewer
@@ -459,6 +461,18 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
       hidden={!rightOpen} onResize={resize} onResizeEnd={() => saveSidebarWidths(widthsRef.current)} />
     <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>{rightPanel}</aside>
   </div>;
+}
+
+export function ExifSection({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(true);
+  const contentId = useId();
+  return <section className="workspace-section left-exif-section">
+    <h2 className="exif-heading"><button type="button" className="exif-toggle" aria-expanded={expanded}
+      aria-controls={contentId} onClick={() => setExpanded((value) => !value)}>
+      <span>EXIF</span><span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+    </button></h2>
+    <div id={contentId} className="workspace-section-content exif-scroll-region" hidden={!expanded}>{children}</div>
+  </section>;
 }
 
 export function WorkspaceSection({ title, children, grow = false, className = '', headerAction }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode }) {

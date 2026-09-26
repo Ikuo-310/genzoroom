@@ -221,7 +221,9 @@ describe('Anshitsu workspace', () => {
     expect(viewerStart).toBeGreaterThan(leftStart);
     expect(rightStart).toBeGreaterThan(viewerStart);
     expect(leftPanel).toContain('>History</h2>');
-    expect(leftPanel).toContain('>EXIF</h2>');
+    expect(leftPanel).toContain('<span>EXIF</span>');
+    expect(leftPanel).toContain('class="history-scroll-region"');
+    expect(leftPanel).toContain('aria-expanded="true" aria-controls=');
     expect(leftPanel).not.toContain('>Scope</h2>');
     expect(rightPanel).toContain('>Scope</h2>');
     expect(rightPanel).toContain('>Develop controls</h2>');

@@ -106,6 +106,17 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .workspace-section-action { flex: 0 0 auto; min-height: 26px; padding: 3px 7px; font-size: 0.7rem; white-space: nowrap; }
 .workspace-section-content { padding: 6px 14px 16px; color: #959598; font-size: 0.78rem; }
 .workspace-section-content p { margin: 0; }
+.left-panel .left-history-section { flex: 1 1 0; min-height: 110px; }
+.left-history-section > .workspace-section-header { flex: 0 0 auto; }
+.left-history-section > .workspace-section-content { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; padding-bottom: 0; }
+.left-history-section .edit-actions { flex: 0 0 auto; }
+.history-scroll-region { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
+.left-panel .left-exif-section { flex: 0 1 auto; min-height: 42px; max-height: 45%; }
+.left-exif-section .exif-heading { flex: 0 0 auto; margin: 0; overflow: visible; }
+.exif-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 42px; padding: 8px 14px; border: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.exif-toggle:focus-visible { outline: 2px solid #f2f2f2; outline-offset: -2px; }
+.exif-scroll-region { min-height: 0; overflow-y: auto; }
+.exif-scroll-region[hidden] { display: none; }
 .exif-list { display: grid; gap: 9px; margin: 0; }
 .exif-list div { display: grid; grid-template-columns: minmax(76px, 0.8fr) minmax(0, 1.2fr); gap: 8px; }
 .exif-list dt { color: #8f8f92; }
@@ -272,6 +283,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .left-panel { order: 2; border-top: 1px solid #353537; border-right: 0; }
   .right-panel { order: 3; border-top: 1px solid #353537; border-left: 0; }
   .workspace-side-panel { overflow: visible; }
+  .left-panel .left-history-section { flex: 0 0 auto; min-height: 0; }
+  .left-history-section > .workspace-section-content { flex: 0 0 auto; }
+  .history-scroll-region { flex: 0 0 auto; overflow: visible; }
+  .left-panel .left-exif-section { flex: 0 0 auto; max-height: none; }
+  .exif-scroll-region { overflow: visible; }
   .workspace-section { min-height: 100px; }
   .workspace-section.grow { flex: 0 0 auto; }
   .right-panel .scope-section { flex-basis: auto; min-height: 100px; }
