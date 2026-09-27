@@ -148,7 +148,7 @@ describe('Color Grading controls', () => {
     expect(slider(3).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider(4).style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(slider(5).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
-    expect(Array.from(grading().querySelectorAll('.adjustment-unit'), (item) => item.textContent)).toEqual(['', '', '', '', '', '']);
+    expect(grading().querySelectorAll('.adjustment-power')).toHaveLength(6);
   });
 
   it('localizes the Shadows section label in Japanese', async () => {

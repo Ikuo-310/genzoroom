@@ -2,11 +2,18 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEven
 import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 import { adjustmentRowPosition, horizontalAdjustmentTarget, revealAdjustment } from './adjustmentNavigation';
+import { useTranslation } from 'react-i18next';
+import type { AdjustmentMenuPosition } from './AdjustmentContextMenu';
+
+export type AdjustmentSliderMenuTarget = AdjustmentMenuPosition & { adjustmentId: AdjustmentId };
+export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => void;
 
 type Props = {
   adjustmentId: AdjustmentId;
   label: string; value: number; min: number; max: number; step: number; valueText: string;
-  valueLabel: string; unit?: string; precision: number; defaultValue: number; resetLabel: string;
+  valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
+  enabled: boolean; onToggle: () => void; operationName?: string;
+  onOpenContextMenu?: OpenAdjustmentSliderMenu;
   disabled?: boolean;
   trackGradient?: string;
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
@@ -35,8 +42,14 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || isAvailable(item)));
   const index = position ? ordered.indexOf(position) : -1;
+  // A category-disabled row still has an operable individual power button.
+  const direction = event.key === 'ArrowDown' ? 1 : -1;
+  const adjacent = index >= 0 ? ordered[index + direction] : position
+    ? (direction > 0 ? ordered : [...ordered].reverse()).find((item) =>
+      !!(position.compareDocumentPosition(item) & (direction > 0 ? Node.DOCUMENT_POSITION_FOLLOWING : Node.DOCUMENT_POSITION_PRECEDING)))
+    : undefined;
   const destination = horizontal ? horizontalAdjustmentTarget(current, event.key === 'ArrowRight' ? 1 : -1)
-    : index < 0 ? undefined : ordered[index + (event.key === 'ArrowDown' ? 1 : -1)];
+    : adjacent;
   if (destination) {
     for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
     keyboardNavigation = true;
@@ -78,9 +91,12 @@ function activateFromMouse(element: HTMLInputElement) {
 }
 
 export function AdjustmentSlider(props: Props) {
+  const { t } = useTranslation();
+  const toggleLabel = t(props.enabled ? 'workspace.disableAdjustment' : 'workspace.enableAdjustment', { name: props.operationName ?? props.label });
   const rangeId = useId();
   const labelId = useId();
   const range = useRef<HTMLInputElement>(null);
+  const power = useRef<HTMLButtonElement>(null);
   const latest = useRef(props);
   latest.current = props;
   const hovered = useRef(false);
@@ -231,7 +247,13 @@ export function AdjustmentSlider(props: Props) {
       window.removeEventListener('pointercancel', pointerEnd);
     };
   }, []);
-  return <div className="adjustment-control" role="group" aria-labelledby={labelId}>
+  return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group" aria-labelledby={labelId}
+    onContextMenu={(event) => {
+      if (!props.onOpenContextMenu || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
+      event.preventDefault();
+      const trigger = range.current && !range.current.disabled ? range.current : power.current;
+      if (trigger) props.onOpenContextMenu({ adjustmentId: props.adjustmentId, trigger, x: event.clientX, y: event.clientY });
+    }}>
     <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
     <input ref={range} id={rangeId} data-adjustment-id={props.adjustmentId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
@@ -258,7 +280,8 @@ export function AdjustmentSlider(props: Props) {
       onBlur={() => {
         if (!hovered.current && activeAdjustment === range.current) activeAdjustment = null;
       }}
-      onPointerDown={() => {
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
         keyboardNavigation = false;
         if (isAvailable(range.current)) activeAdjustment = range.current;
         clearTimeout(timer.current);
@@ -276,7 +299,10 @@ export function AdjustmentSlider(props: Props) {
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
         onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-      <span className="adjustment-unit" aria-hidden="true">{props.unit ?? ''}</span>
+      <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}`}
+        aria-pressed={props.enabled} aria-label={toggleLabel} title={toggleLabel}
+        onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
+        onClick={props.onToggle}>⏻</button>
       <button type="button" className="adjustment-reset" onClick={props.onReset}
         onFocus={focusAdjustmentCategory}
         onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}

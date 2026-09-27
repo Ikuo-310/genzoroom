@@ -573,7 +573,7 @@ describe('production White Balance controls', () => {
     expect([slider().min, slider().max, slider().step, slider().value]).toEqual(['-100', '100', '1', '0']);
     expect([tintSlider().min, tintSlider().max, tintSlider().step, tintSlider().value]).toEqual(['-100', '100', '1', '0']);
     expect(Array.from(category().querySelectorAll('label'), item => item.textContent)).toEqual(['Temperature', 'Tint']);
-    expect(Array.from(category().querySelectorAll('.adjustment-unit'), item => item.textContent)).toEqual(['', '']);
+    expect(category().querySelectorAll('.adjustment-power')).toHaveLength(2);
     expect(slider().style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(tintSlider().style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider().classList.contains('has-gradient')).toBe(true);

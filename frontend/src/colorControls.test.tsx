@@ -85,7 +85,7 @@ describe('production Color controls', () => {
       expect(control.className).toBe('adjustment-range');
       expect(control.getAttribute('style')).toBeNull();
     }
-    expect(Array.from(color().querySelectorAll('.adjustment-unit'), (item) => item.textContent)).toEqual(['', '']);
+    expect(color().querySelectorAll('.adjustment-power')).toHaveLength(2);
   });
 
   it('supports keyboard, wheel, Shift+wheel, direct input, inactivity commit, and individual Reset', () => {

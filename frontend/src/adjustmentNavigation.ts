@@ -23,7 +23,7 @@ export function horizontalAdjustmentTarget(current: HTMLElement, direction: numb
   const row = current.closest('.adjustment-control, .adjustment-category-header');
   if (!row) return;
   const selectors = row.matches('.adjustment-control')
-    ? ['.adjustment-range', '.adjustment-number', '.adjustment-reset']
+    ? ['.adjustment-range', '.adjustment-number', '.adjustment-power', '.adjustment-reset']
     : ['.adjustment-category-title', '[data-category-switch]', '.adjustment-category-reset'];
   const ordered = selectors.map((selector) => row.querySelector<HTMLElement>(selector))
     .filter((item): item is HTMLElement => !!item && !item.matches(':disabled') && !item.closest('[hidden], [inert]'));

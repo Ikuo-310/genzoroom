@@ -104,8 +104,24 @@ afterEach(() => {
 });
 
 describe('edit controls DOM interaction', () => {
-  it('moves across range, number and Reset with Shift only, without History or scrolling', () => {
+  it.each(['Enter', ' '])('toggles power once with native %s while preserving value and reset access', (value) => {
+    act(() => number().focus()); changeNumber('0.47'); key('Enter', number());
+    const power = host.querySelector<HTMLButtonElement>('.adjustment-power')!;
+    act(() => power.focus()); key(value, power);
+    expect(session().recipe.adjustmentEnabled.exposure).toBe(false);
+    expect(range().value).toBe('0.47'); expect(range().disabled).toBe(false);
+    expect(session().history).toHaveLength(2);
+    key('ArrowDown', power, { shiftKey: true }); expect(document.activeElement).toBe(contrastRange());
+    act(() => power.focus()); key('ArrowUp', power, { shiftKey: true });
+    expect(document.activeElement).toBe(host.querySelector('.adjustment-category-title'));
+    act(() => power.focus()); key(value, power);
+    expect(session().recipe.adjustmentEnabled.exposure).toBe(true);
+    expect(session().history).toHaveLength(3);
+  });
+
+  it('moves across range, number, power and Reset with Shift only, without History or scrolling', () => {
     const reset = host.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+    const power = host.querySelector<HTMLButtonElement>('.adjustment-power')!;
     act(() => range().focus());
     expect(key('ArrowLeft', range(), { shiftKey: true }).defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(range());
@@ -113,8 +129,12 @@ describe('edit controls DOM interaction', () => {
     expect(document.activeElement).toBe(number());
     expect(session().history).toHaveLength(0);
     expect(key('ArrowRight', number(), { shiftKey: true }).defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(number());
+    expect(document.activeElement).toBe(power);
+    key('ArrowRight', power, { shiftKey: true });
+    expect(document.activeElement).toBe(power);
     expect(reset.disabled).toBe(true);
+    key('ArrowLeft', power, { shiftKey: true });
+    expect(document.activeElement).toBe(number());
     key('ArrowLeft', number(), { shiftKey: true });
     expect(document.activeElement).toBe(range());
     expect(session().pending).toBeNull();
@@ -125,10 +145,14 @@ describe('edit controls DOM interaction', () => {
     const beforeHistory = session().history;
     key('ArrowRight', range(), { shiftKey: true });
     key('ArrowRight', number(), { shiftKey: true });
+    expect(document.activeElement).toBe(power);
+    key('ArrowRight', power, { shiftKey: true });
     expect(document.activeElement).toBe(reset);
     key('ArrowRight', reset, { shiftKey: true });
     expect(document.activeElement).toBe(reset);
     key('ArrowLeft', reset, { shiftKey: true });
+    expect(document.activeElement).toBe(power);
+    key('ArrowLeft', power, { shiftKey: true });
     expect(document.activeElement).toBe(number());
     key('ArrowLeft', number(), { shiftKey: true });
     expect(document.activeElement).toBe(range());
@@ -143,7 +167,7 @@ describe('edit controls DOM interaction', () => {
       const event = key(direction, number(), { shiftKey: true });
       expect(event.defaultPrevented).toBe(true);
       const destination = direction === 'ArrowLeft' ? range()
-        : direction === 'ArrowRight' ? host.querySelector('.adjustment-reset')
+        : direction === 'ArrowRight' ? host.querySelector('.adjustment-power')
         : direction === 'ArrowUp' ? host.querySelector('.adjustment-category-title') : contrastRange();
       expect(document.activeElement).toBe(destination);
       expect(range().value).toBe('0.47');
@@ -185,7 +209,7 @@ describe('edit controls DOM interaction', () => {
     act(() => range().focus());
     number().hidden = true;
     key('ArrowRight', range(), { shiftKey: true });
-    expect(document.activeElement).toBe(host.querySelector('.adjustment-reset'));
+    expect(document.activeElement).toBe(host.querySelector('.adjustment-power'));
     number().hidden = false;
     act(() => number().focus());
     changeNumber('0.58');
@@ -199,7 +223,7 @@ describe('edit controls DOM interaction', () => {
     expect(range().value).toBe('0.47');
   });
 
-  it.each(['label', '.adjustment-number', '.adjustment-unit', '.adjustment-value-controls'])
+  it.each(['label', '.adjustment-number', '.adjustment-power', '.adjustment-value-controls'])
     ('keeps the focused adjustment active when hovering another row\'s %s', (selector) => {
       act(() => range().focus());
       const target = contrastRange().closest('.adjustment-control')!.querySelector(selector)!;
@@ -258,9 +282,8 @@ describe('edit controls DOM interaction', () => {
       expect(control.children[1].classList.contains('adjustment-range')).toBe(true);
       expect(control.children[2].classList.contains('adjustment-value-controls')).toBe(true);
     }
-    const unitSlots = host.querySelectorAll('.adjustment-unit');
-    expect(unitSlots).toHaveLength(6);
-    expect(Array.from(unitSlots).map((unit) => unit.textContent)).toEqual(['EV', '', '', '', '', '']);
+    expect(host.querySelector('.adjustment-unit')).toBeNull();
+    expect(host.querySelectorAll('.adjustment-power')).toHaveLength(6);
   });
   it('toggles Basic from the wide title button by click, Enter, and Space without changing its recipe', () => {
     act(() => number().focus());
@@ -772,15 +795,16 @@ describe('production Basic control wiring', () => {
     [3, 'whites', 'Whites', '-100', '100', '1', '', '43', '+43'],
     [4, 'shadows', 'Shadows', '-100', '100', '1', '', '54', '+54'],
     [5, 'blacks', 'Blacks', '-100', '100', '1', '', '-65', '-65'],
-  ] as const)('preserves %s / %s metadata, value and reset wiring', (index, adjustment, label, min, max, step, unit, value, valueText) => {
+  ] as const)('preserves %s / %s metadata, value and reset wiring', (index, adjustment, label, min, max, step, _unit, value, valueText) => {
     const row = host.querySelectorAll('.adjustment-control')[index];
     const slider = row.querySelector<HTMLInputElement>('input[type="range"]')!;
     const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
-    const reset = row.querySelector<HTMLButtonElement>('button')!;
+    const reset = row.querySelector<HTMLButtonElement>('.adjustment-reset')!;
     expect(row.querySelector('label')!.textContent).toBe(label);
     expect(input.getAttribute('aria-label')).toBe(`${label} value`);
     expect(reset.getAttribute('aria-label')).toBe(`Reset ${label}`);
-    expect(row.querySelector('.adjustment-unit')!.textContent).toBe(unit);
+    expect(row.querySelector('.adjustment-unit')).toBeNull();
+    expect(row.querySelector('.adjustment-power')?.getAttribute('aria-label')).toBe(`Disable ${label}`);
     for (const element of [slider, input]) {
       expect([element.min, element.max, element.step]).toEqual([min, max, step]);
     }

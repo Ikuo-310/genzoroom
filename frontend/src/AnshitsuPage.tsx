@@ -25,7 +25,8 @@ import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTar
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
 import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './adjustmentSelection';
-import { activeAdjustmentId } from './AdjustmentSlider';
+import { activeAdjustmentId, type AdjustmentSliderMenuTarget } from './AdjustmentSlider';
+import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
@@ -57,6 +58,7 @@ export function AnshitsuPage() {
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
   const [categoryMenu, setCategoryMenu] = useState<AdjustmentCategoryMenuTarget | null>(null);
+  const [sliderMenu, setSliderMenu] = useState<AdjustmentSliderMenuTarget | null>(null);
   const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits'; trigger: HTMLElement } | null>(null);
   const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
@@ -73,16 +75,18 @@ export function AnshitsuPage() {
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
   const closeCategoryMenu = useCallback(() => setCategoryMenu(null), []);
+  const closeSliderMenu = useCallback(() => setSliderMenu(null), []);
 
-  useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
+  useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
   useEffect(() => {
-    if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); }
+    if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); }
     if (!clipboardEnabled) setHistoryConfirmation(null);
   }, [historyEnabled, clipboardEnabled]);
 
   function openHistoryMenu(cursor: number | undefined, trigger: HTMLElement, x?: number, y?: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
     setCategoryMenu(null);
+    setSliderMenu(null);
     const rect = trigger.getBoundingClientRect();
     setHistoryMenu({ assetId, cursor, trigger, x: x ?? rect.left, y: y ?? rect.bottom });
   }
@@ -90,7 +94,15 @@ export function AnshitsuPage() {
   function openCategoryMenu(categoryId: AdjustmentCategoryId, trigger: HTMLElement, x: number, y: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
     setHistoryMenu(null);
+    setSliderMenu(null);
     setCategoryMenu({ categoryId, trigger, x, y });
+  }
+
+  function openSliderMenu(target: AdjustmentSliderMenuTarget) {
+    if (!historyEnabled || switchingRef.current || exitRef.current) return;
+    setHistoryMenu(null);
+    setCategoryMenu(null);
+    setSliderMenu(target);
   }
 
   function requestHistoryOperation(operation: HistoryOperation) {
@@ -116,23 +128,19 @@ export function AnshitsuPage() {
     return true;
   }
 
-  function pasteSettings() {
+  function pasteSettings(ids?: readonly AdjustmentId[]) {
     if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     const clipboard = readEditClipboard();
     if (!clipboard) return false;
-    dispatch({ type: 'paste', ...clipboard });
+    const selected = ids ? selectEditClipboardItems(clipboard, ids) : clipboard;
+    if (ids && !ids.some((id) => Object.hasOwn(selected.values, id))) return false;
+    dispatch({ type: 'paste', ...selected });
     return true;
   }
 
   function pasteCategorySettings(categoryId: AdjustmentCategoryId) {
-    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     const category = ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryId);
-    const clipboard = readEditClipboard();
-    if (!category || !clipboard) return false;
-    const scopedClipboard = selectEditClipboardItems(clipboard, category.ids);
-    if (category.ids.every((id) => !Object.hasOwn(scopedClipboard.values, id))) return false;
-    dispatch({ type: 'paste', ...scopedClipboard });
-    return true;
+    return category ? pasteSettings(category.ids) : false;
   }
 
   function toggleAdjustmentCategory(categoryId: AdjustmentCategoryId) {
@@ -360,7 +368,7 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || historyConfirmation !== null
+          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || historyConfirmation !== null
             || switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         />
       ) : (
@@ -388,7 +396,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleWhiteBalance' })}
               onReset={() => dispatch({ type: 'whiteBalanceReset' })}>
-              <WhiteBalanceAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+              <WhiteBalanceAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <AdjustmentCategory categoryId="basic" onOpenContextMenu={openCategoryMenu}
               title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
@@ -398,7 +406,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleBasic' })}
               onReset={() => dispatch({ type: 'basicReset' })}>
-              <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+              <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <AdjustmentCategory categoryId="color" onOpenContextMenu={openCategoryMenu}
               title={t('workspace.color')} enabled={session.recipe.colorEnabled}
@@ -408,7 +416,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleColor' })}
               onReset={() => dispatch({ type: 'colorReset' })}>
-              <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+              <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <AdjustmentCategory categoryId="colorGrading" onOpenContextMenu={openCategoryMenu}
               title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
@@ -418,7 +426,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleColorGrading' })}
               onReset={() => dispatch({ type: 'colorGradingReset' })}>
-              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
+              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
@@ -433,9 +441,20 @@ export function AnshitsuPage() {
       assets={selectedAssets}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || historyConfirmation !== null}
+      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || historyConfirmation !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
+    {sliderMenu && historyEnabled && <AdjustmentContextMenu target={sliderMenu}
+      className="adjustment-slider-context-menu" menuLabel={t('workspace.adjustmentMenu')}
+      enabled={session.recipe.adjustmentEnabled[sliderMenu.adjustmentId]}
+      resetDisabled={session.recipe.adjustments[sliderMenu.adjustmentId] === defaultRecipe().adjustments[sliderMenu.adjustmentId]}
+      pasteDisabled={!Object.hasOwn(readEditClipboard()?.values ?? {}, sliderMenu.adjustmentId)}
+      enableLabel={t('workspace.enableAdjustmentMenu')} disableLabel={t('workspace.disableAdjustmentMenu')}
+      resetLabel={t('workspace.resetAdjustment')} copyLabel={t('workspace.copyAdjustment')} pasteLabel={t('workspace.pasteAdjustment')}
+      onToggle={() => dispatch({ type: 'toggleAdjustment', id: sliderMenu.adjustmentId })}
+      onReset={() => dispatch({ type: `${sliderMenu.adjustmentId}Reset` })}
+      onCopy={() => { copySettings([sliderMenu.adjustmentId]); }}
+      onPaste={() => { pasteSettings([sliderMenu.adjustmentId]); }} onClose={closeSliderMenu} />}
     {categoryMenu && categoryMenuDefinition && categoryMenuState && historyEnabled && <AdjustmentCategoryMenu
       target={categoryMenu}
       enabled={categoryMenuState.enabled}
