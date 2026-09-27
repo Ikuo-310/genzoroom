@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -25,9 +25,12 @@ function EditSettingsActions({ actions, onSelect, menuItems = true }: {
   actions: Action[]; onSelect: (action: () => boolean) => void; menuItems?: boolean;
 }) {
   const { t } = useTranslation();
-  return <>{actions.map(({ label, action, disabled }) => <button key={label} type="button" className="tool-button"
-    {...(menuItems ? { role: 'menuitem' as const } : {})}
-    disabled={disabled} onClick={() => onSelect(action)}>{t(label)}</button>)}</>;
+  return <>{actions.map(({ label, action, disabled }, index) => <Fragment key={label}>
+    {index === 2 && <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />}
+    <button type="button" className="edit-settings-menu-item"
+      {...(menuItems ? { role: 'menuitem' as const } : {})}
+      disabled={disabled} onClick={() => onSelect(action)}>{t(label)}</button>
+  </Fragment>)}</>;
 }
 
 function ContextEditSettingsMenu({ position, actions, onClose, onSelect }: {
@@ -63,7 +66,7 @@ function ContextEditSettingsMenu({ position, actions, onClose, onSelect }: {
   }, [onClose]);
 
   return createPortal(<div ref={menu} role="menu" aria-label={t('workspace.editSettingsActions')}
-    className="edit-settings-context-menu" style={{ left: location.left, top: location.top }}
+    className="edit-settings-context-menu edit-settings-action-list" style={{ left: location.left, top: location.top }}
     onKeyDownCapture={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}
     onBlur={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) onClose(false); }}>
     <EditSettingsActions actions={actions} onSelect={onSelect} />
@@ -100,7 +103,7 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
   }}>
     <summary ref={trigger} className="tool-button" aria-label={t('workspace.editSettingsActions')} title={t('workspace.editSettingsActions')}>⋯</summary>
-    <div className="edit-settings-menu-actions">
+    <div className="edit-settings-menu-actions edit-settings-action-list">
       <EditSettingsActions actions={actions} onSelect={selectFromToolbar} menuItems={false} />
     </div>
   </details>

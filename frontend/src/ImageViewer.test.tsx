@@ -123,6 +123,11 @@ describe('Viewer edit settings context menu', () => {
     contextMenu(host.querySelector<HTMLElement>('.viewer-viewport')!);
     const contextItems = [...document.body.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu [role="menuitem"]')];
     const toolbarItems = [...host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')];
+    expect([...document.body.querySelectorAll('.edit-settings-context-menu [role="separator"]')]).toHaveLength(1);
+    expect([...host.querySelectorAll('.edit-settings-menu-actions [role="separator"]')]).toHaveLength(1);
+    expect(toolbarItems.map((item) => item.textContent)).toEqual(contextItems.map((item) => item.textContent));
+    expect(contextItems.every((item) => item.classList.contains('edit-settings-menu-item'))).toBe(true);
+    expect(toolbarItems.every((item) => item.classList.contains('edit-settings-menu-item'))).toBe(true);
     expect(contextItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
     expect(toolbarItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
     act(() => root.render(<ContextMenuHarness hasClipboard={false} />));
@@ -158,10 +163,10 @@ describe('Viewer edit settings context menu', () => {
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
     contextMenu(viewport, 100, 100);
     const menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
-    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({ width: 180, height: 140 } as DOMRect);
+    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({ width: 260, height: 170 } as DOMRect);
     contextMenu(viewport, 970, 780);
-    expect(menu.style.left).toBe('812px');
-    expect(menu.style.top).toBe('652px');
+    expect(menu.style.left).toBe('732px');
+    expect(menu.style.top).toBe('622px');
     act(() => root.render(<ContextMenuHarness src="/second" />));
     expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
   });

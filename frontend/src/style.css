@@ -139,10 +139,14 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-settings-menu { position: relative; }
 .edit-settings-menu summary { display: grid; place-items: center; min-width: 30px; cursor: pointer; list-style: none; font-size: 1rem; }
 .edit-settings-menu summary::-webkit-details-marker { display: none; }
-.edit-settings-menu-actions { position: absolute; top: calc(100% + 5px); right: 0; z-index: 25; display: grid; gap: 4px; width: max-content; max-width: 280px; padding: 6px; border: 1px solid #48484b; border-radius: 5px; background: #202023; box-shadow: 0 6px 18px #0008; }
-.edit-settings-menu-actions .tool-button { text-align: left; }
-.edit-settings-context-menu { position: fixed; z-index: 100; display: grid; gap: 4px; box-sizing: border-box; width: max-content; max-width: min(280px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 6px; border: 1px solid #48484b; border-radius: 5px; background: #202023; box-shadow: 0 6px 18px #0008; }
-.edit-settings-context-menu .tool-button { width: 100%; text-align: left; }
+.edit-settings-action-list { display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); gap: 0; padding: 6px; border: 1px solid #48484b; border-radius: 5px; background: #202023; box-shadow: 0 6px 18px #0008; }
+.edit-settings-menu-actions { position: absolute; top: calc(100% + 5px); right: 0; z-index: 25; }
+.edit-settings-context-menu { position: fixed; z-index: 100; max-height: calc(100vh - 16px); overflow: auto; }
+.edit-settings-menu-item { width: 100%; min-width: 0; padding: 7px 10px; border: 0; border-radius: 3px; color: #ddd; background: transparent; text-align: left; font: inherit; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.edit-settings-menu-item:hover:not(:disabled), .edit-settings-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
+.edit-settings-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
+.edit-settings-menu-item:disabled { color: #777; cursor: default; }
+.edit-settings-menu-separator { height: 0; margin: 5px 4px; border-top: 1px solid #48484b; }
 .adjustment-selection-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); box-sizing: border-box; overflow: auto; color: #ddd; background: #242426; border: 1px solid #666; border-radius: 8px; padding: 20px; box-shadow: 0 10px 30px #0008; }
 .adjustment-selection-dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .adjustment-selection-dialog h2 { margin: 0 0 14px; font-size: 1rem; }
