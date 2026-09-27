@@ -427,6 +427,31 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(container.textContent).toContain('Recent photos');
   });
 
+  it('routes the shared title through the same save-before-exit flow', async () => {
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    await click('.workspace-title-link');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][1].history).toHaveLength(1);
+    expect(container.querySelector('.workspace-page')).toBeNull();
+    expect(container.textContent).toContain('Recent photos');
+  });
+
+  it('keeps the shared title from retrying or bypassing a failed exit save', async () => {
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    await click('.workspace-title-link'); await flush();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    const title = container.querySelector<HTMLButtonElement>('.workspace-title-link')!;
+    expect(title.disabled).toBe(true);
+    await act(async () => title.click()); await flush();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
   it('offers stay or exit without saving when final exit save fails', async () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();

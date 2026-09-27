@@ -10,6 +10,7 @@ import { EditedBadge } from './EditedBadge';
 import { useEditStatuses } from './useEditStatuses';
 import type { AssetEditStatuses } from './editStatus';
 import { LanguageControl } from './GalleryPage';
+import { HomeTitle } from './HomeTitle';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
@@ -359,7 +360,8 @@ export function AnshitsuPage() {
   }} onKeyDown={event => enterSelectedOperationPanel(event.nativeEvent)}>
     <header className="workspace-header">
       <div className="workspace-brand">
-        <strong>GenzoRoom</strong>
+        <HomeTitle className="workspace-title-link" disabled={exitSaving || exitFailure !== null}
+          onActivate={() => { void exitToHome(); }} />
         <span>{t('workspace.name')}</span>
         {language === 'en' && <small>{t('workspace.subtitle')}</small>}
       </div>

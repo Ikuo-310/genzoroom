@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { fetchRecentAssets } from './api';
@@ -6,6 +6,7 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { changeAppLanguage, type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
+import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
@@ -32,21 +33,25 @@ export function GalleryPage() {
   const [assetState, setAssetState] = useState<AssetState>('loading');
   const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(DEFAULT_PHOTO_FILTERS);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
-  const [attempt, setAttempt] = useState(0);
-  const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : [], attempt);
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const connectionRequestId = useRef(0);
+  const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
+    const requestId = ++connectionRequestId.current;
     const timeout = window.setTimeout(() => controller.abort(), 8000);
+    setConnection('checking');
+    setImmichConnection('checking');
 
     async function checkBackend() {
       try {
         const response = await fetch('/api/health', { signal: controller.signal, cache: 'no-store' });
         if (!response.ok || !isStatusOk(await response.json())) throw new Error('Invalid health response');
-        if (active) setConnection('connected');
+        if (active && connectionRequestId.current === requestId) setConnection('connected');
       } catch {
-        if (active) setConnection('error');
+        if (active && connectionRequestId.current === requestId) setConnection('error');
       }
     }
 
@@ -55,42 +60,40 @@ export function GalleryPage() {
         const response = await fetch('/api/immich/status', { signal: controller.signal, cache: 'no-store' });
         const data: unknown = response.ok ? await response.json() : null;
         if (!isImmichStatus(data)) throw new Error('Invalid Immich response');
-        if (!active) return;
+        if (!active || connectionRequestId.current !== requestId) return;
         if (!data.configured) setImmichConnection('not-configured');
         else setImmichConnection(data.connected ? 'connected' : 'error');
       } catch {
-        if (active) setImmichConnection('error');
+        if (active && connectionRequestId.current === requestId) setImmichConnection('error');
       }
     }
 
-    async function loadRecentAssets() {
-      try {
-        const data = await fetchRecentAssets(controller.signal);
-        if (active) {
-          setAssets(data);
-          setAssetState('ready');
-        }
-      } catch {
-        if (active) {
-          setAssets([]);
-          setAssetState('error');
-        }
-      }
-    }
-
-    void Promise.all([checkBackend(), checkImmich(), loadRecentAssets()]).finally(() => window.clearTimeout(timeout));
+    void Promise.all([checkBackend(), checkImmich()]).finally(() => window.clearTimeout(timeout));
     return () => {
       active = false;
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [attempt]);
+  }, [connectionAttempt]);
 
-  const connectionDetail = connection === 'error' ? t('connection.backendFailedDetail')
-    : immichConnection === 'not-configured' ? t('connection.notConfiguredDetail')
-      : immichConnection === 'error' ? t('connection.immichFailedDetail')
-        : immichConnection === 'connected' ? t('connection.succeededDetail')
-          : t('connection.checkingDetail');
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    void fetchRecentAssets(controller.signal).then(data => {
+      if (active) {
+        setAssets(data);
+        setAssetState('ready');
+      }
+    }).catch(() => {
+      if (active) {
+        setAssets([]);
+        setAssetState('error');
+      }
+    }).finally(() => window.clearTimeout(timeout));
+    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+  }, []);
+
   const visibleAssets = filterPhotos(assets, photoFilters);
   const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
   const selectionMode = selectedAssetIds.length > 0;
@@ -131,25 +134,19 @@ export function GalleryPage() {
       <div className="home-intro">
         <header className="app-header">
           <div>
-            <h1>{t('app.title')}</h1>
+            <h1 className="home-title-row"><HomeTitle className="home-title-link" onActivate={() => {}} />
+              <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
+                onCheckAgain={() => {
+                  connectionRequestId.current += 1;
+                  setConnection('checking');
+                  setImmichConnection('checking');
+                  setConnectionAttempt(value => value + 1);
+                }} /></h1>
             <p className="eyebrow">{t('app.eyebrow')}</p>
             <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
           </div>
           <LanguageControl language={language} />
         </header>
-        <section aria-label={t('connection.sectionLabel')}>
-          <div className="status-list" role="status" aria-live="polite">
-            <ConnectionRow label={t('connection.backend')} state={connection} />
-            <ConnectionRow label={t('connection.immich')} state={immichConnection} />
-          </div>
-          <p className="detail">{connectionDetail}</p>
-          <button disabled={connection === 'checking' || immichConnection === 'checking' || assetState === 'loading'} onClick={() => {
-            setConnection('checking');
-            setImmichConnection('checking');
-            setAssetState('loading');
-            setAttempt((value) => value + 1);
-          }}>{t('connection.checkAgain')}</button>
-        </section>
       </div>
       <section className="photos" aria-labelledby="recent-photos-heading">
         <div className="photos-heading">
@@ -201,6 +198,54 @@ function ConnectionRow({ label, state }: { label: string; state: ImmichConnectio
   const text = state === 'checking' ? t('connection.checking') : state === 'connected' ? t('connection.connected')
     : state === 'not-configured' ? t('connection.notConfigured') : t('connection.failed');
   return <p className={`connection ${state}`}><span className="dot" aria-hidden="true" />{label}: {text}</p>;
+}
+
+function ConnectionStatusControl({ connection, immichConnection, disabled, onCheckAgain }: {
+  connection: Connection;
+  immichConnection: ImmichConnection;
+  disabled: boolean;
+  onCheckAgain: () => void;
+}) {
+  const { t } = useTranslation();
+  const detailsId = useId();
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  const summary = useRef<HTMLElement>(null);
+  const overall = connection === 'checking' || immichConnection === 'checking' ? 'checking'
+    : connection === 'error' || immichConnection === 'error' ? 'error'
+      : immichConnection === 'not-configured' ? 'not-configured' : 'connected';
+  const overallText = overall === 'checking' ? t('connection.checkingStatus')
+    : overall === 'error' ? t('connection.failedStatus')
+      : overall === 'not-configured' ? t('connection.notConfiguredStatus') : t('connection.connectedStatus');
+  const connectionDetail = connection === 'error' ? t('connection.backendFailedDetail')
+    : immichConnection === 'not-configured' ? t('connection.notConfiguredDetail')
+      : immichConnection === 'error' ? t('connection.immichFailedDetail')
+        : immichConnection === 'connected' ? t('connection.succeededDetail') : t('connection.checkingDetail');
+  function handleDisclosureKey(event: ReactKeyboardEvent<HTMLDetailsElement>) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    if (disclosure.current) disclosure.current.open = false;
+    summary.current?.focus();
+  }
+  function handleSummaryKey(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (disclosure.current) disclosure.current.open = !disclosure.current.open;
+  }
+  return <details className={`connection-control ${overall}`} ref={disclosure} onKeyDown={handleDisclosureKey}>
+    <summary ref={summary} onKeyDown={handleSummaryKey} aria-controls={detailsId} aria-label={t('connection.openDetails', { status: overallText })}>
+      <span className="connection-symbol" aria-hidden="true">{overall === 'checking' ? '…' : overall === 'error' ? '!' : overall === 'not-configured' ? '–' : '✓'}</span>
+      <span className="connection-overall-label">{overallText}</span>
+    </summary>
+    <section id={detailsId} className="connection-details" aria-label={t('connection.sectionLabel')}>
+      <div className="status-list" role="status" aria-live="polite">
+        <ConnectionRow label={t('connection.backend')} state={connection} />
+        <ConnectionRow label={t('connection.immich')} state={immichConnection} />
+      </div>
+      <p className="detail">{connectionDetail}</p>
+      <button type="button" disabled={connection === 'checking' || immichConnection === 'checking' || disabled}
+        onClick={onCheckAgain}>{t('connection.checkAgain')}</button>
+    </section>
+  </details>;
 }
 
 function isStatusOk(data: unknown): boolean {

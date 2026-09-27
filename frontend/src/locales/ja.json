@@ -18,7 +18,12 @@
     "immichFailedDetail": "Immichへの接続を確認できませんでした。設定とBackendのログを確認してください。",
     "succeededDetail": "BackendとImmichへの接続を確認できました。",
     "checkingDetail": "BackendとImmichへの接続を確認しています…",
-    "checkAgain": "再確認"
+    "checkAgain": "再確認",
+    "openDetails": "接続状態：{{status}}。詳細を表示",
+    "checkingStatus": "確認中",
+    "connectedStatus": "接続済み",
+    "failedStatus": "接続に問題があります",
+    "notConfiguredStatus": "Immich未設定"
   },
   "photos": {
     "edited": "GenzoRoomで編集済み",
