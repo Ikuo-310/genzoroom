@@ -116,11 +116,26 @@ describe('Viewer edit settings context menu', () => {
     const trigger = host.querySelector<HTMLElement>('.edit-settings-menu summary')!;
     const list = host.querySelector<HTMLElement>('.edit-settings-menu-actions')!;
     act(() => { trigger.focus(); trigger.click(); });
-    key('keydown', trigger, { key: 'Tab', code: 'Tab' });
+    expect(list.dataset.focusMode).toBe('pointer');
+    expect(key('keydown', trigger, { key: 'Tab', code: 'Tab' }).defaultPrevented).toBe(false);
     const first = list.querySelector<HTMLButtonElement>('button')!;
     act(() => first.focus());
     expect(list.dataset.focusMode).toBe('keyboard');
     act(() => first.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    expect(list.dataset.focusMode).toBe('pointer');
+    for (const value of ['Enter', ' ']) {
+      expect(key('keydown', first, { key: value, code: value === 'Enter' ? 'Enter' : 'Space' }).defaultPrevented).toBe(false);
+      expect(list.dataset.focusMode).toBe('keyboard');
+    }
+    // jsdom does not synthesize button activation from Enter/Space.
+    click(first);
+    expect(contextActions.copy).toHaveBeenCalledTimes(1);
+    expect(host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!.open).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+    act(() => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      trigger.click();
+    });
     expect(list.dataset.focusMode).toBe('pointer');
   });
   it('opens over both the image and viewport whitespace and reuses all toolbar actions', () => {

@@ -766,6 +766,43 @@ describe('selected settings clipboard', () => {
     expect(document.activeElement).toBe(viewport);
   });
 
+  it('isolates toolbar menu shortcuts and restores them after Escape', async () => {
+    await mountHistory();
+    const source = defaultRecipe(); source.adjustments.exposure = 2;
+    copyEditSettings(source, 'source', 'source.jpg', ['exposure']);
+    const clipboard = readEditClipboard();
+    const before = structuredClone(rendered.recipe);
+    const details = host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!;
+    const trigger = details.querySelector<HTMLElement>('summary')!;
+    act(() => { trigger.focus(); trigger.click(); });
+    expect(details.open).toBe(true);
+    for (const target of [trigger, details.querySelector<HTMLButtonElement>('button')!]) {
+      act(() => target.focus());
+      for (const [value, options] of [
+        ['c', {}], ['v', {}], ['z', {}], ['y', {}], ['z', { shiftKey: true }],
+        ['c', { altKey: true }], ['v', { altKey: true }],
+        ['\\', { ctrlKey: false, code: 'Backslash' }],
+        ['ArrowDown', { ctrlKey: false, shiftKey: true }],
+        ['ArrowRight', { ctrlKey: false, shiftKey: true }],
+      ] as [string, KeyboardEventInit][]) key(target, value, options);
+      expect(rendered.recipe).toEqual(before);
+      expect(readEditClipboard()).toEqual(clipboard);
+      expect(host.querySelector('[data-testid="preview"]')!.getAttribute('data-before')).toBe('false');
+      expect(host.querySelector('dialog')).toBeNull();
+      expect(document.activeElement).toBe(target);
+    }
+    expect(key(document.activeElement!, 'Escape', { ctrlKey: false }).defaultPrevented).toBe(true);
+    expect(details.open).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+    key(trigger, 'z'); expect(rendered.recipe!.adjustments.temperature).toBe(10);
+    key(trigger, 'y'); expect(rendered.recipe).toEqual(before);
+    key(trigger, 'v'); expect(rendered.recipe!.adjustments.exposure).toBe(2);
+    key(trigger, '\\', { ctrlKey: false, code: 'Backslash' });
+    expect(host.querySelector('[data-testid="preview"]')!.getAttribute('data-before')).toBe('true');
+    act(() => trigger.dispatchEvent(new KeyboardEvent('keyup', { code: 'Backslash', bubbles: true })));
+    expect(host.querySelector('[data-testid="preview"]')!.getAttribute('data-before')).toBe('false');
+  });
+
   it('provides all four toolbar actions without photo focus and restores focus to its visible trigger', async () => {
     await mount();
     const trigger = menuAction('Copy selected settings');
@@ -1188,6 +1225,51 @@ describe('individual adjustment UI', () => {
 
 describe('3WAY range actions', () => {
   function title(id: string) { return host.querySelector<HTMLButtonElement>('[data-grading-range-id="' + id + '"]')!; }
+  it('releases a range heading on real slider movement and uses that slider for arrows, Copy and row navigation', async () => {
+    await mount();
+    const heading = title('shadows');
+    const target = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => heading.focus());
+    act(() => target.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 30 })));
+    expect(document.activeElement).toBe(document.body);
+    key(document.activeElement!, 'ArrowRight', { ctrlKey: false });
+    expect(rendered.recipe!.adjustments.exposure).toBe(0.01);
+    expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(0);
+    key(document.activeElement!, 'c');
+    expect(readEditClipboard()!.values).toEqual({ exposure: 0.01 });
+    key(document.activeElement!, 'ArrowRight', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(target.closest('.adjustment-control')!.querySelector('.adjustment-number'));
+    key(document.activeElement!, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(host.querySelector('[data-adjustment-id="contrast"]'));
+  });
+
+  it('retains keyboard range ownership across stationary events and non-slider hover', async () => {
+    await mount();
+    const prior = categoryTitle('colorGrading');
+    const other = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 20 })));
+    act(() => prior.focus());
+    key(prior, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+    const heading = title('shadows');
+    expect(document.activeElement).toBe(heading);
+    act(() => {
+      other.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 10, clientY: 20 }));
+      other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 20 }));
+      for (const selector of ['label', '.adjustment-number', '.adjustment-power', '.adjustment-reset']) {
+        other.closest('.adjustment-control')!.querySelector(selector)!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+      }
+    });
+    expect(document.activeElement).toBe(heading);
+    key(heading, 'c');
+    expect(readEditClipboard()!.values).toEqual({ shadowsTemperature: 0, shadowsTint: 0 });
+    key(heading, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(host.querySelector('[data-adjustment-id="shadowsTemperature"]'));
+    act(() => heading.focus());
+    act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 })));
+    expect(document.activeElement).toBe(document.body);
+    key(document.activeElement!, 'c');
+    expect(readEditClipboard()!.values).toEqual({ exposure: 0 });
+  });
   function open(id: string, x = 120, y = 90) {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
     act(() => title(id).dispatchEvent(event)); return event;

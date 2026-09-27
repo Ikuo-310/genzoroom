@@ -111,7 +111,17 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
   return <>
   <details ref={menu} className="edit-settings-menu" onClick={onMenuOpen}
     onPointerMove={() => setToolbarKeyboardFocus(false)} onPointerDown={() => setToolbarKeyboardFocus(false)}
-    onKeyDownCapture={(event) => { if (!event.nativeEvent.isComposing) setToolbarKeyboardFocus(true); }} onBlur={(event) => {
+    onKeyDownCapture={(event) => {
+      if (!event.nativeEvent.isComposing) setToolbarKeyboardFocus(true);
+      if (!event.currentTarget.open) return;
+      // Keep native menu activation and Tab traversal, but isolate workspace shortcuts.
+      event.stopPropagation();
+      if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+        event.preventDefault();
+        event.currentTarget.open = false;
+        trigger.current?.focus({ preventScroll: true });
+      }
+    }} onBlur={(event) => {
     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
   }}>
     <summary ref={trigger} className="tool-button" aria-label={t('workspace.editSettingsActions')} title={t('workspace.editSettingsActions')}>⋯</summary>

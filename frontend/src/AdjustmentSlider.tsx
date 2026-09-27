@@ -105,9 +105,9 @@ function activateFromMouse(element: HTMLInputElement) {
   keyboardNavigation = false;
   activeAdjustment = element;
   const focused = element.ownerDocument.activeElement;
-  // Release stale slider focus without moving focus to the hover target or ending text edits.
+  // Release stale operation focus so Copy and arrows share the hover target, without ending text edits.
   if (focused instanceof HTMLElement && focused !== element
-    && ((focused instanceof HTMLInputElement && adjustments.has(focused)) || focused.matches('.adjustment-category-title'))) focused.blur();
+    && ((focused instanceof HTMLInputElement && adjustments.has(focused)) || focused.matches('.adjustment-category-title, .grading-range-title'))) focused.blur();
 }
 
 export function AdjustmentSlider(props: Props) {
