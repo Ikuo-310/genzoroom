@@ -20,7 +20,9 @@ const scroll = () => host.querySelector<HTMLElement>('.filmstrip-scroll')!;
 const item = (index: number) => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[index];
 const current = () => host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label');
 function hover(inside = true) {
-  act(() => scroll().dispatchEvent(new MouseEvent(inside ? 'pointerover' : 'pointerout', { bubbles: true, relatedTarget: document.body })));
+  const event = new MouseEvent('pointermove', { bubbles: true, clientX: inside ? 20 : 200, clientY: 20 });
+  Object.defineProperty(event, 'movementX', { value: 1 });
+  act(() => (inside ? scroll() : document.body).dispatchEvent(event));
 }
 function key(value = 'ArrowRight', target: EventTarget = window, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
@@ -48,6 +50,24 @@ describe('Filmstrip keyboard navigation', () => {
     key(); expect(current()).toBe('b.jpg');
   });
 
+  it('prioritizes real Filmstrip hover over a retained range focus, then returns arrows to the range', () => {
+    const range = host.querySelector<HTMLInputElement>('input[type="range"]')!;
+    act(() => range.focus()); hover();
+    expect(document.activeElement).toBe(range);
+    expect(key('ArrowRight', range).defaultPrevented).toBe(true);
+    expect(activate).toHaveBeenCalledWith('b');
+    expect(document.activeElement).toBe(range);
+    hover(false);
+    expect(key('ArrowLeft', range).defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(range);
+  });
+
+  it('does not treat an unchanged pointer position as Filmstrip hover', () => {
+    const stationary = new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 });
+    act(() => scroll().dispatchEvent(stationary));
+    expect(key().defaultPrevented).toBe(false); expect(activate).not.toHaveBeenCalled();
+  });
+
   it('supports focused thumbnails outside hover and follows focus with preventScroll', () => {
     act(() => item(0).focus());
     expect(key('ArrowRight', item(0)).defaultPrevented).toBe(true);
@@ -63,7 +83,7 @@ describe('Filmstrip keyboard navigation', () => {
     act(() => item(1).click()); expect(current()).toBe('b.jpg');
   });
 
-  it.each(['input[type="range"]', 'input[type="number"]', 'input[type="text"]', '.other'])
+  it.each(['input[type="number"]', 'input[type="text"]', '.other'])
     ('does not override focus on %s despite hover', (selector) => {
       hover(); const target = host.querySelector<HTMLElement>(selector)!;
       act(() => target.focus()); key('ArrowRight', target);
@@ -84,10 +104,19 @@ describe('Filmstrip keyboard navigation', () => {
     expect(activate).not.toHaveBeenCalled();
     act(() => root.render(<Harness blocked />)); key();
     expect(activate).not.toHaveBeenCalled();
-    act(() => root.render(<Harness disabled />)); key();
+    act(() => root.render(<Harness disabled />)); expect(key().defaultPrevented).toBe(false);
     expect(activate).not.toHaveBeenCalled();
     act(() => root.render(<Harness items={[assets[0]]} />)); key();
     expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('does not consume hovered arrow keys while a menu is open', () => {
+    hover();
+    const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); document.body.append(menu);
+    try {
+      expect(key().defaultPrevented).toBe(false);
+      expect(activate).not.toHaveBeenCalled();
+    } finally { menu.remove(); }
   });
 
   it.each([[120, 212, 200], [260, 352, 252], [80, 172, 180]])

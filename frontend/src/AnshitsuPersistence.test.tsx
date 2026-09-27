@@ -48,7 +48,14 @@ async function mount() {
 }
 const currentPhoto = () => container.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label');
 function hoverFilmstrip() {
-  act(() => container.querySelector('.filmstrip-scroll')!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+  const event = new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 20 });
+  Object.defineProperty(event, 'movementX', { value: 1 });
+  act(() => container.querySelector('.filmstrip-scroll')!.dispatchEvent(event));
+}
+function leaveFilmstrip() {
+  const event = new MouseEvent('pointermove', { bubbles: true, clientX: 300, clientY: 20 });
+  Object.defineProperty(event, 'movementX', { value: 1 });
+  act(() => document.body.dispatchEvent(event));
 }
 async function filmstripKey(value = 'ArrowRight', init: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
@@ -119,19 +126,25 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe('first.jpg');
   });
 
-  it('prioritizes range arrows, Shift navigation and number editing over Filmstrip hover', async () => {
+  it('prioritizes hovered Filmstrip arrows, then preserves slider, Shift and number editing after pointer exit', async () => {
     vi.useFakeTimers(); await mount(); hoverFilmstrip();
     const ranges = container.querySelectorAll<HTMLInputElement>('.adjustment-range');
     await act(async () => ranges[0].focus());
     await filmstripKey('ArrowRight', {}, ranges[0]);
-    expect(ranges[0].value).toBe('1');
-    expect(currentPhoto()).toBe('first.jpg');
-    await filmstripKey('ArrowDown', { shiftKey: true }, ranges[0]);
-    expect(document.activeElement).toBe(ranges[1]);
-    await filmstripKey('ArrowRight', { shiftKey: true }, ranges[1]);
+    expect(ranges[0].value).toBe('0');
+    expect(currentPhoto()).toBe('second.jpg');
+    leaveFilmstrip();
+    const activeRange = container.querySelectorAll<HTMLInputElement>('.adjustment-range')[0];
+    await act(async () => activeRange.focus());
+    await filmstripKey('ArrowRight', {}, activeRange);
+    expect(activeRange.value).toBe('1');
+    await filmstripKey('ArrowDown', { shiftKey: true }, activeRange);
+    const nextRange = container.querySelectorAll<HTMLInputElement>('.adjustment-range')[1];
+    expect(document.activeElement).toBe(nextRange);
+    await filmstripKey('ArrowRight', { shiftKey: true }, nextRange);
     expect(document.activeElement).toBe(container.querySelectorAll('.adjustment-number')[1]);
     await filmstripKey('ArrowRight', {}, document.activeElement!);
-    expect(currentPhoto()).toBe('first.jpg');
+    expect(currentPhoto()).toBe('second.jpg');
     expect(mocked.put).not.toHaveBeenCalled();
   });
 

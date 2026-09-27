@@ -1406,3 +1406,26 @@ describe('focus entry into the selected operation panel', () => {
     const viewport = activatePreview(); enter(viewport); expect(document.activeElement).toBe(slider('contrast'));
   });
 });
+
+
+describe('Filmstrip hover versus slider arrow priority', () => {
+  it('switches the photo from a hovered gap without changing a still focused slider value', async () => {
+    await mount();
+    const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+    act(() => range.focus()); key(range, 'ArrowRight', { ctrlKey: false });
+    const filmstrip = host.querySelector<HTMLElement>('.filmstrip-scroll')!;
+    const move = new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 20 });
+    Object.defineProperty(move, 'movementX', { value: 8 }); act(() => filmstrip.dispatchEvent(move));
+    expect(document.activeElement).toBe(range);
+    const before = range.value;
+    expect(before).toBe('0.01');
+    const event = key(range, 'ArrowRight', { ctrlKey: false });
+    expect(event.defaultPrevented).toBe(true); expect(range.value).toBe(before);
+    await act(async () => {});
+    expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(second.filename);
+    expect(rows.get(first.id)?.state.currentRecipe.adjustments.exposure).toBe(0.01);
+    key(window, 'ArrowLeft', { ctrlKey: false }); await act(async () => {});
+    expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(first.filename);
+    expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.value).toBe(before);
+  });
+});
