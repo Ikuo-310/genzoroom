@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
+import { activeAdjustmentId } from './AdjustmentSlider';
 import { type EditRecipe } from './editing';
 import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import i18n from './i18n';
@@ -53,8 +54,14 @@ function change(target: HTMLInputElement, value: string) {
   });
 }
 function pointer(type: string, target: EventTarget = slider()) {
+  if (type === 'pointerover') {
+    const movement = new MouseEvent('pointermove', { bubbles: true, clientX: ++mouseX });
+    Object.defineProperty(movement, 'movementX', { value: 1 });
+    act(() => target.dispatchEvent(movement));
+  }
   act(() => target.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 })));
 }
+let mouseX = 0;
 function advance(ms = 500) { act(() => vi.advanceTimersByTime(ms)); }
 function button(text: string) { return Array.from(host.querySelectorAll('button')).find(item => item.textContent === text)!; }
 async function mount() {
@@ -86,6 +93,90 @@ afterEach(() => {
 describe('production White Balance controls', () => {
   const ranges = () => Array.from(host.querySelectorAll<HTMLInputElement>('.adjustment-range'));
   const navigate = (direction: 'ArrowUp' | 'ArrowDown') => key(direction, document.activeElement!, { shiftKey: true });
+
+  it('moves through a category title and toggles once with Enter without changing edits', () => {
+    const title = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    const basicTitle = category(1).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    act(() => title.focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(slider());
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(title);
+    expect(activeAdjustmentId()).toBeNull();
+    key('ArrowRight', title);
+    expect(history()).toEqual([]);
+    const before = recipe();
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    act(() => title.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(title.getAttribute('aria-expanded')).toBe('false');
+    expect(category().querySelector('.adjustment-range')).toBeNull();
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(basicTitle);
+    navigate('ArrowUp');
+    key('Enter', title);
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual([]);
+  });
+
+  it.each([
+    [120, 148, 200, 'ArrowDown'], [280, 308, 208, 'ArrowDown'],
+    [80, 108, 180, 'ArrowUp'],
+  ] as const)('scrolls only the adjustment list to reveal %s..%s', (top, bottom, expected, direction) => {
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    const title = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    const destination = direction === 'ArrowDown' ? slider() : title;
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 300 } as DOMRect);
+    vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue({ top, bottom } as DOMRect);
+    const focus = vi.spyOn(destination, 'focus');
+    scroll.scrollTop = 200;
+    act(() => (direction === 'ArrowDown' ? title : slider()).focus());
+    navigate(direction);
+    expect(document.activeElement).toBe(destination);
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+    expect(scroll.scrollTop).toBe(expected);
+    for (const selector of ['.right-panel', '.scope-section', '.develop-panel', '.workspace-section-header']) {
+      expect(host.querySelector(selector)!.scrollTop).toBe(0);
+    }
+    // Read the current geometry again after resizing the sidebar.
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 80 });
+    act(() => (direction === 'ArrowDown' ? title : slider()).focus());
+    navigate(direction);
+    expect(scroll.scrollTop).toBe(expected + (top < 100 ? top - 100 : Math.max(0, bottom - 180)));
+  });
+
+  it('does not scroll an unconstrained narrow layout', () => {
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    scroll.style.overflowY = 'visible';
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
+    act(() => category().querySelector<HTMLButtonElement>('.adjustment-category-title')!.focus());
+    navigate('ArrowDown');
+    expect(scroll.scrollTop).toBe(0);
+    expect(document.activeElement).toBe(slider());
+  });
+
+  it('keeps keyboard focus when scrolling causes stationary pointer events and resumes on mouse movement', () => {
+    const items = ranges();
+    pointer('pointerover', items[0]);
+    act(() => items[0].focus());
+    navigate('ArrowDown');
+    const before = recipe();
+    act(() => items[3].dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+    act(() => items[3].dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 0 })));
+    expect(document.activeElement).toBe(items[1]);
+    expect(activeAdjustmentId()).toBe('tint');
+    expect(recipe()).toEqual(before);
+    pointer('pointerover', category(1).querySelector('.adjustment-category-title')!);
+    pointer('pointerover', category(1).querySelector('label')!);
+    expect(document.activeElement).toBe(items[1]);
+    pointer('pointerover', items[3]);
+    expect(document.activeElement).not.toBe(items[1]);
+    expect(activeAdjustmentId()).toBe('contrast');
+    key('ArrowRight', document.activeElement!);
+    expect(items[3].value).toBe('1');
+  });
 
   it.each([[0, 3], [9, 1]])('routes arrows and wheel to hovered %s → %s despite old DOM focus', (from, to) => {
     const items = ranges();
@@ -144,7 +235,7 @@ describe('production White Balance controls', () => {
   });
 
   it('navigates every gradient, Basic and Color slider in UI order without values or History changes or wrapping', () => {
-    const items = ranges();
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'));
     const before = recipe();
     act(() => items[0].focus());
     navigate('ArrowUp');
@@ -197,7 +288,7 @@ describe('production White Balance controls', () => {
     expect(items[3].value).toBe('10');
   });
 
-  it.each([1, 7, 8])('applies the next arrow only to the destination after navigating from UI index %s', (index) => {
+  it.each([0, 2, 8])('applies the next arrow only to the destination after navigating from UI index %s', (index) => {
     const items = ranges();
     act(() => items[index].focus());
     pointer('pointerover', items[index]);
@@ -216,7 +307,13 @@ describe('production White Balance controls', () => {
     const beforeHistory = history();
     act(() => tintSlider().focus());
     navigate('ArrowDown');
+    expect(document.activeElement).toBe(category(1).querySelector('.adjustment-category-title'));
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(category(2).querySelector('.adjustment-category-title'));
+    navigate('ArrowDown');
     expect(document.activeElement).toBe(slider(2));
+    navigate('ArrowUp');
+    navigate('ArrowUp');
     navigate('ArrowUp');
     expect(document.activeElement).toBe(tintSlider());
     advance();
@@ -229,6 +326,8 @@ describe('production White Balance controls', () => {
     items[1].disabled = true;
     items[2].closest<HTMLElement>('.adjustment-control')!.hidden = true;
     act(() => items[0].focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(category(1).querySelector('.adjustment-category-title'));
     navigate('ArrowDown');
     expect(document.activeElement).toBe(items[3]);
     click(category(1).querySelector<HTMLElement>('[aria-expanded]')!);

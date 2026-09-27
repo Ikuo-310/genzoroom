@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
+import { revealAdjustment } from './adjustmentNavigation';
 
 type Props = {
   adjustmentId: AdjustmentId;
@@ -16,6 +17,31 @@ export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
 // Only mounted AdjustmentSliders participate; native ranges elsewhere stay independent.
 const adjustments = new Map<HTMLInputElement, () => void>();
 let activeAdjustment: HTMLInputElement | null = null;
+// Scrolling can emit pointer enter/leave without mouse movement. Keep keyboard ownership until it moves.
+let keyboardNavigation = false;
+let mousePosition: { x: number; y: number } | null = null;
+
+export function focusAdjustmentCategory() { activeAdjustment = null; }
+
+export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'defaultPrevented' | 'target' | 'preventDefault'>, current: HTMLElement) {
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey
+    || isNativeEditingTarget(event.target) || !event.shiftKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return false;
+  event.preventDefault();
+  const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
+  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'))
+    .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
+      && (!(item instanceof HTMLInputElement) || isAvailable(item)));
+  const index = ordered.indexOf(current);
+  const destination = index < 0 ? undefined : ordered[index + (event.key === 'ArrowDown' ? 1 : -1)];
+  if (destination) {
+    for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
+    keyboardNavigation = true;
+    activeAdjustment = destination instanceof HTMLInputElement ? destination : null;
+    destination.focus({ preventScroll: true });
+    revealAdjustment(destination);
+  }
+  return true;
+}
 
 function isAvailable(element: HTMLInputElement | null): element is HTMLInputElement {
   return !!element && adjustments.has(element) && element.isConnected
@@ -39,10 +65,12 @@ export function activeAdjustmentId(): AdjustmentId | null {
 }
 
 function activateFromMouse(element: HTMLInputElement) {
+  keyboardNavigation = false;
   activeAdjustment = element;
   const focused = element.ownerDocument.activeElement;
   // Release stale slider focus without moving focus to the hover target or ending text edits.
-  if (focused instanceof HTMLInputElement && focused !== element && adjustments.has(focused)) focused.blur();
+  if (focused instanceof HTMLElement && focused !== element
+    && ((focused instanceof HTMLInputElement && adjustments.has(focused)) || focused.matches('.adjustment-category-title'))) focused.blur();
 }
 
 export function AdjustmentSlider(props: Props) {
@@ -154,16 +182,7 @@ export function AdjustmentSlider(props: Props) {
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       if (event.target instanceof HTMLInputElement && event.target.type === 'range' && !adjustments.has(event.target)) return;
       if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
-        event.preventDefault();
-        const scope = currentElement.closest('.workspace-side-panel') ?? currentElement.ownerDocument;
-        const ordered = Array.from(scope.querySelectorAll<HTMLInputElement>('.adjustment-range')).filter(isAvailable);
-        const destination = ordered[ordered.indexOf(currentElement) + (event.key === 'ArrowDown' ? 1 : -1)];
-        if (destination) {
-          // Commit existing edits without beginning a value change or History entry.
-          for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
-          activeAdjustment = destination;
-          destination.focus({ preventScroll: true });
-        }
+        navigateAdjustments(event, currentElement);
         return;
       }
       const steps = sliderSteps(event.key);
@@ -201,6 +220,7 @@ export function AdjustmentSlider(props: Props) {
     return () => {
       if (element) adjustments.delete(element);
       if (activeAdjustment === element) activeAdjustment = null;
+      if (adjustments.size === 0) { keyboardNavigation = false; mousePosition = null; }
       clearTimeout(timer.current);
       latest.current.onCommit();
       element?.removeEventListener('wheel', wheel);
@@ -214,9 +234,16 @@ export function AdjustmentSlider(props: Props) {
     <input ref={range} id={rangeId} data-adjustment-id={props.adjustmentId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
-      onPointerEnter={() => {
+      onPointerEnter={(event) => {
         hovered.current = true;
-        if (isAvailable(range.current)) activateFromMouse(range.current);
+        if (!keyboardNavigation && isAvailable(range.current)) activateFromMouse(range.current);
+        if (!keyboardNavigation) mousePosition = { x: event.clientX, y: event.clientY };
+      }}
+      onPointerMove={(event) => {
+        const moved = mousePosition ? mousePosition.x !== event.clientX || mousePosition.y !== event.clientY
+          : !keyboardNavigation || !!event.movementX || !!event.movementY;
+        mousePosition = { x: event.clientX, y: event.clientY };
+        if (moved && isAvailable(range.current)) activateFromMouse(range.current);
       }}
       onPointerLeave={() => {
         hovered.current = false;
@@ -227,6 +254,7 @@ export function AdjustmentSlider(props: Props) {
         if (!hovered.current && activeAdjustment === range.current) activeAdjustment = null;
       }}
       onPointerDown={() => {
+        keyboardNavigation = false;
         if (isAvailable(range.current)) activeAdjustment = range.current;
         clearTimeout(timer.current);
         if (interaction.current === 'number') commitNumberEdit();

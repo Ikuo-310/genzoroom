@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { focusAdjustmentCategory, navigateAdjustments } from './AdjustmentSlider';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -508,7 +509,9 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
           aria-controls={contentId}
           aria-label={expanded ? collapseLabel : expandLabel}
           onClick={toggleExpanded}
+          onFocus={focusAdjustmentCategory}
           onKeyDown={(event) => {
+            if (navigateAdjustments(event.nativeEvent, event.currentTarget)) return;
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             toggleExpanded();

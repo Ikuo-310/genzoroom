@@ -311,16 +311,22 @@ describe('Color Grading controls', () => {
   it('skips disabled and collapsed grading sliders during Shift+Arrow navigation', () => {
     const colorLast = host.querySelectorAll<HTMLElement>('.adjustment-category')[2]
       .querySelectorAll<HTMLInputElement>('input[type="range"]')[1];
+    const title = grading().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
     act(() => colorLast.focus());
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
     key('ArrowDown', colorLast, { shiftKey: true });
-    expect(document.activeElement).toBe(colorLast);
+    expect(document.activeElement).toBe(title);
+    key('ArrowDown', title, { shiftKey: true });
+    expect(document.activeElement).toBe(title);
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
     click(grading().querySelector<HTMLElement>('.adjustment-category-title')!);
+    act(() => colorLast.focus());
     key('ArrowDown', colorLast, { shiftKey: true });
-    expect(document.activeElement).toBe(colorLast);
+    expect(document.activeElement).toBe(title);
+    key('ArrowDown', title, { shiftKey: true });
+    expect(document.activeElement).toBe(title);
     click(grading().querySelector<HTMLElement>('.adjustment-category-title')!);
-    key('ArrowDown', colorLast, { shiftKey: true });
+    key('ArrowDown', title, { shiftKey: true });
     expect(document.activeElement).toBe(slider());
   });
 

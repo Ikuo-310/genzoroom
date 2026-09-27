@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ADJUSTMENT_COMMIT_DELAY_MS } from './AdjustmentSlider';
+import { activeAdjustmentId, ADJUSTMENT_COMMIT_DELAY_MS } from './AdjustmentSlider';
 import { isBasicDefault, type EditSession } from './editing';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import i18n from './i18n';
@@ -100,6 +100,57 @@ afterEach(() => {
 });
 
 describe('edit controls DOM interaction', () => {
+  it.each(['label', '.adjustment-number', '.adjustment-unit', '.adjustment-value-controls'])
+    ('keeps the focused adjustment active when hovering another row\'s %s', (selector) => {
+      act(() => range().focus());
+      const target = contrastRange().closest('.adjustment-control')!.querySelector(selector)!;
+      const before = session();
+      pointer('pointerover', target);
+      expect(activeAdjustmentId()).toBe('exposure');
+      expect(document.activeElement).toBe(range());
+      expect(session()).toEqual(before);
+      key('ArrowRight');
+      expect(range().value).toBe('0.01');
+      expect(contrastRange().value).toBe('0');
+    });
+
+  it('switches only on range hover, releases stale focus and leaves hover out of History', () => {
+    act(() => range().focus());
+    const before = session();
+    pointer('pointerover', contrastRange());
+    expect(activeAdjustmentId()).toBe('contrast');
+    expect(document.activeElement).not.toBe(range());
+    expect(document.activeElement).not.toBe(contrastRange());
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
+    expect(session()).toEqual(before);
+    key('ArrowRight');
+    expect(contrastRange().value).toBe('1');
+    pointer('pointerout', contrastRange());
+    pointer('pointerover', range());
+    expect(activeAdjustmentId()).toBe('exposure');
+    key('ArrowRight');
+    expect(range().value).toBe('0.01');
+    expect(contrastRange().value).toBe('1');
+  });
+
+  it.each(['Enter', 'Escape'])('preserves a numeric draft across another range hover until %s', (action) => {
+    act(() => number().focus());
+    changeNumber('0.47');
+    const before = session();
+    pointer('pointerover', contrastRange());
+    expect(document.activeElement).toBe(number());
+    expect(number().value).toBe('0.47');
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
+    expect(session()).toEqual(before);
+    expect(session().history).toHaveLength(0);
+    const arrow = key('ArrowUp', number());
+    expect(arrow.defaultPrevented).toBe(false);
+    expect(contrastRange().value).toBe('0');
+    key(action, number());
+    expect(range().value).toBe(action === 'Enter' ? '0.47' : '0');
+    expect(session().history).toHaveLength(action === 'Enter' ? 1 : 0);
+  });
+
   it('renders every adjustment as one shared label-range-value row', () => {
     const controls = host.querySelectorAll('.adjustment-control');
     expect(controls).toHaveLength(6);
