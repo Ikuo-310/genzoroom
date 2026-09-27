@@ -77,14 +77,14 @@ export function AdjustmentCategoryMenu({ target, enabled, resetDisabled, pasteDi
     onBlur={(event) => {
       if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) onClose();
     }}>
+    <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onCopy)}>{t(copyLabel)}</button>
+    <button type="button" className="workspace-menu-item" role="menuitem" disabled={pasteDisabled}
+      onClick={() => invoke(onPaste)}>{t(pasteLabel)}</button>
+    <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />
     <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onToggle)}>
       {t(enabled ? disableLabel : enableLabel)}
     </button>
     <button type="button" className="workspace-menu-item" role="menuitem" disabled={resetDisabled}
       onClick={() => invoke(onReset)}>{t(resetLabel)}</button>
-    <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />
-    <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onCopy)}>{t(copyLabel)}</button>
-    <button type="button" className="workspace-menu-item" role="menuitem" disabled={pasteDisabled}
-      onClick={() => invoke(onPaste)}>{t(pasteLabel)}</button>
   </div>, document.body);
 }

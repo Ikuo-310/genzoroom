@@ -791,14 +791,14 @@ describe('selected settings clipboard', () => {
     expect(title.getAttribute('aria-expanded')).toBe('true');
     openCategoryContextMenu('basic');
     expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
-      .toEqual(['Disable Basic', 'Reset category', 'Copy category settings', 'Paste into category']);
+      .toEqual(['Copy category settings', 'Paste into category', 'Disable Basic', 'Reset category']);
     categoryMenuAction('Disable Basic');
     expect(rendered.recipe!.basicEnabled).toBe(false);
     expect(title.getAttribute('aria-expanded')).toBe('true');
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
     openCategoryContextMenu('basic');
-    expect(document.querySelector('.adjustment-category-context-menu [role="menuitem"]')!.textContent)
-      .toBe('Enable Basic');
+    expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'))
+      .find((item) => item.textContent === 'Enable Basic')).not.toBeUndefined();
     categoryMenuAction('Reset category');
     expect(rendered.recipe!.adjustments.exposure).toBe(0);
     expect(rendered.recipe!.basicEnabled).toBe(false);
@@ -822,7 +822,7 @@ describe('selected settings clipboard', () => {
     await mount();
     openCategoryContextMenu('basic');
     expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
-      .toEqual(['基本補正を無効にする', 'カテゴリをリセット', 'カテゴリの設定をコピー', 'カテゴリに設定を貼り付け']);
+      .toEqual(['カテゴリの設定をコピー', 'カテゴリに設定を貼り付け', '基本補正を無効にする', 'カテゴリをリセット']);
     await act(async () => { await i18n.changeLanguage('en'); });
     expect(i18n.t('workspace.enableWhiteBalance')).toBe('Enable White Balance');
     expect(i18n.t('workspace.disableWhiteBalance')).toBe('Disable White Balance');
