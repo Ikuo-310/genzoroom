@@ -1299,3 +1299,110 @@ describe('3WAY range actions', () => {
     expect(buttons()).toHaveLength(0);
   });
 });
+
+
+describe('focus entry into the selected operation panel', () => {
+  function slider(id = 'temperature') { return host.querySelector<HTMLInputElement>('[data-adjustment-id="' + id + '"]')!; }
+  function enter(target: HTMLElement, direction = 'ArrowDown', modifiers: KeyboardEventInit = {}) {
+    act(() => target.focus()); return key(target, direction, { ctrlKey: false, shiftKey: true, ...modifiers });
+  }
+  it.each(['ArrowUp', 'ArrowDown'])('enters the first slider from Viewer with %s without changing edits', async direction => {
+    await mount(); const before = structuredClone(rendered.recipe); const viewport = activatePreview();
+    expect(enter(viewport, direction).defaultPrevented).toBe(true); expect(document.activeElement).toBe(slider());
+    expect(rendered.recipe).toEqual(before); expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+  });
+  it.each(['.history-menu-trigger', '.filmstrip button', '.workspace-actions button', '.exif-toggle'])('enters from %s', async selector => {
+    await mount(); const target = host.querySelector<HTMLElement>(selector)!;
+    expect(enter(target).defaultPrevented).toBe(true); expect(document.activeElement).toBe(slider());
+  });
+  it('restores actual slider focus rather than hover and preserves the existing row navigation', async () => {
+    await mount(); const remembered = slider('shadowsTint');
+    act(() => remembered.focus());
+    act(() => slider('contrast').dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 30, clientY: 40 })));
+    const viewport = activatePreview(); enter(viewport);
+    expect(document.activeElement).toBe(remembered);
+    key(remembered, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+    expect(document.activeElement).toBe(host.querySelector('[data-grading-range-id="midtones"]'));
+    key(document.activeElement!, 'ArrowDown', { ctrlKey: false, shiftKey: true }); expect(document.activeElement).toBe(slider('midtonesTemperature'));
+    key(document.activeElement!, 'ArrowRight', { ctrlKey: false, shiftKey: true }); expect(document.activeElement).toBe(slider('midtonesTemperature').closest('.adjustment-control')!.querySelector('.adjustment-number'));
+  });
+  it('falls back from a collapsed or disabled remembered slider without expanding its category', async () => {
+    await mount(); act(() => slider('exposure').focus()); const basic = categoryTitle('basic'); act(() => basic.click());
+    enter(activatePreview()); expect(document.activeElement).toBe(slider()); expect(basic.getAttribute('aria-expanded')).toBe('false');
+    act(() => basic.click()); act(() => slider('exposure').focus());
+    act(() => basic.closest('.adjustment-category-header')!.querySelector<HTMLButtonElement>('[data-category-switch]')!.click());
+    enter(activatePreview()); expect(document.activeElement).toBe(slider());
+  });
+  it('does not open a hidden panel or handle a shortcut when no usable slider exists', async () => {
+    await mount(); act(() => slider('exposure').focus());
+    await click('.panel-toggle.right'); const viewport = activatePreview();
+    expect(enter(viewport).defaultPrevented).toBe(false); expect(document.activeElement).toBe(viewport);
+    expect(host.querySelector<HTMLElement>('.right-panel')!.hidden).toBe(true);
+    await click('.panel-toggle.right');
+    for (const title of host.querySelectorAll<HTMLButtonElement>('.adjustment-category-title')) act(() => title.click());
+    expect(enter(viewport).defaultPrevented).toBe(false); expect(document.activeElement).toBe(viewport);
+  });
+  it.each([{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }, { shiftKey: false }])('ignores excluded keys %j', async modifiers => {
+    await mount(); const viewport = activatePreview(); enter(viewport, 'ArrowDown', modifiers); expect(document.activeElement).toBe(viewport);
+  });
+  it('leaves native editing and already handled events alone', async () => {
+    await mount();
+    for (const tag of ['input', 'textarea', 'div']) {
+      const target = document.createElement(tag); if (tag === 'div') target.setAttribute('contenteditable', 'true');
+      host.querySelector('.workspace-page')!.append(target); enter(target); expect(document.activeElement).toBe(target); target.remove();
+    }
+    const viewport = activatePreview(); const cancel = (event: Event) => event.preventDefault(); viewport.addEventListener('keydown', cancel);
+    enter(viewport); expect(document.activeElement).toBe(viewport); viewport.removeEventListener('keydown', cancel);
+  });
+  it('blocks entry while a menu or dialog is open even with a hovered slider', async () => {
+    await mount(); const viewport = activatePreview();
+    act(() => slider().dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+    openCategoryContextMenu('basic');
+    key(viewport, 'ArrowDown', { ctrlKey: false, shiftKey: true }); expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull();
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    openViewerContextMenu(); key(viewport, 'ArrowDown', { ctrlKey: false, shiftKey: true }); expect(document.activeElement).not.toBe(slider());
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    const menu = host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!; menu.open = true;
+    expect(enter(viewport).defaultPrevented).toBe(false); expect(document.activeElement).toBe(viewport); menu.open = false;
+    const dialog = document.createElement('dialog'); dialog.setAttribute('open', ''); host.append(dialog);
+    expect(enter(viewport).defaultPrevented).toBe(false); expect(document.activeElement).toBe(viewport); dialog.remove();
+  });
+
+  it('reveals the restored slider minimally and keeps stationary pointer events from stealing focus', async () => {
+    await mount(); const target = slider('contrast'); act(() => target.focus()); const viewport = activatePreview();
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 100 }); scroll.style.overflowY = 'auto';
+    const bounds = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 100, x: 0, y: top, width: 100, height: bottom - top, toJSON() {} });
+    const a = vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(bounds(100, 200));
+    const b = vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(bounds(250, 278));
+    try {
+      enter(viewport); expect(document.activeElement).toBe(target); expect(scroll.scrollTop).toBe(78);
+      b.mockReturnValue(bounds(110, 138)); enter(viewport); expect(scroll.scrollTop).toBe(78);
+      b.mockReturnValue(bounds(80, 108)); enter(viewport); expect(scroll.scrollTop).toBe(58);
+      const other = slider('exposure');
+      act(() => other.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 10, clientY: 20 })));
+      act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 20 })));
+      expect(document.activeElement).toBe(target); key(target, 'ArrowRight', { ctrlKey: false });
+      expect(rendered.recipe!.adjustments.contrast).toBe(1); expect(rendered.recipe!.adjustments.exposure).toBe(0);
+      act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 })));
+      key(other, 'ArrowRight', { ctrlKey: false }); expect(rendered.recipe!.adjustments.exposure).toBe(0.01);
+      expect(document.documentElement.scrollTop).toBe(0);
+    } finally { a.mockRestore(); b.mockRestore(); }
+  });
+  it.each(['filmstrip', 'home'])('does not enter during %s save', async transition => {
+    await mount(); const viewport = activatePreview();
+    const copied = defaultRecipe(); copied.adjustments.exposure = 2; copyEditSettings(copied, 'source', 'source.jpg', ['exposure']); key(viewport, 'v');
+    let resolveSave!: (value: ReturnType<typeof stored>) => void;
+    api.put.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+    await click(transition === 'home' ? '.workspace-actions button' : 'button[aria-label="destination.jpg"]');
+    enter(viewport); expect(document.activeElement).toBe(viewport);
+    await act(async () => resolveSave(stored(first.id, rendered.recipe!)));
+  });
+  it('keeps the remembered ID through photo changes and allows Filmstrip arrows', async () => {
+    await mount(); act(() => slider('contrast').focus()); const firstThumb = host.querySelector<HTMLButtonElement>('.filmstrip button')!;
+    act(() => firstThumb.focus()); key(firstThumb, 'ArrowRight', { ctrlKey: false });
+    await act(async () => {});
+    expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(second.filename);
+    const viewport = activatePreview(); enter(viewport); expect(document.activeElement).toBe(slider('contrast'));
+  });
+});

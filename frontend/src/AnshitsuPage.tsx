@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { focusAdjustmentCategory, navigateAdjustments } from './AdjustmentSlider';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './AdjustmentSlider';
 import { revealFilmstripItem } from './filmstripNavigation';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -72,6 +72,8 @@ export function AnshitsuPage() {
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
+  const selectedOperationPanelRef = useRef<HTMLElement>(null);
+  const lastFocusedAdjustment = useRef<AdjustmentId | null>(null);
   const closeHistoryMenu = useCallback(() => setHistoryMenu(null), []);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
@@ -323,7 +325,34 @@ export function AnshitsuPage() {
     colorGrading: { enabled: session.recipe.colorGradingEnabled, resetDisabled: colorGradingResetDisabled, enableLabel: 'workspace.enableColorGrading', disableLabel: 'workspace.disableColorGrading' },
   }[categoryMenu.categoryId] : undefined;
   const summary = detail ? detailToRecent(detail) : selectedAssets.find((asset) => asset.id === assetId);
-  return <main className="workspace-page">
+  const selectedOperationPanel = {
+    get element() { return selectedOperationPanelRef.current; },
+    restoreFocus: () => selectedOperationPanelRef.current
+      ? restoreAdjustmentFocus(selectedOperationPanelRef.current, lastFocusedAdjustment.current) : false,
+  };
+  function enterSelectedOperationPanel(event: KeyboardEvent) {
+    const panel = selectedOperationPanel.element;
+    if (!panel || (event.target instanceof Node && panel.contains(event.target)) || !event.shiftKey || !['ArrowUp', 'ArrowDown'].includes(event.key)
+      || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey
+      || isNativeEditingTarget(event.target) || !historyEnabled || switchingRef.current || exitRef.current
+      || historyMenu || categoryMenu || sliderMenu || rangeMenu
+      || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+    if (selectedOperationPanel.restoreFocus()) event.preventDefault();
+  }
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      // Range hover can release stale focus to body; keep the same entry behavior.
+      if (event.target === document.body || event.target === document.documentElement) enterSelectedOperationPanel(event);
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [enterSelectedOperationPanel]);
+  return <main className="workspace-page" onFocus={event => {
+    if (event.target instanceof HTMLInputElement && event.target.matches('.adjustment-range')
+      && selectedOperationPanelRef.current?.contains(event.target)) {
+      lastFocusedAdjustment.current = ADJUSTMENT_IDS.find(id => id === event.target.dataset.adjustmentId) ?? null;
+    }
+  }} onKeyDown={event => enterSelectedOperationPanel(event.nativeEvent)}>
     <header className="workspace-header">
       <div className="workspace-brand">
         <strong>GenzoRoom</strong>
@@ -399,7 +428,7 @@ export function AnshitsuPage() {
         <WorkspaceSection title={t('workspace.scope')} className="scope-section">
           <p>{t('workspace.scopePlaceholder')}</p>
         </WorkspaceSection>
-        <DevelopPanel headerAction={editable
+        <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
@@ -594,9 +623,9 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
   </div>;
 }
 
-export function DevelopPanel({ children, headerAction }: { children: ReactNode; headerAction?: ReactNode }) {
+export function DevelopPanel({ children, headerAction, panelRef }: { children: ReactNode; headerAction?: ReactNode; panelRef?: Ref<HTMLElement> }) {
   const { t } = useTranslation();
-  return <WorkspaceSection title={t('workspace.developControls')} className="develop-panel" headerAction={headerAction}>
+  return <WorkspaceSection title={t('workspace.developControls')} className="develop-panel" headerAction={headerAction} sectionRef={panelRef}>
     <div className="develop-scroll-region">{children}</div>
   </WorkspaceSection>;
 }
@@ -613,10 +642,10 @@ export function ExifSection({ children }: { children: ReactNode }) {
   </section>;
 }
 
-export function WorkspaceSection({ title, children, grow = false, className = '', headerAction }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode }) {
+export function WorkspaceSection({ title, children, grow = false, className = '', headerAction, sectionRef }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode; sectionRef?: Ref<HTMLElement> }) {
   const sectionClassName = `workspace-section${grow ? ' grow' : ''}${className ? ` ${className}` : ''}`;
 
-  return <section className={sectionClassName}>
+  return <section ref={sectionRef} className={sectionClassName}>
     <div className="workspace-section-header">
       <h2>{title}</h2>
       {headerAction}

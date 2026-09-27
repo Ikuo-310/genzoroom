@@ -51,12 +51,32 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const destination = horizontal ? horizontalAdjustmentTarget(current, event.key === 'ArrowRight' ? 1 : -1)
     : adjacent;
   if (destination) {
-    for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
-    keyboardNavigation = true;
-    activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
-    destination.focus({ preventScroll: true });
-    if (!horizontal) revealAdjustment(destination);
+    focusAdjustmentTarget(destination, !horizontal);
   }
+  return true;
+}
+
+function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean) {
+  const scope = destination.closest('.workspace-side-panel') ?? destination.ownerDocument;
+  for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
+  keyboardNavigation = true;
+  activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
+  destination.focus({ preventScroll: true });
+  if (reveal) revealAdjustment(destination);
+}
+
+export function restoreAdjustmentFocus(panel: HTMLElement, lastId: AdjustmentId | null): boolean {
+  const available = Array.from(panel.querySelectorAll<HTMLInputElement>('.adjustment-range')).filter(item => {
+    if (!isAvailable(item)) return false;
+    for (let node: HTMLElement | null = item; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+    }
+    return true;
+  });
+  const destination = available.find(item => item.dataset.adjustmentId === lastId) ?? available[0];
+  if (!destination) return false;
+  focusAdjustmentTarget(destination, true);
   return true;
 }
 
@@ -202,6 +222,10 @@ export function AdjustmentSlider(props: Props) {
       if (!currentElement || keyboardAdjustment() !== currentElement) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       if (event.target instanceof HTMLInputElement && event.target.type === 'range' && !adjustments.has(event.target)) return;
+      // Outside-panel Shift navigation belongs to the selected operation panel.
+      const panel = currentElement.closest('.develop-panel');
+      if (panel && event.shiftKey && ['ArrowUp', 'ArrowDown'].includes(event.key)
+        && event.target instanceof Node && !panel.contains(event.target)) return;
       if (navigateAdjustments(event, currentElement)) return;
       const steps = sliderSteps(event.key);
       if (steps === undefined) return;
