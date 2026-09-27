@@ -47,6 +47,15 @@ async function mount() {
   await flush();
 }
 const currentPhoto = () => container.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label');
+function hoverFilmstrip() {
+  act(() => container.querySelector('.filmstrip-scroll')!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+}
+async function filmstripKey(value = 'ArrowRight', init: KeyboardEventInit = {}, target: EventTarget = window) {
+  const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
+  await act(async () => { target.dispatchEvent(event); });
+  await flush();
+  return event;
+}
 
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -63,6 +72,92 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('navigates in both directions after route changes without saving a clean photo', async () => {
+    await mount(); hoverFilmstrip();
+    await filmstripKey(); expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey(); expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('ArrowLeft'); expect(currentPhoto()).toBe('first.jpg');
+    expect(mocked.put).not.toHaveBeenCalled();
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id, first.id]);
+  });
+
+  it('saves before keyboard navigation and ignores repeated switches during the pending save', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<any>();
+    mocked.put.mockReturnValueOnce(pending.promise);
+    await mount(); await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await filmstripKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    for (let index = 0; index < 4; index++) await filmstripKey('ArrowRight', { repeat: true });
+    await filmstripKey('ArrowLeft');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.get).toHaveBeenCalledTimes(1);
+    const [id, state, revision, saveId] = mocked.put.mock.calls[0];
+    expect(id).toBe(first.id);
+    expect(state.history).toHaveLength(1);
+    await act(async () => pending.resolve({ state, revision: revision + 1, lastSaveId: saveId, updatedAt: first.date }));
+    await flush();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.get.mock.calls.map(([assetId]) => assetId)).toEqual([first.id, second.id]);
+  });
+
+  it('uses the existing save-failure confirmation and retains edits on Stay', async () => {
+    vi.useFakeTimers();
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, 'revision_conflict'));
+    await mount(); await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await filmstripKey();
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(currentPhoto()).toBe('first.jpg');
+    await filmstripKey();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find((button) => button.textContent === 'Stay on this photo')!;
+    await act(async () => stay.click());
+    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('.edit-history')?.textContent).toContain('Basic OFF');
+    expect(currentPhoto()).toBe('first.jpg');
+  });
+
+  it('prioritizes range arrows, Shift navigation and number editing over Filmstrip hover', async () => {
+    vi.useFakeTimers(); await mount(); hoverFilmstrip();
+    const ranges = container.querySelectorAll<HTMLInputElement>('.adjustment-range');
+    await act(async () => ranges[0].focus());
+    await filmstripKey('ArrowRight', {}, ranges[0]);
+    expect(ranges[0].value).toBe('1');
+    expect(currentPhoto()).toBe('first.jpg');
+    await filmstripKey('ArrowDown', { shiftKey: true }, ranges[0]);
+    expect(document.activeElement).toBe(ranges[1]);
+    await filmstripKey('ArrowRight', { shiftKey: true }, ranges[1]);
+    expect(document.activeElement).toBe(container.querySelectorAll('.adjustment-number')[1]);
+    await filmstripKey('ArrowRight', {}, document.activeElement!);
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(mocked.put).not.toHaveBeenCalled();
+  });
+
+  it('blocks Filmstrip keys while a History menu or confirmation dialog is open', async ({ onTestFinished }) => {
+    const show = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+    const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+    onTestFinished(() => {
+      if (show) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', show);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+      if (close) Object.defineProperty(HTMLDialogElement.prototype, 'close', close);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+    });
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+    vi.useFakeTimers(); await mount();
+    await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await click('.history-menu-trigger');
+    await filmstripKey(); expect(currentPhoto()).toBe('first.jpg');
+    const clear = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+      .find((button) => button.textContent === 'Clear all history')!;
+    await act(async () => clear.click());
+    expect(container.querySelector('dialog')).not.toBeNull();
+    await filmstripKey(); expect(currentPhoto()).toBe('first.jpg');
+    expect(mocked.put).not.toHaveBeenCalled();
+  });
+
   it('keeps History controls and cursor unchanged when EXIF is collapsed and expanded', async () => {
     vi.useFakeTimers();
     await mount();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { focusAdjustmentCategory, navigateAdjustments } from './AdjustmentSlider';
+import { revealFilmstripItem } from './filmstripNavigation';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -366,6 +367,7 @@ export function AnshitsuPage() {
       assets={selectedAssets}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
+      keyboardBlocked={selection !== null || historyMenu !== null || historyConfirmation !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
     {selection && selection.assetId === assetId && <AdjustmentSelectionDialog
@@ -675,16 +677,59 @@ export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif;
   ))}</dl> : <p>{t('workspace.exif.empty')}</p>;
 }
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false }: { assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean }) {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false }: {
+  assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
+}) {
   const { t } = useTranslation();
+  const scroll = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  const focusDestination = useRef<string | null>(null);
+  const latest = useRef({ assets, activeAssetId, onActivate, disabled, keyboardBlocked });
+  latest.current = { assets, activeAssetId, onActivate, disabled, keyboardBlocked };
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    const current = latest.current;
+    const region = scroll.current;
+    if (!region || current.keyboardBlocked || event.defaultPrevented || event.isComposing
+      || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    const focused = region.ownerDocument.activeElement;
+    const inside = !!focused && region.contains(focused);
+    if (!inside && !hovered.current) return;
+    if (focused && focused !== region.ownerDocument.body && focused !== region.ownerDocument.documentElement && !inside) return;
+    if (isNativeEditingTarget(event.target) || (event.target instanceof Element && !region.contains(event.target)
+      && event.target.closest('input, button, textarea, select, a, [tabindex], [contenteditable]'))) return;
+    event.preventDefault();
+    if (current.disabled) return;
+    const index = current.assets.findIndex((asset) => asset.id === current.activeAssetId);
+    const destination = index < 0 ? undefined : current.assets[index + (event.key === 'ArrowRight' ? 1 : -1)];
+    if (!destination) return;
+    focusDestination.current = inside ? destination.id : null;
+    current.onActivate(destination.id);
+  }, []);
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+  useEffect(() => {
+    const region = scroll.current;
+    const active = region?.querySelector<HTMLButtonElement>('[aria-current="true"]');
+    if (!region || !active) return;
+    revealFilmstripItem(region, active);
+    if (!disabled && !keyboardBlocked && focusDestination.current === activeAssetId) {
+      focusDestination.current = null;
+      const focused = region.ownerDocument.activeElement;
+      if (focused === region.ownerDocument.body || (focused && region.contains(focused))) active.focus({ preventScroll: true });
+    }
+  }, [activeAssetId, assets, disabled, keyboardBlocked]);
   return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
-    <div className="filmstrip-scroll">
+    <div ref={scroll} className="filmstrip-scroll"
+      onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; }}
+      onKeyDown={(event) => handleKeyDown(event.nativeEvent)}>
       {assets.map((asset) => <button
         key={asset.id}
         type="button"
         disabled={disabled}
         className={`filmstrip-item${asset.id === activeAssetId ? ' active' : ''}`}
-        onClick={() => onActivate(asset.id)}
+        onClick={() => { focusDestination.current = null; onActivate(asset.id); }}
         aria-current={asset.id === activeAssetId ? 'true' : undefined}
         aria-label={asset.filename}
       >
