@@ -139,13 +139,14 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-settings-menu { position: relative; }
 .edit-settings-menu summary { display: grid; place-items: center; min-width: 30px; cursor: pointer; list-style: none; font-size: 1rem; }
 .edit-settings-menu summary::-webkit-details-marker { display: none; }
-.edit-settings-action-list { display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); gap: 0; padding: 6px; border: 1px solid #48484b; border-radius: 5px; background: #202023; box-shadow: 0 6px 18px #0008; }
+.workspace-menu-surface { color: #ddd; background: #202023; border: 1px solid #48484b; border-radius: 5px; box-shadow: 0 6px 18px #0008; padding: 6px; font-size: 0.76rem; }
+.edit-settings-action-list { display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); gap: 0; }
 .edit-settings-menu-actions { position: absolute; top: calc(100% + 5px); right: 0; z-index: 25; }
 .edit-settings-context-menu { position: fixed; z-index: 100; max-height: calc(100vh - 16px); overflow: auto; }
-.edit-settings-menu-item { width: 100%; min-width: 0; padding: 7px 10px; border: 0; border-radius: 3px; color: #ddd; background: transparent; text-align: left; font: inherit; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
-.edit-settings-menu-item:hover:not(:disabled), .edit-settings-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
-.edit-settings-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
-.edit-settings-menu-item:disabled { color: #777; cursor: default; }
+.workspace-menu-item { width: 100%; min-width: 0; padding: 6px 10px; border: 0; border-radius: 3px; color: #ddd; background: transparent; text-align: left; font: inherit; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.workspace-menu-item:hover:not(:disabled), .workspace-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
+.workspace-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
+.workspace-menu-item:disabled { color: #777; cursor: default; }
 .edit-settings-menu-separator { height: 0; margin: 5px 4px; border-top: 1px solid #48484b; }
 .adjustment-selection-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); box-sizing: border-box; overflow: auto; color: #ddd; background: #242426; border: 1px solid #666; border-radius: 8px; padding: 20px; box-shadow: 0 10px 30px #0008; }
 .adjustment-selection-dialog::backdrop { background: rgb(0 0 0 / 65%); }
@@ -241,10 +242,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-history-paste { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }
-.history-organization-menu { position: fixed; z-index: 50; display: grid; box-sizing: border-box; min-width: min(190px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; padding: 4px; border: 1px solid #555; border-radius: 5px; background: #242426; box-shadow: 0 4px 14px #0008; }
-.history-organization-menu button { padding: 7px 10px; border: 0; border-radius: 3px; text-align: left; font: inherit; color: #ddd; background: transparent; cursor: pointer; }
-.history-organization-menu button:hover:not(:disabled), .history-organization-menu button:focus-visible { background: #3b3b3e; }
-.history-organization-menu button:disabled { color: #777; cursor: default; }
+.history-organization-menu { position: fixed; z-index: 50; display: grid; box-sizing: border-box; width: max-content; min-width: min(190px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; }
 .history-confirmation-dialog { width: min(420px, calc(100vw - 40px)); }
 .history-confirmation-warning { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 0; color: #ffb38a; font-weight: 700; }
 .history-confirmation-warning-icon { flex: none; color: inherit; }

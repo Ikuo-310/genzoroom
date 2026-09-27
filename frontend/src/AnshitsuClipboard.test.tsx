@@ -123,6 +123,8 @@ describe('History organization menus and confirmation', () => {
   it('offers three header actions, compacts without confirmation, and restores with Undo', async () => {
     const original = await mountHistory();
     headerHistoryMenu();
+    expect(document.querySelector('.history-organization-menu')?.classList.contains('workspace-menu-surface')).toBe(true);
+    expect([...document.querySelectorAll('.history-organization-menu button')].every((button) => button.classList.contains('workspace-menu-item'))).toBe(true);
     expect(Array.from(document.querySelectorAll('.history-organization-menu button'), (item) => item.textContent))
       .toEqual(['Compact history', 'Clear all history', 'Reset edits']);
     historyMenuAction('Compact history');
@@ -304,7 +306,7 @@ describe('History organization menus and confirmation', () => {
     key(window, 'c', { altKey: true });
     expect(host.querySelectorAll('dialog')).toHaveLength(1);
     act(() => dialogButton('Cancel').click());
-    menuAction('Copy selected settings…');
+    menuAction('Copy selected settings');
     expect(host.querySelectorAll('dialog')).toHaveLength(1);
     expect(host.querySelector<HTMLButtonElement>('.history-menu-trigger')!.disabled).toBe(true);
     key(document.activeElement!, 'Escape', { ctrlKey: false });
@@ -684,7 +686,7 @@ describe('selected settings clipboard', () => {
 
   it('provides all four toolbar actions without photo focus and restores focus to its visible trigger', async () => {
     await mount();
-    const trigger = menuAction('Copy selected settings…');
+    const trigger = menuAction('Copy selected settings');
     expect(host.querySelector('dialog')).not.toBeNull();
     choose(['exposure']); confirm('Copy');
     expect(document.activeElement).toBe(trigger);
@@ -693,7 +695,7 @@ describe('selected settings clipboard', () => {
     expect(Object.keys(readEditClipboard()!.values)).toHaveLength(16);
     const source = defaultRecipe(); source.adjustments.exposure = 2; source.adjustments.tint = 10;
     copyEditSettings(source, 'other', 'other.jpg', ['tint', 'exposure']);
-    menuAction('Paste selected settings…'); choose(['tint']);
+    menuAction('Paste selected settings'); choose(['tint']);
     act(() => dialogButton('Cancel').click());
     expect(document.activeElement).toBe(trigger);
     expect(rendered.recipe!.adjustments.tint).toBe(0);
@@ -707,7 +709,7 @@ describe('selected settings clipboard', () => {
     await mount();
     expect(openViewerContextMenu().defaultPrevented).toBe(true);
     const action = Array.from(document.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu button'))
-      .find((button) => button.textContent === 'Copy selected settings…')!;
+      .find((button) => button.textContent === 'Copy selected settings')!;
     act(() => action.click());
     expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
     expect(host.querySelector('dialog')).not.toBeNull();

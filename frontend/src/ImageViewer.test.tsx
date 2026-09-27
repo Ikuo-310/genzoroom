@@ -96,7 +96,7 @@ describe('Viewer edit settings context menu', () => {
     let menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
     expect(menu).not.toBeNull();
     expect(Array.from(menu.querySelectorAll('[role="menuitem"]'), (item) => item.textContent)).toEqual([
-      'Copy all settings', 'Copy selected settings…', 'Paste copied settings', 'Paste selected settings…',
+      'Copy all settings', 'Copy selected settings', 'Paste copied settings', 'Paste selected settings',
     ]);
     click(menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!);
     expect(contextActions.copy).toHaveBeenCalledTimes(1);
@@ -125,9 +125,13 @@ describe('Viewer edit settings context menu', () => {
     const toolbarItems = [...host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')];
     expect([...document.body.querySelectorAll('.edit-settings-context-menu [role="separator"]')]).toHaveLength(1);
     expect([...host.querySelectorAll('.edit-settings-menu-actions [role="separator"]')]).toHaveLength(1);
+    expect(document.body.querySelector('.edit-settings-context-menu')?.classList.contains('workspace-menu-surface')).toBe(true);
+    expect(host.querySelector('.edit-settings-menu-actions')?.classList.contains('workspace-menu-surface')).toBe(true);
     expect(toolbarItems.map((item) => item.textContent)).toEqual(contextItems.map((item) => item.textContent));
     expect(contextItems.every((item) => item.classList.contains('edit-settings-menu-item'))).toBe(true);
     expect(toolbarItems.every((item) => item.classList.contains('edit-settings-menu-item'))).toBe(true);
+    expect(contextItems.every((item) => item.classList.contains('workspace-menu-item'))).toBe(true);
+    expect(toolbarItems.every((item) => item.classList.contains('workspace-menu-item'))).toBe(true);
     expect(contextItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
     expect(toolbarItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
     act(() => root.render(<ContextMenuHarness hasClipboard={false} />));

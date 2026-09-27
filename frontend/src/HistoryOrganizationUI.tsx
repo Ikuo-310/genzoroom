@@ -35,7 +35,7 @@ export function HistoryOrganizationMenu({ target, hasHistory, canReset, onSelect
     return () => { window.removeEventListener('pointerdown', outside, true); window.removeEventListener('resize', fit); };
   }, [target, onClose]);
   const close = () => { onClose(); if (target.trigger.isConnected) target.trigger.focus({ preventScroll: true }); };
-  return createPortal(<div ref={menu} role="menu" tabIndex={-1} aria-label={t('workspace.historyMenu')} className="history-organization-menu"
+  return createPortal(<div ref={menu} role="menu" tabIndex={-1} aria-label={t('workspace.historyMenu')} className="workspace-menu-surface history-organization-menu"
     style={position} onKeyDown={(event) => {
       event.stopPropagation();
       if (event.key === 'Escape') { event.preventDefault(); close(); }
@@ -50,7 +50,7 @@ export function HistoryOrganizationMenu({ target, hasHistory, canReset, onSelect
       }
     }} onKeyUp={(event) => event.stopPropagation()}>
     {operations.filter(({ operation }) => operation !== 'trimHistory' || target.cursor !== undefined).map(({ operation, label }) =>
-      <button key={operation} type="button" role="menuitem" disabled={operation === 'resetEdits' ? !canReset
+      <button key={operation} type="button" className="workspace-menu-item" role="menuitem" disabled={operation === 'resetEdits' ? !canReset
         : !hasHistory || (operation === 'trimHistory' && target.cursor === 0)}
         onClick={() => { close(); onSelect(operation); }}>{t(label)}</button>)}
   </div>, document.body);

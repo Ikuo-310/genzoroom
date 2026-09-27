@@ -27,7 +27,7 @@ function EditSettingsActions({ actions, onSelect, menuItems = true }: {
   const { t } = useTranslation();
   return <>{actions.map(({ label, action, disabled }, index) => <Fragment key={label}>
     {index === 2 && <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />}
-    <button type="button" className="edit-settings-menu-item"
+    <button type="button" className="workspace-menu-item edit-settings-menu-item"
       {...(menuItems ? { role: 'menuitem' as const } : {})}
       disabled={disabled} onClick={() => onSelect(action)}>{t(label)}</button>
   </Fragment>)}</>;
@@ -66,7 +66,7 @@ function ContextEditSettingsMenu({ position, actions, onClose, onSelect }: {
   }, [onClose]);
 
   return createPortal(<div ref={menu} role="menu" aria-label={t('workspace.editSettingsActions')}
-    className="edit-settings-context-menu edit-settings-action-list" style={{ left: location.left, top: location.top }}
+    className="workspace-menu-surface edit-settings-context-menu edit-settings-action-list" style={{ left: location.left, top: location.top }}
     onKeyDownCapture={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}
     onBlur={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) onClose(false); }}>
     <EditSettingsActions actions={actions} onSelect={onSelect} />
@@ -103,7 +103,7 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
   }}>
     <summary ref={trigger} className="tool-button" aria-label={t('workspace.editSettingsActions')} title={t('workspace.editSettingsActions')}>⋯</summary>
-    <div className="edit-settings-menu-actions edit-settings-action-list">
+    <div className="workspace-menu-surface edit-settings-menu-actions edit-settings-action-list">
       <EditSettingsActions actions={actions} onSelect={selectFromToolbar} menuItems={false} />
     </div>
   </details>
