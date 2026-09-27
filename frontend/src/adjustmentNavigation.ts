@@ -13,15 +13,20 @@ export function revealAdjustment(target: HTMLElement) {
   const offset = revealOffset(item.top, item.bottom, top, top + scroll.clientHeight);
   if (offset) scroll.scrollTop += offset;
 }
-export function moveCategoryFocus(event: KeyboardEvent, current: HTMLButtonElement): boolean {
-  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
-  const selector = current.matches('.adjustment-category-title') && event.key === 'ArrowRight'
-    ? '[data-category-switch]' : current.matches('[data-category-switch]') && event.key === 'ArrowLeft'
-      ? '.adjustment-category-title' : null;
-  if (!selector) return false;
-  const destination = current.closest('.adjustment-category')?.querySelector<HTMLButtonElement>(selector);
-  if (!destination || destination.disabled) return false;
-  event.preventDefault();
-  destination.focus({ preventScroll: true });
-  return true;
+export function adjustmentRowPosition(current: HTMLElement): HTMLElement | null {
+  const row = current.closest('.adjustment-control');
+  if (row) return row.querySelector('.adjustment-range');
+  return current.closest('.adjustment-category-header')?.querySelector('.adjustment-category-title') ?? null;
+}
+
+export function horizontalAdjustmentTarget(current: HTMLElement, direction: number): HTMLElement | undefined {
+  const row = current.closest('.adjustment-control, .adjustment-category-header');
+  if (!row) return;
+  const selectors = row.matches('.adjustment-control')
+    ? ['.adjustment-range', '.adjustment-number', '.adjustment-reset']
+    : ['.adjustment-category-title', '[data-category-switch]', '.adjustment-category-reset'];
+  const ordered = selectors.map((selector) => row.querySelector<HTMLElement>(selector))
+    .filter((item): item is HTMLElement => !!item && !item.matches(':disabled') && !item.closest('[hidden], [inert]'));
+  const index = ordered.indexOf(current);
+  return index < 0 ? undefined : ordered[index + direction];
 }

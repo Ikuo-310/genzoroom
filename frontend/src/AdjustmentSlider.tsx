@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
-import { revealAdjustment } from './adjustmentNavigation';
+import { adjustmentRowPosition, horizontalAdjustmentTarget, revealAdjustment } from './adjustmentNavigation';
 
 type Props = {
   adjustmentId: AdjustmentId;
@@ -25,22 +25,24 @@ export function focusAdjustmentCategory() { activeAdjustment = null; }
 
 export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'defaultPrevented' | 'target' | 'preventDefault'>, current: HTMLElement) {
   if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey
-    || isNativeEditingTarget(event.target) || !event.shiftKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return false;
+    || (isNativeEditingTarget(event.target) && !(event.target === current && current.matches('.adjustment-number')))
+    || !event.shiftKey || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return false;
   event.preventDefault();
+  const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
   const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
+  const position = adjustmentRowPosition(current);
   const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || isAvailable(item)));
-  const position = current.matches('[data-category-switch]')
-    ? current.closest('.adjustment-category')?.querySelector<HTMLElement>('.adjustment-category-title') : current;
   const index = position ? ordered.indexOf(position) : -1;
-  const destination = index < 0 ? undefined : ordered[index + (event.key === 'ArrowDown' ? 1 : -1)];
+  const destination = horizontal ? horizontalAdjustmentTarget(current, event.key === 'ArrowRight' ? 1 : -1)
+    : index < 0 ? undefined : ordered[index + (event.key === 'ArrowDown' ? 1 : -1)];
   if (destination) {
     for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
     keyboardNavigation = true;
-    activeAdjustment = destination instanceof HTMLInputElement ? destination : null;
+    activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
     destination.focus({ preventScroll: true });
-    revealAdjustment(destination);
+    if (!horizontal) revealAdjustment(destination);
   }
   return true;
 }
@@ -149,6 +151,7 @@ export function AdjustmentSlider(props: Props) {
   }
 
   function handleNumberKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (navigateAdjustments(event.nativeEvent, event.currentTarget) || event.nativeEvent.isComposing) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       commitNumberEdit();
@@ -183,10 +186,7 @@ export function AdjustmentSlider(props: Props) {
       if (!currentElement || keyboardAdjustment() !== currentElement) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
       if (event.target instanceof HTMLInputElement && event.target.type === 'range' && !adjustments.has(event.target)) return;
-      if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
-        navigateAdjustments(event, currentElement);
-        return;
-      }
+      if (navigateAdjustments(event, currentElement)) return;
       const steps = sliderSteps(event.key);
       if (steps === undefined) return;
       event.preventDefault();
@@ -252,6 +252,9 @@ export function AdjustmentSlider(props: Props) {
         if (activeAdjustment === range.current && document.activeElement !== range.current) activeAdjustment = null;
       }}
       onFocus={() => { activeAdjustment = range.current; }}
+      onKeyDown={(event) => {
+        if (keyboardAdjustment() === event.currentTarget) navigateAdjustments(event.nativeEvent, event.currentTarget);
+      }}
       onBlur={() => {
         if (!hovered.current && activeAdjustment === range.current) activeAdjustment = null;
       }}
@@ -271,10 +274,12 @@ export function AdjustmentSlider(props: Props) {
     <div className="adjustment-value-controls">
       <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
-        onFocus={() => { beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
+        onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
       <span className="adjustment-unit" aria-hidden="true">{props.unit ?? ''}</span>
       <button type="button" className="adjustment-reset" onClick={props.onReset}
+        onFocus={focusAdjustmentCategory}
+        onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
         disabled={props.disabled || props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button>
     </div>
   </div>;

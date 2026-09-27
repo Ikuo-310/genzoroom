@@ -54,6 +54,10 @@ const blacksNumber = () => host.querySelectorAll<HTMLInputElement>('input[type="
 function key(key: string, target: EventTarget = window, init: KeyboardEventInit = {}, type = 'keydown') {
   const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true, ...init });
   act(() => { target.dispatchEvent(event); });
+  if (target instanceof HTMLButtonElement && type === 'keydown' && ['Enter', ' '].includes(key)
+    && !event.defaultPrevented && !init.isComposing) {
+    act(() => { target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true })); target.click(); });
+  }
   return event;
 }
 function pointer(type: string, target: EventTarget = range()) {
@@ -100,6 +104,101 @@ afterEach(() => {
 });
 
 describe('edit controls DOM interaction', () => {
+  it('moves across range, number and Reset with Shift only, without History or scrolling', () => {
+    const reset = host.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+    act(() => range().focus());
+    expect(key('ArrowLeft', range(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(range());
+    key('ArrowRight', range(), { shiftKey: true });
+    expect(document.activeElement).toBe(number());
+    expect(session().history).toHaveLength(0);
+    expect(key('ArrowRight', number(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(number());
+    expect(reset.disabled).toBe(true);
+    key('ArrowLeft', number(), { shiftKey: true });
+    expect(document.activeElement).toBe(range());
+    expect(session().pending).toBeNull();
+    expect(session().history).toHaveLength(0);
+    key('ArrowRight', range());
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
+    expect(range().value).toBe('0.01');
+    const beforeHistory = session().history;
+    key('ArrowRight', range(), { shiftKey: true });
+    key('ArrowRight', number(), { shiftKey: true });
+    expect(document.activeElement).toBe(reset);
+    key('ArrowRight', reset, { shiftKey: true });
+    expect(document.activeElement).toBe(reset);
+    key('ArrowLeft', reset, { shiftKey: true });
+    expect(document.activeElement).toBe(number());
+    key('ArrowLeft', number(), { shiftKey: true });
+    expect(document.activeElement).toBe(range());
+    expect(session().history).toEqual(beforeHistory);
+    expect(document.documentElement.scrollTop).toBe(0);
+  });
+
+  it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])
+    ('commits a numeric draft once via blur on Shift+%s', (direction) => {
+      act(() => number().focus());
+      changeNumber('0.47');
+      const event = key(direction, number(), { shiftKey: true });
+      expect(event.defaultPrevented).toBe(true);
+      const destination = direction === 'ArrowLeft' ? range()
+        : direction === 'ArrowRight' ? host.querySelector('.adjustment-reset')
+        : direction === 'ArrowUp' ? host.querySelector('.adjustment-category-title') : contrastRange();
+      expect(document.activeElement).toBe(destination);
+      expect(range().value).toBe('0.47');
+      expect(session().history).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
+      expect(session().history).toHaveLength(1);
+      key('z', window, { ctrlKey: true });
+      expect(range().value).toBe('0');
+      key('z', window, { ctrlKey: true, shiftKey: true });
+      expect(range().value).toBe('0.47');
+    });
+
+  it.each([{ isComposing: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }])
+    ('preserves numeric editing during modified Shift navigation %j', (modifier) => {
+      act(() => number().focus());
+      changeNumber('0.47');
+      expect(key('ArrowRight', number(), { shiftKey: true, ...modifier }).defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(number());
+      expect(session().history).toHaveLength(0);
+      key('Escape', number());
+      expect(range().value).toBe('0');
+    });
+
+  it.each(['Enter', ' '])('uses one native %s activation for a slider Reset', (value) => {
+    act(() => number().focus());
+    changeNumber('0.47');
+    key('Enter', number());
+    const reset = host.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+    act(() => reset.focus());
+    expect(key(value, reset).defaultPrevented).toBe(false);
+    expect(range().value).toBe('0');
+    expect(session().history).toHaveLength(2);
+  });
+
+  it('excludes hidden horizontal targets and keeps vertical navigation out of native editing shortcuts', () => {
+    act(() => number().focus());
+    changeNumber('0.47');
+    key('Enter', number());
+    act(() => range().focus());
+    number().hidden = true;
+    key('ArrowRight', range(), { shiftKey: true });
+    expect(document.activeElement).toBe(host.querySelector('.adjustment-reset'));
+    number().hidden = false;
+    act(() => number().focus());
+    changeNumber('0.58');
+    const beforeHistory = session().history;
+    expect(key('Enter', number(), { isComposing: true }).defaultPrevented).toBe(false);
+    expect(session().history).toEqual(beforeHistory);
+    expect(key('a', number(), { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(key('ArrowLeft', number()).defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(number());
+    key('Escape', number());
+    expect(range().value).toBe('0.47');
+  });
+
   it.each(['label', '.adjustment-number', '.adjustment-unit', '.adjustment-value-controls'])
     ('keeps the focused adjustment active when hovering another row\'s %s', (selector) => {
       act(() => range().focus());
@@ -629,6 +728,7 @@ describe('edit controls DOM interaction', () => {
     pointer('pointerover', contrastRange());
     expect(document.activeElement).toBe(target);
     for (const init of [{ key: 'ArrowRight' }, { key: 'ArrowUp', shiftKey: true }, { key: 'ArrowDown', shiftKey: true }, { key: 'z', ctrlKey: true }, { key: 'z', ctrlKey: true, shiftKey: true }, { key: 'y', ctrlKey: true }]) {
+      if (selector === 'input[type="number"]' && init.shiftKey && ['ArrowUp', 'ArrowDown'].includes(init.key)) continue;
       expect(key(init.key, target, init).defaultPrevented).toBe(false);
     }
     expect(session().recipe.adjustments.exposure).toBe(0.1);

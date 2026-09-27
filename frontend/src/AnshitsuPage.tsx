@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { focusAdjustmentCategory, navigateAdjustments } from './AdjustmentSlider';
-import { moveCategoryFocus } from './adjustmentNavigation';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -512,11 +511,7 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
           onClick={toggleExpanded}
           onFocus={focusAdjustmentCategory}
           onKeyDown={(event) => {
-            if (navigateAdjustments(event.nativeEvent, event.currentTarget)) return;
-            if (moveCategoryFocus(event.nativeEvent, event.currentTarget)) return;
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            toggleExpanded();
+            navigateAdjustments(event.nativeEvent, event.currentTarget);
           }}>
           <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
           <span className="adjustment-category-label">{title}</span>
@@ -527,12 +522,13 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
           data-category-switch
           onFocus={focusAdjustmentCategory}
           onKeyDown={(event) => {
-            if (navigateAdjustments(event.nativeEvent, event.currentTarget)) return;
-            moveCategoryFocus(event.nativeEvent, event.currentTarget);
+            navigateAdjustments(event.nativeEvent, event.currentTarget);
           }}
           aria-pressed={enabled} aria-label={enabled ? disableLabel : enableLabel}
           title={enabled ? disableLabel : enableLabel} onClick={onToggle}>⏻</button>
         <button type="button" className="adjustment-category-reset" disabled={resetDisabled}
+          onFocus={focusAdjustmentCategory}
+          onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
           onClick={onReset}>{resetLabel}</button>
       </div>
     </div>

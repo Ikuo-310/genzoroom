@@ -40,7 +40,13 @@ const number = (index = 0) => category().querySelectorAll<HTMLInputElement>('inp
 const history = () => Array.from(host.querySelectorAll('.edit-history li:not(.initial-state)'), item => item.textContent);
 function click(element: HTMLElement) { act(() => element.click()); }
 function key(value: string, target: EventTarget = slider(), init: KeyboardEventInit = {}) {
-  act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init })));
+  const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
+  act(() => target.dispatchEvent(event));
+  // jsdom does not perform the native keyboard activation of buttons.
+  if (target instanceof HTMLButtonElement && ['Enter', ' '].includes(value) && !event.defaultPrevented && !init.isComposing) {
+    act(() => { target.dispatchEvent(new KeyboardEvent('keyup', { key: value, bubbles: true })); target.click(); });
+  }
+  return event;
 }
 function wheel(deltaY: number, shiftKey = false, target = slider()) {
   const event = new WheelEvent('wheel', { deltaY, shiftKey, bubbles: true, cancelable: true });
@@ -94,6 +100,110 @@ describe('production White Balance controls', () => {
   const ranges = () => Array.from(host.querySelectorAll<HTMLInputElement>('.adjustment-range'));
   const navigate = (direction: 'ArrowUp' | 'ArrowDown') => key(direction, document.activeElement!, { shiftKey: true });
 
+  it('moves across all category controls only with Shift and skips a disabled Reset', () => {
+    const title = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    const toggle = category().querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    const reset = category().querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+    act(() => title.focus());
+    key('ArrowRight', title);
+    expect(document.activeElement).toBe(title);
+    key('ArrowRight', title, { shiftKey: true });
+    expect(document.activeElement).toBe(toggle);
+    key('ArrowLeft', toggle);
+    expect(document.activeElement).toBe(toggle);
+    key('ArrowRight', toggle, { shiftKey: true });
+    expect(document.activeElement).toBe(toggle);
+    expect(reset.disabled).toBe(true);
+    wheel(-1);
+    advance();
+    const before = recipe();
+    const beforeHistory = history();
+    act(() => toggle.focus());
+    key('ArrowRight', toggle, { shiftKey: true });
+    expect(document.activeElement).toBe(reset);
+    key('ArrowRight', reset, { shiftKey: true });
+    expect(document.activeElement).toBe(reset);
+    key('ArrowLeft', reset, { shiftKey: true });
+    expect(document.activeElement).toBe(toggle);
+    key('ArrowLeft', toggle, { shiftKey: true });
+    expect(document.activeElement).toBe(title);
+    key('ArrowLeft', title, { shiftKey: true });
+    expect(document.activeElement).toBe(title);
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual(beforeHistory);
+  });
+
+  it.each(['.adjustment-category-title', '[data-category-switch]', '.adjustment-category-reset'])
+    ('uses one vertical position from Basic %s', (selector) => {
+      wheel(-1, false, slider(1));
+      advance();
+      const source = category(1).querySelector<HTMLElement>(selector)!;
+      const before = recipe();
+      const beforeHistory = history();
+      act(() => source.focus());
+      navigate('ArrowUp');
+      expect(document.activeElement).toBe(tintSlider());
+      act(() => source.focus());
+      navigate('ArrowDown');
+      expect(document.activeElement).toBe(slider(1));
+      expect(recipe()).toEqual(before);
+      expect(history()).toEqual(beforeHistory);
+    });
+
+  it.each(['Enter', ' '])('activates category Reset once with native %s', (value) => {
+    wheel(-1);
+    advance();
+    const reset = category().querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+    act(() => reset.focus());
+    expect(key(value, reset).defaultPrevented).toBe(false);
+    expect(recipe().adjustments.temperature).toBe(0);
+    expect(history()).toEqual(['Reset White Balance adjustments', 'Temperature 0 → +10']);
+  });
+
+  it('navigates from category Reset while its sliders are disabled', () => {
+    wheel(-1, false, slider(1));
+    advance();
+    const reset = category(1).querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+    click(category(1).querySelector<HTMLButtonElement>('[data-category-switch]')!);
+    expect(slider(1).disabled).toBe(true);
+    expect(reset.disabled).toBe(false);
+    const before = recipe();
+    const beforeHistory = history();
+    act(() => reset.focus());
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(tintSlider());
+    act(() => reset.focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(category(2).querySelector('.adjustment-category-title'));
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual(beforeHistory);
+  });
+
+  it.each(['.adjustment-range', '.adjustment-number', '.adjustment-reset'])
+    ('uses one vertical position from Exposure %s and keeps scrolling within the list', (selector) => {
+      wheel(-1, false, slider(1));
+      advance();
+      const row = slider(1).closest('.adjustment-control')!;
+      const source = row.querySelector<HTMLElement>(selector)!;
+      const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+      Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
+      vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect);
+      const title = category(1).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+      vi.spyOn(title, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 108 } as DOMRect);
+      scroll.scrollTop = 200;
+      const beforeHistory = history();
+      act(() => source.focus());
+      navigate('ArrowUp');
+      expect(document.activeElement).toBe(title);
+      expect(scroll.scrollTop).toBe(180);
+      act(() => source.focus());
+      navigate('ArrowDown');
+      expect(document.activeElement).toBe(category(1).querySelectorAll('.adjustment-range')[1]);
+      expect(history()).toEqual(beforeHistory);
+      expect(host.querySelector('.scope-section')!.scrollTop).toBe(0);
+      expect(host.querySelector('.develop-panel > .workspace-section-header')!.scrollTop).toBe(0);
+    });
+
   it.each([0, 1, 2, 3])('moves horizontally only within category %s without edits or scrolling', (index) => {
     const title = category(index).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
     const toggle = category(index).querySelector<HTMLButtonElement>('[data-category-switch]')!;
@@ -104,11 +214,11 @@ describe('production White Balance controls', () => {
     const focusTitle = vi.spyOn(title, 'focus');
     const focusToggle = vi.spyOn(toggle, 'focus');
     act(() => title.focus());
-    key('ArrowRight', title);
+    key('ArrowRight', title, { shiftKey: true });
     expect(document.activeElement).toBe(toggle);
     expect(activeAdjustmentId()).toBeNull();
     expect(focusToggle).toHaveBeenLastCalledWith({ preventScroll: true });
-    key('ArrowLeft', toggle);
+    key('ArrowLeft', toggle, { shiftKey: true });
     expect(document.activeElement).toBe(title);
     expect(focusTitle).toHaveBeenLastCalledWith({ preventScroll: true });
     expect(title.getAttribute('aria-expanded')).toBe(expanded);
@@ -141,7 +251,9 @@ describe('production White Balance controls', () => {
     const before = recipe();
     const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true });
     act(() => title.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    click(title);
     expect(title.getAttribute('aria-expanded')).toBe('false');
     expect(recipe()).toEqual(before);
     expect(history()).toEqual([]);
@@ -214,7 +326,8 @@ describe('production White Balance controls', () => {
     const before = recipe();
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     act(() => title.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    click(title);
     expect(title.getAttribute('aria-expanded')).toBe('false');
     expect(category().querySelector('.adjustment-range')).toBeNull();
     navigate('ArrowDown');
