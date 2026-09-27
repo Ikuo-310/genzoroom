@@ -79,6 +79,8 @@ describe('PhotoCard format badge', () => {
     ))}</div>);
 
     expect(markup.match(/<article/g)).toHaveLength(100);
+    expect(markup.match(/<img src="\/api\/assets\/asset-\d+\/thumbnail"/g)).toHaveLength(100);
+    expect(markup.match(/class="format-badge"/g)).toHaveLength(100);
     expect(markup).toContain('photo-100.jpg');
   });
 });

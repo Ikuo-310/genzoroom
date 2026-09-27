@@ -70,6 +70,8 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('aria-current="true"');
     expect(markup).toContain('format-badge raw');
     expect(markup).toContain('>HEIC</span>');
+    expect(markup).toContain('<img src="/api/assets/123/thumbnail" alt=""/>');
+    expect(markup).toContain('<img src="/api/assets/456/thumbnail" alt=""/>');
     expect(markup.match(/filmstrip-item/g)).toHaveLength(2);
   });
 
