@@ -53,11 +53,30 @@ function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: Keyb
 function comparisonToggle() { return host.querySelector<HTMLButtonElement>('.before-after-controls')!; }
 function image() { return host.querySelector<HTMLElement>('[data-testid="adjusted-image"]')!; }
 function click(button: HTMLButtonElement) { act(() => button.click()); }
+function contextMenu(target: Element, x = 120, y = 90) {
+  const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
+
+const contextActions = {
+  copy: vi.fn(() => true), paste: vi.fn(() => true), selectCopy: vi.fn(() => true), selectPaste: vi.fn(() => true),
+};
+
+function ContextMenuHarness({ src = '/first', disabled = false, hasClipboard = true, keyboardBlocked = false }: { src?: string; disabled?: boolean; hasClipboard?: boolean; keyboardBlocked?: boolean }) {
+  return <ImageViewer src={src} alt="photo" leftOpen rightOpen editSource={{ kind: 'immich-preview', url: src }}
+    recipe={defaultRecipe()} editClipboardDisabled={disabled} hasEditClipboard={hasClipboard}
+    keyboardBlocked={keyboardBlocked}
+    onCopyAdjustments={contextActions.copy} onPasteAdjustments={contextActions.paste}
+    onSelectCopyAdjustments={contextActions.selectCopy} onSelectPasteAdjustments={contextActions.selectPaste}
+    onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
+}
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
+  Object.values(contextActions).forEach((action) => action.mockClear());
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -67,6 +86,114 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+});
+
+describe('Viewer edit settings context menu', () => {
+  it('opens over both the image and viewport whitespace and reuses all toolbar actions', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    expect(contextMenu(image()).defaultPrevented).toBe(true);
+    let menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    expect(menu).not.toBeNull();
+    expect(Array.from(menu.querySelectorAll('[role="menuitem"]'), (item) => item.textContent)).toEqual([
+      'Copy all settings', 'Copy selected settings…', 'Paste copied settings', 'Paste selected settings…',
+    ]);
+    click(menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!);
+    expect(contextActions.copy).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+
+    expect(contextMenu(viewport, 210, 130).defaultPrevented).toBe(true);
+    menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    click(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1]);
+    expect(contextActions.selectCopy).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+
+    contextMenu(viewport, 300, 170);
+    menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    click(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[2]);
+    expect(contextActions.paste).toHaveBeenCalledTimes(1);
+    contextMenu(viewport, 340, 200);
+    menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    click(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[3]);
+    expect(contextActions.selectPaste).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares disabled rules with the toolbar menu', () => {
+    act(() => root.render(<ContextMenuHarness disabled hasClipboard={false} />));
+    contextMenu(host.querySelector<HTMLElement>('.viewer-viewport')!);
+    const contextItems = [...document.body.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu [role="menuitem"]')];
+    const toolbarItems = [...host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')];
+    expect(contextItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
+    expect(toolbarItems.map((item) => item.disabled)).toEqual([true, true, true, true]);
+    act(() => root.render(<ContextMenuHarness hasClipboard={false} />));
+    contextMenu(host.querySelector<HTMLElement>('.viewer-viewport')!);
+    const pasteItems = [...document.body.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu [role="menuitem"]')];
+    expect(pasteItems.map((item) => item.disabled)).toEqual([false, false, true, true]);
+  });
+
+  it('closes on outside click and Escape, restores preview focus for Escape, and replaces an open toolbar menu', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    const trigger = host.querySelector<HTMLElement>('.edit-settings-menu summary')!;
+    act(() => trigger.click());
+    expect(host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!.open).toBe(true);
+    contextMenu(viewport, 100, 100);
+    expect(host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!.open).toBe(false);
+    expect(document.body.querySelector('.edit-settings-context-menu')).not.toBeNull();
+    expect(document.activeElement).toBe(document.body.querySelector('.edit-settings-context-menu button'));
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => document.activeElement?.dispatchEvent(escape));
+    expect(escape.defaultPrevented).toBe(true);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+    expect(document.activeElement).toBe(viewport);
+    contextMenu(viewport);
+    act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+  });
+
+  it('clamps repeated right clicks to the viewport and closes when the photo changes', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    act(() => root.render(<ContextMenuHarness />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    contextMenu(viewport, 100, 100);
+    const menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({ width: 180, height: 140 } as DOMRect);
+    contextMenu(viewport, 970, 780);
+    expect(menu.style.left).toBe('812px');
+    expect(menu.style.top).toBe('652px');
+    act(() => root.render(<ContextMenuHarness src="/second" />));
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+  });
+
+  it('does not replace native context menus on toolbar controls or outside the preview', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    const trigger = host.querySelector<HTMLElement>('.edit-settings-menu summary')!;
+    expect(contextMenu(trigger).defaultPrevented).toBe(false);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+    const outside = document.createElement('div'); document.body.append(outside);
+    expect(contextMenu(outside).defaultPrevented).toBe(false);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+    outside.remove();
+  });
+
+  it('leaves the native menu available while a blocking dialog or operation is active', () => {
+    act(() => root.render(<ContextMenuHarness keyboardBlocked />));
+    expect(contextMenu(host.querySelector<HTMLElement>('.viewer-viewport')!).defaultPrevented).toBe(false);
+    expect(document.body.querySelector('.edit-settings-context-menu')).toBeNull();
+  });
+
+  it('keeps viewer shortcuts from reaching global handlers while context menu items are focused', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    contextMenu(host.querySelector<HTMLElement>('.viewer-viewport')!);
+    const item = document.body.querySelector<HTMLButtonElement>('.edit-settings-context-menu button')!;
+    const global = vi.fn(); window.addEventListener('keydown', global);
+    const shortcut = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => item.dispatchEvent(shortcut));
+    window.removeEventListener('keydown', global);
+    expect(global).not.toHaveBeenCalled();
+    expect(contextActions.copy).not.toHaveBeenCalled();
+  });
 });
 
 describe('Before / After viewer state', () => {

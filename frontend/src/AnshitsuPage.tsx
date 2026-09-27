@@ -299,7 +299,8 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null || historyConfirmation !== null}
+          keyboardBlocked={selection !== null || historyMenu !== null || historyConfirmation !== null
+            || switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">

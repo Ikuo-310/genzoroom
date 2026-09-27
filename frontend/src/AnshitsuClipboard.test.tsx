@@ -48,6 +48,12 @@ function activatePreview() {
   act(() => preview.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
   return host.querySelector<HTMLDivElement>('.viewer-viewport')!;
 }
+function openViewerContextMenu() {
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 120, clientY: 90 });
+  act(() => viewport.dispatchEvent(event));
+  return event;
+}
 function key(target: EventTarget, key: string, options: KeyboardEventInit = {}, altGraph = false) {
   const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true, ...options });
   if (altGraph) Object.defineProperty(event, 'getModifierState', { value: (modifier: string) => modifier === 'AltGraph' });
@@ -695,6 +701,17 @@ describe('selected settings clipboard', () => {
     expect(rendered.recipe!.adjustments.exposure).toBe(2);
     expect(rendered.recipe!.adjustments.tint).toBe(10);
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+  });
+
+  it('opens the existing selected-copy dialog from the Viewer context menu', async () => {
+    await mount();
+    expect(openViewerContextMenu().defaultPrevented).toBe(true);
+    const action = Array.from(document.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu button'))
+      .find((button) => button.textContent === 'Copy selected settings…')!;
+    act(() => action.click());
+    expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
+    expect(host.querySelector('dialog')).not.toBeNull();
+    expect(host.querySelector('dialog input[name="exposure"]')).not.toBeNull();
   });
 
   it('blocks background Undo/Redo, clipboard, hovered slider arrows, and Backslash while modal', async () => {

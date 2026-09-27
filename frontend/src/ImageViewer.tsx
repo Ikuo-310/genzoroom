@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
@@ -31,6 +31,8 @@ type ImageViewerProps = {
 export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [closeToolbarMenuSignal, setCloseToolbarMenuSignal] = useState(0);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
   const [imageSize, setImageSize] = useState<Point>({ x: 0, y: 0 });
   const [fitScale, setFitScale] = useState(1);
@@ -40,6 +42,19 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
+  const closeContextMenu = useCallback((restoreFocus: boolean) => {
+    setContextMenuPosition(null);
+    if (restoreFocus) viewportRef.current?.focus({ preventScroll: true });
+  }, []);
+  const openContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (keyboardBlocked || event.button !== 2 || !onCopyAdjustments || !onPasteAdjustments
+      || !onSelectCopyAdjustments || !onSelectPasteAdjustments) return;
+    event.preventDefault();
+    setCloseToolbarMenuSignal((current) => current + 1);
+    setContextMenuPosition({ x: event.clientX, y: event.clientY });
+  }, [keyboardBlocked, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments]);
+
+  useEffect(() => { setContextMenuPosition(null); }, [src]);
 
   useEffect(() => {
     if (keyboardBlocked) setBackslashHeld(false);
@@ -152,7 +167,9 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
         {onCopyAdjustments && onPasteAdjustments && onSelectCopyAdjustments && onSelectPasteAdjustments && <EditSettingsMenu
           disabled={editClipboardDisabled} hasClipboard={hasEditClipboard}
           onCopy={onCopyAdjustments} onPaste={onPasteAdjustments}
-          onSelectCopy={onSelectCopyAdjustments} onSelectPaste={onSelectPasteAdjustments} />}
+          onSelectCopy={onSelectCopyAdjustments} onSelectPaste={onSelectPasteAdjustments}
+          contextPosition={contextMenuPosition} onContextClose={closeContextMenu}
+          onMenuOpen={() => setContextMenuPosition(null)} closeMenuSignal={closeToolbarMenuSignal} />}
         <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
           aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
           onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
@@ -186,6 +203,7 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
         if (handled) event.preventDefault();
       }}
       onWheel={handleWheel}
+      onContextMenu={openContextMenu}
       onPointerDown={startPan}
       onPointerMove={movePan}
       onPointerUp={stopPan}
