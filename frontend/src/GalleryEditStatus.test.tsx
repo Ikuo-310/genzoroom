@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AnshitsuPage } from './AnshitsuPage';
 import { GalleryPage } from './GalleryPage';
+import type { RecentAsset } from './assets';
 import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
 
-const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn() }));
-vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent }));
-vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getAssetEditStatuses: api.statuses }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
+vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
+vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
+  getAssetEditStatuses: api.statuses, getAssetEditState: api.editState }));
+vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel" /> }));
 const assets = Array.from({ length: 100 }, (_, index) => ({ id: `asset-${index}`, filename: `photo-${index}.jpg`,
   date: '2026-09-27', thumbnail_url: `/thumb/${index}`, format: index % 2 ? 'DNG' : 'JPEG', is_raw: !!(index % 2) }));
 let root: Root;
@@ -19,14 +23,48 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => { resolve = yes; });
   return { promise, resolve };
 }
-async function mount() { await act(async () => { root.render(<MemoryRouter><GalleryPage /></MemoryRouter>); }); }
+function SelectionNavigationProbe() {
+  const state = useLocation().state as { selectedAssets?: RecentAsset[] } | null;
+  return <output className="selection-navigation-probe">{state?.selectedAssets?.map((asset) => asset.filename).join('|')}</output>;
+}
+async function mount() {
+  await act(async () => {
+    root.render(<MemoryRouter><Routes>
+      <Route path="/" element={<GalleryPage />} />
+      <Route path="/anshitsu/:assetId" element={<SelectionNavigationProbe />} />
+    </Routes></MemoryRouter>);
+  });
+}
+async function mountAnshitsuRoutes() {
+  await act(async () => {
+    root.render(<MemoryRouter><Routes>
+      <Route path="/" element={<GalleryPage />} />
+      <Route path="/anshitsu/:assetId" element={<AnshitsuPage />} />
+    </Routes></MemoryRouter>);
+  });
+  await act(async () => { await Promise.resolve(); });
+}
+function visibleCardButtons() { return [...host.querySelectorAll<HTMLButtonElement>('.photo-card-button')]; }
+function visibleSelectionInputs() { return [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')]; }
+function selectedVisibleFilenames() {
+  return [...host.querySelectorAll<HTMLElement>('.photo-card.selected .photo-info p')].map((node) => node.textContent);
+}
+function shiftClick(element: HTMLElement) {
+  act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
+}
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  api.recent.mockReset(); api.statuses.mockReset();
+  api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
   api.recent.mockResolvedValue(assets);
   api.statuses.mockResolvedValue(Object.fromEntries(assets.map((asset, index) => [asset.id, index === 0])));
+  api.detail.mockImplementation(async (id: string) => {
+    const asset = assets.find((candidate) => candidate.id === id)!;
+    return { ...asset, preview_url: asset.thumbnail_url, exif: {} };
+  });
+  api.editState.mockResolvedValue({ state: null });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
@@ -158,6 +196,79 @@ describe('Home bulk edit status', () => {
     act(() => host.querySelector<HTMLButtonElement>('.home-title-link')!.click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
+  });
+
+  it('extends a forward range from a checkbox to a shifted checkbox click', async () => {
+    await mount();
+    act(() => visibleSelectionInputs()[1].click());
+    shiftClick(visibleSelectionInputs()[4]);
+    expect(selectedVisibleFilenames()).toEqual(['photo-1.jpg', 'photo-2.jpg', 'photo-3.jpg', 'photo-4.jpg']);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+  });
+
+  it('extends a backward card-click range, preserves existing selection order, and opens in that order', async () => {
+    await mount();
+    act(() => visibleSelectionInputs()[7].click());
+    act(() => visibleSelectionInputs()[9].click());
+    shiftClick(visibleCardButtons()[3]);
+    expect(selectedVisibleFilenames()).toEqual([
+      'photo-3.jpg', 'photo-4.jpg', 'photo-5.jpg', 'photo-6.jpg', 'photo-7.jpg', 'photo-8.jpg', 'photo-9.jpg',
+    ]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('7 selected');
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
+        .find((button) => button.textContent === 'Open in Anshitsu')!.click();
+      for (let index = 0; index < 5; index++) await Promise.resolve();
+    });
+    expect(host.querySelector('.selection-navigation-probe')?.textContent).toBe(
+      ['photo-7.jpg', 'photo-9.jpg', 'photo-3.jpg', 'photo-4.jpg', 'photo-5.jpg', 'photo-6.jpg', 'photo-8.jpg'].join('|'),
+    );
+  });
+
+  it('keeps range-selection order in the Anshitsu Filmstrip after opening the selection', async () => {
+    await mountAnshitsuRoutes();
+    act(() => visibleSelectionInputs()[7].click());
+    act(() => visibleSelectionInputs()[9].click());
+    shiftClick(visibleCardButtons()[3]);
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
+        .find((button) => button.textContent === 'Open in Anshitsu')!.click();
+      for (let index = 0; index < 5; index++) await Promise.resolve();
+    });
+    const filmstripOrder = [...host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')]
+      .map((button) => button.getAttribute('aria-label'));
+    expect(filmstripOrder).toEqual([
+      'photo-7.jpg', 'photo-9.jpg', 'photo-3.jpg', 'photo-4.jpg', 'photo-5.jpg', 'photo-6.jpg', 'photo-8.jpg',
+    ]);
+  });
+
+  it('starts safely on a shifted card click when there is no active selection', async () => {
+    await mount();
+    shiftClick(visibleCardButtons()[5]);
+    expect(selectedVisibleFilenames()).toEqual(['photo-5.jpg']);
+    expect(host.querySelector('.selection-navigation-probe')).toBeNull();
+  });
+
+  it('falls back to a new visible anchor when filtering hides the old one', async () => {
+    await mount();
+    act(() => visibleSelectionInputs()[1].click());
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-filters input')[0].click());
+    shiftClick(visibleCardButtons()[2]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
+    shiftClick(visibleCardButtons()[4]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg', 'photo-6.jpg', 'photo-8.jpg']);
+  });
+
+  it('resets the range anchor when every photo is cleared', async () => {
+    await mount();
+    act(() => visibleSelectionInputs()[1].click());
+    act(() => [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
+      .find((button) => button.textContent === 'Clear selection')!.click());
+    shiftClick(visibleCardButtons()[4]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
   });
 
   it('keeps a failed lookup unknown and ignores responses after unmount', async () => {

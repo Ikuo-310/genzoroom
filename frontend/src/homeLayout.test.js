@@ -10,7 +10,7 @@ beforeEach(() => {
   stylesheet.textContent = readFileSync('src/style.css', 'utf8');
   document.head.append(stylesheet);
   host = document.createElement('div');
-  host.innerHTML = '<main class="home-page"><div class="home-intro"><header class="app-header"></header><section></section></div><section class="photos"><div class="photos-heading"></div><div class="photo-grid"><article class="photo-card selected"><button class="photo-card-button">Photo</button><div class="thumbnail"><img></div></article></div></section><p class="note"></p></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
+  host.innerHTML = '<main class="home-page"><div class="home-intro"><header class="app-header"></header><section></section></div><section class="photos"><div class="photos-heading"></div><div class="photo-grid"><article class="photo-card selected"><label class="photo-selection-control"><input type="checkbox"></label><button class="photo-card-button"><div class="thumbnail"><img></div><div class="photo-info"><p>Photo.jpg</p><time>2026/09/27</time></div></button></article></div></section><p class="note"></p></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
   document.body.append(host);
 });
 afterEach(() => { stylesheet.remove(); host.remove(); });
@@ -64,8 +64,11 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(details).lineHeight).toBe('1.5');
     expect(getComputedStyle(details).width).toContain('320px');
     expect(getComputedStyle(details).maxWidth).toContain('100vw - 32px');
-    expect(getComputedStyle(brand.querySelector('.workspace-title-link')).fontSize).toBe('1.25rem');
+    expect(getComputedStyle(brand.querySelector('.workspace-title-link')).fontSize).toBe('1.6rem');
     expect(getComputedStyle(brand.querySelector('.workspace-title-link')).fontWeight).toBe('700');
+    const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
+    expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.workspace-brand .workspace-title-link'
+      && rule.style.getPropertyValue('font-size') === '1.35rem')).toBe(true);
   });
 
   it('keeps selected cards dark and shows the whole photo in Home and Filmstrip thumbnails', () => {
@@ -77,6 +80,19 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(card).backgroundColor).toBe('rgb(23, 34, 31)');
     expect(getComputedStyle(selectedButton).color).toBe('rgb(230, 238, 233)');
     expect(getComputedStyle(selectedButton).backgroundColor).toBe('rgb(23, 34, 31)');
+    expect(getComputedStyle(selectedButton).userSelect).toBe('none');
+    const photoInfo = host.querySelector('.photo-info');
+    expect(getComputedStyle(photoInfo).backgroundColor).toBe('rgb(23, 34, 31)');
+    expect(getComputedStyle(photoInfo).color).toBe('rgb(230, 238, 233)');
+    expect(getComputedStyle(photoInfo.querySelector('p')).color).toBe('rgb(230, 238, 233)');
+    expect(getComputedStyle(photoInfo.querySelector('time')).color).toBe('rgb(159, 178, 168)');
+    const hoverRules = Array.from(stylesheet.sheet.cssRules).filter((rule) => rule.selectorText?.includes('photo-card-button:hover'));
+    expect(hoverRules.some((rule) => rule.selectorText === 'button.photo-card-button:hover:not(:disabled)'
+      && rule.style.background === '#1d2b26')).toBe(true);
+    expect(hoverRules.some((rule) => rule.selectorText === '.photo-card.selected button.photo-card-button:hover:not(:disabled)'
+      && rule.style.background === '#1d2b26')).toBe(true);
+    expect(Array.from(stylesheet.sheet.cssRules).some((rule) => rule.selectorText === '.photo-card-button:focus-visible'
+      && rule.style.outline.includes('3px'))).toBe(true);
     expect(getComputedStyle(homeImage).objectFit).toBe('contain');
     expect(getComputedStyle(thumbnail).aspectRatio).toBe('1');
     expect(getComputedStyle(homeImage).height).toBe('100%');

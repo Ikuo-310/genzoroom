@@ -1,3 +1,4 @@
+import { useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { FormatBadge } from './FormatBadge';
@@ -10,7 +11,7 @@ type PhotoCardProps = {
   asset: RecentAsset;
   language: AppLanguage;
   onOpen: () => void;
-  onToggleSelection: () => void;
+  onToggleSelection: (extendRange?: boolean) => void;
   selected?: boolean;
   selectionMode?: boolean;
   edited?: boolean;
@@ -26,12 +27,33 @@ export function PhotoCard({
   edited,
 }: PhotoCardProps) {
   const { t } = useTranslation();
+  const rangeClickHandled = useRef(false);
   const selectionLabel = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
 
-  function handleCardClick() {
+  function handleCardClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (event.shiftKey) {
+      onToggleSelection(true);
+      return;
+    }
     // Once selection mode starts, the card surface toggles selection instead of navigating.
     if (selectionMode) onToggleSelection();
     else onOpen();
+  }
+
+  function handleCheckboxClick(event: ReactMouseEvent<HTMLInputElement>) {
+    rangeClickHandled.current = event.shiftKey;
+    if (!event.shiftKey) return;
+    // Prevent native checkbox activation so a follow-up change event cannot toggle the range endpoint twice.
+    event.preventDefault();
+    onToggleSelection(true);
+  }
+
+  function handleCheckboxChange() {
+    if (rangeClickHandled.current) {
+      rangeClickHandled.current = false;
+      return;
+    }
+    onToggleSelection();
   }
 
   return (
@@ -41,7 +63,8 @@ export function PhotoCard({
           className="photo-selection-input"
           type="checkbox"
           checked={selected}
-          onChange={onToggleSelection}
+          onClick={handleCheckboxClick}
+          onChange={handleCheckboxChange}
           aria-label={selectionLabel}
         />
       </label>

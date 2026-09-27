@@ -11,6 +11,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
 import {
+  addVisiblePhotoRange,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
   resolveSelectedAssets,
@@ -35,6 +36,7 @@ export function GalleryPage() {
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
+  const selectionAnchorId = useRef<string | null>(null);
   const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
 
   useEffect(() => {
@@ -112,7 +114,7 @@ export function GalleryPage() {
     if (!selectionMode) return;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (shouldClearSelectionOnEscape(event, true)) setSelectedAssetIds([]);
+      if (shouldClearSelectionOnEscape(event, true)) clearPhotoSelection();
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -127,6 +129,24 @@ export function GalleryPage() {
   function openSelectedAssets() {
     const state = createWorkspaceNavigation(selectedAssets);
     if (state) navigate(workspacePath(state.activeAssetId), { state });
+  }
+
+  function togglePhotoSelection(assetId: string, extendRange = false) {
+    const rangedSelection = extendRange
+      ? addVisiblePhotoRange(selectedAssetIds, visibleAssets.map((asset) => asset.id), selectionAnchorId.current, assetId)
+      : null;
+    if (rangedSelection) {
+      setSelectedAssetIds(rangedSelection);
+      return;
+    }
+    const nextSelection = toggleSelectedAssetId(selectedAssetIds, assetId);
+    selectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
+    setSelectedAssetIds(nextSelection);
+  }
+
+  function clearPhotoSelection() {
+    selectionAnchorId.current = null;
+    setSelectedAssetIds([]);
   }
 
   return (
@@ -156,7 +176,7 @@ export function GalleryPage() {
           <PhotoSelectionBar
             active={selectionMode}
             count={selectedAssetIds.length}
-            onClear={() => setSelectedAssetIds([])}
+            onClear={clearPhotoSelection}
             onOpen={openSelectedAssets}
           />
           <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
@@ -173,7 +193,7 @@ export function GalleryPage() {
                     selected={selectedAssetIds.includes(asset.id)}
                     selectionMode={selectionMode}
                     edited={editStatuses[asset.id]}
-                    onToggleSelection={() => setSelectedAssetIds((current) => toggleSelectedAssetId(current, asset.id))}
+                    onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
                     onOpen={() => openWorkspace(asset)}
                   />
                 ))}</div>}

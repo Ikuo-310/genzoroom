@@ -6,6 +6,29 @@ export function toggleSelectedAssetId(selectedIds: string[], assetId: string): s
     : [...selectedIds, assetId];
 }
 
+export function addVisiblePhotoRange(
+  selectedIds: readonly string[],
+  visibleIds: readonly string[],
+  anchorId: string | null,
+  targetId: string,
+): string[] | null {
+  if (selectedIds.length === 0 || anchorId === null) return null;
+  const anchorIndex = visibleIds.indexOf(anchorId);
+  const targetIndex = visibleIds.indexOf(targetId);
+  if (anchorIndex < 0 || targetIndex < 0) return null;
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  const selected = new Set(selectedIds);
+  const nextSelection = [...selectedIds];
+  for (const id of visibleIds.slice(start, end + 1)) {
+    if (!selected.has(id)) {
+      selected.add(id);
+      nextSelection.push(id);
+    }
+  }
+  return nextSelection;
+}
+
 export function resolveSelectedAssets(assets: RecentAsset[], selectedIds: string[]): RecentAsset[] {
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
   // Resolve in ID selection order rather than gallery or filter order.

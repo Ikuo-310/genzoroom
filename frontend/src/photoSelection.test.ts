@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RecentAsset } from './assets';
 import {
+  addVisiblePhotoRange,
   activateWorkspaceAsset,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
@@ -28,6 +29,23 @@ describe('photo selection', () => {
   it('removes selected IDs and returns to an empty normal state after all are cleared', () => {
     expect(toggleSelectedAssetId(['a', 'b'], 'a')).toEqual(['b']);
     expect(toggleSelectedAssetId(['b'], 'b')).toEqual([]);
+  });
+
+  it.each([
+    ['forward', 'a', 'd', ['a'], ['a', 'b', 'c', 'd']],
+    ['backward', 'd', 'a', ['d'], ['d', 'a', 'b', 'c']],
+  ] as const)('adds the inclusive %s visible range in display order', (_direction, anchor, target, selected, expected) => {
+    expect(addVisiblePhotoRange(selected, ['a', 'b', 'c', 'd'], anchor, target)).toEqual(expected);
+  });
+
+  it('preserves existing selection order and adds only missing visible range items', () => {
+    expect(addVisiblePhotoRange(['x', 'c'], ['a', 'b', 'c', 'd'], 'a', 'd'))
+      .toEqual(['x', 'c', 'a', 'b', 'd']);
+  });
+
+  it('declines range extension when the selection is empty or its anchor is filtered out', () => {
+    expect(addVisiblePhotoRange([], ['a', 'b'], 'a', 'b')).toBeNull();
+    expect(addVisiblePhotoRange(['hidden'], ['a', 'b'], 'hidden', 'b')).toBeNull();
   });
 
   it('resolves selection from the full fetched list regardless of a visible filtered list', () => {
