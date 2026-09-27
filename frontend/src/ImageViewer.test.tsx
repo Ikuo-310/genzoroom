@@ -50,8 +50,7 @@ function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: Keyb
   return event;
 }
 
-function beforeButton() { return host.querySelector<HTMLButtonElement>('.before-after-controls button:first-child')!; }
-function afterButton() { return host.querySelector<HTMLButtonElement>('.before-after-controls button:last-child')!; }
+function comparisonToggle() { return host.querySelector<HTMLButtonElement>('.before-after-controls')!; }
 function image() { return host.querySelector<HTMLElement>('[data-testid="adjusted-image"]')!; }
 function click(button: HTMLButtonElement) { act(() => button.click()); }
 
@@ -71,14 +70,103 @@ afterEach(() => {
 });
 
 describe('Before / After viewer state', () => {
+  it('keeps toolbar group order, panel actions, editing menu and all zoom buttons', () => {
+    const left = vi.fn(); const right = vi.fn();
+    const clipboardActions = [vi.fn(() => true), vi.fn(() => true), vi.fn(() => true), vi.fn(() => true)];
+    act(() => root.render(<ImageViewer src="/first" alt="photo" leftOpen rightOpen
+      editSource={{ kind: 'immich-preview', url: '/first' }} recipe={defaultRecipe()}
+      onToggleLeft={left} onToggleRight={right} editClipboardDisabled={false} hasEditClipboard
+      onCopyAdjustments={clipboardActions[0]} onPasteAdjustments={clipboardActions[1]}
+      onSelectCopyAdjustments={clipboardActions[2]} onSelectPasteAdjustments={clipboardActions[3]} />));
+    const toolbar = host.querySelector('.viewer-toolbar')!;
+    expect(Array.from(toolbar.children, (item) => item.className)).toEqual([
+      'tool-button panel-toggle', 'zoom-controls', 'viewer-toolbar-right',
+    ]);
+    const rightGroup = host.querySelector('.viewer-toolbar-right')!;
+    expect(Array.from(rightGroup.children, (item) => item.className)).toEqual([
+      'edit-settings-menu', 'tool-button before-after-controls', 'tool-button panel-toggle right',
+    ]);
+    click(toolbar.querySelector<HTMLButtonElement>(':scope > .panel-toggle')!);
+    click(rightGroup.querySelector<HTMLButtonElement>('.panel-toggle')!);
+    expect(left).toHaveBeenCalledTimes(1); expect(right).toHaveBeenCalledTimes(1);
+    const menu = host.querySelector<HTMLDetailsElement>('.edit-settings-menu')!;
+    expect(menu.querySelector('summary')?.getAttribute('aria-label')).toBeTruthy();
+    const menuButtons = menu.querySelectorAll<HTMLButtonElement>('button');
+    for (const index of [0, 2, 1, 3]) click(menuButtons[index]);
+    for (const action of clipboardActions) expect(action).toHaveBeenCalledTimes(1);
+
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { value: 300 });
+    act(() => mockImage.onLoad?.(800, 600));
+    const controls = host.querySelector('.zoom-controls')!;
+    const buttons = controls.querySelectorAll<HTMLButtonElement>('button');
+    expect(Array.from(controls.children, (item) => item.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON', 'OUTPUT', 'BUTTON']);
+    expect(controls.querySelector('output')?.textContent).toBe('50%');
+    click(buttons[1]); expect(controls.querySelector('output')?.textContent).toBe('100%');
+    click(buttons[3]); expect(controls.querySelector('output')?.textContent).toBe('125%');
+    click(buttons[2]); expect(controls.querySelector('output')?.textContent).toBe('100%');
+    click(buttons[0]); expect(controls.querySelector('output')?.textContent).toBe('50%');
+  });
+
+  it.each([0, 1])('reverses the permanent choice on every click of segment %s', (index) => {
+    act(() => root.render(<Harness />));
+    const toggle = comparisonToggle();
+    const side = toggle.querySelectorAll('span')[index];
+    expect(toggle.getAttribute('aria-description')).toBe('After');
+    for (const expected of [true, false, true, false]) {
+      act(() => side.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      expect(image().dataset.before).toBe(String(expected));
+      expect(toggle.getAttribute('aria-pressed')).toBe(String(expected));
+      expect(toggle.getAttribute('aria-description')).toBe(expected ? 'Before' : 'After');
+      expect(toggle.querySelector('span.active')?.textContent).toBe(expected ? 'Before' : 'After');
+    }
+    expect(mockImage.recipe).toEqual(defaultRecipe());
+  });
+
+  it.each(['Enter', ' '])('uses one native %s activation and one Tab stop for comparison', (value) => {
+    act(() => root.render(<Harness />));
+    const toggle = comparisonToggle();
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(host.querySelectorAll('button.before-after-controls')).toHaveLength(1);
+    expect(toggle.querySelectorAll('button, input, a, [tabindex]')).toHaveLength(0);
+    expect(toggle.getAttribute('aria-label')).toBeTruthy();
+    act(() => toggle.focus());
+    expect(key('keydown', toggle, { key: 'Tab', code: 'Tab' }).defaultPrevented).toBe(false);
+    expect(key('keydown', toggle, { key: value, code: value === 'Enter' ? 'Enter' : 'Space' }).defaultPrevented).toBe(false);
+    expect(image().dataset.before).toBe('false');
+    // jsdom does not synthesize the native button click following Enter/Space.
+    key('keyup', toggle, { key: value, code: value === 'Enter' ? 'Enter' : 'Space' });
+    click(toggle);
+    expect(image().dataset.before).toBe('true');
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it('keeps the actual Before indication while held and restores changes made to the permanent choice', () => {
+    act(() => root.render(<Harness />));
+    key('keydown');
+    click(comparisonToggle());
+    expect(image().dataset.before).toBe('true');
+    expect(comparisonToggle().querySelector('.active')?.textContent).toBe('Before');
+    key('keyup');
+    expect(image().dataset.before).toBe('true');
+    key('keydown');
+    click(comparisonToggle());
+    expect(image().dataset.before).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-description')).toBe('Before');
+    key('keyup');
+    expect(image().dataset.before).toBe('false');
+    expect(comparisonToggle().querySelector('.active')?.textContent).toBe('After');
+  });
+
   it('defaults to After and toggles persistent Before without editing the recipe', () => {
     act(() => root.render(<Harness />));
-    expect(afterButton().getAttribute('aria-pressed')).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('false');
     expect(image().dataset.before).toBe('false');
-    click(beforeButton());
-    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    click(comparisonToggle());
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
     expect(image().dataset.before).toBe('true');
-    click(afterButton());
+    click(comparisonToggle());
     expect(image().dataset.before).toBe('false');
   });
 
@@ -92,11 +180,11 @@ describe('Before / After viewer state', () => {
     expect(key('keydown', window, { repeat: true }).defaultPrevented).toBe(true);
     key('keyup');
     expect(image().dataset.before).toBe('false');
-    click(beforeButton());
+    click(comparisonToggle());
     key('keydown');
     key('keyup');
     expect(image().dataset.before).toBe('true');
-    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('leaves native fields and IME alone, and clears a held Backslash on blur and visibility loss', () => {
@@ -141,12 +229,12 @@ describe('Before / After viewer state', () => {
     expect(image().dataset.before).toBe('false');
     expect(range.value).toBe('37');
     expect(document.activeElement).toBe(range);
-    click(beforeButton());
+    click(comparisonToggle());
     range.focus();
     key('keydown', range);
     key('keyup', range);
     expect(image().dataset.before).toBe('true');
-    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
     expect(document.activeElement).toBe(range);
     range.remove();
   });
@@ -161,10 +249,10 @@ describe('Before / After viewer state', () => {
     const pan = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
     expect(zoom).not.toBe('100%');
     expect(pan).not.toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
-    click(beforeButton());
+    click(comparisonToggle());
     key('keydown');
     key('keyup');
-    click(afterButton());
+    click(comparisonToggle());
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
     expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(pan);
   });
@@ -201,10 +289,10 @@ describe('Before / After viewer state', () => {
 
   it('keeps the persistent choice across a keyed asset switch and does not retain the old image', () => {
     act(() => root.render(<Harness />));
-    click(beforeButton());
+    click(comparisonToggle());
     act(() => root.render(<Harness src="/second" />));
     expect(image().dataset.before).toBe('true');
-    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('keeps Before selected across a Filmstrip switch without changing recipe or History', async () => {
@@ -216,17 +304,17 @@ describe('Before / After viewer state', () => {
       pathname: '/anshitsu/first', state: { selectedAssets, activeAssetId: 'first' },
     }]}><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
     await act(async () => {});
-    click(beforeButton());
+    click(comparisonToggle());
     expect(mockImage.recipe).toEqual(defaultRecipe());
     expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
     expect(host.querySelector<HTMLButtonElement>('.edit-actions button')!.disabled).toBe(true);
     click(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-label="second.jpg"]')!);
     await act(async () => {});
-    expect(beforeButton().getAttribute('aria-pressed')).toBe('true');
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
     expect(image().dataset.before).toBe('true');
     expect(mockImage.recipe).toEqual(defaultRecipe());
     expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
-    click(afterButton());
+    click(comparisonToggle());
     const sliders = host.querySelectorAll<HTMLInputElement>('input[type="range"]');
     const firstSlider = sliders[0];
     const focusedSlider = sliders[1];

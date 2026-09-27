@@ -153,12 +153,12 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
           disabled={editClipboardDisabled} hasClipboard={hasEditClipboard}
           onCopy={onCopyAdjustments} onPaste={onPasteAdjustments}
           onSelectCopy={onSelectCopyAdjustments} onSelectPaste={onSelectPasteAdjustments} />}
-        <div className="before-after-controls" role="group" aria-label={t('workspace.beforeAfter')}>
-          <button type="button" className="tool-button" aria-pressed={showBeforeAdjustments}
-            onClick={() => onBeforeAdjustmentsChange?.(true)}>{t('workspace.before')}</button>
-          <button type="button" className="tool-button" aria-pressed={!showBeforeAdjustments}
-            onClick={() => onBeforeAdjustmentsChange?.(false)}>{t('workspace.after')}</button>
-        </div>
+        <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
+          aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
+          onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
+          <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>
+          <span className={!showBeforeAdjustments ? 'active' : undefined}>{t('workspace.after')}</span>
+        </button>
         <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
           <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
         </button>

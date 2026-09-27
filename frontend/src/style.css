@@ -133,8 +133,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .tool-button:focus-visible, .filmstrip-item:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .panel-toggle { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-toggle.right { justify-self: end; }
-.zoom-controls { display: flex; align-items: center; gap: 5px; margin-inline: auto; }
-.viewer-toolbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.viewer-toolbar > .panel-toggle { flex: 0 0 auto; }
+.zoom-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; min-width: 0; justify-content: center; align-items: center; gap: 5px; }
+.viewer-toolbar-right { display: flex; flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; justify-content: flex-end; align-items: center; gap: 8px; }
 .edit-settings-menu { position: relative; }
 .edit-settings-menu summary { display: grid; place-items: center; min-width: 30px; cursor: pointer; list-style: none; font-size: 1rem; }
 .edit-settings-menu summary::-webkit-details-marker { display: none; }
@@ -157,11 +158,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-selection-group:first-of-type h3 { margin-top: 0; }
 .adjustment-selection-dialog input { accent-color: #aaa; }
 @media (max-width: 460px) { .adjustment-selection-categories { grid-template-columns: 1fr; } }
-.before-after-controls { display: flex; align-items: center; }
-.before-after-controls .tool-button { border-radius: 0; padding-inline: 7px; }
-.before-after-controls .tool-button:first-child { border-radius: 5px 0 0 5px; }
-.before-after-controls .tool-button:last-child { border-radius: 0 5px 5px 0; border-left: 0; }
-.before-after-controls .tool-button[aria-pressed="true"] { color: #fff; border-color: #a3a3a8; background: #414146; }
+.before-after-controls { display: flex; flex: 0 0 auto; align-items: stretch; padding: 0; }
+.before-after-controls > span { display: flex; align-items: center; padding: 4px 7px; }
+.before-after-controls > span:first-child { border-radius: 4px 0 0 4px; }
+.before-after-controls > span:last-child { border-left: 1px solid #48484b; border-radius: 0 4px 4px 0; }
+.before-after-controls > span.active { color: #fff; background: #414146; }
 .zoom-controls output { min-width: 48px; color: #aaa; font-variant-numeric: tabular-nums; text-align: center; font-size: 0.72rem; }
 .icon-button { min-width: 31px; padding-inline: 7px; font-size: 1rem; }
 .viewer-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; }
