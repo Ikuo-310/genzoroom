@@ -1,4 +1,4 @@
-import { restoreEditSession, type EditStateSnapshot } from './editState';
+import { validateEditStateSnapshot, type EditStateSnapshot } from './editState';
 
 export type EditStateResponse = {
   state: EditStateSnapshot | null;
@@ -39,10 +39,10 @@ function checkedResponse(value: unknown, assetId: string): EditStateResponse {
   if (value.state === null || !Number.isSafeInteger(value.revision) || (value.revision as number) < 1
     || typeof value.updatedAt !== 'string' || typeof value.lastSaveId !== 'string'
     || Number.isNaN(Date.parse(value.updatedAt))) throw new EditStateApiError('invalid_state');
-  const restored = restoreEditSession(value.state);
-  if (!restored.ok || !isRecord(value.state) || !isRecord(value.state.sourceIdentity)
+  const validated = validateEditStateSnapshot(value.state);
+  if (!validated.ok || !isRecord(value.state) || !isRecord(value.state.sourceIdentity)
     || value.state.sourceIdentity.assetId !== assetId) throw new EditStateApiError('invalid_state');
-  return value as EditStateResponse;
+  return { ...(value as EditStateResponse), state: validated.value };
 }
 
 async function readResponse(response: Response): Promise<unknown> {

@@ -143,7 +143,7 @@ class EditStateApiTests(unittest.TestCase):
     def test_versions_and_invalid_payload(self):
         for field, value, code in (
             ("stateFormatVersion", 3, "unsupported_state_format_version"),
-            ("recipeVersion", 18, "unsupported_recipe_version"),
+            ("recipeVersion", 19, "unsupported_recipe_version"),
             ("processingVersion", "future", "unsupported_processing_version"),
         ):
             with self.subTest(field=field):
@@ -398,6 +398,104 @@ class EditStateApiTests(unittest.TestCase):
         invalid = state()
         invalid["history"][0]["metadata"] = {"sourceAssetId": "source", "sourceFilename": "source.jpg", "adjustmentIds": ["temperature"]}
         self.assertEqual(self.request("PUT", payload(invalid)).status_code, 422)
+
+
+    @staticmethod
+    def v18_state():
+        saved = state()
+        saved["stateFormatVersion"] = 2
+        saved["recipeVersion"] = 18
+        for item in [saved["currentRecipe"], *(r[side] for r in saved["history"] for side in ("before", "after"))]:
+            item["version"] = 18
+            item["adjustmentEnabled"] = {key: True for key in ADJUSTMENTS}
+        return saved
+
+    def test_v17_get_preserves_json_then_v18_put_preserves_redo_and_revision_retry(self):
+        legacy = state()
+        legacy["stateFormatVersion"] = 2
+        legacy["historyCursor"] = 0
+        legacy["currentRecipe"] = copy.deepcopy(legacy["history"][0]["before"])
+        old_request = payload(legacy)
+        first = self.request("PUT", old_request).json()
+        with self.database() as db:
+            before = db.execute("SELECT * FROM asset_edit_states").fetchone()
+        self.assertEqual(self.request("GET").json(), first)
+        with self.database() as db:
+            self.assertEqual(db.execute("SELECT * FROM asset_edit_states").fetchone(), before)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+        upgraded = self.v18_state()
+        upgraded["historyCursor"] = 0
+        upgraded["currentRecipe"] = copy.deepcopy(upgraded["history"][0]["before"])
+        new_request = payload(upgraded, revision=1)
+        second = self.request("PUT", new_request)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["state"], upgraded)
+        self.assertEqual(second.json()["revision"], 2)
+        self.assertEqual(self.request("GET").json(), second.json())
+        self.assertEqual(self.request("PUT", new_request).json(), second.json())
+        self.assertEqual(self.request("PUT", old_request).status_code, 409)
+
+    def test_all_sixteen_individual_toggles_validate_and_roundtrip_with_redo(self):
+        saved = self.v18_state()
+        for key in ADJUSTMENTS:
+            before = copy.deepcopy(saved["currentRecipe"])
+            after = copy.deepcopy(before)
+            after["adjustmentEnabled"][key] = False
+            saved["history"].append({"kind": f"{key}Toggle", "before": before, "after": after})
+            saved["currentRecipe"] = after
+            saved["historyCursor"] += 1
+        self.assertEqual(validate_snapshot(saved, ASSET_ID), saved)
+        saved["historyCursor"] = 8
+        saved["currentRecipe"] = copy.deepcopy(saved["history"][7]["after"])
+        response = self.request("PUT", payload(saved))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.request("GET").json()["state"], saved)
+
+    def test_v18_strict_flag_validation_and_history_semantics_do_not_overwrite_saved_v17(self):
+        original = self.request("PUT", payload()).json()
+        invalid_states = []
+        for flags in ({}, {key: True for key in ADJUSTMENTS} | {"extra": True},
+                      {key: True for key in ADJUSTMENTS} | {"tint": 1}):
+            invalid = self.v18_state()
+            invalid["currentRecipe"]["adjustmentEnabled"] = flags
+            invalid_states.append(invalid)
+        invalid = self.v18_state(); del invalid["currentRecipe"]["adjustmentEnabled"]
+        invalid_states.append(invalid)
+        invalid = self.v18_state(); invalid["history"][0]["before"] = recipe()
+        invalid_states.append(invalid)
+        invalid = self.v18_state(); invalid["recipeVersion"] = 17
+        invalid_states.append(invalid)
+        invalid = self.v18_state()
+        invalid["currentRecipe"]["adjustmentEnabled"]["tint"] = False
+        invalid["history"][0]["after"]["adjustmentEnabled"]["tint"] = False
+        invalid_states.append(invalid)
+        invalid = self.v18_state()
+        before = copy.deepcopy(invalid["currentRecipe"])
+        after = copy.deepcopy(before)
+        after["adjustmentEnabled"]["tint"] = False
+        after["adjustmentEnabled"]["exposure"] = False
+        invalid["history"].append({"kind": "tintToggle", "before": before, "after": after})
+        invalid["historyCursor"] += 1
+        invalid["currentRecipe"] = after
+        invalid_states.append(invalid)
+        for invalid in invalid_states:
+            with self.subTest(invalid=invalid):
+                self.assertEqual(self.request("PUT", payload(invalid, revision=1)).status_code, 422)
+                self.assertEqual(self.request("GET").json(), original)
+
+    def test_v18_paste_and_reset_preserve_individual_flags(self):
+        saved = self.v18_state()
+        for item in [saved["currentRecipe"], saved["history"][0]["before"], saved["history"][0]["after"]]:
+            item["adjustmentEnabled"]["tint"] = False
+        before = copy.deepcopy(saved["currentRecipe"])
+        after = copy.deepcopy(before); after["adjustments"]["tint"] = 25
+        saved["history"].append({"kind": "paste", "before": before, "after": after,
+                                 "metadata": {"sourceAssetId": "source", "sourceFilename": "source.jpg", "adjustmentIds": ["tint"]}})
+        reset = copy.deepcopy(after); reset["adjustments"]["tint"] = 0
+        saved["history"].append({"kind": "tintReset", "before": after, "after": reset})
+        saved["currentRecipe"] = reset; saved["historyCursor"] = 3
+        self.assertEqual(self.request("PUT", payload(saved)).status_code, 200)
+        self.assertFalse(self.request("GET").json()["state"]["currentRecipe"]["adjustmentEnabled"]["tint"])
 
 
 if __name__ == "__main__":

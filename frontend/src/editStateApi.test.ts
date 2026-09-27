@@ -29,6 +29,18 @@ describe('edit-state API client', () => {
     await expect(getAssetEditState(assetId, new AbortController().signal)).rejects.toMatchObject({ kind: 'invalid_state' });
   });
 
+  it('normalizes a v17 GET in memory without sending PUT', async () => {
+    const { adjustmentEnabled: _flags, ...fields } = snapshot.currentRecipe;
+    const old = { ...saved, state: { ...snapshot, recipeVersion: 17, currentRecipe: { ...fields, version: 17 } } };
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(old), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await getAssetEditState(assetId, new AbortController().signal)).toEqual(saved);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]).not.toHaveProperty('method', 'PUT');
+    expect(old.state.currentRecipe.version).toBe(17);
+    expect(old.state.currentRecipe).not.toHaveProperty('adjustmentEnabled');
+  });
+
   it.each([
     [409, 'revision_conflict', 'conflict'], [409, 'save_id_reused', 'conflict'],
     [413, 'payload_too_large', 'too_large'], [422, 'invalid_payload', 'invalid_state'],

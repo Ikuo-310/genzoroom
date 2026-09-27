@@ -389,7 +389,7 @@ describe('Color Grading controls', () => {
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
     click(host.querySelector<HTMLButtonElement>('.workspace-section-action:not(.history-menu-trigger)')!);
-    expect(recipe()).toEqual(expect.objectContaining({ version: 17, colorGradingEnabled: true }));
+    expect(recipe()).toEqual(expect.objectContaining({ version: 18, colorGradingEnabled: true }));
     expect(Object.values(recipe().adjustments).every((value) => value === 0)).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ import { getEditImageSource } from './editImageSource';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
-import { ADJUSTMENT_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
+import { ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
 import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
@@ -716,10 +716,16 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
         case 'colorToggle':
           description = `${t('workspace.color')} ${t(entry.after.colorEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;
           break;
-        default:
-          description = control
+        default: {
+          const individual = Object.hasOwn(ADJUSTMENT_TOGGLE_IDS, entry.kind)
+            ? ADJUSTMENT_TOGGLE_IDS[entry.kind as keyof typeof ADJUSTMENT_TOGGLE_IDS] : undefined;
+          description = individual
+            ? `${t(`workspace.${individual}${individual.endsWith('Temperature') || individual.endsWith('Tint') ? 'History' : ''}`)} ${t(entry.after.adjustmentEnabled[individual] ? 'workspace.basicOn' : 'workspace.basicOff')}`
+            : control
             ? `${t(entry.kind === control.reset ? control.resetLabel : control.label)} ${control.format(entry.before.adjustments[control.key])} → ${control.format(entry.after.adjustments[control.key])}`
             : entry.kind;
+          break;
+        }
       }
       const className = [index >= cursor ? 'undone' : '', index + 1 === cursor ? 'current' : ''].filter(Boolean).join(' ') || undefined;
       return <li key={index} value={index + 1} className={className}

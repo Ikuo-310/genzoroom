@@ -1,4 +1,7 @@
 import {
+  ADJUSTMENT_IDS,
+  ADJUSTMENT_TOGGLE_IDS,
+  defaultAdjustmentEnabled,
   editSession,
   recipesEqual,
   type EditEntry,
@@ -65,7 +68,8 @@ const ENABLED_KEYS = [
 ] as const;
 
 const ADJUSTMENT_KEYS = Object.keys(ADJUSTMENT_BOUNDS) as Array<keyof EditRecipe['adjustments']>;
-const RECIPE_KEYS = ['version', ...ENABLED_KEYS, 'adjustments'] as const;
+const LEGACY_RECIPE_KEYS = ['version', ...ENABLED_KEYS, 'adjustments'] as const;
+const RECIPE_KEYS = [...LEGACY_RECIPE_KEYS, 'adjustmentEnabled'] as const;
 const ENTRY_KEYS = ['kind', 'before', 'after'] as const;
 const SNAPSHOT_KEYS = [
   'stateFormatVersion', 'recipeVersion', 'processingVersion', 'currentRecipe', 'history',
@@ -83,6 +87,7 @@ const EDIT_KINDS: readonly EditKind[] = [
   'colorGradingToggle', 'colorGradingReset', 'gradingShadowsToggle', 'gradingMidtonesToggle',
   'gradingHighlightsToggle', 'vibrance', 'vibranceReset', 'saturation', 'saturationReset',
   'colorToggle', 'colorReset', 'allReset', 'paste',
+  ...Object.keys(ADJUSTMENT_TOGGLE_IDS) as Array<keyof typeof ADJUSTMENT_TOGGLE_IDS>,
 ];
 
 const NUMERIC_EDIT_KEYS: Partial<Record<EditKind, keyof EditRecipe['adjustments']>> = {
@@ -130,7 +135,7 @@ function issue(code: EditStateIssueCode, path: string, message: string): EditSta
 }
 
 function cloneRecipe(recipe: EditRecipe): EditRecipe {
-  return { ...recipe, adjustments: { ...recipe.adjustments } };
+  return { ...recipe, adjustments: { ...recipe.adjustments }, adjustmentEnabled: { ...recipe.adjustmentEnabled } };
 }
 
 function cloneEntry(entry: EditEntry): EditEntry {
@@ -144,18 +149,22 @@ function cloneSourceIdentity(source: EditSourceIdentity): EditSourceIdentity {
   return { ...source };
 }
 
-function validateRecipe(value: unknown, path: string): EditStateIssue[] {
-  if (!isRecord(value) || !hasExactKeys(value, RECIPE_KEYS)) {
+function validateRecipe(value: unknown, path: string, version: 17 | 18 = 18): EditStateIssue[] {
+  if (!isRecord(value) || !hasExactKeys(value, version === 17 ? LEGACY_RECIPE_KEYS : RECIPE_KEYS)) {
     return [issue('invalid_recipe', path, 'Recipe fields do not match the supported recipe structure.')];
   }
-  if (value.version !== 17) return [issue('unsupported_recipe_version', `${path}.version`, 'Only recipe version 17 is supported.')];
+  if (value.version !== version) return [issue('unsupported_recipe_version', `${path}.version`, `Recipe must match version ${version}.`)];
 
   const errors: EditStateIssue[] = [];
+  if (version === 18 && (!isRecord(value.adjustmentEnabled) || !hasExactKeys(value.adjustmentEnabled, ADJUSTMENT_KEYS)
+    || ADJUSTMENT_KEYS.some((id) => typeof (value.adjustmentEnabled as Record<string, unknown>)[id] !== 'boolean'))) {
+    errors.push(issue('invalid_recipe', `${path}.adjustmentEnabled`, 'All 16 individual enabled flags must be booleans.'));
+  }
   for (const key of ENABLED_KEYS) {
     if (typeof value[key] !== 'boolean') errors.push(issue('invalid_recipe', `${path}.${key}`, 'Enabled flags must be booleans.'));
   }
   if (!isRecord(value.adjustments) || !hasExactKeys(value.adjustments, ADJUSTMENT_KEYS)) {
-    errors.push(issue('invalid_recipe', `${path}.adjustments`, 'Adjustment fields do not match recipe version 17.'));
+    errors.push(issue('invalid_recipe', `${path}.adjustments`, `Adjustment fields do not match recipe version ${version}.`));
   } else {
     for (const key of ADJUSTMENT_KEYS) {
       const adjustment = value.adjustments[key];
@@ -209,6 +218,16 @@ function validateEntry(value: unknown, index: number, stateFormatVersion: unknow
   const after = value.after as EditRecipe;
   const changedAdjustments = ADJUSTMENT_KEYS.filter((key) => before.adjustments[key] !== after.adjustments[key]);
   const changedFlags = ENABLED_KEYS.filter((key) => before[key] !== after[key]);
+  const changedIndividual = ADJUSTMENT_IDS.filter((id) => before.adjustmentEnabled[id] !== after.adjustmentEnabled[id]);
+  const individualToggle = ADJUSTMENT_TOGGLE_IDS[kind as keyof typeof ADJUSTMENT_TOGGLE_IDS];
+  if (individualToggle) {
+    return changedAdjustments.length === 0 && changedFlags.length === 0
+      && changedIndividual.every((id) => id === individualToggle)
+      ? [] : [issue('invalid_history_semantics', path, 'Individual toggle must change only its own enabled flag.')];
+  }
+  if (kind !== 'allReset' && changedIndividual.length > 0) {
+    return [issue('invalid_history_semantics', path, 'This operation must preserve individual enabled flags.')];
+  }
   if (paste) {
     const ids = (value as unknown as Extract<EditEntry, { kind: 'paste' }>).metadata.adjustmentIds;
     return changedFlags.length === 0 && changedAdjustments.length > 0 && changedAdjustments.every((key) => ids.includes(key))
@@ -223,18 +242,37 @@ function validateEntry(value: unknown, index: number, stateFormatVersion: unknow
   return valid ? [] : [issue('invalid_history_semantics', path, 'History kind does not match changed recipe fields.')];
 }
 
-/** Validates untrusted JSON without coercing, defaulting, or discarding any state. */
+/** Strictly validates untrusted JSON; validated v17 recipes migrate to v18 without changing their values or timeline. */
 export function validateEditStateSnapshot(value: unknown): EditStateResult<EditStateSnapshot> {
   if (!isRecord(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) {
     return { ok: false, issues: [issue('invalid_snapshot', '$', 'Snapshot fields do not match the supported state format.')] };
+  }
+
+  // Validate every legacy recipe before adding fields. Never repair malformed or
+  // mixed-version state, and migrate both applied and unapplied History entries.
+  if (value.recipeVersion === 17) {
+    const legacyErrors = validateRecipe(value.currentRecipe, 'currentRecipe', 17);
+    if (Array.isArray(value.history)) value.history.forEach((entry, index) => {
+      if (!isRecord(entry)) return;
+      legacyErrors.push(...validateRecipe(entry.before, `history[${index}].before`, 17),
+        ...validateRecipe(entry.after, `history[${index}].after`, 17));
+      if (typeof entry.kind === 'string' && Object.hasOwn(ADJUSTMENT_TOGGLE_IDS, entry.kind)) {
+        legacyErrors.push(issue('invalid_history', `history[${index}]`, 'Individual toggle is unavailable in recipe v17.'));
+      }
+    });
+    if (legacyErrors.length) return { ok: false, issues: legacyErrors };
+    const migrate = (recipe: unknown) => ({ ...(recipe as Record<string, unknown>), version: 18, adjustmentEnabled: defaultAdjustmentEnabled() });
+    return validateEditStateSnapshot({ ...value, recipeVersion: 18, currentRecipe: migrate(value.currentRecipe),
+      history: Array.isArray(value.history) ? value.history.map((entry) => isRecord(entry)
+        ? { ...entry, before: migrate(entry.before), after: migrate(entry.after) } : entry) : value.history });
   }
 
   const errors: EditStateIssue[] = [];
   if (value.stateFormatVersion !== 1 && value.stateFormatVersion !== EDIT_STATE_FORMAT_VERSION) {
     errors.push(issue('unsupported_state_format_version', 'stateFormatVersion', 'Only state format versions 1 and 2 are supported.'));
   }
-  if (value.recipeVersion !== 17) {
-    errors.push(issue('unsupported_recipe_version', 'recipeVersion', 'Only recipe version 17 is supported.'));
+  if (value.recipeVersion !== 18) {
+    errors.push(issue('unsupported_recipe_version', 'recipeVersion', 'Only recipe versions 17 and 18 are supported.'));
   }
   if (value.processingVersion !== PROCESSING_VERSION) {
     errors.push(issue('unsupported_processing_version', 'processingVersion', `Only ${PROCESSING_VERSION} is supported.`));
@@ -358,6 +396,9 @@ function compactOperations(entries: readonly EditEntry[]): EditEntry[] {
 }
 
 function sameMergeTarget(left: EditEntry, right: EditEntry): boolean {
+  const leftIndividual = ADJUSTMENT_TOGGLE_IDS[left.kind as keyof typeof ADJUSTMENT_TOGGLE_IDS];
+  const rightIndividual = ADJUSTMENT_TOGGLE_IDS[right.kind as keyof typeof ADJUSTMENT_TOGGLE_IDS];
+  if (leftIndividual || rightIndividual) return !!leftIndividual && leftIndividual === rightIndividual;
   const leftAdjustment = NUMERIC_EDIT_KEYS[left.kind];
   const rightAdjustment = NUMERIC_EDIT_KEYS[right.kind];
   if (leftAdjustment && rightAdjustment) return leftAdjustment === rightAdjustment;

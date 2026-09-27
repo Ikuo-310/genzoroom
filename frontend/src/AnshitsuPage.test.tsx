@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { EditHistory, ExifDetails, Filmstrip, WorkspaceLayout, WorkspaceSection } from './AnshitsuPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
-import type { EditEntry } from './editing';
+import { defaultRecipe, editSession, newSession, type EditEntry } from './editing';
 import { ImageViewer } from './ImageViewer';
 import i18n, { formatPhotoDate } from './i18n';
 
@@ -147,33 +147,33 @@ describe('Anshitsu workspace', () => {
   it('renders adjustment, category, and reset History succinctly in newest-first order', () => {
     const contrast: EditEntry = {
       kind: 'contrast',
-      before: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      before: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const highlights: EditEntry = {
       kind: 'highlights',
       before: contrast.after,
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const whites: EditEntry = {
       kind: 'whites',
       before: highlights.after,
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const shadows: EditEntry = {
       kind: 'shadows',
       before: whites.after,
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const blacks: EditEntry = {
       kind: 'blacks',
       before: shadows.after,
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 30, highlights: -20, whites: 15, shadows: 25, blacks: -35, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const allReset: EditEntry = {
       kind: 'allReset',
       before: { ...blacks.after, basicEnabled: false },
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     const basicToggle: EditEntry = {
       kind: 'basicToggle',
@@ -183,7 +183,7 @@ describe('Anshitsu workspace', () => {
     const basicReset: EditEntry = {
       kind: 'basicReset',
       before: basicToggle.after,
-      after: { version: 17, whiteBalanceEnabled: true, basicEnabled: false, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+      after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: false, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
     };
     allReset.before = basicReset.after;
     const markup = renderToStaticMarkup(<EditHistory history={[historyEntry(0, 0.25), contrast, highlights, whites, shadows, blacks, basicToggle, basicReset, allReset]} cursor={9} />);
@@ -200,7 +200,7 @@ describe('Anshitsu workspace', () => {
   });
 
   it('renders Basic ON after an enable operation', () => {
-    const before = { version: 17, whiteBalanceEnabled: true, basicEnabled: false, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 20, highlights: -30, whites: 10, shadows: 40, blacks: -15, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } } as const;
+    const before = { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: false, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: 0.25, contrast: 20, highlights: -30, whites: 10, shadows: 40, blacks: -15, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } } as const;
     const entry: EditEntry = {
       kind: 'basicToggle',
       before,
@@ -259,12 +259,22 @@ describe('Anshitsu workspace', () => {
 function historyEntry(before: number, after: number): EditEntry {
   return {
     kind: 'exposure',
-    before: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
-    after: { version: 17, whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+    before: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: before, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
+    after: { ...defaultRecipe(), whiteBalanceEnabled: true, basicEnabled: true, colorGradingEnabled: true, gradingShadowsEnabled: true, gradingMidtonesEnabled: true, gradingHighlightsEnabled: true, colorEnabled: true, adjustments: { temperature: 0, tint: 0, exposure: after, contrast: 0, highlights: 0, whites: 0, shadows: 0, blacks: 0, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 } },
   };
 }
 
 describe('explicit Basic History formatting', () => {
+  it.each([
+    ['en', 'exposure', 'Exposure OFF'], ['ja', 'exposure', '露光量 OFF'],
+    ['en', 'shadowsTint', 'Shadows Tint OFF'], ['ja', 'shadowsTint', 'シャドウ 色かぶり補正 OFF'],
+  ] as const)('formats individual bypass History in %s for %s', async (language, id, label) => {
+    await i18n.changeLanguage(language);
+    const session = editSession(newSession(), { type: 'toggleAdjustment', id });
+    const markup = renderToStaticMarkup(<EditHistory history={session.history} cursor={1} />);
+    expect(markup).toContain(label);
+    expect(markup).not.toContain(`${id}Toggle`);
+  });
   it.each([
     ['exposure', 'Exposure', 0.25, '+0.25', '0.00'],
     ['contrast', 'Contrast', 21, '+21', '0'],

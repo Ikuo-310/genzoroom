@@ -100,8 +100,8 @@ describe('edit state snapshot', () => {
   it('detects unsupported state and recipe versions and malformed recipes', () => {
     const saved = snapshot(newSession());
     expect(validateEditStateSnapshot({ ...saved, stateFormatVersion: 3 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_state_format_version' }] });
-    expect(validateEditStateSnapshot({ ...saved, recipeVersion: 18 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
-    expect(validateEditStateSnapshot({ ...saved, currentRecipe: { ...saved.currentRecipe, version: 18 } })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
+    expect(validateEditStateSnapshot({ ...saved, recipeVersion: 19 })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
+    expect(validateEditStateSnapshot({ ...saved, currentRecipe: { ...saved.currentRecipe, version: 19 } })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_recipe_version' }] });
     expect(validateEditStateSnapshot({ ...saved, processingVersion: 'future' })).toMatchObject({ ok: false, issues: [{ code: 'unsupported_processing_version' }] });
     expect(validateEditStateSnapshot({ ...saved, currentRecipe: { ...saved.currentRecipe, adjustments: { ...saved.currentRecipe.adjustments, exposure: 6 } } })).toMatchObject({ ok: false, issues: [{ code: 'invalid_recipe' }] });
     expect(validateEditStateSnapshot({ ...saved, sourceIdentity: { ...sourceIdentity, checksum: 'abc' } })).toMatchObject({ ok: false, issues: [{ code: 'invalid_source_identity' }] });

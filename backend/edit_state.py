@@ -4,7 +4,7 @@ import math
 from uuid import UUID
 
 STATE_FORMAT_VERSION = 2
-RECIPE_VERSION = 17
+RECIPE_VERSION = 18
 PROCESSING_VERSION = "jpeg-preview-srgb8-v1"
 
 BOUNDS = {
@@ -37,6 +37,7 @@ RESET_FIELDS.update({
     "allReset": frozenset(BOUNDS),
 })
 KINDS = SCALAR_KINDS | TOGGLE_FIELDS.keys() | RESET_FIELDS.keys()
+INDIVIDUAL_TOGGLE_FIELDS = {f"{key}Toggle": key for key in BOUNDS}
 SNAPSHOT_KEYS = frozenset((
     "stateFormatVersion", "recipeVersion", "processingVersion", "currentRecipe", "history",
     "historyCursor", "sourceIdentity",
@@ -55,10 +56,17 @@ def _record(value: object, keys: frozenset[str], code: str) -> dict:
     return value
 
 
-def _recipe(value: object) -> dict:
-    recipe = _record(value, frozenset(("version", "adjustments", *FLAGS)), "invalid_recipe")
-    if type(recipe["version"]) is not int or recipe["version"] != RECIPE_VERSION:
+def _recipe(value: object, version: int) -> dict:
+    keys = ("version", "adjustments", *FLAGS)
+    if version == 18:
+        keys += ("adjustmentEnabled",)
+    recipe = _record(value, frozenset(keys), "invalid_recipe")
+    if type(recipe["version"]) is not int or recipe["version"] != version:
         raise InvalidEditState("unsupported_recipe_version")
+    if version == 18:
+        enabled = _record(recipe["adjustmentEnabled"], frozenset(BOUNDS), "invalid_recipe")
+        if any(type(flag) is not bool for flag in enabled.values()):
+            raise InvalidEditState("invalid_recipe")
     if any(type(recipe[flag]) is not bool for flag in FLAGS):
         raise InvalidEditState("invalid_recipe")
     adjustments = _record(recipe["adjustments"], frozenset(BOUNDS), "invalid_recipe")
@@ -81,12 +89,13 @@ def _changed_fields(before: dict, after: dict) -> tuple[set[str], set[str]]:
     return values, flags
 
 
-def _entry(value: object, state_format_version: int) -> dict:
+def _entry(value: object, state_format_version: int, recipe_version: int) -> dict:
     paste = isinstance(value, dict) and value.get("kind") == "paste"
     keys = ("kind", "before", "after", "metadata") if paste else ("kind", "before", "after")
     entry = _record(value, frozenset(keys), "invalid_history")
     kind = entry["kind"]
-    if type(kind) is not str or (kind not in KINDS and not paste) or (paste and state_format_version != 2):
+    individual = type(kind) is str and recipe_version == 18 and kind in INDIVIDUAL_TOGGLE_FIELDS
+    if type(kind) is not str or (kind not in KINDS and not paste and not individual) or (paste and state_format_version != 2):
         raise InvalidEditState("invalid_history")
     if paste:
         metadata = _record(entry["metadata"], frozenset(("sourceAssetId", "sourceFilename", "adjustmentIds")), "invalid_history")
@@ -96,9 +105,14 @@ def _entry(value: object, state_format_version: int) -> dict:
             or any(type(key) is not str or key not in BOUNDS for key in ids) \
             or len(set(ids)) != len(ids):
             raise InvalidEditState("invalid_history")
-    before, after = _recipe(entry["before"]), _recipe(entry["after"])
+    before, after = _recipe(entry["before"], recipe_version), _recipe(entry["after"], recipe_version)
     values, flags = _changed_fields(before, after)
-    if paste:
+    individual_changes = {key for key in BOUNDS if before["adjustmentEnabled"][key] != after["adjustmentEnabled"][key]} if recipe_version == 18 else set()
+    if individual:
+        valid = not values and not flags and individual_changes <= {INDIVIDUAL_TOGGLE_FIELDS[kind]}
+    elif kind != "allReset" and individual_changes:
+        valid = False
+    elif paste:
         valid = not flags and bool(values) and values <= set(ids)
     elif kind in SCALAR_KINDS:
         valid = not flags and values <= {kind}
@@ -113,20 +127,15 @@ def _entry(value: object, state_format_version: int) -> dict:
 
 def validate_snapshot(value: object, asset_id: UUID | None = None) -> dict:
     state = _record(value, SNAPSHOT_KEYS, "invalid_snapshot")
-    # Preserve the original version: GET and identical saveId retries must not
-    # rewrite stored v1 JSON. The frontend creates v2 on its next changed save.
+    # Preserve stored format and recipe versions for GET and identical saveId
+    # retries. The frontend migrates v17 in memory and writes v18 only on an edit.
     if type(state["stateFormatVersion"]) is not int or state["stateFormatVersion"] not in (1, STATE_FORMAT_VERSION):
         raise InvalidEditState("unsupported_state_format_version")
-    for key, expected in (
-        ("recipeVersion", RECIPE_VERSION),
-        ("processingVersion", PROCESSING_VERSION),
-    ):
-        if type(state[key]) is not type(expected) or state[key] != expected:
-            raise InvalidEditState("unsupported_" + {
-                "stateFormatVersion": "state_format_version", "recipeVersion": "recipe_version",
-                "processingVersion": "processing_version",
-            }[key])
-    current = _recipe(state["currentRecipe"])
+    if type(state["recipeVersion"]) is not int or state["recipeVersion"] not in (17, RECIPE_VERSION):
+        raise InvalidEditState("unsupported_recipe_version")
+    if type(state["processingVersion"]) is not str or state["processingVersion"] != PROCESSING_VERSION:
+        raise InvalidEditState("unsupported_processing_version")
+    current = _recipe(state["currentRecipe"], state["recipeVersion"])
     source = state["sourceIdentity"]
     if not isinstance(source, dict) or not {"provider", "assetId", "inputKind"} <= source.keys() \
         or source.keys() - {"provider", "assetId", "inputKind", "checksum", "checksumKind"} \
@@ -147,7 +156,7 @@ def validate_snapshot(value: object, asset_id: UUID | None = None) -> dict:
         raise InvalidEditState("invalid_history")
     previous = None
     for item in history:
-        entry = _entry(item, state["stateFormatVersion"])
+        entry = _entry(item, state["stateFormatVersion"], state["recipeVersion"])
         if previous is not None and previous["after"] != entry["before"]:
             raise InvalidEditState("history_discontinuity")
         previous = entry

@@ -375,6 +375,67 @@ afterEach(() => {
 });
 
 describe('useAssetEdits persistence', () => {
+  it('reads v17 with a Redo branch without writing, then saves and reloads individual bypass as v18', async () => {
+    let session = editSession(editSession(newSession(), { type: 'temperature', value: 8 }), { type: 'commit' });
+    session = editSession(editSession(session, { type: 'tint', value: 12 }), { type: 'commit' });
+    session = editSession(session, { type: 'undo' });
+    const result = createEditStateSnapshot(session, source(first));
+    if (!result.ok) throw new Error('Invalid snapshot');
+    const oldRecipe = (recipe: typeof session.recipe) => {
+      const { adjustmentEnabled: _enabled, ...rest } = recipe;
+      return { ...rest, version: 17 };
+    };
+    const legacy = { ...result.value, recipeVersion: 17, currentRecipe: oldRecipe(result.value.currentRecipe),
+      history: result.value.history.map((entry) => ({ ...entry, before: oldRecipe(entry.before), after: oldRecipe(entry.after) })) };
+    const unchanged = structuredClone(legacy);
+    api.get.mockResolvedValue(response(legacy, 4));
+    await mount(); await flush();
+    expect(latest.session).toEqual(session);
+    expect(latest.dirty).toBe(false);
+    await act(async () => { await latest.save(first); await latest.saveEditedAssetsForExit(); });
+    expect(api.put).not.toHaveBeenCalled();
+    expect(legacy).toEqual(unchanged);
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mount(); await flush();
+    act(() => latest.dispatch({ type: 'redo' }));
+    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'temperature' }));
+    await act(async () => { await latest.save(first); });
+    const saved = api.put.mock.calls[0][1];
+    expect(saved.recipeVersion).toBe(18);
+    expect(saved.stateFormatVersion).toBe(2);
+    expect(saved.history.map((entry: { kind: string }) => entry.kind)).toEqual(['temperature', 'tint', 'temperatureToggle']);
+    expect(saved.currentRecipe.adjustmentEnabled.temperature).toBe(false);
+    expect(api.put.mock.calls[0][2]).toBe(4);
+    api.get.mockResolvedValue(response(saved, 5));
+    await mount(second); await flush(); await mount(first); await flush();
+    expect(latest.session.recipe.adjustmentEnabled.temperature).toBe(false);
+    expect(latest.session.recipe.adjustments.temperature).toBe(8);
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session.recipe.adjustmentEnabled.temperature).toBe(true);
+  });
+
+  it('replays an unanswered individual toggle before saving newer toggles and preserves flags on conflict', async () => {
+    const store = useCasStore();
+    await mount(); await flush();
+    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'tint' }));
+    store.loseNextResponse();
+    await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'network' } }); });
+    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'exposure' }));
+    await act(async () => { await latest.save(first); });
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(latest.session.recipe.adjustmentEnabled).toMatchObject({ tint: false, exposure: false });
+    expect(latest.dirty).toBe(false);
+    const current = store.rows.get(first)!.state;
+    store.externalWrite(first, current);
+    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'contrast' }));
+    await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'conflict' } }); });
+    expect(latest.session.recipe.adjustmentEnabled.contrast).toBe(false);
+    expect(latest.dirty).toBe(true);
+    expect(store.rows.get(first)!.state).toEqual(current);
+  });
+
   it('reads v1 without a write, then saves an edited session as v2 with the loaded revision', async () => {
     const edited = editSession(editSession(newSession(), { type: 'temperature', value: 8 }), { type: 'commit' });
     const snapshot = createEditStateSnapshot(edited, source(first));
