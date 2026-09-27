@@ -212,12 +212,12 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-value-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .adjustment-number { box-sizing: border-box; width: 44px; height: 26px; color: #eee; background: #202022; border: 1px solid #4a4a4d; border-radius: 4px; padding: 2px 5px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; appearance: textfield; -moz-appearance: textfield; }
 .adjustment-number::-webkit-inner-spin-button, .adjustment-number::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
-.adjustment-number:focus-visible, .adjustment-reset:focus-visible, .adjustment-range:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
+.adjustment-number:focus-visible, .adjustment-reset:focus-visible, .grading-range-reset:focus-visible, .adjustment-range:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .adjustment-power { flex: 0 0 26px; }
 .adjustment-control.is-bypassed > label { text-decoration: underline dotted #858589; text-underline-offset: 4px; }
-.adjustment-reset { display: grid; width: 26px; height: 26px; place-items: center; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 0; font-size: 0.9rem; line-height: 1; }
-.adjustment-reset:hover:not(:disabled) { background: #303033; }
-.adjustment-reset:disabled { cursor: default; opacity: 0.35; }
+.adjustment-reset, .grading-range-reset { display: grid; width: 26px; height: 26px; place-items: center; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 0; font-size: 0.9rem; line-height: 1; }
+.adjustment-reset:hover:not(:disabled), .grading-range-reset:hover:not(:disabled) { background: #303033; }
+.adjustment-reset:disabled, .grading-range-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-range { min-width: 0; width: 100%; min-height: 28px; margin: 0; accent-color: #bbb; }
 /* Opt-in track only: existing Basic ranges retain their native appearance. */
 .adjustment-range.has-gradient { appearance: none; background: transparent; }

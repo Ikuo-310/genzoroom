@@ -1187,6 +1187,9 @@ describe('3WAY range actions', () => {
     const row = title(range.id).closest('.grading-range-header')!;
     const reset = row.querySelector<HTMLButtonElement>('.grading-range-reset')!;
     expect(reset.disabled).toBe(false); act(() => reset.click());
+    expect(reset.textContent).toBe('↺');
+    expect(reset.classList.contains('grading-range-reset')).toBe(true);
+    expect(reset.getAttribute('aria-label')).toBe(i18n.t('workspace.resetGradingRange', { name: i18n.t(range.label) }));
     const expected = structuredClone(recipe); for (const id of range.ids) expected.adjustments[id] = 0;
     expect(rendered.recipe).toEqual(expected);
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);

@@ -30,7 +30,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       <button type="button" className="adjustment-category-reset grading-range-reset" aria-label={resetLabel} title={resetLabel}
         disabled={range.ids.every(id => recipe.adjustments[id] === 0)}
         onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        onClick={() => dispatch({ type: range.reset })}>{t('workspace.reset')}</button>
+        onClick={() => dispatch({ type: range.reset })}>↺</button>
     </div>;
   }
   return <>
