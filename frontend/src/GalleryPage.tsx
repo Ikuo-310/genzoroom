@@ -126,27 +126,29 @@ export function GalleryPage() {
 
   return (
     <main className="home-page">
-      <header className="app-header">
-        <div>
-          <h1>{t('app.title')}</h1>
-          <p className="eyebrow">{t('app.eyebrow')}</p>
-          <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
-        </div>
-        <LanguageControl language={language} />
-      </header>
-      <section aria-label={t('connection.sectionLabel')}>
-        <div className="status-list" role="status" aria-live="polite">
-          <ConnectionRow label={t('connection.backend')} state={connection} />
-          <ConnectionRow label={t('connection.immich')} state={immichConnection} />
-        </div>
-        <p className="detail">{connectionDetail}</p>
-        <button disabled={connection === 'checking' || immichConnection === 'checking' || assetState === 'loading'} onClick={() => {
-          setConnection('checking');
-          setImmichConnection('checking');
-          setAssetState('loading');
-          setAttempt((value) => value + 1);
-        }}>{t('connection.checkAgain')}</button>
-      </section>
+      <div className="home-intro">
+        <header className="app-header">
+          <div>
+            <h1>{t('app.title')}</h1>
+            <p className="eyebrow">{t('app.eyebrow')}</p>
+            <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
+          </div>
+          <LanguageControl language={language} />
+        </header>
+        <section aria-label={t('connection.sectionLabel')}>
+          <div className="status-list" role="status" aria-live="polite">
+            <ConnectionRow label={t('connection.backend')} state={connection} />
+            <ConnectionRow label={t('connection.immich')} state={immichConnection} />
+          </div>
+          <p className="detail">{connectionDetail}</p>
+          <button disabled={connection === 'checking' || immichConnection === 'checking' || assetState === 'loading'} onClick={() => {
+            setConnection('checking');
+            setImmichConnection('checking');
+            setAssetState('loading');
+            setAttempt((value) => value + 1);
+          }}>{t('connection.checkAgain')}</button>
+        </section>
+      </div>
       <section className="photos" aria-labelledby="recent-photos-heading">
         <div className="photos-heading">
           <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
