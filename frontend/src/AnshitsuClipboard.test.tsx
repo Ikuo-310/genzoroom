@@ -5,7 +5,7 @@ import { Link, MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { AssetDetail, WorkspaceNavigationState } from './assets';
-import { ADJUSTMENT_IDS, defaultRecipe, editSession, newSession, type EditRecipe } from './editing';
+import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, defaultRecipe, editSession, newSession, type EditRecipe } from './editing';
 import * as editStateModule from './editState';
 import { createEditStateSnapshot, type EditStateSnapshot } from './editState';
 import i18n from './i18n';
@@ -1144,5 +1144,155 @@ describe('individual adjustment UI', () => {
     act(() => row('exposure').querySelector<HTMLButtonElement>('.adjustment-power')!.focus());
     key(document.activeElement!, 'v'); expect(rendered.recipe!.adjustments.contrast).toBe(25);
     expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(false);
+  });
+});
+
+
+describe('3WAY range actions', () => {
+  function title(id: string) { return host.querySelector<HTMLButtonElement>('[data-grading-range-id="' + id + '"]')!; }
+  function open(id: string, x = 120, y = 90) {
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+    act(() => title(id).dispatchEvent(event)); return event;
+  }
+  function buttons() { return Array.from(document.querySelectorAll<HTMLButtonElement>('.grading-range-context-menu button')); }
+  it.each(GRADING_RANGE_CONTROLS)('copies $id OFF values and pastes an intersection as one operation without changing flags', async range => {
+    const recipe = defaultRecipe(); recipe[range.enabled] = false;
+    for (const id of range.ids) { recipe.adjustments[id] = 20; recipe.adjustmentEnabled[id] = false; }
+    rows.set(first.id, stored(first.id, recipe)); await mount();
+    act(() => title(range.id).focus());
+    expect(key(title(range.id), 'c').defaultPrevented).toBe(true);
+    expect(readEditClipboard()!.values).toEqual(Object.fromEntries(range.ids.map(id => [id, 20])));
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+    expect(open(range.id).defaultPrevented).toBe(true); act(() => buttons()[0].click());
+    expect(Object.keys(readEditClipboard()!.values)).toEqual(range.ids);
+    const copy = defaultRecipe(); copy.adjustments[range.ids[0]] = 30; copy.adjustments.exposure = 3;
+    copyEditSettings(copy, 'source', 'source.jpg', [range.ids[0], 'exposure']);
+    open(range.id); expect(buttons()[1].disabled).toBe(false); act(() => buttons()[1].click());
+    const expected = structuredClone(recipe); expected.adjustments[range.ids[0]] = 30;
+    expect(rendered.recipe).toEqual(expected);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    expect(readEditClipboard()!.values).toEqual({ [range.ids[0]]: 30, exposure: 3 });
+    key(window, 'z'); expect(rendered.recipe).toEqual(recipe);
+    key(window, 'z', { shiftKey: true }); expect(rendered.recipe).toEqual(expected);
+    act(() => title(range.id).focus()); key(title(range.id), 'v');
+    expect(rendered.recipe!.adjustments.exposure).toBe(3);
+    expect(rendered.recipe!.adjustmentEnabled).toEqual(recipe.adjustmentEnabled);
+    const other = GRADING_RANGE_CONTROLS.find(item => item.id !== range.id)!;
+    open(other.id); expect(buttons()[1].disabled).toBe(true);
+  });
+  it.each(GRADING_RANGE_CONTROLS)('resets $id from button and menu with one History entry and keeps all enabled flags', async range => {
+    const recipe = defaultRecipe(); recipe.colorGradingEnabled = false; recipe[range.enabled] = false;
+    for (const group of GRADING_RANGE_CONTROLS) for (const id of group.ids) recipe.adjustments[id] = 20;
+    recipe.adjustmentEnabled[range.ids[0]] = false; rows.set(first.id, stored(first.id, recipe)); await mount();
+    const row = title(range.id).closest('.grading-range-header')!;
+    const reset = row.querySelector<HTMLButtonElement>('.grading-range-reset')!;
+    expect(reset.disabled).toBe(false); act(() => reset.click());
+    const expected = structuredClone(recipe); for (const id of range.ids) expected.adjustments[id] = 0;
+    expect(rendered.recipe).toEqual(expected);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    expect(reset.disabled).toBe(true); key(window, 'z'); expect(rendered.recipe).toEqual(recipe);
+    open(range.id); act(() => buttons()[3].click()); expect(rendered.recipe).toEqual(expected);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    key(window, 'z'); expect(rendered.recipe).toEqual(recipe); key(window, 'y'); expect(rendered.recipe).toEqual(expected);
+  });
+  it.each(['en', 'ja'])('renders translated range actions, native toggles and non-collapsing headings in %s', async lang => {
+    await i18n.changeLanguage(lang); await mount();
+    for (const range of GRADING_RANGE_CONTROLS) {
+      const name = i18n.t(range.label); const heading = title(range.id);
+      const header = heading.closest('.grading-range-header')!;
+      const power = header.querySelector<HTMLButtonElement>('.grading-range-toggle')!;
+      expect(power.getAttribute('aria-label')).toBe(i18n.t('workspace.disableAdjustment', { name }));
+      act(() => heading.click()); expect(host.querySelectorAll('.adjustment-range')).toHaveLength(16);
+      open(range.id); expect(buttons().map(item => item.textContent)).toEqual([
+        i18n.t('workspace.copyGradingRange', { name }), i18n.t('workspace.pasteGradingRange', { name }),
+        i18n.t('workspace.disableAdjustment', { name }), i18n.t('workspace.resetGradingRange', { name })]);
+      expect(document.querySelector('.grading-range-context-menu [role="separator"]')).not.toBeNull();
+      act(() => buttons()[2].click()); expect(rendered.recipe![range.enabled]).toBe(false);
+      open(range.id); expect(buttons()[2].textContent).toBe(i18n.t('workspace.enableAdjustment', { name }));
+      key(document.activeElement!, 'Escape', { ctrlKey: false }); expect(document.activeElement).toBe(heading);
+      for (const value of ['Enter', ' ']) {
+        act(() => power.focus()); expect(key(power, value, { ctrlKey: false }).defaultPrevented).toBe(false);
+        const beforeCount = host.querySelectorAll('.edit-history li:not(.initial-state)').length;
+        act(() => power.click());
+        expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(beforeCount + 1);
+      }
+    }
+  });
+  it('navigates headers horizontally and vertically, skipping disabled Reset without changing values', async () => {
+    await mount();
+    const heading = title('shadows'); const header = heading.closest('.grading-range-header')!;
+    const power = header.querySelector<HTMLButtonElement>('.grading-range-toggle')!;
+    const reset = header.querySelector<HTMLButtonElement>('.grading-range-reset')!;
+    const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="shadowsTemperature"]')!;
+    const before = structuredClone(rendered.recipe);
+    act(() => heading.focus()); key(heading, 'ArrowRight', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(power);
+    key(power, 'ArrowRight', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(power); expect(reset.disabled).toBe(true);
+    key(power, 'ArrowDown', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(range);
+    key(range, 'ArrowUp', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(heading);
+    expect(rendered.recipe).toEqual(before); expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+    const copy = defaultRecipe(); copy.adjustments.shadowsTemperature = 30; copyEditSettings(copy, 'a', 'a.jpg', ['shadowsTemperature']);
+    key(heading, 'v'); act(() => heading.focus()); key(heading, 'ArrowRight', { shiftKey: true, ctrlKey: false });
+    key(power, 'ArrowRight', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(reset);
+    key(reset, 'ArrowLeft', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(power);
+    key(power, 'ArrowLeft', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(heading);
+    act(() => reset.focus()); key(reset, 'ArrowUp', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(categoryTitle('colorGrading'));
+    act(() => reset.focus()); key(reset, 'ArrowDown', { shiftKey: true, ctrlKey: false }); expect(document.activeElement).toBe(range);
+  });
+
+  it('keeps range, category, slider, History and Viewer menus exclusive and clamps/repositions range menus', async () => {
+    await mount();
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('grading-range-context-menu')
+        ? { x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 130, width: 200, height: 130, toJSON() {} }
+        : original.call(this);
+    });
+    try {
+      open('shadows', window.innerWidth, window.innerHeight);
+      let menu = document.querySelector<HTMLElement>('.grading-range-context-menu')!;
+      expect(menu.style.left).toBe((window.innerWidth - 208) + 'px'); expect(menu.style.top).toBe((window.innerHeight - 138) + 'px');
+      open('midtones', 35, 45); menu = document.querySelector<HTMLElement>('.grading-range-context-menu')!;
+      expect(menu.style.left).toBe('35px'); expect(menu.style.top).toBe('45px');
+      openCategoryContextMenu('basic'); expect(buttons()).toHaveLength(0);
+      open('shadows'); expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
+      const row = host.querySelector('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!;
+      act(() => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })));
+      expect(buttons()).toHaveLength(0); expect(document.querySelector('.adjustment-slider-context-menu')).not.toBeNull();
+      open('shadows'); expect(document.querySelector('.adjustment-slider-context-menu')).toBeNull();
+      headerHistoryMenu(); expect(buttons()).toHaveLength(0); expect(document.querySelector('.history-organization-menu')).not.toBeNull();
+      open('shadows'); expect(document.querySelector('.history-organization-menu')).toBeNull();
+      act(() => host.querySelector('.viewer-viewport')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 })));
+      openViewerContextMenu(); expect(buttons()).toHaveLength(0); expect(document.querySelector('.edit-settings-context-menu')).not.toBeNull();
+      act(() => title('shadows').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 })));
+      open('shadows'); expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
+      act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+      expect(buttons()).toHaveLength(0);
+    } finally { spy.mockRestore(); }
+  });
+  it('reveals only an out-of-view range title in the adjustment list and keeps horizontal movement from scrolling', async () => {
+    await mount();
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    const heading = title('midtones');
+    const prior = host.querySelector<HTMLInputElement>('[data-adjustment-id="shadowsTint"]')!;
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 100 });
+    scroll.style.overflowY = 'auto';
+    const bounds = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 100, x: 0, y: top, width: 100, height: bottom - top, toJSON() {} });
+    const a = vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(bounds(100, 200));
+    const b = vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue(bounds(240, 265));
+    try {
+      act(() => prior.focus()); key(prior, 'ArrowDown', { ctrlKey: false, shiftKey: true });
+      expect(document.activeElement).toBe(heading); expect(scroll.scrollTop).toBe(65);
+      b.mockReturnValue(bounds(120, 145));
+      act(() => prior.focus()); key(prior, 'ArrowDown', { ctrlKey: false, shiftKey: true }); expect(scroll.scrollTop).toBe(65);
+      b.mockReturnValue(bounds(50, 75));
+      key(heading, 'ArrowRight', { ctrlKey: false, shiftKey: true }); expect(scroll.scrollTop).toBe(65);
+      expect(document.documentElement.scrollTop).toBe(0);
+      expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+    } finally { a.mockRestore(); b.mockRestore(); }
+  });
+  it.each(['filmstrip', 'home'])('closes range menu on %s transition', async transition => {
+    await mount(); open('shadows');
+    await click(transition === 'home' ? '.workspace-actions button' : 'button[aria-label="destination.jpg"]');
+    expect(buttons()).toHaveLength(0);
   });
 });

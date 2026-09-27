@@ -1,7 +1,7 @@
 import type { RecentAsset } from './assets';
 
 export type EditRecipe = { version: 18; adjustmentEnabled: Record<AdjustmentId, boolean>; whiteBalanceEnabled: boolean; basicEnabled: boolean; colorGradingEnabled: boolean; gradingShadowsEnabled: boolean; gradingMidtonesEnabled: boolean; gradingHighlightsEnabled: boolean; colorEnabled: boolean; adjustments: { temperature: number; tint: number; exposure: number; contrast: number; highlights: number; whites: number; shadows: number; blacks: number; shadowsTemperature: number; shadowsTint: number; midtonesTemperature: number; midtonesTint: number; highlightsTemperature: number; highlightsTint: number; vibrance: number; saturation: number } };
-export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'gradingShadowsToggle' | 'gradingMidtonesToggle' | 'gradingHighlightsToggle' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset' | 'paste' | AdjustmentToggleKind;
+export type EditKind = 'temperature' | 'temperatureReset' | 'tint' | 'tintReset' | 'whiteBalanceToggle' | 'whiteBalanceReset' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'exposureReset' | 'contrastReset' | 'highlightsReset' | 'whitesReset' | 'shadowsReset' | 'blacksReset' | 'basicToggle' | 'basicReset' | 'shadowsTemperature' | 'shadowsTemperatureReset' | 'shadowsTint' | 'shadowsTintReset' | 'midtonesTemperature' | 'midtonesTemperatureReset' | 'midtonesTint' | 'midtonesTintReset' | 'highlightsTemperature' | 'highlightsTemperatureReset' | 'highlightsTint' | 'highlightsTintReset' | 'colorGradingToggle' | 'colorGradingReset' | 'gradingShadowsToggle' | 'gradingMidtonesToggle' | 'gradingHighlightsToggle' | 'vibrance' | 'vibranceReset' | 'saturation' | 'saturationReset' | 'colorToggle' | 'colorReset' | 'allReset' | 'paste' | AdjustmentToggleKind | GradingRangeResetKind;
 export type AdjustmentId = keyof EditRecipe['adjustments'];
 export type AdjustmentToggleKind = `${AdjustmentId}Toggle`;
 export type PasteMetadata = { sourceAssetId: string; sourceFilename: string; adjustmentIds: AdjustmentId[] };
@@ -63,6 +63,18 @@ export function isColorGradingDefault(adjustments: EditRecipe['adjustments']): b
 }
 export const COLOR_ADJUSTMENT_KEYS = ['vibrance', 'saturation'] as const;
 // Reuse category membership for all copy modes; never include enabled flags.
+export type GradingRangeId = 'shadows' | 'midtones' | 'highlights';
+export type GradingRangeResetKind = `grading${'Shadows' | 'Midtones' | 'Highlights'}Reset`;
+export const GRADING_RANGES = [
+  { id: 'shadows', enabled: 'gradingShadowsEnabled', toggle: 'toggleGradingShadows', reset: 'gradingShadowsReset' },
+  { id: 'midtones', enabled: 'gradingMidtonesEnabled', toggle: 'toggleGradingMidtones', reset: 'gradingMidtonesReset' },
+  { id: 'highlights', enabled: 'gradingHighlightsEnabled', toggle: 'toggleGradingHighlights', reset: 'gradingHighlightsReset' },
+] as const;
+export const GRADING_RANGE_CONTROLS = GRADING_RANGES.map(range => ({ ...range,
+  ids: COLOR_GRADING_ADJUSTMENT_KEYS.filter(id => id.startsWith(range.id)),
+  label: `workspace.${range.id}Grading`,
+}));
+
 export const ADJUSTMENT_IDS = [
   ...WHITE_BALANCE_ADJUSTMENT_KEYS, ...BASIC_ADJUSTMENT_KEYS,
   ...COLOR_ADJUSTMENT_KEYS, ...COLOR_GRADING_ADJUSTMENT_KEYS,
@@ -144,7 +156,7 @@ export const normalizeMidtonesTint = normalizeTint;
 export const normalizeHighlightsTemperature = normalizeTemperature;
 export const normalizeHighlightsTint = normalizeTint;
 
-export type EditAction = { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
+export type EditAction = { type: GradingRangeResetKind } | { type: 'begin'; kind: Exclude<EditKind, 'paste'> } | { type: 'temperature' | 'tint' | 'exposure' | 'contrast' | 'highlights' | 'whites' | 'shadows' | 'blacks' | 'shadowsTemperature' | 'shadowsTint' | 'midtonesTemperature' | 'midtonesTint' | 'highlightsTemperature' | 'highlightsTint' | 'vibrance' | 'saturation'; value: number }
   | { type: 'paste'; values: Partial<EditRecipe['adjustments']>; sourceAssetId: string; sourceFilename: string }
   | { type: 'toggleAdjustment'; id: AdjustmentId }
   | { type: 'commit'; kind?: EditKind }
@@ -309,6 +321,16 @@ export function editSession(state: EditSession, action: EditAction): EditSession
       // Selecting a newer starting point explicitly replaces the live preview;
       // the organization backup retains any pending gesture for Undo.
       return { ...state, history: state.history.slice(cursor), cursor: 0, recipe: state.history[cursor - 1].after, pending: null };
+    }
+    case 'gradingShadowsReset':
+    case 'gradingMidtonesReset':
+    case 'gradingHighlightsReset': {
+      const current = commit(state);
+      const range = GRADING_RANGE_CONTROLS.find(range => range.reset === action.type)!;
+      const adjustments = { ...current.recipe.adjustments };
+      for (const id of range.ids) adjustments[id] = 0;
+      return commit({ ...current, pending: { kind: action.type, before: current.recipe },
+        recipe: { ...current.recipe, adjustments } });
     }
     case 'temperatureReset':
     case 'tintReset':

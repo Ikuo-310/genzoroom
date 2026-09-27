@@ -498,5 +498,52 @@ class EditStateApiTests(unittest.TestCase):
         self.assertFalse(self.request("GET").json()["state"]["currentRecipe"]["adjustmentEnabled"]["tint"])
 
 
+    def test_grading_range_resets_v18_roundtrip_and_redo(self):
+        revision = 0
+        for scope in ("shadows", "midtones", "highlights"):
+            with self.subTest(scope=scope):
+                saved = self.v18_state()
+                for item in [saved["currentRecipe"], saved["history"][0]["before"], saved["history"][0]["after"]]:
+                    for name in ("shadows", "midtones", "highlights"):
+                        item["adjustments"][f"{name}Temperature"] = 20
+                        item["adjustments"][f"{name}Tint"] = -15
+                    item["colorGradingEnabled"] = False
+                    item[f"grading{scope.title()}Enabled"] = False
+                    item["adjustmentEnabled"][f"{scope}Tint"] = False
+                before = copy.deepcopy(saved["currentRecipe"])
+                after = copy.deepcopy(before)
+                for suffix in ("Temperature", "Tint"):
+                    after["adjustments"][f"{scope}{suffix}"] = 0
+                saved["history"].append({"kind": f"grading{scope.title()}Reset", "before": before, "after": after})
+                saved["currentRecipe"] = after
+                saved["historyCursor"] = 2
+                response = self.request("PUT", payload(saved, revision=revision))
+                self.assertEqual(response.status_code, 200)
+                revision += 1
+                self.assertEqual(self.request("GET").json()["state"], saved)
+                saved["historyCursor"] = 1
+                saved["currentRecipe"] = before
+                self.assertEqual(self.request("PUT", payload(saved, revision=revision)).status_code, 200)
+                revision += 1
+                self.assertEqual(self.request("GET").json()["state"], saved)
+
+    def test_grading_range_reset_rejects_unrelated_values_or_flag_changes(self):
+        original = self.request("PUT", payload()).json()
+        for field in ("other", "range", "individual"):
+            saved = self.v18_state()
+            before = copy.deepcopy(saved["currentRecipe"])
+            after = copy.deepcopy(before)
+            if field == "other":
+                after["adjustments"]["midtonesTint"] = 10
+            elif field == "range":
+                after["gradingShadowsEnabled"] = False
+            else:
+                after["adjustmentEnabled"]["shadowsTint"] = False
+            saved["history"].append({"kind": "gradingShadowsReset", "before": before, "after": after})
+            saved["currentRecipe"] = after
+            saved["historyCursor"] = 2
+            self.assertEqual(self.request("PUT", payload(saved, revision=1)).status_code, 422)
+            self.assertEqual(self.request("GET").json(), original)
+
 if __name__ == "__main__":
     unittest.main()

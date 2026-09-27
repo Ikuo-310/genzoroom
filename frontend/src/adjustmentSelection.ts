@@ -1,6 +1,6 @@
 import {
   WHITE_BALANCE_ADJUSTMENT_KEYS, BASIC_ADJUSTMENT_KEYS, COLOR_ADJUSTMENT_KEYS,
-  COLOR_GRADING_ADJUSTMENT_KEYS, type AdjustmentId,
+  COLOR_GRADING_ADJUSTMENT_KEYS, GRADING_RANGE_CONTROLS, type AdjustmentId,
 } from './editing';
 
 type SelectionGroup = { label?: string; ids: readonly AdjustmentId[] };
@@ -16,9 +16,7 @@ export const ADJUSTMENT_SELECTION_CATEGORIES: SelectionCategory[] = [
   { id: 'color', label: 'workspace.color', ids: COLOR_ADJUSTMENT_KEYS,
     groups: [{ ids: COLOR_ADJUSTMENT_KEYS }] },
   { id: 'colorGrading', label: 'workspace.colorGrading', ids: COLOR_GRADING_ADJUSTMENT_KEYS,
-    groups: ['shadows', 'midtones', 'highlights'].map((range) => ({
-      label: `workspace.${range}Grading`, ids: COLOR_GRADING_ADJUSTMENT_KEYS.filter((id) => id.startsWith(range)),
-    })) },
+    groups: GRADING_RANGE_CONTROLS.map(({ label, ids }) => ({ label, ids })) },
 ];
 
 export function adjustmentSelectionLabel(id: AdjustmentId): string {

@@ -81,7 +81,7 @@ describe('Color Grading controls', () => {
     expect(Array.from(grading().querySelectorAll('.grading-range-header h4'), (item) => item.textContent))
       .toEqual(['Shadows', 'Midtones', 'Highlights']);
     expect([0, 1, 2].map((index) => [rangeToggle(index).getAttribute('aria-pressed'), rangeToggle(index).getAttribute('aria-label')]))
-      .toEqual([['true', 'Bypass Shadows grading'], ['true', 'Bypass Midtones grading'], ['true', 'Bypass Highlights grading']]);
+      .toEqual([['true', 'Disable Shadows'], ['true', 'Disable Midtones'], ['true', 'Disable Highlights']]);
     wheel(-1, false, slider(2));
     wheel(1, false, slider(3));
     click(rangeToggle(1));
@@ -91,9 +91,13 @@ describe('Color Grading controls', () => {
     expect([slider(2).disabled, slider(3).disabled, number(2).disabled, number(3).disabled]).toEqual([true, true, true, true]);
     expect([slider(0).disabled, slider(1).disabled, slider(4).disabled, slider(5).disabled]).toEqual([false, false, false, false]);
     expect([slider(2).value, slider(3).value]).toEqual(['10', '-10']);
-    expect(rangeToggle(1).getAttribute('aria-label')).toBe('Enable Midtones grading');
+    expect(rangeToggle(1).getAttribute('aria-label')).toBe('Enable Midtones');
     act(() => slider(1).focus());
     key('ArrowDown', slider(1), { shiftKey: true });
+    expect(document.activeElement).toBe(grading().querySelectorAll('.grading-range-title')[1]);
+    key('ArrowDown', document.activeElement!, { shiftKey: true });
+    expect(document.activeElement).toBe(grading().querySelectorAll('.grading-range-title')[2]);
+    key('ArrowDown', document.activeElement!, { shiftKey: true });
     expect(document.activeElement).toBe(slider(4));
     click(rangeToggle(1));
     expect([slider(2).disabled, slider(3).disabled]).toEqual([false, false]);
@@ -279,55 +283,25 @@ describe('Color Grading controls', () => {
     expect(history()[0]).toBe('Reset Shadows Tint -26 → 0');
   });
 
-  it('uses Shift+Arrow navigation in DOM order through Midtones without changing values', () => {
-    act(() => slider().focus());
-    key('ArrowDown', slider(), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(1));
-    key('ArrowDown', slider(1), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(2));
-    key('ArrowDown', slider(2), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(3));
-    key('ArrowDown', slider(3), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(4));
-    key('ArrowDown', slider(4), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(5));
-    key('ArrowUp', slider(5), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(4));
-    key('ArrowUp', slider(4), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(3));
-    key('ArrowUp', slider(3), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(2));
-    key('ArrowUp', slider(2), { shiftKey: true });
-    expect(document.activeElement).toBe(slider(1));
-    key('ArrowUp', slider(1), { shiftKey: true });
-    expect(document.activeElement).toBe(slider());
-    expect(recipe().adjustments.shadowsTemperature).toBe(0);
-    expect(recipe().adjustments.shadowsTint).toBe(0);
-    expect(recipe().adjustments.midtonesTemperature).toBe(0);
-    expect(recipe().adjustments.midtonesTint).toBe(0);
-    expect(recipe().adjustments.highlightsTemperature).toBe(0);
+  it('navigates grading titles and sliders in both directions without edits', () => {
+    const title = grading().querySelector<HTMLElement>('.adjustment-category-title')!;
+    const targets = [title, ...Array.from(grading().querySelectorAll<HTMLElement>('.grading-range-title, .adjustment-range'))];
+    act(() => title.focus());
+    for (let i = 1; i < targets.length; i++) { key('ArrowDown', targets[i - 1], { shiftKey: true }); expect(document.activeElement).toBe(targets[i]); }
+    key('ArrowDown', targets.at(-1)!, { shiftKey: true }); expect(document.activeElement).toBe(targets.at(-1));
+    for (let i = targets.length - 2; i >= 0; i--) { key('ArrowUp', targets[i + 1], { shiftKey: true }); expect(document.activeElement).toBe(targets[i]); }
+    expect(history()).toHaveLength(0);
   });
-
-  it('skips disabled and collapsed grading sliders during Shift+Arrow navigation', () => {
-    const colorLast = host.querySelectorAll<HTMLElement>('.adjustment-category')[2]
-      .querySelectorAll<HTMLInputElement>('input[type="range"]')[1];
-    const title = grading().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
-    act(() => colorLast.focus());
+  it('skips disabled sliders but keeps range titles and skips all contents when collapsed', () => {
+    const title = grading().querySelector<HTMLElement>('.adjustment-category-title')!;
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
-    key('ArrowDown', colorLast, { shiftKey: true });
-    expect(document.activeElement).toBe(title);
-    key('ArrowDown', title, { shiftKey: true });
-    expect(document.activeElement).toBe(title);
-    click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
-    click(grading().querySelector<HTMLElement>('.adjustment-category-title')!);
-    act(() => colorLast.focus());
-    key('ArrowDown', colorLast, { shiftKey: true });
-    expect(document.activeElement).toBe(title);
-    key('ArrowDown', title, { shiftKey: true });
-    expect(document.activeElement).toBe(title);
-    click(grading().querySelector<HTMLElement>('.adjustment-category-title')!);
-    key('ArrowDown', title, { shiftKey: true });
-    expect(document.activeElement).toBe(slider());
+    const titles = Array.from(grading().querySelectorAll<HTMLElement>('.grading-range-title'));
+    act(() => title.focus());
+    key('ArrowDown', title, { shiftKey: true }); expect(document.activeElement).toBe(titles[0]);
+    key('ArrowDown', titles[0], { shiftKey: true }); expect(document.activeElement).toBe(titles[1]);
+    key('ArrowDown', titles[1], { shiftKey: true }); expect(document.activeElement).toBe(titles[2]);
+    click(title); act(() => title.focus());
+    key('ArrowDown', title, { shiftKey: true }); expect(document.activeElement).toBe(title);
   });
 
   it('bypasses and disables all six controls while preserving values across OFF/ON', () => {

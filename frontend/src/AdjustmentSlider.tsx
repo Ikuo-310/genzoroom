@@ -38,7 +38,7 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
   const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
   const position = adjustmentRowPosition(current);
-  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'))
+  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || isAvailable(item)));
   const index = position ? ordered.indexOf(position) : -1;

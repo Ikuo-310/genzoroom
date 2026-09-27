@@ -1,4 +1,5 @@
 import {
+  GRADING_RANGE_CONTROLS,
   ADJUSTMENT_IDS,
   ADJUSTMENT_TOGGLE_IDS,
   defaultAdjustmentEnabled,
@@ -85,7 +86,7 @@ const EDIT_KINDS: readonly EditKind[] = [
   'midtonesTemperature', 'midtonesTemperatureReset', 'midtonesTint', 'midtonesTintReset',
   'highlightsTemperature', 'highlightsTemperatureReset', 'highlightsTint', 'highlightsTintReset',
   'colorGradingToggle', 'colorGradingReset', 'gradingShadowsToggle', 'gradingMidtonesToggle',
-  'gradingHighlightsToggle', 'vibrance', 'vibranceReset', 'saturation', 'saturationReset',
+  'gradingShadowsReset', 'gradingMidtonesReset', 'gradingHighlightsReset', 'gradingHighlightsToggle', 'vibrance', 'vibranceReset', 'saturation', 'saturationReset',
   'colorToggle', 'colorReset', 'allReset', 'paste',
   ...Object.keys(ADJUSTMENT_TOGGLE_IDS) as Array<keyof typeof ADJUSTMENT_TOGGLE_IDS>,
 ];
@@ -118,6 +119,7 @@ const RESET_EDIT_KEYS: Partial<Record<EditKind, readonly (keyof EditRecipe['adju
   basicReset: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'],
   colorGradingReset: ['shadowsTemperature', 'shadowsTint', 'midtonesTemperature', 'midtonesTint', 'highlightsTemperature', 'highlightsTint'],
   colorReset: ['vibrance', 'saturation'],
+  ...Object.fromEntries(GRADING_RANGE_CONTROLS.map(range => [range.reset, range.ids])),
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -13,14 +13,14 @@ import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
-import { ColorGradingAdjustmentControls } from './ColorGradingAdjustmentControls';
+import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './ColorGradingAdjustmentControls';
 import { basicHistoryControl } from './basicControls';
 import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
-import { ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
+import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
 import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
@@ -58,6 +58,8 @@ export function AnshitsuPage() {
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
   const [categoryMenu, setCategoryMenu] = useState<AdjustmentCategoryMenuTarget | null>(null);
+  const [rangeMenu, setRangeMenu] = useState<GradingRangeMenuTarget | null>(null);
+  const rangeDefinition = GRADING_RANGE_CONTROLS.find(range => range.id === rangeMenu?.rangeId);
   const [sliderMenu, setSliderMenu] = useState<AdjustmentSliderMenuTarget | null>(null);
   const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits'; trigger: HTMLElement } | null>(null);
   const [historyError, setHistoryError] = useState(false);
@@ -75,18 +77,19 @@ export function AnshitsuPage() {
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
   const closeCategoryMenu = useCallback(() => setCategoryMenu(null), []);
+  const closeRangeMenu = useCallback(() => setRangeMenu(null), []);
   const closeSliderMenu = useCallback(() => setSliderMenu(null), []);
 
-  useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
+  useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
   useEffect(() => {
-    if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); }
+    if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); }
     if (!clipboardEnabled) setHistoryConfirmation(null);
   }, [historyEnabled, clipboardEnabled]);
 
   function openHistoryMenu(cursor: number | undefined, trigger: HTMLElement, x?: number, y?: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
     setCategoryMenu(null);
-    setSliderMenu(null);
+    setSliderMenu(null); setRangeMenu(null);
     const rect = trigger.getBoundingClientRect();
     setHistoryMenu({ assetId, cursor, trigger, x: x ?? rect.left, y: y ?? rect.bottom });
   }
@@ -94,7 +97,7 @@ export function AnshitsuPage() {
   function openCategoryMenu(categoryId: AdjustmentCategoryId, trigger: HTMLElement, x: number, y: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
     setHistoryMenu(null);
-    setSliderMenu(null);
+    setSliderMenu(null); setRangeMenu(null);
     setCategoryMenu({ categoryId, trigger, x, y });
   }
 
@@ -102,7 +105,13 @@ export function AnshitsuPage() {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
     setHistoryMenu(null);
     setCategoryMenu(null);
+    setRangeMenu(null);
     setSliderMenu(target);
+  }
+
+  function openRangeMenu(target: GradingRangeMenuTarget) {
+    if (!historyEnabled || switchingRef.current || exitRef.current) return;
+    setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(target);
   }
 
   function requestHistoryOperation(operation: HistoryOperation) {
@@ -171,6 +180,12 @@ export function AnshitsuPage() {
       // contextual to the active photo and must also work after photo changes
       // when no slider or preview has regained focus.
       if (shortcut === 'copy') {
+        const rangeTitle = event.target instanceof Element ? event.target.closest<HTMLElement>('.grading-range-title') : null;
+        if (rangeTitle) {
+          const range = GRADING_RANGE_CONTROLS.find(range => range.id === rangeTitle.dataset.gradingRangeId);
+          if (range && copySettings(range.ids)) event.preventDefault();
+          return;
+        }
         const categoryTitle = event.target instanceof Element
           ? event.target.closest<HTMLButtonElement>('.adjustment-category-title') : null;
         const categoryId = categoryTitle?.dataset.adjustmentCategoryId as AdjustmentCategoryId | undefined;
@@ -368,7 +383,7 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || historyConfirmation !== null
+          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
             || switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         />
       ) : (
@@ -426,7 +441,7 @@ export function AnshitsuPage() {
               resetLabel={t('workspace.reset')}
               onToggle={() => dispatch({ type: 'toggleColorGrading' })}
               onReset={() => dispatch({ type: 'colorGradingReset' })}>
-              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
+              <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} onOpenRangeMenu={openRangeMenu} />
             </AdjustmentCategory>
             <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
@@ -441,9 +456,21 @@ export function AnshitsuPage() {
       assets={selectedAssets}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || historyConfirmation !== null}
+      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
+    {rangeMenu && rangeDefinition && historyEnabled && <AdjustmentContextMenu target={rangeMenu}
+      className="grading-range-context-menu" menuLabel={t('workspace.gradingRangeMenu', { name: t(rangeDefinition.label) })}
+      enabled={session.recipe[rangeDefinition.enabled]}
+      resetDisabled={rangeDefinition.ids.every(id => session.recipe.adjustments[id] === 0)}
+      pasteDisabled={!rangeDefinition.ids.some(id => Object.hasOwn(readEditClipboard()?.values ?? {}, id))}
+      enableLabel={t('workspace.enableAdjustment', { name: t(rangeDefinition.label) })}
+      disableLabel={t('workspace.disableAdjustment', { name: t(rangeDefinition.label) })}
+      resetLabel={t('workspace.resetGradingRange', { name: t(rangeDefinition.label) })}
+      copyLabel={t('workspace.copyGradingRange', { name: t(rangeDefinition.label) })}
+      pasteLabel={t('workspace.pasteGradingRange', { name: t(rangeDefinition.label) })}
+      onToggle={() => dispatch({ type: rangeDefinition.toggle })} onReset={() => dispatch({ type: rangeDefinition.reset })}
+      onCopy={() => { copySettings(rangeDefinition.ids); }} onPaste={() => { pasteSettings(rangeDefinition.ids); }} onClose={closeRangeMenu} />}
     {sliderMenu && historyEnabled && <AdjustmentContextMenu target={sliderMenu}
       className="adjustment-slider-context-menu" menuLabel={t('workspace.adjustmentMenu')}
       enabled={session.recipe.adjustmentEnabled[sliderMenu.adjustmentId]}
@@ -708,6 +735,13 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
           description = t(entry.kind === 'highlightsTint' ? 'workspace.highlightsTintHistory' : 'workspace.highlightsTintReset')
             + ' ' + formatHighlightsTint(entry.before.adjustments.highlightsTint) + ' → ' + formatHighlightsTint(entry.after.adjustments.highlightsTint);
           break;
+        case 'gradingShadowsReset':
+        case 'gradingMidtonesReset':
+        case 'gradingHighlightsReset': {
+          const range = GRADING_RANGE_CONTROLS.find(range => range.reset === entry.kind)!;
+          description = t('workspace.resetGradingRange', { name: t(range.label) });
+          break;
+        }
         case 'colorGradingReset': description = t('workspace.colorGradingResetHistory'); break;
         case 'colorGradingToggle':
           description = `${t('workspace.colorGrading')} ${t(entry.after.colorGradingEnabled ? 'workspace.basicOn' : 'workspace.basicOff')}`;

@@ -1,18 +1,40 @@
 import { useTranslation } from 'react-i18next';
-import { AdjustmentSlider, type OpenAdjustmentSliderMenu } from './AdjustmentSlider';
-import { TEMPERATURE, TINT, formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
+import { AdjustmentSlider, focusAdjustmentCategory, navigateAdjustments, type OpenAdjustmentSliderMenu } from './AdjustmentSlider';
+import { GRADING_RANGE_CONTROLS, type GradingRangeId, TEMPERATURE, TINT, formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
 import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 
-export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOpenContextMenu }: {
-  assetId: string; recipe: EditRecipe; dispatch: (action: EditAction) => void; onOpenContextMenu?: OpenAdjustmentSliderMenu;
+import type { AdjustmentMenuPosition } from './AdjustmentContextMenu';
+export type GradingRangeMenuTarget = AdjustmentMenuPosition & { rangeId: GradingRangeId };
+
+export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOpenContextMenu, onOpenRangeMenu }: {
+  assetId: string; recipe: EditRecipe; dispatch: (action: EditAction) => void; onOpenContextMenu?: OpenAdjustmentSliderMenu; onOpenRangeMenu?: (target: GradingRangeMenuTarget) => void;
 }) {
   const { t } = useTranslation();
+  function header(id: GradingRangeId) {
+    const range = GRADING_RANGE_CONTROLS.find(range => range.id === id)!;
+    const name = t(range.label);
+    const enabled = recipe[range.enabled];
+    const toggleLabel = t(enabled ? 'workspace.disableAdjustment' : 'workspace.enableAdjustment', { name });
+    const resetLabel = t('workspace.resetGradingRange', { name });
+    return <div className="grading-range-header" onContextMenu={event => {
+      if (!onOpenRangeMenu) return;
+      event.preventDefault();
+      onOpenRangeMenu({ rangeId: id, trigger: event.currentTarget.querySelector<HTMLButtonElement>('.grading-range-title')!, x: event.clientX, y: event.clientY });
+    }}>
+      <h4 className="adjustment-subsection-title"><button type="button" className="grading-range-title" data-grading-range-id={id}
+        onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}>{name}</button></h4>
+      <button type="button" className={`adjustment-category-icon grading-range-toggle${enabled ? '' : ' is-off'}`}
+        aria-pressed={enabled} aria-label={toggleLabel} title={toggleLabel}
+        onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
+        onClick={() => dispatch({ type: range.toggle })}>⏻</button>
+      <button type="button" className="adjustment-category-reset grading-range-reset" aria-label={resetLabel} title={resetLabel}
+        disabled={range.ids.every(id => recipe.adjustments[id] === 0)}
+        onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
+        onClick={() => dispatch({ type: range.reset })}>{t('workspace.reset')}</button>
+    </div>;
+  }
   return <>
-    <div className="grading-range-header"><h4 className="adjustment-subsection-title">{t('workspace.shadowsGrading')}</h4>
-      <button type="button" className={`adjustment-category-icon grading-range-toggle${recipe.gradingShadowsEnabled ? '' : ' is-off'}`}
-        aria-pressed={recipe.gradingShadowsEnabled}
-        aria-label={t(recipe.gradingShadowsEnabled ? 'workspace.disableShadowsGrading' : 'workspace.enableShadowsGrading')}
-        onClick={() => dispatch({ type: 'toggleGradingShadows' })}>⏻</button></div>
+    {header('shadows')}
     <AdjustmentSlider key={`${assetId}-shadows-temperature`} adjustmentId="shadowsTemperature"
       enabled={recipe.adjustmentEnabled.shadowsTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'shadowsTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.shadowsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.shadowsTemperature} valueText={formatShadowsTemperature(recipe.adjustments.shadowsTemperature)}
@@ -33,11 +55,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onChange={(value) => dispatch({ type: 'shadowsTint', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'shadowsTint' })}
       onReset={() => dispatch({ type: 'shadowsTintReset' })} />
-    <div className="grading-range-header"><h4 className="adjustment-subsection-title">{t('workspace.midtonesGrading')}</h4>
-      <button type="button" className={`adjustment-category-icon grading-range-toggle${recipe.gradingMidtonesEnabled ? '' : ' is-off'}`}
-        aria-pressed={recipe.gradingMidtonesEnabled}
-        aria-label={t(recipe.gradingMidtonesEnabled ? 'workspace.disableMidtonesGrading' : 'workspace.enableMidtonesGrading')}
-        onClick={() => dispatch({ type: 'toggleGradingMidtones' })}>⏻</button></div>
+    {header('midtones')}
     <AdjustmentSlider key={`${assetId}-midtones-temperature`} adjustmentId="midtonesTemperature"
       enabled={recipe.adjustmentEnabled.midtonesTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'midtonesTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.midtonesTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.midtonesTemperature} valueText={formatMidtonesTemperature(recipe.adjustments.midtonesTemperature)}
@@ -58,11 +76,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onChange={(value) => dispatch({ type: 'midtonesTint', value })}
       onCommit={() => dispatch({ type: 'commit', kind: 'midtonesTint' })}
       onReset={() => dispatch({ type: 'midtonesTintReset' })} />
-    <div className="grading-range-header"><h4 className="adjustment-subsection-title">{t('workspace.highlightsGrading')}</h4>
-      <button type="button" className={`adjustment-category-icon grading-range-toggle${recipe.gradingHighlightsEnabled ? '' : ' is-off'}`}
-        aria-pressed={recipe.gradingHighlightsEnabled}
-        aria-label={t(recipe.gradingHighlightsEnabled ? 'workspace.disableHighlightsGrading' : 'workspace.enableHighlightsGrading')}
-        onClick={() => dispatch({ type: 'toggleGradingHighlights' })}>⏻</button></div>
+    {header('highlights')}
     <AdjustmentSlider key={`${assetId}-highlights-temperature`} adjustmentId="highlightsTemperature"
       enabled={recipe.adjustmentEnabled.highlightsTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'highlightsTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.highlightsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.highlightsTemperature} valueText={formatHighlightsTemperature(recipe.adjustments.highlightsTemperature)}

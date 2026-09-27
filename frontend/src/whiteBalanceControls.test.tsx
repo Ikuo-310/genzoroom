@@ -454,7 +454,7 @@ describe('production White Balance controls', () => {
   });
 
   it('navigates every gradient, Basic and Color slider in UI order without values or History changes or wrapping', () => {
-    const items = Array.from(host.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'));
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .adjustment-range'));
     const before = recipe();
     act(() => items[0].focus());
     navigate('ArrowUp');

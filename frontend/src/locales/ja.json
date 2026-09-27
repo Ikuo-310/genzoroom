@@ -220,7 +220,11 @@
     "historyContinue": "続行",
     "historyFailed": "履歴を整理できませんでした。",
     "jpegOnly": "現在、画像調整はJPEGのみ対応しています。",
-    "previewEditingNote": "写真の元データは変更しません。編集設定は5秒後に自動保存され、Home操作で履歴を整理して保存します。"
+    "previewEditingNote": "写真の元データは変更しません。編集設定は5秒後に自動保存され、Home操作で履歴を整理して保存します。",
+    "resetGradingRange": "{{name}}をリセット",
+    "copyGradingRange": "{{name}}の設定をコピー",
+    "pasteGradingRange": "{{name}}に貼り付け",
+    "gradingRangeMenu": "{{name}}の操作"
   },
   "language": {
     "label": "言語",

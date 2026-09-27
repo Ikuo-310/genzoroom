@@ -33,6 +33,8 @@ RESET_FIELDS.update({
     "whiteBalanceReset": frozenset(("temperature", "tint")),
     "basicReset": frozenset(("exposure", "contrast", "highlights", "whites", "shadows", "blacks")),
     "colorGradingReset": frozenset(("shadowsTemperature", "shadowsTint", "midtonesTemperature", "midtonesTint", "highlightsTemperature", "highlightsTint")),
+    **{f"grading{scope.title()}Reset": frozenset((f"{scope}Temperature", f"{scope}Tint"))
+       for scope in ("shadows", "midtones", "highlights")},
     "colorReset": frozenset(("vibrance", "saturation")),
     "allReset": frozenset(BOUNDS),
 })
