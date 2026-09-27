@@ -371,6 +371,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -651,6 +652,103 @@ describe('useAssetEdits persistence', () => {
     expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(20);
     expect(latest.revision).toBe(2);
     expect(latest.dirty).toBe(false);
+  });
+
+  it.each(['502', '503', '504', 'json', 'ack'])('recovers a committed PUT with %s through the real API client before newer edits', async failure => {
+    vi.useFakeTimers();
+    const store = useCasStore();
+    const persist = api.put.getMockImplementation()!;
+    const actualApi = await vi.importActual<typeof import('./editStateApi')>('./editStateApi');
+    api.put.mockImplementation(actualApi.putAssetEditState);
+    let firstResponse = true;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, init) => {
+      const { expectedRevision, saveId, ...state } = JSON.parse(init.body);
+      const saved = await persist(first, state, expectedRevision, saveId);
+      if (firstResponse) {
+        firstResponse = false;
+        if (failure === 'json') return new Response('{');
+        if (failure === 'ack') return new Response(JSON.stringify({ ...saved, lastSaveId: 'wrong' }));
+        return new Response('proxy failure', { status: Number(failure) });
+      }
+      return new Response(JSON.stringify({ ...saved, lastSaveId: saveId }));
+    }));
+    await mount();
+    editTemperature(10); commitEdit();
+    await advance(5000);
+    expect(store.rows.get(first)?.revision).toBe(1);
+    expect(latest.revision).toBe(0);
+    expect(latest.dirty).toBe(true);
+    editTemperature(20); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(api.put.mock.calls[2][2]).toBe(1);
+    expect(api.put.mock.calls[2][3]).not.toBe(api.put.mock.calls[0][3]);
+    expect(store.rows.get(first)?.state.currentRecipe.adjustments.temperature).toBe(20);
+    expect(latest.revision).toBe(2);
+    expect(latest.dirty).toBe(false);
+  });
+
+  it('retains an uncertain request through repeated failures without automatic resends', async () => {
+    vi.useFakeTimers();
+    api.put.mockRejectedValue(new EditStateApiError('unexpected', 504, undefined, 'unknown'));
+    await mount(); editTemperature(10); commitEdit();
+    await advance(5000);
+    await advance(60000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    editTemperature(20); commitEdit();
+    await advance(5000);
+    await advance(60000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(latest.session.recipe.adjustments.temperature).toBe(20);
+    expect(latest.dirty).toBe(true);
+  });
+
+  it('resolves an in-flight uncertain HTTP save before Home compaction', async () => {
+    const store = useCasStore();
+    await mount(); editTemperature(10); commitEdit(); editTemperature(20); commitEdit();
+    const pending = store.holdNextCommittedWrite();
+    let saving!: ReturnType<typeof latest.save>;
+    let exiting!: ReturnType<typeof latest.saveEditedAssetsForExit>;
+    act(() => { saving = latest.save(first); });
+    act(() => { exiting = latest.saveEditedAssetsForExit(); });
+    await act(async () => { pending.reject(new EditStateApiError('unexpected', 504, undefined, 'unknown')); await saving; await exiting; });
+    expect(await exiting).toMatchObject({ ok: true });
+    expect(api.put).toHaveBeenCalledTimes(3);
+    expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
+    expect(store.rows.get(first)?.state.history).toHaveLength(1);
+  });
+
+  it.each([false, true])('retains confirmed saved status %s after discarding a rejected later edit', async edited => {
+    await mount();
+    editTemperature(10); commitEdit();
+    await act(async () => { await latest.save(first); });
+    if (!edited) {
+      act(() => latest.dispatch({ type: 'resetEdits' }));
+      await act(async () => { await latest.save(first); });
+    }
+    editTemperature(20); commitEdit();
+    api.put.mockRejectedValueOnce(new EditStateApiError('invalid_state', 422));
+    await act(async () => { await latest.save(first); });
+    act(() => latest.discard(first));
+    await mount(second);
+    expect(latest.editStatusFor(first, !edited)).toBe(edited);
+  });
+
+  it.each([
+    new EditStateApiError('unexpected', 504, undefined, 'unknown'),
+    new EditStateApiError('conflict', 409),
+  ])('does not reuse bulk status after discarding an uncertain or conflicted save: %s', async error => {
+    await mount(); editTemperature(10); commitEdit();
+    api.put.mockRejectedValueOnce(error);
+    await act(async () => { await latest.save(first); });
+    act(() => latest.discard(first));
+    await mount(second);
+    expect(latest.editStatusFor(first, false)).toBeUndefined();
+    expect(latest.editStatusFor(first, true)).toBeUndefined();
+    await mount(first);
+    expect(latest.editStatusFor(first, true)).toBe(false);
   });
 
   it('replays the same request when the first PUT never reached the database', async () => {

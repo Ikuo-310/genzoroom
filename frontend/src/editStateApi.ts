@@ -11,7 +11,8 @@ export type EditStateResponse = {
 export type EditStateApiErrorKind = 'conflict' | 'too_large' | 'invalid_state' | 'unavailable' | 'network' | 'unexpected';
 
 export class EditStateApiError extends Error {
-  constructor(public readonly kind: EditStateApiErrorKind, public readonly status?: number, public readonly code?: string) {
+  constructor(public readonly kind: EditStateApiErrorKind, public readonly status?: number, public readonly code?: string,
+    public readonly saveOutcome: 'rejected' | 'unknown' = kind === 'network' ? 'unknown' : 'rejected') {
     super(kind);
   }
 }
@@ -65,7 +66,9 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     : response.status === 413 ? 'too_large'
       : response.status === 422 ? 'invalid_state'
         : response.status === 503 ? 'unavailable' : 'unexpected';
-  throw new EditStateApiError(kind, response.status, code);
+  // A proxy/server failure cannot prove that a PUT did not commit upstream.
+  const uncertainSave = init.method === 'PUT' && (response.status >= 500 || response.status === 408);
+  throw new EditStateApiError(kind, response.status, code, uncertainSave ? 'unknown' : 'rejected');
 }
 
 export async function getAssetEditState(assetId: string, signal: AbortSignal): Promise<EditStateResponse> {
@@ -97,11 +100,17 @@ export async function putAssetEditState(assetId: string, snapshot: EditStateSnap
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
       body: JSON.stringify({ ...snapshot, expectedRevision, saveId }),
     });
-    const checked = checkedResponse(await readResponse(response), assetId);
-    if (!checked.state || checked.revision === undefined || !checked.updatedAt || !checked.lastSaveId) {
-      throw new EditStateApiError('invalid_state');
+    try {
+      const checked = checkedResponse(await readResponse(response), assetId);
+      if (!checked.state || checked.revision !== expectedRevision + 1 || !checked.updatedAt || checked.lastSaveId !== saveId) {
+        throw new EditStateApiError('invalid_state');
+      }
+      return checked as Required<EditStateResponse>;
+    } catch (cause) {
+      // Even HTTP success is uncertain until its acknowledgement is validated.
+      const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('invalid_state');
+      throw new EditStateApiError(error.kind, error.status, error.code, 'unknown');
     }
-    return checked as Required<EditStateResponse>;
   } finally {
     globalThis.clearTimeout(timeout);
   }

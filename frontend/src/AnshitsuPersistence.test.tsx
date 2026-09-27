@@ -81,6 +81,67 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('keeps the confirmed saved badge after a later rejected save and discard without refetching statuses', async () => {
+    vi.useFakeTimers();
+    const bulk = deferred<Record<string, boolean>>();
+    mocked.statuses.mockReturnValueOnce(bulk.promise);
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    await advance(5000);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await click('button[aria-label="Disable Color"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('invalid_state', 422));
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(currentPhoto()).toBe('first.jpg');
+    const move = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find(button => button.textContent === 'Move without saving')!;
+    await act(async () => move.click()); await flush();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    await act(async () => bulk.resolve({ [first.id]: false, [second.id]: true }));
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(mocked.statuses).toHaveBeenCalledTimes(1);
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
+  });
+
+  it('masks a delayed bulk result after an uncertain save is discarded until a fresh GET', async () => {
+    const bulk = deferred<Record<string, boolean>>();
+    mocked.statuses.mockReturnValueOnce(bulk.promise);
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unexpected', 504, undefined, 'unknown'));
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    const savedSnapshot = mocked.put.mock.calls[0][1];
+    const move = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find(button => button.textContent === 'Move without saving')!;
+    await act(async () => move.click()); await flush();
+    await act(async () => bulk.resolve({ [first.id]: true, [second.id]: true }));
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).toBeNull();
+    expect(mocked.statuses).toHaveBeenCalledTimes(1);
+    const get = deferred<any>();
+    mocked.get.mockReturnValueOnce(get.promise);
+    await click('.filmstrip-item[aria-label="first.jpg"]');
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).toBeNull();
+    await act(async () => get.resolve({ state: savedSnapshot, revision: 1,
+      updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] }));
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an uncertain HTTP autosave before saving newer edits on a Filmstrip switch', async () => {
+    vi.useFakeTimers();
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unexpected', 504, undefined, 'unknown'));
+    await advance(5000);
+    await click('button[aria-label="Disable Color"]');
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.put).toHaveBeenCalledTimes(3);
+    expect(mocked.put.mock.calls[1].slice(1, 4)).toEqual(mocked.put.mock.calls[0].slice(1, 4));
+    expect(mocked.put.mock.calls[2][2]).toBe(1);
+    expect(mocked.put.mock.calls[2][1].currentRecipe).toMatchObject({ basicEnabled: false, colorEnabled: false });
+  });
+
   it('shows saved status for inactive photos and prioritizes live edits over a delayed bulk response', async () => {
     const waiting = deferred<Record<string, boolean>>();
     mocked.statuses.mockReturnValueOnce(waiting.promise);

@@ -489,7 +489,7 @@ export function AnshitsuPage() {
 
     <Filmstrip
       assets={selectedAssets}
-      editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id) ?? savedEditStatuses[asset.id]]))}
+      editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
       keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}

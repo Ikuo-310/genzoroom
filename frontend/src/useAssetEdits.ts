@@ -36,6 +36,7 @@ type AssetEditRecord = {
   lastSaveId?: string;
   sourceIdentity: EditSourceIdentity;
   savedFingerprint: string | null;
+  savedEdited?: boolean;
   retrySave?: RetrySave;
   autosaveError?: EditStateApiError['kind'] | null;
   autosaveErrorGeneration?: number;
@@ -61,6 +62,8 @@ function freshRecord(assetId: string): AssetEditRecord {
 
 export function useAssetEdits(assetId: string, enabled: boolean) {
   const records = useRef<Record<string, AssetEditRecord>>({});
+  // Presence also represents unknown: discarded assets must not fall back to an old bulk result.
+  const discardedEditStatuses = useRef(new Map<string, boolean | undefined>());
   // editSession and restoreEditSession replace the session rather than mutating
   // it. Keep one validated snapshot per session/source pair; status-only
   // rerenders and async save responses can reuse its fingerprint.
@@ -149,7 +152,8 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         updatedAt: response.updatedAt, lastSaveId: response.lastSaveId,
         sourceIdentity: response.state?.sourceIdentity ?? freshRecord(id).sourceIdentity,
       };
-      setRecord(id, { ...next, savedFingerprint: fingerprintFor(next) });
+      discardedEditStatuses.current.delete(id);
+      setRecord(id, { ...next, savedFingerprint: fingerprintFor(next), savedEdited: hasEdits(restored.value) });
     }).catch((cause) => {
       if (loads.current[id]?.generation === generation) {
         const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
@@ -269,7 +273,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       if (!record.autosaveError || (record.autosaveErrorGeneration ?? 0) > operationGeneration) return record;
       return { ...record, autosaveError: null, autosaveErrorGeneration: undefined };
     };
-    // A network failure may have hidden a committed PUT. Replaying that exact
+    // An uncertain response may have hidden a committed PUT. Replaying that exact
     // request must precede any newer snapshot, even when local edits diverged.
     const send = async (request: RetrySave): Promise<SaveResult> => {
       setRecord(id, { ...getRecord(id), saveStatus: 'saving', retrySave: request });
@@ -282,6 +286,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
         let next: AssetEditRecord = { ...latest, session: restored?.ok ? restored.value : latest.session,
           revision: response.revision, updatedAt: response.updatedAt,
           lastSaveId: response.lastSaveId, savedFingerprint: request.fingerprint,
+          savedEdited: hasEdits({ recipe: request.snapshot.currentRecipe, history: request.snapshot.history, pending: null }),
           retrySave: undefined, saveStatus: 'idle' as const };
         if (canSyncSession && restored?.ok) next.needsCompaction = false;
         const clean = fingerprintFor(next) === request.fingerprint;
@@ -291,7 +296,9 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       } catch (cause) {
         const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
         const latest = getRecord(id);
-        setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.kind === 'network' ? request : undefined });
+        setRecord(id, { ...latest, saveStatus: 'idle', retrySave: error.saveOutcome === 'unknown' ? request : undefined,
+          // Unknown commits and external conflicts invalidate the previously confirmed DB status.
+          savedEdited: error.saveOutcome === 'unknown' || error.kind === 'conflict' ? undefined : latest.savedEdited });
         return { ok: false, error };
       }
     };
@@ -414,10 +421,10 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       const existingSave = saves.current[id];
       if (existingSave) {
         const inFlightResult = await existingSave;
-        if (!inFlightResult.ok && inFlightResult.error.kind !== 'network') return failure(id, inFlightResult.error);
+        if (!inFlightResult.ok && inFlightResult.error.saveOutcome !== 'unknown') return failure(id, inFlightResult.error);
       }
 
-      // This also covers a network failure that settled before exit began.
+      // This also covers an uncertain response that settled before exit began.
       // The compact target is computed only after the old request is confirmed.
       const confirmed = await writeSnapshot(id, null, { allowUnloaded: true });
       if (!confirmed.ok) return failure(id, confirmed.error);
@@ -491,6 +498,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
       window.clearTimeout(loads.current[id].timeout);
       loads.current[id].generation += 1;
     }
+    discardedEditStatuses.current.set(id, records.current[id]?.savedEdited);
     delete records.current[id];
     changed();
   }, [cancelAutosave, changed]);
@@ -500,11 +508,12 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
     session: current.session, dispatch, organizeHistory,
-    editStatusFor: (id: string): boolean | undefined => {
+    editStatusFor: (id: string, bulkStatus?: boolean): boolean | undefined => {
       const record = records.current[id];
       // A validated retained session wins over a delayed bulk response, including failed saves.
       // Reset-to-initial is semantically unedited even before its reset snapshot is saved.
-      return record && record.savedFingerprint !== null ? hasEdits(record.session) : undefined;
+      if (record && record.savedFingerprint !== null) return hasEdits(record.session);
+      return discardedEditStatuses.current.has(id) ? discardedEditStatuses.current.get(id) : bulkStatus;
     },
     hasOrganizationUndo: !!current.organizationUndo,
     canUndo: !!current.organizationUndo || current.session.cursor > 0 || !!current.session.pending,

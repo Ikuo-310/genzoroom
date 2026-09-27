@@ -74,4 +74,35 @@ describe('edit-state API client', () => {
     expect(error).toBeInstanceOf(EditStateApiError);
     expect(error).toMatchObject({ kind: 'network', message: 'network' });
   });
+
+  it.each([408, 500, 502, 503, 504])('treats PUT HTTP %i as uncertain without changing GET classification', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response('proxy failure', { status })));
+    await expect(putAssetEditState(assetId, snapshot, 0, crypto.randomUUID()))
+      .rejects.toMatchObject({ status, saveOutcome: 'unknown' });
+    await expect(getAssetEditState(assetId, new AbortController().signal))
+      .rejects.toMatchObject({ status, saveOutcome: 'rejected' });
+  });
+
+  it.each([409, 413, 422])('treats PUT HTTP %i as a confirmed rejection', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status })));
+    await expect(putAssetEditState(assetId, snapshot, 0, crypto.randomUUID()))
+      .rejects.toMatchObject({ status, saveOutcome: 'rejected' });
+  });
+
+  it.each(['broken JSON', '{}', JSON.stringify({ state: null }), JSON.stringify(saved)])
+    ('keeps an unreadable or mismatched PUT acknowledgement uncertain: %s', async body => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)));
+      await expect(putAssetEditState(assetId, snapshot, 0, crypto.randomUUID()))
+        .rejects.toMatchObject({ kind: 'invalid_state', saveOutcome: 'unknown' });
+    });
+
+  it('keeps Abort uncertain and accepts a matching acknowledgement on retry', async () => {
+    const saveId = crypto.randomUUID();
+    const fetcher = vi.fn().mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...saved, revision: 1, lastSaveId: saveId })));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(putAssetEditState(assetId, snapshot, 0, saveId)).rejects.toMatchObject({ saveOutcome: 'unknown' });
+    await expect(putAssetEditState(assetId, snapshot, 0, saveId)).resolves.toMatchObject({ revision: 1, lastSaveId: saveId });
+    expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[0][1].body);
+  });
 });
