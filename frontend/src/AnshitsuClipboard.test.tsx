@@ -728,6 +728,44 @@ describe('selected settings clipboard', () => {
     await click('.workspace-actions button'); expect(api.put).not.toHaveBeenCalled();
   });
 
+  it.each(['copy', 'paste'] as const)('keeps %s dialog focus consistent across shortcuts, right clicks and toolbar actions', async (mode) => {
+    await mount();
+    copyEditSettings(defaultRecipe(), 'source', 'source.jpg', ['temperature']);
+    const label = mode === 'copy' ? 'Copy' : 'Paste';
+    const actionLabel = `${label} selected settings`;
+    const viewport = activatePreview();
+    key(viewport, mode === 'copy' ? 'c' : 'v', { altKey: true });
+    const assertInitialFocus = () => {
+      const confirm = dialogButton(label);
+      expect(document.activeElement).toBe(confirm);
+      expect(confirm.classList.contains('selection-confirm-button')).toBe(true);
+      expect(confirm.disabled).toBe(false);
+      expect(key(confirm, 'Enter', { ctrlKey: false }).defaultPrevented).toBe(false);
+      // jsdom does not perform native button activation for Enter.
+      act(() => confirm.click());
+    };
+    assertInitialFocus();
+    expect(document.activeElement).toBe(viewport);
+    openViewerContextMenu();
+    let menu = document.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    expect(menu.dataset.focusMode).toBe('pointer');
+    const other = menu.querySelectorAll<HTMLButtonElement>('button')[1];
+    act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    expect(menu.dataset.focusMode).toBe('pointer');
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+    expect(document.activeElement).toBe(viewport);
+    const trigger = menuAction(actionLabel);
+    assertInitialFocus();
+    expect(document.activeElement).toBe(trigger);
+    openViewerContextMenu();
+    menu = document.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    const action = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === actionLabel)!;
+    act(() => action.click());
+    expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
+    assertInitialFocus();
+    expect(document.activeElement).toBe(viewport);
+  });
+
   it('provides all four toolbar actions without photo focus and restores focus to its visible trigger', async () => {
     await mount();
     const trigger = menuAction('Copy selected settings');

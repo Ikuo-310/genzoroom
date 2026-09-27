@@ -114,7 +114,7 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     </div>
     <div className="selection-confirm-actions">
       <button type="button" className="tool-button" onClick={onCancel}>{t('workspace.cancelSelection')}</button>
-      <button ref={confirmButton} type="button" className="tool-button" disabled={selected.size === 0}
+      <button ref={confirmButton} type="button" className="tool-button selection-confirm-button" disabled={selected.size === 0}
         onClick={() => onConfirm(ADJUSTMENT_IDS.filter((id) => availableIds.includes(id) && selected.has(id)))}>
         {t(mode === 'copy' ? 'workspace.confirmCopy' : 'workspace.confirmPaste')}
       </button>

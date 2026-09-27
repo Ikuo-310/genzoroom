@@ -89,6 +89,40 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('uses pointer styling on every mouse open, keyboard styling on Tab, and hover styling after mouse movement', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    act(() => viewport.focus());
+    key('keydown', viewport, { key: 'F10', code: 'F10', shiftKey: true });
+    let menu = document.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    expect(menu.dataset.focusMode).toBe('keyboard');
+    key('keydown', document.activeElement!, { key: 'Escape', code: 'Escape' });
+    contextMenu(viewport);
+    menu = document.querySelector<HTMLElement>('.edit-settings-context-menu')!;
+    const first = menu.querySelector<HTMLButtonElement>('button')!;
+    expect(document.activeElement).toBe(first);
+    expect(menu.dataset.focusMode).toBe('pointer');
+    key('keydown', first, { key: 'Tab', code: 'Tab' });
+    expect(menu.dataset.focusMode).toBe('keyboard');
+    const other = menu.querySelectorAll('button')[1];
+    act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    expect(menu.dataset.focusMode).toBe('pointer');
+    contextMenu(viewport, 200, 200);
+    expect(menu.dataset.focusMode).toBe('pointer');
+  });
+
+  it('uses the same explicit input mode for toolbar actions', () => {
+    act(() => root.render(<ContextMenuHarness />));
+    const trigger = host.querySelector<HTMLElement>('.edit-settings-menu summary')!;
+    const list = host.querySelector<HTMLElement>('.edit-settings-menu-actions')!;
+    act(() => { trigger.focus(); trigger.click(); });
+    key('keydown', trigger, { key: 'Tab', code: 'Tab' });
+    const first = list.querySelector<HTMLButtonElement>('button')!;
+    act(() => first.focus());
+    expect(list.dataset.focusMode).toBe('keyboard');
+    act(() => first.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    expect(list.dataset.focusMode).toBe('pointer');
+  });
   it('opens over both the image and viewport whitespace and reuses all toolbar actions', () => {
     act(() => root.render(<ContextMenuHarness />));
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;

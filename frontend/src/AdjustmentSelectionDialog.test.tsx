@@ -138,11 +138,20 @@ describe('adjustment selection dialog', () => {
     mount(mode);
     const confirm = button(mode === 'copy' ? 'Copy' : 'Paste');
     expect(document.activeElement).toBe(confirm);
+    expect(confirm.classList.contains('selection-confirm-button')).toBe(true);
     expect(key(confirm, 'Enter').defaultPrevented).toBe(false);
     // The browser's native button activation follows Enter; jsdom needs it simulated.
     click(confirm);
     expect(confirmed).toHaveBeenCalledTimes(1);
     expect(confirmed).toHaveBeenCalledWith(ADJUSTMENT_IDS);
+  });
+  it('disables confirm when the selection becomes empty and safely handles a removed opener', () => {
+    mount(); const confirm = button('Copy');
+    // Keep DOM focus on confirm while a selection update disables it.
+    click(button('Clear all'));
+    expect(confirm.disabled).toBe(true);
+    opener.remove();
+    expect(() => act(() => root.render(null))).not.toThrow();
   });
   it('wraps Tab and Shift+Tab at modal boundaries, including a disabled confirm button', () => {
     mount(); const first = button('Select all'); const last = button('Copy');

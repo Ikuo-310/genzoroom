@@ -31,7 +31,7 @@ type ImageViewerProps = {
 export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
   const [closeToolbarMenuSignal, setCloseToolbarMenuSignal] = useState(0);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
   const [imageSize, setImageSize] = useState<Point>({ x: 0, y: 0 });
@@ -189,6 +189,15 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
         if (keyboardBlocked || document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
+        if (!event.defaultPrevented && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey
+          && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
+          && onCopyAdjustments && onPasteAdjustments && onSelectCopyAdjustments && onSelectPasteAdjustments) {
+          event.preventDefault();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setCloseToolbarMenuSignal((current) => current + 1);
+          setContextMenuPosition({ x: bounds.left, y: bounds.top, keyboard: true });
+          return;
+        }
         const selection = editSelectionShortcut(event.nativeEvent);
         if (selection) {
           const handled = selection === 'copy' ? onSelectCopyAdjustments?.() : onSelectPasteAdjustments?.();

@@ -6,7 +6,7 @@ type Props = {
   disabled: boolean; hasClipboard: boolean;
   onCopy: () => boolean; onPaste: () => boolean;
   onSelectCopy: () => boolean; onSelectPaste: () => boolean;
-  contextPosition?: { x: number; y: number } | null;
+  contextPosition?: { x: number; y: number; keyboard?: boolean } | null;
   onContextClose?: (restoreFocus: boolean) => void;
   onMenuOpen?: () => void;
   closeMenuSignal?: number;
@@ -34,20 +34,24 @@ function EditSettingsActions({ actions, onSelect, menuItems = true }: {
 }
 
 function ContextEditSettingsMenu({ position, actions, onClose, onSelect }: {
-  position: { x: number; y: number }; actions: Action[];
+  position: { x: number; y: number; keyboard?: boolean }; actions: Action[];
   onClose: (restoreFocus: boolean) => void; onSelect: (action: () => boolean) => void;
 }) {
   const { t } = useTranslation();
   const menu = useRef<HTMLDivElement>(null);
   const [location, setLocation] = useState({ left: position.x, top: position.y });
+  const [keyboardFocus, setKeyboardFocus] = useState(!!position.keyboard);
 
   useLayoutEffect(() => {
     const element = menu.current;
     if (!element) return;
     const bounds = element.getBoundingClientRect();
     setLocation(editMenuPosition(position.x, position.y, bounds.width, bounds.height, innerWidth, innerHeight));
+    setKeyboardFocus(!!position.keyboard);
+    // Retain keyboard access without relying on the browser's inherited
+    // focus-visible heuristic to style a menu opened by the mouse.
     element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
-  }, [position.x, position.y]);
+  }, [position]);
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
@@ -67,7 +71,12 @@ function ContextEditSettingsMenu({ position, actions, onClose, onSelect }: {
 
   return createPortal(<div ref={menu} role="menu" aria-label={t('workspace.editSettingsActions')}
     className="workspace-menu-surface edit-settings-context-menu edit-settings-action-list" style={{ left: location.left, top: location.top }}
-    onKeyDownCapture={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}
+    data-focus-mode={keyboardFocus ? 'keyboard' : 'pointer'}
+    onPointerMove={() => setKeyboardFocus(false)} onPointerDown={() => setKeyboardFocus(false)}
+    onKeyDownCapture={(event) => {
+      if (!event.nativeEvent.isComposing) setKeyboardFocus(true);
+      if (event.key !== 'Escape') event.stopPropagation();
+    }}
     onBlur={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) onClose(false); }}>
     <EditSettingsActions actions={actions} onSelect={onSelect} />
   </div>, document.body);
@@ -78,6 +87,7 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
   const { t } = useTranslation();
   const menu = useRef<HTMLDetailsElement>(null);
   const trigger = useRef<HTMLElement>(null);
+  const [toolbarKeyboardFocus, setToolbarKeyboardFocus] = useState(false);
   const actions: Action[] = [
     { label: 'workspace.copyAll', action: onCopy, disabled },
     { label: 'workspace.selectCopy', action: onSelectCopy, disabled },
@@ -99,11 +109,14 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
   useEffect(() => { if (contextPosition || closeMenuSignal) menu.current!.open = false; }, [contextPosition, closeMenuSignal]);
 
   return <>
-  <details ref={menu} className="edit-settings-menu" onClick={onMenuOpen} onBlur={(event) => {
+  <details ref={menu} className="edit-settings-menu" onClick={onMenuOpen}
+    onPointerMove={() => setToolbarKeyboardFocus(false)} onPointerDown={() => setToolbarKeyboardFocus(false)}
+    onKeyDownCapture={(event) => { if (!event.nativeEvent.isComposing) setToolbarKeyboardFocus(true); }} onBlur={(event) => {
     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
   }}>
     <summary ref={trigger} className="tool-button" aria-label={t('workspace.editSettingsActions')} title={t('workspace.editSettingsActions')}>⋯</summary>
-    <div className="workspace-menu-surface edit-settings-menu-actions edit-settings-action-list">
+    <div className="workspace-menu-surface edit-settings-menu-actions edit-settings-action-list"
+      data-focus-mode={toolbarKeyboardFocus ? 'keyboard' : 'pointer'}>
       <EditSettingsActions actions={actions} onSelect={selectFromToolbar} menuItems={false} />
     </div>
   </details>

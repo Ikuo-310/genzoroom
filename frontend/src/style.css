@@ -148,12 +148,18 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .workspace-menu-item:hover:not(:disabled), .workspace-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
 .workspace-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
 .workspace-menu-item:disabled { color: #777; cursor: default; }
+.edit-settings-action-list[data-focus-mode="pointer"] .workspace-menu-item:focus { outline: none; background: transparent; color: #ddd; }
+.edit-settings-action-list[data-focus-mode="pointer"] .workspace-menu-item:hover:not(:disabled),
+.edit-settings-action-list[data-focus-mode="keyboard"] .workspace-menu-item:focus:not(:disabled) { color: #fff; background: #3b3b3e; }
+.edit-settings-action-list[data-focus-mode="keyboard"] .workspace-menu-item:focus:not(:disabled) { outline: 2px solid #aaa; outline-offset: -2px; }
 .edit-settings-menu-separator { height: 0; margin: 5px 4px; border-top: 1px solid #48484b; }
 .adjustment-selection-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); box-sizing: border-box; overflow: auto; color: #ddd; background: #242426; border: 1px solid #666; border-radius: 8px; padding: 20px; box-shadow: 0 10px 30px #0008; }
 .adjustment-selection-dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .adjustment-selection-dialog h2 { margin: 0 0 14px; font-size: 1rem; }
 .selection-all-actions, .selection-confirm-actions { display: flex; gap: 8px; }
 .selection-confirm-actions { justify-content: flex-end; margin-top: 16px; }
+.adjustment-selection-dialog .selection-confirm-button:focus:not(:disabled) { outline: 2px solid #f2f2f2; outline-offset: 2px; }
+.adjustment-selection-dialog .selection-confirm-button:disabled { outline: none; }
 .history-confirmation-dialog .selection-confirm-actions .tool-button:focus { outline: none; }
 .history-confirmation-dialog .selection-confirm-actions .tool-button:first-child:focus { color: #fff; background: #492729; border-color: #d66c72; }
 .history-confirmation-dialog .selection-confirm-actions .tool-button:last-child:focus { color: #fff; background: #3b3b3e; border-color: #c8c8ca; }
