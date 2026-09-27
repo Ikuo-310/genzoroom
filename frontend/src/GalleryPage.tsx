@@ -134,14 +134,16 @@ export function GalleryPage() {
       <div className="home-intro">
         <header className="app-header">
           <div>
-            <h1 className="home-title-row"><HomeTitle className="home-title-link" onActivate={() => {}} />
+            <div className="home-title-row">
+              <h1><HomeTitle className="home-title-link" onActivate={() => {}} /></h1>
               <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
                 onCheckAgain={() => {
                   connectionRequestId.current += 1;
                   setConnection('checking');
                   setImmichConnection('checking');
                   setConnectionAttempt(value => value + 1);
-                }} /></h1>
+                }} />
+            </div>
             <p className="eyebrow">{t('app.eyebrow')}</p>
             <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
           </div>
@@ -231,6 +233,15 @@ function ConnectionStatusControl({ connection, immichConnection, disabled, onChe
     event.preventDefault();
     if (disclosure.current) disclosure.current.open = !disclosure.current.open;
   }
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const current = disclosure.current;
+      if (current?.open && event.target instanceof Node && !current.contains(event.target)) current.open = false;
+    };
+    // Capture only to close before the outside control acts; never cancel its pointer event or steal its focus.
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+  }, []);
   return <details className={`connection-control ${overall}`} ref={disclosure} onKeyDown={handleDisclosureKey}>
     <summary ref={summary} onKeyDown={handleSummaryKey} aria-controls={detailsId} aria-label={t('connection.openDetails', { status: overallText })}>
       <span className="connection-symbol" aria-hidden="true">{overall === 'checking' ? '…' : overall === 'error' ? '!' : overall === 'not-configured' ? '–' : '✓'}</span>

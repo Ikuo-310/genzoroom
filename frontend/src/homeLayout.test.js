@@ -49,6 +49,25 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(host.querySelector('.photo-card')).alignSelf).toBe('start');
   });
 
+  it('keeps connection details outside the heading and restores the Anshitsu brand scale', () => {
+    const row = document.createElement('div'); row.className = 'home-title-row';
+    row.innerHTML = '<h1><button class="home-title-link">GenzoRoom</button></h1><details class="connection-control"><summary>Status</summary><section class="connection-details">Connection information</section></details>';
+    const brand = document.createElement('div'); brand.className = 'workspace-brand';
+    brand.innerHTML = '<button class="workspace-title-link">GenzoRoom</button>';
+    host.append(row, brand);
+    const heading = row.querySelector('h1');
+    const details = row.querySelector('.connection-details');
+    expect(heading.children).toHaveLength(1);
+    expect(details.closest('h1')).toBeNull();
+    expect(getComputedStyle(details).letterSpacing).toBe('normal');
+    expect(getComputedStyle(details).fontWeight).toBe('400');
+    expect(getComputedStyle(details).lineHeight).toBe('1.5');
+    expect(getComputedStyle(details).width).toContain('320px');
+    expect(getComputedStyle(details).maxWidth).toContain('100vw - 32px');
+    expect(getComputedStyle(brand.querySelector('.workspace-title-link')).fontSize).toBe('1.25rem');
+    expect(getComputedStyle(brand.querySelector('.workspace-title-link')).fontWeight).toBe('700');
+  });
+
   it('keeps selected cards dark and shows the whole photo in Home and Filmstrip thumbnails', () => {
     const card = host.querySelector('.photo-card');
     const selectedButton = host.querySelector('.photo-card-button');

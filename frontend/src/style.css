@@ -24,7 +24,7 @@ h1 { margin: 0; font-size: clamp(2.5rem, 8vw, 4rem); letter-spacing: -0.04em; li
 .connection-control.error .connection-symbol { color: #ffb2a3; background: #3a2926; }
 .connection-control.not-configured .connection-symbol { color: #d4d2b0; background: #343429; }
 .connection-overall-label { font-size: 0.72rem; font-weight: 650; }
-.connection-details { position: absolute; z-index: 12; top: calc(100% + 10px); left: 0; width: min(320px, calc(100vw - 32px)); padding: 16px; border: 1px solid #526a5e; border-radius: 9px; color: #e6eee9; background: #203029; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); font-size: 0.9rem; }
+.connection-details { position: absolute; z-index: 12; top: calc(100% + 10px); left: 0; width: min(320px, calc(100vw - 32px)); max-width: calc(100vw - 32px); padding: 16px; border: 1px solid #526a5e; border-radius: 9px; color: #e6eee9; background: #203029; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); font-size: 0.9rem; font-weight: 400; letter-spacing: normal; line-height: 1.5; }
 .connection-details .status-list { display: grid; gap: 9px; }
 .connection-details .connection { font-size: 0.9rem; }
 .connection-details .detail { margin: 12px 0; }
@@ -96,7 +96,7 @@ h2 { margin: 0; font-size: 1.35rem; }
 .workspace-page { display: grid; grid-template-rows: auto minmax(0, 1fr) 126px; width: 100%; height: 100dvh; overflow: hidden; color: #e8e8e8; background: #0d0d0e; line-height: 1.35; }
 .workspace-header { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.5fr) minmax(220px, 0.8fr); align-items: center; gap: 20px; min-height: 74px; padding: 10px 16px; border-bottom: 1px solid #353537; background: #171719; }
 .workspace-brand { display: grid; grid-template-columns: auto auto; align-items: baseline; justify-content: start; gap: 2px 12px; min-width: 0; }
-.workspace-brand strong { font-size: 1.25rem; }
+.workspace-brand .workspace-title-link { font-size: 1.25rem; font-weight: 700; }
 .workspace-brand > span { color: #d2d2d2; font-weight: 650; }
 .workspace-brand small { grid-column: 1 / -1; color: #949496; font-size: 0.72rem; }
 .workspace-asset-title { display: grid; min-width: 0; }

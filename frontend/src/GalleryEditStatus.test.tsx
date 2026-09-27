@@ -53,16 +53,28 @@ describe('Home bulk edit status', () => {
 
   it('rechecks only service status and preserves a pending edit-status response', async () => {
     const waiting = deferred<Record<string, boolean>>();
+    const recheck = deferred<Response>();
+    let healthCalls = 0;
     api.statuses.mockReturnValueOnce(waiting.promise);
+    vi.stubGlobal('fetch', vi.fn((url: string) => url === '/api/health' && healthCalls++ > 0
+      ? recheck.promise : Promise.resolve(new Response(JSON.stringify(url === '/api/health'
+        ? { status: 'ok' } : { configured: true, connected: true })))));
     await mount();
     expect(host.querySelector('.edited-badge')).toBeNull();
     expect(host.querySelector('.connection-control')?.classList.contains('connected')).toBe(true);
     act(() => host.querySelector<HTMLElement>('.connection-control summary')!.click());
     const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check again')!;
-    await act(async () => retry.click());
+    await act(async () => {
+      retry.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      retry.click();
+    });
+    expect(host.querySelector<HTMLDetailsElement>('.connection-control')?.open).toBe(true);
+    expect(retry.disabled).toBe(true);
     expect(api.statuses).toHaveBeenCalledTimes(1);
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(host.querySelector('.photo-card')).not.toBeNull();
+    await act(async () => recheck.resolve(new Response(JSON.stringify({ status: 'ok' }))));
+    expect(host.querySelector<HTMLDetailsElement>('.connection-control')?.open).toBe(true);
     await act(async () => waiting.resolve(Object.fromEntries(assets.map(asset => [asset.id, true]))));
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(100);
   });
@@ -73,6 +85,10 @@ describe('Home bulk edit status', () => {
     await mount();
     const details = host.querySelector<HTMLDetailsElement>('.connection-control')!;
     const summary = details.querySelector<HTMLElement>('summary')!;
+    const heading = host.querySelector('h1')!;
+    expect(heading.children).toHaveLength(1);
+    expect(heading.firstElementChild?.classList.contains('home-title-link')).toBe(true);
+    expect(details.parentElement).toBe(heading.parentElement);
     expect(details.classList.contains('not-configured')).toBe(true);
     expect(summary.getAttribute('aria-label')).toContain('Immich not configured');
     await act(async () => summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
@@ -83,6 +99,30 @@ describe('Home bulk edit status', () => {
     await act(async () => details.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
     expect(details.open).toBe(false);
     expect(document.activeElement).toBe(summary);
+  });
+
+  it('closes on outside pointer without blocking the outside control and ignores inside pointers', async () => {
+    await mount();
+    const details = host.querySelector<HTMLDetailsElement>('.connection-control')!;
+    const summary = details.querySelector<HTMLElement>('summary')!;
+    act(() => summary.click());
+    expect(details.open).toBe(true);
+    act(() => details.querySelector('.detail')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(details.open).toBe(true);
+
+    const outsideButton = document.createElement('button');
+    let activated = 0;
+    outsideButton.addEventListener('click', () => { activated += 1; });
+    document.body.append(outsideButton);
+    outsideButton.focus();
+    await act(async () => {
+      outsideButton.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      outsideButton.click();
+    });
+    expect(details.open).toBe(false);
+    expect(activated).toBe(1);
+    expect(document.activeElement).toBe(outsideButton);
+    outsideButton.remove();
   });
 
   it('keeps the status neutral and the retry action disabled while checks are pending', async () => {
