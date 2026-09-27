@@ -242,7 +242,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-history-paste { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-history [aria-current="step"] { color: #eee; }
 .edit-history .undone { opacity: 0.55; }
-.history-organization-menu { position: fixed; z-index: 50; display: grid; box-sizing: border-box; width: max-content; min-width: min(190px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; }
+.history-organization-menu { position: fixed; z-index: 50; display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; }
 .history-confirmation-dialog { width: min(420px, calc(100vw - 40px)); }
 .history-confirmation-warning { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 0; color: #ffb38a; font-weight: 700; }
 .history-confirmation-warning-icon { flex: none; color: inherit; }

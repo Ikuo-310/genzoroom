@@ -104,12 +104,12 @@ function headerHistoryMenu() {
   act(() => { trigger.focus(); trigger.click(); });
   return trigger;
 }
-function rowHistoryMenu(cursor: number, keyboard = false) {
+function rowHistoryMenu(cursor: number, keyboard = false, x = 100, y = 100) {
   const trigger = host.querySelector<HTMLButtonElement>(`.edit-history li[value="${cursor}"] button`)!;
   act(() => {
     trigger.focus();
     if (keyboard) trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
-    else trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }));
+    else trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }));
   });
   return trigger;
 }
@@ -151,6 +151,34 @@ describe('History organization menus and confirmation', () => {
     expect(rendered.recipe).toEqual(original.recipe);
     expect(host.querySelector('.edit-history button[aria-current]')!.textContent).toContain('→ +20');
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('fits the measured menu width at the viewport edge for header and row menus', async () => {
+    await mountHistory();
+    const oldWidth = window.innerWidth; const oldHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('history-organization-menu')) return new DOMRect(0, 0, 220, 150);
+      if (this.classList.contains('history-menu-trigger')) return new DOMRect(970, 760, 30, 20);
+      return originalRect.call(this);
+    });
+    try {
+      headerHistoryMenu();
+      let menu = document.querySelector<HTMLElement>('.history-organization-menu')!;
+      expect(menu.style.left).toBe('772px');
+      expect(menu.style.top).toBe('642px');
+      key(document.activeElement!, 'Escape', { ctrlKey: false });
+      rowHistoryMenu(1, false, 970, 780);
+      menu = document.querySelector<HTMLElement>('.history-organization-menu')!;
+      expect(menu.style.left).toBe('772px');
+      expect(menu.style.top).toBe('642px');
+    } finally {
+      rectSpy.mockRestore();
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: oldWidth });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: oldHeight });
+    }
   });
 
   it('supports Shift+F10, disables Initial State trimming at cursor zero, and preserves ordinary row click', async () => {
