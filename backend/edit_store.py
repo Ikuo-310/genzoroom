@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from edit_state import InvalidEditState, validate_snapshot
+from edit_state import InvalidEditState, validate_snapshot, has_edits
 
 DB_PATH = Path("/data/genzoroom.db")
 SCHEMA_VERSION = 1
@@ -134,6 +134,24 @@ def get_edit_state(asset_id: UUID) -> dict:
     with _connection() as connection:
         row = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
         return {"state": None} if row is None else _result(row, asset_id)
+
+
+def get_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool]:
+    result = {str(asset_id): False for asset_id in asset_ids}
+    if not asset_ids:
+        return result
+    # Read all requested rows together; validate stored data before certifying any status.
+    placeholders = ",".join("?" for _ in asset_ids)
+    with _connection() as connection:
+        rows = connection.execute(
+            f"""SELECT asset_id, state_format_version, recipe_version, processing_version,
+            current_recipe_json, history_json, history_cursor, source_identity_json
+            FROM asset_edit_states WHERE asset_id IN ({placeholders})""", tuple(result)
+        )
+        for row in rows:
+            asset_id = UUID(row["asset_id"])
+            result[str(asset_id)] = has_edits(_snapshot(row, asset_id))
+    return result
 
 
 def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state: dict) -> dict:

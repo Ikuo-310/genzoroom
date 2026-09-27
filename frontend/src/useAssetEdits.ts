@@ -11,6 +11,7 @@ import {
 } from './editState';
 import { createEditStateSaveId, EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
 import { editSession, newSession, type EditAction, type EditSession } from './editing';
+import { hasEdits } from './editStatus';
 import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
 type LoadStatus = 'unloaded' | 'loading' | 'ready' | 'error';
@@ -499,6 +500,12 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
     session: current.session, dispatch, organizeHistory,
+    editStatusFor: (id: string): boolean | undefined => {
+      const record = records.current[id];
+      // A validated retained session wins over a delayed bulk response, including failed saves.
+      // Reset-to-initial is semantically unedited even before its reset snapshot is saved.
+      return record && record.savedFingerprint !== null ? hasEdits(record.session) : undefined;
+    },
     hasOrganizationUndo: !!current.organizationUndo,
     canUndo: !!current.organizationUndo || current.session.cursor > 0 || !!current.session.pending,
     loadStatus: current.loadStatus, saveStatus: current.saveStatus,

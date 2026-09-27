@@ -6,6 +6,9 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
 import type { AssetDetail, AssetExif, RecentAsset, WorkspaceNavigationState } from './assets';
 import { FormatBadge } from './FormatBadge';
+import { EditedBadge } from './EditedBadge';
+import { useEditStatuses } from './useEditStatuses';
+import type { AssetEditStatuses } from './editStatus';
 import { LanguageControl } from './GalleryPage';
 import { ImageViewer } from './ImageViewer';
 import { formatPhotoDate, type AppLanguage } from './i18n';
@@ -44,6 +47,7 @@ export function AnshitsuPage() {
   const initialNavigation = useMemo(() => readNavigationState(location.state), [location.state]);
   // Preserve selection order for the Filmstrip while the route identifies the active asset.
   const [selectedAssets, setSelectedAssets] = useState<RecentAsset[]>(initialNavigation?.selectedAssets ?? []);
+  const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id));
   const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
@@ -67,7 +71,7 @@ export function AnshitsuPage() {
   const activeDetail = detail?.id === assetId ? detail : null;
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
-    saveEditedAssetsForExit, resumeAfterExitFailure } = useAssetEdits(assetId, canEdit);
+    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
@@ -483,6 +487,7 @@ export function AnshitsuPage() {
 
     <Filmstrip
       assets={selectedAssets}
+      editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id) ?? savedEditStatuses[asset.id]]))}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
       keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
@@ -854,8 +859,9 @@ export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif;
   ))}</dl> : <p>{t('workspace.exif.empty')}</p>;
 }
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {} }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
+  editStatuses?: AssetEditStatuses;
 }) {
   const { t } = useTranslation();
   const scroll = useRef<HTMLDivElement>(null);
@@ -920,9 +926,11 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
         onClick={() => { focusDestination.current = null; onActivate(asset.id); }}
         aria-current={asset.id === activeAssetId ? 'true' : undefined}
         aria-label={asset.filename}
+        aria-description={editStatuses[asset.id] ? t('photos.edited') : undefined}
       >
         <img src={asset.thumbnail_url} alt="" />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
+        <EditedBadge edited={editStatuses[asset.id]} />
       </button>)}
     </div>
   </section>;

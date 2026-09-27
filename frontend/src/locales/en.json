@@ -22,6 +22,7 @@
     "checkAgain": "Check again"
   },
   "photos": {
+    "edited": "Edited in GenzoRoom",
     "recent": "Recent photos",
     "loading": "Loading photos…",
     "empty": "No recent photos",

@@ -5,7 +5,7 @@ import { PhotoCard, type RecentAsset } from './PhotoCard';
 
 beforeEach(async () => i18n.changeLanguage('en'));
 
-function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`) {
+function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean) {
   const asset: RecentAsset = {
     id: 'asset-id',
     filename,
@@ -14,10 +14,20 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
     format,
     is_raw: isRaw,
   };
-  return renderToStaticMarkup(<PhotoCard asset={asset} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />);
+  return renderToStaticMarkup(<PhotoCard asset={asset} edited={edited} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />);
 }
 
 describe('PhotoCard format badge', () => {
+  it.each([true, false, undefined])('shows a display-only GenzoRoom badge only for known edited status %s', edited => {
+    const markup = renderBadge('JPEG', false, 'photo.jpg', edited);
+    expect(markup.includes('class="edited-badge"')).toBe(edited === true);
+    if (edited) expect(markup).toContain('role="img" aria-label="Edited in GenzoRoom"');
+    expect(markup).toContain('class="format-badge"');
+  });
+  it('localizes the edited indicator in Japanese', async () => {
+    await i18n.changeLanguage('ja');
+    expect(renderBadge('JPEG', false, 'photo.jpg', true)).toContain('aria-description="GenzoRoomで編集済み"');
+  });
   it.each([
     ['JPEG', false],
     ['HEIC', false],

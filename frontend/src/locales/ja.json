@@ -21,6 +21,7 @@
     "checkAgain": "再確認"
   },
   "photos": {
+    "edited": "GenzoRoomで編集済み",
     "recent": "最近の写真",
     "loading": "写真を読み込んでいます…",
     "empty": "最近の写真はありません",

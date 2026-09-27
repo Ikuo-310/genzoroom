@@ -9,13 +9,13 @@ import * as editStateModule from './editState';
 import { EditStateApiError } from './editStateApi';
 import i18n from './i18n';
 
-const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn() }));
+const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()), fetchAssetDetail: mocked.detail,
 }));
 vi.mock('./editStateApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./editStateApi')>()),
-  getAssetEditState: mocked.get, putAssetEditState: mocked.put,
+  getAssetEditState: mocked.get, putAssetEditState: mocked.put, getAssetEditStatuses: mocked.statuses,
 }));
 vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel">Viewer</div> }));
 
@@ -72,6 +72,8 @@ beforeEach(async () => {
   mocked.detail.mockReset(); mocked.get.mockReset(); mocked.put.mockReset();
   mocked.detail.mockImplementation(async (id: string) => id === first.id ? first : second);
   mocked.get.mockResolvedValue({ state: null });
+  mocked.statuses.mockReset();
+  mocked.statuses.mockResolvedValue({ [first.id]: false, [second.id]: true });
   mocked.put.mockImplementation(async (_id, snapshot, revision, saveId) => ({
     state: snapshot, revision: revision + 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId,
   }));
@@ -79,6 +81,21 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('shows saved status for inactive photos and prioritizes live edits over a delayed bulk response', async () => {
+    const waiting = deferred<Record<string, boolean>>();
+    mocked.statuses.mockReturnValueOnce(waiting.promise);
+    await mount();
+    expect(container.querySelector('.edited-badge')).toBeNull();
+    await click('button[aria-label="Disable Basic"]');
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
+    await act(async () => waiting.resolve({ [first.id]: false, [second.id]: true }));
+    expect(container.querySelectorAll('.filmstrip .edited-badge')).toHaveLength(2);
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    // The full GET validates this photo as initial, superseding the older summary.
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(mocked.statuses).toHaveBeenCalledTimes(1);
+  });
   it('navigates in both directions after route changes without saving a clean photo', async () => {
     await mount(); hoverFilmstrip();
     await filmstripKey(); expect(currentPhoto()).toBe('second.jpg');
@@ -117,6 +134,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(currentPhoto()).toBe('first.jpg');
     await filmstripKey();
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Stay on this photo')!;

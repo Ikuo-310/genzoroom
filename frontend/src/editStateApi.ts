@@ -1,4 +1,5 @@
 import { validateEditStateSnapshot, type EditStateSnapshot } from './editState';
+import type { AssetEditStatuses } from './editStatus';
 
 export type EditStateResponse = {
   state: EditStateSnapshot | null;
@@ -70,6 +71,22 @@ async function request(url: string, init: RequestInit): Promise<Response> {
 export async function getAssetEditState(assetId: string, signal: AbortSignal): Promise<EditStateResponse> {
   const response = await request(`/api/assets/${encodeURIComponent(assetId)}/edit-state`, { signal });
   return checkedResponse(await readResponse(response), assetId);
+}
+
+export async function getAssetEditStatuses(assetIds: string[], signal: AbortSignal): Promise<AssetEditStatuses> {
+  const ids = [...new Set(assetIds)];
+  if (ids.length === 0) return {};
+  const response = await request('/api/assets/edit-status', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds: ids }),
+  });
+  const body = await readResponse(response);
+  if (!isRecord(body) || !isRecord(body.edited)) throw new EditStateApiError('invalid_state');
+  const edited = body.edited;
+  if (Object.keys(edited).length !== ids.length || ids.some(id => typeof edited[id] !== 'boolean')) {
+    throw new EditStateApiError('invalid_state');
+  }
+  return edited as AssetEditStatuses;
 }
 
 export async function putAssetEditState(assetId: string, snapshot: EditStateSnapshot, expectedRevision: number, saveId: string): Promise<Required<EditStateResponse>> {

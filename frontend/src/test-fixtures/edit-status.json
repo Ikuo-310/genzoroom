@@ -1,0 +1,13 @@
+[
+  { "name": "initial", "edited": false },
+  { "name": "reset-to-initial", "edited": false },
+  { "name": "values-without-history", "adjustments": { "exposure": 1 }, "edited": true },
+  { "name": "bypassed-values", "adjustments": { "exposure": 1 }, "flags": { "basicEnabled": false }, "adjustmentEnabled": { "exposure": false }, "edited": true },
+  { "name": "category-off-at-zero", "flags": { "colorEnabled": false }, "edited": true },
+  { "name": "range-off-at-zero", "flags": { "gradingMidtonesEnabled": false }, "edited": true },
+  { "name": "slider-off-at-zero", "adjustmentEnabled": { "highlightsTint": false }, "edited": true },
+  { "name": "redo-only", "history": true, "edited": true },
+  { "name": "saved-v17-initial", "version": 17, "stateFormatVersion": 1, "edited": false },
+  { "name": "saved-v17-values", "version": 17, "adjustments": { "saturation": 10 }, "edited": true },
+  { "name": "saved-v17-redo", "version": 17, "history": true, "edited": true }
+]

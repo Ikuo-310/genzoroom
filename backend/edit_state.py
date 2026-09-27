@@ -52,6 +52,14 @@ class InvalidEditState(ValueError):
         self.code = code
 
 
+def has_edits(state: dict) -> bool:
+    """Classify validated v17/v18 snapshots without bypassing disabled settings."""
+    recipe = state["currentRecipe"]
+    return bool(state["history"]) or any(recipe["adjustments"][key] != 0 for key in BOUNDS) \
+        or any(not recipe[key] for key in FLAGS) \
+        or any(not flag for flag in recipe.get("adjustmentEnabled", {}).values())
+
+
 def _record(value: object, keys: frozenset[str], code: str) -> dict:
     if not isinstance(value, dict) or value.keys() != keys:
         raise InvalidEditState(code)

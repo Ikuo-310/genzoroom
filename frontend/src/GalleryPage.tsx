@@ -5,6 +5,7 @@ import { fetchRecentAssets } from './api';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { changeAppLanguage, type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
+import { useEditStatuses } from './useEditStatuses';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
@@ -32,6 +33,7 @@ export function GalleryPage() {
   const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(DEFAULT_PHOTO_FILTERS);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [attempt, setAttempt] = useState(0);
+  const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : [], attempt);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -171,6 +173,7 @@ export function GalleryPage() {
                     key={asset.id}
                     selected={selectedAssetIds.includes(asset.id)}
                     selectionMode={selectionMode}
+                    edited={editStatuses[asset.id]}
                     onToggleSelection={() => setSelectedAssetIds((current) => toggleSelectedAssetId(current, asset.id))}
                     onOpen={() => openWorkspace(asset)}
                   />

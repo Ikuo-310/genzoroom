@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEditStateSaveId, getAssetEditState, putAssetEditState, EditStateApiError } from './editStateApi';
+import { createEditStateSaveId, getAssetEditState, getAssetEditStatuses, putAssetEditState, EditStateApiError } from './editStateApi';
 import { createEditStateSnapshot } from './editState';
 import { newSession } from './editing';
 
@@ -13,6 +13,23 @@ const saved = { state: snapshot, revision: 2, updatedAt: '2026-09-25T00:00:00Z',
 afterEach(() => vi.unstubAllGlobals());
 
 describe('edit-state API client', () => {
+  it('gets 100 statuses in one request and deduplicates requested IDs', async () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `asset-${index}`);
+    const edited = Object.fromEntries(ids.map(id => [id, false]));
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ edited })));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await getAssetEditStatuses([...ids, ids[0]], new AbortController().signal)).toEqual(edited);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/assets/edit-status');
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).assetIds).toEqual(ids);
+    expect(await getAssetEditStatuses([], new AbortController().signal)).toEqual({});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([{ edited: {} }, { edited: { a: 'false' } }, { edited: { a: false, b: true } }, {}])
+    ('rejects incomplete or malformed status responses %j', async body => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
+      await expect(getAssetEditStatuses(['a'], new AbortController().signal)).rejects.toMatchObject({ kind: 'invalid_state' });
+    });
   it('creates UUID save IDs when randomUUID is unavailable in an insecure context', () => {
     vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);
     const id = createEditStateSaveId();

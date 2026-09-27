@@ -4,9 +4,10 @@ from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, ConfigDict, Field
 
 from edit_state import InvalidEditState, validate_snapshot
-from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state
+from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state, get_edit_statuses
 
 from immich import (
     AssetDetail,
@@ -30,6 +31,21 @@ def _edit_error(status: int, code: str) -> HTTPException:
 
 def _store_error(error: StoreUnavailable) -> HTTPException:
     return _edit_error(503, error.code)
+
+
+class EditStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetIds: list[UUID] = Field(max_length=100)
+
+
+@app.post("/assets/edit-status")
+def asset_edit_statuses(payload: EditStatusRequest) -> dict:
+    if len(set(payload.assetIds)) != len(payload.assetIds):
+        raise _edit_error(422, "duplicate_asset_ids")
+    try:
+        return {"edited": get_edit_statuses(payload.assetIds)}
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
 
 
 @app.get("/assets/{asset_id}/edit-state")

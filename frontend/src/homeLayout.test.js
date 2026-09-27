@@ -16,6 +16,17 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('anchors the display-only edit badge to both thumbnail frames', () => {
+    for (const frame of host.querySelectorAll('.thumbnail, .filmstrip-item')) {
+      const badge = document.createElement('span'); badge.className = 'edited-badge'; frame.append(badge);
+      expect(getComputedStyle(frame).position).toBe('relative');
+      expect(getComputedStyle(badge).position).toBe('absolute');
+      expect(getComputedStyle(badge).right).toBe('6px');
+      expect(getComputedStyle(badge).bottom).toBe('6px');
+      expect(getComputedStyle(badge).pointerEvents).toBe('none');
+      expect(getComputedStyle(badge).backgroundColor).toBe('rgba(15, 20, 18, 0.82)');
+    }
+  });
   it('caps card widths and gives the photo grid its own vertical scroll area', () => {
     const page = host.querySelector('.home-page');
     const intro = host.querySelector('.home-intro');

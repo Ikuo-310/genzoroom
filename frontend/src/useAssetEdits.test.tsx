@@ -375,6 +375,40 @@ afterEach(() => {
 });
 
 describe('useAssetEdits persistence', () => {
+  it('classifies pending edits, Redo-only History, clear and reset without treating dirty reset as edited', async () => {
+    await mount();
+    expect(latest.editStatusFor(second)).toBeUndefined();
+    expect(latest.editStatusFor(first)).toBe(false);
+    editTemperature(12);
+    expect(latest.editStatusFor(first)).toBe(true);
+    commitEdit();
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.session.recipe.adjustments.temperature).toBe(0);
+    expect(latest.editStatusFor(first)).toBe(true);
+    act(() => latest.dispatch({ type: 'redo' }));
+    act(() => latest.organizeHistory('clearHistory'));
+    expect(latest.session.history).toHaveLength(0);
+    expect(latest.editStatusFor(first)).toBe(true);
+    act(() => latest.organizeHistory('resetEdits'));
+    expect(latest.editStatusFor(first)).toBe(false);
+  });
+
+  it('retains edited status after save failure and while another photo loads', async () => {
+    await mount(); editTemperature(12);
+    api.put.mockRejectedValueOnce(new EditStateApiError('network'));
+    await act(async () => { expect((await latest.save(first)).ok).toBe(false); });
+    expect(latest.editStatusFor(first)).toBe(true);
+    const waiting = deferred<{ state: null }>();
+    api.get.mockReturnValueOnce(waiting.promise);
+    await mount(second);
+    expect(latest.editStatusFor(first)).toBe(true);
+    expect(latest.editStatusFor(second)).toBeUndefined();
+    await act(async () => waiting.resolve({ state: null }));
+    expect(latest.editStatusFor(second)).toBe(false);
+    await mount(first);
+    expect(latest.session.recipe.adjustments.temperature).toBe(12);
+    expect(latest.editStatusFor(first)).toBe(true);
+  });
   it('reads v17 with a Redo branch without writing, then saves and reloads individual bypass as v18', async () => {
     let session = editSession(editSession(newSession(), { type: 'temperature', value: 8 }), { type: 'commit' });
     session = editSession(editSession(session, { type: 'tint', value: 12 }), { type: 'commit' });
