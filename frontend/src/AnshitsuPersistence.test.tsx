@@ -85,7 +85,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     vi.useFakeTimers();
     const pending = deferred<any>();
     mocked.put.mockReturnValueOnce(pending.promise);
-    await mount(); await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await mount(); await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
     await filmstripKey();
     expect(currentPhoto()).toBe('first.jpg');
     expect(mocked.put).toHaveBeenCalledTimes(1);
@@ -105,7 +105,7 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('uses the existing save-failure confirmation and retains edits on Stay', async () => {
     vi.useFakeTimers();
     mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, 'revision_conflict'));
-    await mount(); await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await mount(); await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
     await filmstripKey();
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(currentPhoto()).toBe('first.jpg');
@@ -114,7 +114,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Stay on this photo')!;
     await act(async () => stay.click());
-    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
     expect(container.querySelector('.edit-history')?.textContent).toContain('Basic OFF');
     expect(currentPhoto()).toBe('first.jpg');
   });
@@ -147,7 +147,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     HTMLDialogElement.prototype.close = function () { this.open = false; };
     vi.useFakeTimers(); await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]'); hoverFilmstrip();
+    await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
     await click('.history-menu-trigger');
     await filmstripKey(); expect(currentPhoto()).toBe('first.jpg');
     const clear = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
@@ -161,7 +161,7 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('keeps History controls and cursor unchanged when EXIF is collapsed and expanded', async () => {
     vi.useFakeTimers();
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const history = container.querySelector('.left-history-section')!;
     const scroll = history.querySelector('.history-scroll-region')!;
     const actions = history.querySelector('.edit-actions')!;
@@ -181,14 +181,14 @@ describe('Anshitsu Filmstrip persistence', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe(String(expanded));
       expect(content.hidden).toBe(!expanded);
       expect(scroll.innerHTML).toBe(before);
-      expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+      expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
     }
     expect(mocked.put).not.toHaveBeenCalled();
     await act(async () => { (actions.querySelectorAll('button')[0] as HTMLButtonElement).click(); });
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
     await click('.exif-toggle');
     await act(async () => { (actions.querySelectorAll('button')[1] as HTMLButtonElement).click(); });
-    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
   });
 
   it('switches a clean photo without PUT and loads the next photo', async () => {
@@ -206,16 +206,16 @@ describe('Anshitsu Filmstrip persistence', () => {
     await mount();
     await click('button[aria-label="second.jpg"]');
     expect(currentPhoto()).toBe('second.jpg');
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).toBeNull();
     expect(container.textContent).toContain('Loading saved edits');
     await act(async () => { resolveLoad({ state: null }); await pendingGet; });
     await flush();
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
   });
 
   it('saves a dirty photo before switching and uses the full uncompressed History', async () => {
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await click('button[aria-label="second.jpg"]'); await flush();
     expect(mocked.put).toHaveBeenCalledTimes(1);
     expect(mocked.put.mock.calls[0][1].history).toHaveLength(1);
@@ -245,10 +245,10 @@ describe('Anshitsu Filmstrip persistence', () => {
       return { state, revision: stored.revision, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId };
     });
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await advance(5000);
     expect(mocked.put).toHaveBeenCalledTimes(1);
-    await click('button[aria-label="Enable Basic adjustments"]');
+    await click('button[aria-label="Enable Basic"]');
     await click('button[aria-label="second.jpg"]'); await flush();
     expect(mocked.put).toHaveBeenCalledTimes(3);
     expect(mocked.put.mock.calls[1].slice(1, 4)).toEqual(mocked.put.mock.calls[0].slice(1, 4));
@@ -278,7 +278,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     ['save_id_reused', 'could not be retried'],
   ])('keeps local edits for %s when the user stays', async (code, message) => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, code));
-    await mount(); await click('button[aria-label="Bypass Basic adjustments"]');
+    await mount(); await click('button[aria-label="Disable Basic"]');
     await click('button[aria-label="second.jpg"]');
     expect(container.querySelector('[role="alertdialog"]')?.textContent).toContain(message);
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
@@ -287,12 +287,12 @@ describe('Anshitsu Filmstrip persistence', () => {
     await act(async () => { stay.click(); });
     expect(currentPhoto()).toBe('first.jpg');
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
   });
 
   it('discards uncertain local state without rollback and re-GETs when revisited', async () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('network'));
-    await mount(); await click('button[aria-label="Bypass Basic adjustments"]');
+    await mount(); await click('button[aria-label="Disable Basic"]');
     await click('button[aria-label="second.jpg"]');
     const discard = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Move without saving');
@@ -302,30 +302,30 @@ describe('Anshitsu Filmstrip persistence', () => {
     await click('button[aria-label="first.jpg"]'); await flush();
     expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id, first.id]);
     expect(mocked.put).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
   });
 
   it('shows load failure and retries before enabling controls', async () => {
     mocked.get.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();
     expect(container.textContent).toContain('Saved edits could not be loaded');
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).toBeNull();
     const retry = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === 'Retry');
     if (!retry) throw new Error('Missing retry button');
     await act(async () => { retry.click(); }); await flush();
-    expect(container.querySelector('button[aria-label="Bypass Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
   });
 
   it('shows a nonblocking localized warning when autosave fails and keeps Develop available', async () => {
     vi.useFakeTimers();
     mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await advance(5000); await flush();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Autosave failed');
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await advance(15000);
     expect(mocked.put).toHaveBeenCalledTimes(1);
@@ -334,7 +334,7 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('cancels the debounce before a Filmstrip save so the same dirty state is not PUT twice', async () => {
     vi.useFakeTimers();
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await advance(4999);
     await click('button[aria-label="second.jpg"]'); await flush();
     expect(mocked.put).toHaveBeenCalledTimes(1);
@@ -348,10 +348,10 @@ describe('Anshitsu Filmstrip persistence', () => {
     const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
     mocked.put.mockImplementationOnce(() => pending.promise);
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await advance(5000);
     expect(mocked.put).toHaveBeenCalledTimes(1);
-    await click('button[aria-label="Enable Basic adjustments"]');
+    await click('button[aria-label="Enable Basic"]');
     await click('button[aria-label="second.jpg"]');
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await act(async () => {
@@ -369,7 +369,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
     mocked.put.mockImplementationOnce(() => pending.promise);
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     await click('button[aria-label="second.jpg"]');
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await advance(5000);
@@ -385,7 +385,7 @@ describe('Anshitsu Filmstrip persistence', () => {
 
   it('compacts and saves before the existing Home navigation', async () => {
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); });
@@ -399,7 +399,7 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('offers stay or exit without saving when final exit save fails', async () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); }); await flush();
@@ -413,13 +413,13 @@ describe('Anshitsu Filmstrip persistence', () => {
     await act(async () => { stay.click(); });
     expect(currentPhoto()).toBe('first.jpg');
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="Enable Basic adjustments"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
   });
 
   it('discards local edits without another write when the user exits after a failed final save', async () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('network'));
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); }); await flush();
@@ -437,7 +437,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     const pending = deferred<{ state: unknown; revision: number; updatedAt: string; lastSaveId: string }>();
     mocked.put.mockImplementationOnce(() => pending.promise);
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); });
@@ -457,7 +457,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     const compact = vi.spyOn(editStateModule, 'compactEditStateSnapshot')
       .mockReturnValueOnce({ ok: false, issues: [] });
     await mount();
-    await click('button[aria-label="Bypass Basic adjustments"]');
+    await click('button[aria-label="Disable Basic"]');
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button');
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); }); await flush();

@@ -791,14 +791,14 @@ describe('selected settings clipboard', () => {
     expect(title.getAttribute('aria-expanded')).toBe('true');
     openCategoryContextMenu('basic');
     expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
-      .toEqual(['Bypass Basic adjustments', 'Reset category', 'Copy category settings', 'Paste into category']);
-    categoryMenuAction('Bypass Basic adjustments');
+      .toEqual(['Disable Basic', 'Reset category', 'Copy category settings', 'Paste into category']);
+    categoryMenuAction('Disable Basic');
     expect(rendered.recipe!.basicEnabled).toBe(false);
     expect(title.getAttribute('aria-expanded')).toBe('true');
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
     openCategoryContextMenu('basic');
     expect(document.querySelector('.adjustment-category-context-menu [role="menuitem"]')!.textContent)
-      .toBe('Enable Basic adjustments');
+      .toBe('Enable Basic');
     categoryMenuAction('Reset category');
     expect(rendered.recipe!.adjustments.exposure).toBe(0);
     expect(rendered.recipe!.basicEnabled).toBe(false);
@@ -809,10 +809,29 @@ describe('selected settings clipboard', () => {
 
   it('localizes category menu actions in Japanese', async () => {
     await act(async () => { await i18n.changeLanguage('ja'); });
+    const categoryLabels = [
+      ['workspace.enableWhiteBalance', 'workspace.disableWhiteBalance', '色温度補正を有効にする', '色温度補正を無効にする'],
+      ['workspace.enableBasic', 'workspace.disableBasic', '基本補正を有効にする', '基本補正を無効にする'],
+      ['workspace.enableColor', 'workspace.disableColor', '色補正を有効にする', '色補正を無効にする'],
+      ['workspace.enableColorGrading', 'workspace.disableColorGrading', 'カラーグレーディングを有効にする', 'カラーグレーディングを無効にする'],
+    ];
+    for (const [enableKey, disableKey, enableText, disableText] of categoryLabels) {
+      expect(i18n.t(enableKey)).toBe(enableText);
+      expect(i18n.t(disableKey)).toBe(disableText);
+    }
     await mount();
     openCategoryContextMenu('basic');
     expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
-      .toEqual(['基本補正を一時的に無効にする', 'カテゴリをリセット', 'カテゴリの設定をコピー', 'カテゴリに設定を貼り付け']);
+      .toEqual(['基本補正を無効にする', 'カテゴリをリセット', 'カテゴリの設定をコピー', 'カテゴリに設定を貼り付け']);
+    await act(async () => { await i18n.changeLanguage('en'); });
+    expect(i18n.t('workspace.enableWhiteBalance')).toBe('Enable White Balance');
+    expect(i18n.t('workspace.disableWhiteBalance')).toBe('Disable White Balance');
+    expect(i18n.t('workspace.enableBasic')).toBe('Enable Basic');
+    expect(i18n.t('workspace.disableBasic')).toBe('Disable Basic');
+    expect(i18n.t('workspace.enableColor')).toBe('Enable Color');
+    expect(i18n.t('workspace.disableColor')).toBe('Disable Color');
+    expect(i18n.t('workspace.enableColorGrading')).toBe('Enable Color Grading');
+    expect(i18n.t('workspace.disableColorGrading')).toBe('Disable Color Grading');
   });
 
   it('pastes only the clipboard/category intersection as one undoable entry and leaves the clipboard intact', async () => {
