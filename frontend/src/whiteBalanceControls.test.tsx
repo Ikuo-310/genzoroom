@@ -94,6 +94,112 @@ describe('production White Balance controls', () => {
   const ranges = () => Array.from(host.querySelectorAll<HTMLInputElement>('.adjustment-range'));
   const navigate = (direction: 'ArrowUp' | 'ArrowDown') => key(direction, document.activeElement!, { shiftKey: true });
 
+  it.each([0, 1, 2, 3])('moves horizontally only within category %s without edits or scrolling', (index) => {
+    const title = category(index).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    const toggle = category(index).querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    scroll.scrollTop = 140;
+    const before = recipe();
+    const expanded = title.getAttribute('aria-expanded');
+    const focusTitle = vi.spyOn(title, 'focus');
+    const focusToggle = vi.spyOn(toggle, 'focus');
+    act(() => title.focus());
+    key('ArrowRight', title);
+    expect(document.activeElement).toBe(toggle);
+    expect(activeAdjustmentId()).toBeNull();
+    expect(focusToggle).toHaveBeenLastCalledWith({ preventScroll: true });
+    key('ArrowLeft', toggle);
+    expect(document.activeElement).toBe(title);
+    expect(focusTitle).toHaveBeenLastCalledWith({ preventScroll: true });
+    expect(title.getAttribute('aria-expanded')).toBe(expanded);
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual([]);
+    expect(scroll.scrollTop).toBe(140);
+  });
+
+  it.each(['Enter', ' '])('leaves %s switch activation to one native button click', (value) => {
+    const toggle = category().querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    act(() => toggle.focus());
+    const before = recipe();
+    const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true });
+    act(() => toggle.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(recipe()).toEqual(before);
+    // jsdom does not synthesize native keyboard button clicks; emulate its one default click.
+    act(() => {
+      toggle.dispatchEvent(new KeyboardEvent('keyup', { key: value, bubbles: true }));
+      toggle.click();
+    });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(history()).toEqual(['White Balance OFF']);
+    expect(category().querySelector('.adjustment-category-title')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it.each(['Enter', ' '])('keeps title %s activation a single collapse', (value) => {
+    const title = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    act(() => title.focus());
+    const before = recipe();
+    const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true });
+    act(() => title.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(title.getAttribute('aria-expanded')).toBe('false');
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual([]);
+  });
+
+  it.each(['expanded', 'collapsed', 'disabled'])('shares the title position for switch navigation when Basic is %s', (mode) => {
+    const title = category(1).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    const toggle = category(1).querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    if (mode === 'collapsed') click(title);
+    if (mode === 'disabled') click(toggle);
+    const before = recipe();
+    const beforeHistory = history();
+    act(() => toggle.focus());
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(tintSlider());
+    act(() => toggle.focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(mode === 'expanded' ? slider(1)
+      : category(2).querySelector('.adjustment-category-title'));
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(title);
+    expect(recipe()).toEqual(before);
+    expect(history()).toEqual(beforeHistory);
+  });
+
+  it('stops switch navigation at the first and last positions', () => {
+    const first = category().querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    act(() => first.focus());
+    navigate('ArrowUp');
+    expect(document.activeElement).toBe(first);
+    const lastTitle = category(3).querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+    click(lastTitle);
+    const last = category(3).querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    act(() => last.focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(last);
+  });
+
+  it.each([
+    ['ArrowDown', 120, 148, 200], ['ArrowDown', 280, 308, 208], ['ArrowUp', 80, 108, 180],
+  ] as const)('reveals switch navigation destination %s at %s..%s only within the list', (direction, top, bottom, expected) => {
+    const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
+    const toggle = category(1).querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    const destination = direction === 'ArrowDown' ? slider(1) : tintSlider();
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 300 } as DOMRect);
+    vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue({ top, bottom } as DOMRect);
+    scroll.scrollTop = 200;
+    act(() => toggle.focus());
+    navigate(direction);
+    expect(document.activeElement).toBe(destination);
+    expect(scroll.scrollTop).toBe(expected);
+    for (const selector of ['.right-panel', '.scope-section', '.develop-panel', '.workspace-section-header']) {
+      expect(host.querySelector(selector)!.scrollTop).toBe(0);
+    }
+    expect(document.documentElement.scrollTop).toBe(0);
+  });
+
   it('moves through a category title and toggles once with Enter without changing edits', () => {
     const title = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
     const basicTitle = category(1).querySelector<HTMLButtonElement>('.adjustment-category-title')!;

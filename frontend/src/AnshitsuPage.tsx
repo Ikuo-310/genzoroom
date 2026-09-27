@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { focusAdjustmentCategory, navigateAdjustments } from './AdjustmentSlider';
+import { moveCategoryFocus } from './adjustmentNavigation';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -512,6 +513,7 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
           onFocus={focusAdjustmentCategory}
           onKeyDown={(event) => {
             if (navigateAdjustments(event.nativeEvent, event.currentTarget)) return;
+            if (moveCategoryFocus(event.nativeEvent, event.currentTarget)) return;
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             toggleExpanded();
@@ -522,6 +524,12 @@ export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel,
       </h3>
       <div className="adjustment-category-actions">
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`}
+          data-category-switch
+          onFocus={focusAdjustmentCategory}
+          onKeyDown={(event) => {
+            if (navigateAdjustments(event.nativeEvent, event.currentTarget)) return;
+            moveCategoryFocus(event.nativeEvent, event.currentTarget);
+          }}
           aria-pressed={enabled} aria-label={enabled ? disableLabel : enableLabel}
           title={enabled ? disableLabel : enableLabel} onClick={onToggle}>⏻</button>
         <button type="button" className="adjustment-category-reset" disabled={resetDisabled}

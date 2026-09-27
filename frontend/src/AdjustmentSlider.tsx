@@ -31,7 +31,9 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || isAvailable(item)));
-  const index = ordered.indexOf(current);
+  const position = current.matches('[data-category-switch]')
+    ? current.closest('.adjustment-category')?.querySelector<HTMLElement>('.adjustment-category-title') : current;
+  const index = position ? ordered.indexOf(position) : -1;
   const destination = index < 0 ? undefined : ordered[index + (event.key === 'ArrowDown' ? 1 : -1)];
   if (destination) {
     for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
