@@ -10,6 +10,7 @@ import * as editStateModule from './editState';
 import { createEditStateSnapshot, type EditStateSnapshot } from './editState';
 import i18n from './i18n';
 import { copyEditSettings, readEditClipboard } from './editClipboard';
+import { ADJUSTMENT_SELECTION_CATEGORIES } from './adjustmentSelection';
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), detail: vi.fn() }));
 vi.mock('./api', async (original) => ({ ...await original<typeof import('./api')>(), fetchAssetDetail: api.detail }));
@@ -47,6 +48,21 @@ function activatePreview() {
   const preview = host.querySelector('[data-testid="preview"], .viewer-image-position img')!;
   act(() => preview.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
   return host.querySelector<HTMLDivElement>('.viewer-viewport')!;
+}
+function categoryTitle(id: string) {
+  return host.querySelector<HTMLButtonElement>(`.adjustment-category-title[data-adjustment-category-id="${id}"]`)!;
+}
+function openCategoryContextMenu(id: string, x = 120, y = 90) {
+  const title = categoryTitle(id);
+  const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+  act(() => title.dispatchEvent(event));
+  return event;
+}
+function categoryMenuAction(text: string) {
+  const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.adjustment-category-context-menu button'))
+    .find((item) => item.textContent === text)!;
+  act(() => button.click());
+  return button;
 }
 function openViewerContextMenu() {
   const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
@@ -742,6 +758,163 @@ describe('selected settings clipboard', () => {
     expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
     expect(host.querySelector('dialog')).not.toBeNull();
     expect(host.querySelector('dialog input[name="exposure"]')).not.toBeNull();
+  });
+
+  it.each(ADJUSTMENT_SELECTION_CATEGORIES)('copies exactly the $id category ids, including stored values when it is OFF', async (category) => {
+    const recipe = defaultRecipe();
+    ADJUSTMENT_IDS.forEach((id, index) => { recipe.adjustments[id] = index + 1; });
+    if (category.id === 'basic') recipe.basicEnabled = false;
+    if (category.id === 'whiteBalance') recipe.whiteBalanceEnabled = false;
+    if (category.id === 'color') recipe.colorEnabled = false;
+    if (category.id === 'colorGrading') recipe.colorGradingEnabled = false;
+    rows.set(first.id, stored(first.id, recipe));
+    await mount();
+    const title = categoryTitle(category.id);
+    const expanded = title.getAttribute('aria-expanded');
+    expect(openCategoryContextMenu(category.id).defaultPrevented).toBe(true);
+    expect(document.querySelector('.adjustment-category-context-menu')).not.toBeNull();
+    expect(title.getAttribute('aria-expanded')).toBe(expanded);
+    expect(host.querySelector('dialog')).toBeNull();
+    categoryMenuAction('Copy category settings');
+    const copied = readEditClipboard()!;
+    expect(Object.keys(copied.values)).toEqual([...category.ids]);
+    expect(copied.values[category.ids[0]]).toBe(recipe.adjustments[category.ids[0]]);
+    expect(Object.keys(copied.values).some((id) => id.endsWith('Enabled'))).toBe(false);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+  });
+
+  it('toggles and resets a category from its menu without changing the expansion, one History entry per action', async () => {
+    const recipe = defaultRecipe(); recipe.adjustments.exposure = 2;
+    rows.set(first.id, stored(first.id, recipe));
+    await mount();
+    const title = categoryTitle('basic');
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    openCategoryContextMenu('basic');
+    expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
+      .toEqual(['Bypass Basic adjustments', 'Reset category', 'Copy category settings', 'Paste into category']);
+    categoryMenuAction('Bypass Basic adjustments');
+    expect(rendered.recipe!.basicEnabled).toBe(false);
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    openCategoryContextMenu('basic');
+    expect(document.querySelector('.adjustment-category-context-menu [role="menuitem"]')!.textContent)
+      .toBe('Enable Basic adjustments');
+    categoryMenuAction('Reset category');
+    expect(rendered.recipe!.adjustments.exposure).toBe(0);
+    expect(rendered.recipe!.basicEnabled).toBe(false);
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(2);
+    expect(document.activeElement).toBe(title);
+  });
+
+  it('localizes category menu actions in Japanese', async () => {
+    await act(async () => { await i18n.changeLanguage('ja'); });
+    await mount();
+    openCategoryContextMenu('basic');
+    expect(Array.from(document.querySelectorAll('.adjustment-category-context-menu [role="menuitem"]'), (item) => item.textContent))
+      .toEqual(['基本補正を一時的に無効にする', 'カテゴリをリセット', 'カテゴリの設定をコピー', 'カテゴリに設定を貼り付け']);
+  });
+
+  it('pastes only the clipboard/category intersection as one undoable entry and leaves the clipboard intact', async () => {
+    const source = defaultRecipe(); source.adjustments.vibrance = 44; source.adjustments.saturation = 23; source.adjustments.exposure = 2.5;
+    copyEditSettings(source, 'source', 'source.jpg', ['vibrance', 'saturation', 'exposure']);
+    const destination = defaultRecipe(); destination.colorEnabled = false;
+    rows.set(first.id, stored(first.id, destination));
+    const copied = readEditClipboard();
+    await mount();
+    openCategoryContextMenu('color');
+    const paste = Array.from(document.querySelectorAll<HTMLButtonElement>('.adjustment-category-context-menu button'))
+      .find((button) => button.textContent === 'Paste into category')!;
+    expect(paste.disabled).toBe(false);
+    categoryMenuAction('Paste into category');
+    expect(rendered.recipe!.adjustments.vibrance).toBe(44);
+    expect(rendered.recipe!.adjustments.saturation).toBe(23);
+    expect(rendered.recipe!.adjustments.exposure).toBe(0);
+    expect(rendered.recipe!.colorEnabled).toBe(false);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
+    expect(readEditClipboard()).toEqual(copied);
+    key(window, 'z'); expect(rendered.recipe!.adjustments.vibrance).toBe(0);
+    key(window, 'y'); expect(rendered.recipe!.adjustments.vibrance).toBe(44);
+    await click('.workspace-actions button');
+    expect(rows.get(first.id)!.state.history).toHaveLength(1);
+    expect(rows.get(first.id)!.state.history[0]).toMatchObject({ kind: 'paste', metadata: {
+      sourceAssetId: 'source', sourceFilename: 'source.jpg', adjustmentIds: ['vibrance', 'saturation'],
+    } });
+  });
+
+  it('clamps the category menu at viewport edges, restores focus on Escape, and closes outside', async () => {
+    await mount();
+    const oldWidth = window.innerWidth; const oldHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('adjustment-category-context-menu')) return new DOMRect(0, 0, 220, 150);
+      return originalRect.call(this);
+    });
+    try {
+      const title = categoryTitle('basic');
+      openCategoryContextMenu('basic', 970, 780);
+      let menu = document.querySelector<HTMLElement>('.adjustment-category-context-menu')!;
+      expect(menu.style.left).toBe('772px');
+      expect(menu.style.top).toBe('642px');
+      key(document.activeElement!, 'Escape', { ctrlKey: false });
+      expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
+      expect(document.activeElement).toBe(title);
+      openCategoryContextMenu('basic', 200, 200);
+      menu = document.querySelector<HTMLElement>('.adjustment-category-context-menu')!;
+      expect(menu.style.left).toBe('200px');
+      expect(menu.style.top).toBe('200px');
+      act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+      expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
+    } finally {
+      rectSpy.mockRestore();
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: oldWidth });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: oldHeight });
+    }
+  });
+
+  it('keeps the category, Viewer, and History menus exclusive', async () => {
+    await mount();
+    openCategoryContextMenu('basic');
+    expect(document.querySelector('.adjustment-category-context-menu')).not.toBeNull();
+    headerHistoryMenu();
+    expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
+    expect(document.querySelector('.history-organization-menu')).not.toBeNull();
+    openCategoryContextMenu('color');
+    expect(document.querySelector('.history-organization-menu')).toBeNull();
+    expect(document.querySelector('.adjustment-category-context-menu')).not.toBeNull();
+    act(() => host.querySelector<HTMLElement>('.viewer-viewport')!
+      .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 })));
+    openViewerContextMenu();
+    expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
+    expect(document.querySelector('.history-organization-menu')).toBeNull();
+    expect(document.querySelector('.edit-settings-context-menu')).not.toBeNull();
+  });
+
+  it('disables category Paste when the clipboard has no matching ids and keeps Ctrl+C/V scope rules', async () => {
+    const recipe = defaultRecipe(); recipe.adjustments.temperature = 17; recipe.adjustments.exposure = 2; recipe.adjustments.vibrance = 31;
+    rows.set(first.id, stored(first.id, recipe));
+    copyEditSettings(defaultRecipe(), 'source', 'source.jpg', ['exposure']);
+    await mount();
+    openCategoryContextMenu('color');
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('.adjustment-category-context-menu button'))
+      .find((button) => button.textContent === 'Paste into category')!.disabled).toBe(true);
+    key(document.activeElement!, 'Escape', { ctrlKey: false });
+
+    const title = categoryTitle('whiteBalance');
+    act(() => title.focus());
+    expect(key(title, 'c').defaultPrevented).toBe(true);
+    expect(Object.keys(readEditClipboard()!.values)).toEqual(['temperature', 'tint']);
+    expect(readEditClipboard()!.values.temperature).toBe(17);
+    const crossCategoryClipboard = defaultRecipe();
+    crossCategoryClipboard.adjustments.exposure = 4;
+    crossCategoryClipboard.adjustments.vibrance = 60;
+    copyEditSettings(crossCategoryClipboard, 'source', 'source.jpg', ['exposure', 'vibrance']);
+    const colorTitle = categoryTitle('color'); act(() => colorTitle.focus());
+    expect(key(colorTitle, 'v').defaultPrevented).toBe(true);
+    expect(rendered.recipe!.adjustments.exposure).toBe(4);
+    expect(rendered.recipe!.adjustments.vibrance).toBe(60);
   });
 
   it('blocks background Undo/Redo, clipboard, hovered slider arrows, and Backslash while modal', async () => {

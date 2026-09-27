@@ -23,6 +23,8 @@ import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type Edi
 import { ADJUSTMENT_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
 import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
+import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
+import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './adjustmentSelection';
 import { activeAdjustmentId } from './AdjustmentSlider';
 import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -54,6 +56,7 @@ export function AnshitsuPage() {
   const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
+  const [categoryMenu, setCategoryMenu] = useState<AdjustmentCategoryMenuTarget | null>(null);
   const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits'; trigger: HTMLElement } | null>(null);
   const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
@@ -69,17 +72,25 @@ export function AnshitsuPage() {
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
   const colorResetDisabled = isColorDefault(session.recipe.adjustments);
+  const closeCategoryMenu = useCallback(() => setCategoryMenu(null), []);
 
-  useEffect(() => { setSelection(null); setHistoryMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
+  useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
   useEffect(() => {
-    if (!historyEnabled) setHistoryMenu(null);
+    if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); }
     if (!clipboardEnabled) setHistoryConfirmation(null);
   }, [historyEnabled, clipboardEnabled]);
 
   function openHistoryMenu(cursor: number | undefined, trigger: HTMLElement, x?: number, y?: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
+    setCategoryMenu(null);
     const rect = trigger.getBoundingClientRect();
     setHistoryMenu({ assetId, cursor, trigger, x: x ?? rect.left, y: y ?? rect.bottom });
+  }
+
+  function openCategoryMenu(categoryId: AdjustmentCategoryId, trigger: HTMLElement, x: number, y: number) {
+    if (!historyEnabled || switchingRef.current || exitRef.current) return;
+    setHistoryMenu(null);
+    setCategoryMenu({ categoryId, trigger, x, y });
   }
 
   function requestHistoryOperation(operation: HistoryOperation) {
@@ -113,14 +124,53 @@ export function AnshitsuPage() {
     return true;
   }
 
+  function pasteCategorySettings(categoryId: AdjustmentCategoryId) {
+    if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
+    const category = ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryId);
+    const clipboard = readEditClipboard();
+    if (!category || !clipboard) return false;
+    const scopedClipboard = selectEditClipboardItems(clipboard, category.ids);
+    if (category.ids.every((id) => !Object.hasOwn(scopedClipboard.values, id))) return false;
+    dispatch({ type: 'paste', ...scopedClipboard });
+    return true;
+  }
+
+  function toggleAdjustmentCategory(categoryId: AdjustmentCategoryId) {
+    const actions = {
+      whiteBalance: () => dispatch({ type: 'toggleWhiteBalance' }),
+      basic: () => dispatch({ type: 'toggleBasic' }),
+      color: () => dispatch({ type: 'toggleColor' }),
+      colorGrading: () => dispatch({ type: 'toggleColorGrading' }),
+    } satisfies Record<AdjustmentCategoryId, () => void>;
+    actions[categoryId]();
+  }
+
+  function resetAdjustmentCategory(categoryId: AdjustmentCategoryId) {
+    const actions = {
+      whiteBalance: () => dispatch({ type: 'whiteBalanceReset' }),
+      basic: () => dispatch({ type: 'basicReset' }),
+      color: () => dispatch({ type: 'colorReset' }),
+      colorGrading: () => dispatch({ type: 'colorGradingReset' }),
+    } satisfies Record<AdjustmentCategoryId, () => void>;
+    actions[categoryId]();
+  }
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const shortcut = editClipboardShortcut(event);
       if (!shortcut || isNativeEditingTarget(event.target)) return;
-      // Copy is contextual to the current slider operation target. Paste is
+      // Copy is contextual to the focused category or slider. Paste is
       // contextual to the active photo and must also work after photo changes
       // when no slider or preview has regained focus.
       if (shortcut === 'copy') {
+        const categoryTitle = event.target instanceof Element
+          ? event.target.closest<HTMLButtonElement>('.adjustment-category-title') : null;
+        const categoryId = categoryTitle?.dataset.adjustmentCategoryId as AdjustmentCategoryId | undefined;
+        const category = categoryId && ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryId);
+        if (categoryTitle) {
+          if (category && copySettings(category.ids)) event.preventDefault();
+          return;
+        }
         const adjustmentId = activeAdjustmentId();
         if (adjustmentId && copySettings([adjustmentId])) event.preventDefault();
         return;
@@ -238,6 +288,17 @@ export function AnshitsuPage() {
     };
   }, [assetId]);
 
+  const categoryMenuDefinition = categoryMenu
+    ? ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryMenu.categoryId) : undefined;
+  const categoryMenuClipboard = categoryMenuDefinition ? readEditClipboard() : null;
+  const categoryMenuPasteDisabled = !categoryMenuDefinition || !categoryMenuClipboard
+    || !categoryMenuDefinition.ids.some((id) => Object.hasOwn(categoryMenuClipboard.values, id));
+  const categoryMenuState = categoryMenu ? {
+    whiteBalance: { enabled: session.recipe.whiteBalanceEnabled, resetDisabled: isWhiteBalanceDefault(session.recipe.adjustments), enableLabel: 'workspace.enableWhiteBalance', disableLabel: 'workspace.disableWhiteBalance' },
+    basic: { enabled: session.recipe.basicEnabled, resetDisabled: basicResetDisabled, enableLabel: 'workspace.enableBasic', disableLabel: 'workspace.disableBasic' },
+    color: { enabled: session.recipe.colorEnabled, resetDisabled: colorResetDisabled, enableLabel: 'workspace.enableColor', disableLabel: 'workspace.disableColor' },
+    colorGrading: { enabled: session.recipe.colorGradingEnabled, resetDisabled: colorGradingResetDisabled, enableLabel: 'workspace.enableColorGrading', disableLabel: 'workspace.disableColorGrading' },
+  }[categoryMenu.categoryId] : undefined;
   const summary = detail ? detailToRecent(detail) : selectedAssets.find((asset) => asset.id === assetId);
   return <main className="workspace-page">
     <header className="workspace-header">
@@ -299,7 +360,7 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null || historyMenu !== null || historyConfirmation !== null
+          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || historyConfirmation !== null
             || switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         />
       ) : (
@@ -319,7 +380,8 @@ export function AnshitsuPage() {
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
-            <AdjustmentCategory title={t('workspace.whiteBalance')} enabled={session.recipe.whiteBalanceEnabled}
+            <AdjustmentCategory categoryId="whiteBalance" onOpenContextMenu={openCategoryMenu}
+              title={t('workspace.whiteBalance')} enabled={session.recipe.whiteBalanceEnabled}
               resetDisabled={isWhiteBalanceDefault(session.recipe.adjustments)}
               enableLabel={t('workspace.enableWhiteBalance')} disableLabel={t('workspace.disableWhiteBalance')}
               expandLabel={t('workspace.expandWhiteBalance')} collapseLabel={t('workspace.collapseWhiteBalance')}
@@ -328,7 +390,8 @@ export function AnshitsuPage() {
               onReset={() => dispatch({ type: 'whiteBalanceReset' })}>
               <WhiteBalanceAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
-            <AdjustmentCategory title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
+            <AdjustmentCategory categoryId="basic" onOpenContextMenu={openCategoryMenu}
+              title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
               resetDisabled={basicResetDisabled}
               enableLabel={t('workspace.enableBasic')} disableLabel={t('workspace.disableBasic')}
               expandLabel={t('workspace.expandBasic')} collapseLabel={t('workspace.collapseBasic')}
@@ -337,7 +400,8 @@ export function AnshitsuPage() {
               onReset={() => dispatch({ type: 'basicReset' })}>
               <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
-            <AdjustmentCategory title={t('workspace.color')} enabled={session.recipe.colorEnabled}
+            <AdjustmentCategory categoryId="color" onOpenContextMenu={openCategoryMenu}
+              title={t('workspace.color')} enabled={session.recipe.colorEnabled}
               resetDisabled={colorResetDisabled}
               enableLabel={t('workspace.enableColor')} disableLabel={t('workspace.disableColor')}
               expandLabel={t('workspace.expandColor')} collapseLabel={t('workspace.collapseColor')}
@@ -346,7 +410,8 @@ export function AnshitsuPage() {
               onReset={() => dispatch({ type: 'colorReset' })}>
               <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} />
             </AdjustmentCategory>
-            <AdjustmentCategory title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
+            <AdjustmentCategory categoryId="colorGrading" onOpenContextMenu={openCategoryMenu}
+              title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
               resetDisabled={colorGradingResetDisabled}
               enableLabel={t('workspace.enableColorGrading')} disableLabel={t('workspace.disableColorGrading')}
               expandLabel={t('workspace.expandColorGrading')} collapseLabel={t('workspace.collapseColorGrading')}
@@ -368,9 +433,25 @@ export function AnshitsuPage() {
       assets={selectedAssets}
       activeAssetId={assetId}
       disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-      keyboardBlocked={selection !== null || historyMenu !== null || historyConfirmation !== null}
+      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || historyConfirmation !== null}
       onActivate={(nextId) => { void activateAsset(nextId); }}
     />
+    {categoryMenu && categoryMenuDefinition && categoryMenuState && historyEnabled && <AdjustmentCategoryMenu
+      target={categoryMenu}
+      enabled={categoryMenuState.enabled}
+      resetDisabled={categoryMenuState.resetDisabled}
+      pasteDisabled={categoryMenuPasteDisabled}
+      enableLabel={categoryMenuState.enableLabel}
+      disableLabel={categoryMenuState.disableLabel}
+      resetLabel="workspace.resetCategory"
+      copyLabel="workspace.copyCategorySettings"
+      pasteLabel="workspace.pasteCategorySettings"
+      onToggle={() => toggleAdjustmentCategory(categoryMenu.categoryId)}
+      onReset={() => resetAdjustmentCategory(categoryMenu.categoryId)}
+      onCopy={() => { copySettings(categoryMenuDefinition.ids); }}
+      onPaste={() => { pasteCategorySettings(categoryMenu.categoryId); }}
+      onClose={closeCategoryMenu}
+    />}
     {selection && selection.assetId === assetId && <AdjustmentSelectionDialog
       mode={selection.mode}
       availableIds={selection.mode === 'copy' ? ADJUSTMENT_IDS
@@ -498,17 +579,24 @@ export function WorkspaceSection({ title, children, grow = false, className = ''
   </section>;
 }
 
-export function AdjustmentCategory({ title, enabled, resetDisabled, enableLabel, disableLabel, expandLabel, collapseLabel, resetLabel, onToggle, onReset, children }: {
+export function AdjustmentCategory({ categoryId, onOpenContextMenu, title, enabled, resetDisabled, enableLabel, disableLabel, expandLabel, collapseLabel, resetLabel, onToggle, onReset, children }: {
+  categoryId?: AdjustmentCategoryId; onOpenContextMenu?: (categoryId: AdjustmentCategoryId, trigger: HTMLElement, x: number, y: number) => void;
   title: string; enabled: boolean; resetDisabled: boolean; enableLabel: string; disableLabel: string;
   expandLabel: string; collapseLabel: string; resetLabel: string; onToggle: () => void; onReset: () => void; children: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(true);
   const contentId = useId();
+  const titleButton = useRef<HTMLButtonElement>(null);
   const toggleExpanded = () => setExpanded((value) => !value);
   return <section className={`adjustment-category${enabled ? '' : ' is-disabled'}`}>
-    <div className="adjustment-category-header">
+    <div className="adjustment-category-header" onContextMenu={(event) => {
+      if (!categoryId || !onOpenContextMenu) return;
+      event.preventDefault();
+      onOpenContextMenu(categoryId, titleButton.current ?? event.currentTarget, event.clientX, event.clientY);
+    }}>
       <h3>
-        <button type="button" className="adjustment-category-title" aria-expanded={expanded}
+        <button ref={titleButton} type="button" className="adjustment-category-title"
+          data-adjustment-category-id={categoryId} aria-expanded={expanded}
           aria-controls={contentId}
           aria-label={expanded ? collapseLabel : expandLabel}
           onClick={toggleExpanded}

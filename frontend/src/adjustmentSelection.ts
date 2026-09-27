@@ -4,7 +4,8 @@ import {
 } from './editing';
 
 type SelectionGroup = { label?: string; ids: readonly AdjustmentId[] };
-type SelectionCategory = { id: string; label: string; ids: readonly AdjustmentId[]; groups: SelectionGroup[] };
+export type AdjustmentCategoryId = 'whiteBalance' | 'basic' | 'color' | 'colorGrading';
+type SelectionCategory = { id: AdjustmentCategoryId; label: string; ids: readonly AdjustmentId[]; groups: SelectionGroup[] };
 
 // Category membership belongs to editing.ts. This adds only selection UI grouping.
 export const ADJUSTMENT_SELECTION_CATEGORIES: SelectionCategory[] = [

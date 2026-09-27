@@ -140,9 +140,10 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .edit-settings-menu summary { display: grid; place-items: center; min-width: 30px; cursor: pointer; list-style: none; font-size: 1rem; }
 .edit-settings-menu summary::-webkit-details-marker { display: none; }
 .workspace-menu-surface { color: #ddd; background: #202023; border: 1px solid #48484b; border-radius: 5px; box-shadow: 0 6px 18px #0008; padding: 6px; font-size: 0.76rem; }
-.edit-settings-action-list { display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); gap: 0; }
+.edit-settings-action-list, .workspace-menu-list { display: grid; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); gap: 0; }
 .edit-settings-menu-actions { position: absolute; top: calc(100% + 5px); right: 0; z-index: 25; }
 .edit-settings-context-menu { position: fixed; z-index: 100; max-height: calc(100vh - 16px); overflow: auto; }
+.adjustment-category-context-menu { position: fixed; z-index: 100; max-height: calc(100dvh - 16px); overflow: auto; }
 .workspace-menu-item { width: 100%; min-width: 0; padding: 6px 10px; border: 0; border-radius: 3px; color: #ddd; background: transparent; text-align: left; font: inherit; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
 .workspace-menu-item:hover:not(:disabled), .workspace-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
 .workspace-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
