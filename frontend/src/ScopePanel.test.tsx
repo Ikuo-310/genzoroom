@@ -6,6 +6,7 @@ import type { Histogram } from './histogram';
 import i18n from './i18n';
 import { histogramDisplayMaximum } from './HistogramGraph';
 import { ScopePanel } from './ScopePanel';
+import { AdjustmentSlider } from './AdjustmentSlider';
 
 function histogram(r: number, g: number, b: number, y: number): Histogram {
   const make = (value: number) => {
@@ -32,6 +33,14 @@ function render(data: Histogram | null, keyboardBlocked = false) {
   act(() => root.render(<ScopePanel histogram={data} keyboardBlocked={keyboardBlocked} />));
 }
 
+function renderWithAdjustmentSlider(scopeFirst: boolean, onChange: (value: number) => void) {
+  const scope = <ScopePanel histogram={null} />;
+  const slider = <AdjustmentSlider adjustmentId="contrast" label="Contrast" value={0} min={-100} max={100} step={1}
+    valueText="0" valueLabel="Contrast value" precision={0} defaultValue={0} resetLabel="Reset"
+    enabled onToggle={() => {}} onBegin={() => {}} onChange={onChange} onCommit={() => {}} onReset={() => {}} />;
+  act(() => root.render(<>{scopeFirst ? scope : slider}{scopeFirst ? slider : scope}</>));
+}
+
 function button(label: string) {
   return [...host.querySelectorAll('button')].find((item) => item.textContent === label)!;
 }
@@ -40,9 +49,9 @@ function scaleToggle() {
   return host.querySelector<HTMLButtonElement>('.histogram-scale-toggle')!;
 }
 
-function numpad(code: string, init: KeyboardEventInit = {}) {
+function numpad(code: string, init: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key: 'Unidentified', code, bubbles: true, cancelable: true, ...init });
-  act(() => window.dispatchEvent(event));
+  act(() => target.dispatchEvent(event));
   return event;
 }
 
@@ -251,6 +260,51 @@ describe('ScopePanel', () => {
     numpad('NumpadDecimal');
     expect(button('R').getAttribute('aria-pressed')).toBe('true');
     expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it.each([true, false])('returns NumLock-off Numpad2 from Y Only without changing the slider (Scope first: %s)', (scopeFirst) => {
+    const onChange = vi.fn<(value: number) => void>();
+    renderWithAdjustmentSlider(scopeFirst, onChange);
+    const range = host.querySelector<HTMLInputElement>('.adjustment-range')!;
+    act(() => range.focus());
+
+    numpad('Numpad0', { key: 'Insert' }, range);
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('true');
+    numpad('Numpad2', { key: 'ArrowDown' }, range);
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('G').getAttribute('aria-pressed')).toBe('true');
+    expect(button('B').getAttribute('aria-pressed')).toBe('true');
+    expect(onChange).not.toHaveBeenCalled();
+
+    numpad('Numpad2', { key: 'ArrowDown' }, range);
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('B').getAttribute('aria-pressed')).toBe('true');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('reserves every Histogram Numpad code from slider changes while retaining arrow and number input', () => {
+    const onChange = vi.fn<(value: number) => void>();
+    renderWithAdjustmentSlider(true, onChange);
+    const range = host.querySelector<HTMLInputElement>('.adjustment-range')!;
+    act(() => range.focus());
+    for (const [code, key] of [
+      ['Numpad0', 'Insert'], ['Numpad1', 'End'], ['Numpad2', 'ArrowDown'],
+      ['Numpad3', 'PageDown'], ['NumpadDecimal', 'Delete'],
+    ]) numpad(code, { key }, range);
+    expect(onChange).not.toHaveBeenCalled();
+
+    for (const [code, key] of [
+      ['ArrowUp', 'ArrowUp'], ['ArrowDown', 'ArrowDown'], ['ArrowLeft', 'ArrowLeft'], ['ArrowRight', 'ArrowRight'],
+    ]) numpad(code, { key }, range);
+    expect(onChange.mock.calls.map(([value]) => value)).toEqual([10, -10, -1, 1]);
+
+    const number = host.querySelector<HTMLInputElement>('.adjustment-number')!;
+    act(() => number.focus());
+    const keypadInput = numpad('Numpad2', { key: '2' }, number);
+    expect(keypadInput.defaultPrevented).toBe(false);
+    expect(onChange.mock.calls.map(([value]) => value)).toEqual([10, -10, -1, 1]);
   });
 
   it('toggles R, G and B separately without changing the other selections', () => {

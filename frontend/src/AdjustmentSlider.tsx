@@ -20,6 +20,7 @@ type Props = {
 };
 
 export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
+const histogramNumpadCodes = new Set(['Numpad0', 'Numpad1', 'Numpad2', 'Numpad3', 'NumpadDecimal']);
 
 // Only mounted AdjustmentSliders participate; native ranges elsewhere stay independent.
 const adjustments = new Map<HTMLInputElement, () => void>();
@@ -221,6 +222,8 @@ export function AdjustmentSlider(props: Props) {
       const currentElement = range.current;
       if (!currentElement || keyboardAdjustment() !== currentElement) return;
       if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
+      // NumLock-off keypad keys carry arrow names, but their physical codes belong to ScopePanel.
+      if (histogramNumpadCodes.has(event.code)) return;
       if (event.target instanceof HTMLInputElement && event.target.type === 'range' && !adjustments.has(event.target)) return;
       // Outside-panel Shift navigation belongs to the selected operation panel.
       const panel = currentElement.closest('.develop-panel');
