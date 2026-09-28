@@ -2,6 +2,18 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Histogram H1〜H3 完了（2026-09-29・現在仕様）
+
+暗室ScopeにJPEGプレビュー用Histogramを追加した。collectHistogram()はDOM非依存のpure functionで、RGBAの8bit sRGBコード値からR・G・B・Y′を各256個のUint32Arrayへ集計する。Y′は非線形RGBへBT.709系係数を適用し、Math.roundでビン化する。補正前はdecode成功後に一度だけ集計し、補正後は既存Workerのrender出力時に同じ画素結果から集計する。WorkerはpixelBufferとHistogramを同じresult messageで返し、Worker起動・処理エラー時のmain thread fallbackも同じ集計関数を使う。
+
+requestId・assetGenerationが一致しないWorker結果と、pendingLatestがある間の古い結果は採用しない。写真との対応はassetId・sourceKeyで確認し、未取得のbefore／afterはnullのまま扱う。Viewerの実表示状態（永続BeforeまたはBackslash押下中）に合わせて該当するHistogramだけをScopeへ渡す。比較表示、Scope設定変更では再集計しない。
+
+ScopeはRGBチャンネル、Y Only、通常／拡大を非永続状態として管理し、写真を切り替えても維持する。通常表示はRGB全チャンネル共通の最大ビン基準。拡大表示はRGBの768ビン、またはY Onlyの256ビンからゼロを含むnearest-rank P99を求め、上限を超えるピークをグラフ上端でクリップする。RGB選択は最低1チャンネルを維持する。
+
+H2でScopePanelとHistogram SVGを追加し、Scopeの利用可能な高さに追従するレイアウトへ調整した。H3でViewerのBefore／Afterと一時Before表示を連動させ、Numpad 0〜3とNumpad Decimalを追加した。Y Only中のNumpad 1〜3は最初の1回でRGB表示へ戻り、次の押下からチャンネルを切り替える。テキスト・数値入力、IME、修飾キー、メニュー／ダイアログ、操作ブロック中は入力側を優先する。NumLock OFFではNumpad 2のevent.keyがArrowDownになるため、AdjustmentSliderのグローバル矢印処理からHistogram専用の5つのevent.codeを除外した。
+
+利用者によるNAS／Firefox実機確認は完了している。最終静的監査はHigh 0件、Medium 1件、Low 0件。MediumのNumpad／AdjustmentSlider競合を上記のコード除外で修正した。修正後に報告された検証は、関連テスト88件、Frontend全43ファイル999件、TypeScript型チェック、本番ビルドが成功し、git diff --checkも空白エラーなし（改行コード変換警告のみ）。性能測定は実施していない。
+
 ## 永続化 Phase 5（現在仕様）
 
 JPEG写真を暗室でactiveにすると通常はedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。退出保存失敗後に暗室に留まり、assetにdirtyなlocal stateまたは未確認saveが残っている場合は、再activation時にそのstateを保持してGETで上書きしない。明示的にdiscardしたassetは記録を破棄し、再訪時にDBから取得する。GET失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryを行わない。失敗後に最新snapshotまで保存できたら警告を解除する。通信結果が不明な保存（HTTP 408／5xx、成功応答の解析・検証失敗等）はDBで成功済みの可能性があるため、元のsnapshot・expectedRevision・saveIdを変更せず先に再送する。確認後に追加編集を保存する。別タブ等による真正なrevision conflict（409）は自動mergeしない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。discard後も保存済み状態が確定済みなら編集済み表示を維持し、不明なら古い一括取得結果を使わずunknownとして扱う。Home controlで暗室を退出すると、そのAnshitsu session中に永続化対象の編集を行った全assetを順次処理する。最新snapshotをcopy上で作り、`COMPACT_HISTORY_ON_EXIT`が有効ならapplied / redoを分離したpure compactionとvalidation後に保存する。圧縮失敗時は非圧縮snapshotへfallbackする。成功済みassetはlive sessionも保存済みHistoryへ同期し、後続assetの失敗で詳細Historyが再autosaveされないようにする。最終保存失敗時は暗室に留まるか、rollback / DELETEなしで退出するかを選ぶ。Browser Back、reload、tab close時の同期保存・interceptは未実装。
@@ -30,7 +42,7 @@ History行の通常クリックはその時点のRecipeへ直接移動し、Hist
 
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 
-現在のrecipeはflat構造のv18。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3range・16個別項目の計23 enabled flagを持つ。各階層のON/OFFは独立し、OFFでも値を保持する。Shadows / Midtones / Highlightsは各Temperature / Tintと個別range ON/OFFを持つ。Point / Width、RAW現像、export、Histogram等は未実装。
+現在のrecipeはflat構造のv18。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3range・16個別項目の計23 enabled flagを持つ。各階層のON/OFFは独立し、OFFでも値を保持する。Shadows / Midtones / Highlightsは各Temperature / Tintと個別range ON/OFFを持つ。Point / Width、RAW現像、exportは未実装。
 
 処理順はGlobal Temperature → Global Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Shadows Temperature/Tint → Midtones Temperature/Tint → Highlights Temperature/Tint → Vibrance → Saturation。各range内ではTemperature適用前の同じsRGB由来Yからweightを一度計算し、Tintにも使う。range間では直前rangeの丸め済み画素からYを求め直す。
 
@@ -66,7 +78,7 @@ Phase 3では異常な非有限EXIF整数を欠損値として扱い、写真詳
 
 ## 今後の作業計画
 
-暗室第1フェーズの残作業は、総合パフォーマンス監査、Histogram実装、最終実機検証。Histogram完成を第1フェーズの区切りとする。将来の書き出し設定とキューはHome中心に検討し、暗室には書き出し候補のマーキングを追加する予定だが、いずれも未実装。公式サイトと日英操作マニュアルは暗室第1フェーズの完成後に制作する。サイト構成案は現時点の第一候補であり確定仕様ではない。
+Histogramを含む暗室の実装、最終静的監査、利用者によるNAS／Firefox実機確認は完了した。総合パフォーマンス監査は未実施。将来の書き出し設定とキューはHome中心に検討し、暗室には書き出し候補のマーキングを追加する案があるが、いずれも未実装。公式サイトと日英操作マニュアルの制作時期・構成は未確定。
 
 過去の最大10/50件、古いrecipe、当時の未実装・手動検証記録は以下に保持した。今回ブラウザ手動確認やfixture・画像の作成は行っていない。
 
@@ -362,7 +374,7 @@ RAW側のサムネイルは通常画像より暗く見えることがある。�
 
 RAWとJPEG / HEICの自動ペアリングや統合表示は未実装。将来必要になれば、同一撮影時刻、ファイル名、連番、メタデータなどを使ったペアリングを検討できる。ただし、誤判定やImmich側のAsset関係との整合も考える必要があるため、現段階では別Assetとして扱う。
 
-## 11. 現時点で未実装
+## 11. 第三段階時点で未実装だった機能（履歴）
 
 以下は今後の候補であり、第三段階時点では未実装。
 
@@ -371,7 +383,6 @@ RAWとJPEG / HEICの自動ペアリングや統合表示は未実装。将来必
 - DNGデコード
 - Exposure / Contrast / White Balanceなどの調整
 - 非破壊編集パラメータを保存するDB
-- Histogram
 - Waveform
 - RGB Parade
 - GPU処理
@@ -400,7 +411,7 @@ Frontendは現時点ではこれらを形式バッジの表示にだけ使用す
 
 RAWとRAW以外の2つのチェックボックスは初期状態で両方ONとし、片方だけがONになった場合は最後のチェックを外せないようにした。フィルター結果が0件の場合は、Immichからの取得結果自体が0件の場合とは別のメッセージを表示する。フィルター状態は保存せず、再読み込み時には両方ONへ戻る。
 
-## 15. 暗室 / Anshitsuワークスペース
+## 15. 暗室 / Anshitsuワークスペース（初期実装時）
 
 最近の写真をクリックすると、写真ごとのURLを持つ暗室へ遷移する。暗室は将来の現像作業を行う画面で、左にHistory / EXIF、中央に写真Viewer、右上にScope、右下にDevelop controls、下にFilmstripを配置した。左側は参照情報、右側は将来のスコープ表示と現像操作の領域として役割を分けた。左右は独立して閉じられ、編集中は必要に応じてViewerを広げられる。英語UIでは名称を `Anshitsu` とし、意味を補うため `Photo development workspace` を併記する。
 
@@ -408,7 +419,7 @@ RAWとRAW以外の2つのチェックボックスは初期状態で両方ONと�
 
 詳細表示画像には原画像ではなく、Immichの `GET /api/assets/{id}/thumbnail?size=preview` で生成済みpreviewを使う。GenzoRoom Backendのproxyを経由するため、Immich APIキーはブラウザへ渡らない。EXIFは `GET /api/assets/{id}` から取得し、GPSを除く主要項目だけをFrontendへ返す。欠損項目は画面に出さない。
 
-左右パネルは独立して折りたためる。中央Viewerは初期状態をFitとし、等倍（1:1）、段階的な拡大・縮小、ホイールズーム、拡大時のドラッグPanに対応した。現像操作、Scope表示、History保存はまだプレースホルダーである。写真の色判断を妨げないよう、暗室だけは無彩色のダークグレーから黒を基調とした。
+左右パネルは独立して折りたためる。中央Viewerは初期状態をFitとし、等倍（1:1）、段階的な拡大・縮小、ホイールズーム、拡大時のドラッグPanに対応した。この初期実装時点では現像操作、Scope表示、History保存はまだプレースホルダーだった。写真の色判断を妨げないよう、暗室だけは無彩色のダークグレーから黒を基調とした。現行のHistogram Scopeは本ノート冒頭とarchitecture.mdに記載する。
 
 ### モバイル対応方針
 

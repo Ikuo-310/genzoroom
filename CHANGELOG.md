@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- An RGB / Y′ Histogram Scope for JPEG previews, with per-channel visibility, Y Only, Normal shared-maximum and Expanded P99 scales, and synchronization with the Viewer’s persistent and temporary Before / After display. Numpad 0–3 and Numpad Decimal control the display.
 - Recipe v18 adds independent ON/OFF switches for all 16 numeric adjustments alongside the four category and three Color Grading range switches. Disabled values remain stored; reset, History, and processing respect each switch level.
 - Home Shift+click range selection, edited markers in Home and Filmstrip, connection details, and the shared GenzoRoom Home navigation are available. UI improvements add independent edit-panel scrolling and focus navigation, category/adjustment/3WAY range switches and context menus (including reset and numeric Copy/Paste), and Viewer Before / After operations.
 - `POST /assets/edit-status` returns persisted edit status for up to 100 asset IDs in one request, supporting distinct unknown, unedited, and edited UI states.
@@ -69,6 +70,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Keep NumLock-off Histogram keypad shortcuts from being consumed as adjustment-slider arrow controls while preserving native numeric input.
 - Preserve the exact snapshot, expected revision, and save ID for retries when a PUT may have committed but its response is uncertain, including HTTP 408/5xx and unreadable or invalid success responses. Genuine 409 conflicts are not automatically merged.
 - Keep the known saved edited state visible after discarding newer unsaved edits; invalidate an old batch status when the persisted state is unknown.
 - Prevent global workspace shortcuts from running while the Viewer `⋯` menu is open, restore trigger focus on Escape, and clear stale 3WAY heading focus after real pointer movement to another slider.

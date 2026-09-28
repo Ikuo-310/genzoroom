@@ -4,9 +4,9 @@ GenzoRoom is an early-development, self-hosted browser interface for developing 
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
-![GenzoRoom Anshitsu workspace with the viewer, History, EXIF, Develop controls, and Filmstrip](docs/images/anshitsu-overview.png)
+![GenzoRoom Anshitsu workspace with the Viewer, RGB and Y′ Histogram Scope, History, EXIF, Develop controls, and Filmstrip](docs/images/260928_Histogram.png)
 
-*The current desktop-focused Anshitsu workspace.*
+*The desktop Anshitsu workspace with the Histogram Scope in the upper-right panel.*
 
 ## Current features
 
@@ -29,6 +29,9 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
 - Before / After display toggle and hold the Backslash key for temporary Before; comparison bypasses develop adjustments without changing edits or zoom/pan.
+- An 8-bit sRGB Histogram from JPEG previews, with 256 bins each for R, G, B, and Y′. The Scope supports individual RGB visibility while keeping at least one channel on, Y Only, a Normal scale based on the shared RGB maximum, and an Expanded scale using nearest-rank P99. It follows both persistent and temporary Viewer Before / After display.
+- Histogram shortcuts: Numpad 0 toggles Y Only; Numpad 1, 2, and 3 toggle R, G, and B; Numpad Decimal toggles Normal / Expanded. While Y Only is active, the first Numpad 1–3 press restores the previous RGB selection; the next press toggles that channel. Text and number fields keep native keypad input.
+- RGB visibility, Y Only, and scale mode remain selected when switching photos in Anshitsu.
 - Independently collapsible and resizable desktop sidebars with remembered widths.
 - English and Japanese UI with remembered language selection and locale-aware dates.
 
@@ -64,7 +67,7 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 - RAW development pipeline.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
 - Export or write-back to Immich.
-- Scopes such as Histogram, Waveform, and RGB Parade; the current Scope area is a placeholder.
+- Waveform Monitor (WFM), RGB Parade, and Vectorscope. Histogram is implemented in the Scope area.
 - Masking or local adjustments.
 - Crop or rotate tools.
 - AI-assisted adjustments.
