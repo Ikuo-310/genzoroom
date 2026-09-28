@@ -37,6 +37,7 @@ export class AdjustmentWorkerClient {
   }
 
   initialize(source: Uint8ClampedArray, width: number, height: number) {
+    // Transfer detaches its buffer, so retain the original for Before and main-thread fallback.
     const workerSource = source.slice();
     const message: AdjustmentWorkerInitMessage = {
       type: 'init',
@@ -100,6 +101,7 @@ export class AdjustmentWorkerClient {
     const pending = this.pendingLatest;
     this.pendingLatest = null;
     if (pending) {
+      // A newer recipe is waiting; painting this completed result would show obsolete edits.
       this.send(pending);
       return;
     }

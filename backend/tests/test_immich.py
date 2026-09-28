@@ -134,6 +134,20 @@ class ImmichStatusTests(unittest.TestCase):
 
 
 class ImmichAssetTests(unittest.TestCase):
+    def run_detail_with_exif(self, exif):
+        body = {
+            "id": str(ASSET_ID),
+            "type": "IMAGE",
+            "originalFileName": "photo.jpg",
+            "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+            "exifInfo": {"make": "Example Camera Co.", "fNumber": 2.8, **exif},
+        }
+        # Raw JSON permits non-finite upstream values that httpx's json= encoder rejects.
+        transport = httpx.MockTransport(lambda request: httpx.Response(
+            200, content=json.dumps(body), headers={"content-type": "application/json"},
+        ))
+        return asyncio.run(get_asset_detail(IMMICH_URL, API_KEY, ASSET_ID, transport=transport))
+
     def run_recent(self, handler, *, url=IMMICH_URL, api_key=API_KEY):
         return asyncio.run(
             get_recent_assets(
@@ -307,6 +321,60 @@ class ImmichAssetTests(unittest.TestCase):
         ))
 
         self.assertEqual(detail.exif.model_dump(exclude_none=True), {})
+
+    def test_ignores_nonfinite_optional_exif_integers(self):
+        fields = {"iso": "iso", "exifImageWidth": "width", "exifImageHeight": "height"}
+        for field, attribute in fields.items():
+            for value in (float("inf"), float("-inf"), float("nan")):
+                with self.subTest(field=field, value=value):
+                    exif = {"iso": 200, "exifImageWidth": 6000, "exifImageHeight": 4000}
+                    exif[field] = value
+                    detail = self.run_detail_with_exif(exif)
+                    self.assertIsNone(getattr(detail.exif, attribute))
+                    self.assertNotIn(attribute, detail.exif.model_dump(exclude_none=True))
+                    for other, other_attribute in fields.items():
+                        if other != field:
+                            self.assertEqual(getattr(detail.exif, other_attribute), exif[other])
+                    self.assertEqual(detail.filename, "photo.jpg")
+                    self.assertEqual(detail.preview_url, f"/api/assets/{ASSET_ID}/preview")
+                    self.assertEqual(detail.exif.make, "Example Camera Co.")
+                    self.assertEqual(detail.exif.f_number, 2.8)
+
+    def test_preserves_optional_exif_integer_conversion_and_rejected_formats(self):
+        cases = [
+            (200, 200), (200.9, 200), (-2.9, -2), (0, 0),
+            (10 ** 400, 10 ** 400), (1e308, int(1e308)),
+            ("200", None), ("200.9", None), ("1e400", None),
+            ("NaN", None), ("not-a-number", None), ("", None),
+            (True, None), (False, None), (None, None), ([], None), ({}, None),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                detail = self.run_detail_with_exif({
+                    "iso": value, "exifImageWidth": value, "exifImageHeight": value,
+                })
+                for attribute in ("iso", "width", "height"):
+                    self.assertEqual(getattr(detail.exif, attribute), expected)
+                self.assertEqual(detail.exif.make, "Example Camera Co.")
+
+    def test_detail_endpoint_omits_invalid_exif_and_preserves_other_fields(self):
+        detail = self.run_detail_with_exif({
+            "iso": float("inf"), "exifImageWidth": 6000, "exifImageHeight": float("nan"),
+        })
+
+        async def request_detail():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                return await client.get(f"/assets/{ASSET_ID}")
+
+        with patch("main.get_asset_detail", new=AsyncMock(return_value=detail)):
+            response = asyncio.run(request_detail())
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["id"], str(ASSET_ID))
+        self.assertEqual(body["filename"], "photo.jpg")
+        self.assertEqual(body["date"], "2026-09-01T12:00:00.000Z")
+        self.assertEqual(body["exif"], {"make": "Example Camera Co.", "f_number": 2.8, "width": 6000})
 
     def test_proxies_preview_instead_of_the_original_asset(self):
         image = b"fake-preview"

@@ -217,6 +217,7 @@ export function renderAdjustments(source: Uint8ClampedArray, recipe: EditRecipe)
         }
       }
     }
+    // Each 3WAY pair shares its pre-Temperature weight; recomputing it before Tint changes existing pixels.
     if (shadowsTemperature !== 0 || shadowsTint !== 0) {
       const red = output[i] / 255;
       const green = output[i + 1] / 255;

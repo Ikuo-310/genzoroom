@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import PurePath
 from typing import Literal
 from uuid import UUID
@@ -112,7 +113,12 @@ def _optional_number(value: object) -> float | None:
 
 
 def _optional_integer(value: object) -> int | None:
-    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    # Optional malformed EXIF must not block the photo; keep arbitrary-size integers intact.
+    if isinstance(value, float) and not isfinite(value):
+        return None
+    return int(value)
 
 
 def classify_image_format(filename: str) -> tuple[str, bool]:
