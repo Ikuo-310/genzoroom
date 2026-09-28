@@ -19,8 +19,6 @@ export function HistogramGraph({ histogram, channels, yOnly }: Props) {
       aria-label={t('workspace.histogramGraph')}>
       <path className="histogram-gridline" d="M0 14.5H256 M0 59.5H256" />
       <path className="histogram-baseline" d="M0 105.5H256" />
-      <text className="histogram-axis-label" x="2" y="11">{maxCount.toLocaleString()}</text>
-      <text className="histogram-axis-label" x="2" y="103">0</text>
       {histogram && visible.map((channel) => {
         const bins = histogram[channel];
         const points = Array.from(bins, (count, index) => `${index},${BASELINE - count / maxCount * PLOT_HEIGHT}`);
@@ -29,10 +27,11 @@ export function HistogramGraph({ histogram, channels, yOnly }: Props) {
           data-channel={channel} d={`M0,${BASELINE} L${points.join(' L')} L255,${BASELINE} Z`}
           fill={color} stroke={color} />;
       })}
-      <text className="histogram-axis-label" x="1" y="122">0</text>
-      <text className="histogram-axis-label" x="128" y="122" textAnchor="middle">128</text>
-      <text className="histogram-axis-label" x="255" y="122" textAnchor="end">255</text>
     </svg>
+    <div className="histogram-y-axis" aria-hidden="true">
+      <span>{maxCount.toLocaleString()}</span><span>0</span>
+    </div>
+    <div className="histogram-x-axis" aria-hidden="true"><span>0</span><span>128</span><span>255</span></div>
     {!histogram && <p className="histogram-message">{t('workspace.histogramLoading')}</p>}
     {histogram && visible.length === 0 && <p className="histogram-message">{t('workspace.histogramNoChannels')}</p>}
   </div>;
