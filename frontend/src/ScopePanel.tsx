@@ -24,12 +24,14 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
     const onKeyDown = (event: KeyboardEvent) => {
       const channel = event.code === 'Numpad1' ? 'r' : event.code === 'Numpad2' ? 'g' : event.code === 'Numpad3' ? 'b' : null;
       const isYToggle = event.code === 'Numpad0';
-      if ((!channel && !isYToggle) || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey
+      const isScaleToggle = event.code === 'NumpadDecimal';
+      if ((!channel && !isYToggle && !isScaleToggle) || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey
         || event.metaKey || event.shiftKey || isNativeEditingTarget(event.target) || keyboardBlocked
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       event.preventDefault();
       if (event.repeat) return;
-      if (isYToggle) setYOnly((current) => !current);
+      if (isScaleToggle) setExpanded((current) => !current);
+      else if (isYToggle) setYOnly((current) => !current);
       else if (channel) {
         if (yOnly) setYOnly(false);
         else setChannels((current) => toggleChannel(current, channel));
@@ -48,12 +50,12 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
         </select>
       </label>
       <div className="histogram-channel-controls" role="group" aria-label={t('workspace.histogramChannels')}>
-        <div className="histogram-scale-controls" role="group" aria-label={t('workspace.histogramScale')}>
-          <button type="button" aria-pressed={!expanded} className={!expanded ? 'selected' : ''}
-            onClick={() => setExpanded(false)}>{t('workspace.histogramNormal')}</button>
-          <button type="button" aria-pressed={expanded} className={expanded ? 'selected' : ''}
-            onClick={() => setExpanded(true)}>{t('workspace.histogramExpanded')}</button>
-        </div>
+        <button type="button" className="tool-button before-after-controls histogram-scale-toggle"
+          aria-label={t('workspace.histogramScale')} aria-description={t(expanded ? 'workspace.histogramExpanded' : 'workspace.histogramNormal')}
+          aria-pressed={expanded} onClick={() => setExpanded((current) => !current)}>
+          <span className={!expanded ? 'active' : undefined}>{t('workspace.histogramNormal')}</span>
+          <span className={expanded ? 'active' : undefined}>{t('workspace.histogramExpanded')}</span>
+        </button>
         {(['r', 'g', 'b'] as const).map((channel) => <button key={channel} type="button"
           className={`histogram-channel-button channel-${channel}${channels[channel] ? ' selected' : ''}`}
           aria-label={channelNames[channel]} aria-pressed={channels[channel]} disabled={yOnly}

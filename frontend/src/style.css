@@ -128,10 +128,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .scope-type-label { display: flex; min-width: 0; align-items: center; gap: 5px; color: #aaa; font-size: 0.7rem; }
 .scope-type-label select { min-width: 0; max-width: 100%; padding: 2px 22px 2px 6px; border: 1px solid #4b4b4e; border-radius: 4px; color: #e6eee9; background: #252527; font: inherit; }
 .histogram-channel-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
-.histogram-scale-controls { display: flex; align-items: center; gap: 2px; }
-.histogram-scale-controls button { min-width: 0; padding: 2px 5px; border: 1px solid #56565a; border-radius: 4px; color: #bcbcc0; background: #252527; font-size: 0.66rem; line-height: 1.45; white-space: nowrap; }
-.histogram-scale-controls button:hover:not(:disabled) { color: #fff; background: #353539; }
-.histogram-scale-controls button.selected { outline: 1px solid #e6eee9; outline-offset: -2px; color: #fff; }
+.scope-panel .histogram-scale-toggle > span { padding: 2px 5px; font-size: 0.66rem; white-space: nowrap; }
 .histogram-channel-button, .histogram-y-button { min-width: 24px; padding: 2px 6px; border: 1px solid #56565a; border-radius: 4px; color: #bcbcc0; background: #252527; font-size: 0.68rem; font-weight: 700; line-height: 1.45; }
 .histogram-channel-button:hover:not(:disabled), .histogram-y-button:hover:not(:disabled) { color: #fff; background: #353539; }
 .histogram-channel-button.selected, .histogram-y-button.selected { outline: 1px solid currentColor; outline-offset: -2px; }

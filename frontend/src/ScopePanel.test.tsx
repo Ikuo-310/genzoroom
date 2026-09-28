@@ -36,6 +36,10 @@ function button(label: string) {
   return [...host.querySelectorAll('button')].find((item) => item.textContent === label)!;
 }
 
+function scaleToggle() {
+  return host.querySelector<HTMLButtonElement>('.histogram-scale-toggle')!;
+}
+
 function numpad(code: string, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent('keydown', { key: 'Unidentified', code, bubbles: true, cancelable: true, ...init });
   act(() => window.dispatchEvent(event));
@@ -64,8 +68,9 @@ describe('ScopePanel', () => {
     expect(button('G').getAttribute('aria-pressed')).toBe('true');
     expect(button('B').getAttribute('aria-pressed')).toBe('true');
     expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
-    expect(button('Normal').getAttribute('aria-pressed')).toBe('true');
-    expect(button('Expanded').getAttribute('aria-pressed')).toBe('false');
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(scaleToggle().getAttribute('aria-label')).toBe('Vertical scale');
+    expect(scaleToggle().textContent).toBe('NormalExpanded');
     expect(host.querySelectorAll('.histogram-series')).toHaveLength(3);
     expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('40,');
     expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe('histogram');
@@ -95,7 +100,7 @@ describe('ScopePanel', () => {
     const original = Object.fromEntries(Object.entries(data).map(([key, bins]) => [key, bins.slice()]));
     expect(histogramDisplayMaximum(data, false, true)).toBe(10);
     render(data);
-    act(() => button('Expanded').click());
+    act(() => scaleToggle().click());
     expect(host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent).toBe('P99 10');
     const path = host.querySelector('[data-channel="r"]')?.getAttribute('d') ?? '';
     const bluePath = host.querySelector('[data-channel="b"]')?.getAttribute('d') ?? '';
@@ -120,12 +125,12 @@ describe('ScopePanel', () => {
     first.r[0] = 20000;
     const second = denseHistogram(20);
     render(first);
-    act(() => button('Expanded').click());
+    act(() => scaleToggle().click());
     const initialMaximum = host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent;
     act(() => button('R').click());
     expect(host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent).toBe(initialMaximum);
     render(second);
-    expect(button('Expanded').getAttribute('aria-pressed')).toBe('true');
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('true');
     expect(host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent).toBe('P99 20');
   });
 
@@ -135,6 +140,30 @@ describe('ScopePanel', () => {
     act(() => button('Y Only').click());
     expect(host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent).toBe('101');
     expect(histogramDisplayMaximum(data, true, false)).toBe(101);
+  });
+
+  it('toggles scale from anywhere on the single accessible control and keeps its state synchronized', () => {
+    render(denseHistogram());
+    const toggle = scaleToggle();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.querySelector('span.active')?.textContent).toBe('Normal');
+    act(() => toggle.querySelector('span:last-child')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.querySelector('span.active')?.textContent).toBe('Expanded');
+    act(() => toggle.querySelector('span:first-child')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.querySelector('span.active')?.textContent).toBe('Normal');
+  });
+
+  it('toggles scale with NumpadDecimal but ignores the top-row period key', () => {
+    render(denseHistogram());
+    expect(numpad('NumpadDecimal', { key: '.' }).defaultPrevented).toBe(true);
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('true');
+    numpad('NumpadDecimal', { key: ',' });
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
+    const topRowPeriod = numpad('Period', { key: '.' });
+    expect(topRowPeriod.defaultPrevented).toBe(false);
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
   });
 
   it.each([
@@ -173,6 +202,9 @@ describe('ScopePanel', () => {
     numpad('Numpad2', { shiftKey: true });
     numpad('Numpad3', { repeat: true });
     numpad('Numpad0', { isComposing: true });
+    numpad('NumpadDecimal', { ctrlKey: true });
+    numpad('NumpadDecimal', { repeat: true });
+    numpad('NumpadDecimal', { isComposing: true });
     const prevented = new KeyboardEvent('keydown', { code: 'Numpad1', cancelable: true });
     prevented.preventDefault();
     act(() => window.dispatchEvent(prevented));
@@ -180,6 +212,7 @@ describe('ScopePanel', () => {
     expect(button('G').getAttribute('aria-pressed')).toBe('true');
     expect(button('B').getAttribute('aria-pressed')).toBe('true');
     expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('preserves Numpad entry in native fields and ignores keys while menus or blocked operations are active', () => {
@@ -190,7 +223,11 @@ describe('ScopePanel', () => {
     const numberEvent = new KeyboardEvent('keydown', { code: 'Numpad1', key: '1', bubbles: true, cancelable: true });
     act(() => number.dispatchEvent(numberEvent));
     expect(numberEvent.defaultPrevented).toBe(false);
+    const decimalEvent = new KeyboardEvent('keydown', { code: 'NumpadDecimal', key: '.', bubbles: true, cancelable: true });
+    act(() => number.dispatchEvent(decimalEvent));
+    expect(decimalEvent.defaultPrevented).toBe(false);
     expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
     number.remove();
     const blockedLayers: HTMLElement[] = [];
     for (const role of ['menu', 'dialog', 'alertdialog']) {
@@ -199,6 +236,7 @@ describe('ScopePanel', () => {
       document.body.append(layer);
       blockedLayers.push(layer);
       numpad('Numpad1');
+      numpad('NumpadDecimal');
     }
     const toolbarMenu = document.createElement('details');
     toolbarMenu.className = 'edit-settings-menu';
@@ -206,10 +244,13 @@ describe('ScopePanel', () => {
     document.body.append(toolbarMenu);
     blockedLayers.push(toolbarMenu);
     numpad('Numpad1');
+    numpad('NumpadDecimal');
     blockedLayers.forEach((layer) => layer.remove());
     render(histogram(40, 90, 180, 100), true);
     numpad('Numpad1');
+    numpad('NumpadDecimal');
     expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(scaleToggle().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('toggles R, G and B separately without changing the other selections', () => {
