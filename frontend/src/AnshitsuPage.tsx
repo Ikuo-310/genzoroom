@@ -22,6 +22,7 @@ import { basicHistoryControl } from './basicControls';
 import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
 import type { AssetHistograms, ImageHistograms } from './histogram';
+import { ScopePanel } from './ScopePanel';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
@@ -447,7 +448,7 @@ export function AnshitsuPage() {
       )}
       rightPanel={<>
         <WorkspaceSection title={t('workspace.scope')} className="scope-section">
-          <p>{t('workspace.scopePlaceholder')}</p>
+          <ScopePanel histogram={activeHistograms?.after ?? null} />
         </WorkspaceSection>
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>

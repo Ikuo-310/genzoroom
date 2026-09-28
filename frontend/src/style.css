@@ -122,6 +122,29 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .workspace-section { display: flex; flex: 0 0 auto; flex-direction: column; min-height: 130px; border-bottom: 1px solid #353537; }
 .workspace-section.grow { flex: 1 0 auto; }
 .right-panel .scope-section { flex: 0 1 34%; min-height: 100px; }
+.right-panel .scope-section > .workspace-section-content { min-width: 0; min-height: 0; padding: 5px 10px 10px; }
+.scope-panel { --histogram-r: #ff4c4c; --histogram-g: #39d65b; --histogram-b: #478cff; --histogram-y: #e1e1e1; display: grid; min-width: 0; gap: 3px; }
+.scope-panel-toolbar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px 8px; }
+.scope-type-label { display: flex; min-width: 0; align-items: center; gap: 5px; color: #aaa; font-size: 0.7rem; }
+.scope-type-label select { min-width: 0; max-width: 100%; padding: 2px 22px 2px 6px; border: 1px solid #4b4b4e; border-radius: 4px; color: #e6eee9; background: #252527; font: inherit; }
+.histogram-channel-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+.histogram-channel-button, .histogram-y-button { min-width: 24px; padding: 2px 6px; border: 1px solid #56565a; border-radius: 4px; color: #bcbcc0; background: #252527; font-size: 0.68rem; font-weight: 700; line-height: 1.45; }
+.histogram-channel-button:hover:not(:disabled), .histogram-y-button:hover:not(:disabled) { color: #fff; background: #353539; }
+.histogram-channel-button.selected, .histogram-y-button.selected { outline: 1px solid currentColor; outline-offset: -2px; }
+.histogram-channel-button.channel-r { --channel-color: #ff7777; color: var(--channel-color); }
+.histogram-channel-button.channel-g { --channel-color: #86dc8f; color: var(--channel-color); }
+.histogram-channel-button.channel-b { --channel-color: #80aaff; color: var(--channel-color); }
+.histogram-channel-button:not(.selected), .histogram-y-button:not(.selected) { color: #99999d; font-weight: 500; }
+.histogram-channel-button:disabled { cursor: not-allowed; }
+.histogram-y-button.selected { color: #f0f0f0; }
+.histogram-graph-wrap { position: relative; min-width: 0; }
+.histogram-graph { display: block; width: 100%; height: 116px; overflow: visible; }
+.histogram-gridline { fill: none; stroke: #454549; stroke-width: 0.7; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.histogram-baseline { fill: none; stroke: #77777b; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.histogram-axis-label { fill: #a6a6aa; font: 9px system-ui, sans-serif; }
+.histogram-series { stroke-width: 1.1; opacity: 0.38; vector-effect: non-scaling-stroke; mix-blend-mode: screen; }
+.histogram-series-y { fill-opacity: 0.24; stroke-width: 1.6; opacity: 0.9; mix-blend-mode: normal; }
+.histogram-message { position: absolute; inset: 30% 4px auto; margin: 0; color: #aaa; font-size: 0.68rem; text-align: center; pointer-events: none; }
 .right-panel .develop-panel { flex: 1 1 0; min-height: 90px; }
 .right-panel .workspace-section-header { flex: 0 0 auto; }
 .develop-panel > .workspace-section-content { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; padding: 0; }
