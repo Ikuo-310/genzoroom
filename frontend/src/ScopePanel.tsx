@@ -9,6 +9,7 @@ export function ScopePanel({ histogram }: Props) {
   const { t } = useTranslation();
   const [channels, setChannels] = useState({ r: true, g: true, b: true });
   const [yOnly, setYOnly] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const channelNames = { r: t('workspace.histogramRed'), g: t('workspace.histogramGreen'), b: t('workspace.histogramBlue') };
 
   return <div className="scope-panel">
@@ -20,6 +21,12 @@ export function ScopePanel({ histogram }: Props) {
         </select>
       </label>
       <div className="histogram-channel-controls" role="group" aria-label={t('workspace.histogramChannels')}>
+        <div className="histogram-scale-controls" role="group" aria-label={t('workspace.histogramScale')}>
+          <button type="button" aria-pressed={!expanded} className={!expanded ? 'selected' : ''}
+            onClick={() => setExpanded(false)}>{t('workspace.histogramNormal')}</button>
+          <button type="button" aria-pressed={expanded} className={expanded ? 'selected' : ''}
+            onClick={() => setExpanded(true)}>{t('workspace.histogramExpanded')}</button>
+        </div>
         {(['r', 'g', 'b'] as const).map((channel) => <button key={channel} type="button"
           className={`histogram-channel-button channel-${channel}${channels[channel] ? ' selected' : ''}`}
           aria-label={channelNames[channel]} aria-pressed={channels[channel]} disabled={yOnly}
@@ -30,6 +37,6 @@ export function ScopePanel({ histogram }: Props) {
           onClick={() => setYOnly((current) => !current)}>{t('workspace.yOnly')}</button>
       </div>
     </div>
-    <HistogramGraph histogram={histogram} channels={channels} yOnly={yOnly} />
+    <HistogramGraph histogram={histogram} channels={channels} yOnly={yOnly} expanded={expanded} />
   </div>;
 }
