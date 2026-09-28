@@ -137,21 +137,19 @@ describe('ScopePanel', () => {
     expect(histogramDisplayMaximum(data, true, false)).toBe(101);
   });
 
-  it('maps Numpad0 through Numpad3 to the same visible state as the buttons', () => {
+  it.each([
+    ['Numpad1', 'R'],
+    ['Numpad2', 'G'],
+    ['Numpad3', 'B'],
+  ])('%s exits Y Only without toggling %s, then toggles it on the next press', (code, label) => {
     render(histogram(40, 90, 180, 100));
-    expect(numpad('Numpad0').defaultPrevented).toBe(true);
+    numpad('Numpad0');
     expect(button('Y Only').getAttribute('aria-pressed')).toBe('true');
-    numpad('Numpad1');
+    numpad(code);
     expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
-    expect(button('R').getAttribute('aria-pressed')).toBe('false');
-    numpad('Numpad1');
-    numpad('Numpad2');
-    numpad('Numpad3');
-    expect(button('R').getAttribute('aria-pressed')).toBe('true');
-    expect(button('G').getAttribute('aria-pressed')).toBe('false');
-    expect(button('B').getAttribute('aria-pressed')).toBe('false');
-    expect(host.querySelectorAll('.histogram-series')).toHaveLength(1);
-    expect(host.querySelector('[data-channel="r"]')).not.toBeNull();
+    expect(button(label).getAttribute('aria-pressed')).toBe('true');
+    numpad(code);
+    expect(button(label).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('keeps Y Only RGB choices and restores them when Numpad0 toggles it off', () => {
@@ -242,14 +240,37 @@ describe('ScopePanel', () => {
     expect(host.querySelectorAll('.histogram-series')).toHaveLength(2);
   });
 
-  it('shows an empty graph when all RGB channels are off', () => {
+  it('keeps one RGB channel on when every channel is toggled off', () => {
     render(histogram(40, 90, 180, 100));
     act(() => button('R').click());
     act(() => button('G').click());
     act(() => button('B').click());
-    expect(host.querySelectorAll('.histogram-series')).toHaveLength(0);
-    expect(host.querySelector('.histogram-baseline')).not.toBeNull();
-    expect(host.textContent).toContain('Select a channel to display.');
+    expect(button('R').getAttribute('aria-pressed')).toBe('false');
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+    expect(button('B').getAttribute('aria-pressed')).toBe('true');
+    expect(button('B').disabled).toBe(false);
+    expect(host.querySelectorAll('.histogram-series')).toHaveLength(1);
+  });
+
+  it('prevents the last RGB channel from being turned off by either input method', () => {
+    render(histogram(40, 90, 180, 100));
+    act(() => button('G').click());
+    act(() => button('B').click());
+    numpad('Numpad1');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('R').disabled).toBe(false);
+    act(() => button('R').click());
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('keeps mouse and Numpad channel changes in the same RGB selection state', () => {
+    render(histogram(40, 90, 180, 100));
+    act(() => button('G').click());
+    numpad('Numpad3');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+    expect(button('B').getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelectorAll('.histogram-series')).toHaveLength(1);
   });
 
   it('treats unavailable data as pending and updates when the selected photo changes', () => {

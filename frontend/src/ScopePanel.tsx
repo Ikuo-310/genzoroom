@@ -5,6 +5,13 @@ import { isNativeEditingTarget } from './editShortcuts';
 import { HistogramGraph } from './HistogramGraph';
 
 type Props = { histogram: Histogram | null; keyboardBlocked?: boolean };
+type Channel = 'r' | 'g' | 'b';
+type Channels = Record<Channel, boolean>;
+
+function toggleChannel(current: Channels, channel: Channel): Channels {
+  if (current[channel] && Object.values(current).filter(Boolean).length === 1) return current;
+  return { ...current, [channel]: !current[channel] };
+}
 
 export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
   const { t } = useTranslation();
@@ -24,13 +31,13 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
       if (event.repeat) return;
       if (isYToggle) setYOnly((current) => !current);
       else if (channel) {
-        setChannels((current) => ({ ...current, [channel]: !current[channel] }));
-        setYOnly(false);
+        if (yOnly) setYOnly(false);
+        else setChannels((current) => toggleChannel(current, channel));
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [keyboardBlocked]);
+  }, [keyboardBlocked, yOnly]);
 
   return <div className="scope-panel">
     <div className="scope-panel-toolbar">
@@ -50,7 +57,7 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
         {(['r', 'g', 'b'] as const).map((channel) => <button key={channel} type="button"
           className={`histogram-channel-button channel-${channel}${channels[channel] ? ' selected' : ''}`}
           aria-label={channelNames[channel]} aria-pressed={channels[channel]} disabled={yOnly}
-          onClick={() => setChannels((current) => ({ ...current, [channel]: !current[channel] }))}>
+          onClick={() => setChannels((current) => toggleChannel(current, channel))}>
           {channel.toUpperCase()}
         </button>)}
         <button type="button" className={`histogram-y-button${yOnly ? ' selected' : ''}`} aria-pressed={yOnly}
