@@ -1,3 +1,4 @@
+import { collectHistogram } from './histogram';
 import { describe, expect, it, vi } from 'vitest';
 import { AdjustmentWorkerClient, type AdjustmentWorkerLike } from './adjustmentWorkerClient';
 import { defaultRecipe, type EditRecipe } from './editing';
@@ -26,7 +27,7 @@ function withExposure(value: number): EditRecipe {
 }
 
 function result(requestId: number, assetGeneration = 12): AdjustmentWorkerResultMessage {
-  return { type: 'result', requestId, assetGeneration, pixelBuffer: new ArrayBuffer(4), width: 1, height: 1 };
+  return { histogram: collectHistogram(new Uint8ClampedArray(4)), type: 'result', requestId, assetGeneration, pixelBuffer: new ArrayBuffer(4), width: 1, height: 1 };
 }
 
 describe('AdjustmentWorkerClient', () => {

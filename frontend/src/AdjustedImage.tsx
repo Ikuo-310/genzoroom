@@ -3,30 +3,36 @@ import type { EditRecipe } from './editing';
 import { decodeEditSource, type EditImageSource } from './editImageSource';
 import { renderAdjustments } from './adjustmentPipeline';
 import { AdjustmentWorkerClient } from './adjustmentWorkerClient';
+import { collectHistogram, type Histogram, type HistogramChangeHandler } from './histogram';
 
 type Props = {
   source: EditImageSource; recipe: EditRecipe; alt: string; width?: number; showBeforeAdjustments?: boolean;
   onLoad: (width: number, height: number) => void; onError: () => void;
+  onHistogramChange?: HistogramChangeHandler;
 };
 
-export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustments = false, onLoad, onError }: Props) {
+export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustments = false, onLoad, onError, onHistogramChange }: Props) {
   const beforeCanvas = useRef<HTMLCanvasElement>(null);
   const afterCanvas = useRef<HTMLCanvasElement>(null);
   const sourceKey = `${source.kind}:${source.url}`;
   const currentSourceKey = useRef(sourceKey);
   currentSourceKey.current = sourceKey;
-  const [decoded, setDecoded] = useState<{ sourceKey: string; pixels: ImageData } | null>(null);
+  const [decoded, setDecoded] = useState<{ sourceKey: string; pixels: ImageData; histogram: Histogram } | null>(null);
   const pixels = decoded?.sourceKey === sourceKey ? decoded.pixels : null;
+  const beforeHistogram = decoded?.sourceKey === sourceKey ? decoded.histogram : null;
   const [workerFailure, setWorkerFailure] = useState(0);
   const workerClient = useRef<AdjustmentWorkerClient | null>(null);
-  const callbacks = useRef({ onLoad, onError });
-  callbacks.current = { onLoad, onError };
+  const callbacks = useRef({ onLoad, onError, onHistogramChange });
+  callbacks.current = { onLoad, onError, onHistogramChange };
   useEffect(() => {
     const controller = new AbortController();
     setDecoded(null);
+    callbacks.current.onHistogramChange?.({ sourceKey, before: null, after: null });
     void decodeEditSource(source, controller.signal).then((decoded) => {
-      if (controller.signal.aborted) return;
-      setDecoded({ sourceKey, pixels: decoded });
+      if (controller.signal.aborted || currentSourceKey.current !== sourceKey) return;
+      const histogram = collectHistogram(decoded.data);
+      setDecoded({ sourceKey, pixels: decoded, histogram });
+      callbacks.current.onHistogramChange?.({ sourceKey, before: histogram, after: null });
       callbacks.current.onLoad(decoded.width, decoded.height);
     }).catch(() => { if (!controller.signal.aborted) callbacks.current.onError(); });
     return () => controller.abort();
@@ -52,6 +58,8 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
             const context = afterCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
             if (!context) throw new Error('Canvas unavailable');
             context.putImageData(new ImageData(new Uint8ClampedArray(result.pixelBuffer), result.width, result.height), 0, 0);
+            // Notify only after the same result has been accepted by the canvas.
+            callbacks.current.onHistogramChange?.({ sourceKey, before: beforeHistogram, after: result.histogram });
           } catch { callbacks.current.onError(); }
         },
         onError: (error) => {
@@ -73,11 +81,12 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
       if (workerClient.current === client) workerClient.current = null;
       client?.dispose();
     };
-  }, [pixels, sourceKey]);
+  }, [pixels, sourceKey, beforeHistogram]);
   useEffect(() => {
     if (!pixels) return;
     // Coalesce recipe changes within a frame before issuing a Worker request.
     const frame = requestAnimationFrame(() => {
+      if (currentSourceKey.current !== sourceKey) return;
       const client = workerClient.current;
       if (client) {
         client.render(recipe);
@@ -86,11 +95,14 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
       try {
         const context = afterCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
         if (!context) throw new Error('Canvas unavailable');
-        context.putImageData(new ImageData(renderAdjustments(pixels.data, recipe), pixels.width, pixels.height), 0, 0);
+        const adjusted = renderAdjustments(pixels.data, recipe);
+        const histogram = collectHistogram(adjusted);
+        context.putImageData(new ImageData(adjusted, pixels.width, pixels.height), 0, 0);
+        callbacks.current.onHistogramChange?.({ sourceKey, before: beforeHistogram, after: histogram });
       } catch { callbacks.current.onError(); }
     });
     return () => cancelAnimationFrame(frame);
-  }, [pixels, recipe, workerFailure]);
+  }, [pixels, recipe, workerFailure, sourceKey, beforeHistogram]);
   return <div className="viewer-comparison-image" role="img" aria-label={alt}
     style={{ width: width ? `${width}px` : undefined }}>
     <canvas ref={beforeCanvas} aria-hidden="true" width={pixels?.width ?? 0} height={pixels?.height ?? 0} />

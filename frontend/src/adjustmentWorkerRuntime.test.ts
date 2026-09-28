@@ -1,3 +1,4 @@
+import { collectHistogram } from './histogram';
 import { describe, expect, it } from 'vitest';
 import { renderAdjustments } from './adjustmentPipeline';
 import { defaultRecipe, type EditRecipe } from './editing';
@@ -65,6 +66,7 @@ describe('adjustment Worker runtime', () => {
     expect(result.assetGeneration).toBe(7);
     expect([result.width, result.height]).toEqual([4, 2]);
     expect(new Uint8ClampedArray(result.pixelBuffer)).toEqual(expected);
+    expect(result.histogram).toEqual(collectHistogram(expected));
     expect(responses[1].transfer).toEqual([result.pixelBuffer]);
     for (let i = 3; i < expected.length; i += 4) expect(new Uint8ClampedArray(result.pixelBuffer)[i]).toBe(source[i]);
   });

@@ -21,6 +21,7 @@ import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './C
 import { basicHistoryControl } from './basicControls';
 import { formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatSaturation, formatShadowsTemperature, formatShadowsTint, formatTemperature, formatTint, formatVibrance, isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing, type EditEntry } from './editing';
 import { getEditImageSource } from './editImageSource';
+import type { AssetHistograms, ImageHistograms } from './histogram';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
@@ -74,6 +75,19 @@ export function AnshitsuPage() {
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
+  const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
+  const histogramSourceKey = editable ? `immich-preview:${activeDetail?.preview_url}` : null;
+  const currentHistogramAsset = useRef({ assetId, sourceKey: histogramSourceKey });
+  currentHistogramAsset.current = { assetId, sourceKey: histogramSourceKey };
+  // H2 can pass this guarded snapshot to ScopePanel; route changes hide old data immediately.
+  const activeHistograms = histograms?.assetId === assetId && histograms.sourceKey === histogramSourceKey
+    ? histograms : null;
+  const receiveHistograms = useCallback((next: ImageHistograms) => {
+    if (currentHistogramAsset.current.assetId !== assetId
+      || currentHistogramAsset.current.sourceKey !== next.sourceKey) return;
+    setHistograms({ ...next, assetId });
+  }, [assetId]);
+  useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
@@ -405,6 +419,7 @@ export function AnshitsuPage() {
           src={activeDetail.preview_url}
           editSource={editable ? getEditImageSource(activeDetail) : undefined}
           recipe={editable ? session.recipe : undefined}
+          onHistogramChange={receiveHistograms}
           alt={activeDetail.filename}
           leftOpen={leftOpen}
           rightOpen={rightOpen}

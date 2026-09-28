@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
 import { ImageViewer } from './ImageViewer';
 import { defaultRecipe } from './editing';
+import { collectHistogram, type HistogramChangeHandler } from './histogram';
 import i18n from './i18n';
 
 vi.mock('./editStateApi', async (importOriginal) => ({
@@ -16,6 +17,8 @@ vi.mock('./editStateApi', async (importOriginal) => ({
 const mockImage = vi.hoisted(() => ({
   onLoad: undefined as undefined | ((width: number, height: number) => void),
   recipe: undefined as unknown,
+  onHistogramChange: undefined as HistogramChangeHandler | undefined,
+  renders: 0,
 }));
 vi.mock('./api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api')>();
@@ -25,9 +28,11 @@ vi.mock('./api', async (importOriginal) => {
   })) };
 });
 vi.mock('./AdjustedImage', () => ({
-  AdjustedImage: ({ showBeforeAdjustments, onLoad, recipe }: { showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown }) => {
+  AdjustedImage: ({ showBeforeAdjustments, onLoad, recipe, onHistogramChange }: { showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler }) => {
     mockImage.onLoad = onLoad;
     mockImage.recipe = recipe;
+    mockImage.onHistogramChange = onHistogramChange;
+    mockImage.renders++;
     return <div data-testid="adjusted-image" data-before={String(showBeforeAdjustments)} />;
   },
 }));
@@ -89,6 +94,41 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('forwards histogram snapshots unchanged through ImageViewer', () => {
+    const receive = vi.fn();
+    act(() => root.render(<ImageViewer src="/first" editSource={{ kind: 'immich-preview', url: '/first' }}
+      recipe={defaultRecipe()} alt="photo" leftOpen rightOpen onHistogramChange={receive}
+      onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));
+    const snapshot = { sourceKey: 'immich-preview:/first', before: collectHistogram(new Uint8ClampedArray(4)), after: null };
+    act(() => mockImage.onHistogramChange?.(snapshot));
+    expect(receive).toHaveBeenCalledWith(snapshot);
+    expect(receive.mock.calls[0][0]).toBe(snapshot);
+  });
+
+  it('stores current photo histograms in AnshitsuPage and rejects a previous photo callback', async () => {
+    const selectedAssets = ['first', 'second'].map((id) => ({
+      id, filename: `${id}.jpg`, date: '2026-09-01T10:00:00', thumbnail_url: `/${id}/thumbnail`,
+      format: 'JPEG', is_raw: false,
+    }));
+    act(() => root.render(<MemoryRouter initialEntries={[{
+      pathname: '/anshitsu/first', state: { selectedAssets, activeAssetId: 'first' },
+    }]}><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
+    await act(async () => {});
+    const firstCallback = mockImage.onHistogramChange!;
+    const firstSnapshot = { sourceKey: 'immich-preview:/first/preview', before: collectHistogram(new Uint8ClampedArray(4)), after: null };
+    const firstRenders = mockImage.renders;
+    act(() => firstCallback(firstSnapshot));
+    expect(mockImage.renders).toBeGreaterThan(firstRenders);
+    click(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-label="second.jpg"]')!);
+    await act(async () => {});
+    const secondRenders = mockImage.renders;
+    act(() => firstCallback(firstSnapshot));
+    act(() => mockImage.onHistogramChange?.(firstSnapshot));
+    expect(mockImage.renders).toBe(secondRenders);
+    act(() => mockImage.onHistogramChange?.({ ...firstSnapshot, sourceKey: 'immich-preview:/second/preview' }));
+    expect(mockImage.renders).toBeGreaterThan(secondRenders);
+  });
+
   it('uses pointer styling on every mouse open, keyboard styling on Tab, and hover styling after mouse movement', () => {
     act(() => root.render(<ContextMenuHarness />));
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;

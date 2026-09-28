@@ -1,4 +1,5 @@
 import type { EditRecipe } from './editing';
+import type { Histogram } from './histogram';
 
 export type AdjustmentWorkerInitMessage = {
   type: 'init';
@@ -27,6 +28,7 @@ export type AdjustmentWorkerResultMessage = {
   requestId: number;
   assetGeneration: number;
   pixelBuffer: ArrayBuffer;
+  histogram: Histogram;
   width: number;
   height: number;
 };

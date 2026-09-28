@@ -7,11 +7,13 @@ import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } f
 import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
+import type { HistogramChangeHandler } from './histogram';
 
 type ImageViewerProps = {
   src: string;
   editSource?: EditImageSource;
   recipe?: EditRecipe;
+  onHistogramChange?: HistogramChangeHandler;
   alt: string;
   leftOpen: boolean;
   rightOpen: boolean;
@@ -28,7 +30,7 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
@@ -223,7 +225,7 @@ export function ImageViewer({ src, editSource, recipe, alt, leftOpen, rightOpen,
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>
         {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
-          width={imageSize.x * scale}
+          width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
           onError={() => setImageState('error')} /> : <img
           src={src}

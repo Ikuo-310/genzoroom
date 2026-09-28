@@ -1,4 +1,5 @@
 import { renderAdjustments } from './adjustmentPipeline';
+import { collectHistogram } from './histogram';
 import type { AdjustmentWorkerRequest, AdjustmentWorkerResponse } from './adjustmentWorkerProtocol';
 
 export type AdjustmentWorkerState = {
@@ -43,6 +44,7 @@ export function handleAdjustmentWorkerMessage(
       requestId: message.requestId,
       assetGeneration: message.assetGeneration,
       pixelBuffer: pixels.buffer,
+      histogram: collectHistogram(pixels),
       width: state.width,
       height: state.height,
     }, [pixels.buffer]);
