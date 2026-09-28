@@ -4,11 +4,11 @@
 
 ## 永続化 Phase 5（現在仕様）
 
-JPEG写真を暗室でactiveにすると通常はedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。退出保存失敗後に暗室へ留まり、assetにdirtyなlocal stateまたは未確認saveが残っている場合は、再activation時にそのstateを保持してGETで上書きしない。明示的にdiscardしたassetは記録を破棄し、再訪時にDBから取得する。GET失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryを行わない。失敗後に最新snapshotまで保存できたら警告を解除する。通信結果が不明な保存は、DBで成功済みの可能性があるため、元のsnapshot・expectedRevision・saveIdを変更せず先に再送する。確認後に追加編集を保存する。別タブ等によるrevision conflictは自動mergeしない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。Home controlで暗室を退出すると、そのAnshitsu session中に永続化対象の編集を行った全assetを順次処理する。最新snapshotをcopy上で作り、`COMPACT_HISTORY_ON_EXIT`が有効ならapplied / redoを分離したpure compactionとvalidation後に保存する。圧縮失敗時は非圧縮snapshotへfallbackする。成功済みassetはlive sessionも保存済みHistoryへ同期し、後続assetの失敗で詳細Historyが再autosaveされないようにする。最終保存失敗時は暗室に留まるか、rollback / DELETEなしで退出するかを選ぶ。Browser Back、reload、tab close時の同期保存・interceptは未実装。
+JPEG写真を暗室でactiveにすると通常はedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。退出保存失敗後に暗室に留まり、assetにdirtyなlocal stateまたは未確認saveが残っている場合は、再activation時にそのstateを保持してGETで上書きしない。明示的にdiscardしたassetは記録を破棄し、再訪時にDBから取得する。GET失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryを行わない。失敗後に最新snapshotまで保存できたら警告を解除する。通信結果が不明な保存（HTTP 408／5xx、成功応答の解析・検証失敗等）はDBで成功済みの可能性があるため、元のsnapshot・expectedRevision・saveIdを変更せず先に再送する。確認後に追加編集を保存する。別タブ等による真正なrevision conflict（409）は自動mergeしない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。discard後も保存済み状態が確定済みなら編集済み表示を維持し、不明なら古い一括取得結果を使わずunknownとして扱う。Home controlで暗室を退出すると、そのAnshitsu session中に永続化対象の編集を行った全assetを順次処理する。最新snapshotをcopy上で作り、`COMPACT_HISTORY_ON_EXIT`が有効ならapplied / redoを分離したpure compactionとvalidation後に保存する。圧縮失敗時は非圧縮snapshotへfallbackする。成功済みassetはlive sessionも保存済みHistoryへ同期し、後続assetの失敗で詳細Historyが再autosaveされないようにする。最終保存失敗時は暗室に留まるか、rollback / DELETEなしで退出するかを選ぶ。Browser Back、reload、tab close時の同期保存・interceptは未実装。
 
 ## Copy / Paste（現行仕様）
 
-recipe v17の16数値項目を、`frontend/src/editClipboard.ts`の同一タブ内メモリ上のクリップボードで共有する。通常コピーは16項目、選択コピーは選んだ項目、単一スライダーコピーは対象の1項目を保存し、いずれも以前のコピーを置き換える。値は`effectiveAdjustments()`ではなくrecipeからコピー時点で複製し、source asset IDとfilenameも保持する。カテゴリ4個とColor Grading range3個のON/OFFは含めず、OFF中に保存されている数値も対象とする。Homeへ戻るなどのroute変更後も同じタブ内では保持するが、reload・タブ終了後は残さない。OS clipboard APIは使わない。
+Recipe v18の16数値項目を、`frontend/src/editClipboard.ts`の同一タブ内メモリ上のクリップボードで共有する。通常コピーは16項目、選択コピーは選んだ項目、単一スライダーコピーは対象の1項目を保存し、いずれも以前のコピーを置き換える。値は`effectiveAdjustments()`ではなくrecipeからコピー時点で複製し、source asset IDとfilenameも保持する。ON/OFFはコピーせず、個別項目がOFFでも保持されている数値を対象とする。Homeへ戻るなどのroute変更後も同じタブ内では保持するが、reload・タブ終了後は残さない。OS clipboard APIは使わない。
 
 プレビューがViewerの操作対象で`Ctrl+C`を押すと全項目をコピーし、AdjustmentSliderの操作対象があればその1項目をコピーする。操作対象は`keyboardAdjustment()`で共有し、マウスホバーとキーボードフォーカス、Shift＋上下キーで移した既存の対象に従う。対象を別途記憶するCopy専用状態はない。`Ctrl+V`はスライダー／Viewerのfocusを要求せず、編集可能な現在の写真にクリップボード内容を適用する。写真切替中、編集状態の読み込み前、退出保存中、選択dialog表示中などは実行できない。数値・テキスト入力中はブラウザ標準操作を優先する。
 
@@ -16,7 +16,7 @@ recipe v17の16数値項目を、`frontend/src/editClipboard.ts`の同一タブ�
 
 Pasteは値を選んだ1回の`paste` actionで適用し、コピー項目が複数でも変更があれば1件のcompound Historyとなる。同値Paste自体はHistoryを作らず、Redoも破棄しない。Paste開始前の未確定スライダー操作は先にcommitし、そのHistoryとは別扱いにする。クリップボードも減らさない。`before`／`after`は完全recipe、metadataはsource asset ID・filenameと指定されたadjustment ID一覧を保持する。HistoryからUndo／Redoでき、表示にはコピー元filenameを使う。History compactionはPasteを前後の編集操作と結合しない。通常のdirty判定、5秒autosave、Filmstrip切替前save、Home退出時のsave・compactionを通る。
 
-永続snapshotはRecipe v17、`stateFormatVersion` 2、`processingVersion` `jpeg-preview-srgb8-v1`、SQLite schema 1。Frontend／Backendはv1を完全検証して読み込めるが、Paste entryはv2にのみ許可する。v1を読むだけではDBを更新せず、その後に変更を保存するとv2になる。v2 snapshot保存後にv1のみ対応する旧版へrollbackすると、その編集状態を読めない可能性がある。DB schema、Recipe、画素処理versionはCopy / Pasteのために変更していない。HSL、カーブ、シャープネス等は将来候補で、現時点ではRecipe v17の16数値項目以外のCopy / Pasteは未実装。
+永続snapshotはRecipe v18（Recipe v17の読み込み互換あり）、`stateFormatVersion` 2（snapshot v1も読み込み互換あり）、`processingVersion` `jpeg-preview-srgb8-v1`、SQLite schema 1。snapshot v1は完全検証して読み込めるが、Paste entryはsnapshot v2にのみ許可する。v1を読むだけではDBを更新せず、その後に変更を保存するとv2になる。v2 snapshot保存後にsnapshot v1のみ対応する旧版へrollbackすると、その編集状態を読めない可能性がある。DB schema、Recipe、画素処理versionはCopy / Pasteのために変更していない。HSL、カーブ、シャープネス等は将来候補で、Copy / PasteはRecipe v18の16数値項目が対象。
 
 ## History完成後の確認・英語ロケール監査（2026-09-26・現在仕様）
 
@@ -30,7 +30,7 @@ History行の通常クリックはその時点のRecipeへ直接移動し、Hist
 
 ## 3WAY Color Grading監査（2026-09-24・現在仕様）
 
-recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3rangeの計7 enabled flagを持つ。Shadows / Midtones / Highlightsは各Temperature / Tintと個別ON/OFFが完成済み。Point / Width、RAW現像、export、Histogram等は未実装。
+現在のrecipeはflat構造のv18。White Balance 2項目、Basic 6項目、Color Grading 6項目、Color 2項目の計16値と、4カテゴリ・3range・16個別項目の計23 enabled flagを持つ。各階層のON/OFFは独立し、OFFでも値を保持する。Shadows / Midtones / Highlightsは各Temperature / Tintと個別range ON/OFFを持つ。Point / Width、RAW現像、export、Histogram等は未実装。
 
 処理順はGlobal Temperature → Global Tint → Exposure → Contrast → Highlights → Whites → Shadows → Blacks → Shadows Temperature/Tint → Midtones Temperature/Tint → Highlights Temperature/Tint → Vibrance → Saturation。各range内ではTemperature適用前の同じsRGB由来Yからweightを一度計算し、Tintにも使う。range間では直前rangeの丸め済み画素からYを求め直す。
 
@@ -38,15 +38,35 @@ recipeはflat構造のv17を維持。White Balance 2項目、Basic 6項目、Col
 - Midtones：`smoothstep(0.15, 0.35, Y) * (1 - smoothstep(0.60, 0.78, Y))`。0.35〜0.60でfull。
 - Highlights：`smoothstep(0.55, 0.75, Y)`。0.55以下で0、0.75以上でfull。
 
-全体OFFでは全rangeをbypassし、全体ONでは各range flagに従う。いずれも値は保持する。個別adjustment ResetとColor Grading Resetはenabledを保持し、All Resetのみすべてtrueへ戻す。range切替はpending編集を先にcommitしてから独立した1操作になる。
+全体OFFでは全rangeと個別項目をbypassし、ON時はcategory、range、individual flagの各段階に従う。いずれも値は保持する。個別adjustment Reset、カテゴリReset、Color Grading Resetはenabledを保持し、All Resetのみすべてtrueへ戻す。各ON/OFF切替はpending編集を先にcommitしてから独立した1操作になる。
 
 監査で重大な整合性問題は見つからなかった。小規模修正として、Global Tintの同一R/B LUTを共用し、gain LUTとExposureも既存Float64 decode表を再利用した。linear gainのclip/encode/丸めを共通helperへまとめ、weighted TintのR/Bで同じべき乗を二度計算しないようにした。カテゴリReset・既定値判定でdefaultRecipeをキーごとに生成していた箇所も1回へ減らした。schema、gain式、weight、処理順、UI表示・操作は維持する。既存テストの画素列を用い、修正前v17の3種類の出力ハッシュを固定してbyte互換性を検証する。
 
 Workerはsourceを初期化時に1回だけcopyしてtransferし、以後はrecipeのみ送る。runtimeは共通renderAdjustmentsを呼び、結果bufferをtransferする。1 in-flight＋pending latest 1、requestId / assetGeneration検査、fallback、unmount時の終了を確認した。sourceのmain-thread保持はfallbackに必要で、毎renderの出力bufferもsourceをdetachしないために必要。画素数に比例するCPU処理とCanvas転送は残り、Worker化だけでは進行中renderの計算時間は短縮・中断できない。今回の演算回数削減から実写真Firefoxの応答時間改善率は断定しない。
 
-editing.tsの列挙は長いが、現在の16値・7flagのReset/equality/Historyは整合している。ColorGradingAdjustmentControlsは3 propsで画素処理を持たず、6sliderの明示的な重複は現段階では許容した。AdjustmentSliderのmodule-level Map/activeAdjustmentと各sliderのwindow listenerは、単一workspace内では既存テストで保護されている。複数workspaceの同時mount、可変slider構成、別document対応が必要になった際は、操作対象管理をworkspace単位へ分離する。今すぐ大規模分割は行わない。
+editing.tsの列挙は長いが、現在の16値・23flagのReset/equality/Historyは整合している。ColorGradingAdjustmentControlsは3 propsで画素処理を持たず、6sliderの明示的な重複は現段階では許容した。AdjustmentSliderのmodule-level Map/activeAdjustmentと各sliderのwindow listenerは、単一workspace内では既存テストで保護されている。複数workspaceの同時mount、可変slider構成、別document対応が必要になった際は、操作対象管理をworkspace単位へ分離する。今すぐ大規模分割は行わない。
 
 将来Point / Width化では、3つの純粋weight helperと定数が変更箇所になる。ただしShadows/Highlightsの片側範囲とMidtonesのplateauをどのようにPoint / Widthへ対応させるか、境界・最小幅を先に定義する必要がある。現時点のための汎用frameworkやrecipe項目は追加していない。
+
+## UI改善 Phase 1〜3（現在仕様）
+
+暗室のHistory／EXIF側とScope／Develop側は独立してスクロールし、調整項目間のキーボード移動は表示中のカテゴリ・3WAY範囲・スライダーに従う。スライダーには数値入力、個別電源、Resetがあり、カテゴリと3WAY範囲にも独立した電源・Reset・コンテキスト操作を備える。カテゴリ、個別調整、3WAY範囲の右クリックメニューは既存の編集actionを共有し、各ON/OFF、Reset、Copy／Pasteを行う。
+
+ViewerのBefore／After切替はレシピやHistoryを変更せず、Backslash長押しはBeforeを一時表示する。Viewerの「⋯」メニューは開いている間グローバルshortcutを遮断し、Escapeで閉じると起動ボタンへfocusを戻す。3WAY範囲見出しから別のスライダーへ実際にポインターを移したときは古い見出しfocusを解除し、DOM focusと調整操作対象を一致させる。
+
+Homeは最大100件の写真一覧、RAW／非RAW filter、Shift＋clickの表示順範囲選択、選択順を保った暗室への引き渡しを備える。HomeとFilmstripは編集済みマーカーを表示する。POST `/assets/edit-status` は最大100 IDを一括確認し、未取得・未編集・編集済みを区別する。Homeの接続状態から開く接続詳細と、Home／暗室共通のGenzoRoomタイトルを使う。暗室からのタイトル操作は既存の退出保存経路を通る。
+
+## 総合コード監査 Phase 1〜3 完了
+
+Phase 1では、保存結果不明時に同一snapshot・revision・saveIdを再送する処理と、discard後も確定済みの保存状態を編集済み表示へ反映する処理を修正した。HTTP 408／5xxや成功応答の解析・検証失敗は結果不明として扱い、真正な409は自動mergeしない。未保存のブラウザBack・再読込・タブ終了時の強制保存は未実装のまま。
+
+Phase 2ではViewer「⋯」メニュー表示中のグローバルshortcutを遮断し、Escape後に起動ボタンへfocusを戻すようにした。3WAY見出しから別スライダーへ実ポインター移動した場合に残留focusを整理し、スクロール由来の疑似pointerイベントでは操作対象を変えない。
+
+Phase 3では異常な非有限EXIF整数を欠損値として扱い、写真詳細全体の失敗を防ぐ防御を追加した。Workerのsource buffer保持・古いrender結果破棄、および3WAY各範囲内でTemperature／Tintが同じweightを共有する互換性制約を英語コメントで明確にした。Worker無応答時の回復方針は未決定で、現時点で障害が確認されたという意味ではない。総合パフォーマンス監査は未実施。
+
+## 今後の作業計画
+
+暗室第1フェーズの残作業は、総合パフォーマンス監査、Histogram実装、最終実機検証。Histogram完成を第1フェーズの区切りとする。将来の書き出し設定とキューはHome中心に検討し、暗室には書き出し候補のマーキングを追加する予定だが、いずれも未実装。公式サイトと日英操作マニュアルは暗室第1フェーズの完成後に制作する。サイト構成案は現時点の第一候補であり確定仕様ではない。
 
 過去の最大10/50件、古いrecipe、当時の未実装・手動検証記録は以下に保持した。今回ブラウザ手動確認やfixture・画像の作成は行っていない。
 
