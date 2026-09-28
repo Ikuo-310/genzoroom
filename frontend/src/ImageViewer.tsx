@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
@@ -19,6 +19,7 @@ type ImageViewerProps = {
   rightOpen: boolean;
   persistentBeforeAdjustments?: boolean;
   onBeforeAdjustmentsChange?: (value: boolean) => void;
+  onBeforeAdjustmentsDisplayChange?: (value: boolean) => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
   onCopyAdjustments?: () => boolean;
@@ -30,7 +31,7 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
@@ -44,6 +45,9 @@ export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, l
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
+  useLayoutEffect(() => {
+    onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
+  }, [showBeforeAdjustments, onBeforeAdjustmentsDisplayChange]);
   const closeContextMenu = useCallback((restoreFocus: boolean) => {
     setContextMenuPosition(null);
     if (restoreFocus) viewportRef.current?.focus({ preventScroll: true });
@@ -62,7 +66,8 @@ export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, l
     if (keyboardBlocked) setBackslashHeld(false);
     const keydown = (event: KeyboardEvent) => {
       if (keyboardBlocked || event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
-        || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)) return;
+        || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       event.preventDefault();
       if (!event.repeat) setBackslashHeld(true);
     };

@@ -28,12 +28,18 @@ function denseHistogram(value = 10): Histogram {
 let host: HTMLDivElement;
 let root: Root;
 
-function render(data: Histogram | null) {
-  act(() => root.render(<ScopePanel histogram={data} />));
+function render(data: Histogram | null, keyboardBlocked = false) {
+  act(() => root.render(<ScopePanel histogram={data} keyboardBlocked={keyboardBlocked} />));
 }
 
 function button(label: string) {
   return [...host.querySelectorAll('button')].find((item) => item.textContent === label)!;
+}
+
+function numpad(code: string, init: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key: 'Unidentified', code, bubbles: true, cancelable: true, ...init });
+  act(() => window.dispatchEvent(event));
+  return event;
 }
 
 beforeEach(async () => {
@@ -129,6 +135,83 @@ describe('ScopePanel', () => {
     act(() => button('Y Only').click());
     expect(host.querySelector('.histogram-y-axis')?.firstElementChild?.textContent).toBe('101');
     expect(histogramDisplayMaximum(data, true, false)).toBe(101);
+  });
+
+  it('maps Numpad0 through Numpad3 to the same visible state as the buttons', () => {
+    render(histogram(40, 90, 180, 100));
+    expect(numpad('Numpad0').defaultPrevented).toBe(true);
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('true');
+    numpad('Numpad1');
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
+    expect(button('R').getAttribute('aria-pressed')).toBe('false');
+    numpad('Numpad1');
+    numpad('Numpad2');
+    numpad('Numpad3');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+    expect(button('B').getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelectorAll('.histogram-series')).toHaveLength(1);
+    expect(host.querySelector('[data-channel="r"]')).not.toBeNull();
+  });
+
+  it('keeps Y Only RGB choices and restores them when Numpad0 toggles it off', () => {
+    render(histogram(40, 90, 180, 100));
+    act(() => button('G').click());
+    numpad('Numpad0');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+    expect(button('B').getAttribute('aria-pressed')).toBe('true');
+    numpad('Numpad0');
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
+    expect(button('G').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('ignores top-row numbers, modifiers, repeats, prevented and composing events', () => {
+    render(histogram(40, 90, 180, 100));
+    numpad('Digit1', { key: '1' });
+    numpad('Numpad1', { ctrlKey: true });
+    numpad('Numpad1', { altKey: true });
+    numpad('Numpad1', { metaKey: true });
+    numpad('Numpad2', { shiftKey: true });
+    numpad('Numpad3', { repeat: true });
+    numpad('Numpad0', { isComposing: true });
+    const prevented = new KeyboardEvent('keydown', { code: 'Numpad1', cancelable: true });
+    prevented.preventDefault();
+    act(() => window.dispatchEvent(prevented));
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    expect(button('G').getAttribute('aria-pressed')).toBe('true');
+    expect(button('B').getAttribute('aria-pressed')).toBe('true');
+    expect(button('Y Only').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('preserves Numpad entry in native fields and ignores keys while menus or blocked operations are active', () => {
+    render(histogram(40, 90, 180, 100));
+    const number = document.createElement('input');
+    number.type = 'number';
+    host.append(number);
+    const numberEvent = new KeyboardEvent('keydown', { code: 'Numpad1', key: '1', bubbles: true, cancelable: true });
+    act(() => number.dispatchEvent(numberEvent));
+    expect(numberEvent.defaultPrevented).toBe(false);
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
+    number.remove();
+    const blockedLayers: HTMLElement[] = [];
+    for (const role of ['menu', 'dialog', 'alertdialog']) {
+      const layer = document.createElement('div');
+      layer.setAttribute('role', role);
+      document.body.append(layer);
+      blockedLayers.push(layer);
+      numpad('Numpad1');
+    }
+    const toolbarMenu = document.createElement('details');
+    toolbarMenu.className = 'edit-settings-menu';
+    toolbarMenu.open = true;
+    document.body.append(toolbarMenu);
+    blockedLayers.push(toolbarMenu);
+    numpad('Numpad1');
+    blockedLayers.forEach((layer) => layer.remove());
+    render(histogram(40, 90, 180, 100), true);
+    numpad('Numpad1');
+    expect(button('R').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('toggles R, G and B separately without changing the other selections', () => {

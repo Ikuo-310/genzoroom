@@ -1,16 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Histogram } from './histogram';
+import { isNativeEditingTarget } from './editShortcuts';
 import { HistogramGraph } from './HistogramGraph';
 
-type Props = { histogram: Histogram | null };
+type Props = { histogram: Histogram | null; keyboardBlocked?: boolean };
 
-export function ScopePanel({ histogram }: Props) {
+export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
   const { t } = useTranslation();
   const [channels, setChannels] = useState({ r: true, g: true, b: true });
   const [yOnly, setYOnly] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const channelNames = { r: t('workspace.histogramRed'), g: t('workspace.histogramGreen'), b: t('workspace.histogramBlue') };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const channel = event.code === 'Numpad1' ? 'r' : event.code === 'Numpad2' ? 'g' : event.code === 'Numpad3' ? 'b' : null;
+      const isYToggle = event.code === 'Numpad0';
+      if ((!channel && !isYToggle) || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey
+        || event.metaKey || event.shiftKey || isNativeEditingTarget(event.target) || keyboardBlocked
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (isYToggle) setYOnly((current) => !current);
+      else if (channel) {
+        setChannels((current) => ({ ...current, [channel]: !current[channel] }));
+        setYOnly(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [keyboardBlocked]);
 
   return <div className="scope-panel">
     <div className="scope-panel-toolbar">

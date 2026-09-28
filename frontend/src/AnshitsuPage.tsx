@@ -56,6 +56,8 @@ export function AnshitsuPage() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
+  // Scope needs the effective Viewer state because the persistent choice omits held Backslash.
+  const [viewerShowsBefore, setViewerShowsBefore] = useState(false);
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
   const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
@@ -90,6 +92,8 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
+  const viewerKeyboardBlocked = selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
+    || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
@@ -426,6 +430,7 @@ export function AnshitsuPage() {
           rightOpen={rightOpen}
           persistentBeforeAdjustments={persistentBeforeAdjustments}
           onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
+          onBeforeAdjustmentsDisplayChange={setViewerShowsBefore}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => setRightOpen((value) => !value)}
           onCopyAdjustments={() => copySettings()}
@@ -434,8 +439,7 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
-            || switching || exitSaving || exitFailure !== null || failedSwitch !== null}
+          keyboardBlocked={viewerKeyboardBlocked}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -448,7 +452,8 @@ export function AnshitsuPage() {
       )}
       rightPanel={<>
         <WorkspaceSection title={t('workspace.scope')} className="scope-section">
-          <ScopePanel histogram={activeHistograms?.after ?? null} />
+          <ScopePanel histogram={activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
+            keyboardBlocked={!editable || viewerKeyboardBlocked} />
         </WorkspaceSection>
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>

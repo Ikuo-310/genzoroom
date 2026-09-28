@@ -19,6 +19,7 @@ const mockImage = vi.hoisted(() => ({
   recipe: undefined as unknown,
   onHistogramChange: undefined as HistogramChangeHandler | undefined,
   renders: 0,
+  beforeDisplay: false,
 }));
 vi.mock('./api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api')>();
@@ -46,7 +47,17 @@ function Harness({ src = '/first' }: { src?: string }) {
     editSource={{ kind: 'immich-preview', url: src }} recipe={defaultRecipe()}
     persistentBeforeAdjustments={persistentBeforeAdjustments}
     onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
+    onBeforeAdjustmentsDisplayChange={(value) => { mockImage.beforeDisplay = value; }}
     onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
+}
+
+function BlockingBeforeHarness({ keyboardBlocked = false }: { keyboardBlocked?: boolean }) {
+  const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
+  return <ImageViewer src="/first" alt="photo" leftOpen rightOpen recipe={defaultRecipe()}
+    editSource={{ kind: 'immich-preview', url: '/first' }} persistentBeforeAdjustments={persistentBeforeAdjustments}
+    onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
+    onBeforeAdjustmentsDisplayChange={(value) => { mockImage.beforeDisplay = value; }}
+    keyboardBlocked={keyboardBlocked} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
 function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: KeyboardEventInit = {}) {
@@ -81,6 +92,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
+  mockImage.beforeDisplay = false;
   Object.values(contextActions).forEach((action) => action.mockClear());
   host = document.createElement('div');
   document.body.append(host);
@@ -127,6 +139,37 @@ describe('Viewer edit settings context menu', () => {
     expect(mockImage.renders).toBe(secondRenders);
     act(() => mockImage.onHistogramChange?.({ ...firstSnapshot, sourceKey: 'immich-preview:/second/preview' }));
     expect(mockImage.renders).toBeGreaterThan(secondRenders);
+  });
+
+  it('selects the matching before or after histogram for the Viewer state without a fallback', async () => {
+    const selectedAssets = [{
+      id: 'first', filename: 'first.jpg', date: '2026-09-01T10:00:00', thumbnail_url: '/first/thumbnail',
+      format: 'JPEG', is_raw: false,
+    }];
+    act(() => root.render(<MemoryRouter initialEntries={[{
+      pathname: '/anshitsu/first', state: { selectedAssets, activeAssetId: 'first' },
+    }]}><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
+    await act(async () => {});
+    const before = collectHistogram(new Uint8ClampedArray([7, 8, 9, 255]));
+    const after = collectHistogram(new Uint8ClampedArray([200, 201, 202, 255]));
+    act(() => mockImage.onHistogramChange?.({ sourceKey: 'immich-preview:/first/preview', before: null, after }));
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('200,');
+
+    click(comparisonToggle());
+    expect(host.textContent).toContain('Histogram is not available yet.');
+    expect(host.querySelectorAll('.histogram-series')).toHaveLength(0);
+    act(() => mockImage.onHistogramChange?.({ sourceKey: 'immich-preview:/first/preview', before, after }));
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('7,');
+
+    key('keydown');
+    key('keyup');
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('7,');
+    click(comparisonToggle());
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('200,');
+    key('keydown');
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('7,');
+    key('keyup');
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('200,');
   });
 
   it('uses pointer styling on every mouse open, keyboard styling on Tab, and hover styling after mouse movement', () => {
@@ -399,16 +442,20 @@ describe('Before / After viewer state', () => {
     act(() => root.render(<Harness />));
     expect(key('keydown', window, { key: '/', code: 'Slash' }).defaultPrevented).toBe(false);
     expect(image().dataset.before).toBe('false');
+    expect(mockImage.beforeDisplay).toBe(false);
     expect(key('keydown', window, { key: '¥' }).defaultPrevented).toBe(true);
     expect(key('keydown').defaultPrevented).toBe(true);
     expect(image().dataset.before).toBe('true');
+    expect(mockImage.beforeDisplay).toBe(true);
     expect(key('keydown', window, { repeat: true }).defaultPrevented).toBe(true);
     key('keyup');
     expect(image().dataset.before).toBe('false');
+    expect(mockImage.beforeDisplay).toBe(false);
     click(comparisonToggle());
     key('keydown');
     key('keyup');
     expect(image().dataset.before).toBe('true');
+    expect(mockImage.beforeDisplay).toBe(true);
     expect(comparisonToggle().getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -429,12 +476,29 @@ describe('Before / After viewer state', () => {
     key('keydown');
     act(() => window.dispatchEvent(new Event('blur')));
     expect(image().dataset.before).toBe('false');
+    expect(mockImage.beforeDisplay).toBe(false);
     key('keydown');
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     act(() => document.dispatchEvent(new Event('visibilitychange')));
     expect(image().dataset.before).toBe('false');
+    expect(mockImage.beforeDisplay).toBe(false);
     Reflect.deleteProperty(document, 'hidden');
     fields.forEach((field) => field.remove());
+  });
+
+  it('clears only the temporary Before state when keyboard actions become blocked', () => {
+    act(() => root.render(<BlockingBeforeHarness />));
+    click(comparisonToggle());
+    key('keydown');
+    expect(mockImage.beforeDisplay).toBe(true);
+    act(() => root.render(<BlockingBeforeHarness keyboardBlocked />));
+    expect(mockImage.beforeDisplay).toBe(true);
+    key('keyup');
+    expect(mockImage.beforeDisplay).toBe(true);
+    click(comparisonToggle());
+    expect(comparisonToggle().getAttribute('aria-pressed')).toBe('false');
+    key('keyup');
+    expect(mockImage.beforeDisplay).toBe(false);
   });
 
   it('allows Before comparison with a focused range slider and preserves focus and value', () => {
