@@ -1,5 +1,7 @@
 # Node.js / React / TypeScript dependencies and tooling
 node_modules/
+# Local pipeline benchmark data; keep harness sources tracked.
+/frontend/benchmark-results/
 .npm/
 .pnpm-store/
 .yarn/cache/
