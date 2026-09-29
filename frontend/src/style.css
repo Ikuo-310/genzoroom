@@ -184,6 +184,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .tool-button:focus-visible, .filmstrip-item:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .panel-toggle { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-toggle.right { justify-self: end; }
+.panel-toggle.icon-button { display: grid; place-items: center; }
 .viewer-toolbar > .panel-toggle { flex: 0 0 auto; }
 .zoom-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; min-width: 0; justify-content: center; align-items: center; gap: 5px; }
 .viewer-toolbar-right { display: flex; flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; justify-content: flex-end; align-items: center; gap: 8px; }

@@ -65,6 +65,13 @@ function BlockingBeforeHarness({ keyboardBlocked = false }: { keyboardBlocked?: 
     keyboardBlocked={keyboardBlocked} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
+function PanelToggleHarness() {
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  return <ImageViewer src="/first" alt="photo" leftOpen={leftOpen} rightOpen={rightOpen}
+    onToggleLeft={() => setLeftOpen(value => !value)} onToggleRight={() => setRightOpen(value => !value)} />;
+}
+
 function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent(type, { key: '\\', code: 'Backslash', bubbles: true, cancelable: true, ...init });
   act(() => target.dispatchEvent(event));
@@ -408,6 +415,30 @@ describe('Viewer edit settings context menu', () => {
 });
 
 describe('Before / After viewer state', () => {
+  it('shows state-directed panel arrows with localized action tooltips and accessible names', async () => {
+    for (const language of ['en', 'ja'] as const) {
+      await i18n.changeLanguage(language);
+      act(() => root.render(<PanelToggleHarness />));
+      const left = host.querySelector<HTMLButtonElement>('.viewer-toolbar > .panel-toggle')!;
+      const right = host.querySelector<HTMLButtonElement>('.viewer-toolbar-right > .panel-toggle')!;
+      const expected = language === 'en'
+        ? [['Collapse left panel', '‹'], ['Collapse right panel', '›'], ['Expand left panel', '›'], ['Expand right panel', '‹']]
+        : [['左パネルを閉じる', '‹'], ['右パネルを閉じる', '›'], ['左パネルを開く', '›'], ['右パネルを開く', '‹']];
+      for (const [button, index] of [[left, 0], [right, 1]] as const) {
+        expect(button.getAttribute('aria-label')).toBe(expected[index][0]);
+        expect(button.title).toBe(expected[index][0]);
+        expect(button.textContent).toBe(expected[index][1]);
+        expect(button.querySelector('[aria-hidden="true"]')).not.toBeNull();
+        click(button);
+        expect(button.getAttribute('aria-label')).toBe(expected[index + 2][0]);
+        expect(button.title).toBe(expected[index + 2][0]);
+        expect(button.textContent).toBe(expected[index + 2][1]);
+        click(button);
+      }
+    }
+    await i18n.changeLanguage('en');
+  });
+
   it('keeps toolbar group order, panel actions, editing menu and all zoom buttons', () => {
     const left = vi.fn(); const right = vi.fn();
     const clipboardActions = [vi.fn(() => true), vi.fn(() => true), vi.fn(() => true), vi.fn(() => true)];
@@ -418,11 +449,11 @@ describe('Before / After viewer state', () => {
       onSelectCopyAdjustments={clipboardActions[2]} onSelectPasteAdjustments={clipboardActions[3]} />));
     const toolbar = host.querySelector('.viewer-toolbar')!;
     expect(Array.from(toolbar.children, (item) => item.className)).toEqual([
-      'tool-button panel-toggle', 'zoom-controls', 'viewer-toolbar-right',
+      'tool-button icon-button panel-toggle', 'zoom-controls', 'viewer-toolbar-right',
     ]);
     const rightGroup = host.querySelector('.viewer-toolbar-right')!;
     expect(Array.from(rightGroup.children, (item) => item.className)).toEqual([
-      'edit-settings-menu', 'tool-button before-after-controls', 'tool-button panel-toggle right',
+      'edit-settings-menu', 'tool-button before-after-controls', 'tool-button icon-button panel-toggle right',
     ]);
     click(toolbar.querySelector<HTMLButtonElement>(':scope > .panel-toggle')!);
     click(rightGroup.querySelector<HTMLButtonElement>('.panel-toggle')!);

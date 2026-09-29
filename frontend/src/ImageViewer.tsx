@@ -169,8 +169,10 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
 
   return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
     <div className="viewer-toolbar">
-      <button type="button" className="tool-button panel-toggle" onClick={onToggleLeft} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')} aria-pressed={leftOpen}>
-        {leftOpen ? '‹' : '›'} <span>{t('workspace.history')}</span>
+      <button type="button" className="tool-button icon-button panel-toggle" onClick={onToggleLeft}
+        aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}
+        title={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')} aria-pressed={leftOpen}>
+        <span aria-hidden="true">{leftOpen ? '‹' : '›'}</span>
       </button>
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
         <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>
@@ -203,8 +205,10 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
           <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>
           <span className={!showBeforeAdjustments ? 'active' : undefined}>{t('workspace.after')}</span>
         </button>
-        <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
-          <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
+        <button type="button" className="tool-button icon-button panel-toggle right" onClick={onToggleRight}
+          aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')}
+          title={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
+          <span aria-hidden="true">{rightOpen ? '›' : '‹'}</span>
         </button>
       </div>
     </div>
