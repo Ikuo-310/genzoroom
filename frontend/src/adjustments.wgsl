@@ -21,7 +21,7 @@ fn bytes(rgb: vec3<f32>) -> vec3<f32> {
 fn luminance(rgb: vec3<f32>) -> f32 {
   return 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
 }
-fn smooth(position: f32) -> f32 {
+fn smooth_weight(position: f32) -> f32 {
   let x = clamp(position, 0.0, 1.0);
   return x * x * (3.0 - 2.0 * x);
 }
@@ -41,10 +41,10 @@ fn grade(input: vec3<f32>, range: u32) -> vec3<f32> {
   if (flags == 0u) { return input; }
   let y = luminance(input / 255.0);
   var weight: f32;
-  if (range == 0u) { weight = 1.0 - smooth((y - 0.15) / (0.35 - 0.15)); }
+  if (range == 0u) { weight = 1.0 - smooth_weight((y - 0.15) / (0.35 - 0.15)); }
   else if (range == 1u) {
-    weight = smooth((y - 0.15) / (0.35 - 0.15)) * (1.0 - smooth((y - 0.60) / (0.78 - 0.60)));
-  } else { weight = smooth((y - 0.55) / (0.75 - 0.55)); }
+    weight = smooth_weight((y - 0.15) / (0.35 - 0.15)) * (1.0 - smooth_weight((y - 0.60) / (0.78 - 0.60)));
+  } else { weight = smooth_weight((y - 0.55) / (0.75 - 0.55)); }
   if (weight <= 0.0) { return input; }
   let gains = p.grading[range];
   var result = input;
@@ -76,21 +76,21 @@ fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index
     let color = rgb / 255.0;
     let y = luminance(color);
     if (y > 0.5) {
-      let weight = smooth((y - 0.5) * 2.0);
+      let weight = smooth_weight((y - 0.5) * 2.0);
       var curved = y * y;
       if (p.tones.x > 0.0) { curved = 1.0 - (1.0 - y) * (1.0 - y); }
-      let target = clamp(y + abs(p.tones.x) * weight * (curved - y), 0.0, 1.0);
-      rgb = bytes(color * (target / y));
+      let target_luminance = clamp(y + abs(p.tones.x) * weight * (curved - y), 0.0, 1.0);
+      rgb = bytes(color * (target_luminance / y));
     }
   }
   if (p.tones.y != 0.0) {
     let color = rgb / 255.0;
     let y = luminance(color);
     if (y > 0.75) {
-      let weight = smooth((y - 0.75) / (1.0 - 0.75));
-      var target = 0.75;
-      if (p.tones.y > 0.0) { target = 1.0; }
-      let adjusted = clamp(y + abs(p.tones.y) * weight * (target - y), 0.0, 1.0);
+      let weight = smooth_weight((y - 0.75) / (1.0 - 0.75));
+      var target_luminance = 0.75;
+      if (p.tones.y > 0.0) { target_luminance = 1.0; }
+      let adjusted = clamp(y + abs(p.tones.y) * weight * (target_luminance - y), 0.0, 1.0);
       rgb = bytes(color * (adjusted / max(y, 1e-6)));
     }
   }
@@ -98,11 +98,11 @@ fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index
     let color = rgb / 255.0;
     let y = luminance(color);
     if (y < 0.15) {
-      let weight = smooth((0.15 - y) / 0.15);
-      var target = y * y;
-      if (p.tones.z > 0.0) { target = sqrt(y); }
+      let weight = smooth_weight((0.15 - y) / 0.15);
+      var target_luminance = y * y;
+      if (p.tones.z > 0.0) { target_luminance = sqrt(y); }
       let amount = abs(p.tones.z) * weight;
-      let adjusted = clamp(y + amount * (target - y), 0.0, 1.0);
+      let adjusted = clamp(y + amount * (target_luminance - y), 0.0, 1.0);
       rgb = bytes(color * (adjusted / max(y, 1e-6)));
     }
   }
@@ -110,7 +110,7 @@ fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index
     let color = rgb / 255.0;
     let y = luminance(color);
     if (y < 0.35) {
-      let weight = 1.0 - smooth(y / 0.35);
+      let weight = 1.0 - smooth_weight(y / 0.35);
       let adjusted = clamp(y + p.tones.w * 0.1 * weight, 0.0, 1.0);
       if (y <= 1e-6) { rgb = vec3(floor(255.0 * adjusted + 0.5)); }
       else { rgb = bytes(color * (adjusted / y)); }
