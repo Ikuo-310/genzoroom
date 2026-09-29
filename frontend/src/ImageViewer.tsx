@@ -72,12 +72,17 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       if (keyboardBlocked || event.defaultPrevented || event.isComposing
         || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
-      if (event.code === 'Backslash') {
+      if (event.key === ']') {
+        // JIS keyboards report this character on the physical Backslash key.
+        if (originalStatus === 'ready' && editSource && onOriginalToggle) {
+          event.preventDefault();
+          if (!event.repeat) onOriginalToggle();
+        } else if (event.code === 'Backslash') {
+          event.preventDefault();
+        }
+      } else if (event.code === 'Backslash') {
         event.preventDefault();
         if (!event.repeat) setBackslashHeld(true);
-      } else if (event.key === ']' && originalStatus === 'ready' && editSource && onOriginalToggle) {
-        event.preventDefault();
-        if (!event.repeat) onOriginalToggle();
       }
     };
     const keyup = (event: KeyboardEvent) => {

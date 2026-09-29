@@ -120,12 +120,15 @@ afterEach(() => {
 describe('Viewer edit settings context menu', () => {
   it.each(['loading', 'error'] as const)('keeps original switching disabled and ignores ] while acquisition is %s', (status) => {
     const toggle = vi.fn();
+    const beforeDisplay = vi.fn();
     act(() => root.render(<ImageViewer src="/first" editSource={{ kind: 'immich-preview', url: '/first' }}
       originalStatus={status} onOriginalToggle={toggle} recipe={defaultRecipe()} alt="photo" leftOpen rightOpen
-      onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));
+      onBeforeAdjustmentsDisplayChange={beforeDisplay} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Preview / Original"]')?.disabled).toBe(true);
     expect(key('keydown', window, { key: ']', code: 'BracketRight' }).defaultPrevented).toBe(false);
+    expect(key('keydown', window, { key: ']', code: 'Backslash' }).defaultPrevented).toBe(true);
     expect(toggle).not.toHaveBeenCalled();
+    expect(beforeDisplay).not.toHaveBeenCalledWith(true);
     expect(key('keydown').defaultPrevented).toBe(true);
     key('keyup');
   });
@@ -157,6 +160,12 @@ describe('Viewer edit settings context menu', () => {
     expect(mockImage.source?.kind).toBe('immich-preview');
     expect(key('keydown', window, { key: ']', code: 'BracketRight' }).defaultPrevented).toBe(true);
     expect(mockImage.source?.kind).toBe('jpeg-original');
+    expect(key('keydown', window, { key: ']', code: 'Backslash' }).defaultPrevented).toBe(true);
+    expect(mockImage.source?.kind).toBe('immich-preview');
+    expect(image().dataset.before).toBe('false');
+    expect(key('keydown', window, { key: ']', code: 'Backslash' }).defaultPrevented).toBe(true);
+    expect(mockImage.source?.kind).toBe('jpeg-original');
+    expect(image().dataset.before).toBe('false');
     expect(key('keydown').defaultPrevented).toBe(true);
     expect(mockImage.source?.kind).toBe('jpeg-original');
     key('keyup');
