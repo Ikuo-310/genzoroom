@@ -37,7 +37,9 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Histogram shortcuts: Numpad 0 toggles Y Only; Numpad 1, 2, and 3 toggle R, G, and B; Numpad Decimal toggles Normal / Expanded. While Y Only is active, the first Numpad 1–3 press restores the previous RGB selection; the next press toggles that channel. Text and number fields keep native keypad input.
 - RGB visibility, Y Only, and scale mode remain selected when switching photos in Anshitsu.
 - Independently collapsible and resizable desktop sidebars with remembered widths.
-- English and Japanese UI with remembered language selection and locale-aware dates.
+- A shared Settings dialog available from Home and Anshitsu. It offers Auto, Japanese, and English display language; Auto follows the browser's preferred languages and falls back to English. Date and time locale is independent of display language, with Auto using the browser's regional settings and choices including Japan, the US, the UK, and other supported regions. Calendar week start can be Auto, Sunday, or Monday.
+- Browser-saved image preferences, including WebGPU enablement and Anshitsu's initial image choice (Auto, Original preferred, or Preview preferred). Auto prefers the original when WebGPU is enabled and available; otherwise it keeps the preview. The preview is shown while a selected JPEG original loads, then switches automatically when ready unless Preview is preferred or the user has manually chosen a source.
+- Settings shows Immich server version and available build information alongside GenzoRoom and backend connection status. Preferences are stored in the browser; the Immich API key stays on the backend.
 
 Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. The **Back to photos** control performs a final sequential save for every photo edited in that Anshitsu session and compacts each History. If a save response is lost, GenzoRoom retries that exact snapshot, revision, and save ID before sending a newer snapshot; genuine revision conflicts are reported without merging. Reloading or closing the browser during the debounce or an in-flight save can still lose the latest edits; Browser Back and tab-close interception are not implemented. A failed final save offers the choice to stay in Anshitsu or exit without saving.
 
@@ -56,9 +58,9 @@ Recipe v18 provides an individual ON/OFF switch for each of the 16 numeric adjus
 
 ### Optional WebGPU acceleration
 
-Anshitsu can use WebGPU to accelerate JPEG preview and selected-original adjustments. The WebGPU ON/OFF switch is beside the language selector, and its preference is remembered by the browser. A compatible GPU, driver, and browser are required; WebGPU generally requires a Secure Context, normally HTTPS or `localhost`. If WebGPU is unavailable or GPU initialization or rendering fails, Anshitsu uses the CPU Worker, with the existing main-thread fallback if the Worker also fails. Editing remains available without WebGPU.
+Anshitsu can use WebGPU to accelerate JPEG preview and selected-original adjustments. The WebGPU ON/OFF switch is in Settings, and its preference is remembered by the browser. Settings distinguishes the saved preference from the actual processing state. A compatible GPU, driver, and browser are required; WebGPU generally requires a Secure Context. HTTPS is recommended for general use. If WebGPU is unavailable or GPU initialization or rendering fails, Anshitsu uses the CPU Worker, with the existing main-thread fallback if the Worker also fails. Editing remains available without WebGPU.
 
-Firefox and Edge on Windows with a Radeon RX 580 are a verified configuration; the RX 580 is not a minimum requirement. On a LAN address served over HTTP, using WebGPU requires a browser-specific development exception that treats the origin as secure. This exception does not encrypt the connection. Prefer HTTPS or `localhost` where possible. Detailed instructions for browser exceptions belong in a future installation guide.
+Firefox and Edge on Windows with a Radeon RX 580 are a verified configuration; the RX 580 is not a minimum requirement. On a LAN address served over HTTP, some browsers can use WebGPU only with a browser-specific development exception that treats the origin as secure. This exception does not encrypt the connection; HTTP traffic remains unencrypted. HTTPS is recommended for general use. Detailed browser-specific exception instructions are outside this guide.
 
 Copy / Paste transfers saved numeric values, including values in disabled categories, adjustments, or Color Grading ranges; ON/OFF switches are never copied. Paste changes only the copied adjustment values and keeps the destination photo’s enabled flags. Category, individual adjustment, and Color Grading range context menus provide their relevant copy, paste, reset, or toggle operations. A selected Paste can apply any subset without changing the clipboard. Each changed Paste appears as one undoable History entry labelled with the source filename; repeating values already present creates no new entry. Text and numeric editing fields keep their native browser Copy / Paste behavior.
 
@@ -88,7 +90,7 @@ These are current boundaries, not release commitments or a promised roadmap.
 
 ## Security and data handling
 
-- GenzoRoom calls read-only Immich endpoints. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, and `asset.download` permissions; `asset.download` is required to retrieve JPEG originals.
+- GenzoRoom calls read-only Immich endpoints. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, and `server.about` permissions; `asset.download` retrieves JPEG originals and `server.about` retrieves the server version and public build information shown in Settings.
 - The Immich API key is supplied to the backend through environment variables. It is not sent to the frontend or embedded in the frontend image.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
@@ -101,7 +103,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 
 - Docker Engine with Docker Compose v2, or Portainer connected to a Docker Standalone environment.
 - An existing Immich server reachable from the GenzoRoom backend container.
-- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, and `asset.download` permissions.
+- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, and `server.about` permissions.
 - A browser that can reach the GenzoRoom frontend. The default host port is `3190` and can be changed with `GENZOROOM_PORT`.
 
 ## Quick start
@@ -114,7 +116,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
    docker compose up -d --build
    ```
 
-4. Open `http://<HOST-IP>:3190`, or the configured port.
+4. Open the configured GenzoRoom address. HTTPS is recommended for general use; the default local Compose setup publishes HTTP on port `3190` and does not encrypt that connection.
 
 If Immich runs on the same Docker host and is not reachable through the host LAN address, use the optional shared-network configuration documented in the [deployment guide](docs/deployment.md). Portainer Git Repository Stack instructions are covered there as well.
 

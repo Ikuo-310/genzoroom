@@ -2,6 +2,24 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Settingsダイアログ（2026-09-29・現在仕様）
+
+Homeと暗室で共通のSettingsダイアログをAppレベルで管理する。Routeや暗室を再マウントせず、暗室の編集session、HistoryとUndo/Redo、Filmstrip、既存autosave timerを保持する。Generalには表示言語（Auto／日本語／English）、表示言語から独立した日付・時刻ロケール、カレンダー週初め（Auto／日曜／月曜）を配置した。Auto言語はブラウザの優先言語を対応リソースと地域サブタグ込みで照合し、該当がなければ英語にする。日付ロケールAutoはブラウザの地域設定を使用する。週初めAutoはIntl.LocaleのweekInfoを利用し、非対応環境では地域に基づく決定的なfallbackを使う。週初め設定の取得処理は実装済みだが、Homeカレンダーはない。
+
+Image Processingでは既存WebGPU設定をSettingsへ移し、ON/OFF設定と実際のGPU描画状態を分けて表示する。利用不能・初期化失敗・実行失敗時は既存CPU Worker、さらにWorker失敗時はmain-thread経路へfallbackする。Homeで可用性を調べる場合はpipeline probeを直ちに解放し、画像処理rendererを保持しない。初期表示画像はAuto／原版優先／PV優先で、AutoはWebGPUが有効かつ利用可能な場合だけ原版を優先する。原版取得中はPVを表示し、取得完了後に条件を満たせば切り替える。暗室での手動PV／原版選択は、その写真の非同期取得完了やGPU状態変化より優先し、写真切替時は古い取得を中止・解放する。初期表示選択はRecipe、History、保存snapshotに含めない。
+
+接続情報にはGenzoRoomの開発版表示、Backend状態、Immich接続状態と`server.about`由来の公開バージョン／ビルド情報を表示する。APIキーはBackend環境変数に留め、Frontendには返さない。取得失敗や権限不足は任意情報の表示に限定し、既存の写真閲覧・編集を妨げない。Homeのコンパクトな接続状態表示は維持する。
+
+設定キーは既存の`genzoroom.language`を再利用し、新規項目は`genzoroom.dateLocale`、`genzoroom.weekStart`、`genzoroom.initialImage`、WebGPUは既存の`genzoroom.webgpu.enabled`を使う。保存不能でもページ内の設定変更を維持する。日付表示にはIntl.DateTimeFormatを使い、タイムゾーン情報を持たないEXIF撮影日時をブラウザのタイムゾーンで確定しない。Recipe v18、History、SQLite schema 1、`processingVersion`（`jpeg-preview-srgb8-v1`）は変更していない。
+
+Homeのカレンダー／アルバム選択、翻訳エディター、キーボードショートカットのカスタマイズは未実装。
+
+ダイアログはフォーカストラップ、Escape、閉じるボタン、閉じた後のフォーカス復帰を備える。外側で押下と解放の両方が起きた場合だけバックドロップクリックで閉じるため、内部から外へドラッグしても閉じない。表示中は暗室のグローバルショートカットを抑止し、背面操作を伝播させない。
+
+WebGPU行の追加修正では、ほかの設定と同じ2列配置にし、項目名を左、トグルと小さな状態表示を右列へ揃えた。狭幅でも列の重なりを防ぐ。
+
+4193429までの最終差分監査では、報告すべき実害のある問題は見つかっていない。報告済みの自動テストはFrontend 1,238件成功・2件skip、Backend 73件成功、TypeScriptチェック、build、`git diff --check`成功。通常の`npm test`では既存Nodeテスト2ファイルもVitestに検出されるため、Frontend検証は`npx vitest run src`で行った。NAS／FirefoxではSettingsの開閉、枠外クリック、設定保持、WebGPU切替、原版への自動切替、Immichサーバー情報表示を確認済み。
+
 ## WebGPU Phase G1〜G3（2026-09-29・現在仕様）
 
 G1でRecipe v18以前の8bit sRGB JPEGを処理する独立した露出レンダラーを追加し、FirefoxとEdgeで実GPU描画を確認した。G2では現行CPU Pipelineを基準に16補正をWGSLへ移植した。処理順と段階ごとのクリップ・8bit丸めを保ち、Temperature、Tint、Exposure／Contrastの256値RGB LUTはCPUで生成して転送する。残るトーン、3WAY Color Grading、Vibrance、SaturationはWGSLで処理し、アルファは保持する。Recipe v18、永続化形式、CPU Pipelineは変更していない。
@@ -118,7 +136,7 @@ Phase 3では異常な非有限EXIF整数を欠損値として扱い、写真詳
 
 HistogramとWebGPUを含む暗室の実装、利用者によるNAS／Firefoxの確認は完了した。EdgeのG3暗室統合確認と総合パフォーマンス監査は未実施。将来の書き出し設定とキューはHome中心に検討し、暗室には書き出し候補のマーキングを追加する案があるが、いずれも未実装。公式サイトと日英操作マニュアルの制作時期・構成は未確定。
 
-将来Settingsページを追加する場合は、現在暗室ヘッダーにあるGPUと言語の設定を移し、暗室の初期表示画像を「自動／原版／プレビュー」から選べるようにする案がある。初期値は自動とし、自動ではWebGPU動作中に原版、CPU動作中にプレビューを選ぶ。原版を取得する間はプレビューを表示し、原版の準備後に切り替える。これは設計案で、未実装である。
+以前の節に記録したSettingsの構想は実装済みである。現在仕様は本ノート冒頭の「Settingsダイアログ」節を参照する。
 
 将来のインストールガイドでは、WebGPUの動作要件、HTTPS、宅内HTTPでの制限とブラウザ固有の開発例外を説明する。例外設定は通信を暗号化せず、今回開発環境で使ったFirefoxの全体設定を一般利用者へ推奨しない。
 
