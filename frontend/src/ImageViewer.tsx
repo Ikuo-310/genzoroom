@@ -69,11 +69,16 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
   useEffect(() => {
     if (keyboardBlocked) setBackslashHeld(false);
     const keydown = (event: KeyboardEvent) => {
-      if (keyboardBlocked || event.code !== 'Backslash' || event.defaultPrevented || event.isComposing
+      if (keyboardBlocked || event.defaultPrevented || event.isComposing
         || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
-      event.preventDefault();
-      if (!event.repeat) setBackslashHeld(true);
+      if (event.code === 'Backslash') {
+        event.preventDefault();
+        if (!event.repeat) setBackslashHeld(true);
+      } else if (event.key === ']' && originalStatus === 'ready' && editSource && onOriginalToggle) {
+        event.preventDefault();
+        if (!event.repeat) onOriginalToggle();
+      }
     };
     const keyup = (event: KeyboardEvent) => {
       if (event.code === 'Backslash') setBackslashHeld(false);
@@ -90,7 +95,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       window.removeEventListener('blur', release);
       document.removeEventListener('visibilitychange', visibilityChange);
     };
-  }, [keyboardBlocked]);
+  }, [editSource, keyboardBlocked, onOriginalToggle, originalStatus]);
 
   useEffect(() => {
     setImageState('loading');
@@ -181,12 +186,6 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
           onSelectCopy={onSelectCopyAdjustments} onSelectPaste={onSelectPasteAdjustments}
           contextPosition={contextMenuPosition} onContextClose={closeContextMenu}
           onMenuOpen={() => setContextMenuPosition(null)} closeMenuSignal={closeToolbarMenuSignal} />}
-        <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
-          aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
-          onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
-          <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>
-          <span className={!showBeforeAdjustments ? 'active' : undefined}>{t('workspace.after')}</span>
-        </button>
         {originalStatus && <>
           <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.previewOriginal')}
             aria-pressed={showingOriginal} disabled={originalStatus !== 'ready' || !editSource}
@@ -198,6 +197,12 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
             {t(originalStatus === 'loading' ? 'workspace.originalLoading' : 'workspace.originalFailed')}
           </span>}
         </>}
+        <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
+          aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
+          onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
+          <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>
+          <span className={!showBeforeAdjustments ? 'active' : undefined}>{t('workspace.after')}</span>
+        </button>
         <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
           <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
         </button>
