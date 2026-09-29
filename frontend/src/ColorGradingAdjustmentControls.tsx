@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { AdjustmentSlider, focusAdjustmentCategory, navigateAdjustments, type OpenAdjustmentSliderMenu } from './AdjustmentSlider';
+import { AdjustmentSlider, type OpenAdjustmentSliderMenu } from './AdjustmentSlider';
+import { focusAdjustmentCategory, navigateAdjustments } from './adjustmentFocus';
 import { GRADING_RANGE_CONTROLS, type GradingRangeId, TEMPERATURE, TINT, formatHighlightsTemperature, formatHighlightsTint, formatMidtonesTemperature, formatMidtonesTint, formatShadowsTemperature, formatShadowsTint, type EditAction, type EditRecipe } from './editing';
 import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 

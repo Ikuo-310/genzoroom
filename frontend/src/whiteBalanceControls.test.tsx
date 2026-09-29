@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
-import { activeAdjustmentId } from './AdjustmentSlider';
+import { activeAdjustmentId } from './adjustmentFocus';
 import { type EditRecipe } from './editing';
 import { TEMPERATURE_TRACK_GRADIENT, TINT_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import i18n from './i18n';

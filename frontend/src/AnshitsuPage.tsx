@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './AdjustmentSlider';
+import { activeAdjustmentId, focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -29,7 +29,7 @@ import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTar
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
 import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './adjustmentSelection';
-import { activeAdjustmentId, type AdjustmentSliderMenuTarget } from './AdjustmentSlider';
+import type { AdjustmentSliderMenuTarget } from './AdjustmentSlider';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
 

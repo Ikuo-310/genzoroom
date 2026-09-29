@@ -2,7 +2,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activeAdjustmentId, ADJUSTMENT_COMMIT_DELAY_MS } from './AdjustmentSlider';
+import { ADJUSTMENT_COMMIT_DELAY_MS } from './AdjustmentSlider';
+import { activeAdjustmentId } from './adjustmentFocus';
 import { isBasicDefault, type EditSession } from './editing';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import i18n from './i18n';

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Pointer
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
-import { activeAdjustmentId } from './AdjustmentSlider';
+import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
