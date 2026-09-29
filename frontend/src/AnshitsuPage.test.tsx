@@ -231,6 +231,9 @@ describe('Anshitsu workspace', () => {
     expect(leftPanel).toContain('aria-expanded="true" aria-controls=');
     expect(leftPanel).not.toContain('>Scope</h2>');
     expect(rightPanel).toContain('>Scope</h2>');
+    expect(rightPanel).toContain('<select class="scope-type-select" aria-label="Scope type"');
+    expect(rightPanel).toContain('<option value="histogram" selected="">Histogram</option>');
+    expect(rightPanel).not.toContain('>Scope type</span>');
     expect(rightPanel).toContain('>Develop controls</h2>');
     expect(rightPanel.indexOf('>Scope</h2>')).toBeLessThan(rightPanel.indexOf('>Develop controls</h2>'));
   });

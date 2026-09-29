@@ -723,12 +723,16 @@ describe('production White Balance controls', () => {
   it('separates Scope and Develop header from the category scroll region while preserving the left panel', () => {
     const right = host.querySelector('.right-panel')!;
     const scope = right.querySelector('.scope-section')!;
+    const resizeHandle = right.querySelector('.scope-resize-handle')!;
     const develop = right.querySelector('.develop-panel')!;
     const header = develop.querySelector('.workspace-section-header')!;
     const scroll = develop.querySelector('.develop-scroll-region')!;
     expect(scope.parentElement).toBe(right);
     expect(develop.parentElement).toBe(right);
-    expect(scope.nextElementSibling).toBe(develop);
+    expect(scope.nextElementSibling).toBe(resizeHandle);
+    expect(resizeHandle.nextElementSibling).toBe(develop);
+    expect(resizeHandle.getAttribute('role')).toBe('separator');
+    expect(resizeHandle.getAttribute('aria-orientation')).toBe('horizontal');
     expect(scope.textContent).toContain('Scope');
     expect(header.querySelector('h2')?.textContent).toBe('Develop controls');
     expect(header.querySelector('button')?.textContent).toBe('Reset all');

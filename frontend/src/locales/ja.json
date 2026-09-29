@@ -72,6 +72,7 @@
     "viewer": "写真表示",
     "scope": "スコープ",
     "scopeType": "スコープの種類",
+    "resizeScope": "スコープ領域の高さを調整",
     "histogram": "Histogram",
     "histogramGraph": "RGBとY′のヒストグラム。横軸はsRGB 0から255です。",
     "histogramRed": "赤チャンネル",

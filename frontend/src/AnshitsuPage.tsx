@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { activeAdjustmentId, focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -21,6 +21,7 @@ import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDe
 import { getEditImageSource } from './editImageSource';
 import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
+import { ScopeResizeHandle } from './ScopeResizeHandle';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
@@ -51,6 +52,7 @@ export function AnshitsuPage() {
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [scopePanelBasis, setScopePanelBasis] = useState(34);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   // Scope needs the effective Viewer state because the persistent choice omits held Backslash.
   const [viewerShowsBefore, setViewerShowsBefore] = useState(false);
@@ -447,10 +449,15 @@ export function AnshitsuPage() {
         </section>
       )}
       rightPanel={<>
-        <WorkspaceSection title={t('workspace.scope')} className="scope-section">
+        <WorkspaceSection title={t('workspace.scope')} className="scope-section"
+          style={{ '--scope-panel-basis': `${scopePanelBasis}%` } as CSSProperties}
+          headerAction={<select className="scope-type-select" aria-label={t('workspace.scopeType')} defaultValue="histogram">
+            <option value="histogram">{t('workspace.histogram')}</option>
+          </select>}>
           <ScopePanel histogram={activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
             keyboardBlocked={!editable || viewerKeyboardBlocked} />
         </WorkspaceSection>
+        <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} label={t('workspace.resizeScope')} />
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
@@ -612,10 +619,10 @@ export function ExifSection({ children }: { children: ReactNode }) {
   </section>;
 }
 
-export function WorkspaceSection({ title, children, grow = false, className = '', headerAction, sectionRef }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode; sectionRef?: Ref<HTMLElement> }) {
+export function WorkspaceSection({ title, children, grow = false, className = '', headerAction, sectionRef, style }: { title: string; children: ReactNode; grow?: boolean; className?: string; headerAction?: ReactNode; sectionRef?: Ref<HTMLElement>; style?: CSSProperties }) {
   const sectionClassName = `workspace-section${grow ? ' grow' : ''}${className ? ` ${className}` : ''}`;
 
-  return <section ref={sectionRef} className={sectionClassName}>
+  return <section ref={sectionRef} className={sectionClassName} style={style}>
     <div className="workspace-section-header">
       <h2>{title}</h2>
       {headerAction}

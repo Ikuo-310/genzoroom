@@ -43,12 +43,6 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
 
   return <div className="scope-panel">
     <div className="scope-panel-toolbar">
-      <label className="scope-type-label">
-        <span>{t('workspace.scopeType')}</span>
-        <select aria-label={t('workspace.scopeType')} defaultValue="histogram">
-          <option value="histogram">{t('workspace.histogram')}</option>
-        </select>
-      </label>
       <div className="histogram-channel-controls" role="group" aria-label={t('workspace.histogramChannels')}>
         <button type="button" className="tool-button before-after-controls histogram-scale-toggle"
           aria-label={t('workspace.histogramScale')} aria-description={t(expanded ? 'workspace.histogramExpanded' : 'workspace.histogramNormal')}

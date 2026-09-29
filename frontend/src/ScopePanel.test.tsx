@@ -82,8 +82,7 @@ describe('ScopePanel', () => {
     expect(scaleToggle().textContent).toBe('NormalExpanded');
     expect(host.querySelectorAll('.histogram-series')).toHaveLength(3);
     expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('40,');
-    expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe('histogram');
-    expect(host.querySelectorAll('select option')).toHaveLength(1);
+    expect(host.querySelector('select')).toBeNull();
   });
 
   it('keeps normal mode on the previous maximum-bin scale', () => {

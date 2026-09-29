@@ -74,6 +74,7 @@
     "viewer": "Photo viewer",
     "scope": "Scope",
     "scopeType": "Scope type",
+    "resizeScope": "Resize Scope area",
     "histogram": "Histogram",
     "histogramGraph": "RGB and Y-prime histogram. Horizontal axis is sRGB 0 to 255.",
     "histogramRed": "Red channel",
