@@ -2,7 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Filmstrip } from './AnshitsuPage';
+import { Filmstrip } from './Filmstrip';
 import type { RecentAsset } from './assets';
 
 const assets: RecentAsset[] = ['a', 'b', 'c'].map((id) => ({ id, filename: `${id}.jpg`, date: '2026-09-25',

@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './AdjustmentSlider';
-import { revealFilmstripItem } from './filmstripNavigation';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
 import type { AssetDetail, AssetExif, RecentAsset, WorkspaceNavigationState } from './assets';
-import { FormatBadge } from './FormatBadge';
-import { EditedBadge } from './EditedBadge';
 import { useEditStatuses } from './useEditStatuses';
-import type { AssetEditStatuses } from './editStatus';
 import { LanguageControl } from './GalleryPage';
 import { HomeTitle } from './HomeTitle';
 import { ImageViewer } from './ImageViewer';
+import { Filmstrip } from './Filmstrip';
+import { WorkspaceLayout } from './WorkspaceLayout';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
@@ -34,8 +32,6 @@ import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './ad
 import { activeAdjustmentId, type AdjustmentSliderMenuTarget } from './AdjustmentSlider';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
-import { SidebarResizeHandle } from './SidebarResizeHandle';
-import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWidths, type SidebarSide } from './sidebarSizing';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -598,59 +594,6 @@ export function AnshitsuPage() {
   </main>;
 }
 
-type WorkspaceLayoutProps = {
-  leftOpen: boolean;
-  rightOpen: boolean;
-  leftPanel: ReactNode;
-  viewer: ReactNode;
-  rightPanel: ReactNode;
-};
-
-export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightPanel }: WorkspaceLayoutProps) {
-  const { t } = useTranslation();
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [widths, setWidths] = useState(readSidebarWidths);
-  const widthsRef = useRef(widths);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const layoutClass = `workspace-body${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`;
-  const fitted = fitSidebarWidths(widths, containerWidth, leftOpen, rightOpen);
-  const style = {
-    '--left-panel-width': `${fitted.left}px`,
-    '--right-panel-width': `${fitted.right}px`,
-  } as CSSProperties;
-
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const updateWidth = () => setContainerWidth(body.clientWidth);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, []);
-
-  function resize(side: SidebarSide, proposedWidth: number) {
-    const bodyWidth = bodyRef.current?.clientWidth ?? containerWidth;
-    const current = fitSidebarWidths(widthsRef.current, bodyWidth, leftOpen, rightOpen);
-    const otherSide = side === 'left' ? 'right' : 'left';
-    const otherOpen = side === 'left' ? rightOpen : leftOpen;
-    const width = clampResizedSidebar(side, proposedWidth, bodyWidth, current[otherSide], otherOpen);
-    const next = { ...widthsRef.current, [side]: width };
-    widthsRef.current = next;
-    setWidths(next);
-  }
-
-  return <div ref={bodyRef} className={layoutClass} style={style}>
-    <aside className="workspace-side-panel left-panel" hidden={!leftOpen}>{leftPanel}</aside>
-    <SidebarResizeHandle side="left" width={fitted.left} label={t('workspace.resizeLeftPanel')}
-      hidden={!leftOpen} onResize={resize} onResizeEnd={() => saveSidebarWidths(widthsRef.current)} />
-    {viewer}
-    <SidebarResizeHandle side="right" width={fitted.right} label={t('workspace.resizeRightPanel')}
-      hidden={!rightOpen} onResize={resize} onResizeEnd={() => saveSidebarWidths(widthsRef.current)} />
-    <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>{rightPanel}</aside>
-  </div>;
-}
-
 export function DevelopPanel({ children, headerAction, panelRef }: { children: ReactNode; headerAction?: ReactNode; panelRef?: Ref<HTMLElement> }) {
   const { t } = useTranslation();
   return <WorkspaceSection title={t('workspace.developControls')} className="develop-panel" headerAction={headerAction} sectionRef={panelRef}>
@@ -880,83 +823,6 @@ export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif;
   return visibleRows.length > 0 ? <dl className="exif-list">{visibleRows.map(([label, value]) => (
     <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
   ))}</dl> : <p>{t('workspace.exif.empty')}</p>;
-}
-
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {} }: {
-  assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
-  editStatuses?: AssetEditStatuses;
-}) {
-  const { t } = useTranslation();
-  const scroll = useRef<HTMLDivElement>(null);
-  const hovered = useRef(false);
-  const pointerPosition = useRef<{ x: number; y: number } | null>(null);
-  const focusDestination = useRef<string | null>(null);
-  const latest = useRef({ assets, activeAssetId, onActivate, disabled, keyboardBlocked });
-  latest.current = { assets, activeAssetId, onActivate, disabled, keyboardBlocked };
-  const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    const current = latest.current;
-    const region = scroll.current;
-    if (!region || current.disabled || current.keyboardBlocked || event.defaultPrevented || event.isComposing
-      || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-    if (region.ownerDocument.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
-    const focused = region.ownerDocument.activeElement;
-    const inside = !!focused && region.contains(focused);
-    if (!inside && !hovered.current) return;
-    if (!inside && focused && focused !== region.ownerDocument.body && focused !== region.ownerDocument.documentElement
-      && !(focused instanceof HTMLInputElement && focused.type === 'range')) return;
-    if (isNativeEditingTarget(event.target)) return;
-    event.preventDefault();
-    const index = current.assets.findIndex((asset) => asset.id === current.activeAssetId);
-    const destination = index < 0 ? undefined : current.assets[index + (event.key === 'ArrowRight' ? 1 : -1)];
-    if (!destination) return;
-    focusDestination.current = inside ? destination.id : null;
-    current.onActivate(destination.id);
-  }, []);
-  const handlePointerMove = useCallback((event: PointerEvent) => {
-    const previous = pointerPosition.current;
-    const moved = (previous !== null && (previous.x !== event.clientX || previous.y !== event.clientY))
-      || !!event.movementX || !!event.movementY;
-    pointerPosition.current = { x: event.clientX, y: event.clientY };
-    if (moved && scroll.current) hovered.current = event.target instanceof Node && scroll.current.contains(event.target);
-  }, []);
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown, true);
-    window.addEventListener('pointermove', handlePointerMove, true);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, true);
-      window.removeEventListener('pointermove', handlePointerMove, true);
-    };
-  }, [handleKeyDown, handlePointerMove]);
-  useEffect(() => {
-    const region = scroll.current;
-    const active = region?.querySelector<HTMLButtonElement>('[aria-current="true"]');
-    if (!region || !active) return;
-    revealFilmstripItem(region, active);
-    if (!disabled && !keyboardBlocked && focusDestination.current === activeAssetId) {
-      focusDestination.current = null;
-      const focused = region.ownerDocument.activeElement;
-      if (focused === region.ownerDocument.body || (focused && region.contains(focused))) active.focus({ preventScroll: true });
-    }
-  }, [activeAssetId, assets, disabled, keyboardBlocked]);
-  return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
-    <div ref={scroll} className="filmstrip-scroll"
-      onKeyDown={(event) => handleKeyDown(event.nativeEvent)}>
-      {assets.map((asset) => <button
-        key={asset.id}
-        type="button"
-        disabled={disabled}
-        className={`filmstrip-item${asset.id === activeAssetId ? ' active' : ''}`}
-        onClick={() => { focusDestination.current = null; onActivate(asset.id); }}
-        aria-current={asset.id === activeAssetId ? 'true' : undefined}
-        aria-label={asset.filename}
-        aria-description={editStatuses[asset.id] ? t('photos.edited') : undefined}
-      >
-        <img src={asset.thumbnail_url} alt="" />
-        <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-        <EditedBadge edited={editStatuses[asset.id]} />
-      </button>)}
-    </div>
-  </section>;
 }
 
 function readNavigationState(value: unknown): WorkspaceNavigationState | null {
