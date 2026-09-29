@@ -1,3 +1,4 @@
+import { prefersOriginal, type InitialImage } from './appSettings';
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDetail } from './assets';
 import { readJpegProfile, type JpegProfile } from './jpegProfile';
@@ -5,10 +6,10 @@ import { getEditImageSource, type EditImageSource } from './editImageSource';
 
 type Original = { assetId: string; status: 'loading' | 'ready' | 'error'; url?: string; profile: JpegProfile };
 
-export function useJpegOriginal(asset: AssetDetail | null) {
+export function useJpegOriginal(asset: AssetDetail | null, preference: InitialImage = 'preview', gpuUsable = false) {
   const assetId = asset?.format === 'JPEG' ? asset.id : null;
   const [original, setOriginal] = useState<Original | null>(null);
-  const [mode, setMode] = useState<{ assetId: string; original: boolean } | null>(null);
+  const [mode, setMode] = useState<{ assetId: string; original: boolean; manual: boolean } | null>(null);
   const releaseOriginal = useRef(() => {});
   useEffect(() => {
     setMode(null);
@@ -41,13 +42,18 @@ export function useJpegOriginal(asset: AssetDetail | null) {
   }, [assetId]);
   // Gate on identity during render: effect cleanup alone is too late on navigation.
   const current = original?.assetId === assetId ? original : null;
+  useEffect(() => {
+    // Once selected, keep the source stable across GPU readiness/loss; manual choices always win.
+    if (!assetId || current?.status !== 'ready' || mode?.assetId === assetId && (mode.manual || mode.original)) return;
+    if (prefersOriginal(preference, gpuUsable)) setMode({ assetId, original: true, manual: false });
+  }, [assetId, current?.status, mode, preference, gpuUsable]);
   const showingOriginal = mode?.assetId === assetId && mode.original && current?.status === 'ready';
   const source: EditImageSource | undefined = asset ? showingOriginal
     ? { kind: 'jpeg-original', url: current.url! } : getEditImageSource(asset) : undefined;
   return {
     source, showingOriginal: !!showingOriginal, status: assetId ? current?.status ?? 'loading' : undefined,
     profile: current?.profile ?? { status: 'unknown' } as JpegProfile,
-    toggle: () => { if (assetId && current?.status === 'ready') setMode({ assetId, original: !showingOriginal }); },
+    toggle: () => { if (assetId) setMode({ assetId, original: current?.status === 'ready' ? !showingOriginal : false, manual: true }); },
     failDecode: () => {
       if (assetId && showingOriginal) {
         releaseOriginal.current();

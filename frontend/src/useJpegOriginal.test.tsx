@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssetDetail } from './assets';
 import { useJpegOriginal } from './useJpegOriginal';
 import { readJpegProfile } from './jpegProfile';
+import type { InitialImage } from './appSettings';
 
 vi.mock('./jpegProfile', () => ({ readJpegProfile: vi.fn() }));
 const first: AssetDetail = { id: 'first', filename: 'RAW-01.COVER.jpg', format: 'JPEG', is_raw: false, date: '', thumbnail_url: '/thumb', preview_url: '/preview', exif: {} };
@@ -15,8 +16,8 @@ let current: ReturnType<typeof useJpegOriginal>;
 const fetchOriginal = vi.fn();
 const createObjectURL = vi.fn();
 const revokeObjectURL = vi.fn();
-function Harness({ asset }: { asset: AssetDetail | null }) { current = useJpegOriginal(asset); return null; }
-async function render(asset: AssetDetail | null) { await act(async () => root.render(<Harness asset={asset} />)); }
+function Harness({ asset, preference, gpu }: { asset: AssetDetail | null; preference: InitialImage; gpu: boolean }) { current = useJpegOriginal(asset, preference, gpu); return null; }
+async function render(asset: AssetDetail | null, preference: InitialImage = 'preview', gpu = false) { await act(async () => root.render(<Harness asset={asset} preference={preference} gpu={gpu} />)); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 const response = () => ({ ok: true, blob: async () => new Blob(['image']) }) as Response;
 
@@ -32,6 +33,44 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
 describe('current-photo original ownership', () => {
+  it('shows Preview first and automatically switches only when the preferred original is ready', async () => {
+    const pending = deferred<Response>(); fetchOriginal.mockReturnValue(pending.promise);
+    await render(first, 'original');
+    expect(current.source?.kind).toBe('immich-preview');
+    await act(async () => pending.resolve(response()));
+    expect(current.source?.kind).toBe('jpeg-original');
+    expect(fetchOriginal).toHaveBeenCalledOnce();
+  });
+  it('respects a manual Preview choice before and after original acquisition', async () => {
+    const pending = deferred<Response>(); fetchOriginal.mockReturnValue(pending.promise);
+    await render(first, 'original');
+    act(() => current.toggle());
+    await act(async () => pending.resolve(response()));
+    expect(current.showingOriginal).toBe(false);
+    act(() => current.toggle()); expect(current.showingOriginal).toBe(true);
+    act(() => current.toggle()); expect(current.showingOriginal).toBe(false);
+    await render(first, 'auto', true);
+    expect(current.showingOriginal).toBe(false);
+    await render(first, 'original', true);
+    expect(current.showingOriginal).toBe(false);
+  });
+  it('Auto waits for usable GPU and keeps source choices stable after GPU loss', async () => {
+    fetchOriginal.mockResolvedValue(response());
+    await render(first, 'auto', false); expect(current.showingOriginal).toBe(false);
+    await render(first, 'auto', true); expect(current.showingOriginal).toBe(true);
+    await render(first, 'auto', false); expect(current.showingOriginal).toBe(true);
+    act(() => current.toggle()); expect(current.showingOriginal).toBe(false);
+    await render(first, 'auto', true); expect(current.showingOriginal).toBe(false);
+    await render(second, 'auto', true); expect(current.showingOriginal).toBe(true);
+  });
+  it('does not promote Preview preferred, and rejects an old preferred original after Filmstrip navigation', async () => {
+    const old = deferred<Response>(); fetchOriginal.mockReturnValueOnce(old.promise).mockResolvedValue(response());
+    await render(first, 'original');
+    await render(second, 'preview', true); expect(current.showingOriginal).toBe(false);
+    await act(async () => old.resolve(response()));
+    expect(current.source?.url).toBe(second.preview_url);
+    expect(createObjectURL).toHaveBeenCalledOnce();
+  });
   it('keeps preview usable while loading and reuses one compressed original for mode toggles', async () => {
     const pending = deferred<Response>(); fetchOriginal.mockReturnValue(pending.promise);
     await render(first);

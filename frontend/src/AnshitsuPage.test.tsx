@@ -50,19 +50,19 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('Anshitsu');
     expect(markup).toContain('Photo development workspace');
     expect(markup).toContain(`title="${asset.filename}"`);
-    expect(markup).toContain(formatPhotoDate(asset.date, 'en'));
-    expect(markup).toContain('aria-label="Use WebGPU"');
-    expect(markup).toContain('Checking · CPU');
-    expect(markup.indexOf('webgpu-control')).toBeLessThan(markup.indexOf('language-control compact'));
+    expect(markup).toContain(formatPhotoDate(asset.date));
+    expect(markup).toContain('aria-label="Settings"');
+    expect(markup).not.toContain('webgpu-control');
+    expect(markup).not.toContain('language-control');
   });
 
   it('renders the Japanese name without the English-only subtitle', () => {
     const markup = renderWorkspace('ja');
     expect(markup).toContain('暗室');
     expect(markup).not.toContain('Photo development workspace');
-    expect(markup).toContain(formatPhotoDate(asset.date, 'ja'));
-    expect(markup).toContain('aria-label="WebGPUを使用"');
-    expect(markup).toContain('確認中 · CPU');
+    expect(markup).toContain(formatPhotoDate(asset.date));
+    expect(markup).toContain('aria-label="設定"');
+    expect(markup).not.toContain('webgpu-control');
   });
 
   it('omits missing EXIF values instead of rendering undefined or null', () => {
@@ -102,7 +102,7 @@ describe('Anshitsu workspace', () => {
   it('uses the active Filmstrip asset for the workspace filename and date', () => {
     const markup = renderWorkspace('en', [asset, secondAsset], secondAsset.id);
     expect(markup).toContain(`title="${secondAsset.filename}"`);
-    expect(markup).toContain(formatPhotoDate(secondAsset.date, 'en'));
+    expect(markup).toContain(formatPhotoDate(secondAsset.date));
     expect(markup).toContain('aria-current="true"');
   });
 

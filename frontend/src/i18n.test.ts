@@ -113,18 +113,19 @@ describe('localized resources', () => {
 
   it('formats dates with the selected locale', () => {
     const value = '2026-09-08T20:43:43';
-    const date = new Date(value);
+    const date = new Date(value + 'Z');
     const options: Intl.DateTimeFormatOptions = {
       dateStyle: 'short',
       timeStyle: 'medium',
+      timeZone: 'UTC',
     };
 
-    expect(formatPhotoDate(value, 'ja')).toBe(
+    expect(formatPhotoDate(value, 'ja-JP')).toBe(
       new Intl.DateTimeFormat('ja-JP', options).format(date),
     );
-    expect(formatPhotoDate(value, 'en')).toBe(
+    expect(formatPhotoDate(value, 'en-US')).toBe(
       new Intl.DateTimeFormat('en-US', options).format(date),
     );
-    expect(formatPhotoDate(value, 'ja')).not.toBe(formatPhotoDate(value, 'en'));
+    expect(formatPhotoDate(value, 'ja-JP')).not.toBe(formatPhotoDate(value, 'en-US'));
   });
 });

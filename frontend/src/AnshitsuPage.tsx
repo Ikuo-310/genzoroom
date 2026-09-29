@@ -1,5 +1,6 @@
+import { useAppSettings } from './appSettings';
 import { useWorkspaceGpu } from './useWorkspaceGpu';
-import { WebGpuControl } from './WebGpuControl';
+import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { activeAdjustmentId, focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
@@ -7,7 +8,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
 import type { AssetDetail, AssetExif, RecentAsset, WorkspaceNavigationState } from './assets';
 import { useEditStatuses } from './useEditStatuses';
-import { LanguageControl } from './GalleryPage';
 import { HomeTitle } from './HomeTitle';
 import { ImageViewer } from './ImageViewer';
 import { EditHistory } from './EditHistory';
@@ -76,7 +76,10 @@ export function AnshitsuPage() {
   const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
-  const jpegOriginal = useJpegOriginal(activeDetail);
+  const settings = useAppSettings();
+  const { isOpen: settingsOpen, publishGpu } = useSettingsDialog();
+  const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
+  const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit);
@@ -84,6 +87,15 @@ export function AnshitsuPage() {
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
   const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`);
+  useEffect(() => {
+    // Preserve source-bound GPU ownership so an old render cannot overlap a new source upload.
+    // Original promotion is latched by useJpegOriginal while the new renderer prepares.
+    setInitialGpu({ assetId, usable: gpu.enabled && gpu.availability === 'available' && !!gpu.renderer });
+  }, [assetId, gpu.enabled, gpu.availability, gpu.renderer]);
+  useEffect(() => {
+    publishGpu({ enabled: gpu.enabled, availability: gpu.availability, active: gpu.active, setPreference: gpu.setPreference });
+  }, [publishGpu, gpu.enabled, gpu.availability, gpu.active, gpu.setPreference]);
+  useEffect(() => () => publishGpu(null), [publishGpu]);
   const currentHistogramAsset = useRef({ assetId, sourceKey: histogramSourceKey });
   currentHistogramAsset.current = { assetId, sourceKey: histogramSourceKey };
   // H2 can pass this guarded snapshot to ScopePanel; route changes hide old data immediately.
@@ -96,7 +108,7 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
-  const viewerKeyboardBlocked = selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
+  const viewerKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
     || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
@@ -390,13 +402,12 @@ export function AnshitsuPage() {
       </div>
       <div className="workspace-asset-title">
         <span title={summary?.filename}>{summary?.filename ?? t('workspace.loading')}</span>
-        {summary && <time dateTime={summary.date}>{formatPhotoDate(summary.date, language)}</time>}
+        {summary && <time dateTime={summary.date}>{formatPhotoDate(summary.date)}</time>}
       </div>
       <div className="workspace-actions">
         <button type="button" className="tool-button" disabled={exitSaving || exitFailure !== null}
           onClick={() => { void exitToHome(); }}>{t('workspace.backToPhotos')}</button>
-        <WebGpuControl enabled={gpu.enabled} availability={gpu.availability} active={gpu.active} onChange={gpu.setPreference} />
-        <LanguageControl language={language} compact />
+        <SettingsButton />
       </div>
     </header>
 
@@ -526,7 +537,7 @@ export function AnshitsuPage() {
         editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
         activeAssetId={assetId}
         disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-        keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
+        keyboardBlocked={settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
         onActivate={(nextId) => { void activateAsset(nextId); }}
       />}
     />
@@ -695,7 +706,7 @@ export function AdjustmentCategory({ categoryId, onOpenContextMenu, title, enabl
 export function ExifDetails({ exif, fallbackDate, language, profile = { status: 'unknown' } }: { exif: AssetExif; fallbackDate: string; language: AppLanguage; profile?: JpegProfile }) {
   const { t } = useTranslation();
   const rows: Array<[string, string | number | undefined]> = [
-    [t('workspace.exif.date'), formatPhotoDate(exif.date_time_original ?? fallbackDate, language)],
+    [t('workspace.exif.date'), formatPhotoDate(exif.date_time_original ?? fallbackDate)],
     [t('workspace.exif.make'), exif.make],
     [t('workspace.exif.model'), exif.model],
     [t('workspace.exif.lens'), exif.lens_model],

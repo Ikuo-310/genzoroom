@@ -1,9 +1,10 @@
+import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { fetchRecentAssets } from './api';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
-import { changeAppLanguage, type AppLanguage } from './i18n';
+import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
 import { HomeTitle } from './HomeTitle';
@@ -167,7 +168,7 @@ export function GalleryPage() {
             <p className="eyebrow">{t('app.eyebrow')}</p>
             <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
           </div>
-          <LanguageControl language={language} />
+          <SettingsButton />
         </header>
       </div>
       <section className="photos" aria-labelledby="recent-photos-heading">
@@ -201,18 +202,6 @@ export function GalleryPage() {
       <p className="note">{t('app.stageNotice')}</p>
     </main>
   );
-}
-
-export function LanguageControl({ language, compact = false }: { language: AppLanguage; compact?: boolean }) {
-  const { t } = useTranslation();
-  const id = compact ? 'workspace-language-select' : 'language-select';
-  return <div className={`language-control${compact ? ' compact' : ''}`}>
-    <label htmlFor={id}>{t('language.label')}</label>
-    <select id={id} value={language} onChange={(event) => void changeAppLanguage(event.target.value as AppLanguage)}>
-      <option value="en">{t('language.english')}</option>
-      <option value="ja">{t('language.japanese')}</option>
-    </select>
-  </div>;
 }
 
 function ConnectionRow({ label, state }: { label: string; state: ImmichConnection }) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 import { defaultGpu } from './webgpuExposureRenderer';
-import { readWebGpuEnabled, saveWebGpuEnabled } from './webgpuSettings';
+import { readWebGpuEnabled, saveWebGpuEnabled, subscribeWebGpu } from './webgpuSettings';
 
 export type WorkspaceGpuRenderer = Pick<WebGpuAdjustmentRenderer,
   'available' | 'setSource' | 'render' | 'dispose' | 'onDeviceLost'>;
@@ -11,8 +11,9 @@ type Snapshot = {
   key: string; enabled: boolean; availability: GpuAvailability; renderer: WorkspaceGpuRenderer | null;
 };
 
-export function useWorkspaceGpu(key: string) {
+export function useWorkspaceGpu(key: string, probeOnly = false) {
   const [enabled, setEnabled] = useState(readWebGpuEnabled);
+  useEffect(() => subscribeWebGpu(setEnabled), []);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [paintedRenderer, setPaintedRenderer] = useState<WorkspaceGpuRenderer | null>(null);
   const current = useRef({ key, enabled, snapshot });
@@ -37,8 +38,8 @@ export function useWorkspaceGpu(key: string) {
       const created = await WebGpuAdjustmentRenderer.create(defaultGpu(), undefined, controller.signal);
       if (controller.signal.aborted) { created?.dispose(); return; }
       if (!created || !created.available) { created?.dispose(); publish('unavailable', null); return; }
-      if (!enabled) {
-        // An OFF preference still checks the full G2 pipeline, then releases its probe device.
+      if (!enabled || probeOnly) {
+        // OFF and Home check the full G2 pipeline without retaining a device for image processing.
         created.dispose();
         publish('available', null);
         return;
@@ -55,7 +56,7 @@ export function useWorkspaceGpu(key: string) {
       unsubscribe();
       owned?.dispose();
     };
-  }, [key, enabled]);
+  }, [key, enabled, probeOnly]);
 
   const setPreference = useCallback((next: boolean) => {
     saveWebGpuEnabled(next);

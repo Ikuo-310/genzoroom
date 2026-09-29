@@ -4,7 +4,7 @@
     "active": "GPU処理",
     "ready": "準備中 · CPU",
     "off": "OFF · CPU",
-    "checking": "確認中 · CPU",
+    "checking": "準備中 / CPU",
     "unavailable": "利用不可 · CPU",
     "error": "GPUエラー · CPU"
   },
@@ -271,8 +271,43 @@
     "numericNotes": "Global Temperature・Tint・Exposure/ContrastはCPU生成LUT、以降はWGSLのf32演算です。Stage prefixのケースで差が生じ始める補正を確認できます。f32の差は後段で増幅する場合があり、この画面だけでは原因を断定しません。ケース名は英語の技術的なテスト識別名です。"
   },
   "language": {
+    "nativeName": "日本語",
     "label": "言語",
     "english": "English",
     "japanese": "日本語"
+  },
+  "settings": {
+    "title": "設定",
+    "close": "閉じる",
+    "general": "一般設定",
+    "processing": "画像処理設定",
+    "connection": "接続情報",
+    "auto": "自動",
+    "autoLanguage": "自動（ブラウザの優先言語）",
+    "autoLocale": "自動（ブラウザの地域設定）",
+    "autoWeek": "自動（地域設定に従う）",
+    "dateLocale": "日付・時刻のロケール",
+    "weekStart": "カレンダーの週初め",
+    "sunday": "日曜日",
+    "monday": "月曜日",
+    "initialImage": "暗室の初期表示画像",
+    "original": "原版優先",
+    "preview": "プレビュー優先",
+    "development": "開発版",
+    "refresh": "再確認",
+    "aboutPermission": "サーバー情報を取得できません。APIキーの server.about 権限を確認してください。",
+    "aboutFailed": "サーバー情報を取得できませんでした。",
+    "version": "サーバーバージョン",
+    "build": "ビルド",
+    "sourceRef": "ソース参照",
+    "regions": {
+      "ja-JP": "日本",
+      "en-US": "米国",
+      "en-GB": "英国",
+      "de-DE": "ドイツ",
+      "fr-FR": "フランス",
+      "zh-CN": "中国",
+      "ko-KR": "韓国"
+    }
   }
 }

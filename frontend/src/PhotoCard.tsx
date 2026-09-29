@@ -1,3 +1,4 @@
+import { useAppSettings } from './appSettings';
 import { useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
@@ -26,6 +27,7 @@ export function PhotoCard({
   selectionMode = false,
   edited,
 }: PhotoCardProps) {
+  useAppSettings();
   const { t } = useTranslation();
   const rangeClickHandled = useRef(false);
   const selectionLabel = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
@@ -83,7 +85,7 @@ export function PhotoCard({
         </div>
         <div className="photo-info">
           <p title={asset.filename}>{asset.filename}</p>
-          <time dateTime={asset.date}>{formatPhotoDate(asset.date, language)}</time>
+          <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time>
         </div>
       </button>
     </article>

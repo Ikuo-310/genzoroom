@@ -1,3 +1,5 @@
+import { SettingsProvider } from './SettingsDialog';
+import { updateSetting } from './appSettings';
 // @vitest-environment jsdom
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -128,7 +130,10 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
-  it('wires the workspace GPU switch and runtime fallback without changing source, History, or Recipe', async () => {
+  it('wires the Settings GPU switch and runtime fallback without changing source, History, or Recipe', async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
+    updateSetting('initialImage', 'preview');
     vi.stubGlobal('isSecureContext', true);
     vi.stubGlobal('navigator', { gpu: {}, language: 'en' });
     const fetch = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['jpeg']), json: async () => ({ edited: {} }) }));
@@ -144,7 +149,8 @@ describe('Viewer edit settings context menu', () => {
     });
     try {
       await act(async () => root.render(<MemoryRouter initialEntries={['/anshitsu/first']}>
-        <Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
+        <SettingsProvider><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></SettingsProvider></MemoryRouter>));
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click());
       expect(mockImage.gpuRenderer?.available).toBe(true);
       const switchButton = () => host.querySelector<HTMLButtonElement>('[aria-label="Use WebGPU"]')!;
       act(() => mockImage.onBackendChange?.('gpu'));
@@ -165,12 +171,13 @@ describe('Viewer edit settings context menu', () => {
       expect(localStorage.getItem(WEBGPU_STORAGE_KEY)).toBe('true');
       expect(mockImage.source).toEqual(source); expect(mockImage.recipe).toBe(recipe);
       expect(host.querySelector('.edit-history')!.innerHTML).toBe(history); expect(fetch).toHaveBeenCalledTimes(requests);
+      click(host.querySelector<HTMLButtonElement>('.settings-dialog header button')!);
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Preview / Original"]')!.click());
       expect(mockImage.source?.kind).toBe('jpeg-original'); expect(mockImage.gpuRenderer?.available).toBe(true);
       expect(mockImage.recipe).toBe(recipe); expect(host.querySelector('.edit-history')!.innerHTML).toBe(history);
       act(() => root.unmount()); root = createRoot(host);
       expect(created.every(renderer => !renderer.available)).toBe(true);
-    } finally { create.mockRestore(); localStorage.removeItem(WEBGPU_STORAGE_KEY); }
+    } finally { create.mockRestore(); localStorage.removeItem(WEBGPU_STORAGE_KEY); updateSetting('initialImage', 'auto'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close'); }
   });
   it.each(['loading', 'error'] as const)('keeps original switching disabled and ignores ] while acquisition is %s', (status) => {
     const toggle = vi.fn();

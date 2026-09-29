@@ -12,6 +12,8 @@ from edit_state import InvalidEditState, validate_snapshot
 from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state, get_edit_statuses
 
 from immich import (
+    ImmichAbout,
+    get_immich_about,
     AssetDetail,
     ImmichRequestError,
     ImmichStatus,
@@ -26,6 +28,11 @@ from immich import (
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
+
+
+@app.get("/immich/about", response_model=ImmichAbout, response_model_exclude_none=True)
+async def immich_about() -> ImmichAbout:
+    return await get_immich_about(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
 
 
 @app.get("/assets/{asset_id}/original")

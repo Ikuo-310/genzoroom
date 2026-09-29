@@ -4,7 +4,7 @@
     "active": "GPU active",
     "ready": "Preparing · CPU",
     "off": "OFF · CPU",
-    "checking": "Checking · CPU",
+    "checking": "Preparing / CPU",
     "unavailable": "Unavailable · CPU",
     "error": "GPU error · CPU"
   },
@@ -273,8 +273,43 @@
     "numericNotes": "Global Temperature, Tint, and Exposure/Contrast use CPU-generated LUTs; subsequent stages use WGSL f32 arithmetic. Stage-prefix cases help locate where differences begin. Small f32 differences can grow in later stages; this screen alone does not establish their cause. Case names are technical test identifiers."
   },
   "language": {
+    "nativeName": "English",
     "label": "Language",
     "english": "English",
     "japanese": "日本語"
+  },
+  "settings": {
+    "title": "Settings",
+    "close": "Close",
+    "general": "General",
+    "processing": "Image Processing",
+    "connection": "Connection Information",
+    "auto": "Auto",
+    "autoLanguage": "Auto (browser preferred languages)",
+    "autoLocale": "Auto (browser regional settings)",
+    "autoWeek": "Auto (regional settings)",
+    "dateLocale": "Date and time locale",
+    "weekStart": "First day of the week",
+    "sunday": "Sunday",
+    "monday": "Monday",
+    "initialImage": "Initial image in Anshitsu",
+    "original": "Original preferred",
+    "preview": "Preview preferred",
+    "development": "Development build",
+    "refresh": "Check again",
+    "aboutPermission": "Server information unavailable. Check the server.about API key permission.",
+    "aboutFailed": "Server information could not be retrieved.",
+    "version": "Server version",
+    "build": "Build",
+    "sourceRef": "Source reference",
+    "regions": {
+      "ja-JP": "Japan",
+      "en-US": "United States",
+      "en-GB": "United Kingdom",
+      "de-DE": "Germany",
+      "fr-FR": "France",
+      "zh-CN": "China",
+      "ko-KR": "South Korea"
+    }
   }
 }

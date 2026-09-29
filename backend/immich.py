@@ -59,6 +59,45 @@ class ImmichStatus(BaseModel):
     error_code: ErrorCode | None = None
 
 
+class ImmichAbout(BaseModel):
+    version: str | None = None
+    build: str | None = None
+    sourceRef: str | None = None
+    error_code: ErrorCode | None = None
+
+
+async def get_immich_about(
+    immich_url: str | None, api_key: str | None,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> ImmichAbout:
+    # Optional diagnostics must not affect connection checks or photo APIs.
+    try:
+        url, key = _require_configuration(immich_url, api_key)
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.get(
+                _api_url(url, "/server/about"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+            )
+        if response.status_code != 200:
+            raise _request_error(response)
+        body = response.json()
+        if not isinstance(body, Mapping) or not _optional_string(body.get("version")):
+            return ImmichAbout(error_code="unexpected_response")
+        # Allowlist public build labels; never proxy the raw upstream payload.
+        return ImmichAbout(**{
+            field: value[:200] for field in ("version", "build", "sourceRef")
+            if (value := _optional_string(body.get(field))) is not None
+        })
+    except ImmichRequestError as error:
+        return ImmichAbout(error_code=error.error_code)
+    except (httpx.InvalidURL, httpx.RequestError):
+        return ImmichAbout(error_code="unreachable")
+    except ValueError:
+        return ImmichAbout(error_code="unexpected_response")
+
+
 class RecentAsset(BaseModel):
     id: UUID
     filename: str

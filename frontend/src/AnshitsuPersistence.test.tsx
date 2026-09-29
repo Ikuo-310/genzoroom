@@ -81,6 +81,34 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('preserves History, Undo/Redo, Filmstrip and the existing autosave deadline across Settings', async ({ onTestFinished }) => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
+    onTestFinished(() => { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close'); });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
+    vi.useFakeTimers(); await mount();
+    await click('button[aria-label="Disable Basic"]');
+    hoverFilmstrip();
+    const history = container.querySelector('.edit-history')!.innerHTML;
+    const getCount = mocked.get.mock.calls.length;
+    await advance(3000);
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!;
+    trigger.focus(); await click('[aria-label="Settings"]');
+    await filmstripKey(); await filmstripKey('z', { ctrlKey: true });
+    const select = container.querySelector('dialog select')!;
+    await filmstripKey('z', { ctrlKey: true }, select);
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('.edit-history')!.innerHTML).toBe(history);
+    await advance(1999); expect(mocked.put).not.toHaveBeenCalled();
+    await advance(1); expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][1].currentRecipe.basicEnabled).toBe(false);
+    await filmstripKey('Escape', {}, container.querySelector('dialog button')!);
+    expect(container.querySelector('dialog')).toBeNull(); expect(document.activeElement).toBe(trigger);
+    expect(mocked.get).toHaveBeenCalledTimes(getCount);
+    await click('.edit-actions button'); expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
+    await click('.edit-actions button:nth-child(2)'); expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
+    expect(currentPhoto()).toBe('first.jpg');
+  });
   it('keeps the confirmed saved badge after a later rejected save and discard without refetching statuses', async () => {
     vi.useFakeTimers();
     const bulk = deferred<Record<string, boolean>>();

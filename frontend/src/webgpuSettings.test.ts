@@ -17,5 +17,7 @@ describe('WebGPU preference storage', () => {
     const storage = { getItem: () => { throw new Error('Denied'); }, setItem: () => { throw new Error('Full'); } };
     expect(readWebGpuEnabled(storage)).toBe(true);
     expect(() => saveWebGpuEnabled(false, storage)).not.toThrow();
+    expect(readWebGpuEnabled(storage)).toBe(false);
+    saveWebGpuEnabled(true, { setItem: () => {} });
   });
 });
