@@ -29,7 +29,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Web Worker preview rendering with only the latest pending edit retained, plus a main-thread fallback if the Worker is unavailable or fails.
 - Fit, 1:1, zoom, and pan controls.
 - Before / After display toggle and hold the Backslash key for temporary Before; comparison bypasses develop adjustments without changing edits or zoom/pan.
-- An 8-bit sRGB Histogram from JPEG previews, with 256 bins each for R, G, B, and Y′. The Scope supports individual RGB visibility while keeping at least one channel on, Y Only, a Normal scale based on the shared RGB maximum, and an Expanded scale using nearest-rank P99. It follows both persistent and temporary Viewer Before / After display.
+- An 8-bit sRGB Histogram from JPEG previews, with 256 bins each for R, G, B, and Y′. The Scope supports individual RGB visibility while keeping at least one channel on, Y Only, a Normal scale based on the shared RGB maximum, and an Expanded scale using nearest-rank P99. It follows both persistent and temporary Viewer Before / After display. On desktop, its height can be resized from 15% to 40% of the right panel (30% by default) and is remembered by the browser.
 - Histogram shortcuts: Numpad 0 toggles Y Only; Numpad 1, 2, and 3 toggle R, G, and B; Numpad Decimal toggles Normal / Expanded. While Y Only is active, the first Numpad 1–3 press restores the previous RGB selection; the next press toggles that channel. Text and number fields keep native keypad input.
 - RGB visibility, Y Only, and scale mode remain selected when switching photos in Anshitsu.
 - Independently collapsible and resizable desktop sidebars with remembered widths.

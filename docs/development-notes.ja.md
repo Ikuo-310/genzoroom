@@ -20,7 +20,13 @@ H2でScopePanelとHistogram SVGを追加し、Scopeの利用可能な高さに�
 
 AdjustmentSliderにあった共有スライダーMap、現在の操作対象、キーボード／マウスの操作権、フォーカス移動・復元処理を`adjustmentFocus.ts`へ移した。AdjustmentSliderは各コントロールの数値入力、pointer、wheel、編集確定を保持する。`adjustmentNavigation.ts`はDOM上の移動先とスクロール、`editShortcuts.ts`はキー判定とネイティブ入力保護を引き続き担当する。AnshitsuPage、ColorGradingAdjustmentControls、ImageViewerは共有状態を新モジュールから参照する。キー操作の優先順位、移動前の編集確定、NumLock OFF時のNumpad共存を維持し、NAS／Firefox実機確認も完了した。
 
+構造調査では、AnshitsuPageの独立した表示責務とAdjustmentSliderの共有フォーカス状態だけを分離した。`useAssetEdits`の読み込み、編集セッション、autosave／retry、退出時の保存とHistory圧縮は同じセッション状態と実行順序を共有するため、分割せず既存の責務を維持した。構造調査で緊急の設計上の問題は確認されず、必要性を確認できた分離だけを実施した。
+
 各工程で報告された検証は、関連テスト238件、163件、323件が成功し、Frontend `src` 全体43ファイル・999件、TypeScript型チェック、本番ビルド、git diff --checkも成功した。実機確認は利用者により完了している。
+
+その後、デスクトップのWorkspaceLayoutを上下2段にし、右パネルと右リサイズハンドルを画面最下部まで伸ばした。Filmstripは左パネルとViewerの下段へ移し、右パネルを閉じた場合は全幅を使う。モバイルでは既存の縦積みとsticky Filmstripを維持した。Scope種類の選択を見出し右側へ移して説明文を外し、ScopeとDevelopの間に高さ調整ハンドルを追加した。ドラッグと上下矢印で15〜40%を調整でき、初期値30%。`scopeSizing.ts`の専用localStorageキーで保存し、暗室再入場・写真切替後も復元する。不正値は初期値に戻し、40%を超える保存値は40%として扱う。左右パネル幅の保存とは独立している。
+
+高さ調整の変更後はFrontend `src` 全45ファイル・1004件、TypeScript型チェック、本番ビルド、git diff --checkが成功した。初期値を30%へ変更した後はScope関連5件、TypeScript型チェック、git diff --checkが成功した。高さ調整についてブラウザ手動確認や性能測定は行っていない。
 
 ## 永続化 Phase 5（現在仕様）
 
