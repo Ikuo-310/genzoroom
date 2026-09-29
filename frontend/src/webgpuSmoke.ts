@@ -1,7 +1,8 @@
 import { renderAdjustments } from './adjustmentPipeline';
-import { defaultRecipe } from './editing';
+import { gpuRecipeCases, gpuComparisonPixels } from './webgpuRecipeCases';
 import { compareRgba } from './webgpuComparison';
-import { WebGpuExposureRenderer } from './webgpuExposureRenderer';
+import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
+import i18n from './i18n';
 import type { ExposureGpu, ExposureGpuDevice } from './webgpuTypes';
 
 interface AdapterInfo { vendor?: string; architecture?: string; device?: string; description?: string }
@@ -13,22 +14,14 @@ interface SmokeGpu extends ExposureGpu {
   } | null>;
 }
 export interface SmokeEnvironment { secureContext: boolean; gpu?: SmokeGpu }
-type Renderer = Pick<WebGpuExposureRenderer, 'render' | 'dispose'>;
+type Renderer = Pick<WebGpuAdjustmentRenderer, 'setSource' | 'render' | 'dispose'>;
 type Factory = (gpu: ExposureGpu, onError: (error: unknown) => void) => Promise<Renderer | null>;
-export const SMOKE_EXPOSURES = [0, 1, -1, 2] as const;
+export const SMOKE_CASES = gpuRecipeCases();
 
-export function smokePixels() {
-  // Includes transfer-function boundaries and alpha extremes in one small 4x4 image.
-  return new Uint8ClampedArray([
-    0, 0, 0, 0,       255, 255, 255, 255, 128, 128, 128, 128, 255, 0, 0, 64,
-    0, 255, 0, 192,   0, 0, 255, 1,       10, 10, 10, 254,   11, 11, 11, 127,
-    1, 1, 1, 255,     254, 254, 254, 0,   32, 64, 96, 17,    127, 128, 129, 73,
-    255, 255, 0, 255, 0, 255, 255, 128,   255, 0, 255, 64,   50, 100, 200, 211,
-  ]);
-}
+export const smokePixels = gpuComparisonPixels;
 
 interface SmokeResult {
-  exposure: number;
+  name: string;
   success: boolean;
   comparison?: ReturnType<typeof compareRgba>;
   error?: string;
@@ -55,7 +48,7 @@ export class WebGpuSmoke {
   };
 
   constructor(private environment: SmokeEnvironment, private update: (state: SmokeState) => void,
-    private factory: Factory = WebGpuExposureRenderer.create) {}
+    private factory: Factory = WebGpuAdjustmentRenderer.create) {}
 
   dispose() {
     this.closed = true;
@@ -124,25 +117,25 @@ export class WebGpuSmoke {
       this.state.shader = 'コンパイル・Pipeline作成成功';
       publish();
       const source = smokePixels();
-      for (const exposure of SMOKE_EXPOSURES) {
+      const generation = await this.renderer.setSource(source, 32, 16);
+      for (const { name, recipe } of SMOKE_CASES) {
         if (this.closed) return;
         try {
-          const recipe = defaultRecipe();
-          recipe.adjustments.exposure = exposure;
           const cpu = renderAdjustments(source, recipe);
-          const gpuOutput = await this.renderer.render(source, 4, 4, exposure);
+          const result = await this.renderer.render(recipe);
+          if (result.sourceGeneration !== generation) throw new Error('GPU result source generation does not match the uploaded image.');
           if (this.closed) return;
-          this.state.results.push({ exposure, success: true, comparison: compareRgba(cpu, gpuOutput) });
+          this.state.results.push({ name, success: true, comparison: compareRgba(cpu, result.pixels) });
         } catch (error) {
           if (this.closed) return;
-          this.state.results.push({ exposure, success: false, error: errorText(error) });
+          this.state.results.push({ name, success: false, error: errorText(error) });
         }
         publish();
       }
       this.state.status = this.state.results.every(result => result.success) ? 'GPU実行完了' : 'GPU実行失敗あり';
     } catch (error) {
       this.state.status = `利用不可／失敗: ${errorText(error)}`;
-      this.state.results = SMOKE_EXPOSURES.map(exposure => ({ exposure, success: false, error: errorText(error) }));
+      this.state.results = SMOKE_CASES.map(({ name }) => ({ name, success: false, error: errorText(error) }));
     } finally {
       this.renderer?.dispose();
       this.renderer = null;
@@ -155,13 +148,14 @@ export class WebGpuSmoke {
 }
 
 export function mountSmokePage(root: HTMLElement, environment: SmokeEnvironment, factory?: Factory) {
-  root.innerHTML = `<h1>GenzoRoom WebGPU G1 Smoke Test（開発用）</h1>
-    <p>生成した4×4 sRGB RGBA画像をCPUとGPUで比較します。写真の取得・保存は行いません。</p>
+  root.innerHTML = `<h1>${i18n.t('webgpuSmoke.title')}</h1>
+    <p>${i18n.t('webgpuSmoke.imageDescription')}</p>
     <p>Secure Context: <strong id="secure"></strong> / navigator.gpu: <strong id="gpu-api"></strong></p>
     <button type="button">スモークテストを実行</button>
     <pre id="diagnostics" aria-live="polite"></pre>
     <p>最大差と差異数はRGBA全チャンネルの生バイト比較です。差は自動合否判定せず実測値を表示します。</p>
-    <div class="results"><table><thead><tr><th>露出</th><th>GPU実行</th><th>最大階調差</th>
+    <p>${i18n.t('webgpuSmoke.numericNotes')}</p>
+    <div class="results"><table><thead><tr><th>${i18n.t('webgpuSmoke.recipeCase')}</th><th>GPU実行</th><th>最大階調差</th>
     <th>差異チャンネル数</th><th>アルファ一致</th><th>エラー</th></tr></thead><tbody></tbody></table></div>`;
   root.querySelector('#secure')!.textContent = String(environment.secureContext);
   root.querySelector('#gpu-api')!.textContent = String(Boolean(environment.gpu));
@@ -169,14 +163,14 @@ export function mountSmokePage(root: HTMLElement, environment: SmokeEnvironment,
   const show = (state: SmokeState) => {
     button.disabled = state.running;
     root.querySelector('#diagnostics')!.textContent = `アダプター: ${state.adapter}\nデバイス: ${state.device}\nWGSL: ${state.shader}\nGPU情報:\n${state.info}\n状態: ${state.status}`;
-    const rows = SMOKE_EXPOSURES.map(exposure => state.results.find(result => result.exposure === exposure)
-      ?? { exposure, success: false });
+    const rows = SMOKE_CASES.map(({ name }) => state.results.find(result => result.name === name)
+      ?? { name, success: false });
     const tbody = root.querySelector('tbody')!;
     tbody.replaceChildren(...rows.map(result => {
       const row = document.createElement('tr');
       const comparison = 'comparison' in result ? result.comparison : undefined;
       const error = 'error' in result ? result.error : undefined;
-      const values = [ `${result.exposure > 0 ? '+' : ''}${result.exposure} EV`,
+      const values = [ result.name,
         state.results.includes(result) ? (result.success ? '成功' : '失敗') : '未実行',
         comparison?.maximumDifference ?? '—', comparison?.differingChannels ?? '—',
         comparison ? (comparison.alphaMatches ? '一致' : '不一致') : '—', error ?? '—' ];

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { renderAdjustments } from './adjustmentPipeline';
-import { defaultRecipe } from './editing';
+import type { EditRecipe } from './editing';
+import type { GpuAdjustmentResult } from './webgpuAdjustmentRenderer';
+import i18n from './i18n';
 import { compareRgba } from './webgpuComparison';
-import { mountSmokePage, SMOKE_EXPOSURES, smokePixels, WebGpuSmoke, type SmokeEnvironment } from './webgpuSmoke';
+import { mountSmokePage, SMOKE_CASES, smokePixels, WebGpuSmoke, type SmokeEnvironment } from './webgpuSmoke';
 import type { ExposureGpu, ExposureGpuDevice } from './webgpuTypes';
 
 function deferred<T>() {
@@ -15,12 +17,13 @@ function setup(info: object = { vendor: '', architecture: '', device: '', descri
   const device = { destroy: vi.fn() } as unknown as ExposureGpuDevice;
   const adapter = { info, requestDevice: vi.fn(async () => device) };
   const gpu = { requestAdapter: vi.fn(async () => adapter) };
+  let uploaded = smokePixels();
   const renderer = {
+    setSource: vi.fn(async (source: Uint8ClampedArray, _width: number, _height: number) => { uploaded = source.slice(); return 1; }),
     // Mock CPU-produced outputs verify smoke orchestration, not WGSL execution.
-    render: vi.fn(async (source: Uint8ClampedArray, _width: number, _height: number, exposure: number) => {
-      const recipe = defaultRecipe(); recipe.adjustments.exposure = exposure;
-      return renderAdjustments(source, recipe);
-    }),
+    render: vi.fn(async (recipe: EditRecipe): Promise<GpuAdjustmentResult> => ({
+      pixels: renderAdjustments(uploaded, recipe), width: 32, height: 16, sourceGeneration: 1, requestId: 1,
+    })),
     dispose: vi.fn(),
   };
   const factory = vi.fn(async (instrumented: ExposureGpu, _onError: (error: unknown) => void) => {
@@ -47,8 +50,24 @@ describe('byte comparison shared with G1', () => {
   });
 });
 
+it('localizes G2 UI additions through the existing language resources', async () => {
+  const original = i18n.language;
+  try {
+    for (const language of ['en', 'ja']) {
+      await i18n.changeLanguage(language);
+      const root = document.createElement('main');
+      const cleanup = mountSmokePage(root, { secureContext: true });
+      expect(root.querySelector('h1')!.textContent).toBe(i18n.t('webgpuSmoke.title'));
+      expect(root.textContent).toContain(i18n.t('webgpuSmoke.numericNotes'));
+      expect(root.textContent).toContain(i18n.t('webgpuSmoke.recipeCase'));
+      expect(root.textContent).not.toContain('webgpuSmoke.');
+      cleanup();
+    }
+  } finally { await i18n.changeLanguage(original); }
+});
+
 describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', () => {
-  it('uses one 4x4 image and the requested EV values with serial CPU comparisons', async () => {
+  it('uses one uploaded image and all Recipe cases with serial CPU comparisons', async () => {
     const fake = setup();
     let active = 0;
     const render = fake.renderer.render.getMockImplementation()!;
@@ -60,8 +79,9 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
       return output;
     });
     await fake.smoke.run();
-    expect(fake.renderer.render.mock.calls.map(call => call.slice(1))).toEqual(SMOKE_EXPOSURES.map(ev => [4, 4, ev]));
-    expect(fake.smoke.state.results).toHaveLength(4);
+    expect(fake.renderer.setSource).toHaveBeenCalledExactlyOnceWith(smokePixels(), 32, 16);
+    expect(fake.renderer.render.mock.calls.map(call => call[0])).toEqual(SMOKE_CASES.map(c => c.recipe));
+    expect(fake.smoke.state.results).toHaveLength(SMOKE_CASES.length);
     for (const row of fake.smoke.state.results) {
       expect(row.success).toBe(true);
       expect(row.comparison).toEqual({ maximumDifference: 0, differingChannels: 0, alphaMatches: true });
@@ -70,8 +90,8 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     expect(fake.smoke.state.device).toBe('成功');
     expect(fake.smoke.state.info).toContain('（空文字／未公開）');
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
-    expect(smokePixels()).toHaveLength(64);
-    const tuples = Array.from({ length: 16 }, (_, i) => [...smokePixels().slice(i * 4, i * 4 + 4)]);
+    expect(smokePixels()).toHaveLength(2048);
+    const tuples = Array.from({ length: 512 }, (_, i) => [...smokePixels().slice(i * 4, i * 4 + 4)]);
     for (const rgb of [[0, 0, 0], [255, 255, 255], [128, 128, 128], [255, 0, 0], [0, 255, 0], [0, 0, 255]]) {
       expect(tuples.some(pixel => pixel.slice(0, 3).join() === rgb.join())).toBe(true);
     }
@@ -104,7 +124,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     if (mode === 'device error') fake.adapter.requestDevice.mockRejectedValueOnce(new Error(mode));
     const smoke = new WebGpuSmoke(fake.environment, vi.fn(), factory);
     await smoke.run();
-    expect(smoke.state.results).toHaveLength(4);
+    expect(smoke.state.results).toHaveLength(SMOKE_CASES.length);
     expect(smoke.state.results.every(row => !row.success)).toBe(true);
     expect(smoke.state.status).toContain(mode === 'adapter null' ? 'GPUアダプター' : mode);
     if (mode === 'shader error') expect(smoke.state.shader).toContain('WGSL validation');
@@ -113,7 +133,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
   it('continues after a render failure and reports alpha differences', async () => {
     const fake = setup();
     const alphaMismatch = smokePixels(); alphaMismatch[3] = 255;
-    fake.renderer.render.mockRejectedValueOnce(new Error('device lost')).mockResolvedValueOnce(alphaMismatch);
+    fake.renderer.render.mockRejectedValueOnce(new Error('device lost')).mockResolvedValueOnce({ pixels: alphaMismatch, width: 32, height: 16, sourceGeneration: 1, requestId: 2 });
     await fake.smoke.run();
     expect(fake.smoke.state.results[0].error).toBe('device lost');
     expect(fake.smoke.state.results[1].comparison?.alphaMatches).toBe(false);
@@ -140,7 +160,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
 
   it('prevents duplicate runs, disposes on departure and suppresses late results', async () => {
     const fake = setup();
-    const pending = deferred<Uint8ClampedArray<ArrayBuffer>>();
+    const pending = deferred<GpuAdjustmentResult>();
     const started = deferred<void>();
     fake.renderer.render.mockImplementationOnce(() => { started.resolve(); return pending.promise; });
     const work = fake.smoke.run();
@@ -150,7 +170,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     fake.smoke.dispose();
     const updates = fake.update.mock.calls.length;
     expect(fake.renderer.dispose).toHaveBeenCalled();
-    pending.resolve(smokePixels());
+    pending.resolve({ pixels: smokePixels(), width: 32, height: 16, sourceGeneration: 1, requestId: 1 });
     await work;
     expect(fake.smoke.state.results).toHaveLength(0);
     expect(fake.update).toHaveBeenCalledTimes(updates);
@@ -204,7 +224,7 @@ it('renders diagnostic errors as text and removes execution handlers on cleanup'
     return null as never;
   });
   const cleanup = mountSmokePage(root, fake.environment, fake.factory);
-  expect(root.querySelectorAll('tbody tr')).toHaveLength(4);
+  expect(root.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
   expect(root.textContent).toContain('未実行');
   root.querySelector('button')!.click();
   expect(root.querySelector('button')!.disabled).toBe(true);
@@ -212,7 +232,7 @@ it('renders diagnostic errors as text and removes execution handlers on cleanup'
   await Promise.resolve();
   expect(root.textContent).toContain('<img src=x onerror=alert(1)> WGSL');
   expect(root.querySelector('img')).toBeNull();
-  expect(root.querySelectorAll('tbody tr')).toHaveLength(4);
+  expect(root.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
   cleanup();
   root.querySelector('button')!.click();
   expect(fake.factory).toHaveBeenCalledOnce();

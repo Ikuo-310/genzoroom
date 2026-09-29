@@ -5,12 +5,12 @@ import type { ExposureGpu, ExposureGpuBuffer, ExposureGpuDevice, ExposureGpuPipe
 // WebGPU bit flags are fixed by the API; no browser globals are needed at module load.
 const USAGE = { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 };
 
-function defaultGpu(): ExposureGpu | undefined {
+export function defaultGpu(): ExposureGpu | undefined {
   return typeof navigator === 'undefined' ? undefined
     : (navigator as Navigator & { gpu?: ExposureGpu }).gpu;
 }
 
-async function scoped<T>(device: ExposureGpuDevice, action: () => Promise<T>): Promise<T> {
+export async function scoped<T>(device: ExposureGpuDevice, action: () => Promise<T>): Promise<T> {
   device.pushErrorScope('internal');
   device.pushErrorScope('out-of-memory');
   device.pushErrorScope('validation');

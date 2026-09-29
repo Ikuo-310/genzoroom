@@ -255,6 +255,12 @@
     "profileNone": "ICC埋め込みなし",
     "profileUnknown": "不明"
   },
+  "webgpuSmoke": {
+    "title": "GenzoRoom WebGPU G2 Smoke Test（開発用）",
+    "imageDescription": "生成した32×16 sRGB RGBA画像をCPUとGPUで比較します。写真の取得・保存は行いません。",
+    "recipeCase": "Recipeケース",
+    "numericNotes": "Global Temperature・Tint・Exposure/ContrastはCPU生成LUT、以降はWGSLのf32演算です。Stage prefixのケースで差が生じ始める補正を確認できます。f32の差は後段で増幅する場合があり、この画面だけでは原因を断定しません。ケース名は英語の技術的なテスト識別名です。"
+  },
   "language": {
     "label": "言語",
     "english": "English",

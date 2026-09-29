@@ -257,6 +257,12 @@
     "profileNone": "No embedded ICC",
     "profileUnknown": "Unknown"
   },
+  "webgpuSmoke": {
+    "title": "GenzoRoom WebGPU G2 Smoke Test (development)",
+    "imageDescription": "Compare CPU and GPU output using a generated 32×16 sRGB RGBA image. No photos are fetched or saved.",
+    "recipeCase": "Recipe case",
+    "numericNotes": "Global Temperature, Tint, and Exposure/Contrast use CPU-generated LUTs; subsequent stages use WGSL f32 arithmetic. Stage-prefix cases help locate where differences begin. Small f32 differences can grow in later stages; this screen alone does not establish their cause. Case names are technical test identifiers."
+  },
   "language": {
     "label": "Language",
     "english": "English",
