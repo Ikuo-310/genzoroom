@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from edit_state import InvalidEditState, validate_snapshot
@@ -17,12 +19,30 @@ from immich import (
     check_immich_status,
     get_asset_detail,
     get_asset_preview,
+    get_asset_original,
     get_asset_thumbnail,
     get_recent_assets,
 )
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
+
+
+@app.get("/assets/{asset_id}/original")
+async def asset_original(asset_id: UUID) -> StreamingResponse:
+    try:
+        original = await get_asset_original(
+            os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id,
+        )
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+    # Headers are validated before committing the response. Later stream failures
+    # terminate the transfer so the frontend cannot accept a truncated original.
+    return StreamingResponse(
+        original.chunks(), media_type="image/jpeg",
+        headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
+        background=BackgroundTask(original.close),
+    )
 
 
 def _edit_error(status: int, code: str) -> HTTPException:

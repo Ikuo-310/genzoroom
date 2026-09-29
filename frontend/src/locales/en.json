@@ -246,7 +246,15 @@
     "resetGradingRange": "Reset {{name}}",
     "copyGradingRange": "Copy {{name}} settings",
     "pasteGradingRange": "Paste into {{name}}",
-    "gradingRangeMenu": "{{name}} actions"
+    "gradingRangeMenu": "{{name}} actions",
+    "previewOriginal": "Preview / Original",
+    "preview": "Preview",
+    "original": "Original",
+    "originalLoading": "Loading original…",
+    "originalFailed": "Original unavailable; preview editing remains available.",
+    "colorProfile": "Color profile (original)",
+    "profileNone": "No embedded ICC",
+    "profileUnknown": "Unknown"
   },
   "language": {
     "label": "Language",

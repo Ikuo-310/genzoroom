@@ -244,7 +244,15 @@
     "resetGradingRange": "{{name}}をリセット",
     "copyGradingRange": "{{name}}の設定をコピー",
     "pasteGradingRange": "{{name}}に貼り付け",
-    "gradingRangeMenu": "{{name}}の操作"
+    "gradingRangeMenu": "{{name}}の操作",
+    "previewOriginal": "プレビュー／原版",
+    "preview": "プレビュー",
+    "original": "原版",
+    "originalLoading": "原版を取得中…",
+    "originalFailed": "原版を利用できません。プレビューで編集できます。",
+    "colorProfile": "カラープロファイル（原版）",
+    "profileNone": "ICC埋め込みなし",
+    "profileUnknown": "不明"
   },
   "language": {
     "label": "言語",

@@ -8,6 +8,9 @@ import { ImageViewer } from './ImageViewer';
 import { defaultRecipe } from './editing';
 import { collectHistogram, type HistogramChangeHandler } from './histogram';
 import i18n from './i18n';
+import type { EditImageSource } from './editImageSource';
+
+vi.mock('./jpegProfile', () => ({ readJpegProfile: vi.fn(async () => ({ status: 'embedded', description: 'Display P3' })) }));
 
 vi.mock('./editStateApi', async (importOriginal) => ({
   ...await importOriginal<typeof import('./editStateApi')>(),
@@ -17,6 +20,7 @@ vi.mock('./editStateApi', async (importOriginal) => ({
 const mockImage = vi.hoisted(() => ({
   onLoad: undefined as undefined | ((width: number, height: number) => void),
   recipe: undefined as unknown,
+  source: undefined as EditImageSource | undefined,
   onHistogramChange: undefined as HistogramChangeHandler | undefined,
   renders: 0,
   beforeDisplay: false,
@@ -29,7 +33,8 @@ vi.mock('./api', async (importOriginal) => {
   })) };
 });
 vi.mock('./AdjustedImage', () => ({
-  AdjustedImage: ({ showBeforeAdjustments, onLoad, recipe, onHistogramChange }: { showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler }) => {
+  AdjustedImage: ({ source, showBeforeAdjustments, onLoad, recipe, onHistogramChange }: { source: EditImageSource; showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler }) => {
+    mockImage.source = source;
     mockImage.onLoad = onLoad;
     mockImage.recipe = recipe;
     mockImage.onHistogramChange = onHistogramChange;
@@ -106,6 +111,46 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('shares edits and History across modes and selects only the displayed source histogram', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, blob: async () => new Blob(['jpeg']), json: async () => ({ edited: {} }) }));
+    vi.stubGlobal('fetch', fetch);
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = () => 'blob:original'; static revokeObjectURL = revoke; });
+    act(() => root.render(<MemoryRouter initialEntries={['/anshitsu/first']}>
+      <Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
+    await act(async () => {});
+    const mode = () => host.querySelector<HTMLButtonElement>('[aria-label="Preview / Original"]')!;
+    expect(mode().disabled).toBe(false); expect(mockImage.source?.kind).toBe('immich-preview');
+    expect(host.querySelector('.exif-list')?.textContent).toContain('Display P3');
+    const previewCallback = mockImage.onHistogramChange!;
+    const before = collectHistogram(new Uint8ClampedArray([7, 8, 9, 255]));
+    const after = collectHistogram(new Uint8ClampedArray([200, 201, 202, 255]));
+    act(() => previewCallback({ sourceKey: 'immich-preview:/first/preview', before, after }));
+    click(host.querySelector<HTMLButtonElement>('[aria-label="Disable Basic"]')!);
+    const editedRecipe = mockImage.recipe;
+    const history = host.querySelector('.edit-history')?.innerHTML;
+    click(mode());
+    expect(mockImage.source).toEqual({ kind: 'jpeg-original', url: 'blob:original' });
+    expect(mockImage.recipe).toBe(editedRecipe); expect(host.querySelector('.edit-history')?.innerHTML).toBe(history);
+    expect(host.querySelectorAll('.histogram-series')).toHaveLength(0);
+    const renders = mockImage.renders;
+    act(() => previewCallback({ sourceKey: 'immich-preview:/first/preview', before, after }));
+    expect(mockImage.renders).toBe(renders);
+    act(() => mockImage.onHistogramChange?.({ sourceKey: 'jpeg-original:blob:original', before, after }));
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('200,');
+    click(comparisonToggle()); expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('7,');
+    click(host.querySelector<HTMLButtonElement>('.edit-actions button')!);
+    expect(mockImage.recipe).toEqual(defaultRecipe());
+    click(host.querySelectorAll<HTMLButtonElement>('.edit-actions button')[1]); expect(mockImage.recipe).toEqual(editedRecipe);
+    expect([...host.querySelectorAll<HTMLInputElement>('input[type="range"]')].some(slider => !slider.disabled)).toBe(true);
+    act(() => mockImage.onLoad?.(4000, 3000));
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    expect(host.querySelector('.zoom-controls output')?.textContent).toBe('100%');
+    click(mode()); expect(mockImage.recipe).toEqual(editedRecipe); expect(image().dataset.before).toBe('true');
+    click(mode());
+    expect(fetch.mock.calls.filter(call => String(call[0]).endsWith('/original'))).toHaveLength(1);
+    act(() => root.unmount()); expect(revoke).toHaveBeenCalledWith('blob:original'); root = createRoot(host);
+  });
   it('forwards histogram snapshots unchanged through ImageViewer', () => {
     const receive = vi.fn();
     act(() => root.render(<ImageViewer src="/first" editSource={{ kind: 'immich-preview', url: '/first' }}

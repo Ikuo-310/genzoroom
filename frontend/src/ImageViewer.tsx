@@ -12,6 +12,10 @@ import type { HistogramChangeHandler } from './histogram';
 type ImageViewerProps = {
   src: string;
   editSource?: EditImageSource;
+  originalStatus?: 'loading' | 'ready' | 'error';
+  showingOriginal?: boolean;
+  onOriginalToggle?: () => void;
+  onImageError?: () => void;
   recipe?: EditRecipe;
   onHistogramChange?: HistogramChangeHandler;
   alt: string;
@@ -31,7 +35,7 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
@@ -93,7 +97,7 @@ export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, l
     setImageSize({ x: 0, y: 0 });
     setFitMode(true);
     setPan({ x: 0, y: 0 });
-  }, [src]);
+  }, [src, editSource?.kind, editSource?.url]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -183,6 +187,17 @@ export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, l
           <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>
           <span className={!showBeforeAdjustments ? 'active' : undefined}>{t('workspace.after')}</span>
         </button>
+        {originalStatus && <>
+          <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.previewOriginal')}
+            aria-pressed={showingOriginal} disabled={originalStatus !== 'ready' || !editSource}
+            onClick={onOriginalToggle}>
+            <span className={!showingOriginal ? 'active' : undefined}>{t('workspace.preview')}</span>
+            <span className={showingOriginal ? 'active' : undefined}>{t('workspace.original')}</span>
+          </button>
+          {originalStatus !== 'ready' && <span role="status" className={originalStatus === 'error' ? 'error-text' : undefined}>
+            {t(originalStatus === 'loading' ? 'workspace.originalLoading' : 'workspace.originalFailed')}
+          </span>}
+        </>}
         <button type="button" className="tool-button panel-toggle right" onClick={onToggleRight} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')} aria-pressed={rightOpen}>
           <span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}
         </button>
@@ -232,7 +247,7 @@ export function ImageViewer({ src, editSource, recipe, onHistogramChange, alt, l
         {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
-          onError={() => setImageState('error')} /> : <img
+          onError={() => { setImageState('error'); onImageError?.(); }} /> : <img
           src={src}
           alt={alt}
           draggable="false"

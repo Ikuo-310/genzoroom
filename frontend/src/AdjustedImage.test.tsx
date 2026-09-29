@@ -85,6 +85,24 @@ afterEach(() => {
 });
 
 describe('AdjustedImage Worker lifecycle', () => {
+  it('rejects a retired original Worker even when returning to the same cached URL', async () => {
+    const original: EditImageSource = { kind: 'jpeg-original', url: 'blob:original' };
+    vi.mocked(decodeEditSource).mockResolvedValue(secondPixels);
+    render(original); await act(async () => {}); flushFrames();
+    const oldWorker = FakeWorker.instances[0];
+    const staleHandler = oldWorker.onmessage;
+    const init = oldWorker.sent[0]; const request = oldWorker.sent[1];
+    if (init.type !== 'init' || request.type !== 'render') throw new Error('Expected worker messages');
+    render(firstSource); await act(async () => {}); flushFrames();
+    render(original); await act(async () => {}); flushFrames();
+    const count = onHistogramChange.mock.calls.length;
+    staleHandler?.({ data: { type: 'result', requestId: request.requestId, assetGeneration: init.assetGeneration,
+      pixelBuffer: firstPixels.data.slice().buffer, histogram: collectHistogram(firstPixels.data), width: 1, height: 1,
+    } } as MessageEvent<AdjustmentWorkerResponse>);
+    expect(onHistogramChange).toHaveBeenCalledTimes(count);
+    expect(oldWorker.terminate).toHaveBeenCalledOnce();
+    expect(onHistogramChange).toHaveBeenLastCalledWith({ sourceKey: 'jpeg-original:blob:original', before: collectHistogram(secondPixels.data), after: null });
+  });
   it('notifies only the painted latest Worker histogram and caches the before histogram', async () => {
     vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
     render(firstSource);

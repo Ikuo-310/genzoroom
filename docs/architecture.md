@@ -17,6 +17,7 @@ Frontend: nginx on container port 8080
   ├─ /api/assets/{id}          → internal Docker network
   ├─ /api/assets/{id}/thumbnail → internal Docker network
   ├─ /api/assets/{id}/preview  → internal Docker network
+  ├─ /api/assets/{id}/original → internal Docker network
   ├─ /api/assets/{id}/edit-state → internal Docker network
   └─ /api/assets/edit-status → internal Docker network
                        ↓
@@ -27,6 +28,7 @@ Frontend: nginx on container port 8080
                        ├─ GET /assets/{id}
                        ├─ GET /assets/{id}/thumbnail
                        ├─ GET /assets/{id}/preview
+                       ├─ GET /assets/{id}/original
                        ├─ GET/PUT /assets/{id}/edit-state → SQLite /data/genzoroom.db
                        └─ POST /assets/edit-status → SQLite /data/genzoroom.db
                             ↓ x-api-key (server-side only)
@@ -41,7 +43,7 @@ Anshitsu is desktop-first because practical photo development requires adequate 
 
 The frontend image builds static assets using Vite and TypeScript with Node.js 24, then serves them with nginx. No Node.js or Vite development server runs in the final frontend image. nginx strips the `/api/` prefix before forwarding to `backend:8000`; the browser never connects directly to port 8000. Docker DNS resolution is refreshed so a recreated backend can be found again.
 
-The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` calls the stable Immich `GET /api/users/me` endpoint. `GET /assets/recent` calls stable `POST /api/search/metadata`, filters for `IMAGE`, orders by `fileCreatedAt` descending, limits the result to 100, and returns the metadata needed by the grid. `GET /assets/{id}` returns selected non-GPS details and EXIF data. The thumbnail and preview routes proxy Immich-generated images at the corresponding sizes. All Immich calls use the official `x-api-key` header from backend environment variables. The key needs `user.read`, `asset.read`, and `asset.view`; no write endpoint is used. Redirects are not followed, TLS verification remains enabled, and requests use a five-second overall timeout with a three-second connection timeout and no retries.
+The backend uses Python 3.13, FastAPI, Uvicorn, and HTTPX. `GET /immich/status` calls the stable Immich `GET /api/users/me` endpoint. `GET /assets/recent` calls stable `POST /api/search/metadata`, filters for `IMAGE`, orders by `fileCreatedAt` descending, limits the result to 100, and returns the metadata needed by the grid. `GET /assets/{id}` returns selected non-GPS details and EXIF data. The thumbnail and preview routes proxy Immich-generated images at the corresponding sizes. All Immich calls use the official `x-api-key` header from backend environment variables. The key needs `user.read`, `asset.read`, `asset.view`, and `asset.download`; no write endpoint is used. The JPEG original route validates asset format and response content type, then streams the official `GET /api/assets/{id}/original` response in 64 KiB chunks. It disables nginx buffering through `X-Accel-Buffering: no`, uses private no-store caching, and closes upstream resources on completion, failure, or client disconnect. The original route retains the existing timeout and redirect policy. A failure after response headers terminates the transfer rather than returning a JSON error inside the JPEG. Redirects are not followed, TLS verification remains enabled, and requests use a five-second overall timeout with a three-second connection timeout and no retries.
 
 Application code uses only the configured `IMMICH_URL`; it does not know whether Docker DNS, a LAN route, or HTTPS provides the route. Selecting and operating that route is a deployment responsibility.
 
@@ -124,7 +126,7 @@ Individual adjustment Reset changes only its value and preserves that adjustment
 The current rendering path is:
 
 ```text
-Temporary Immich preview adapter (editImageSource.ts)
+Selected preview or cached JPEG original adapter (editImageSource.ts)
   → browser decode into sRGB RGBA
   → adjustmentWorkerClient.ts (one source copy transferred on initialization; recipes sent per render)
   → adjustmentWorker.ts → adjustmentWorkerRuntime.ts
@@ -140,7 +142,20 @@ The no-op check considers all sixteen effective values and returns exact source 
 
 Vibrance runs after Highlights Tint. It uses `Y = 0.2126R + 0.7152G + 0.0722B`, `chroma = max(|R−Y|, |G−Y|, |B−Y|)`, and `lowSatWeight = 1 − clamp(chroma / 0.5, 0, 1)`. Positive strength is `0.75 × lowSatWeight`; negative strength is `0.6 × (0.25 + 0.75 × lowSatWeight)`. With `factor = 1 + vibrance / 100 × strength`, each channel becomes `clamp(Y + (C−Y) × factor, 0, 1)` and is rounded to 8-bit before Saturation. Zero-valued stages are skipped. Every render starts from the untouched decoded source, so edits do not accumulate clipping from previous renders.
 
-This is an 8-bit browser-managed sRGB preview, not an original-quality rendering or RAW workflow. Immich-generated preview dimensions still define Viewer 1:1. Pixel processing runs in a Web Worker with the existing main-thread fallback; large-source performance, wide-gamut/HDR fidelity, and color-profile matching need separate work before final rendering. Original acquisition is isolated from recipe and processing code: the next source adapter should provide JPEG original → GenzoRoom pipeline → GenzoRoom preview without silently treating existing preview-based recipes as equivalent original-based results.
+This remains an 8-bit sRGB processing pipeline. Anshitsu initially displays the Immich preview and acquires only the selected JPEG original in the background. JPEG-only captures and Pixel RAW-01.COVER.jpg use the same filename-format classification; DNG and other formats have no original acquisition. Preview / Original is local display state alongside Before / After and never changes Recipe, History, sourceIdentity, saved-data versions, or SQLite. Both sources receive the same current recipe, including all bypass flags, Undo and Redo. Viewer 1:1 uses the dimensions of the displayed source; switching sources resets zoom/pan to Fit.
+
+JPEG originals decode only when selected for display. An HTML image retains embedded ICC interpretation; drawing into an explicitly verified sRGB Canvas and reading sRGB ImageData performs browser-managed conversion before pixel processing. Display P3 is not relabeled as sRGB. Out-of-sRGB colors are limited by the existing 8-bit working space. No RAW, wide-gamut, HDR, export, or special original-processing interlock is introduced. Firefox ICC conversion and actual performance still require device verification.
+
+Immich's Asset EXIF response has no ICC profile description field. jpegProfile.ts reads bounded JPEG metadata slices from the already-acquired original, assembles ICC APP2 segments, and reads v2 desc or v4 mluc profile descriptions. It does not use EXIF ColorSpace or assume sRGB. Missing ICC and unknown/malformed metadata are displayed separately. Profile descriptions appear in EXIF in either display mode and do not determine pixel transforms.
+
+| State | Owner | Lifetime and invariant |
+| --- | --- | --- |
+| Compressed original object URL, acquisition status, ICC metadata | useJpegOriginal | One active asset only; abort acquisition and revoke URL on navigation/unmount or decode failure. No Filmstrip-wide cache. |
+| Preview / Original display selection | useJpegOriginal | Starts in Preview for each photo; Original enabled only after acquisition and edit-state readiness. No persistence or History entry. |
+| Decoded source, Worker copy, Before/After canvases | AdjustedImage | Only the displayed source; source changes release decoded state, terminate the old Worker, cancel scheduled work and clear canvases. Returning to Original reuses its compressed URL but decodes again to avoid retaining both full-resolution pixel buffers. |
+| Histogram source identity | AnshitsuPage | Includes source kind and URL as well as asset ID; stale source callbacks are rejected and missing data remains unavailable. |
+
+Original transfer or decode failure leaves preview editing available. Mode toggles do not refetch the current original. Revisiting a different photo may fetch it again because original memory is released on navigation.
 
 ### Color Grading weights and shared gains
 
@@ -207,7 +222,7 @@ Possible extensions include:
 - Further adjustments beyond JPEG Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, Blacks, Vibrance, and Saturation: tone curve and HSL. Waveform Monitor (WFM), RGB Parade, and Vectorscope remain unimplemented; the Histogram Scope is available.
 - Future config, logs, and file-export storage paths as needed; only data is mounted today.
 
-These are provisional directions, not available functionality or delivery commitments. The current Immich integration is limited to authenticated read-only browsing, generated image previews, and the Anshitsu workspace with its current Histogram Scope described above.
+These are provisional directions, not available functionality or delivery commitments. The current Immich integration provides authenticated read-only browsing, generated previews, selected JPEG original acquisition, and the Anshitsu workspace with its Histogram Scope described above.
 
 ## Portability and validation
 

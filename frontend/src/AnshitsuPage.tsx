@@ -18,7 +18,8 @@ import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './ColorGradingAdjustmentControls';
 import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
-import { getEditImageSource } from './editImageSource';
+import { useJpegOriginal } from './useJpegOriginal';
+import type { JpegProfile } from './jpegProfile';
 import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
 import { ScopeResizeHandle } from './ScopeResizeHandle';
@@ -73,12 +74,13 @@ export function AnshitsuPage() {
   const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
+  const jpegOriginal = useJpegOriginal(activeDetail);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit);
   const editable = canEdit && loadStatus === 'ready';
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
-  const histogramSourceKey = editable ? `immich-preview:${activeDetail?.preview_url}` : null;
+  const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
   const currentHistogramAsset = useRef({ assetId, sourceKey: histogramSourceKey });
   currentHistogramAsset.current = { assetId, sourceKey: histogramSourceKey };
   // H2 can pass this guarded snapshot to ScopePanel; route changes hide old data immediately.
@@ -413,7 +415,8 @@ export function AnshitsuPage() {
           </div>
         </WorkspaceSection>
         <ExifSection>
-          {detail ? <ExifDetails exif={detail.exif} fallbackDate={detail.date} language={language} />
+          {activeDetail ? <ExifDetails exif={activeDetail.exif} fallbackDate={activeDetail.date} language={language}
+            profile={jpegOriginal.profile} />
             : <p>{detailState === 'error' ? t('workspace.detailFailed') : t('workspace.loading')}</p>}
         </ExifSection>
       </>}
@@ -421,7 +424,11 @@ export function AnshitsuPage() {
         <ImageViewer
           key={assetId}
           src={activeDetail.preview_url}
-          editSource={editable ? getEditImageSource(activeDetail) : undefined}
+          editSource={editable ? jpegOriginal.source : undefined}
+          originalStatus={jpegOriginal.status}
+          showingOriginal={jpegOriginal.showingOriginal}
+          onOriginalToggle={jpegOriginal.toggle}
+          onImageError={jpegOriginal.failDecode}
           recipe={editable ? session.recipe : undefined}
           onHistogramChange={receiveHistograms}
           alt={activeDetail.filename}
@@ -680,7 +687,7 @@ export function AdjustmentCategory({ categoryId, onOpenContextMenu, title, enabl
   </section>;
 }
 
-export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif; fallbackDate: string; language: AppLanguage }) {
+export function ExifDetails({ exif, fallbackDate, language, profile = { status: 'unknown' } }: { exif: AssetExif; fallbackDate: string; language: AppLanguage; profile?: JpegProfile }) {
   const { t } = useTranslation();
   const rows: Array<[string, string | number | undefined]> = [
     [t('workspace.exif.date'), formatPhotoDate(exif.date_time_original ?? fallbackDate, language)],
@@ -691,6 +698,7 @@ export function ExifDetails({ exif, fallbackDate, language }: { exif: AssetExif;
     [t('workspace.exif.aperture'), exif.f_number === undefined ? undefined : `f/${exif.f_number}`],
     [t('workspace.exif.shutterSpeed'), exif.exposure_time],
     ['ISO', exif.iso],
+    [t('workspace.colorProfile'), profile.status === 'embedded' ? profile.description : t(profile.status === 'none' ? 'workspace.profileNone' : 'workspace.profileUnknown')],
     [t('workspace.exif.exposureCompensation'), exif.exposure_compensation === undefined ? undefined : `${exif.exposure_compensation > 0 ? '+' : ''}${exif.exposure_compensation} EV`],
     [t('workspace.exif.dimensions'), exif.width !== undefined && exif.height !== undefined ? `${exif.width} × ${exif.height}` : undefined],
   ];

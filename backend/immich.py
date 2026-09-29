@@ -1,10 +1,11 @@
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePath
 from typing import Literal
 from uuid import UUID
 
+import anyio
 import httpx
 from pydantic import BaseModel
 
@@ -453,3 +454,59 @@ async def get_asset_preview(
         "preview",
         transport=transport,
     )
+
+
+@dataclass
+class ImmichOriginal:
+    response: httpx.Response
+    client: httpx.AsyncClient
+
+    async def close(self) -> None:
+        # ASGI disconnect cancellation must not interrupt upstream cleanup.
+        with anyio.CancelScope(shield=True):
+            try:
+                await self.response.aclose()
+            finally:
+                await self.client.aclose()
+
+    async def chunks(self) -> AsyncIterator[bytes]:
+        try:
+            async for chunk in self.response.aiter_bytes(64 * 1024):
+                yield chunk
+        finally:
+            # This also runs on a downstream disconnect or a mid-stream timeout.
+            await self.close()
+
+
+async def get_asset_original(
+    immich_url: str | None,
+    api_key: str | None,
+    asset_id: UUID,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ImmichOriginal:
+    url, key = _require_configuration(immich_url, api_key)
+    detail = await get_asset_detail(url, key, asset_id, transport=transport)
+    if detail.format != "JPEG":
+        raise ImmichRequestError("unexpected_response", "Only JPEG originals are supported.")
+    client = httpx.AsyncClient(
+        timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+    )
+    response = None
+    try:
+        response = await client.send(client.build_request(
+            "GET", _api_url(url, f"/assets/{asset_id}/original"),
+            headers={"x-api-key": key, "Accept": "image/jpeg"},
+        ), stream=True)
+        if response.status_code != 200:
+            raise _request_error(response)
+        if response.headers.get("content-type", "").split(";")[0].strip().lower() != "image/jpeg":
+            raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
+        return ImmichOriginal(response=response, client=client)
+    except BaseException as error:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        if isinstance(error, (httpx.InvalidURL, httpx.RequestError)):
+            raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+        raise
