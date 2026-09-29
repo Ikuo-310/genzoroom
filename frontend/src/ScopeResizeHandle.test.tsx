@@ -21,27 +21,33 @@ afterEach(() => {
 describe('ScopeResizeHandle', () => {
   it('exposes the current size and supports keyboard resizing within limits', () => {
     const onChange = vi.fn();
-    act(() => root.render(<ScopeResizeHandle value={34} onChange={onChange} label="Resize Scope area" />));
+    const onCommit = vi.fn();
+    act(() => root.render(<ScopeResizeHandle value={30} onChange={onChange} onCommit={onCommit} label="Resize Scope area" />));
     const handle = host.querySelector<HTMLElement>('[role="separator"]')!;
 
-    expect(handle.getAttribute('aria-valuenow')).toBe('34');
+    expect(handle.getAttribute('aria-valuenow')).toBe('30');
+    expect(handle.getAttribute('aria-valuemax')).toBe('40');
     act(() => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
-    expect(onChange).toHaveBeenLastCalledWith(36);
+    expect(onChange).toHaveBeenLastCalledWith(32);
+    expect(onCommit).toHaveBeenLastCalledWith(32);
     act(() => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
     expect(onChange).toHaveBeenLastCalledWith(15);
     act(() => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
-    expect(onChange).toHaveBeenLastCalledWith(70);
+    expect(onChange).toHaveBeenLastCalledWith(40);
+    expect(onCommit).toHaveBeenLastCalledWith(40);
   });
 
   it('adjusts the Scope height by dragging the divider', () => {
     const onChange = vi.fn();
-    act(() => root.render(<div style={{ height: '200px' }}><ScopeResizeHandle value={34} onChange={onChange} label="Resize Scope area" /></div>));
+    const onCommit = vi.fn();
+    act(() => root.render(<div style={{ height: '200px' }}><ScopeResizeHandle value={30} onChange={onChange} onCommit={onCommit} label="Resize Scope area" /></div>));
     const handle = host.querySelector<HTMLElement>('[role="separator"]')!;
     Object.defineProperty(handle.parentElement, 'clientHeight', { configurable: true, value: 200 });
 
     act(() => handle.dispatchEvent(new MouseEvent('pointerdown', { clientY: 10, bubbles: true })));
-    act(() => handle.dispatchEvent(new MouseEvent('pointermove', { clientY: 30, bubbles: true })));
-    expect(onChange).toHaveBeenLastCalledWith(44);
+    act(() => handle.dispatchEvent(new MouseEvent('pointermove', { clientY: 20, bubbles: true })));
+    expect(onChange).toHaveBeenLastCalledWith(35);
     act(() => handle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })));
+    expect(onCommit).toHaveBeenCalledWith(35);
   });
 });

@@ -22,6 +22,7 @@ import { getEditImageSource } from './editImageSource';
 import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
 import { ScopeResizeHandle } from './ScopeResizeHandle';
+import { readScopePanelBasis, saveScopePanelBasis } from './scopeSizing';
 import type { EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
@@ -52,7 +53,7 @@ export function AnshitsuPage() {
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [scopePanelBasis, setScopePanelBasis] = useState(34);
+  const [scopePanelBasis, setScopePanelBasis] = useState(readScopePanelBasis);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   // Scope needs the effective Viewer state because the persistent choice omits held Backslash.
   const [viewerShowsBefore, setViewerShowsBefore] = useState(false);
@@ -457,7 +458,7 @@ export function AnshitsuPage() {
           <ScopePanel histogram={activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
             keyboardBlocked={!editable || viewerKeyboardBlocked} />
         </WorkspaceSection>
-        <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} label={t('workspace.resizeScope')} />
+        <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : undefined}>
