@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Anshitsu can acquire the selected JPEG original through the backend and switch between Preview and Original. Home and Filmstrip retain thumbnail browsing; both viewer sources share the current edits, and Original Info reports embedded profile details.
+- Preview / Original and Before / After controls, with `]` for source switching and held Backslash for temporary Before. JIS `]` key events take priority over the Backslash comparison shortcut. History and Develop panel toggles now use directional icon buttons with localized tooltips.
 - An RGB / Y′ Histogram Scope for JPEG previews, with per-channel visibility, Y Only, Normal shared-maximum and Expanded P99 scales, and synchronization with the Viewer’s persistent and temporary Before / After display. Numpad 0–3 and Numpad Decimal control the display.
 - Recipe v18 adds independent ON/OFF switches for all 16 numeric adjustments alongside the four category and three Color Grading range switches. Disabled values remain stored; reset, History, and processing respect each switch level.
 - Home Shift+click range selection, edited markers in Home and Filmstrip, connection details, and the shared GenzoRoom Home navigation are available. UI improvements add independent edit-panel scrolling and focus navigation, category/adjustment/3WAY range switches and context menus (including reset and numeric Copy/Paste), and Viewer Before / After operations.

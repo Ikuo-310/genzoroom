@@ -2,6 +2,18 @@
 
 現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## JPEG原版対応・最終監査完了（2026-09-29・現在仕様）
+
+HomeとFilmstripはImmichのサムネイルを使い、暗室では選択中のJPEGだけをバックグラウンド取得する。取得中もプレビュー編集を続けられ、取得した圧縮原版は同じ写真を選択している間の表示切り替えで再利用する。写真切替・Unmount・原版デコード失敗では取得を中止し、不要なObject URLや画素状態を解放する。JPEG単独AssetとPixelの`RAW-01.COVER.jpg`は同じ経路で、DNG現像やJPEG／RAWペア管理は対象外。
+
+原版表示はプレビューと同じRecipe、History、Undo/Redo、各ON/OFF状態を共有する。表示モードは暗室ローカルの状態で、保存recipeやHistoryへ記録しない。補正前／補正後、Fit、1:1、Histogramにも対応する。上部スイッチはプレビュー／原版を左、補正前／補正後を右の順とし、左History・右Developの開閉ボタンは状態に応じた矢印アイコンと日英ツールチップを使う。`]`で表示元を切り替え、Backslash押下中は補正前を一時表示する。JIS配列で`]`が`key: "]"`, `code: "Backslash"`となる場合は`]`を優先し、原版取得中・失敗時はBackslash処理へ流さない。入力欄、IME、モーダル／メニューの既存ガードは維持する。
+
+原版のICCはImmich Asset EXIF APIではなく取得JPEGの埋め込みAPP2から読み、プロファイル名を「原版情報／Original Info」に表示する。画像サイズも原版由来で、プレビュー表示中も同じ原版メタデータを表示する。埋め込み情報がない場合にsRGBとは推測しない。画像デコードでは埋め込みICCを考慮したブラウザー管理の変換を経て、既存の8bit sRGB Canvasから画素を取得する。広色域作業PipelineやRAW現像は追加していない。
+
+利用者によるNAS／Firefox確認では、Pixel 7 ProのJPEG単独撮影とRAW同時撮影のCOVER.jpg、sRGB／Display P3原版の表示、原版の解像感、スライダー、補正前後、Histogram、Filmstrip、ツールバーとパネル操作を確認済み。色は目視確認であり、厳密な色差測定ではない。補正を重ねた原版の更新は体感で約2〜3秒弱で許容範囲だったため、この対応ではインターロックや追加最適化を導入していない。これは性能ベンチマークではない。
+
+最終静的監査はCritical 0件、High 0件、Medium 1件、Low 0件。JPEG取得、ICC、Worker、Histogram、保存経路に追加指摘はなかった。MediumはJIS配列の`]`とBackslash判定競合で、`]`を先に処理する修正と回帰テストを追加した。修正時のImageViewer関連テスト31件、TypeScriptを含むproduction build、`git diff --check`が成功し、修正後のUS配列での切替は実機確認済み。静的監査・自動テストはICCの厳密な色差精度を保証しない。
+
 ## Histogram H1〜H3 完了（2026-09-29・現在仕様）
 
 暗室ScopeにJPEGプレビュー用Histogramを追加した。collectHistogram()はDOM非依存のpure functionで、RGBAの8bit sRGBコード値からR・G・B・Y′を各256個のUint32Arrayへ集計する。Y′は非線形RGBへBT.709系係数を適用し、Math.roundでビン化する。補正前はdecode成功後に一度だけ集計し、補正後は既存Workerのrender出力時に同じ画素結果から集計する。WorkerはpixelBufferとHistogramを同じresult messageで返し、Worker起動・処理エラー時のmain thread fallbackも同じ集計関数を使う。
@@ -166,7 +178,7 @@ JPEGのみを対象に、露光量 −5〜+5 EV（0.01 EV刻み、初期値0）�
 
 画像取得はeditImageSourceに隔離し、今回はImmich previewを暫定入力にした。`basicEnabled`がfalseなら未変更sourceを返し、6項目の値は書き換えない。有効時はブラウザでsRGB RGBAへdecodeし、まずsRGBの伝達関数を戻した線形光へ2^EVを乗算してsRGBへ戻す。その後、各sRGB channelを0.5中心に `1 + contrast / 100` 倍して0〜1へclipする。HighlightsはsRGB輝度 `Y = 0.2126R + 0.7152G + 0.0722B` から0.5〜1.0のsmoothstep重みを求め、正値では `1 - (1 - Y)^2`、負値では `Y^2` へ補間する。WhitesはHighlights後の輝度0.75〜1.0をsmoothstepで選び、正値では1.0、負値では0.75へ補間する。ShadowsはWhites後の輝度から0〜0.15のsmoothstep重みを求め、正値では `sqrt(Y)`、負値では `Y^2` へ補間する。BlacksはShadows後にMaster Black / Pedestalとして、`weight = 1 - smoothstep(0, 0.35, Y)`、`newY = clamp(Y + blacks / 100 × 0.10 × weight, 0, 1)`を適用する。作用は黒で最大、0.10〜0.20でも明確に残り、0.30付近で弱まり、0.35で連続的に0になる。非ゼロ輝度には目標輝度と元輝度の比をRGB共通倍率として適用し、倍率では持ち上げられない完全な黒だけは色相が定義されないため無彩色として扱う。Shadowsは暗部階調を曲線で起こす／沈める操作、Blacksは低域全体の基準レベルを加算offsetで上下する操作として分けた。alphaを維持し、毎回未変更の画素bufferからExposure → Contrast → Highlights → Whites → Shadows → Blacksの順に計算するため累積劣化しない。requestAnimationFrameで更新をまとめ、Canvasだけを書き換えるのでViewerのZoom/Panは編集値変更で初期化されない。
 
-8-bit・ブラウザの色管理・既存previewに依存する暫定表示であり、originalと同等の品質やRAWのハイライト復元は保証しない。現在の1:1もpreviewのpixel基準。将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する。このフェーズ当時は大画像のmain thread負荷を課題としていた。現在の画素処理はWorker経路を持つ。
+このフェーズ当時の8-bit・ブラウザ色管理・Immich previewに依存する表示であり、原版と同等の品質やRAWのハイライト復元は保証しなかった。当時の1:1はpreviewのpixel基準で、将来JPEG originalへ切り替える際は取得adapterを差し替え、元画像とpreviewの向き・色空間・寸法を検証する計画だった。現在の原版取得・表示経路と制約は本ノート冒頭節を参照。このフェーズ当時は大画像のmain thread負荷を課題としていた。現在の画素処理はWorker経路を持つ。
 
 DB導入時はrecipe versionの検証/migration、Assetと入力画像・処理versionの紐付け、commit時の原子的保存を設計する。previewベースのレシピをoriginalへ無条件に適用して同じ見え方になるとは扱わない。pending操作やCanvas bufferは永続化対象にせず、Historyを保存するかは別に決める。
 
