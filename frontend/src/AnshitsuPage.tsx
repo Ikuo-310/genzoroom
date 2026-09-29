@@ -616,12 +616,13 @@ export function DevelopPanel({ children, headerAction, panelRef }: { children: R
 }
 
 export function ExifSection({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const contentId = useId();
   return <section className="workspace-section left-exif-section">
     <h2 className="exif-heading"><button type="button" className="exif-toggle" aria-expanded={expanded}
       aria-controls={contentId} onClick={() => setExpanded((value) => !value)}>
-      <span>EXIF</span><span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+      <span>{t('workspace.originalInfo')}</span><span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
     </button></h2>
     <div id={contentId} className="workspace-section-content exif-scroll-region" hidden={!expanded}>{children}</div>
   </section>;

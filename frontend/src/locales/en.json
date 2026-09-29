@@ -89,6 +89,7 @@
     "histogramExpandedMaximum": "P99 {{count}}",
     "yOnly": "Y Only",
     "history": "History",
+    "originalInfo": "Original Info",
     "developControls": "Develop controls",
     "filmstrip": "Filmstrip",
     "fit": "Fit",
@@ -252,7 +253,7 @@
     "original": "Original",
     "originalLoading": "Loading original…",
     "originalFailed": "Original unavailable; preview editing remains available.",
-    "colorProfile": "Color profile (original)",
+    "colorProfile": "Color profile",
     "profileNone": "No embedded ICC",
     "profileUnknown": "Unknown"
   },

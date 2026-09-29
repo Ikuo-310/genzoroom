@@ -67,6 +67,22 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('Captured');
   });
 
+  it.each([
+    { language: 'en' as const, section: 'Original Info', profile: 'Color profile' },
+    { language: 'ja' as const, section: '原版情報', profile: 'カラープロファイル' },
+  ])('labels original metadata in $language without changing metadata values', async ({ language, section, profile }) => {
+    await i18n.changeLanguage(language);
+    const workspace = renderWorkspace(language);
+    expect(workspace).toContain(`<span>${section}</span>`);
+    const markup = renderToStaticMarkup(<ExifDetails
+      exif={{ make: 'Pixel', width: 6000, height: 4000 }} fallbackDate={asset.date} language={language}
+      profile={{ status: 'embedded', description: 'Display P3' }} />);
+    expect(markup).toContain(`<dt>${profile}</dt><dd>Display P3</dd>`);
+    expect(markup).toContain('6000 × 4000');
+    expect(markup).toContain('<dd>Pixel</dd>');
+    expect(markup).not.toContain(language === 'en' ? 'Color profile (original)' : 'カラープロファイル（原版）');
+  });
+
   it('marks the active Filmstrip thumbnail and keeps the format badge', () => {
     const markup = renderToStaticMarkup(<Filmstrip assets={[asset, secondAsset]} activeAssetId={secondAsset.id} onActivate={vi.fn()} />);
     expect(markup).toContain('filmstrip-item active');
@@ -102,7 +118,10 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('viewer-viewport');
     expect(markup).toContain('aria-label="Collapse left panel"');
     expect(markup).toContain('aria-label="Collapse right panel"');
-    expect(markup).toContain('<span>History</span>');
+    expect(markup).toContain('aria-hidden="true">‹</span>');
+    expect(markup).toContain('aria-hidden="true">›</span>');
+    expect(markup).not.toContain('<span>History</span>');
+    expect(markup).not.toContain('<span>Develop controls</span>');
     expect(markup).not.toContain('All Reset');
   });
 
@@ -226,7 +245,7 @@ describe('Anshitsu workspace', () => {
     expect(viewerStart).toBeGreaterThan(leftStart);
     expect(rightStart).toBeGreaterThan(viewerStart);
     expect(leftPanel).toContain('>History</h2>');
-    expect(leftPanel).toContain('<span>EXIF</span>');
+    expect(leftPanel).toContain('<span>Original Info</span>');
     expect(leftPanel).toContain('class="history-scroll-region"');
     expect(leftPanel).toContain('aria-expanded="true" aria-controls=');
     expect(leftPanel).not.toContain('>Scope</h2>');

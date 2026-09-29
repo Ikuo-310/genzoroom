@@ -87,6 +87,7 @@
     "histogramExpandedMaximum": "P99 {{count}}",
     "yOnly": "Y Only",
     "history": "ヒストリー",
+    "originalInfo": "原版情報",
     "developControls": "現像操作",
     "filmstrip": "フィルムストリップ",
     "fit": "全体表示",
@@ -250,7 +251,7 @@
     "original": "原版",
     "originalLoading": "原版を取得中…",
     "originalFailed": "原版を利用できません。プレビューで編集できます。",
-    "colorProfile": "カラープロファイル（原版）",
+    "colorProfile": "カラープロファイル",
     "profileNone": "ICC埋め込みなし",
     "profileUnknown": "不明"
   },
