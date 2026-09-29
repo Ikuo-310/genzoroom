@@ -41,7 +41,9 @@ export class WebGpuExposureRenderer {
 
   private pipeline!: ExposureGpuPipeline;
 
-  static async create(gpu: ExposureGpu | undefined = defaultGpu()): Promise<WebGpuExposureRenderer | null> {
+  // Diagnostics can expose compilation failures while callers retain the unavailable/null contract.
+  static async create(gpu: ExposureGpu | undefined = defaultGpu(),
+    onError?: (error: unknown) => void): Promise<WebGpuExposureRenderer | null> {
     let renderer: WebGpuExposureRenderer | undefined;
     try {
       const adapter = await gpu?.requestAdapter();
@@ -53,8 +55,9 @@ export class WebGpuExposureRenderer {
       })), renderer.interrupted]);
       if (renderer.stopped) throw renderer.stopped;
       return renderer;
-    } catch {
+    } catch (error) {
       renderer?.dispose();
+      onError?.(error);
       return null;
     }
   }

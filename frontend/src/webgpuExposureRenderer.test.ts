@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderAdjustments } from './adjustmentPipeline';
 import { defaultRecipe } from './editing';
 import { WebGpuExposureRenderer } from './webgpuExposureRenderer';
+import { compareRgba } from './webgpuComparison';
 import type { ExposureGpu, ExposureGpuBuffer, ExposureGpuDevice } from './webgpuTypes';
 
 function deferred<T>() {
@@ -71,7 +72,9 @@ describe('WebGPU lifecycle and transfer (mock device, no GPU execution)', () => 
   it('destroys the device when pipeline compilation fails', async () => {
     const fake = fakeGpu();
     fake.device.createComputePipelineAsync.mockRejectedValueOnce(new Error('shader'));
-    expect(await WebGpuExposureRenderer.create(fake.gpu)).toBeNull();
+    const onError = vi.fn();
+    expect(await WebGpuExposureRenderer.create(fake.gpu, onError)).toBeNull();
+    expect(onError).toHaveBeenCalledWith(new Error('shader'));
     expect(fake.device.destroy).toHaveBeenCalledOnce();
     expect(fake.device.popErrorScope).toHaveBeenCalledTimes(3);
   });
@@ -218,16 +221,12 @@ describe.skipIf(!nativeGpu)('real WebGPU / CPU comparison (requires WebGPU test 
           const cpu = renderAdjustments(source, recipe);
           const gpu = await renderer!.render(source, width, height, exposure);
           expect(source).toEqual(original);
-          expect(gpu.length).toBe(cpu.length);
-          for (let i = 0; i < gpu.length; i++) {
-            if (i % 4 === 3 || exposure === 0) expect(gpu[i]).toBe(cpu[i]);
-            else {
-              const delta = Math.abs(gpu[i] - cpu[i]);
-              maximum = Math.max(maximum, delta);
-              if (delta) differing++;
-              expect(delta, `EV=${exposure}, byte=${i}, input=${source[i]}`).toBeLessThanOrEqual(1);
-            }
-          }
+          const comparison = compareRgba(cpu, gpu);
+          expect(comparison.alphaMatches).toBe(true);
+          expect(comparison.maximumDifference, `EV=${exposure}, size=${width}x${height}`).toBeLessThanOrEqual(1);
+          if (exposure === 0) expect(comparison.differingChannels).toBe(0);
+          maximum = Math.max(maximum, comparison.maximumDifference);
+          differing += comparison.differingChannels;
         }
       }
       console.info(`Real GPU: maximum RGB byte difference=${maximum}, differing bytes=${differing}`);
