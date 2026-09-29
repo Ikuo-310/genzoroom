@@ -502,15 +502,14 @@ export function AnshitsuPage() {
           </div> : <p>{t('workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
-    />
-
-    <Filmstrip
-      assets={selectedAssets}
-      editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
-      activeAssetId={assetId}
-      disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-      keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
-      onActivate={(nextId) => { void activateAsset(nextId); }}
+      filmstrip={<Filmstrip
+        assets={selectedAssets}
+        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
+        activeAssetId={assetId}
+        disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
+        keyboardBlocked={selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
+        onActivate={(nextId) => { void activateAsset(nextId); }}
+      />}
     />
     {rangeMenu && rangeDefinition && historyEnabled && <AdjustmentContextMenu target={rangeMenu}
       className="grading-range-context-menu" menuLabel={t('workspace.gradingRangeMenu', { name: t(rangeDefinition.label) })}

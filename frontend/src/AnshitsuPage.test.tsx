@@ -248,6 +248,7 @@ describe('Anshitsu workspace', () => {
         leftPanel={<p>Left panel</p>}
         viewer={<section className="viewer-panel" data-testid="viewer">Viewer</section>}
         rightPanel={<p>Right panel</p>}
+        filmstrip={<section className="filmstrip" data-testid="filmstrip">Filmstrip</section>}
       />,
     );
 
@@ -256,6 +257,8 @@ describe('Anshitsu workspace', () => {
     expect(markup.match(/data-testid="viewer"/g)).toHaveLength(1);
     expect(markup.indexOf('class="workspace-side-panel left-panel"')).toBeLessThan(markup.indexOf('data-testid="viewer"'));
     expect(markup.indexOf('data-testid="viewer"')).toBeLessThan(markup.indexOf('class="workspace-side-panel right-panel"'));
+    expect(markup.indexOf('class="workspace-side-panel right-panel"')).toBeLessThan(markup.indexOf('data-testid="filmstrip"'));
+    expect(markup.match(/data-testid="filmstrip"/g)).toHaveLength(1);
     expect(markup).toContain(`class="sidebar-resize-handle left" role="separator" aria-label="Resize left panel" aria-orientation="vertical"${leftOpen ? '' : ' hidden=""'}`);
     expect(markup).toContain(`class="sidebar-resize-handle right" role="separator" aria-label="Resize right panel" aria-orientation="vertical"${rightOpen ? '' : ' hidden=""'}`);
   });

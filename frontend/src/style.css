@@ -93,7 +93,7 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .photo-info time { color: #9fb2a8; font-size: 0.78rem; }
 
 /* The workspace uses neutral tones so surrounding UI does not bias photo evaluation. */
-.workspace-page { display: grid; grid-template-rows: auto minmax(0, 1fr) 126px; width: 100%; height: 100dvh; overflow: hidden; color: #e8e8e8; background: #0d0d0e; line-height: 1.35; }
+.workspace-page { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: #e8e8e8; background: #0d0d0e; line-height: 1.35; }
 .workspace-header { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.5fr) minmax(220px, 0.8fr); align-items: center; gap: 20px; min-height: 74px; padding: 10px 16px; border-bottom: 1px solid #353537; background: #171719; }
 .workspace-brand { display: grid; grid-template-columns: auto auto; align-items: baseline; justify-content: start; gap: 2px 12px; min-width: 0; }
 .workspace-brand .workspace-title-link { font-size: 1.6rem; font-weight: 700; }
@@ -105,13 +105,15 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 .language-control.compact { display: flex; align-items: center; gap: 7px; color: #aaa; }
 .language-control.compact select { min-width: 100px; color: #eee; background: #252527; border-color: #4b4b4e; padding-block: 5px; }
-.workspace-body { --left-panel: 0px; --left-resizer: 0px; --right-panel: 0px; --right-resizer: 0px; display: grid; grid-template-areas: 'left left-resizer viewer right-resizer right'; grid-template-columns: var(--left-panel) var(--left-resizer) minmax(0, 1fr) var(--right-resizer) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-body { --left-panel: 0px; --left-resizer: 0px; --right-panel: 0px; --right-resizer: 0px; display: grid; grid-template-areas: 'left left-resizer viewer right-resizer right' 'filmstrip filmstrip filmstrip right-resizer right'; grid-template-rows: minmax(0, 1fr) 126px; grid-template-columns: var(--left-panel) var(--left-resizer) minmax(0, 1fr) var(--right-resizer) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-body:not(.right-open) { grid-template-areas: 'left left-resizer viewer right-resizer right' 'filmstrip filmstrip filmstrip filmstrip filmstrip'; }
 .workspace-body.left-open { --left-panel: clamp(210px, 18vw, 270px); }
 .workspace-body.right-open { --right-panel: clamp(230px, 20vw, 300px); }
 .workspace-side-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; background: #18181a; }
 .workspace-side-panel[hidden] { display: none; }
 .left-panel { grid-area: left; border-right: 1px solid #353537; }
 .right-panel { grid-area: right; border-left: 1px solid #353537; }
+.filmstrip { grid-area: filmstrip; }
 .sidebar-resize-handle { display: none; position: relative; z-index: 2; min-width: 0; background: #202023; cursor: col-resize; touch-action: none; }
 .sidebar-resize-handle::after { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #3b3b3e; content: ''; transform: translateX(-50%); transition: background 120ms ease; }
 .sidebar-resize-handle:hover::after { background: #77777b; }
@@ -333,7 +335,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 @media (max-width: 760px) {
   .photos-heading { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'title filters' 'selection selection'; }
   .selection-bar { justify-self: stretch; justify-content: center; }
-  .workspace-page { grid-template-rows: auto auto 112px; height: auto; min-height: 100dvh; overflow: visible; }
+  .workspace-page { grid-template-rows: auto auto; height: auto; min-height: 100dvh; overflow: visible; }
   .workspace-header { grid-template-columns: 1fr auto; gap: 8px 12px; }
   .workspace-brand { grid-column: 1; }
   .workspace-asset-title { grid-column: 1 / -1; grid-row: 2; }
@@ -366,7 +368,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .zoom-controls { justify-content: center; }
   .zoom-controls .tool-button:first-child { padding-inline: 7px; }
-  .filmstrip { position: sticky; bottom: 0; z-index: 5; }
+  .filmstrip { position: sticky; order: 4; flex: 0 0 112px; bottom: 0; z-index: 5; grid-area: auto; }
 }
 
 @media (max-width: 520px) {

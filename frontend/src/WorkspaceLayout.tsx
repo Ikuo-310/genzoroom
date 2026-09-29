@@ -9,9 +9,10 @@ type WorkspaceLayoutProps = {
   leftPanel: ReactNode;
   viewer: ReactNode;
   rightPanel: ReactNode;
+  filmstrip: ReactNode;
 };
 
-export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightPanel }: WorkspaceLayoutProps) {
+export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightPanel, filmstrip }: WorkspaceLayoutProps) {
   const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState(readSidebarWidths);
@@ -53,5 +54,6 @@ export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightP
     <SidebarResizeHandle side="right" width={fitted.right} label={t('workspace.resizeRightPanel')}
       hidden={!rightOpen} onResize={resize} onResizeEnd={() => saveSidebarWidths(widthsRef.current)} />
     <aside className="workspace-side-panel right-panel" hidden={!rightOpen}>{rightPanel}</aside>
+    {filmstrip}
   </div>;
 }
