@@ -102,9 +102,9 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .workspace-asset-title { display: grid; min-width: 0; }
 .workspace-asset-title span { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-asset-title time { color: #a8a8aa; font-size: 0.76rem; }
-.webgpu-control { display: grid; justify-items: center; gap: 2px; font-size: 0.7rem; }
+.webgpu-control { display: grid; justify-items: end; gap: 2px; min-width: 0; font-size: 0.7rem; text-align: right; }
 .webgpu-control [role="status"] { max-width: 7rem; }
-.webgpu-control .tool-button { font-size: 0.75rem; padding: 5px 7px; }
+.webgpu-control .tool-button { max-width: 100%; font-size: 0.75rem; padding: 5px 7px; }
 .webgpu-control [aria-checked="true"]:not(:disabled) { border-color: #aaa; }
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 .language-control.compact { display: flex; align-items: center; gap: 7px; color: #aaa; }
@@ -418,6 +418,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .settings-dialog h2 { margin: 0; }
 .settings-dialog section { border-top: 1px solid #43584d; margin-top: 22px; padding-top: 12px; }
 .settings-dialog label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
+.settings-webgpu-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 16px; margin: 16px 0; }
+.settings-webgpu-row > span { overflow-wrap: anywhere; }
+.settings-webgpu-row > .webgpu-control { justify-self: stretch; }
 .settings-dialog select { background: #17221f; color: inherit; border: 1px solid #526a5e; border-radius: 5px; padding: 7px; max-width: 65%; }
 .settings-dialog dl > div { display: flex; gap: 16px; margin: 8px 0; }
 .settings-dialog dd { margin: 0; overflow-wrap: anywhere; }
@@ -425,4 +428,5 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 @media (max-width: 480px) {
   .settings-dialog label { align-items: stretch; flex-direction: column; gap: 8px; }
   .settings-dialog select { max-width: 100%; }
+  .settings-webgpu-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 }

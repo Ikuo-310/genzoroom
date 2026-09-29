@@ -110,7 +110,10 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
       </select></label>
     </section>
     <section aria-labelledby={`${title}-processing`}><h3 id={`${title}-processing`}>{t('settings.processing')}</h3>
-      {gpu ? <WebGpuControl {...gpu} onChange={gpu.setPreference} /> : <HomeGpuControl />}
+      <div className="settings-webgpu-row">
+        <span>WebGPU</span>
+        {gpu ? <WebGpuControl {...gpu} onChange={gpu.setPreference} /> : <HomeGpuControl />}
+      </div>
       <label>{t('settings.initialImage')}<select value={settings.initialImage} onChange={event => updateSetting('initialImage', event.target.value as InitialImage)}>
         <option value="auto">{t('settings.auto')}</option><option value="original">{t('settings.original')}</option><option value="preview">{t('settings.preview')}</option>
       </select></label>
