@@ -9,6 +9,9 @@ import { defaultRecipe } from './editing';
 import { collectHistogram, type HistogramChangeHandler } from './histogram';
 import i18n from './i18n';
 import type { EditImageSource } from './editImageSource';
+import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
+import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
+import { WEBGPU_STORAGE_KEY } from './webgpuSettings';
 
 vi.mock('./jpegProfile', () => ({ readJpegProfile: vi.fn(async () => ({ status: 'embedded', description: 'Display P3' })) }));
 
@@ -24,6 +27,9 @@ const mockImage = vi.hoisted(() => ({
   onHistogramChange: undefined as HistogramChangeHandler | undefined,
   renders: 0,
   beforeDisplay: false,
+  gpuRenderer: undefined as WorkspaceGpuRenderer | null | undefined,
+  onGpuError: undefined as ((renderer: WorkspaceGpuRenderer, error: unknown) => void) | undefined,
+  onBackendChange: undefined as ((backend: ProcessingBackend) => void) | undefined,
 }));
 vi.mock('./api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api')>();
@@ -33,11 +39,15 @@ vi.mock('./api', async (importOriginal) => {
   })) };
 });
 vi.mock('./AdjustedImage', () => ({
-  AdjustedImage: ({ source, showBeforeAdjustments, onLoad, recipe, onHistogramChange }: { source: EditImageSource; showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler }) => {
+  AdjustedImage: ({ source, showBeforeAdjustments, onLoad, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange }: { source: EditImageSource; showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler;
+    gpuRenderer?: WorkspaceGpuRenderer | null; onGpuError?: (renderer: WorkspaceGpuRenderer, error: unknown) => void; onBackendChange?: (backend: ProcessingBackend) => void }) => {
     mockImage.source = source;
     mockImage.onLoad = onLoad;
     mockImage.recipe = recipe;
     mockImage.onHistogramChange = onHistogramChange;
+    mockImage.gpuRenderer = gpuRenderer;
+    mockImage.onGpuError = onGpuError;
+    mockImage.onBackendChange = onBackendChange;
     mockImage.renders++;
     return <div data-testid="adjusted-image" data-before={String(showBeforeAdjustments)} />;
   },
@@ -118,6 +128,50 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('wires the workspace GPU switch and runtime fallback without changing source, History, or Recipe', async () => {
+    vi.stubGlobal('isSecureContext', true);
+    vi.stubGlobal('navigator', { gpu: {}, language: 'en' });
+    const fetch = vi.fn(async () => ({ ok: true, blob: async () => new Blob(['jpeg']), json: async () => ({ edited: {} }) }));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = () => 'blob:gpu-original'; static revokeObjectURL = vi.fn(); });
+    localStorage.removeItem(WEBGPU_STORAGE_KEY);
+    const created: WorkspaceGpuRenderer[] = [];
+    const create = vi.spyOn(WebGpuAdjustmentRenderer, 'create').mockImplementation(async () => {
+      const renderer = { available: true, setSource: vi.fn(), render: vi.fn(), onDeviceLost: () => () => {},
+        dispose: vi.fn(() => { renderer.available = false; }) };
+      created.push(renderer);
+      return renderer as unknown as WebGpuAdjustmentRenderer;
+    });
+    try {
+      await act(async () => root.render(<MemoryRouter initialEntries={['/anshitsu/first']}>
+        <Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></MemoryRouter>));
+      expect(mockImage.gpuRenderer?.available).toBe(true);
+      const switchButton = () => host.querySelector<HTMLButtonElement>('[aria-label="Use WebGPU"]')!;
+      act(() => mockImage.onBackendChange?.('gpu'));
+      expect(host.querySelector('#webgpu-status')!.textContent).toBe('GPU active');
+      click(host.querySelector<HTMLButtonElement>('[aria-label="Disable Basic"]')!);
+      const recipe = mockImage.recipe, history = host.querySelector('.edit-history')!.innerHTML;
+      const source = mockImage.source, requests = fetch.mock.calls.length;
+      const old = mockImage.gpuRenderer!;
+      await act(async () => switchButton().click());
+      expect(mockImage.gpuRenderer).toBeNull(); expect(old.dispose).toHaveBeenCalled();
+      expect(localStorage.getItem(WEBGPU_STORAGE_KEY)).toBe('false');
+      await act(async () => switchButton().click());
+      expect(mockImage.gpuRenderer?.available).toBe(true);
+      act(() => mockImage.onBackendChange?.('gpu'));
+      act(() => mockImage.onGpuError?.(mockImage.gpuRenderer!, new Error('GPU execution failed')));
+      expect(mockImage.gpuRenderer).toBeNull(); expect(switchButton().disabled).toBe(true);
+      expect(host.querySelector('#webgpu-status')!.textContent).toBe('GPU error · CPU');
+      expect(localStorage.getItem(WEBGPU_STORAGE_KEY)).toBe('true');
+      expect(mockImage.source).toEqual(source); expect(mockImage.recipe).toBe(recipe);
+      expect(host.querySelector('.edit-history')!.innerHTML).toBe(history); expect(fetch).toHaveBeenCalledTimes(requests);
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Preview / Original"]')!.click());
+      expect(mockImage.source?.kind).toBe('jpeg-original'); expect(mockImage.gpuRenderer?.available).toBe(true);
+      expect(mockImage.recipe).toBe(recipe); expect(host.querySelector('.edit-history')!.innerHTML).toBe(history);
+      act(() => root.unmount()); root = createRoot(host);
+      expect(created.every(renderer => !renderer.available)).toBe(true);
+    } finally { create.mockRestore(); localStorage.removeItem(WEBGPU_STORAGE_KEY); }
+  });
   it.each(['loading', 'error'] as const)('keeps original switching disabled and ignores ] while acquisition is %s', (status) => {
     const toggle = vi.fn();
     const beforeDisplay = vi.fn();

@@ -24,21 +24,31 @@ export class WebGpuAdjustmentRenderer {
   private pipeline!: ExposureGpuPipeline;
   private interrupted: Promise<never>;
   private interrupt!: (error: Error) => void;
+  private lossListeners = new Set<(error: Error) => void>();
 
   private constructor(private device: ExposureGpuDevice) {
     this.interrupted = new Promise((_, reject) => { this.interrupt = reject; });
     void this.interrupted.catch(() => {});
-    void device.lost.then(info => this.stop(new Error(`WebGPU device lost: ${info.message}`)));
+    void device.lost.then(info => {
+      const error = new Error(`WebGPU device lost: ${info.message}`);
+      this.stop(error);
+      if (!this.disposed) for (const listener of this.lossListeners) listener(error);
+    });
   }
 
   static async create(gpu: ExposureGpu | undefined = defaultGpu(),
-    onError?: (error: unknown) => void): Promise<WebGpuAdjustmentRenderer | null> {
+    onError?: (error: unknown) => void, signal?: AbortSignal): Promise<WebGpuAdjustmentRenderer | null> {
     let renderer: WebGpuAdjustmentRenderer | undefined;
+    const abort = () => renderer?.dispose();
     try {
+      if (signal?.aborted) return null;
       const adapter = await gpu?.requestAdapter();
-      if (!adapter) return null;
+      if (!adapter || signal?.aborted) return null;
       const device = await adapter.requestDevice();
+      // requestDevice cannot be cancelled; release a device that arrives after its owner left.
+      if (signal?.aborted) { device.destroy(); return null; }
       renderer = new WebGpuAdjustmentRenderer(device);
+      signal?.addEventListener('abort', abort, { once: true });
       renderer.pipeline = await Promise.race([scoped(device, () => device.createComputePipelineAsync({
         layout: 'auto', compute: { module: device.createShaderModule({ code: shader }), entryPoint: 'main' },
       })), renderer.interrupted]);
@@ -48,11 +58,17 @@ export class WebGpuAdjustmentRenderer {
       renderer?.dispose();
       onError?.(error);
       return null;
-    }
+    } finally { signal?.removeEventListener('abort', abort); }
   }
 
   get available() { return this.stopped === null; }
   get sourceGeneration() { return this.generation; }
+
+  onDeviceLost(listener: (error: Error) => void): () => void {
+    if (this.stopped && !this.disposed) listener(this.stopped);
+    else if (!this.disposed) this.lossListeners.add(listener);
+    return () => { this.lossListeners.delete(listener); };
+  }
 
   private ready() {
     if (this.stopped) throw this.stopped;
@@ -78,6 +94,7 @@ export class WebGpuAdjustmentRenderer {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.lossListeners.clear();
     this.stop(new Error('WebGPU renderer disposed'));
     this.device.destroy();
   }

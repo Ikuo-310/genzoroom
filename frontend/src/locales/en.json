@@ -1,4 +1,13 @@
 {
+  "webgpu": {
+    "toggle": "Use WebGPU",
+    "active": "GPU active",
+    "ready": "Preparing · CPU",
+    "off": "OFF · CPU",
+    "checking": "Checking · CPU",
+    "unavailable": "Unavailable · CPU",
+    "error": "GPU error · CPU"
+  },
   "app": {
     "title": "GenzoRoom",
     "eyebrow": "A photo development room",

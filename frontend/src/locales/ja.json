@@ -1,4 +1,13 @@
 {
+  "webgpu": {
+    "toggle": "WebGPUを使用",
+    "active": "GPU処理",
+    "ready": "準備中 · CPU",
+    "off": "OFF · CPU",
+    "checking": "確認中 · CPU",
+    "unavailable": "利用不可 · CPU",
+    "error": "GPUエラー · CPU"
+  },
   "app": {
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",

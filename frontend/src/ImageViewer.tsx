@@ -7,6 +7,7 @@ import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } f
 import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
+import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 import type { HistogramChangeHandler } from './histogram';
 
 type ImageViewerProps = {
@@ -18,6 +19,9 @@ type ImageViewerProps = {
   onImageError?: () => void;
   recipe?: EditRecipe;
   onHistogramChange?: HistogramChangeHandler;
+  gpuRenderer?: WorkspaceGpuRenderer | null;
+  onGpuError?: (renderer: WorkspaceGpuRenderer, error: unknown) => void;
+  onBackendChange?: (backend: ProcessingBackend) => void;
   alt: string;
   leftOpen: boolean;
   rightOpen: boolean;
@@ -35,7 +39,7 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
@@ -258,7 +262,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>
-        {editSource && recipe ? <AdjustedImage source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
+        {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
           onError={() => { setImageState('error'); onImageError?.(); }} /> : <img

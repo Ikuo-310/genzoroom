@@ -9,6 +9,50 @@ import { prepareGpuRecipe } from './webgpuRecipe';
 import { gpuComparisonPixels, gpuRecipeCases } from './webgpuRecipeCases';
 import { modelGpuRecipe } from './webgpuRecipeModel.testSupport';
 import { deferred, fakeGpu } from './webgpuTestDevice.testSupport';
+import type { ExposureGpuDevice } from './webgpuTypes';
+
+describe('G3 renderer ownership (mock device, not GPU execution)', () => {
+  it('does not request an adapter after initialization is cancelled', async () => {
+    const fake = fakeGpu(), controller = new AbortController(); controller.abort();
+    expect(await WebGpuAdjustmentRenderer.create(fake.gpu, undefined, controller.signal)).toBeNull();
+    expect(fake.gpu.requestAdapter).not.toHaveBeenCalled();
+  });
+  it('destroys a device acquired after its owner has left', async () => {
+    const fake = fakeGpu(), pending = deferred<ExposureGpuDevice>(), controller = new AbortController();
+    const gpu = { requestAdapter: async () => ({ requestDevice: () => pending.promise }) };
+    const creating = WebGpuAdjustmentRenderer.create(gpu, undefined, controller.signal);
+    await Promise.resolve(); controller.abort(); pending.resolve(fake.device);
+    expect(await creating).toBeNull(); expect(fake.device.destroy).toHaveBeenCalledOnce();
+    expect(fake.device.createComputePipelineAsync).not.toHaveBeenCalled();
+  });
+  it('releases a device while pipeline creation is still pending', async () => {
+    const fake = fakeGpu(), controller = new AbortController();
+    const pending = deferred<Awaited<ReturnType<typeof fake.device.createComputePipelineAsync>>>();
+    fake.device.createComputePipelineAsync.mockReturnValue(pending.promise);
+    const creating = WebGpuAdjustmentRenderer.create(fake.gpu, undefined, controller.signal);
+    await Promise.resolve(); await Promise.resolve();
+    expect(fake.device.createComputePipelineAsync).toHaveBeenCalledOnce();
+    controller.abort();
+    expect(await creating).toBeNull(); expect(fake.device.destroy).toHaveBeenCalledOnce();
+    pending.resolve({ getBindGroupLayout: vi.fn() });
+  });
+  it('notifies idle device loss, supports unsubscribe, and rejects later processing', async () => {
+    const fake = fakeGpu(), renderer = (await WebGpuAdjustmentRenderer.create(fake.gpu))!;
+    const listener = vi.fn(), removed = vi.fn();
+    renderer.onDeviceLost(listener); renderer.onDeviceLost(removed)();
+    fake.loss.resolve({ message: 'Device removed' }); await Promise.resolve();
+    expect(listener).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'WebGPU device lost: Device removed' }));
+    expect(removed).not.toHaveBeenCalled(); expect(renderer.available).toBe(false);
+    await expect(renderer.render(defaultRecipe())).rejects.toThrow('Device removed');
+    renderer.dispose(); expect(fake.device.destroy).toHaveBeenCalledOnce();
+  });
+  it('does not report intentional device disposal as a runtime failure', async () => {
+    const fake = fakeGpu(), renderer = (await WebGpuAdjustmentRenderer.create(fake.gpu))!, listener = vi.fn();
+    renderer.onDeviceLost(listener); renderer.dispose();
+    fake.loss.resolve({ message: 'Destroyed' }); await Promise.resolve();
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
 
 describe('G2 CPU-derived tables and arithmetic models (not GPU execution)', () => {
   it.each(gpuRecipeCases())('preserves CPU stage order in double arithmetic: $name', ({ recipe }) => {

@@ -94,7 +94,7 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 
 /* The workspace uses neutral tones so surrounding UI does not bias photo evaluation. */
 .workspace-page { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: #e8e8e8; background: #0d0d0e; line-height: 1.35; }
-.workspace-header { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.5fr) minmax(220px, 0.8fr); align-items: center; gap: 20px; min-height: 74px; padding: 10px 16px; border-bottom: 1px solid #353537; background: #171719; }
+.workspace-header { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.5fr) auto; align-items: center; gap: 20px; min-height: 74px; padding: 10px 16px; border-bottom: 1px solid #353537; background: #171719; }
 .workspace-brand { display: grid; grid-template-columns: auto auto; align-items: baseline; justify-content: start; gap: 2px 12px; min-width: 0; }
 .workspace-brand .workspace-title-link { font-size: 1.6rem; font-weight: 700; }
 .workspace-brand > span { color: #d2d2d2; font-weight: 650; }
@@ -102,6 +102,10 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .workspace-asset-title { display: grid; min-width: 0; }
 .workspace-asset-title span { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-asset-title time { color: #a8a8aa; font-size: 0.76rem; }
+.webgpu-control { display: grid; justify-items: center; gap: 2px; font-size: 0.7rem; }
+.webgpu-control [role="status"] { max-width: 7rem; }
+.webgpu-control .tool-button { font-size: 0.75rem; padding: 5px 7px; }
+.webgpu-control [aria-checked="true"]:not(:disabled) { border-color: #aaa; }
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 .language-control.compact { display: flex; align-items: center; gap: 7px; color: #aaa; }
 .language-control.compact select { min-width: 100px; color: #eee; background: #252527; border-color: #4b4b4e; padding-block: 5px; }

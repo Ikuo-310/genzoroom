@@ -31,6 +31,12 @@ function result(requestId: number, assetGeneration = 12): AdjustmentWorkerResult
 }
 
 describe('AdjustmentWorkerClient', () => {
+  it('drops a result whose Recipe changed before the next RAF submission', () => {
+    const worker = new FakeWorker(), onResult = vi.fn();
+    const client = new AdjustmentWorkerClient(worker, 12, { onResult, onError: vi.fn(), isCurrentRecipe: () => false });
+    client.render(defaultRecipe()); worker.emit(result(1));
+    expect(onResult).not.toHaveBeenCalled();
+  });
   it('transfers a one-time source copy and sends render identity fields', () => {
     const worker = new FakeWorker();
     const source = new Uint8ClampedArray([1, 2, 3, 4]);

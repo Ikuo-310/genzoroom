@@ -51,6 +51,9 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('Photo development workspace');
     expect(markup).toContain(`title="${asset.filename}"`);
     expect(markup).toContain(formatPhotoDate(asset.date, 'en'));
+    expect(markup).toContain('aria-label="Use WebGPU"');
+    expect(markup).toContain('Checking · CPU');
+    expect(markup.indexOf('webgpu-control')).toBeLessThan(markup.indexOf('language-control compact'));
   });
 
   it('renders the Japanese name without the English-only subtitle', () => {
@@ -58,6 +61,8 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('暗室');
     expect(markup).not.toContain('Photo development workspace');
     expect(markup).toContain(formatPhotoDate(asset.date, 'ja'));
+    expect(markup).toContain('aria-label="WebGPUを使用"');
+    expect(markup).toContain('確認中 · CPU');
   });
 
   it('omits missing EXIF values instead of rendering undefined or null', () => {

@@ -17,10 +17,11 @@ export type AdjustmentWorkerLike = {
 type Callbacks = {
   onResult: (result: AdjustmentWorkerResultMessage) => void;
   onError: (error: Error) => void;
+  isCurrentRecipe?: (recipe: EditRecipe) => boolean;
 };
 
 export class AdjustmentWorkerClient {
-  private inFlight: { requestId: number; assetGeneration: number } | null = null;
+  private inFlight: { requestId: number; assetGeneration: number; recipe: EditRecipe } | null = null;
   private pendingLatest: EditRecipe | null = null;
   private nextRequestId = 1;
   private disposed = false;
@@ -76,7 +77,7 @@ export class AdjustmentWorkerClient {
       assetGeneration: this.assetGeneration,
       recipe,
     };
-    this.inFlight = { requestId, assetGeneration: this.assetGeneration };
+    this.inFlight = { requestId, assetGeneration: this.assetGeneration, recipe };
     try {
       this.worker.postMessage(message, []);
     } catch (error) {
@@ -105,7 +106,8 @@ export class AdjustmentWorkerClient {
       this.send(pending);
       return;
     }
-    this.callbacks.onResult(response);
+    // React can receive a newer Recipe before RAF has queued it in this client.
+    if (this.callbacks.isCurrentRecipe?.(current.recipe) !== false) this.callbacks.onResult(response);
   }
 
   private fail(error: Error) {

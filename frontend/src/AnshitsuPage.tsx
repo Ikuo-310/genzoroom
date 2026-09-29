@@ -1,3 +1,5 @@
+import { useWorkspaceGpu } from './useWorkspaceGpu';
+import { WebGpuControl } from './WebGpuControl';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { activeAdjustmentId, focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
@@ -81,6 +83,7 @@ export function AnshitsuPage() {
   const editable = canEdit && loadStatus === 'ready';
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
+  const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`);
   const currentHistogramAsset = useRef({ assetId, sourceKey: histogramSourceKey });
   currentHistogramAsset.current = { assetId, sourceKey: histogramSourceKey };
   // H2 can pass this guarded snapshot to ScopePanel; route changes hide old data immediately.
@@ -392,6 +395,7 @@ export function AnshitsuPage() {
       <div className="workspace-actions">
         <button type="button" className="tool-button" disabled={exitSaving || exitFailure !== null}
           onClick={() => { void exitToHome(); }}>{t('workspace.backToPhotos')}</button>
+        <WebGpuControl enabled={gpu.enabled} availability={gpu.availability} active={gpu.active} onChange={gpu.setPreference} />
         <LanguageControl language={language} compact />
       </div>
     </header>
@@ -421,7 +425,7 @@ export function AnshitsuPage() {
         </ExifSection>
       </>}
       viewer={detailState === 'ready' && activeDetail ? (
-        <ImageViewer
+        <ImageViewer gpuRenderer={gpu.renderer} onGpuError={gpu.fail} onBackendChange={gpu.reportBackend}
           key={assetId}
           src={activeDetail.preview_url}
           editSource={editable ? jpegOriginal.source : undefined}

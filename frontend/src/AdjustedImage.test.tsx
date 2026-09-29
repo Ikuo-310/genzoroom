@@ -8,10 +8,123 @@ import { renderAdjustments } from './adjustmentPipeline';
 import type { AdjustmentWorkerRequest, AdjustmentWorkerResponse } from './adjustmentWorkerProtocol';
 import { decodeEditSource, type EditImageSource } from './editImageSource';
 import { defaultRecipe } from './editing';
+import { deferred } from './webgpuTestDevice.testSupport';
+import type { GpuAdjustmentResult } from './webgpuAdjustmentRenderer';
+import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 
 vi.mock('./editImageSource', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./editImageSource')>();
   return { ...actual, decodeEditSource: vi.fn() };
+});
+
+describe('AdjustedImage GPU routing with mocked output', () => {
+  const output = (requestId = 1): GpuAdjustmentResult => ({ pixels: new Uint8ClampedArray([9, 8, 7, 73]),
+    width: 1, height: 1, requestId, sourceGeneration: 1 });
+  function gpu() {
+    return { available: true, dispose: vi.fn(), onDeviceLost: vi.fn(() => () => {}),
+      setSource: vi.fn(async () => 1), render: vi.fn(async () => output()) };
+  }
+  const onGpuError = vi.fn(), onImageError = vi.fn(), onBackend = vi.fn<(backend: ProcessingBackend) => void>();
+  function show(renderer: WorkspaceGpuRenderer | null, recipe = defaultRecipe(), source = firstSource, before = false) {
+    act(() => root.render(<AdjustedImage source={source} recipe={recipe} gpuRenderer={renderer}
+      onGpuError={onGpuError} onBackendChange={onBackend} alt="GPU test" showBeforeAdjustments={before}
+      onHistogramChange={onHistogramChange} onLoad={vi.fn()} onError={onImageError} />));
+  }
+  async function ready() { await act(async () => {}); flushFrames(); await act(async () => {}); }
+
+  it('reuses one upload for Recipe edits and Before/After, publishing the painted histogram and alpha', async () => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    const renderer = gpu(), recipe = defaultRecipe();
+    show(renderer, recipe); await ready();
+    expect(FakeWorker.instances).toHaveLength(0);
+    expect(putImageData.mock.calls[1][0].data).toEqual(output().pixels);
+    expect(onHistogramChange).toHaveBeenLastCalledWith({ sourceKey: 'immich-preview:/first',
+      before: collectHistogram(firstPixels.data), after: collectHistogram(output().pixels) });
+    expect(onBackend).toHaveBeenLastCalledWith('gpu');
+    const histogramCalls = onHistogramChange.mock.calls.length;
+    show(renderer, recipe, firstSource, true); await ready();
+    expect(host.querySelectorAll('canvas')[1].classList.contains('comparison-hidden')).toBe(true);
+    expect(renderer.render).toHaveBeenCalledOnce();
+    expect(onHistogramChange).toHaveBeenCalledTimes(histogramCalls);
+    renderer.render.mockResolvedValueOnce(output(2));
+    const next = defaultRecipe(); next.adjustments.exposure = 1;
+    show(renderer, next); await ready();
+    expect(renderer.setSource).toHaveBeenCalledOnce();
+    expect(renderer.render).toHaveBeenLastCalledWith(next);
+  });
+  it('rejects an old GPU result when Recipe changed before the next RAF', async () => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    const renderer = gpu(), pending = deferred<GpuAdjustmentResult>();
+    renderer.render.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(output(2));
+    show(renderer); await ready();
+    const next = defaultRecipe(); next.adjustments.exposure = 2;
+    show(renderer, next);
+    await act(async () => pending.resolve(output()));
+    expect(putImageData).toHaveBeenCalledOnce();
+    expect(onHistogramChange).toHaveBeenCalledTimes(2);
+    await ready();
+    expect(putImageData).toHaveBeenCalledTimes(2);
+    expect(renderer.render).toHaveBeenLastCalledWith(next);
+  });
+  it('falls back to Worker and then main thread using the same decoded source and latest Recipe', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(decodeEditSource).mockClear().mockResolvedValue(firstPixels);
+    onGpuError.mockClear(); onImageError.mockClear();
+    const renderer = gpu(), pending = deferred<GpuAdjustmentResult>();
+    renderer.render.mockReturnValueOnce(pending.promise);
+    show(renderer); await ready();
+    const recipe = defaultRecipe(); recipe.adjustments.exposure = -1;
+    show(renderer, recipe); flushFrames();
+    const error = new Error('Device lost');
+    await act(async () => pending.reject(error)); await ready();
+    expect(onGpuError).toHaveBeenCalledExactlyOnceWith(renderer, error);
+    const worker = FakeWorker.instances[0];
+    expect(worker.sent[0]).toMatchObject({ type: 'init', width: 1, height: 1 });
+    expect(worker.sent[1]).toMatchObject({ type: 'render', recipe });
+    act(() => worker.onerror?.({ message: 'Worker unavailable' } as ErrorEvent)); await ready();
+    expect(onBackend).toHaveBeenLastCalledWith('cpu');
+    expect(putImageData.mock.calls.at(-1)![0].data).toEqual(renderAdjustments(firstPixels.data, recipe));
+    expect(decodeEditSource).toHaveBeenCalledOnce(); expect(onImageError).not.toHaveBeenCalled();
+  });
+  it.each(['photo', 'original', 'CPU'] as const)('drops late GPU output across a %s switch and simultaneous Recipe edit', async change => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    const renderer = gpu(), pending = deferred<GpuAdjustmentResult>();
+    renderer.render.mockReturnValueOnce(pending.promise);
+    show(renderer); await ready();
+    const next = defaultRecipe(); next.adjustments.temperature = 50;
+    const source: EditImageSource = change === 'original' ? { kind: 'jpeg-original', url: 'blob:original' }
+      : change === 'photo' ? secondSource : firstSource;
+    show(null, next, source); await ready();
+    const paints = putImageData.mock.calls.length, histograms = onHistogramChange.mock.calls.length;
+    await act(async () => pending.resolve(output()));
+    expect(putImageData).toHaveBeenCalledTimes(paints);
+    expect(onHistogramChange).toHaveBeenCalledTimes(histograms);
+    expect(FakeWorker.instances.at(-1)!.sent[1]).toMatchObject({ type: 'render', recipe: next });
+  });
+  it('drops a late CPU result after GPU selection and a Recipe edit', async () => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    show(null); await ready();
+    const worker = FakeWorker.instances[0], handler = worker.onmessage;
+    const request = worker.sent[1]; if (request.type !== 'render') throw new Error('Expected render');
+    const recipe = defaultRecipe(); recipe.adjustments.tint = 30;
+    const renderer = gpu(); show(renderer, recipe); await ready();
+    const paints = putImageData.mock.calls.length, histograms = onHistogramChange.mock.calls.length;
+    handler?.(new MessageEvent<AdjustmentWorkerResponse>('message', { data: { requestId: request.requestId,
+      assetGeneration: request.assetGeneration, type: 'result', pixelBuffer: new ArrayBuffer(4), width: 1, height: 1,
+      histogram: collectHistogram(new Uint8ClampedArray(4)) } }));
+    expect(putImageData).toHaveBeenCalledTimes(paints); expect(onHistogramChange).toHaveBeenCalledTimes(histograms);
+    expect(worker.terminate).toHaveBeenCalledOnce(); expect(renderer.render).toHaveBeenLastCalledWith(recipe);
+  });
+  it('drops completion after unmount', async () => {
+    vi.mocked(decodeEditSource).mockResolvedValue(firstPixels);
+    const renderer = gpu(), pending = deferred<GpuAdjustmentResult>();
+    renderer.render.mockReturnValueOnce(pending.promise);
+    show(renderer); await ready();
+    act(() => root.unmount()); root = createRoot(host);
+    const histograms = onHistogramChange.mock.calls.length;
+    await act(async () => pending.resolve(output()));
+    expect(onHistogramChange).toHaveBeenCalledTimes(histograms); expect(putImageData).toHaveBeenCalledOnce();
+  });
 });
 
 class FakeWorker {
