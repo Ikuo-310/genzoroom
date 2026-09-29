@@ -54,6 +54,12 @@ Editing is currently available for JPEG assets only. Anshitsu begins with the Im
 
 Recipe v18 provides an individual ON/OFF switch for each of the 16 numeric adjustments, in addition to independent category and Color Grading range switches. These 23 switches do not enable or disable one another, and turning any switch off retains its numeric values. Individual, category, range, and all-reset operations participate in History and Undo / Redo. Processing is performed locally in the browser; Immich originals are not modified.
 
+### Optional WebGPU acceleration
+
+Anshitsu can use WebGPU to accelerate JPEG preview and selected-original adjustments. The WebGPU ON/OFF switch is beside the language selector, and its preference is remembered by the browser. A compatible GPU, driver, and browser are required; WebGPU generally requires a Secure Context, normally HTTPS or `localhost`. If WebGPU is unavailable or GPU initialization or rendering fails, Anshitsu uses the CPU Worker, with the existing main-thread fallback if the Worker also fails. Editing remains available without WebGPU.
+
+Firefox and Edge on Windows with a Radeon RX 580 are a verified configuration; the RX 580 is not a minimum requirement. On a LAN address served over HTTP, using WebGPU requires a browser-specific development exception that treats the origin as secure. This exception does not encrypt the connection. Prefer HTTPS or `localhost` where possible. Detailed instructions for browser exceptions belong in a future installation guide.
+
 Copy / Paste transfers saved numeric values, including values in disabled categories, adjustments, or Color Grading ranges; ON/OFF switches are never copied. Paste changes only the copied adjustment values and keeps the destination photo’s enabled flags. Category, individual adjustment, and Color Grading range context menus provide their relevant copy, paste, reset, or toggle operations. A selected Paste can apply any subset without changing the clipboard. Each changed Paste appears as one undoable History entry labelled with the source filename; repeating values already present creates no new entry. Text and numeric editing fields keep their native browser Copy / Paste behavior.
 
 ## Current limitations
@@ -61,7 +67,7 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 - The working and Histogram pipeline remains browser-managed 8-bit sRGB. Embedded sRGB and Display P3 profiles are considered during original decoding and converted into that working space; this is not a wide-gamut or HDR pipeline.
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
 - RAW development, including DNG, remains unimplemented. A JPEG `COVER.jpg` is handled as a JPEG original; GenzoRoom does not pair or manage it with a RAW asset.
-- Original rendering processes full-resolution pixels in the existing pipeline. On the tested NAS / Firefox setup, repeated adjustment updates took about two to three seconds by user estimate and were acceptable; this was not a benchmark or color-difference measurement.
+- Original rendering processes full-resolution pixels. WebGPU can accelerate this path when supported; CPU processing remains available and is slower on the tested NAS / Firefox setup. No detailed performance benchmark has been performed.
 - Edits made within the five-second debounce or during an in-flight save can be lost on reload or tab close; these browser events are not intercepted.
 - Recent Photos is limited to 100 items and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.

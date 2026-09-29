@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Optional WebGPU image processing for JPEG previews and originals in Anshitsu, with a remembered GPU ON/OFF preference and automatic CPU fallback when GPU processing is unavailable or fails.
 - Anshitsu can acquire the selected JPEG original through the backend and switch between Preview and Original. Home and Filmstrip retain thumbnail browsing; both viewer sources share the current edits, and Original Info reports embedded profile details.
 - Preview / Original and Before / After controls, with `]` for source switching and held Backslash for temporary Before. JIS `]` key events take priority over the Backslash comparison shortcut. History and Develop panel toggles now use directional icon buttons with localized tooltips.
 - An RGB / Y′ Histogram Scope for JPEG previews, with per-channel visibility, Y Only, Normal shared-maximum and Expanded P99 scales, and synchronization with the Viewer’s persistent and temporary Before / After display. Numpad 0–3 and Numpad Decimal control the display.
