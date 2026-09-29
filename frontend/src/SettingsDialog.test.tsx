@@ -54,6 +54,36 @@ describe('shared Settings modal', () => {
       expect(dialog()).toBeNull(); expect(document.activeElement).toBe(trigger);
     } finally { window.removeEventListener('keydown', background); }
   });
+  it('closes only for a pointer press and release on the backdrop, without bubbling behind it', async () => {
+    const trigger = host.querySelector<HTMLButtonElement>('button')!;
+    const open = async () => { await click(trigger); return dialog(); };
+    const bounds = { x: 10, y: 10, top: 10, left: 10, right: 310, bottom: 410, width: 300, height: 400, toJSON: () => ({}) };
+    const send = (target: Element, type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+      act(() => target.dispatchEvent(event));
+    };
+    trigger.focus();
+    let current = await open();
+    vi.spyOn(current, 'getBoundingClientRect').mockReturnValue(bounds);
+    const behind = vi.fn(); window.addEventListener('pointerup', behind);
+    try {
+      send(current, 'pointerdown', 5, 5); send(current, 'pointerup', 5, 5);
+      expect(dialog()).toBeNull(); expect(document.activeElement).toBe(trigger); expect(behind).not.toHaveBeenCalled();
+
+      current = await open(); vi.spyOn(current, 'getBoundingClientRect').mockReturnValue(bounds);
+      send(current, 'pointerdown', 100, 100); send(current, 'pointerup', 100, 100);
+      expect(dialog()).toBe(current);
+      send(current, 'pointerdown', 100, 100); send(current, 'pointerup', 5, 5);
+      expect(dialog()).toBe(current);
+      send(current, 'pointerdown', 5, 5); send(current, 'pointerup', 100, 100);
+      expect(dialog()).toBe(current);
+      send(current, 'pointerdown', 5, 5); send(current, 'pointercancel', 5, 5);
+      send(current, 'pointerup', 5, 5);
+      expect(dialog()).toBe(current);
+      send(current, 'pointerdown', 5, 5); send(current, 'pointerup', 5, 5);
+      expect(dialog()).toBeNull(); expect(document.activeElement).toBe(trigger);
+    } finally { window.removeEventListener('pointerup', behind); }
+  });
   it('retains session preferences when localStorage is blocked and the dialog is reopened', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
     await click(host.querySelector('button')!);

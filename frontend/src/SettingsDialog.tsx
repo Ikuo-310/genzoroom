@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
 import { DATE_LOCALES, updateSetting, useAppSettings, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
@@ -68,6 +68,13 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
   const { t } = useTranslation(); const settings = useAppSettings();
   const [language, setLanguage] = useState(currentLanguagePreference);
   const dialog = useRef<HTMLDialogElement>(null); const title = useId();
+  const backdropPointerDown = useRef(false);
+  const isBackdropPointer = (event: ReactPointerEvent<HTMLDialogElement>) => {
+    if (event.target !== event.currentTarget) return false;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientX < bounds.left || event.clientX > bounds.right
+      || event.clientY < bounds.top || event.clientY > bounds.bottom;
+  };
   useLayoutEffect(() => {
     const element = dialog.current!; const previous = document.activeElement;
     element.showModal(); element.querySelector<HTMLElement>('button')?.focus();
@@ -84,6 +91,17 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
     };
   }, []);
   return <dialog ref={dialog} className="settings-dialog" aria-modal="true" aria-labelledby={title}
+    onPointerDown={event => {
+      event.stopPropagation();
+      backdropPointerDown.current = event.button === 0 && isBackdropPointer(event);
+    }}
+    onPointerUp={event => {
+      event.stopPropagation();
+      const closeFromBackdrop = backdropPointerDown.current && isBackdropPointer(event);
+      backdropPointerDown.current = false;
+      if (closeFromBackdrop) onClose();
+    }}
+    onPointerCancel={event => { event.stopPropagation(); backdropPointerDown.current = false; }}
     onCancel={event => { event.preventDefault(); onClose(); }} onKeyUp={event => event.stopPropagation()}
     onKeyDown={event => {
       event.stopPropagation();
