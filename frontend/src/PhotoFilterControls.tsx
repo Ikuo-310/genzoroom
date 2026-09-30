@@ -1,35 +1,24 @@
 import { useTranslation } from 'react-i18next';
-import type { PhotoFilterKey, PhotoFilters } from './photoFilters';
+import type { PhotoFilters } from './photoFilters';
 
 type PhotoFilterControlsProps = {
   filters: PhotoFilters;
-  onToggle: (filter: PhotoFilterKey) => void;
+  onChange: (filter: 'both' | 'raw' | 'nonRaw') => void;
 };
 
-export function PhotoFilterControls({ filters, onToggle }: PhotoFilterControlsProps) {
+export function PhotoFilterControls({ filters, onChange }: PhotoFilterControlsProps) {
   const { t } = useTranslation();
+  const value = filters.raw ? filters.nonRaw ? 'both' : 'raw' : 'nonRaw';
 
   return (
-    <fieldset className="photo-filters">
-      <legend>{t('photos.filterLabel')}</legend>
-      <label className={`photo-filter${filters.raw ? ' selected' : ''}`}>
-        <input
-          type="checkbox"
-          checked={filters.raw}
-          disabled={filters.raw && !filters.nonRaw}
-          onChange={() => onToggle('raw')}
-        />
-        RAW
-      </label>
-      <label className={`photo-filter${filters.nonRaw ? ' selected' : ''}`}>
-        <input
-          type="checkbox"
-          checked={filters.nonRaw}
-          disabled={filters.nonRaw && !filters.raw}
-          onChange={() => onToggle('nonRaw')}
-        />
-        {t('photos.nonRaw')}
-      </label>
-    </fieldset>
+    <label className="home-control photo-filter-control">
+      <span className="home-control-label">{t('photos.filterLabel')}</span>
+      <select aria-label={t('photos.filterLabel')} value={value}
+        onChange={event => onChange(event.target.value as 'both' | 'raw' | 'nonRaw')}>
+        <option value="both">{t('photos.allTypes')}</option>
+        <option value="raw">{t('photos.rawOnly')}</option>
+        <option value="nonRaw">{t('photos.nonRaw')}</option>
+      </select>
+    </label>
   );
 }

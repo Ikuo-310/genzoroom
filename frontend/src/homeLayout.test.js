@@ -52,11 +52,12 @@ describe('Home and thumbnail layout', () => {
   it('allows Home header controls to wrap at narrow widths', () => {
     const controls = document.createElement('div');
     controls.className = 'photos-heading-controls';
-    controls.innerHTML = '<fieldset class="photo-filters"></fieldset><label class="recent-count-control"><span>Recent count</span><select><option>100</option></select></label><div class="thumbnail-size-control"></div>';
+    controls.innerHTML = '<label class="home-control photo-filter-control"><span class="home-control-label">Type</span><select><option>All</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
     host.querySelector('.photos-heading').append(controls);
     expect(getComputedStyle(controls).display).toBe('flex');
     expect(getComputedStyle(controls).flexWrap).toBe('wrap');
-    expect(getComputedStyle(host.querySelector('.recent-count-control')).whiteSpace).toBe('nowrap');
+    expect(controls.querySelectorAll('.home-control')).toHaveLength(3);
+    for (const group of controls.querySelectorAll('.home-control')) expect(getComputedStyle(group).flexDirection).toBe('column');
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.photos-heading-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);

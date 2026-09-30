@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PHOTO_FILTERS,
   filterPhotos,
-  togglePhotoFilter,
-  type PhotoFilters,
 } from './photoFilters';
 
 const photos = [
@@ -39,13 +37,5 @@ describe('photo filters', () => {
       raw: false,
       nonRaw: true,
     })).toEqual([]);
-  });
-
-  it('does not allow the last enabled filter to be turned off', () => {
-    const rawOnly: PhotoFilters = { raw: true, nonRaw: false };
-    const nonRawOnly: PhotoFilters = { raw: false, nonRaw: true };
-
-    expect(togglePhotoFilter(rawOnly, 'raw')).toBe(rawOnly);
-    expect(togglePhotoFilter(nonRawOnly, 'nonRaw')).toBe(nonRawOnly);
   });
 });

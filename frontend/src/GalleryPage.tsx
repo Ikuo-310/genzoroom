@@ -12,7 +12,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { RECENT_PHOTO_COUNTS, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
+import { DEFAULT_PHOTO_FILTERS, filterPhotos, type PhotoFilters } from './photoFilters';
 import {
   addVisiblePhotoRange,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -189,14 +189,21 @@ export function GalleryPage() {
             onOpen={openSelectedAssets}
           />
           <div className="photos-heading-controls">
-            <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
-            <label className="recent-count-control"><span>{t('photos.recentCount')}</span>
-              <select aria-label={t('photos.recentCount')} value={settings.recentPhotoCount}
+            <PhotoFilterControls filters={photoFilters} onChange={filter => setPhotoFilters(
+              filter === 'both' ? { raw: true, nonRaw: true }
+                : filter === 'raw' ? { raw: true, nonRaw: false }
+                  : { raw: false, nonRaw: true },
+            )} />
+            <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
+              <select value={settings.recentPhotoCount}
                 onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
                 {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
               </select>
             </label>
-            <HomeThumbnailSizeControl />
+            <div className="home-control thumbnail-size-setting">
+              <span className="home-control-label">{t('photos.thumbnailSize')}</span>
+              <HomeThumbnailSizeControl />
+            </div>
           </div>
         </div>
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>

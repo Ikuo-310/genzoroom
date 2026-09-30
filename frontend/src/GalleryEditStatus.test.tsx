@@ -53,6 +53,13 @@ function selectedVisibleFilenames() {
 function shiftClick(element: HTMLElement) {
   act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
 }
+function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
+  const select = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -108,11 +115,11 @@ describe('Home bulk edit status', () => {
     expect(api.statuses.mock.calls[0][0]).toEqual(assets.map(asset => asset.id));
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    act(() => host.querySelector<HTMLInputElement>('.photo-filters input')!.click());
+    changeFilter('nonRaw');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
     expect(api.statuses).toHaveBeenCalledTimes(1);
-    act(() => host.querySelector<HTMLInputElement>('.photo-filters input')!.click());
+    changeFilter('both');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
   });
@@ -291,7 +298,7 @@ describe('Home bulk edit status', () => {
   it('falls back to a new visible anchor when filtering hides the old one', async () => {
     await mount();
     act(() => visibleSelectionInputs()[1].click());
-    act(() => host.querySelectorAll<HTMLInputElement>('.photo-filters input')[0].click());
+    changeFilter('nonRaw');
     shiftClick(visibleCardButtons()[2]);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
     expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
