@@ -58,6 +58,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(controls).flexWrap).toBe('wrap');
     expect(controls.querySelectorAll('.home-control')).toHaveLength(3);
     for (const group of controls.querySelectorAll('.home-control')) expect(getComputedStyle(group).flexDirection).toBe('column');
+    expect(getComputedStyle(controls.querySelector('.photo-filter-control select')).width).toBe('88px');
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.photos-heading-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);

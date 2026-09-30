@@ -9,6 +9,7 @@ import type { RecentAsset } from './assets';
 import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
 import { updateSetting } from './appSettings';
+import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
@@ -64,6 +65,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
+  sessionStorage.clear(); writePhotoFilterMode('both');
   updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
@@ -77,7 +79,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
+afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
   it('re-fetches the selected count while preserving the current grid and ignores stale responses', async () => {
@@ -122,6 +124,35 @@ describe('Home bulk edit status', () => {
     changeFilter('both');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+  });
+
+  it('restores the selected type filter after Home unmounts and remounts', async () => {
+    await mount();
+    changeFilter('raw');
+    expect(localStorage.getItem(PHOTO_FILTER_SESSION_KEY)).toBeNull();
+    expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('raw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    act(() => root.render(<div />));
+    await mount();
+    expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('raw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+  });
+
+  it('continues filtering and retains the choice in memory when session storage is blocked', async () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
+    try {
+      await mount();
+      changeFilter('nonRaw');
+      expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('nonRaw');
+      expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+      act(() => root.render(<div />));
+      await mount();
+      expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('nonRaw');
+      expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    } finally {
+      getItem.mockRestore(); setItem.mockRestore();
+    }
   });
 
   it('renders edited badges for a 150-photo Home list', async () => {

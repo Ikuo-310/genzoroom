@@ -12,7 +12,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { RECENT_PHOTO_COUNTS, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { DEFAULT_PHOTO_FILTERS, filterPhotos, type PhotoFilters } from './photoFilters';
+import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode } from './photoFilters';
 import {
   addVisiblePhotoRange,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -36,13 +36,14 @@ export function GalleryPage() {
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
-  const [photoFilters, setPhotoFilters] = useState<PhotoFilters>(DEFAULT_PHOTO_FILTERS);
+  const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
   const hasLoadedRecentAssets = useRef(false);
   const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
+  const photoFilters = photoFiltersForMode(photoFilterMode);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -189,11 +190,10 @@ export function GalleryPage() {
             onOpen={openSelectedAssets}
           />
           <div className="photos-heading-controls">
-            <PhotoFilterControls filters={photoFilters} onChange={filter => setPhotoFilters(
-              filter === 'both' ? { raw: true, nonRaw: true }
-                : filter === 'raw' ? { raw: true, nonRaw: false }
-                  : { raw: false, nonRaw: true },
-            )} />
+            <PhotoFilterControls filters={photoFilters} onChange={mode => {
+              setPhotoFilterMode(mode);
+              writePhotoFilterMode(mode);
+            }} />
             <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
               <select value={settings.recentPhotoCount}
                 onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
