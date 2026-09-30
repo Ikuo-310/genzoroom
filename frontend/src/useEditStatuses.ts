@@ -11,11 +11,13 @@ export function useEditStatuses(assetIds: string[], refresh = 0): AssetEditStatu
     const controller = new AbortController();
     let active = true;
     const timeout = window.setTimeout(() => controller.abort(), 8000);
-    void getAssetEditStatuses(ids, controller.signal).then(statuses => {
-      if (active && !controller.signal.aborted) setResult({ key, refresh, statuses });
-    }).catch(() => {
-      // Unknown stays unknown; a failed request must not certify photos as unedited.
-      if (active) setResult({ key, refresh, statuses: {} });
+    const batches: string[][] = [];
+    for (let index = 0; index < ids.length; index += 100) batches.push(ids.slice(index, index + 100));
+    void Promise.all(batches.map(batch => getAssetEditStatuses(batch, controller.signal).catch(() => null))).then(results => {
+      if (!active || controller.signal.aborted) return;
+      const statuses = Object.assign({}, ...results.filter((result): result is AssetEditStatuses => result !== null));
+      // Successful batches remain useful when another batch fails; absent IDs stay unknown.
+      setResult({ key, refresh, statuses });
     }).finally(() => window.clearTimeout(timeout));
     return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
   }, [key, refresh]);

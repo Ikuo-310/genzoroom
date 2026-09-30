@@ -117,6 +117,17 @@ describe('Home bulk edit status', () => {
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
   });
 
+  it('renders edited badges for a 150-photo Home list', async () => {
+    const manyAssets = Array.from({ length: 150 }, (_, index) => ({ ...assets[index % assets.length],
+      id: `large-${index}`, filename: `large-${index}.jpg` }));
+    api.recent.mockResolvedValue(manyAssets);
+    api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, true])));
+    await mount();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(150);
+    expect(api.statuses.mock.calls.map(([ids]) => ids.length)).toEqual([100, 50]);
+    expect(host.querySelectorAll('.edited-badge')).toHaveLength(150);
+  });
+
   it('rechecks only service status and preserves a pending edit-status response', async () => {
     const waiting = deferred<Record<string, boolean>>();
     const recheck = deferred<Response>();
