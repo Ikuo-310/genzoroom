@@ -48,6 +48,8 @@
     "nextMonth": "Next month",
     "gridLabel": "Calendar for {{year}}-{{month}}",
     "dayLabel": "{{date}}",
+    "dayWithAssets": "{{date}}, {{count}} assets",
+    "assetCount": "{{count}}",
     "backToMonth": "Back to calendar",
     "loading": "Loading calendar…",
     "loadFailed": "Calendar could not be loaded.",

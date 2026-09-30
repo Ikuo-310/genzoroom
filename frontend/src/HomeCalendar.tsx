@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-export type CalendarDay = { date: string; hasAssets: boolean };
+export type CalendarDay = { date: string; hasAssets: boolean; count: number };
 export type CalendarHeatmap = { year: number; month: number; days: CalendarDay[] };
 
 export const CALENDAR_FIRST_YEAR = 1900;
@@ -29,7 +29,7 @@ export function HomeCalendar({ year, month, days, weekStart, loading, onYearChan
   const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
   const offset = (firstWeekday - weekStart + 7) % 7;
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const activeDays = new Set(days.filter(day => day.hasAssets).map(day => day.date));
+  const daysByDate = new Map(days.map(day => [day.date, day]));
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const previous = shiftCalendarMonth(year, month, -1);
@@ -65,10 +65,13 @@ export function HomeCalendar({ year, month, days, weekStart, loading, onYearChan
       {Array.from({ length: daysInMonth }, (_, index) => {
         const day = index + 1;
         const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const available = !loading && activeDays.has(date);
+        const entry = daysByDate.get(date);
+        const available = !loading && entry?.hasAssets === true;
         return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${date === todayKey ? ' today' : ''}`}
-          disabled={!available} aria-label={t('calendar.dayLabel', { date })}
-          onClick={() => onDayOpen(date)}>{day}</button>;
+          disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date, count: entry.count }) : t('calendar.dayLabel', { date })}
+          onClick={() => onDayOpen(date)}><span className="calendar-day-number">{day}</span>
+          {available && <span className="calendar-day-count">{t('calendar.assetCount', { count: entry.count })}</span>}
+        </button>;
       })}
     </div>
   </div>;

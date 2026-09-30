@@ -4,15 +4,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
-import { updateSetting } from './appSettings';
+import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
 import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
 import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
-const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), heatmap: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
-  fetchRecentAssets: api.recent, fetchAlbums: api.albums,
+  fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
   fetchCalendarHeatmap: api.heatmap, fetchCalendarDayAssets: api.day }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
   getAssetEditStatuses: api.statuses }));
@@ -30,6 +30,7 @@ function monthData(year: number, month: number): CalendarHeatmap {
   return { year, month, days: [1, 2, 3].map(day => ({
     date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     hasAssets: day === 1 || day === 3,
+    count: day === 1 ? 1558 : day === 3 ? 2 : 0,
   })) };
 }
 
@@ -70,6 +71,7 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue(recent);
   api.albums.mockReset().mockResolvedValue([]);
+  api.albumAssets.mockReset().mockResolvedValue(dayPhotos.slice(0, 2));
   api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => monthData(year, month));
   api.day.mockReset().mockResolvedValue(dayPhotos);
   api.statuses.mockReset().mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, id === 'day-0'])));
@@ -83,6 +85,34 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('shares the selected thumbnail density across sparse Recent, Album, and Calendar photo grids', async () => {
+    api.albums.mockResolvedValue([{ id: 'album-1', albumName: 'Album', albumThumbnailAssetId: null,
+      assetCount: 2, startDate: null, endDate: null }]);
+    api.day.mockResolvedValue(dayPhotos.slice(0, 1));
+    function setSize(rank: string) {
+      const slider = host.querySelector<HTMLInputElement>('.thumbnail-size-control input')!;
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, rank);
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    }
+    const gridWidth = () => host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-column-width');
+    await mount();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    setSize('4');
+    expect(gridWidth()).toBe('calc(25% - 12px)');
+    click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
+    expect(gridWidth()).toBe('calc(25% - 12px)');
+    click('#home-calendar-tab'); await settle(); click('.calendar-day.has-assets'); await settle();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(gridWidth()).toBe('calc(25% - 12px)');
+    setSize('3');
+    expect(gridWidth()).toBe('calc(20% - 12.8px)');
+    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('5');
+    click('#home-recent-tab'); expect(gridWidth()).toBe('calc(20% - 12.8px)');
+    click('#home-albums-tab'); expect(gridWidth()).toBe('calc(20% - 12.8px)');
+  });
   it('opens on the current month with localized weekdays, and supports year, month, and boundary navigation', async () => {
     await mount();
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
@@ -117,7 +147,11 @@ describe('Home calendar', () => {
     selectValue('#calendar-year', '2026'); selectValue('#calendar-month', '9'); await settle();
     const days = [...host.querySelectorAll<HTMLButtonElement>('.calendar-day')];
     expect(days[0].disabled).toBe(false);
+    expect(days[0].querySelector('.calendar-day-number')?.textContent).toBe('1');
+    expect(days[0].querySelector('.calendar-day-count')?.textContent).toBe('1558');
+    expect(days[2].querySelector('.calendar-day-count')?.textContent).toBe('2');
     expect(days[1].disabled).toBe(true);
+    expect(days[1].querySelector('.calendar-day-count')).toBeNull();
     expect(days[1].className).not.toContain('has-assets');
     act(() => days[1].click());
     expect(api.day).not.toHaveBeenCalled();

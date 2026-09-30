@@ -47,6 +47,8 @@
     "nextMonth": "次の月",
     "gridLabel": "{{year}}年{{month}}月のカレンダー",
     "dayLabel": "{{date}}",
+    "dayWithAssets": "{{date}}、{{count}}件",
+    "assetCount": "{{count}}件",
     "backToMonth": "カレンダーへ戻る",
     "loading": "カレンダーを読み込んでいます…",
     "loadFailed": "カレンダーを読み込めませんでした。",

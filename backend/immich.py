@@ -125,6 +125,7 @@ class AlbumSummary(BaseModel):
 class CalendarDay(BaseModel):
     date: str
     hasAssets: bool
+    count: int
 
 
 class CalendarHeatmap(BaseModel):
@@ -562,7 +563,7 @@ async def get_calendar_heatmap(
         body = response.json()
         if not isinstance(body, Mapping) or not isinstance(body.get("series"), list):
             raise TypeError
-        active_days: set[str] = set()
+        day_counts: dict[str, int] = {}
         seen_days: set[str] = set()
         for item in body["series"]:
             if not isinstance(item, Mapping) or not isinstance(item.get("date"), str):
@@ -576,14 +577,14 @@ async def get_calendar_heatmap(
             if not first <= date.fromisoformat(day_value) <= last:
                 raise ValueError
             seen_days.add(day_value)
-            if count > 0:
-                active_days.add(day_value)
+            day_counts[day_value] = count
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     return CalendarHeatmap(
         year=year, month=month,
         days=[CalendarDay(date=(first + timedelta(days=offset)).isoformat(),
-                          hasAssets=(first + timedelta(days=offset)).isoformat() in active_days)
+                          hasAssets=day_counts.get((first + timedelta(days=offset)).isoformat(), 0) > 0,
+                          count=day_counts.get((first + timedelta(days=offset)).isoformat(), 0))
               for offset in range(last_day)],
     )
 

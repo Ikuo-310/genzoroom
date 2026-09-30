@@ -35,8 +35,9 @@ class CalendarTests(unittest.TestCase):
         result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 9,
             transport=httpx.MockTransport(handler)))
         self.assertEqual(len(result.days), 30)
-        self.assertEqual(result.days[0].model_dump(), {"date": "2026-09-01", "hasAssets": True})
-        self.assertEqual(result.days[1].model_dump(), {"date": "2026-09-02", "hasAssets": False})
+        self.assertEqual(result.days[0].model_dump(), {"date": "2026-09-01", "hasAssets": True, "count": 2})
+        self.assertEqual(result.days[1].model_dump(), {"date": "2026-09-02", "hasAssets": False, "count": 0})
+        self.assertEqual(result.days[-1].count, 0)
         self.assertFalse(result.days[-1].hasAssets)
 
     def test_heatmap_handles_february_and_rejects_bad_upstream(self):

@@ -29,8 +29,11 @@ describe('Home and thumbnail layout', () => {
     const days = document.createElement('div'); days.className = 'calendar-days'; month.append(days);
     host.querySelector('.photos').append(month);
     expect(getComputedStyle(month).minWidth).toBe('0');
+    expect(getComputedStyle(month).maxWidth).toBe('840px');
     expect(getComputedStyle(days).minWidth).toBe('0');
     expect(getComputedStyle(days).gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
+    const cell = document.createElement('button'); cell.className = 'calendar-day'; days.append(cell);
+    expect(getComputedStyle(cell).aspectRatio).toBe('1');
   });
   it('anchors the display-only edit badge to both thumbnail frames', () => {
     for (const frame of host.querySelectorAll('.thumbnail, .filmstrip-item')) {
@@ -60,7 +63,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(heading).flexShrink).toBe('0');
     expect(getComputedStyle(grid).overflowY).toBe('auto');
     expect(getComputedStyle(grid).minHeight).toBe('0');
-    expect(getComputedStyle(grid).gridTemplateColumns).toContain('auto-fit');
+    expect(getComputedStyle(grid).gridTemplateColumns).toContain('auto-fill');
     expect(getComputedStyle(grid).gridAutoRows).toBe('max-content');
     expect(getComputedStyle(host.querySelector('.photo-card')).maxWidth).toBe('');
     expect(getComputedStyle(host.querySelector('.photo-card')).alignSelf).toBe('start');
