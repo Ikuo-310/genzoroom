@@ -46,6 +46,22 @@ button:hover:not(:disabled) { background: #e3f0d6; }
 button:focus-visible { outline: 3px solid #e6eee9; outline-offset: 4px; }
 button:disabled { opacity: 0.6; cursor: wait; }
 .photos { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; margin-top: 24px; }
+.home-tabs { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 0 0 auto; margin: -4px 0 20px; border-bottom: 1px solid #526a5e; }
+.home-tabs button { color: #bacac1; background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 5px 8px 8px; font-weight: 600; }
+.home-tabs button:hover { color: #e6eee9; background: #2a3932; }
+.home-tabs button[aria-selected="true"] { color: #e6eee9; border-bottom-color: #c7d9ae; }
+.home-tabs button:focus-visible { outline: 2px solid #e6eee9; outline-offset: -2px; }
+.home-tab-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
+.album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); grid-auto-rows: max-content; gap: 16px; min-height: 0; overflow-y: auto; padding: 2px; }
+.album-card { min-width: 0; overflow: hidden; border: 1px solid #43584d; border-radius: 8px; background: #17221f; }
+.album-cover { display: grid; aspect-ratio: 4 / 3; overflow: hidden; place-items: center; background: #101a16; }
+.album-cover img { width: 100%; height: 100%; object-fit: cover; }
+.album-cover-placeholder { color: #9fb2a8; font-size: 0.86rem; }
+.album-info { padding: 10px 12px 12px; }
+.album-info h3 { margin: 0; overflow-wrap: anywhere; font-size: 0.95rem; line-height: 1.4; }
+.album-info p { margin: 3px 0 0; color: #9fb2a8; font-size: 0.8rem; }
+.album-info .album-count { color: #c7d9ae; }
+.album-heading { display: flex; }
 h2 { margin: 0; font-size: 1.35rem; }
 .photos-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'title selection filters'; align-items: center; gap: 12px 20px; flex: 0 0 auto; margin-bottom: 18px; }
 .photos-heading h2 { grid-area: title; }

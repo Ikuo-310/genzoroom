@@ -16,6 +16,14 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('keeps the Home tabs and panels flexible at narrow widths', () => {
+    const tabs = document.createElement('div'); tabs.className = 'home-tabs';
+    const panel = document.createElement('div'); panel.className = 'home-tab-panel';
+    host.querySelector('.photos').prepend(tabs, panel);
+    expect(getComputedStyle(tabs).flexWrap).toBe('wrap');
+    expect(getComputedStyle(panel).minWidth).toBe('0');
+    expect(getComputedStyle(panel).minHeight).toBe('0');
+  });
   it('anchors the display-only edit badge to both thumbnail frames', () => {
     for (const frame of host.querySelectorAll('.thumbnail, .filmstrip-item')) {
       const badge = document.createElement('span'); badge.className = 'edited-badge'; frame.append(badge);

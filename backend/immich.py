@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from math import isfinite
 from pathlib import PurePath
 from typing import Literal
@@ -108,6 +109,15 @@ class RecentAsset(BaseModel):
     thumbnail_url: str
     format: str
     is_raw: bool
+
+
+class AlbumSummary(BaseModel):
+    id: UUID
+    albumName: str
+    albumThumbnailAssetId: UUID | None
+    assetCount: int
+    startDate: str | None
+    endDate: str | None
 
 
 class AssetExif(BaseModel):
@@ -288,6 +298,67 @@ async def check_immich_status(
         )
 
     return ImmichStatus(configured=True, connected=True)
+
+
+def _album_date(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError
+    datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+async def get_albums(
+    immich_url: str | None,
+    api_key: str | None,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[AlbumSummary]:
+    url, key = _require_configuration(immich_url, api_key)
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.get(
+                _api_url(url, "/albums"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+            )
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+
+    if response.status_code != 200:
+        raise _request_error(response)
+
+    try:
+        body = response.json()
+        if not isinstance(body, list):
+            raise TypeError
+        albums: list[AlbumSummary] = []
+        for item in body:
+            if not isinstance(item, Mapping):
+                raise TypeError
+            album_id = UUID(item["id"])
+            name = item["albumName"]
+            thumbnail_id = item["albumThumbnailAssetId"]
+            count = item["assetCount"]
+            if not isinstance(name, str) or (thumbnail_id is not None and not isinstance(thumbnail_id, str)) \
+                    or type(count) is not int or count < 0:
+                raise TypeError
+            albums.append(AlbumSummary(
+                id=album_id,
+                albumName=name,
+                albumThumbnailAssetId=UUID(thumbnail_id) if thumbnail_id is not None else None,
+                assetCount=count,
+                startDate=_album_date(item.get("startDate")),
+                endDate=_album_date(item.get("endDate")),
+            ))
+    except (KeyError, TypeError, ValueError):
+        raise ImmichRequestError(
+            "unexpected_response", "Immich returned an unexpected response.",
+        ) from None
+
+    # Only fields used by Home leave the backend; Immich user and sharing metadata stay upstream.
+    return albums
 
 
 async def get_recent_assets(

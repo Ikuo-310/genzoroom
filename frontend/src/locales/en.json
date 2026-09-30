@@ -34,6 +34,20 @@
     "failedStatus": "Connection problem",
     "notConfiguredStatus": "Immich not configured"
   },
+  "home": {
+    "sections": "Home sections",
+    "recentTab": "Recent",
+    "albumsTab": "Albums"
+  },
+  "albums": {
+    "loading": "Loading albums…",
+    "loadFailed": "Albums could not be loaded.",
+    "empty": "No albums",
+    "noCover": "No cover",
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} items",
+    "dateRange": "{{start}} – {{end}}"
+  },
   "photos": {
     "edited": "Edited in GenzoRoom",
     "recent": "Recent photos",

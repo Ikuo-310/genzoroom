@@ -2,7 +2,9 @@ import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { fetchRecentAssets } from './api';
+import { fetchAlbums, fetchRecentAssets } from './api';
+import type { AlbumSummary } from './albums';
+import { AlbumCard } from './AlbumCard';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
@@ -26,6 +28,7 @@ import {
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
+type HomeTab = 'recent' | 'albums';
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
@@ -36,12 +39,18 @@ export function GalleryPage() {
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
+  const [activeTab, setActiveTab] = useState<HomeTab>('recent');
+  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+  const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
   const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
   const hasLoadedRecentAssets = useRef(false);
+  const hasLoadedAlbums = useRef(false);
+  const recentTab = useRef<HTMLButtonElement>(null);
+  const albumsTab = useRef<HTMLButtonElement>(null);
   const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
   const photoFilters = photoFiltersForMode(photoFilterMode);
 
@@ -106,9 +115,26 @@ export function GalleryPage() {
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
   }, [settings.recentPhotoCount]);
 
+  useEffect(() => {
+    if (activeTab !== 'albums') return;
+    const controller = new AbortController();
+    let active = true;
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    if (!hasLoadedAlbums.current) setAlbumState('loading');
+    void fetchAlbums(controller.signal).then(data => {
+      if (!active) return;
+      hasLoadedAlbums.current = true;
+      setAlbums(data);
+      setAlbumState('ready');
+    }).catch(() => {
+      if (active && !hasLoadedAlbums.current) setAlbumState('error');
+    }).finally(() => window.clearTimeout(timeout));
+    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+  }, [activeTab]);
+
   const visibleAssets = filterPhotos(assets, photoFilters);
   const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
-  const selectionMode = selectedAssetIds.length > 0;
+  const selectionMode = activeTab === 'recent' && selectedAssetIds.length > 0;
   const previousSelectionMode = useRef(selectionMode);
 
   useLayoutEffect(() => {
@@ -159,6 +185,15 @@ export function GalleryPage() {
     setSelectedAssetIds([]);
   }
 
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'albums'
+      : activeTab === 'recent' ? 'albums' : 'recent';
+    setActiveTab(next);
+    (next === 'recent' ? recentTab : albumsTab).current?.focus();
+  }
+
   return (
     <main className="home-page">
       <div className="home-intro">
@@ -180,7 +215,16 @@ export function GalleryPage() {
           <SettingsButton />
         </header>
       </div>
-      <section className="photos" aria-labelledby="recent-photos-heading">
+      <section className="photos" aria-label={t('home.sections')}>
+        <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
+          <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
+            aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
+            onClick={() => setActiveTab('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
+          <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
+            aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
+            onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+        </div>
+        {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         <div className="photos-heading">
           <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
           <PhotoSelectionBar
@@ -222,6 +266,14 @@ export function GalleryPage() {
                     onOpen={() => openWorkspace(asset)}
                   />
                 ))}</div>}
+        </div> : <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
+          <div className="photos-heading album-heading"><h2>{t('home.albumsTab')}</h2></div>
+          {albumState === 'idle' || albumState === 'loading'
+            ? <p className="gallery-message" role="status">{t('albums.loading')}</p>
+            : albumState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.loadFailed')}</p>
+              : albums.length === 0 ? <p className="gallery-message">{t('albums.empty')}</p>
+                : <div className="album-grid">{albums.map(album => <AlbumCard key={album.id} album={album} />)}</div>}
+        </div>}
       </section>
     </main>
   );

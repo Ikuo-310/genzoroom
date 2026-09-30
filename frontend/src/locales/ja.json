@@ -33,6 +33,20 @@
     "failedStatus": "接続に問題があります",
     "notConfiguredStatus": "Immich未設定"
   },
+  "home": {
+    "sections": "Homeの表示",
+    "recentTab": "最近の写真",
+    "albumsTab": "アルバム"
+  },
+  "albums": {
+    "loading": "アルバムを読み込んでいます…",
+    "loadFailed": "アルバムを読み込めませんでした。",
+    "empty": "アルバムはありません",
+    "noCover": "カバーなし",
+    "itemCount_one": "{{count}}枚",
+    "itemCount_other": "{{count}}枚",
+    "dateRange": "{{start}}〜{{end}}"
+  },
   "photos": {
     "edited": "GenzoRoomで編集済み",
     "recent": "最近の写真",

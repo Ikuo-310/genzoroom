@@ -1,4 +1,5 @@
 import type { AssetDetail, RecentAsset } from './assets';
+import type { AlbumSummary } from './albums';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -18,6 +19,24 @@ function isAssetDetail(value: unknown): value is AssetDetail {
   if (!isRecentAsset(value)) return false;
   const detail = value as RecentAsset & Record<string, unknown>;
   return typeof detail.preview_url === 'string' && isRecord(detail.exif);
+}
+
+function isAlbumSummary(value: unknown): value is AlbumSummary {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.albumName === 'string' &&
+    (value.albumThumbnailAssetId === null || typeof value.albumThumbnailAssetId === 'string') &&
+    typeof value.assetCount === 'number' && Number.isInteger(value.assetCount) && value.assetCount >= 0 &&
+    (value.startDate === null || typeof value.startDate === 'string') &&
+    (value.endDate === null || typeof value.endDate === 'string');
+}
+
+export async function fetchAlbums(signal: AbortSignal): Promise<AlbumSummary[]> {
+  const response = await fetch('/api/albums', { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Albums request failed');
+  const data: unknown = await response.json();
+  if (!Array.isArray(data) || data.some(album => !isAlbumSummary(album))) {
+    throw new Error('Unexpected albums response');
+  }
+  return data;
 }
 
 export async function fetchRecentAssets(limit: number, signal: AbortSignal): Promise<RecentAsset[]> {
