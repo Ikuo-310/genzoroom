@@ -4,6 +4,7 @@ import { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type
 import { DATE_LOCALES, updateSetting, useAppSettings, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
+import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 
 type GpuStatus = { enabled: boolean; availability: GpuAvailability; active: boolean; setPreference: (value: boolean) => void };
 const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGpu: (_value: GpuStatus | null) => {} });
@@ -126,6 +127,9 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
       <label>{t('settings.weekStart')}<select value={settings.weekStart} onChange={event => updateSetting('weekStart', event.target.value as WeekStart)}>
         <option value="auto">{t('settings.autoWeek')}</option><option value="sunday">{t('settings.sunday')}</option><option value="monday">{t('settings.monday')}</option>
       </select></label>
+    </section>
+    <section aria-labelledby={`${title}-home`}><h3 id={`${title}-home`}>{t('settings.home')}</h3>
+      <div className="settings-thumbnail-row"><span>{t('settings.thumbnailSize')}</span><HomeThumbnailSizeControl inSettings /></div>
     </section>
     <section aria-labelledby={`${title}-processing`}><h3 id={`${title}-processing`}>{t('settings.processing')}</h3>
       <div className="settings-webgpu-row">

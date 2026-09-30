@@ -43,9 +43,9 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(heading).flexShrink).toBe('0');
     expect(getComputedStyle(grid).overflowY).toBe('auto');
     expect(getComputedStyle(grid).minHeight).toBe('0');
-    expect(getComputedStyle(grid).gridTemplateColumns).toContain('auto-fill');
+    expect(getComputedStyle(grid).gridTemplateColumns).toContain('auto-fit');
     expect(getComputedStyle(grid).gridAutoRows).toBe('max-content');
-    expect(getComputedStyle(host.querySelector('.photo-card')).maxWidth).toBe('240px');
+    expect(getComputedStyle(host.querySelector('.photo-card')).maxWidth).toBe('');
     expect(getComputedStyle(host.querySelector('.photo-card')).alignSelf).toBe('start');
   });
 

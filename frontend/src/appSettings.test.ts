@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DATE_LOCALE_KEY, INITIAL_IMAGE_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
+import { DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
 import i18n, { changeAppLanguage, currentLanguagePreference, detectLanguage, formatPhotoDate, LANGUAGE_STORAGE_KEY, readLanguagePreference } from './i18n';
 
-afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); });
+afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailColumns', 6); });
 const memory = (initial: Record<string, string> = {}) => ({
   getItem: (key: string) => initial[key] ?? null,
   setItem: (key: string, value: string) => { initial[key] = value; },
@@ -27,13 +27,15 @@ describe('browser preferences', () => {
     expect(detectLanguage(storage, ['ja-JP'])).toBe('en');
   });
   it('defaults and reloads independent preferences, ignoring invalid saved values', () => {
-    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto' });
-    const storage = memory({ [DATE_LOCALE_KEY]: 'en-GB', [WEEK_START_KEY]: 'sunday', [INITIAL_IMAGE_KEY]: 'original' });
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original' });
-    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto' });
+    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6 });
+    const storage = memory({ [DATE_LOCALE_KEY]: 'en-GB', [WEEK_START_KEY]: 'sunday', [INITIAL_IMAGE_KEY]: 'original', [HOME_THUMBNAIL_COLUMNS_KEY]: '3' });
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailColumns: 3 });
+    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_COLUMNS_KEY]: '9' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6 });
     vi.stubGlobal('window', { localStorage: storage });
     updateSetting('initialImage', 'preview'); updateSetting('weekStart', 'monday'); updateSetting('dateLocale', 'ja-JP');
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview' });
+    updateSetting('homeThumbnailColumns', 4);
+    expect(storage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('4');
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailColumns: 4 });
   });
   it('keeps date locale independent of manual or fallback display language', async () => {
     vi.stubGlobal('navigator', { languages: ['fr-FR'] });
@@ -67,7 +69,7 @@ describe('browser preferences', () => {
   it('accepts changes for the current session when storage is blocked', async () => {
     const storage = { getItem: () => { throw new Error('Denied'); }, setItem: () => { throw new Error('Denied'); } };
     vi.stubGlobal('window', { localStorage: storage });
-    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto' });
+    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6 });
     updateSetting('dateLocale', 'en-GB'); expect(resolveDateLocale()).toBe('en-GB');
     updateSetting('weekStart', 'sunday'); expect(resolveWeekStart()).toBe(0);
     await changeAppLanguage('ja', storage); expect(i18n.resolvedLanguage).toBe('ja'); expect(currentLanguagePreference()).toBe('ja');

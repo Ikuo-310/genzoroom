@@ -93,6 +93,16 @@ describe('shared Settings modal', () => {
     await click(host.querySelector('button')!);
     expect(dialog().querySelector<HTMLSelectElement>('select')!.value).toBe('ja');
   });
+  it('persists the Home thumbnail size selected in the shared Settings dialog', async () => {
+    await click(host.querySelector('button')!);
+    const slider = dialog().querySelector<HTMLInputElement>('.settings-thumbnail-size-control input[type="range"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '5');
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(localStorage.getItem('genzoroom.homeThumbnailColumns')).toBe('3');
+    expect(slider.getAttribute('aria-valuetext')).toBe('3 columns');
+  });
   it('shows independent connection and safe server information', async () => {
     await click(host.querySelector('button')!);
     expect(dialog().textContent).toContain('Development build');

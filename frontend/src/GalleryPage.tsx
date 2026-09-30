@@ -1,5 +1,5 @@
 import { SettingsButton } from './SettingsDialog';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { fetchRecentAssets } from './api';
@@ -10,6 +10,8 @@ import { useEditStatuses } from './useEditStatuses';
 import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
+import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
+import { useAppSettings } from './appSettings';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
 import {
   addVisiblePhotoRange,
@@ -27,6 +29,7 @@ type AssetState = 'loading' | 'ready' | 'error';
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
+  const settings = useAppSettings();
   const navigate = useNavigate();
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const [connection, setConnection] = useState<Connection>('checking');
@@ -180,13 +183,16 @@ export function GalleryPage() {
             onClear={clearPhotoSelection}
             onOpen={openSelectedAssets}
           />
-          <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
+          <div className="photos-heading-controls">
+            <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
+            <HomeThumbnailSizeControl />
+          </div>
         </div>
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
-                : <div className="photo-grid">{visibleAssets.map((asset) => (
+                : <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => (
                   <PhotoCard
                     asset={asset}
                     language={language}

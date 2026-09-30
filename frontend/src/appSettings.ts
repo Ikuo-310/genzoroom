@@ -3,11 +3,14 @@ import { useSyncExternalStore } from 'react';
 export const DATE_LOCALE_KEY = 'genzoroom.dateLocale';
 export const WEEK_START_KEY = 'genzoroom.weekStart';
 export const INITIAL_IMAGE_KEY = 'genzoroom.initialImage';
+export const HOME_THUMBNAIL_COLUMNS_KEY = 'genzoroom.homeThumbnailColumns';
 export const DATE_LOCALES = ['ja-JP', 'en-US', 'en-GB', 'de-DE', 'fr-FR', 'zh-CN', 'ko-KR'] as const;
 export type DateLocale = 'auto' | typeof DATE_LOCALES[number];
 export type WeekStart = 'auto' | 'sunday' | 'monday';
 export type InitialImage = 'auto' | 'original' | 'preview';
-export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage };
+export const HOME_THUMBNAIL_COLUMNS = [3, 4, 5, 6, 7, 8] as const;
+export type HomeThumbnailColumns = typeof HOME_THUMBNAIL_COLUMNS[number];
+export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailColumns: HomeThumbnailColumns };
 
 export function browserStorage(): Storage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.localStorage; }
@@ -18,18 +21,24 @@ export function readSetting<T extends string>(key: string, choices: readonly T[]
   catch { return 'auto'; }
 }
 export function readSettings(storage = browserStorage()): Settings {
+  let homeThumbnailColumns: HomeThumbnailColumns = 6;
+  try {
+    const value = Number(storage?.getItem(HOME_THUMBNAIL_COLUMNS_KEY));
+    if (HOME_THUMBNAIL_COLUMNS.includes(value as HomeThumbnailColumns)) homeThumbnailColumns = value as HomeThumbnailColumns;
+  } catch { /* Invalid or blocked storage keeps the default grid size. */ }
   return {
     dateLocale: readSetting(DATE_LOCALE_KEY, DATE_LOCALES, storage),
     weekStart: readSetting(WEEK_START_KEY, ['sunday', 'monday'] as const, storage),
     initialImage: readSetting(INITIAL_IMAGE_KEY, ['original', 'preview'] as const, storage),
+    homeThumbnailColumns,
   };
 }
 let settings = readSettings();
 const listeners = new Set<() => void>();
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings = { ...settings, [key]: value };
-  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY }[key];
-  try { browserStorage()?.setItem(storageKey, value); } catch { /* Keep session preferences when storage is blocked. */ }
+  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY }[key];
+  try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }
   listeners.forEach(listener => listener());
 }
 export function useAppSettings() {
