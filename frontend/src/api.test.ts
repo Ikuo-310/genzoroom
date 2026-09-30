@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAlbums, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchRecentAssets } from './api';
 
 describe('recent assets API', () => {
   it('passes the selected limit to the backend', async () => {
@@ -26,6 +26,22 @@ describe('albums API', () => {
       expect(fetch).toHaveBeenCalledWith('/api/albums', { signal: controller.signal, cache: 'no-store' });
       fetch.mockImplementation(async () => new Response(JSON.stringify([{ ...album, assetCount: '0' }])));
       await expect(fetchAlbums(controller.signal)).rejects.toThrow('Unexpected albums response');
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe('album assets API', () => {
+  it('fetches and validates the complete backend asset list', async () => {
+    const asset = { id: 'asset-1', filename: 'photo.dng', date: '2026-09-27',
+      thumbnail_url: '/api/assets/asset-1/thumbnail', format: 'DNG', is_raw: true };
+    const fetch = vi.fn(async () => new Response(JSON.stringify([asset])));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchAlbumAssets('album/id', controller.signal)).toEqual([asset]);
+      expect(fetch).toHaveBeenCalledWith('/api/albums/album%2Fid/assets', { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response(JSON.stringify([{ ...asset, is_raw: 'true' }])));
+      await expect(fetchAlbumAssets('album/id', controller.signal)).rejects.toThrow('Unexpected album assets response');
     } finally { vi.unstubAllGlobals(); }
   });
 });

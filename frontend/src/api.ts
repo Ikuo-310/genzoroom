@@ -39,6 +39,16 @@ export async function fetchAlbums(signal: AbortSignal): Promise<AlbumSummary[]> 
   return data;
 }
 
+export async function fetchAlbumAssets(albumId: string, signal: AbortSignal): Promise<RecentAsset[]> {
+  const response = await fetch(`/api/albums/${encodeURIComponent(albumId)}/assets`, { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Album assets request failed');
+  const data: unknown = await response.json();
+  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+    throw new Error('Unexpected album assets response');
+  }
+  return data;
+}
+
 export async function fetchRecentAssets(limit: number, signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch(`/api/assets/recent?limit=${limit}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Recent assets request failed');

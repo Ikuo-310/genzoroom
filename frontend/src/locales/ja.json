@@ -39,6 +39,11 @@
     "albumsTab": "アルバム"
   },
   "albums": {
+    "open": "アルバム「{{name}}」を開く",
+    "backToList": "アルバム一覧へ",
+    "photosLoading": "アルバム内の写真を読み込んでいます…",
+    "photosLoadFailed": "アルバム内の写真を読み込めませんでした。",
+    "photosEmpty": "このアルバムに写真はありません",
     "loading": "アルバムを読み込んでいます…",
     "loadFailed": "アルバムを読み込めませんでした。",
     "empty": "アルバムはありません",

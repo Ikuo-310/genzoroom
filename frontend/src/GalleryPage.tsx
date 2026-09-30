@@ -2,7 +2,7 @@ import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { fetchAlbums, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
@@ -42,16 +42,25 @@ export function GalleryPage() {
   const [activeTab, setActiveTab] = useState<HomeTab>('recent');
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
+  const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(null);
+  const [albumAssets, setAlbumAssets] = useState<RecentAsset[]>([]);
+  const [albumAssetState, setAlbumAssetState] = useState<'idle' | AssetState>('idle');
   const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [albumSelectedAssetIds, setAlbumSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
+  const albumSelectionAnchorId = useRef<string | null>(null);
+  const albumAssetRequestId = useRef(0);
   const hasLoadedRecentAssets = useRef(false);
   const hasLoadedAlbums = useRef(false);
   const recentTab = useRef<HTMLButtonElement>(null);
   const albumsTab = useRef<HTMLButtonElement>(null);
-  const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
+  const showingAlbumPhotos = activeTab === 'albums' && selectedAlbum !== null;
+  const editStatusAssets = activeTab === 'recent' && assetState === 'ready' ? assets
+    : showingAlbumPhotos && albumAssetState === 'ready' ? albumAssets : [];
+  const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterMode);
 
   useEffect(() => {
@@ -116,7 +125,8 @@ export function GalleryPage() {
   }, [settings.recentPhotoCount]);
 
   useEffect(() => {
-    if (activeTab !== 'albums') return;
+    // Returning from an album detail should reuse the already loaded list.
+    if (activeTab !== 'albums' || hasLoadedAlbums.current) return;
     const controller = new AbortController();
     let active = true;
     const timeout = window.setTimeout(() => controller.abort(), 8000);
@@ -132,9 +142,30 @@ export function GalleryPage() {
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
   }, [activeTab]);
 
-  const visibleAssets = filterPhotos(assets, photoFilters);
-  const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
-  const selectionMode = activeTab === 'recent' && selectedAssetIds.length > 0;
+  useEffect(() => {
+    if (activeTab !== 'albums' || selectedAlbum === null) return;
+    const controller = new AbortController();
+    let active = true;
+    const requestId = albumAssetRequestId.current;
+    void fetchAlbumAssets(selectedAlbum.id, controller.signal).then(data => {
+      if (!active || requestId !== albumAssetRequestId.current) return;
+      const availableIds = new Set(data.map(asset => asset.id));
+      setAlbumAssets(data);
+      setAlbumSelectedAssetIds(current => current.filter(id => availableIds.has(id)));
+      if (albumSelectionAnchorId.current && !availableIds.has(albumSelectionAnchorId.current)) albumSelectionAnchorId.current = null;
+      setAlbumAssetState('ready');
+    }).catch(() => {
+      if (active && requestId === albumAssetRequestId.current) setAlbumAssetState('error');
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeTab, selectedAlbum?.id]);
+
+  // Each grid owns its selection so shared asset IDs cannot carry a selection across views.
+  const currentAssets = showingAlbumPhotos ? albumAssets : assets;
+  const activeSelectedAssetIds = showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
+  const visibleAssets = filterPhotos(currentAssets, photoFilters);
+  const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
+  const selectionMode = (activeTab === 'recent' || showingAlbumPhotos && albumAssetState === 'ready') && activeSelectedAssetIds.length > 0;
   const previousSelectionMode = useRef(selectionMode);
 
   useLayoutEffect(() => {
@@ -169,20 +200,51 @@ export function GalleryPage() {
 
   function togglePhotoSelection(assetId: string, extendRange = false) {
     const rangedSelection = extendRange
-      ? addVisiblePhotoRange(selectedAssetIds, visibleAssets.map((asset) => asset.id), selectionAnchorId.current, assetId)
+      ? addVisiblePhotoRange(activeSelectedAssetIds, visibleAssets.map((asset) => asset.id),
+        showingAlbumPhotos ? albumSelectionAnchorId.current : selectionAnchorId.current, assetId)
       : null;
     if (rangedSelection) {
-      setSelectedAssetIds(rangedSelection);
+      if (showingAlbumPhotos) setAlbumSelectedAssetIds(rangedSelection);
+      else setSelectedAssetIds(rangedSelection);
       return;
     }
-    const nextSelection = toggleSelectedAssetId(selectedAssetIds, assetId);
-    selectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
-    setSelectedAssetIds(nextSelection);
+    const nextSelection = toggleSelectedAssetId(activeSelectedAssetIds, assetId);
+    if (showingAlbumPhotos) {
+      albumSelectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
+      setAlbumSelectedAssetIds(nextSelection);
+    } else {
+      selectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
+      setSelectedAssetIds(nextSelection);
+    }
   }
 
   function clearPhotoSelection() {
-    selectionAnchorId.current = null;
-    setSelectedAssetIds([]);
+    if (showingAlbumPhotos) {
+      albumSelectionAnchorId.current = null;
+      setAlbumSelectedAssetIds([]);
+    } else {
+      selectionAnchorId.current = null;
+      setSelectedAssetIds([]);
+    }
+  }
+
+  function openAlbum(album: AlbumSummary) {
+    // Invalidate the previous request before React runs its effect cleanup.
+    albumAssetRequestId.current += 1;
+    albumSelectionAnchorId.current = null;
+    setAlbumSelectedAssetIds([]);
+    setAlbumAssets([]);
+    setAlbumAssetState('loading');
+    setSelectedAlbum(album);
+  }
+
+  function closeAlbum() {
+    albumAssetRequestId.current += 1;
+    albumSelectionAnchorId.current = null;
+    setAlbumSelectedAssetIds([]);
+    setAlbumAssets([]);
+    setAlbumAssetState('idle');
+    setSelectedAlbum(null);
   }
 
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -192,6 +254,21 @@ export function GalleryPage() {
       : activeTab === 'recent' ? 'albums' : 'recent';
     setActiveTab(next);
     (next === 'recent' ? recentTab : albumsTab).current?.focus();
+  }
+
+  function renderPhotoGrid() {
+    return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => (
+      <PhotoCard
+        asset={asset}
+        language={language}
+        key={asset.id}
+        selected={activeSelectedAssetIds.includes(asset.id)}
+        selectionMode={selectionMode}
+        edited={editStatuses[asset.id]}
+        onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
+        onOpen={() => openWorkspace(asset)}
+      />
+    ))}</div>;
   }
 
   return (
@@ -226,11 +303,11 @@ export function GalleryPage() {
               onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
           </div>
           <div className="home-toolbar-controls">
+            {(activeTab === 'recent' || showingAlbumPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
+              setPhotoFilterMode(mode);
+              writePhotoFilterMode(mode);
+            }} />}
             {activeTab === 'recent' && <>
-              <PhotoFilterControls filters={photoFilters} onChange={mode => {
-                setPhotoFilterMode(mode);
-                writePhotoFilterMode(mode);
-              }} />
               <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
                 <select value={settings.recentPhotoCount}
                   onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
@@ -247,7 +324,7 @@ export function GalleryPage() {
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {selectionMode && <PhotoSelectionBar
           active={selectionMode}
-          count={selectedAssetIds.length}
+          count={activeSelectedAssetIds.length}
           onClear={clearPhotoSelection}
           onOpen={openSelectedAssets}
         />}
@@ -255,24 +332,26 @@ export function GalleryPage() {
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
-                : <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => (
-                  <PhotoCard
-                    asset={asset}
-                    language={language}
-                    key={asset.id}
-                    selected={selectedAssetIds.includes(asset.id)}
-                    selectionMode={selectionMode}
-                    edited={editStatuses[asset.id]}
-                    onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
-                    onOpen={() => openWorkspace(asset)}
-                  />
-                ))}</div>}
+                : renderPhotoGrid()}
         </div> : <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
-          {albumState === 'idle' || albumState === 'loading'
+          {selectedAlbum ? <>
+            <div className="album-detail-heading">
+              <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
+              <h2>{selectedAlbum.albumName}</h2>
+            </div>
+            {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
+              onClear={clearPhotoSelection} onOpen={openSelectedAssets} />}
+            {albumAssetState === 'idle' || albumAssetState === 'loading'
+              ? <p className="gallery-message" role="status">{t('albums.photosLoading')}</p>
+              : albumAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.photosLoadFailed')}</p>
+                : albumAssets.length === 0 ? <p className="gallery-message">{t('albums.photosEmpty')}</p>
+                  : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
+                    : renderPhotoGrid()}
+          </> : albumState === 'idle' || albumState === 'loading'
             ? <p className="gallery-message" role="status">{t('albums.loading')}</p>
             : albumState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.loadFailed')}</p>
               : albums.length === 0 ? <p className="gallery-message">{t('albums.empty')}</p>
-                : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} />)}</div>}
+                : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} onOpen={() => openAlbum(album)} />)}</div>}
         </div>}
       </section>
     </main>

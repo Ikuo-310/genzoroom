@@ -8,9 +8,9 @@ import { updateSetting } from './appSettings';
 import { writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
-const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn() }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
-  fetchRecentAssets: api.recent, fetchAlbums: api.albums }));
+  fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets }));
 vi.mock('./useEditStatuses', () => ({ useEditStatuses: () => ({}) }));
 
 const photo = { id: 'photo-1', filename: 'photo.jpg', date: '2026-09-27', thumbnail_url: '/thumb/1', format: 'JPEG', is_raw: false };
@@ -38,6 +38,7 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
+  api.albumAssets.mockReset().mockResolvedValue([photo]);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
@@ -71,7 +72,7 @@ describe('Home album tab', () => {
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(api.albums).toHaveBeenCalledTimes(1);
-    expect(host.querySelector('.album-card h3')?.textContent).toBe('旅行 2026');
+    expect(host.querySelector('.album-card .album-name')?.textContent).toBe('旅行 2026');
     expect(host.querySelector<HTMLImageElement>('.album-cover img')?.getAttribute('src')).toBe('/api/assets/cover-1/thumbnail');
     expect(host.querySelector('.album-period')?.textContent).toBe('Apr 2026 – May 2026');
     expect(host.querySelector('.album-count')?.textContent).toBe('2 items');
@@ -127,7 +128,7 @@ describe('Home album tab', () => {
     expect([...host.querySelectorAll('.album-period')].map(node => node.textContent)).toEqual(['Apr 2026', 'May 2026']);
   });
 
-  it('shows loading, ignores an aborted request, and handles empty and error states', async () => {
+  it('shows loading, ignores an aborted request, and keeps a loaded empty list', async () => {
     const stale = deferred<typeof album[]>();
     api.albums.mockReset().mockReturnValueOnce(stale.promise).mockResolvedValueOnce([]);
     await mount(); clickTab('#home-albums-tab');
@@ -140,10 +141,9 @@ describe('Home album tab', () => {
     expect(host.querySelector('.gallery-message')?.textContent).toBe('No albums');
     expect(host.querySelector('.album-card')).toBeNull();
     clickTab('#home-recent-tab');
-    api.albums.mockRejectedValueOnce(new Error('Failed'));
     clickTab('#home-albums-tab');
     await act(async () => { await Promise.resolve(); });
-    // A previously loaded list remains visible if a later refresh fails.
+    expect(api.albums).toHaveBeenCalledTimes(2);
     expect(host.querySelector('.gallery-message')?.textContent).toBe('No albums');
   });
 
@@ -163,7 +163,7 @@ describe('Home album tab', () => {
     await mount(); clickTab('#home-albums-tab');
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.textContent).toBe('アルバム');
-    expect(host.querySelector('.album-card h3')?.textContent).toBe('旅行 2026');
+    expect(host.querySelector('.album-card .album-name')?.textContent).toBe('旅行 2026');
     expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月〜2026年5月');
     expect(host.querySelector('.album-count')?.textContent).toBe('2枚');
   });

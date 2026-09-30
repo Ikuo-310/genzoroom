@@ -40,6 +40,11 @@
     "albumsTab": "Albums"
   },
   "albums": {
+    "open": "Open album {{name}}",
+    "backToList": "Back to albums",
+    "photosLoading": "Loading album photos…",
+    "photosLoadFailed": "Album photos could not be loaded.",
+    "photosEmpty": "No photos in this album",
     "loading": "Loading albums…",
     "loadFailed": "Albums could not be loaded.",
     "empty": "No albums",

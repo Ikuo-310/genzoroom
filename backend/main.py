@@ -20,6 +20,7 @@ from immich import (
     AlbumSummary,
     RecentAsset,
     get_albums,
+    get_album_assets,
     check_immich_status,
     get_asset_detail,
     get_asset_preview,
@@ -162,6 +163,14 @@ async def recent_assets(limit: int = Query(default=100, ge=50, le=500, multiple_
 async def albums() -> list[AlbumSummary]:
     try:
         return await get_albums(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/albums/{album_id}/assets", response_model=list[RecentAsset])
+async def album_assets(album_id: UUID) -> list[RecentAsset]:
+    try:
+        return await get_album_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), album_id)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 

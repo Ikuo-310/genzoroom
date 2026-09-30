@@ -15,6 +15,7 @@ DEFAULT_RECENT_ASSET_LIMIT = 100
 MIN_RECENT_ASSET_LIMIT = 50
 MAX_RECENT_ASSET_LIMIT = 500
 RECENT_ASSET_LIMIT_STEP = 50
+ALBUM_ASSET_PAGE_SIZE = 1000
 FORMAT_ALIASES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",
@@ -398,33 +399,7 @@ async def get_recent_assets(
         raise _request_error(response)
 
     try:
-        body = response.json()
-        items = body["assets"]["items"]
-        if not isinstance(items, list):
-            raise TypeError
-
-        assets: list[RecentAsset] = []
-        for item in items:
-            if not isinstance(item, Mapping):
-                raise TypeError
-            if item.get("type") != "IMAGE":
-                continue
-            asset_id = UUID(str(item["id"]))
-            filename = item["originalFileName"]
-            date = item["fileCreatedAt"]
-            if not isinstance(filename, str) or not isinstance(date, str):
-                raise TypeError
-            image_format, is_raw = classify_image_format(filename)
-            assets.append(
-                RecentAsset(
-                    id=asset_id,
-                    filename=filename,
-                    date=date,
-                    thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
-                    format=image_format,
-                    is_raw=is_raw,
-                )
-            )
+        assets = _search_assets(response.json())
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError(
             "unexpected_response",
@@ -432,6 +407,88 @@ async def get_recent_assets(
         ) from None
 
     return assets[:limit]
+
+
+def _search_assets(body: object) -> list[RecentAsset]:
+    if not isinstance(body, Mapping) or not isinstance(body.get("assets"), Mapping):
+        raise TypeError
+    items = body["assets"].get("items")
+    if not isinstance(items, list):
+        raise TypeError
+    assets: list[RecentAsset] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise TypeError
+        if item.get("type") != "IMAGE":
+            continue
+        asset_id = UUID(str(item["id"]))
+        filename = item["originalFileName"]
+        date = item["fileCreatedAt"]
+        if not isinstance(filename, str) or not isinstance(date, str):
+            raise TypeError
+        image_format, is_raw = classify_image_format(filename)
+        assets.append(RecentAsset(
+            id=asset_id,
+            filename=filename,
+            date=date,
+            thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
+            format=image_format,
+            is_raw=is_raw,
+        ))
+    return assets
+
+
+async def get_album_assets(
+    immich_url: str | None,
+    api_key: str | None,
+    album_id: UUID,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    url, key = _require_configuration(immich_url, api_key)
+    assets: list[RecentAsset] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            while True:
+                request_body: dict[str, object] = {
+                    "filter": {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(album_id)]}},
+                    "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
+                    "size": ALBUM_ASSET_PAGE_SIZE,
+                }
+                if cursor is not None:
+                    request_body["cursor"] = cursor
+                response = await client.post(
+                    _api_url(url, "/search/metadata"),
+                    headers={"x-api-key": key, "Accept": "application/json"},
+                    json=request_body,
+                )
+                if response.status_code != 200:
+                    raise _request_error(response)
+                try:
+                    body = response.json()
+                    page = _search_assets(body)
+                    next_cursor = body["assets"]["nextCursor"]
+                    if next_cursor is not None and (
+                        not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors
+                    ):
+                        raise TypeError
+                    if next_cursor is not None and not body["assets"]["items"]:
+                        raise TypeError
+                except (KeyError, TypeError, ValueError):
+                    raise ImmichRequestError(
+                        "unexpected_response", "Immich returned an unexpected response.",
+                    ) from None
+                assets.extend(page)
+                if next_cursor is None:
+                    return assets
+                # A cursor cycle would otherwise keep the backend reading upstream indefinitely.
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
 
 
 async def get_asset_detail(
