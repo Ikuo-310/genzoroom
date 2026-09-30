@@ -77,8 +77,6 @@ h2 { margin: 0; font-size: 1.35rem; }
 .thumbnail-size-icon:disabled { opacity: 0.38; cursor: not-allowed; }
 .thumbnail-size-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.settings-thumbnail-size-control { margin-top: 0; }
-.settings-thumbnail-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
 .photo-card.selected { border-color: #c7d9ae; box-shadow: 0 0 0 2px #c7d9ae; background: #17221f; }
 .photo-card-button { display: block; width: 100%; color: inherit; background: transparent; border: 0; border-radius: 0; padding: 0; text-align: left; user-select: none; }
 .photo-card.selected .photo-card-button { color: #e6eee9; background: #17221f; }
@@ -438,7 +436,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .settings-button { display: inline-flex; align-items: center; justify-content: center; }
 @media (max-width: 480px) {
   .settings-dialog label { align-items: stretch; flex-direction: column; gap: 8px; }
-  .settings-thumbnail-row { align-items: stretch; flex-direction: column; gap: 8px; }
   .settings-dialog select { max-width: 100%; }
   .settings-webgpu-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 }

@@ -19,31 +19,29 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear(); updateSetting('homeThumbnailColumns', 6); await changeAppLanguage('en');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => root.render(<><HomeThumbnailSizeControl /><HomeThumbnailSizeControl inSettings /></>));
+  await act(async () => root.render(<HomeThumbnailSizeControl />));
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('homeThumbnailColumns', 6); });
 
 describe('Home thumbnail size controls', () => {
-  it('moves one step per icon click, disables both limits, and syncs the Settings control', async () => {
-    const [home, settings] = Array.from(host.querySelectorAll<HTMLElement>('.thumbnail-size-control'));
+  it('moves one step per icon click and disables both limits', async () => {
+    const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('6 columns');
     await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
     expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('7');
-    expect(settings.querySelector('input')!.getAttribute('aria-valuetext')).toBe('7 columns');
     for (let i = 0; i < 4; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
     expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.disabled).toBe(true);
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('8 columns');
-    for (let i = 0; i < 5; i++) await act(async () => settings.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.click());
-    expect(settings.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
+    for (let i = 0; i < 5; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.click());
+    expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
   });
-  it('updates both controls immediately while the slider moves', async () => {
-    const [home, settings] = Array.from(host.querySelectorAll<HTMLElement>('.thumbnail-size-control'));
+  it('updates the saved Home setting immediately while the slider moves', async () => {
+    const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
     await change(home, '0');
     expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('8');
-    expect(settings.querySelector('input')!.value).toBe('0');
-    await change(settings, '5');
-    expect(home.querySelector('input')!.value).toBe('5');
+    expect(home.querySelector('input')!.value).toBe('0');
+    await change(home, '5');
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
   });
 });

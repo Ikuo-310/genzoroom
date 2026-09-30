@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { updateSetting, useAppSettings, type HomeThumbnailColumns } from './appSettings';
 
-export function HomeThumbnailSizeControl({ inSettings = false }: { inSettings?: boolean }) {
+export function HomeThumbnailSizeControl() {
   const { t } = useTranslation();
   const columns = useAppSettings().homeThumbnailColumns;
   const setColumns = (value: number) => updateSetting('homeThumbnailColumns', value as HomeThumbnailColumns);
   const rank = 8 - columns;
-  return <div className={`thumbnail-size-control${inSettings ? ' settings-thumbnail-size-control' : ''}`} role="group" aria-label={t('photos.thumbnailSize')}>
+  return <div className="thumbnail-size-control" role="group" aria-label={t('photos.thumbnailSize')}>
     <button type="button" className="thumbnail-size-icon" aria-label={t('photos.smallerThumbnails')} title={t('photos.smallerThumbnails')}
       disabled={columns === 8} onClick={() => setColumns(columns + 1)}>
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h14M3 8h14M3 12h9M3 16h9" /></svg>
