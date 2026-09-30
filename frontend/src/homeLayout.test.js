@@ -58,6 +58,11 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(host.querySelector('.photo-card')).alignSelf).toBe('start');
   });
 
+  it('adds spacing beside the photo grid scrollbar only in Firefox', () => {
+    expect(stylesheet.textContent).toContain('@-moz-document url-prefix() {\n  .photo-grid { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
+    expect(getComputedStyle(host.querySelector('.photo-grid')).paddingRight).toBe('2px');
+  });
+
   it('allows Home header controls to wrap at narrow widths', () => {
     const toolbar = document.createElement('div'); toolbar.className = 'home-toolbar';
     const tabs = document.createElement('div'); tabs.className = 'home-tabs';
