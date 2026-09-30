@@ -49,6 +49,19 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(host.querySelector('.photo-card')).alignSelf).toBe('start');
   });
 
+  it('allows Home header controls to wrap at narrow widths', () => {
+    const controls = document.createElement('div');
+    controls.className = 'photos-heading-controls';
+    controls.innerHTML = '<fieldset class="photo-filters"></fieldset><label class="recent-count-control"><span>Recent count</span><select><option>100</option></select></label><div class="thumbnail-size-control"></div>';
+    host.querySelector('.photos-heading').append(controls);
+    expect(getComputedStyle(controls).display).toBe('flex');
+    expect(getComputedStyle(controls).flexWrap).toBe('wrap');
+    expect(getComputedStyle(host.querySelector('.recent-count-control')).whiteSpace).toBe('nowrap');
+    const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
+    expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.photos-heading-controls'
+      && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
+  });
+
   it('keeps connection details outside the heading and restores the Anshitsu brand scale', () => {
     const row = document.createElement('div'); row.className = 'home-title-row';
     row.innerHTML = '<h1><button class="home-title-link">GenzoRoom</button></h1><details class="connection-control"><summary>Status</summary><section class="connection-details">Connection information</section></details>';

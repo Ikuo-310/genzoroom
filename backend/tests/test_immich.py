@@ -148,11 +148,12 @@ class ImmichAssetTests(unittest.TestCase):
         ))
         return asyncio.run(get_asset_detail(IMMICH_URL, API_KEY, ASSET_ID, transport=transport))
 
-    def run_recent(self, handler, *, url=IMMICH_URL, api_key=API_KEY):
+    def run_recent(self, handler, *, url=IMMICH_URL, api_key=API_KEY, limit=100):
         return asyncio.run(
             get_recent_assets(
                 url,
                 api_key,
+                limit=limit,
                 transport=httpx.MockTransport(handler),
             )
         )
@@ -202,7 +203,7 @@ class ImmichAssetTests(unittest.TestCase):
         )
         self.assertNotIn(API_KEY, result[0].model_dump_json())
 
-    def test_limits_recent_images_to_one_hundred(self):
+    def test_forwards_limit_to_immich_and_caps_returned_images(self):
         items = [
             {
                 "id": str(UUID(int=index + 1)),
@@ -210,16 +211,43 @@ class ImmichAssetTests(unittest.TestCase):
                 "originalFileName": f"photo-{index + 1}.jpg",
                 "fileCreatedAt": "2026-09-01T12:00:00.000Z",
             }
-            for index in range(101)
+            for index in range(501)
         ]
 
-        result = self.run_recent(
-            lambda request: httpx.Response(200, json={"assets": {"items": items}})
-        )
+        def handler(request):
+            self.assertEqual(json.loads(request.content)["size"], 250)
+            return httpx.Response(200, json={"assets": {"items": items}})
 
-        self.assertEqual(len(result), 100)
+        result = self.run_recent(handler, limit=250)
+
+        self.assertEqual(len(result), 250)
         self.assertEqual(result[0].filename, "photo-1.jpg")
-        self.assertEqual(result[-1].filename, "photo-100.jpg")
+        self.assertEqual(result[-1].filename, "photo-250.jpg")
+
+    def test_rejects_invalid_limits_before_requesting_immich(self):
+        for limit in (49, 51, 0, 501, 1000, True):
+            with self.subTest(limit=limit):
+                with self.assertRaises(ValueError):
+                    self.run_recent(lambda request: self.fail("Immich should not be called"), limit=limit)
+
+    def test_recent_assets_route_validates_and_forwards_allowed_limits(self):
+        async def exercise():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://backend") as client:
+                get_recent = AsyncMock(return_value=[])
+                with patch("main.get_recent_assets", get_recent):
+                    response = await client.get("/assets/recent")
+                    self.assertEqual(response.status_code, 200)
+                    get_recent.assert_awaited_with(None, None, limit=100)
+                    for limit in range(50, 501, 50):
+                        response = await client.get("/assets/recent", params={"limit": limit})
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(get_recent.await_args.kwargs["limit"], limit)
+                    calls_before_invalid = get_recent.await_count
+                    for limit in ("49", "51", "0", "501", "1000000", "invalid"):
+                        response = await client.get("/assets/recent", params={"limit": limit})
+                        self.assertEqual(response.status_code, 422)
+                    self.assertEqual(get_recent.await_count, calls_before_invalid)
+        asyncio.run(exercise())
 
     def test_gets_an_empty_asset_list(self):
         result = self.run_recent(

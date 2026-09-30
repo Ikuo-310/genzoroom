@@ -30,6 +30,11 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Preserve compatibility with supported saved-data versions unless a breaking change is explicitly authorized.
 - Do not change persistent-data versions or database schemas unnecessarily.
 - Maintain existing save-failure, retry, and conflict-handling guarantees.
+- For backend tests on Windows, use the repository virtual environment:
+  `I:\code\genzoroom\.venv\Scripts\python.exe`
+- Run backend pytest with `I:\code\genzoroom\backend` as the working directory.
+  Example:
+  `I:\code\genzoroom\.venv\Scripts\python.exe -m pytest`
 
 ## Testing
 

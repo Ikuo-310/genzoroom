@@ -8,6 +8,7 @@ import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
 import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
+import { updateSetting } from './appSettings';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
@@ -56,6 +57,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
+  updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
   api.recent.mockResolvedValue(assets);
@@ -68,9 +70,35 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
+  it('re-fetches the selected count while preserving the current grid and ignores stale responses', async () => {
+    const stale = deferred<RecentAsset[]>();
+    const latest = deferred<RecentAsset[]>();
+    api.recent.mockReset().mockResolvedValueOnce(assets).mockReturnValueOnce(stale.promise).mockReturnValueOnce(latest.promise);
+    await mount();
+    const count = host.querySelector<HTMLSelectElement>('.recent-count-control select')!;
+    expect(count.value).toBe('100');
+    expect(api.recent.mock.calls[0][0]).toBe(100);
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    const choose = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(count, value);
+      count.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await choose('250');
+    await choose('500');
+    expect(api.recent.mock.calls.map(([limit]) => limit)).toEqual([100, 250, 500]);
+    expect((api.recent.mock.calls[1][1] as AbortSignal).aborted).toBe(true);
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+    await act(async () => latest.resolve([assets[0]]));
+    await act(async () => stale.resolve(assets.slice(0, 3)));
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(host.querySelector('.photo-card .photo-info p')?.textContent).toBe('photo-0.jpg');
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+  });
+
   it('fetches all 100 photos once, retains selection and does not refetch for filters', async () => {
     await mount();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);

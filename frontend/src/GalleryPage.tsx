@@ -11,7 +11,7 @@ import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
-import { useAppSettings } from './appSettings';
+import { RECENT_PHOTO_COUNTS, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { DEFAULT_PHOTO_FILTERS, filterPhotos, togglePhotoFilter, type PhotoFilters } from './photoFilters';
 import {
   addVisiblePhotoRange,
@@ -41,6 +41,7 @@ export function GalleryPage() {
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
+  const hasLoadedRecentAssets = useRef(false);
   const editStatuses = useEditStatuses(assetState === 'ready' ? assets.map(asset => asset.id) : []);
 
   useEffect(() => {
@@ -86,19 +87,23 @@ export function GalleryPage() {
     const controller = new AbortController();
     let active = true;
     const timeout = window.setTimeout(() => controller.abort(), 8000);
-    void fetchRecentAssets(controller.signal).then(data => {
+    void fetchRecentAssets(settings.recentPhotoCount, controller.signal).then(data => {
       if (active) {
+        hasLoadedRecentAssets.current = true;
         setAssets(data);
+        const availableIds = new Set(data.map(asset => asset.id));
+        setSelectedAssetIds(current => current.filter(id => availableIds.has(id)));
+        if (selectionAnchorId.current && !availableIds.has(selectionAnchorId.current)) selectionAnchorId.current = null;
         setAssetState('ready');
       }
     }).catch(() => {
-      if (active) {
+      if (active && !hasLoadedRecentAssets.current) {
         setAssets([]);
         setAssetState('error');
       }
     }).finally(() => window.clearTimeout(timeout));
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
-  }, []);
+  }, [settings.recentPhotoCount]);
 
   const visibleAssets = filterPhotos(assets, photoFilters);
   const selectedAssets = resolveSelectedAssets(assets, selectedAssetIds);
@@ -185,6 +190,12 @@ export function GalleryPage() {
           />
           <div className="photos-heading-controls">
             <PhotoFilterControls filters={photoFilters} onToggle={(filter) => setPhotoFilters((current) => togglePhotoFilter(current, filter))} />
+            <label className="recent-count-control"><span>{t('photos.recentCount')}</span>
+              <select aria-label={t('photos.recentCount')} value={settings.recentPhotoCount}
+                onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
+                {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
+              </select>
+            </label>
             <HomeThumbnailSizeControl />
           </div>
         </div>

@@ -37,6 +37,8 @@
   "photos": {
     "edited": "GenzoRoomで編集済み",
     "recent": "最近の写真",
+    "recentCount": "表示枚数",
+    "recentCountOption": "{{count}}枚",
     "loading": "写真を読み込んでいます…",
     "empty": "最近の写真はありません",
     "loadFailed": "最近の写真を読み込めませんでした。",

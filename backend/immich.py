@@ -10,7 +10,10 @@ import httpx
 from pydantic import BaseModel
 
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
-RECENT_ASSET_LIMIT = 100
+DEFAULT_RECENT_ASSET_LIMIT = 100
+MIN_RECENT_ASSET_LIMIT = 50
+MAX_RECENT_ASSET_LIMIT = 500
+RECENT_ASSET_LIMIT_STEP = 50
 FORMAT_ALIASES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",
@@ -291,8 +294,11 @@ async def get_recent_assets(
     immich_url: str | None,
     api_key: str | None,
     *,
+    limit: int = DEFAULT_RECENT_ASSET_LIMIT,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
+    if type(limit) is not int or not MIN_RECENT_ASSET_LIMIT <= limit <= MAX_RECENT_ASSET_LIMIT or limit % RECENT_ASSET_LIMIT_STEP:
+        raise ValueError("Recent asset limit must be between 50 and 500 in steps of 50.")
     url, key = _require_configuration(immich_url, api_key)
 
     try:
@@ -308,7 +314,7 @@ async def get_recent_assets(
                 json={
                     "filter": {"type": {"eq": "IMAGE"}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
-                    "size": RECENT_ASSET_LIMIT,
+                    "size": limit,
                 },
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
@@ -354,7 +360,7 @@ async def get_recent_assets(
             "Immich returned an unexpected response.",
         ) from None
 
-    return assets[:RECENT_ASSET_LIMIT]
+    return assets[:limit]
 
 
 async def get_asset_detail(

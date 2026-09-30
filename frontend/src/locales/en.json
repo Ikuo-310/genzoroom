@@ -38,6 +38,8 @@
   "photos": {
     "edited": "Edited in GenzoRoom",
     "recent": "Recent photos",
+    "recentCount": "Recent count",
+    "recentCountOption": "{{count}}",
     "loading": "Loading photos…",
     "empty": "No recent photos",
     "loadFailed": "Recent photos could not be loaded.",

@@ -2,7 +2,7 @@ import os
 import json
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 from starlette.background import BackgroundTask
@@ -145,11 +145,12 @@ def _upstream_error(error: ImmichRequestError) -> HTTPException:
 
 
 @app.get("/assets/recent", response_model=list[RecentAsset])
-async def recent_assets() -> list[RecentAsset]:
+async def recent_assets(limit: int = Query(default=100, ge=50, le=500, multiple_of=50)) -> list[RecentAsset]:
     try:
         return await get_recent_assets(
             os.getenv("IMMICH_URL"),
             os.getenv("IMMICH_API_KEY"),
+            limit=limit,
         )
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
