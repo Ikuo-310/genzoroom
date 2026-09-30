@@ -306,7 +306,7 @@
     "connection": "接続情報",
     "auto": "自動",
     "autoLanguage": "自動（ブラウザの優先言語）",
-    "autoLocale": "自動（言語設定に従う）",
+    "autoLocale": "自動（ブラウザの地域設定）",
     "autoWeek": "自動（地域設定に従う）",
     "dateLocale": "日付・時刻のロケール",
     "weekStart": "カレンダーの週初め",

@@ -308,7 +308,7 @@
     "connection": "Connection Information",
     "auto": "Auto",
     "autoLanguage": "Auto (browser preferred languages)",
-    "autoLocale": "Auto (follow language setting)",
+    "autoLocale": "Auto (browser regional settings)",
     "autoWeek": "Auto (regional settings)",
     "dateLocale": "Date and time locale",
     "weekStart": "First day of the week",
