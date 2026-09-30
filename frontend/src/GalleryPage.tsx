@@ -216,7 +216,6 @@ export function GalleryPage() {
                   />
                 ))}</div>}
       </section>
-      <p className="note">{t('app.stageNotice')}</p>
     </main>
   );
 }

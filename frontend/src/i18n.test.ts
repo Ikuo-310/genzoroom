@@ -49,7 +49,6 @@ describe('language selection', () => {
 describe('localized resources', () => {
   it('uses the revised English history, reset, and workspace wording', () => {
     const expected: Record<string, string> = {
-      'app.stageNotice': 'Browse up to 100 recent Immich photos. White Balance, Basic, Color Grading, and Color adjustments are available for JPEG photos in Anshitsu.',
       'workspace.allReset': 'Reset all',
       'workspace.historyTrim': 'Delete this and earlier history',
       'workspace.historyResetConfirm': 'All adjustments and edit history will be deleted.',

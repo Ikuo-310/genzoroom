@@ -10,7 +10,7 @@ beforeEach(() => {
   stylesheet.textContent = readFileSync('src/style.css', 'utf8');
   document.head.append(stylesheet);
   host = document.createElement('div');
-  host.innerHTML = '<main class="home-page"><div class="home-intro"><header class="app-header"></header><section></section></div><section class="photos"><div class="photos-heading"></div><div class="photo-grid"><article class="photo-card selected"><label class="photo-selection-control"><input type="checkbox"></label><button class="photo-card-button"><div class="thumbnail"><img></div><div class="photo-info"><p>Photo.jpg</p><time>2026/09/27</time></div></button></article></div></section><p class="note"></p></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
+  host.innerHTML = '<main class="home-page"><div class="home-intro"><header class="app-header"></header><section></section></div><section class="photos"><div class="photos-heading"></div><div class="photo-grid"><article class="photo-card selected"><label class="photo-selection-control"><input type="checkbox"></label><button class="photo-card-button"><div class="thumbnail"><img></div><div class="photo-info"><p>Photo.jpg</p><time>2026/09/27</time></div></button></article></div></section></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
   document.body.append(host);
 });
 afterEach(() => { stylesheet.remove(); host.remove(); });
@@ -60,6 +60,12 @@ describe('Home and thumbnail layout', () => {
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.photos-heading-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
+  });
+
+  it('has no bottom note or extra grid row', () => {
+    expect(host.querySelector('.note')).toBeNull();
+    expect(getComputedStyle(host.querySelector('.home-page')).gridTemplateRows).toBe('auto minmax(120px, 1fr)');
+    expect(stylesheet.textContent).not.toContain('.note');
   });
 
   it('keeps connection details outside the heading and restores the Anshitsu brand scale', () => {

@@ -24,6 +24,13 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('homeThumbnailColumns', 6); });
 
 describe('Home thumbnail size controls', () => {
+  it('uses visibly different thumbnail sizes for the smaller and larger controls', () => {
+    const icons = [...host.querySelectorAll('.thumbnail-size-icon svg path')].map(path => path.getAttribute('d'));
+    expect(icons[0]).toContain('M3 3h5v5H3z');
+    expect(icons[1]).toBe('M3 3h14v14H3z');
+    expect(icons[0]).not.toBe(icons[1]);
+  });
+
   it('moves one step per icon click and disables both limits', async () => {
     const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('6 columns');

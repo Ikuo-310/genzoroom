@@ -11,8 +11,7 @@
   "app": {
     "eyebrow": "写真現像室",
     "statusLabel": "ステータス",
-    "earlyDevelopment": "開発初期段階",
-    "stageNotice": "Immichの最近の写真を最大100件表示します。暗室でJPEGの色温度補正、基本補正、カラーグレーディング、色補正を調整できます。"
+    "earlyDevelopment": "開発初期段階"
   },
   "connection": {
     "sectionLabel": "サービス接続状況",
