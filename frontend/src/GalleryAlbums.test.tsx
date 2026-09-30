@@ -155,26 +155,4 @@ describe('Home album tab', () => {
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月 – 2026年5月');
   });
-
-  it.each([
-    ['ja', 'auto', 'ja-JP'],
-    ['en', 'auto', 'en-US'],
-    ['en', 'ja-JP', 'ja-JP'],
-    ['ja', 'en-GB', 'en-GB'],
-  ] as const)('uses %s UI and %s date setting consistently in Recent and Albums', async (language, preference, locale) => {
-    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['ja-JP']);
-    await i18n.changeLanguage(language);
-    updateSetting('dateLocale', preference);
-    await mount();
-
-    const recentDate = host.querySelector('.photo-info time')?.textContent;
-    expect(recentDate).toBe(new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(photo.date)));
-
-    clickTab('#home-albums-tab');
-    await act(async () => { await Promise.resolve(); });
-    const month = (value: string) => new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', timeZone: 'UTC' })
-      .format(new Date(`${value}-01T00:00:00.000Z`));
-    const range = `${month('2026-04')}${language === 'ja' ? '〜' : ' – '}${month('2026-05')}`;
-    expect(host.querySelector('.album-period')?.textContent).toBe(range);
-  });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveDateLocaleForLanguage, resolveWeekStart, updateSetting } from './appSettings';
+import { DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
 import i18n, { changeAppLanguage, currentLanguagePreference, detectLanguage, formatPhotoDate, LANGUAGE_STORAGE_KEY, readLanguagePreference } from './i18n';
 
 afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailColumns', 6); updateSetting('recentPhotoCount', 100); });
@@ -50,14 +50,6 @@ describe('browser preferences', () => {
     await changeAppLanguage('ja', memory()); expect(formatPhotoDate(value)).toBe(date);
     expect(resolveDateLocale('en-GB', ['ja-JP'])).toBe('en-GB');
     expect(resolveDateLocale('auto', ['bad_tag', 'de-DE'])).toBe('de-DE');
-  });
-  it.each([
-    ['ja', 'auto', 'ja-JP'],
-    ['en', 'auto', 'en-US'],
-    ['en', 'ja-JP', 'ja-JP'],
-    ['ja', 'en-GB', 'en-GB'],
-  ] as const)('resolves date locale for UI language %s and setting %s', (language, preference, expected) => {
-    expect(resolveDateLocaleForLanguage(preference, language)).toBe(expected);
   });
   it('formats timezone-less EXIF as a wall clock without changing data or inferring a zone', () => {
     const value = '2026-09-08T20:43:43';

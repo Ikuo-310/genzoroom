@@ -61,10 +61,6 @@ export function resolveDateLocale(preference: DateLocale = settings.dateLocale, 
   }
   return new Intl.DateTimeFormat().resolvedOptions().locale;
 }
-export function resolveDateLocaleForLanguage(preference: DateLocale, language: 'ja' | 'en'): Exclude<DateLocale, 'auto'> {
-  if (preference !== 'auto') return preference;
-  return language === 'ja' ? 'ja-JP' : 'en-US';
-}
 export function resolveWeekStart(preference: WeekStart = settings.weekStart, locale = resolveDateLocale()): number {
   if (preference !== 'auto') return preference === 'sunday' ? 0 : 1;
   try {
