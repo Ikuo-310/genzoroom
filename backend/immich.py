@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator, Mapping
+from calendar import monthrange
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from math import isfinite
 from pathlib import PurePath
 from typing import Literal
@@ -119,6 +120,17 @@ class AlbumSummary(BaseModel):
     assetCount: int
     startDate: str | None
     endDate: str | None
+
+
+class CalendarDay(BaseModel):
+    date: str
+    hasAssets: bool
+
+
+class CalendarHeatmap(BaseModel):
+    year: int
+    month: int
+    days: list[CalendarDay]
 
 
 class AssetExif(BaseModel):
@@ -444,6 +456,37 @@ async def get_album_assets(
     album_id: UUID,
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
+    return await _search_all_assets(
+        immich_url, api_key,
+        {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(album_id)]}},
+        "fileCreatedAt", transport=transport,
+    )
+
+
+async def get_calendar_day_assets(
+    immich_url: str | None,
+    api_key: str | None,
+    selected_day: date,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    if selected_day == date.max:
+        raise ValueError("The selected date is outside the supported range.")
+    next_day = selected_day + timedelta(days=1)
+    # Immich v3.2.4 applies takenAt to fileCreatedAt; use its half-open UTC range as requested.
+    bounds = {"gte": f"{selected_day.isoformat()}T00:00:00.000Z", "lt": f"{next_day.isoformat()}T00:00:00.000Z"}
+    return await _search_all_assets(
+        immich_url, api_key, {"type": {"eq": "IMAGE"}, "takenAt": bounds},
+        "localDateTime", transport=transport,
+    )
+
+
+async def _search_all_assets(
+    immich_url: str | None,
+    api_key: str | None,
+    search_filter: dict[str, object],
+    order_field: str,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
     url, key = _require_configuration(immich_url, api_key)
     assets: list[RecentAsset] = []
     cursor: str | None = None
@@ -454,8 +497,8 @@ async def get_album_assets(
         ) as client:
             while True:
                 request_body: dict[str, object] = {
-                    "filter": {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(album_id)]}},
-                    "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
+                    "filter": search_filter,
+                    "orderBy": {"field": order_field, "direction": "desc"},
                     "size": ALBUM_ASSET_PAGE_SIZE,
                 }
                 if cursor is not None:
@@ -489,6 +532,60 @@ async def get_album_assets(
                 cursor = next_cursor
     except (httpx.InvalidURL, httpx.RequestError) as error:
         raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+
+
+async def get_calendar_heatmap(
+    immich_url: str | None,
+    api_key: str | None,
+    year: int,
+    month: int,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> CalendarHeatmap:
+    first = date(year, month, 1)
+    last_day = monthrange(year, month)[1]
+    last = date(year, month, last_day)
+    url, key = _require_configuration(immich_url, api_key)
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.get(
+                _api_url(url, "/users/me/calendar-heatmap"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+                params={"from": first.isoformat(), "to": last.isoformat(), "type": "Taken"},
+            )
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+    if response.status_code != 200:
+        raise _request_error(response)
+    try:
+        body = response.json()
+        if not isinstance(body, Mapping) or not isinstance(body.get("series"), list):
+            raise TypeError
+        active_days: set[str] = set()
+        seen_days: set[str] = set()
+        for item in body["series"]:
+            if not isinstance(item, Mapping) or not isinstance(item.get("date"), str):
+                raise TypeError
+            day_value = item["date"]
+            if date.fromisoformat(day_value).isoformat() != day_value or day_value in seen_days:
+                raise ValueError
+            count = item.get("count")
+            if type(count) is not int or count < 0:
+                raise TypeError
+            if not first <= date.fromisoformat(day_value) <= last:
+                raise ValueError
+            seen_days.add(day_value)
+            if count > 0:
+                active_days.add(day_value)
+    except (KeyError, TypeError, ValueError):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    return CalendarHeatmap(
+        year=year, month=month,
+        days=[CalendarDay(date=(first + timedelta(days=offset)).isoformat(),
+                          hasAssets=(first + timedelta(days=offset)).isoformat() in active_days)
+              for offset in range(last_day)],
+    )
 
 
 async def get_asset_detail(

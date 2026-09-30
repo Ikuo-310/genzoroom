@@ -37,7 +37,25 @@
   "home": {
     "sections": "Home sections",
     "recentTab": "Recent",
-    "albumsTab": "Albums"
+    "albumsTab": "Albums",
+    "calendarTab": "Calendar"
+  },
+  "calendar": {
+    "year": "Year",
+    "month": "Month",
+    "yearOption": "{{year}}",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "gridLabel": "Calendar for {{year}}-{{month}}",
+    "dayLabel": "{{date}}",
+    "backToMonth": "Back to calendar",
+    "loading": "Loading calendar…",
+    "loadFailed": "Calendar could not be loaded.",
+    "photosLoading": "Loading photos for this day…",
+    "photosLoadFailed": "Photos for this day could not be loaded.",
+    "photosEmpty": "No photos on this day",
+    "weekdays": { "sunday": "Sun", "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed", "thursday": "Thu", "friday": "Fri", "saturday": "Sat" },
+    "months": { "january": "January", "february": "February", "march": "March", "april": "April", "may": "May", "june": "June", "july": "July", "august": "August", "september": "September", "october": "October", "november": "November", "december": "December" }
   },
   "albums": {
     "open": "Open album {{name}}",

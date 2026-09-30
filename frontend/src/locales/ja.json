@@ -36,7 +36,25 @@
   "home": {
     "sections": "Homeの表示",
     "recentTab": "最近の写真",
-    "albumsTab": "アルバム"
+    "albumsTab": "アルバム",
+    "calendarTab": "カレンダー"
+  },
+  "calendar": {
+    "year": "年",
+    "month": "月",
+    "yearOption": "{{year}}年",
+    "previousMonth": "前の月",
+    "nextMonth": "次の月",
+    "gridLabel": "{{year}}年{{month}}月のカレンダー",
+    "dayLabel": "{{date}}",
+    "backToMonth": "カレンダーへ戻る",
+    "loading": "カレンダーを読み込んでいます…",
+    "loadFailed": "カレンダーを読み込めませんでした。",
+    "photosLoading": "この日の写真を読み込んでいます…",
+    "photosLoadFailed": "この日の写真を読み込めませんでした。",
+    "photosEmpty": "この日に写真はありません",
+    "weekdays": { "sunday": "日", "monday": "月", "tuesday": "火", "wednesday": "水", "thursday": "木", "friday": "金", "saturday": "土" },
+    "months": { "january": "1月", "february": "2月", "march": "3月", "april": "4月", "may": "5月", "june": "6月", "july": "7月", "august": "8月", "september": "9月", "october": "10月", "november": "11月", "december": "12月" }
   },
   "albums": {
     "open": "アルバム「{{name}}」を開く",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAlbumAssets, fetchAlbums, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchRecentAssets } from './api';
 
 describe('recent assets API', () => {
   it('passes the selected limit to the backend', async () => {
@@ -42,6 +42,37 @@ describe('album assets API', () => {
       expect(fetch).toHaveBeenCalledWith('/api/albums/album%2Fid/assets', { signal: controller.signal, cache: 'no-store' });
       fetch.mockImplementation(async () => new Response(JSON.stringify([{ ...asset, is_raw: 'true' }])));
       await expect(fetchAlbumAssets('album/id', controller.signal)).rejects.toThrow('Unexpected album assets response');
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe('calendar API', () => {
+  it('passes year and month and validates the heatmap', async () => {
+    const heatmap = { year: 2026, month: 9, days: [{ date: '2026-09-30', hasAssets: true }] };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(heatmap)));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchCalendarHeatmap(2026, 9, controller.signal)).toEqual(heatmap);
+      expect(fetch).toHaveBeenCalledWith('/api/calendar/heatmap?year=2026&month=9',
+        { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response(JSON.stringify({ ...heatmap, month: 8 })));
+      await expect(fetchCalendarHeatmap(2026, 9, controller.signal)).rejects.toThrow('Unexpected calendar heatmap response');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('requests a selected day and validates PhotoCard assets', async () => {
+    const photo = { id: 'photo-1', filename: 'photo.jpg', date: '2026-09-30',
+      thumbnail_url: '/api/assets/photo-1/thumbnail', format: 'JPEG', is_raw: false };
+    const fetch = vi.fn(async () => new Response(JSON.stringify([photo])));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchCalendarDayAssets('2026-09-30', controller.signal)).toEqual([photo]);
+      expect(fetch).toHaveBeenCalledWith('/api/calendar/2026-09-30/assets',
+        { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response(JSON.stringify([{ ...photo, is_raw: 'false' }])));
+      await expect(fetchCalendarDayAssets('2026-09-30', controller.signal)).rejects.toThrow('Unexpected calendar photos response');
     } finally { vi.unstubAllGlobals(); }
   });
 });

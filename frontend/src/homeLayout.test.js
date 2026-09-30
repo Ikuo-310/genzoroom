@@ -24,6 +24,14 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(panel).minWidth).toBe('0');
     expect(getComputedStyle(panel).minHeight).toBe('0');
   });
+  it('keeps the calendar in seven shrinkable columns at narrow widths', () => {
+    const month = document.createElement('div'); month.className = 'calendar-month';
+    const days = document.createElement('div'); days.className = 'calendar-days'; month.append(days);
+    host.querySelector('.photos').append(month);
+    expect(getComputedStyle(month).minWidth).toBe('0');
+    expect(getComputedStyle(days).minWidth).toBe('0');
+    expect(getComputedStyle(days).gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
+  });
   it('anchors the display-only edit badge to both thumbnail frames', () => {
     for (const frame of host.querySelectorAll('.thumbnail, .filmstrip-item')) {
       const badge = document.createElement('span'); badge.className = 'edited-badge'; frame.append(badge);

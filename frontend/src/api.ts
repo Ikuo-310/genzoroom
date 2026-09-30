@@ -1,5 +1,6 @@
 import type { AssetDetail, RecentAsset } from './assets';
 import type { AlbumSummary } from './albums';
+import type { CalendarHeatmap } from './HomeCalendar';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -45,6 +46,27 @@ export async function fetchAlbumAssets(albumId: string, signal: AbortSignal): Pr
   const data: unknown = await response.json();
   if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected album assets response');
+  }
+  return data;
+}
+
+export async function fetchCalendarHeatmap(year: number, month: number, signal: AbortSignal): Promise<CalendarHeatmap> {
+  const response = await fetch(`/api/calendar/heatmap?year=${year}&month=${month}`, { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Calendar heatmap request failed');
+  const data: unknown = await response.json();
+  if (!isRecord(data) || data.year !== year || data.month !== month || !Array.isArray(data.days) ||
+    data.days.some(day => !isRecord(day) || typeof day.date !== 'string' || typeof day.hasAssets !== 'boolean')) {
+    throw new Error('Unexpected calendar heatmap response');
+  }
+  return data as CalendarHeatmap;
+}
+
+export async function fetchCalendarDayAssets(day: string, signal: AbortSignal): Promise<RecentAsset[]> {
+  const response = await fetch(`/api/calendar/${encodeURIComponent(day)}/assets`, { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Calendar photos request failed');
+  const data: unknown = await response.json();
+  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+    throw new Error('Unexpected calendar photos response');
   }
   return data;
 }

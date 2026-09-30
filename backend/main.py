@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import date
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -18,9 +19,12 @@ from immich import (
     ImmichRequestError,
     ImmichStatus,
     AlbumSummary,
+    CalendarHeatmap,
     RecentAsset,
     get_albums,
     get_album_assets,
+    get_calendar_day_assets,
+    get_calendar_heatmap,
     check_immich_status,
     get_asset_detail,
     get_asset_preview,
@@ -171,6 +175,26 @@ async def albums() -> list[AlbumSummary]:
 async def album_assets(album_id: UUID) -> list[RecentAsset]:
     try:
         return await get_album_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), album_id)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/calendar/heatmap", response_model=CalendarHeatmap)
+async def calendar_heatmap(
+    year: int = Query(ge=1, le=9999), month: int = Query(ge=1, le=12),
+) -> CalendarHeatmap:
+    try:
+        return await get_calendar_heatmap(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), year, month)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/calendar/{selected_day}/assets", response_model=list[RecentAsset])
+async def calendar_day_assets(selected_day: date) -> list[RecentAsset]:
+    if selected_day == date.max:
+        raise HTTPException(status_code=422, detail="Date is outside the supported range")
+    try:
+        return await get_calendar_day_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), selected_day)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 

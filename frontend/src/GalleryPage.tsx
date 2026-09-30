@@ -2,7 +2,7 @@ import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { fetchAlbumAssets, fetchAlbums, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
@@ -13,7 +13,8 @@ import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
-import { RECENT_PHOTO_COUNTS, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
+import { CALENDAR_FIRST_YEAR, CALENDAR_LAST_YEAR, HomeCalendar, type CalendarDay } from './HomeCalendar';
+import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode } from './photoFilters';
 import {
   addVisiblePhotoRange,
@@ -28,7 +29,7 @@ import {
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
-type HomeTab = 'recent' | 'albums';
+type HomeTab = 'recent' | 'albums' | 'calendar';
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
@@ -45,21 +46,35 @@ export function GalleryPage() {
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(null);
   const [albumAssets, setAlbumAssets] = useState<RecentAsset[]>([]);
   const [albumAssetState, setAlbumAssetState] = useState<'idle' | AssetState>('idle');
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [calendarState, setCalendarState] = useState<'idle' | AssetState>('idle');
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [calendarAssets, setCalendarAssets] = useState<RecentAsset[]>([]);
+  const [calendarAssetState, setCalendarAssetState] = useState<'idle' | AssetState>('idle');
   const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [albumSelectedAssetIds, setAlbumSelectedAssetIds] = useState<string[]>([]);
+  const [calendarSelectedAssetIds, setCalendarSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
   const albumSelectionAnchorId = useRef<string | null>(null);
+  const calendarSelectionAnchorId = useRef<string | null>(null);
   const albumAssetRequestId = useRef(0);
+  const calendarHeatmapRequestId = useRef(0);
+  const calendarAssetRequestId = useRef(0);
   const hasLoadedRecentAssets = useRef(false);
   const hasLoadedAlbums = useRef(false);
   const recentTab = useRef<HTMLButtonElement>(null);
   const albumsTab = useRef<HTMLButtonElement>(null);
+  const calendarTab = useRef<HTMLButtonElement>(null);
   const showingAlbumPhotos = activeTab === 'albums' && selectedAlbum !== null;
+  const showingCalendarPhotos = activeTab === 'calendar' && selectedCalendarDate !== null;
   const editStatusAssets = activeTab === 'recent' && assetState === 'ready' ? assets
-    : showingAlbumPhotos && albumAssetState === 'ready' ? albumAssets : [];
+    : showingAlbumPhotos && albumAssetState === 'ready' ? albumAssets
+      : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterMode);
 
@@ -160,12 +175,47 @@ export function GalleryPage() {
     return () => { active = false; controller.abort(); };
   }, [activeTab, selectedAlbum?.id]);
 
+  useEffect(() => {
+    if (activeTab !== 'calendar' || selectedCalendarDate !== null) return;
+    const controller = new AbortController();
+    let active = true;
+    const requestId = ++calendarHeatmapRequestId.current;
+    setCalendarState('loading');
+    void fetchCalendarHeatmap(calendarYear, calendarMonth, controller.signal).then(data => {
+      if (!active || requestId !== calendarHeatmapRequestId.current) return;
+      setCalendarDays(data.days);
+      setCalendarState('ready');
+    }).catch(() => {
+      if (active && requestId === calendarHeatmapRequestId.current) setCalendarState('error');
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeTab, calendarYear, calendarMonth, selectedCalendarDate]);
+
+  useEffect(() => {
+    if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
+    const controller = new AbortController();
+    let active = true;
+    const requestId = calendarAssetRequestId.current;
+    void fetchCalendarDayAssets(selectedCalendarDate, controller.signal).then(data => {
+      if (!active || requestId !== calendarAssetRequestId.current) return;
+      setCalendarAssets(data);
+      const availableIds = new Set(data.map(asset => asset.id));
+      setCalendarSelectedAssetIds(current => current.filter(id => availableIds.has(id)));
+      if (calendarSelectionAnchorId.current && !availableIds.has(calendarSelectionAnchorId.current)) calendarSelectionAnchorId.current = null;
+      setCalendarAssetState('ready');
+    }).catch(() => {
+      if (active && requestId === calendarAssetRequestId.current) setCalendarAssetState('error');
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeTab, selectedCalendarDate]);
+
   // Each grid owns its selection so shared asset IDs cannot carry a selection across views.
-  const currentAssets = showingAlbumPhotos ? albumAssets : assets;
-  const activeSelectedAssetIds = showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
+  const currentAssets = showingCalendarPhotos ? calendarAssets : showingAlbumPhotos ? albumAssets : assets;
+  const activeSelectedAssetIds = showingCalendarPhotos ? calendarSelectedAssetIds : showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
   const visibleAssets = filterPhotos(currentAssets, photoFilters);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
-  const selectionMode = (activeTab === 'recent' || showingAlbumPhotos && albumAssetState === 'ready') && activeSelectedAssetIds.length > 0;
+  const selectionMode = (activeTab === 'recent' || showingAlbumPhotos && albumAssetState === 'ready' ||
+    showingCalendarPhotos && calendarAssetState === 'ready') && activeSelectedAssetIds.length > 0;
   const previousSelectionMode = useRef(selectionMode);
 
   useLayoutEffect(() => {
@@ -201,15 +251,20 @@ export function GalleryPage() {
   function togglePhotoSelection(assetId: string, extendRange = false) {
     const rangedSelection = extendRange
       ? addVisiblePhotoRange(activeSelectedAssetIds, visibleAssets.map((asset) => asset.id),
-        showingAlbumPhotos ? albumSelectionAnchorId.current : selectionAnchorId.current, assetId)
+        showingCalendarPhotos ? calendarSelectionAnchorId.current
+          : showingAlbumPhotos ? albumSelectionAnchorId.current : selectionAnchorId.current, assetId)
       : null;
     if (rangedSelection) {
-      if (showingAlbumPhotos) setAlbumSelectedAssetIds(rangedSelection);
+      if (showingCalendarPhotos) setCalendarSelectedAssetIds(rangedSelection);
+      else if (showingAlbumPhotos) setAlbumSelectedAssetIds(rangedSelection);
       else setSelectedAssetIds(rangedSelection);
       return;
     }
     const nextSelection = toggleSelectedAssetId(activeSelectedAssetIds, assetId);
-    if (showingAlbumPhotos) {
+    if (showingCalendarPhotos) {
+      calendarSelectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
+      setCalendarSelectedAssetIds(nextSelection);
+    } else if (showingAlbumPhotos) {
       albumSelectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
       setAlbumSelectedAssetIds(nextSelection);
     } else {
@@ -219,7 +274,10 @@ export function GalleryPage() {
   }
 
   function clearPhotoSelection() {
-    if (showingAlbumPhotos) {
+    if (showingCalendarPhotos) {
+      calendarSelectionAnchorId.current = null;
+      setCalendarSelectedAssetIds([]);
+    } else if (showingAlbumPhotos) {
       albumSelectionAnchorId.current = null;
       setAlbumSelectedAssetIds([]);
     } else {
@@ -247,13 +305,45 @@ export function GalleryPage() {
     setSelectedAlbum(null);
   }
 
+  function changeCalendarYear(year: number) {
+    if (year < CALENDAR_FIRST_YEAR || year > CALENDAR_LAST_YEAR) return;
+    calendarHeatmapRequestId.current += 1;
+    setCalendarYear(year);
+  }
+
+  function changeCalendarMonth(month: number) {
+    if (month < 1 || month > 12) return;
+    calendarHeatmapRequestId.current += 1;
+    setCalendarMonth(month);
+  }
+
+  function openCalendarDay(day: string) {
+    calendarAssetRequestId.current += 1;
+    calendarSelectionAnchorId.current = null;
+    setCalendarSelectedAssetIds([]);
+    setCalendarAssets([]);
+    setCalendarAssetState('loading');
+    setSelectedCalendarDate(day);
+  }
+
+  function closeCalendarDay() {
+    calendarAssetRequestId.current += 1;
+    calendarSelectionAnchorId.current = null;
+    setCalendarSelectedAssetIds([]);
+    setCalendarAssets([]);
+    setCalendarAssetState('idle');
+    setSelectedCalendarDate(null);
+  }
+
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'albums'
-      : activeTab === 'recent' ? 'albums' : 'recent';
+    const tabs: HomeTab[] = ['recent', 'albums', 'calendar'];
+    const index = tabs.indexOf(activeTab);
+    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'calendar'
+      : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     setActiveTab(next);
-    (next === 'recent' ? recentTab : albumsTab).current?.focus();
+    (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : calendarTab).current?.focus();
   }
 
   function renderPhotoGrid() {
@@ -301,9 +391,12 @@ export function GalleryPage() {
             <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
               aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
               onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+            <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
+              aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
+              onClick={() => setActiveTab('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
           </div>
           <div className="home-toolbar-controls">
-            {(activeTab === 'recent' || showingAlbumPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
+            {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
               setPhotoFilterMode(mode);
               writePhotoFilterMode(mode);
             }} />}
@@ -315,10 +408,10 @@ export function GalleryPage() {
                 </select>
               </label>
             </>}
-            <div className="home-control thumbnail-size-setting">
+            {(activeTab !== 'calendar' || showingCalendarPhotos) && <div className="home-control thumbnail-size-setting">
               <span className="home-control-label">{t('photos.thumbnailSize')}</span>
               <HomeThumbnailSizeControl />
-            </div>
+            </div>}
           </div>
         </div>
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
@@ -333,7 +426,7 @@ export function GalleryPage() {
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                 : renderPhotoGrid()}
-        </div> : <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
+        </div> : activeTab === 'albums' ? <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
           {selectedAlbum ? <>
             <div className="album-detail-heading">
               <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
@@ -352,6 +445,29 @@ export function GalleryPage() {
             : albumState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.loadFailed')}</p>
               : albums.length === 0 ? <p className="gallery-message">{t('albums.empty')}</p>
                 : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} onOpen={() => openAlbum(album)} />)}</div>}
+        </div> : <div id="home-calendar-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-calendar-tab">
+          {selectedCalendarDate ? <>
+            <div className="album-detail-heading">
+              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t('calendar.backToMonth')}</button>
+              <h2>{new Intl.DateTimeFormat(resolveDateLocale(settings.dateLocale), { dateStyle: 'long', timeZone: 'UTC' })
+                .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
+            </div>
+            {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
+              onClear={clearPhotoSelection} onOpen={openSelectedAssets} />}
+            {calendarAssetState === 'idle' || calendarAssetState === 'loading'
+              ? <p className="gallery-message" role="status">{t('calendar.photosLoading')}</p>
+              : calendarAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('calendar.photosLoadFailed')}</p>
+                : calendarAssets.length === 0 ? <p className="gallery-message">{t('calendar.photosEmpty')}</p>
+                  : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
+                    : renderPhotoGrid()}
+          </> : <>
+            <HomeCalendar year={calendarYear} month={calendarMonth} days={calendarDays}
+              weekStart={resolveWeekStart(settings.weekStart, resolveDateLocale(settings.dateLocale))}
+              loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
+              onMonthChange={changeCalendarMonth} onDayOpen={openCalendarDay} />
+            {calendarState === 'loading' && <p className="gallery-message" role="status">{t('calendar.loading')}</p>}
+            {calendarState === 'error' && <p className="gallery-message error-text" role="alert">{t('calendar.loadFailed')}</p>}
+          </>}
         </div>}
       </section>
     </main>
