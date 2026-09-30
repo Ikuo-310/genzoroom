@@ -34,7 +34,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   await i18n.changeLanguage('en');
   sessionStorage.clear(); writePhotoFilterMode('both');
-  updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100);
+  updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
@@ -43,7 +43,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
-  updateSetting('dateLocale', 'auto'); vi.unstubAllGlobals();
+  updateSetting('dateLocale', 'auto'); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
 });
 
 describe('Home album tab', () => {
@@ -53,7 +53,15 @@ describe('Home album tab', () => {
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).not.toHaveBeenCalled();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .recent-count-control')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
+    expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual([
+      'home-control photo-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
+    ]);
+    expect(host.querySelector('#recent-photos-heading')).toBeNull();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    expect(host.querySelector('.selection-bar')).not.toBeNull();
     const filter = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(filter, 'nonRaw');
@@ -69,14 +77,34 @@ describe('Home album tab', () => {
     expect(host.querySelector('.album-count')?.textContent).toBe('2 items');
     expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
-    expect(host.querySelector('.thumbnail-size-setting')).toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect(host.querySelector('.selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .recent-count-control')).toBeNull();
+    expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual(['home-control thumbnail-size-setting']);
     clickTab('#home-recent-tab');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
     expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(host.querySelector('.photo-filter-control')).not.toBeNull();
+    expect(host.querySelector('.selection-bar')).not.toBeNull();
+  });
+
+  it('shares thumbnail size across Recent and Album grids', async () => {
+    await mount(); clickTab('#home-albums-tab');
+    await act(async () => { await Promise.resolve(); });
+    const albumGrid = host.querySelector<HTMLElement>('.album-grid')!;
+    const slider = host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '4');
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('4 columns');
+    expect(albumGrid.style.getPropertyValue('--album-column-width')).toBe('calc(25% - 12px)');
+    clickTab('#home-recent-tab');
+    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('4 columns');
+    expect(host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-column-width')).toBe('calc(25% - 12px)');
   });
 
   it('shows a cover placeholder, no period, and zero items for an empty album', async () => {

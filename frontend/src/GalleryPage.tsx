@@ -216,40 +216,41 @@ export function GalleryPage() {
         </header>
       </div>
       <section className="photos" aria-label={t('home.sections')}>
-        <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
-          <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
-            aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
-            onClick={() => setActiveTab('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
-          <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
-            aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
-            onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
-        </div>
-        {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
-        <div className="photos-heading">
-          <h2 id="recent-photos-heading">{t('photos.recent')}</h2>
-          <PhotoSelectionBar
-            active={selectionMode}
-            count={selectedAssetIds.length}
-            onClear={clearPhotoSelection}
-            onOpen={openSelectedAssets}
-          />
-          <div className="photos-heading-controls">
-            <PhotoFilterControls filters={photoFilters} onChange={mode => {
-              setPhotoFilterMode(mode);
-              writePhotoFilterMode(mode);
-            }} />
-            <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
-              <select value={settings.recentPhotoCount}
-                onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
-                {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
-              </select>
-            </label>
+        <div className="home-toolbar">
+          <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
+            <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
+              aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
+              onClick={() => setActiveTab('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
+            <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
+              aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
+              onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+          </div>
+          <div className="home-toolbar-controls">
+            {activeTab === 'recent' && <>
+              <PhotoFilterControls filters={photoFilters} onChange={mode => {
+                setPhotoFilterMode(mode);
+                writePhotoFilterMode(mode);
+              }} />
+              <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
+                <select value={settings.recentPhotoCount}
+                  onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
+                  {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
+                </select>
+              </label>
+            </>}
             <div className="home-control thumbnail-size-setting">
               <span className="home-control-label">{t('photos.thumbnailSize')}</span>
               <HomeThumbnailSizeControl />
             </div>
           </div>
         </div>
+        {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
+        {selectionMode && <PhotoSelectionBar
+          active={selectionMode}
+          count={selectedAssetIds.length}
+          onClear={clearPhotoSelection}
+          onOpen={openSelectedAssets}
+        />}
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
@@ -267,12 +268,11 @@ export function GalleryPage() {
                   />
                 ))}</div>}
         </div> : <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
-          <div className="photos-heading album-heading"><h2>{t('home.albumsTab')}</h2></div>
           {albumState === 'idle' || albumState === 'loading'
             ? <p className="gallery-message" role="status">{t('albums.loading')}</p>
             : albumState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.loadFailed')}</p>
               : albums.length === 0 ? <p className="gallery-message">{t('albums.empty')}</p>
-                : <div className="album-grid">{albums.map(album => <AlbumCard key={album.id} album={album} />)}</div>}
+                : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} />)}</div>}
         </div>}
       </section>
     </main>

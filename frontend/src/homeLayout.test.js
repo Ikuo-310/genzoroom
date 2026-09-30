@@ -39,7 +39,8 @@ describe('Home and thumbnail layout', () => {
     const page = host.querySelector('.home-page');
     const intro = host.querySelector('.home-intro');
     const photos = host.querySelector('.photos');
-    const heading = host.querySelector('.photos-heading');
+    const heading = document.createElement('div'); heading.className = 'home-toolbar';
+    host.querySelector('.photos').prepend(heading);
     const grid = host.querySelector('.photo-grid');
     expect(getComputedStyle(page).height).toBe('100dvh');
     expect(getComputedStyle(page).maxWidth).toBe('none');
@@ -58,18 +59,29 @@ describe('Home and thumbnail layout', () => {
   });
 
   it('allows Home header controls to wrap at narrow widths', () => {
+    const toolbar = document.createElement('div'); toolbar.className = 'home-toolbar';
+    const tabs = document.createElement('div'); tabs.className = 'home-tabs';
     const controls = document.createElement('div');
-    controls.className = 'photos-heading-controls';
+    controls.className = 'home-toolbar-controls';
     controls.innerHTML = '<label class="home-control photo-filter-control"><span class="home-control-label">Type</span><select><option>All</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
-    host.querySelector('.photos-heading').append(controls);
+    toolbar.append(tabs, controls); host.querySelector('.photos').prepend(toolbar);
+    expect(getComputedStyle(toolbar).display).toBe('flex');
+    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
     expect(getComputedStyle(controls).display).toBe('flex');
     expect(getComputedStyle(controls).flexWrap).toBe('wrap');
     expect(controls.querySelectorAll('.home-control')).toHaveLength(3);
     for (const group of controls.querySelectorAll('.home-control')) expect(getComputedStyle(group).flexDirection).toBe('column');
     expect(getComputedStyle(controls.querySelector('.photo-filter-control select')).width).toBe('88px');
-    const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 520px'));
-    expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.photos-heading-controls'
+    const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 760px'));
+    expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.home-toolbar-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
+  });
+
+  it('lets the Album grid use the shared thumbnail column width setting', () => {
+    const grid = document.createElement('div'); grid.className = 'album-grid';
+    grid.style.setProperty('--album-column-width', 'calc(25% - 12px)'); host.append(grid);
+    expect(getComputedStyle(grid).gridTemplateColumns).toContain('var(--album-column-width, 220px)');
+    expect(getComputedStyle(grid).gap).toBe('16px');
   });
 
   it('has no bottom note or extra grid row', () => {
