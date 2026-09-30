@@ -1,13 +1,12 @@
 import { useTranslation } from 'react-i18next';
-import { useAppSettings } from './appSettings';
+import { resolveDateLocaleForLanguage, useAppSettings } from './appSettings';
 import type { AlbumSummary } from './albums';
 import { formatAlbumMonth } from './albums';
 
 export function AlbumCard({ album }: { album: AlbumSummary }) {
   const { t, i18n } = useTranslation();
   const { dateLocale } = useAppSettings();
-  // Auto follows the visible UI language; an explicit date locale remains the user's choice.
-  const locale = dateLocale === 'auto' ? (i18n.resolvedLanguage === 'ja' ? 'ja-JP' : 'en-US') : dateLocale;
+  const locale = resolveDateLocaleForLanguage(dateLocale, i18n.resolvedLanguage === 'ja' ? 'ja' : 'en');
   const start = formatAlbumMonth(album.startDate, locale);
   const end = formatAlbumMonth(album.endDate, locale);
   const period = start && end && start !== end ? t('albums.dateRange', { start, end }) : start || end;
