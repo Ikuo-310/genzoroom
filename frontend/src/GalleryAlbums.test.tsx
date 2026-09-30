@@ -34,7 +34,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   await i18n.changeLanguage('en');
   sessionStorage.clear(); writePhotoFilterMode('both');
-  updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100);
+  updateSetting('dateLocale', 'auto'); updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
@@ -43,7 +43,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
-  updateSetting('dateLocale', 'auto'); vi.unstubAllGlobals();
+  updateSetting('dateLocale', 'auto'); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 describe('Home album tab', () => {
@@ -138,5 +138,21 @@ describe('Home album tab', () => {
     expect(host.querySelector('.album-card h3')?.textContent).toBe('旅行 2026');
     expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月〜2026年5月');
     expect(host.querySelector('.album-count')?.textContent).toBe('2枚');
+  });
+
+  it('formats automatic album dates in the UI language and updates them when the language changes', async () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['ja-JP']);
+    await mount(); clickTab('#home-albums-tab');
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector('.album-period')?.textContent).toBe('Apr 2026 – May 2026');
+    await act(async () => { await i18n.changeLanguage('ja'); });
+    expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月〜2026年5月');
+  });
+
+  it('respects an explicitly selected date locale', async () => {
+    updateSetting('dateLocale', 'ja-JP');
+    await mount(); clickTab('#home-albums-tab');
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月 – 2026年5月');
   });
 });
