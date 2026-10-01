@@ -395,6 +395,17 @@ export function GalleryPage() {
     setSelectedCalendarDate(null);
   }
 
+  function handleTabClick(tab: HomeTab) {
+    if (tab !== activeTab) {
+      setActiveTab(tab);
+      return;
+    }
+    // Reactivating a tab uses the same parent-view transition as its back button.
+    // Switching tabs must leave the inactive tab's detail and selection intact.
+    if (tab === 'albums' && selectedAlbum !== null) closeAlbum();
+    else if (tab === 'calendar' && selectedCalendarDate !== null) closeCalendarDay();
+  }
+
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -447,13 +458,13 @@ export function GalleryPage() {
           <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
             <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
               aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
-              onClick={() => setActiveTab('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
+              onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
             <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
               aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
-              onClick={() => setActiveTab('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+              onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
             <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
               aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
-              onClick={() => setActiveTab('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
+              onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
           </div>
           <div className="home-toolbar-controls">
             {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {

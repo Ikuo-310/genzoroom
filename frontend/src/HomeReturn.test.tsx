@@ -76,6 +76,40 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it.each(['albums', 'calendar'] as const)('restores %s detail after tab switches and darkroom exit, then allows reactivation to go up', async tab => {
+    await mount();
+    if (tab === 'albums') { await click('#home-albums-tab'); await click('.album-card'); }
+    else await openCalendarDay();
+    await click('#home-recent-tab'); await click(`#home-${tab}-tab`);
+    await click('.photo-card-button'); await click('.workspace-actions button');
+    expect(host.querySelector(`#home-${tab}-tab`)?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('.album-detail-heading h2')).not.toBeNull();
+    if (tab === 'albums') expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
+    else expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
+    await click(`#home-${tab}-tab`);
+    expect(host.querySelector('.album-detail-heading')).toBeNull();
+    if (tab === 'albums') expect(host.querySelector('.album-card')).not.toBeNull();
+    else {
+      expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2026');
+      expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('9');
+    }
+  });
+
+  it.each(['albums', 'calendar'] as const)('cancels pending %s detail scroll restoration when its active tab is reactivated', async tab => {
+    let resolve!: (assets: AssetDetail[]) => void;
+    const pending = new Promise<AssetDetail[]>(yes => { resolve = yes; });
+    (tab === 'albums' ? api.albumAssets : api.day).mockReturnValueOnce(pending);
+    await mount({ homeReturn: { ...context, tab, album: tab === 'albums' ? album : null,
+      date: tab === 'calendar' ? '2026-09-01' : null } });
+    const request = (tab === 'albums' ? api.albumAssets : api.day).mock.calls[0];
+    await click(`#home-${tab}-tab`);
+    expect((request[1] as AbortSignal).aborted).toBe(true);
+    await act(async () => resolve([photo]));
+    expect(host.querySelector('.photo-grid')).toBeNull();
+    expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
+    expect(host.querySelector('.album-detail-heading')).toBeNull();
+  });
+
   it('starts normally in Recent and returns to Recent after a successful save', async () => {
     await mount();
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');

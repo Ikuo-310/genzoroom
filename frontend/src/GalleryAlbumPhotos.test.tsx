@@ -75,6 +75,31 @@ afterEach(() => {
 });
 
 describe('album photo view', () => {
+  it('only returns to the album list when reactivating Albums, preserving ordinary tab switches', async () => {
+    await mount();
+    click('.photo-selection-input');
+    click('#home-recent-tab');
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+    expect(api.recent).toHaveBeenCalledTimes(1);
+    click('#home-albums-tab'); await settle();
+    click('#home-albums-tab'); await settle();
+    expect(api.albums).toHaveBeenCalledTimes(1);
+    expect(api.albumAssets).not.toHaveBeenCalled();
+    click('.album-card'); await settle(); click('.photo-selection-input');
+    click('#home-recent-tab'); click('#home-albums-tab'); await settle();
+    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(albumA.albumName);
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+    click('#home-albums-tab'); await settle();
+    expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('.album-detail-heading')).toBeNull();
+    expect(host.querySelectorAll('.album-card')).toHaveLength(2);
+    expect(api.albums).toHaveBeenCalledTimes(1);
+    click('#home-recent-tab');
+    expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('recent.jpg');
+    click('#home-albums-tab'); await settle();
+    expect(host.querySelectorAll('.album-card')).toHaveLength(2);
+  });
+
   it('opens a keyboard-ready card, shows photo controls and badges, and returns without refetching albums', async () => {
     await mount(); click('#home-albums-tab'); await settle();
     expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).toBeNull();
@@ -103,7 +128,7 @@ describe('album photo view', () => {
     await mount(); click('#home-albums-tab'); await settle();
     click('.album-card');
     expect(host.querySelector('.home-tab-panel .gallery-message[role="status"]')?.textContent).toContain('Loading album photos');
-    click('.album-back');
+    click('#home-albums-tab');
     expect((api.albumAssets.mock.calls[0][1] as AbortSignal).aborted).toBe(true);
     click('.album-card'); await settle();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('Album photos could not be loaded.');

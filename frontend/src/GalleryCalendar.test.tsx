@@ -87,6 +87,29 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('only returns to the same month when reactivating Calendar, preserving ordinary tab switches', async () => {
+    await mount(); click('.photo-selection-input');
+    click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-year', '2024'); selectValue('#calendar-month', '8'); await settle();
+    const requestCount = api.heatmap.mock.calls.length;
+    click('#home-calendar-tab'); await settle();
+    expect(api.heatmap).toHaveBeenCalledTimes(requestCount);
+    click('.calendar-day.has-assets'); await settle(); click('.photo-selection-input');
+    click('#home-albums-tab'); await settle(); click('#home-calendar-tab'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2024-08-01', expect.any(AbortSignal));
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+    expect(host.querySelector('.calendar-month')).toBeNull();
+    click('#home-calendar-tab'); await settle();
+    expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2024');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
+    expect(host.querySelector('.selection-bar')).toBeNull();
+    click('#home-recent-tab');
+    expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('recent.jpg');
+    click('#home-calendar-tab'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
+  });
+
   it('shares the selected thumbnail density across sparse Recent, Album, and Calendar photo grids', async () => {
     api.albums.mockResolvedValue([{ id: 'album-1', albumName: 'Album', albumThumbnailAssetId: null,
       assetCount: 2, startDate: null, endDate: null }]);
@@ -276,7 +299,7 @@ describe('Home calendar', () => {
     await mount(); click('#home-calendar-tab'); await settle();
     click('.calendar-day.has-assets');
     expect(host.querySelector('.home-tab-panel [role="status"]')?.textContent).toContain('Loading photos');
-    click('.album-back');
+    click('#home-calendar-tab');
     expect((api.day.mock.calls[0][1] as AbortSignal).aborted).toBe(true);
     await settle();
     click('.calendar-day.has-assets'); await settle();
