@@ -3,9 +3,10 @@ import type { AlbumSummary } from './albums';
 import { formatAlbumMonth } from './albums';
 
 export function AlbumCard({ album, onOpen }: { album: AlbumSummary; onOpen: () => void }) {
-  const { t } = useTranslation();
-  const start = formatAlbumMonth(album.startDate);
-  const end = formatAlbumMonth(album.endDate);
+  const { t, i18n } = useTranslation();
+  const compactJapanese = i18n.resolvedLanguage === 'ja';
+  const start = formatAlbumMonth(album.startDate, undefined, compactJapanese);
+  const end = formatAlbumMonth(album.endDate, undefined, compactJapanese);
   const period = start && end && start !== end ? t('albums.dateRange', { start, end }) : start || end;
 
   return <button type="button" className="album-card" onClick={onOpen} aria-label={t('albums.open', { name: album.albumName })}>

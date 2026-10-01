@@ -162,12 +162,12 @@ describe('Home album tab', () => {
 
   it('keeps user album names while translating fixed UI and date locale', async () => {
     await i18n.changeLanguage('ja');
-    updateSetting('dateLocale', 'ja-JP');
+    updateSetting('dateLocale', 'en-US');
     await mount(); clickTab('#home-albums-tab');
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.textContent).toBe('アルバム');
     expect(host.querySelector('.album-card .album-name')?.textContent).toBe('旅行 2026');
-    expect(host.querySelector('.album-period')?.textContent).toBe('2026年4月〜2026年5月');
+    expect(host.querySelector('.album-period')?.textContent).toBe('2026/04〜2026/05');
     expect(host.querySelector('.album-count')?.textContent).toBe('2枚');
   });
 });

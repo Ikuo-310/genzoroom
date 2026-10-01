@@ -9,7 +9,7 @@ export type AlbumSummary = {
   endDate: string | null;
 };
 
-export function formatAlbumMonth(value: string | null, locale = resolveDateLocale()): string | null {
+export function formatAlbumMonth(value: string | null, locale = resolveDateLocale(), compactJapanese = false): string | null {
   if (value === null) return null;
   const match = /^(\d{4})-(\d{2})-/.exec(value);
   if (!match) return null;
@@ -17,6 +17,9 @@ export function formatAlbumMonth(value: string | null, locale = resolveDateLocal
   const month = Number(match[2]);
   if (month < 1 || month > 12) return null;
   // Immich's album bounds represent local calendar dates, so format the month without timezone conversion.
-  return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', timeZone: 'UTC' })
+  const formattingLocale = compactJapanese ? 'ja-JP' : locale;
+  return new Intl.DateTimeFormat(formattingLocale, {
+    year: 'numeric', month: compactJapanese ? '2-digit' : 'short', timeZone: 'UTC',
+  })
     .format(new Date(Date.UTC(year, month - 1, 1)));
 }
