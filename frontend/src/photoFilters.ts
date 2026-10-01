@@ -1,8 +1,11 @@
+import type { AssetEditStatuses } from './editStatus';
+
 export type PhotoFilters = {
   raw: boolean;
   nonRaw: boolean;
 };
 export type PhotoFilterMode = 'both' | 'raw' | 'nonRaw';
+export type EditStatusFilterMode = 'both' | 'edited' | 'unedited';
 export type PhotoFilterTab = 'recent' | 'albums' | 'calendar';
 
 // Keep the former shared key readable for sessions created before filters were tab-scoped.
@@ -12,6 +15,12 @@ export const PHOTO_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
   albums: `${PHOTO_FILTER_SESSION_KEY}.albums`,
   calendar: `${PHOTO_FILTER_SESSION_KEY}.calendar`,
 };
+export const EDIT_STATUS_FILTER_SESSION_KEY = 'genzoroom.homeEditStatusFilter';
+export const EDIT_STATUS_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
+  recent: `${EDIT_STATUS_FILTER_SESSION_KEY}.recent`,
+  albums: `${EDIT_STATUS_FILTER_SESSION_KEY}.albums`,
+  calendar: `${EDIT_STATUS_FILTER_SESSION_KEY}.calendar`,
+};
 
 export const DEFAULT_PHOTO_FILTERS: PhotoFilters = {
   raw: true,
@@ -19,6 +28,11 @@ export const DEFAULT_PHOTO_FILTERS: PhotoFilters = {
 };
 
 const memoryPhotoFilterModes: Record<PhotoFilterTab, PhotoFilterMode> = {
+  recent: 'both',
+  albums: 'both',
+  calendar: 'both',
+};
+const memoryEditStatusFilterModes: Record<PhotoFilterTab, EditStatusFilterMode> = {
   recent: 'both',
   albums: 'both',
   calendar: 'both',
@@ -73,6 +87,36 @@ export function writePhotoFilterMode(
   catch { /* Keep each tab's choice in memory when session storage is blocked. */ }
 }
 
+export function readEditStatusFilterMode(
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): EditStatusFilterMode {
+  if (storage === null) return memoryEditStatusFilterModes[tab];
+  try {
+    const stored = storage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS[tab]);
+    const mode = parseEditStatusFilterMode(stored);
+    memoryEditStatusFilterModes[tab] = mode;
+    return mode;
+  } catch {
+    // A blocked session store must not couple the in-memory choices between tabs.
+  }
+  return memoryEditStatusFilterModes[tab];
+}
+
+function parseEditStatusFilterMode(value: string | null): EditStatusFilterMode {
+  return value === 'both' || value === 'edited' || value === 'unedited' ? value : 'both';
+}
+
+export function writeEditStatusFilterMode(
+  mode: EditStatusFilterMode,
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): void {
+  memoryEditStatusFilterModes[tab] = mode;
+  try { storage?.setItem(EDIT_STATUS_FILTER_SESSION_KEYS[tab], mode); }
+  catch { /* Keep each tab's choice in memory when session storage is blocked. */ }
+}
+
 export function photoFiltersForMode(mode: PhotoFilterMode): PhotoFilters {
   return mode === 'both' ? { raw: true, nonRaw: true }
     : mode === 'raw' ? { raw: true, nonRaw: false }
@@ -84,4 +128,17 @@ export function filterPhotos<T extends { is_raw: boolean }>(
   filters: PhotoFilters,
 ): T[] {
   return photos.filter((photo) => photo.is_raw ? filters.raw : filters.nonRaw);
+}
+
+export function filterPhotosByEditStatus<T extends { id: string }>(
+  photos: T[],
+  mode: EditStatusFilterMode,
+  statuses: AssetEditStatuses,
+): T[] {
+  if (mode === 'both') return photos;
+  return photos.filter((photo) => {
+    const status = statuses[photo.id];
+    // Unknown statuses stay visible while batch lookup is pending or has failed.
+    return status === undefined || (mode === 'edited' ? status : !status);
+  });
 }

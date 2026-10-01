@@ -7,7 +7,7 @@ import { GalleryPage } from './GalleryPage';
 import { HOME_THUMBNAIL_COLUMNS_KEY, resolveDateLocale, updateSetting } from './appSettings';
 import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
-import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
+import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
@@ -74,6 +74,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en');
   sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('weekStart', 'sunday'); updateSetting('dateLocale', 'en-US');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -90,6 +91,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('weekStart', 'auto'); updateSetting('dateLocale', 'auto');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals(); vi.useRealTimers();
 });
@@ -451,6 +453,36 @@ describe('Home calendar', () => {
     expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
     click('#home-calendar-tab'); await settle();
     expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+  });
+
+  it('keeps edit status filters independent across Recent, Albums, and Calendar details', async () => {
+    api.albums.mockResolvedValue([{ id: 'album-1', albumName: 'Album', albumThumbnailAssetId: null,
+      assetCount: 2, startDate: null, endDate: null }]);
+    await mount();
+    selectValue('.edit-status-filter-control select', 'edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+    click('#home-albums-tab'); await settle();
+    expect(host.querySelector('.edit-status-filter-control')).toBeNull();
+    click('.album-card'); await settle();
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('both');
+    selectValue('.edit-status-filter-control select', 'unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('unedited');
+    click('#home-calendar-tab'); await settle(); click('.calendar-day.has-assets'); await settle();
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('both');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    selectValue('.edit-status-filter-control select', 'edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(sessionStorage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS.recent)).toBe('edited');
+    expect(sessionStorage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS.albums)).toBe('unedited');
+    expect(sessionStorage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS.calendar)).toBe('edited');
+    click('#home-albums-tab'); await settle();
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    click('#home-recent-tab');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
   });
 
   it('keeps Recent selection separate and restores the selected month when returning from a day', async () => {

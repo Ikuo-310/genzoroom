@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PHOTO_FILTERS,
+  EDIT_STATUS_FILTER_SESSION_KEYS,
+  EDIT_STATUS_FILTER_SESSION_KEY,
   filterPhotos,
+  filterPhotosByEditStatus,
   PHOTO_FILTER_SESSION_KEY,
   PHOTO_FILTER_SESSION_KEYS,
   photoFiltersForMode,
   readPhotoFilterMode,
+  readEditStatusFilterMode,
+  writeEditStatusFilterMode,
   writePhotoFilterMode,
 } from './photoFilters';
 
@@ -94,5 +99,56 @@ describe('photo filters', () => {
     expect(readPhotoFilterMode('recent', unavailable)).toBe('raw');
     expect(readPhotoFilterMode('albums', unavailable)).toBe('both');
     expect(readPhotoFilterMode('calendar', unavailable)).toBe('nonRaw');
+  });
+});
+
+describe('edit status filters', () => {
+  const assets = [{ id: 'edited', is_raw: true }, { id: 'unedited', is_raw: false }];
+
+  it('keeps independent values per tab and restores them from session storage', () => {
+    const { storage, values } = makeStorage();
+    expect(readEditStatusFilterMode('recent', storage)).toBe('both');
+    expect(readEditStatusFilterMode('albums', storage)).toBe('both');
+    expect(readEditStatusFilterMode('calendar', storage)).toBe('both');
+    writeEditStatusFilterMode('edited', 'recent', storage);
+    writeEditStatusFilterMode('unedited', 'calendar', storage);
+    expect(values.get(EDIT_STATUS_FILTER_SESSION_KEYS.recent)).toBe('edited');
+    expect(values.get(EDIT_STATUS_FILTER_SESSION_KEYS.albums)).toBeUndefined();
+    expect(values.get(EDIT_STATUS_FILTER_SESSION_KEYS.calendar)).toBe('unedited');
+    expect(EDIT_STATUS_FILTER_SESSION_KEY).toBe('genzoroom.homeEditStatusFilter');
+    expect(readEditStatusFilterMode('recent', storage)).toBe('edited');
+    expect(readEditStatusFilterMode('albums', storage)).toBe('both');
+    expect(readEditStatusFilterMode('calendar', storage)).toBe('unedited');
+  });
+
+  it('falls back only the affected tab for invalid values', () => {
+    const { storage } = makeStorage({
+      [EDIT_STATUS_FILTER_SESSION_KEYS.recent]: 'broken',
+      [EDIT_STATUS_FILTER_SESSION_KEYS.albums]: 'edited',
+      [EDIT_STATUS_FILTER_SESSION_KEYS.calendar]: 'unedited',
+    });
+    expect(readEditStatusFilterMode('recent', storage)).toBe('both');
+    expect(readEditStatusFilterMode('albums', storage)).toBe('edited');
+    expect(readEditStatusFilterMode('calendar', storage)).toBe('unedited');
+  });
+
+  it('keeps memory fallbacks independent when session storage is unavailable', () => {
+    const unavailable = {
+      getItem: () => { throw new Error('Blocked'); },
+      setItem: () => { throw new Error('Blocked'); },
+    } as unknown as Storage;
+    writeEditStatusFilterMode('edited', 'recent', unavailable);
+    writeEditStatusFilterMode('both', 'albums', unavailable);
+    writeEditStatusFilterMode('unedited', 'calendar', unavailable);
+    expect(readEditStatusFilterMode('recent', unavailable)).toBe('edited');
+    expect(readEditStatusFilterMode('albums', unavailable)).toBe('both');
+    expect(readEditStatusFilterMode('calendar', unavailable)).toBe('unedited');
+  });
+
+  it('filters known statuses and leaves unknown statuses visible', () => {
+    expect(filterPhotosByEditStatus(assets, 'both', {})).toEqual(assets);
+    expect(filterPhotosByEditStatus(assets, 'edited', { edited: true })).toEqual(assets);
+    expect(filterPhotosByEditStatus(assets, 'edited', { edited: true, unedited: false })).toEqual([assets[0]]);
+    expect(filterPhotosByEditStatus(assets, 'unedited', { edited: true, unedited: false })).toEqual([assets[1]]);
   });
 });

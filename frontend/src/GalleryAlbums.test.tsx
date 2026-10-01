@@ -60,7 +60,8 @@ describe('Home album tab', () => {
     expect(host.querySelector('.home-toolbar-controls .recent-count-control')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual([
-      'home-control photo-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
+      'home-control photo-filter-control', 'home-control edit-status-filter-control',
+      'home-control recent-count-control', 'home-control thumbnail-size-setting',
     ]);
     expect(host.querySelector('#recent-photos-heading')).toBeNull();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());

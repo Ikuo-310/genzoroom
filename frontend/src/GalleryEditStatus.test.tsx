@@ -9,7 +9,7 @@ import type { RecentAsset } from './assets';
 import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
 import { updateSetting } from './appSettings';
-import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
+import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEY, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
@@ -61,12 +61,20 @@ function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
     select.dispatchEvent(new Event('change', { bubbles: true }));
   });
 }
+function changeEditFilter(value: 'both' | 'edited' | 'unedited') {
+  const select = host.querySelector<HTMLSelectElement>('.edit-status-filter-control select')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
   sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
@@ -82,6 +90,7 @@ beforeEach(async () => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
@@ -129,6 +138,32 @@ describe('Home bulk edit status', () => {
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
   });
 
+  it('filters by edit status and ANDs the choice with the RAW filter without clearing selection', async () => {
+    await mount();
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(host.querySelector('.photo-card .photo-info p')?.textContent).toBe('photo-0.jpg');
+    expect(api.statuses).toHaveBeenCalledTimes(1);
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    changeFilter('raw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+    expect(host.querySelector('.gallery-message')?.textContent).toBe('No photos match this filter.');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+    changeEditFilter('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+  });
+
+  it('keeps unknown edit statuses visible while the lookup is pending, then applies the filter', async () => {
+    const waiting = deferred<Record<string, boolean | undefined>>();
+    api.statuses.mockReturnValueOnce(waiting.promise);
+    await mount();
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
+    await act(async () => waiting.resolve(Object.fromEntries(assets.map((asset, index) => [asset.id, index === 0]))));
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+  });
+
   it('restores the selected type filter after Home unmounts and remounts', async () => {
     await mount();
     changeFilter('raw');
@@ -139,6 +174,17 @@ describe('Home bulk edit status', () => {
     await mount();
     expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('raw');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+  });
+
+  it('restores the edit status filter after Home unmounts and remounts', async () => {
+    await mount();
+    changeEditFilter('edited');
+    expect(sessionStorage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS.recent)).toBe('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    act(() => root.render(<div />));
+    await mount();
+    expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
   });
 
   it('continues filtering and retains the choice in memory when session storage is blocked', async () => {

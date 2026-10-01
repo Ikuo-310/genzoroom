@@ -12,11 +12,12 @@ import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
 import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
+import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { HomeCalendar, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode, type PhotoFilterMode } from './photoFilters';
+import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, readPhotoFilterMode, writeEditStatusFilterMode, writePhotoFilterMode, type EditStatusFilterMode, type PhotoFilterMode } from './photoFilters';
 import {
   addVisiblePhotoRange,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -70,6 +71,11 @@ export function GalleryPage() {
     recent: readPhotoFilterMode('recent'),
     albums: readPhotoFilterMode('albums'),
     calendar: readPhotoFilterMode('calendar'),
+  }));
+  const [editStatusFilterModes, setEditStatusFilterModes] = useState<Record<HomeTab, EditStatusFilterMode>>(() => ({
+    recent: readEditStatusFilterMode('recent'),
+    albums: readEditStatusFilterMode('albums'),
+    calendar: readEditStatusFilterMode('calendar'),
   }));
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [albumSelectedAssetIds, setAlbumSelectedAssetIds] = useState<string[]>([]);
@@ -286,7 +292,7 @@ export function GalleryPage() {
   // Each grid owns its selection so shared asset IDs cannot carry a selection across views.
   const currentAssets = showingCalendarPhotos ? calendarAssets : showingAlbumPhotos ? albumAssets : assets;
   const activeSelectedAssetIds = showingCalendarPhotos ? calendarSelectedAssetIds : showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
-  const visibleAssets = filterPhotos(currentAssets, photoFilters);
+  const visibleAssets = filterPhotosByEditStatus(filterPhotos(currentAssets, photoFilters), editStatusFilterModes[activeTab], editStatuses);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = (activeTab === 'recent' || showingAlbumPhotos && albumAssetState === 'ready' ||
     showingCalendarPhotos && calendarAssetState === 'ready') && activeSelectedAssetIds.length > 0;
@@ -549,6 +555,10 @@ export function GalleryPage() {
             {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
               setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
               writePhotoFilterMode(mode, activeTab);
+            }} />}
+            {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
+              setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
+              writeEditStatusFilterMode(mode, activeTab);
             }} />}
             {activeTab === 'recent' && <>
               <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
