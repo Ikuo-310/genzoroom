@@ -69,7 +69,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .album-back:hover:not(:disabled) { color: #e6eee9; background: #2a3932; }
 .album-detail-heading h2 { overflow-wrap: anywhere; }
 .calendar-month { width: 100%; max-width: 840px; margin-inline: auto; padding: 10px; min-width: 0; min-height: 0; overflow-y: auto; border: 1px solid #35473e; border-radius: 10px; background: #192722; }
-.calendar-navigation { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-bottom: 18px; }
+.calendar-navigation { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: -10px 0 0; padding: 10px 0 18px; background: #192722; box-shadow: 0 1px 0 #35473e; }
 .calendar-navigation select, .calendar-navigation .calendar-current-month, .calendar-navigation .calendar-view-toggle { max-width: 100%; height: 42px; padding: 6px 24px 6px 10px; color: #e6eee9; background: #17221f; border: 1px solid #526a5e; border-radius: 6px; font: inherit; font-size: 1.15rem; font-weight: 600; }
 .calendar-navigation select:focus-visible, .calendar-navigation .calendar-current-month:focus-visible, .calendar-navigation .calendar-view-toggle:focus-visible { outline: 3px solid #e6eee9; outline-offset: 2px; }
 .calendar-arrow { padding: 4px 9px; color: #c7d9ae; background: transparent; font-size: 1.35rem; }

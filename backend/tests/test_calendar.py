@@ -29,15 +29,16 @@ def bucket(ids=(), images=(), timestamps=(), offsets=()):
 
 
 class CalendarTests(unittest.TestCase):
-    def test_month_presence_uses_timeline_images_not_archive_counts_or_representative_formats(self):
+    def test_month_requires_timeline_image_even_when_archive_assets_are_present(self):
         records = [(1, "timeline", "IMAGE", "jpg"), (2, "archive", "IMAGE", "jpg"),
                    (3, "timeline", "VIDEO", "mp4"), (4, "archive", "IMAGE", "jpg"),
-                   (4, "timeline", "IMAGE", "png"), (5, "timeline", "IMAGE", "dng")]
+                   (4, "timeline", "IMAGE", "png"), (5, "archive", "IMAGE", "jpg"),
+                   (5, "timeline", "IMAGE", "dng")]
         selected = []
         def handler(request):
             if request.url.path.endswith("calendar-heatmap"):
                 return httpx.Response(200, json={"series": [{"date": f"2026-07-{day:02}", "count": 9}
-                    for day in range(1, 5)]})
+                    for day in (1, 2, 3, 4, 5)]})
             if request.url.path == "/api/timeline/bucket":
                 self.assertEqual(request.url.params["visibility"], "timeline")
                 selected.extend(index for index, record in enumerate(records) if record[1] == "timeline")
@@ -52,7 +53,7 @@ class CalendarTests(unittest.TestCase):
         self.assertIsNotNone(result.days[0].thumbnail_url)
         self.assertIsNotNone(result.days[3].thumbnail_url)
         self.assertIsNone(result.days[4].thumbnail_url)
-        self.assertEqual(result.days[4].count, 0)
+        self.assertEqual(result.days[4].count, 9)
 
     def test_year_bucket_failure_rejects_partial_presence(self):
         def handler(request):
