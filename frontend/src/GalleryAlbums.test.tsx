@@ -33,7 +33,8 @@ function clickTab(id: string) { act(() => host.querySelector<HTMLButtonElement>(
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   await i18n.changeLanguage('en');
-  sessionStorage.clear(); writePhotoFilterMode('both');
+  sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
@@ -43,7 +44,8 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => {
-  act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
+  act(() => root.unmount()); host.remove(); sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('dateLocale', 'auto'); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
 });
 

@@ -64,7 +64,8 @@ function expectScroll(page: number, content: number) {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-  await i18n.changeLanguage('en'); writePhotoFilterMode('both');
+  await i18n.changeLanguage('en');
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
@@ -83,7 +84,9 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); host.remove();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
   it('keeps Year view scroll separate from months and other years across tabs and date details', async () => {

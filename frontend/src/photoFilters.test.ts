@@ -3,6 +3,7 @@ import {
   DEFAULT_PHOTO_FILTERS,
   filterPhotos,
   PHOTO_FILTER_SESSION_KEY,
+  PHOTO_FILTER_SESSION_KEYS,
   photoFiltersForMode,
   readPhotoFilterMode,
   writePhotoFilterMode,
@@ -14,61 +15,84 @@ const photos = [
   { id: 'raw-2', is_raw: true },
 ];
 
+function makeStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    values,
+    storage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    } as unknown as Storage,
+  };
+}
+
 describe('photo filters', () => {
   it('starts with RAW and Non-RAW enabled', () => {
     expect(DEFAULT_PHOTO_FILTERS).toEqual({ raw: true, nonRaw: true });
   });
 
-  it('shows every fetched photo when both filters are enabled', () => {
+  it('filters photos for the selected format', () => {
     expect(filterPhotos(photos, DEFAULT_PHOTO_FILTERS)).toEqual(photos);
+    expect(filterPhotos(photos, photoFiltersForMode('raw'))).toEqual([photos[0], photos[2]]);
+    expect(filterPhotos(photos, photoFiltersForMode('nonRaw'))).toEqual([photos[1]]);
+    expect(filterPhotos(photos.filter(photo => photo.is_raw), photoFiltersForMode('nonRaw'))).toEqual([]);
   });
 
-  it('shows only RAW photos', () => {
-    expect(filterPhotos(photos, { raw: true, nonRaw: false })).toEqual([
-      photos[0],
-      photos[2],
-    ]);
+  it('stores and restores independent values for each Home tab', () => {
+    const { storage, values } = makeStorage();
+    expect(readPhotoFilterMode('recent', storage)).toBe('both');
+    expect(readPhotoFilterMode('albums', storage)).toBe('both');
+    expect(readPhotoFilterMode('calendar', storage)).toBe('both');
+    writePhotoFilterMode('raw', 'recent', storage);
+    writePhotoFilterMode('nonRaw', 'calendar', storage);
+    expect(values.get(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(values.get(PHOTO_FILTER_SESSION_KEYS.albums)).toBeUndefined();
+    expect(values.get(PHOTO_FILTER_SESSION_KEYS.calendar)).toBe('nonRaw');
+    expect(readPhotoFilterMode('recent', storage)).toBe('raw');
+    expect(readPhotoFilterMode('albums', storage)).toBe('both');
+    expect(readPhotoFilterMode('calendar', storage)).toBe('nonRaw');
   });
 
-  it('shows only Non-RAW photos', () => {
-    expect(filterPhotos(photos, { raw: false, nonRaw: true })).toEqual([
-      photos[1],
-    ]);
+  it('migrates the legacy shared value to Recent only', () => {
+    const { storage, values } = makeStorage({ [PHOTO_FILTER_SESSION_KEY]: 'raw' });
+    expect(readPhotoFilterMode('recent', storage)).toBe('raw');
+    expect(values.get(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(readPhotoFilterMode('albums', storage)).toBe('both');
+    expect(readPhotoFilterMode('calendar', storage)).toBe('both');
   });
 
-  it('returns an empty result when no fetched photo matches', () => {
-    expect(filterPhotos(photos.filter((photo) => photo.is_raw), {
-      raw: false,
-      nonRaw: true,
-    })).toEqual([]);
+  it('prefers an existing Recent value over the legacy key', () => {
+    const { storage } = makeStorage({
+      [PHOTO_FILTER_SESSION_KEY]: 'raw',
+      [PHOTO_FILTER_SESSION_KEYS.recent]: 'nonRaw',
+    });
+    expect(readPhotoFilterMode('recent', storage)).toBe('nonRaw');
   });
 
-  it('restores only valid RAW type choices from session storage', () => {
-    const values = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => { values.set(key, value); },
-    } as unknown as Storage;
-
-    expect(readPhotoFilterMode(storage)).toBe('both');
-    writePhotoFilterMode('raw', storage);
-    expect(values.get(PHOTO_FILTER_SESSION_KEY)).toBe('raw');
-    expect(readPhotoFilterMode(storage)).toBe('raw');
-    expect(photoFiltersForMode(readPhotoFilterMode(storage))).toEqual({ raw: true, nonRaw: false });
-    writePhotoFilterMode('nonRaw', storage);
-    expect(readPhotoFilterMode(storage)).toBe('nonRaw');
-    expect(photoFiltersForMode(readPhotoFilterMode(storage))).toEqual({ raw: false, nonRaw: true });
-    values.set(PHOTO_FILTER_SESSION_KEY, 'other');
-    expect(readPhotoFilterMode(storage)).toBe('both');
+  it('falls back only the affected tab to both for invalid values', () => {
+    const { storage } = makeStorage({
+      [PHOTO_FILTER_SESSION_KEYS.recent]: 'broken',
+      [PHOTO_FILTER_SESSION_KEYS.albums]: 'raw',
+      [PHOTO_FILTER_SESSION_KEYS.calendar]: 'nonRaw',
+      [PHOTO_FILTER_SESSION_KEY]: 'invalid-legacy',
+    });
+    expect(readPhotoFilterMode('recent', storage)).toBe('both');
+    expect(readPhotoFilterMode('albums', storage)).toBe('raw');
+    expect(readPhotoFilterMode('calendar', storage)).toBe('nonRaw');
   });
 
-  it('keeps the current filter in memory when session storage throws', () => {
+  it('keeps tab-specific memory fallbacks when session storage throws', () => {
     const unavailable = {
       getItem: () => { throw new Error('Blocked'); },
       setItem: () => { throw new Error('Blocked'); },
     } as unknown as Storage;
-    writePhotoFilterMode('both', unavailable);
-    writePhotoFilterMode('raw', unavailable);
-    expect(readPhotoFilterMode(unavailable)).toBe('raw');
+    writePhotoFilterMode('both', 'recent', unavailable);
+    writePhotoFilterMode('both', 'albums', unavailable);
+    writePhotoFilterMode('both', 'calendar', unavailable);
+    writePhotoFilterMode('raw', 'recent', unavailable);
+    writePhotoFilterMode('nonRaw', 'calendar', unavailable);
+    expect(readPhotoFilterMode('recent', unavailable)).toBe('raw');
+    expect(readPhotoFilterMode('albums', unavailable)).toBe('both');
+    expect(readPhotoFilterMode('calendar', unavailable)).toBe('nonRaw');
   });
 });

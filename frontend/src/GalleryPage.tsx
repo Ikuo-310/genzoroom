@@ -16,7 +16,7 @@ import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { HomeCalendar, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode } from './photoFilters';
+import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode, type PhotoFilterMode } from './photoFilters';
 import {
   addVisiblePhotoRange,
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -66,7 +66,11 @@ export function GalleryPage() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(homeReturn?.date ?? null);
   const [calendarAssets, setCalendarAssets] = useState<RecentAsset[]>([]);
   const [calendarAssetState, setCalendarAssetState] = useState<'idle' | AssetState>('idle');
-  const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
+  const [photoFilterModes, setPhotoFilterModes] = useState<Record<HomeTab, PhotoFilterMode>>(() => ({
+    recent: readPhotoFilterMode('recent'),
+    albums: readPhotoFilterMode('albums'),
+    calendar: readPhotoFilterMode('calendar'),
+  }));
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [albumSelectedAssetIds, setAlbumSelectedAssetIds] = useState<string[]>([]);
   const [calendarSelectedAssetIds, setCalendarSelectedAssetIds] = useState<string[]>([]);
@@ -89,7 +93,7 @@ export function GalleryPage() {
     : showingAlbumPhotos && albumAssetState === 'ready' ? albumAssets
       : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
-  const photoFilters = photoFiltersForMode(photoFilterMode);
+  const photoFilters = photoFiltersForMode(photoFilterModes[activeTab]);
   const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
   useLayoutEffect(() => {
@@ -543,8 +547,8 @@ export function GalleryPage() {
           </div>
           <div className="home-toolbar-controls">
             {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
-              setPhotoFilterMode(mode);
-              writePhotoFilterMode(mode);
+              setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
+              writePhotoFilterMode(mode, activeTab);
             }} />}
             {activeTab === 'recent' && <>
               <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>

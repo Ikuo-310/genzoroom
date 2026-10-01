@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
 import { updateSetting } from './appSettings';
-import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
+import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), statuses: vi.fn() }));
@@ -59,7 +59,8 @@ function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   await i18n.changeLanguage('en');
-  sessionStorage.clear(); writePhotoFilterMode('both');
+  sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue(recent);
@@ -70,7 +71,8 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => {
-  act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
+  act(() => root.unmount()); host.remove(); sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
 });
 
@@ -176,7 +178,7 @@ describe('album photo view', () => {
     expect(host.querySelector('.photo-card.selected')).toBeNull();
     changeFilter('raw');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEY)).toBe('raw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.albums)).toBe('raw');
     changeFilter('both');
     const boxes = [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')];
     act(() => boxes[0].click());
@@ -192,6 +194,25 @@ describe('album photo view', () => {
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
     click('.selection-bar button:last-child');
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('album-0|album-2');
+  });
+
+  it('keeps Album filters independent from Recent and shared across Album A and B', async () => {
+    await mount();
+    changeFilter('raw');
+    click('#home-albums-tab'); await settle();
+    click('.album-card'); await settle();
+    changeFilter('nonRaw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.albums)).toBe('nonRaw');
+    click('.album-back');
+    const cards = [...host.querySelectorAll<HTMLButtonElement>('.album-card')];
+    act(() => cards[1].click()); await settle();
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    click('#home-recent-tab');
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
+    click('#home-albums-tab'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
   });
 
   it('loads edit statuses in batches of 100 for large albums', async () => {

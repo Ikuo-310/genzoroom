@@ -3,40 +3,74 @@ export type PhotoFilters = {
   nonRaw: boolean;
 };
 export type PhotoFilterMode = 'both' | 'raw' | 'nonRaw';
+export type PhotoFilterTab = 'recent' | 'albums' | 'calendar';
 
+// Keep the former shared key readable for sessions created before filters were tab-scoped.
 export const PHOTO_FILTER_SESSION_KEY = 'genzoroom.homePhotoFilter';
+export const PHOTO_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
+  recent: `${PHOTO_FILTER_SESSION_KEY}.recent`,
+  albums: `${PHOTO_FILTER_SESSION_KEY}.albums`,
+  calendar: `${PHOTO_FILTER_SESSION_KEY}.calendar`,
+};
 
 export const DEFAULT_PHOTO_FILTERS: PhotoFilters = {
   raw: true,
   nonRaw: true,
 };
 
-let memoryPhotoFilterMode: PhotoFilterMode = 'both';
+const memoryPhotoFilterModes: Record<PhotoFilterTab, PhotoFilterMode> = {
+  recent: 'both',
+  albums: 'both',
+  calendar: 'both',
+};
 
 function browserSessionStorage(): Storage | null {
   try { return typeof window === 'undefined' ? null : window.sessionStorage; }
   catch { return null; }
 }
 
-export function readPhotoFilterMode(storage = browserSessionStorage()): PhotoFilterMode {
-  if (storage === null) return memoryPhotoFilterMode;
+export function readPhotoFilterMode(
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): PhotoFilterMode {
+  if (storage === null) return memoryPhotoFilterModes[tab];
   try {
-    const value = storage.getItem(PHOTO_FILTER_SESSION_KEY);
-    if (value === 'both' || value === 'raw' || value === 'nonRaw') {
-      memoryPhotoFilterMode = value;
-      return value;
+    const key = PHOTO_FILTER_SESSION_KEYS[tab];
+    const stored = storage.getItem(key);
+    if (stored !== null) {
+      const mode = parsePhotoFilterMode(stored);
+      memoryPhotoFilterModes[tab] = mode;
+      return mode;
     }
-    memoryPhotoFilterMode = 'both';
+
+    if (tab === 'recent') {
+      const legacy = storage.getItem(PHOTO_FILTER_SESSION_KEY);
+      if (legacy !== null) {
+        const mode = parsePhotoFilterMode(legacy);
+        memoryPhotoFilterModes.recent = mode;
+        storage.setItem(key, mode);
+        return mode;
+      }
+    }
+    memoryPhotoFilterModes[tab] = 'both';
   } catch {
-    // The in-memory choice keeps the filter usable when browser storage is blocked.
+    // A blocked session store must not couple the in-memory choices between tabs.
   }
-  return memoryPhotoFilterMode;
+  return memoryPhotoFilterModes[tab];
 }
 
-export function writePhotoFilterMode(mode: PhotoFilterMode, storage = browserSessionStorage()): void {
-  memoryPhotoFilterMode = mode;
-  try { storage?.setItem(PHOTO_FILTER_SESSION_KEY, mode); }
-  catch { /* Keep the active tab's choice in memory when session storage is blocked. */ }
+function parsePhotoFilterMode(value: string): PhotoFilterMode {
+  return value === 'both' || value === 'raw' || value === 'nonRaw' ? value : 'both';
+}
+
+export function writePhotoFilterMode(
+  mode: PhotoFilterMode,
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): void {
+  memoryPhotoFilterModes[tab] = mode;
+  try { storage?.setItem(PHOTO_FILTER_SESSION_KEYS[tab], mode); }
+  catch { /* Keep each tab's choice in memory when session storage is blocked. */ }
 }
 
 export function photoFiltersForMode(mode: PhotoFilterMode): PhotoFilters {

@@ -7,7 +7,7 @@ import { GalleryPage } from './GalleryPage';
 import { HOME_THUMBNAIL_COLUMNS_KEY, resolveDateLocale, updateSetting } from './appSettings';
 import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
-import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
+import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
@@ -70,7 +70,8 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
   await i18n.changeLanguage('en');
-  sessionStorage.clear(); writePhotoFilterMode('both');
+  sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('weekStart', 'sunday'); updateSetting('dateLocale', 'en-US');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -85,7 +86,8 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => {
-  act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
+  act(() => root.unmount()); host.remove(); sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('weekStart', 'auto'); updateSetting('dateLocale', 'auto');
   updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals(); vi.useRealTimers();
 });
@@ -407,7 +409,7 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
     selectValue('.photo-filter-control select', 'raw');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEY)).toBe('raw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.calendar)).toBe('raw');
     selectValue('.photo-filter-control select', 'both');
     const boxes = [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')];
     act(() => boxes[0].click());
@@ -415,6 +417,24 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
     click('.selection-bar button:last-child');
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('day-0|day-1|day-2');
+  });
+
+  it('keeps Calendar filters independent from Recent and shared across date details', async () => {
+    await mount();
+    selectValue('.photo-filter-control select', 'raw');
+    click('#home-calendar-tab'); await settle();
+    click('.calendar-day.has-assets'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('both');
+    selectValue('.photo-filter-control select', 'nonRaw');
+    click('.album-back'); await settle();
+    click('.calendar-day.has-assets'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.calendar)).toBe('nonRaw');
+    click('#home-recent-tab');
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
+    click('#home-calendar-tab'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
   });
 
   it('keeps Recent selection separate and restores the selected month when returning from a day', async () => {

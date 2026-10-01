@@ -65,7 +65,8 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
-  sessionStorage.clear(); writePhotoFilterMode('both');
+  sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
@@ -79,7 +80,9 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
+afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear();
+  writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
+  vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
   it('re-fetches the selected count while preserving the current grid and ignores stale responses', async () => {
