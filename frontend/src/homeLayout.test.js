@@ -35,6 +35,20 @@ describe('Home and thumbnail layout', () => {
     const cell = document.createElement('button'); cell.className = 'calendar-day'; days.append(cell);
     expect(getComputedStyle(cell).aspectRatio).toBe('1');
   });
+  it('styles This month like the calendar selects while keeping the navigation responsive', () => {
+    const navigation = document.createElement('div'); navigation.className = 'calendar-navigation';
+    navigation.innerHTML = '<select><option>2026</option></select><button class="calendar-current-month">This month</button>';
+    host.querySelector('.photos').append(navigation);
+    const select = getComputedStyle(navigation.querySelector('select'));
+    const button = getComputedStyle(navigation.querySelector('.calendar-current-month'));
+    for (const property of ['fontSize', 'fontWeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'color', 'backgroundColor', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius']) {
+      expect(button[property]).toBe(select[property]);
+    }
+    expect(button.whiteSpace).toBe('nowrap');
+    expect(getComputedStyle(navigation).flexWrap).toBe('wrap');
+    expect(button.backgroundColor).not.toBe('transparent');
+  });
   it('anchors the display-only edit badge to both thumbnail frames', () => {
     for (const frame of host.querySelectorAll('.thumbnail, .filmstrip-item')) {
       const badge = document.createElement('span'); badge.className = 'edited-badge'; frame.append(badge);
