@@ -80,8 +80,11 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-navigation .calendar-current-month:active, .calendar-navigation .calendar-view-toggle:active { background: #293a33; }
 .calendar-year { width: 100%; max-width: 1700px; margin-inline: auto; padding: 10px; min-width: 0; min-height: 0; overflow-y: auto; border: 1px solid #35473e; border-radius: 10px; background: #192722; }
 .calendar-year-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; min-width: 0; }
-.calendar-mini-month { min-width: 0; padding: 8px; border: 1px solid #35473e; border-radius: 6px; }
+.calendar-mini-month { min-width: 0; padding: 8px; border: 1px solid #35473e; border-radius: 6px; cursor: pointer; }
 .calendar-mini-month h3 { margin: 0 0 8px; color: #e6eee9; font-size: 1rem; text-align: center; }
+.calendar-mini-month-title { width: 100%; padding: 0; color: inherit; background: transparent; font: inherit; }
+.calendar-mini-month-title:hover:not(:disabled) { color: #c7d9ae; background: transparent; }
+.calendar-mini-month-title:focus-visible { outline: 2px solid #e6eee9; outline-offset: 2px; }
 .calendar-mini-month .calendar-days { gap: 3px; }
 .calendar-mini-month .calendar-weekday { font-size: 0.75rem; }
 .calendar-mini-month .calendar-day { justify-content: center; align-items: center; padding: 2px; }

@@ -151,6 +151,39 @@ describe('Home calendar', () => {
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('12');
   });
 
+  it('opens a month from the card title or blank card area while date buttons retain exclusive actions', async () => {
+    await mount(); click('#home-calendar-tab'); await settle(); click('.calendar-view-toggle'); await settle();
+    const card = host.querySelectorAll<HTMLElement>('.calendar-mini-month')[1]!;
+    const title = card.querySelector<HTMLButtonElement>('.calendar-mini-month-title')!;
+    act(() => title.click()); await settle();
+    expect(host.querySelector('.calendar-year')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('2');
+    expect(host.querySelector('.calendar-view-toggle')?.textContent).toBe('Year view');
+    click('.calendar-view-toggle'); await settle();
+    const august = host.querySelectorAll<HTMLElement>('.calendar-mini-month')[7]!;
+    const heatmapCalls = api.heatmap.mock.calls.length;
+    const emptyDay = august.querySelector<HTMLButtonElement>('.calendar-day[aria-label="2026-08-02"]')!;
+    act(() => emptyDay.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls);
+    expect(host.querySelector('.calendar-year')).not.toBeNull();
+    const photoDay = august.querySelector<HTMLButtonElement>('[aria-label^="2026-08-01,"]')!;
+    act(() => photoDay.click()); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-08-01', expect.any(AbortSignal));
+    expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls);
+    expect(host.querySelector('.calendar-year')).toBeNull();
+    expect(host.querySelector('.album-detail-heading h2')).not.toBeNull();
+    click('.album-back'); await settle();
+    const december = host.querySelectorAll<HTMLElement>('.calendar-mini-month')[11]!;
+    act(() => december.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await settle();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('12');
+    expect(host.querySelector('.calendar-view-toggle')?.textContent).toBe('Year view');
+    click('.calendar-view-toggle'); await settle();
+    expect(host.querySelector('.calendar-year')).not.toBeNull();
+  });
+
   it('ignores stale annual and month responses after year and mode changes', async () => {
     const oldYear = deferred<CalendarHeatmap>();
     const oldMonth = deferred<CalendarHeatmap>();

@@ -18,7 +18,7 @@ afterEach(() => { stylesheet.remove(); host.remove(); });
 describe('Home and thumbnail layout', () => {
   it('keeps annual calendars scrollable with a responsive grid and matching mode-control height', () => {
     const year = document.createElement('div'); year.className = 'calendar-year';
-    year.innerHTML = '<div class="calendar-year-grid"><section class="calendar-mini-month"><div class="calendar-days"></div></section></div><div class="calendar-navigation"><select></select><button class="calendar-view-toggle">Year view</button></div>';
+    year.innerHTML = '<div class="calendar-year-grid"><section class="calendar-mini-month"><h3><button class="calendar-mini-month-title">January</button></h3><div class="calendar-days"></div></section></div><div class="calendar-navigation"><select></select><button class="calendar-view-toggle">Year view</button></div>';
     host.querySelector('.photos').append(year);
     expect(getComputedStyle(year).minWidth).toBe('0');
     expect(getComputedStyle(year).minHeight).toBe('0');
@@ -27,6 +27,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).toBe('repeat(auto-fit, minmax(min(100%, 260px), 1fr))');
     expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).not.toContain('scroll');
     expect(getComputedStyle(year.querySelector('.calendar-mini-month')).minWidth).toBe('0');
+    expect(getComputedStyle(year.querySelector('.calendar-mini-month-title')).width).toBe('100%');
     expect(getComputedStyle(year.querySelector('.calendar-days')).gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
     expect(getComputedStyle(year.querySelector('.calendar-view-toggle')).height).toBe(getComputedStyle(year.querySelector('select')).height);
   });

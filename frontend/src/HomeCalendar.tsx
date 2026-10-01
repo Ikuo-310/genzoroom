@@ -13,7 +13,7 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
-export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onDayOpen }: {
+export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onMonthOpen, onDayOpen }: {
   year: number;
   month: number;
   mode: CalendarViewMode;
@@ -28,6 +28,7 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
   onModeChange: (mode: CalendarViewMode) => void;
   onCurrentMonth: () => void;
   onCurrentYear: () => void;
+  onMonthOpen: (month: number) => void;
   onDayOpen: (date: string) => void;
 }) {
   const { t } = useTranslation();
@@ -65,8 +66,10 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
         onClick={() => move(next)}>→</button>
     </div>
     {mode === 'year' ? <div className="calendar-year-grid">
-      {monthKeys.map((key, index) => <section className="calendar-mini-month" key={key} aria-label={t(`calendar.months.${key}`)}>
-        <h3>{t(`calendar.months.${key}`)}</h3>
+      {monthKeys.map((key, index) => <section className="calendar-mini-month" key={key} aria-label={t(`calendar.months.${key}`)}
+        onClick={event => { if (!(event.target as HTMLElement).closest('button')) onMonthOpen(index + 1); }}>
+        <h3><button type="button" className="calendar-mini-month-title" onClick={() => onMonthOpen(index + 1)}>
+          {t(`calendar.months.${key}`)}</button></h3>
         <CalendarMonthGrid year={year} month={index + 1} daysByDate={daysByDate} weekStart={weekStart}
           loading={loading} showCounts={false} onDayOpen={onDayOpen} />
       </section>)}
@@ -99,7 +102,7 @@ function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showCo
           disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date, count: entry.count }) : t('calendar.dayLabel', { date })}
           onClick={() => onDayOpen(date)}><span className="calendar-day-number">{day}</span>
           {available && showCounts && <span className="calendar-day-count">{t('calendar.assetCount', { count: entry.count })}</span>}
-        </button>;
+      </button>;
       })}
     </div>;
 }

@@ -425,6 +425,10 @@ export function GalleryPage() {
     changeCalendarPeriod(calendarYear, month, 'month');
   }
 
+  function openCalendarMonth(month: number) {
+    changeCalendarPeriod(calendarYear, month, 'month');
+  }
+
   function changeCalendarMode(mode: CalendarViewMode) {
     changeCalendarPeriod(calendarYear, calendarMonth, mode);
   }
@@ -607,6 +611,7 @@ export function GalleryPage() {
               loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
               onMonthChange={changeCalendarMonth} onCurrentMonth={goToCurrentCalendarMonth}
               onNavigate={changeCalendarPeriod}
+              onMonthOpen={openCalendarMonth}
               onModeChange={changeCalendarMode} onCurrentYear={goToCurrentCalendarYear}
               onDayOpen={openCalendarDay} />
             {calendarState === 'loading' && <p className="gallery-message" role="status">{t('calendar.loading')}</p>}
