@@ -30,7 +30,8 @@ function monthData(year: number, month: number): CalendarHeatmap {
   return { year, month, days: [1, 2, 3].map(day => ({
     date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     hasAssets: day === 1 || day === 3,
-    count: day === 1 ? 1558 : day === 3 ? 2 : 0,
+    // Legacy heatmap counts can include archives; only hasAssets enables a calendar day.
+    count: day === 1 ? 1558 : day === 3 ? 2 : 9,
     thumbnail_url: day === 1 ? `/api/assets/${year}-${month}-cover/thumbnail` : null,
   })) };
 }

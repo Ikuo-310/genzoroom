@@ -33,7 +33,7 @@ def run_search(handler):
 
 
 class AlbumAssetTests(unittest.TestCase):
-    def test_structured_search_allowlists_images_and_returns_one_page(self):
+    def test_structured_search_allowlists_images_including_archives_and_returns_one_page(self):
         def handler(request):
             self.assertEqual(request.method, "POST")
             self.assertEqual(request.url.path, "/api/search/metadata")
@@ -43,7 +43,7 @@ class AlbumAssetTests(unittest.TestCase):
                 "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                 "size": 1000,
             })
-            return search_response([asset(0), asset(1, kind="VIDEO")])
+            return search_response([asset(0) | {"visibility": "archive"}, asset(1, kind="VIDEO")])
 
         result = run_search(handler)
         self.assertEqual(len(result), 1)

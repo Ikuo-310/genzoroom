@@ -408,7 +408,7 @@ async def get_recent_assets(
                 _api_url(url, "/search/metadata"),
                 headers={"x-api-key": key, "Accept": "application/json"},
                 json={
-                    "filter": {"type": {"eq": "IMAGE"}},
+                    "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                     "size": limit,
                 },
@@ -487,7 +487,8 @@ async def get_calendar_day_assets(
     # Immich v3.2.4 applies takenAt to fileCreatedAt; use its half-open UTC range as requested.
     bounds = {"gte": f"{selected_day.isoformat()}T00:00:00.000Z", "lt": f"{next_day.isoformat()}T00:00:00.000Z"}
     return await _search_all_assets(
-        immich_url, api_key, {"type": {"eq": "IMAGE"}, "takenAt": bounds},
+        immich_url, api_key,
+        {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "takenAt": bounds},
         "localDateTime", transport=transport,
     )
 
@@ -506,7 +507,7 @@ async def get_calendar_min_year(
                 _api_url(url, "/search/metadata"),
                 headers={"x-api-key": key, "Accept": "application/json"},
                 json={
-                    "filter": {"type": {"eq": "IMAGE"}},
+                    "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
                     "orderBy": {"field": "localDateTime", "direction": "asc"},
                     "size": 1,
                 },
@@ -636,25 +637,39 @@ async def get_calendar_heatmap(
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     thumbnails: dict[str, str] = {}
-    if month is not None:
-        try:
-            thumbnails = await _calendar_month_thumbnails(url, key, first, transport=transport)
-        except ImmichRequestError:
-            # Representative images are optional; their failure must not hide a valid heatmap.
-            pass
+    image_days: set[str] = set()
+    # Heatmap counts include archives and videos. Only timeline IMAGE presence enables a day.
+    # Read yearly buckets sequentially to keep upstream concurrency bounded to one request.
+    for bucket_month in ([month] if month is not None else range(1, 13)):
+        bucket_first = date(year, bucket_month, 1)
+        images = await _calendar_month_images(url, key, bucket_first, transport=transport)
+        image_days.update(day for day, _ in images.candidates)
+        if month is not None:
+            try:
+                thumbnails = await _calendar_month_thumbnails(url, key, first, images, transport=transport)
+            except ImmichRequestError:
+                # Format lookup is optional; timeline presence remains valid without thumbnails.
+                pass
     return CalendarHeatmap(
         year=year, month=month,
         days=[CalendarDay(date=(first + timedelta(days=offset)).isoformat(),
-                          hasAssets=day_counts.get((first + timedelta(days=offset)).isoformat(), 0) > 0,
+                          hasAssets=(first + timedelta(days=offset)).isoformat() in image_days,
                           count=day_counts.get((first + timedelta(days=offset)).isoformat(), 0),
                           thumbnail_url=thumbnails.get((first + timedelta(days=offset)).isoformat()))
               for offset in range(day_count)],
     )
 
 
-async def _calendar_month_thumbnails(
+@dataclass(frozen=True)
+class _CalendarMonthImages:
+    candidates: list[tuple[str, UUID]]
+    bucket_assets: int
+    image_assets: int
+
+
+async def _calendar_month_images(
     url: str, key: str, first: date, *, transport: httpx.AsyncBaseTransport | None = None,
-) -> dict[str, str]:
+) -> _CalendarMonthImages:
     try:
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
@@ -667,10 +682,10 @@ async def _calendar_month_thumbnails(
                         "withStacked": "true"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
-        logger.warning("Calendar thumbnail lookup failed: stage=timeline error=unreachable")
+        logger.warning("Calendar data lookup failed: stage=timeline error=unreachable")
         raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
     if response.status_code != 200:
-        logger.warning("Calendar thumbnail lookup failed: stage=timeline http_status=%s", response.status_code)
+        logger.warning("Calendar data lookup failed: stage=timeline http_status=%s", response.status_code)
         raise _request_error(response)
     try:
         body = response.json()
@@ -694,9 +709,16 @@ async def _calendar_month_thumbnails(
             if is_image and (local_day.year, local_day.month) == (first.year, first.month):
                 candidates.append((local_day.isoformat(), asset_id))
     except (KeyError, TypeError, ValueError, OverflowError):
-        logger.warning("Calendar thumbnail lookup failed: stage=timeline error=unexpected_response")
+        logger.warning("Calendar data lookup failed: stage=timeline error=unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    return _CalendarMonthImages(candidates, len(body["id"]), image_assets)
 
+
+async def _calendar_month_thumbnails(
+    url: str, key: str, first: date, images: _CalendarMonthImages,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, str]:
+    candidates = images.candidates
     thumbnails: dict[str, str] = {}
     format_results = 0
     eligible_asset_ids: set[UUID] = set()
@@ -725,7 +747,7 @@ async def _calendar_month_thumbnails(
     logger.debug(
         "Calendar thumbnail lookup: year=%s month=%s bucket_assets=%s image_assets=%s "
         "month_candidates=%s candidate_days=%s format_results=%s non_raw_assets=%s thumbnail_days=%s",
-        first.year, first.month, len(body["id"]), image_assets, len(candidates),
+        first.year, first.month, images.bucket_assets, images.image_assets, len(candidates),
         len({day for day, _ in candidates}), format_results, len(eligible_asset_ids), len(thumbnails),
     )
     return thumbnails

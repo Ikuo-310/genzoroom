@@ -166,7 +166,7 @@ class ImmichAssetTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(request.content),
                 {
-                    "filter": {"type": {"eq": "IMAGE"}},
+                    "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                     "size": 100,
                 },
@@ -202,6 +202,17 @@ class ImmichAssetTests(unittest.TestCase):
             f"/api/assets/{ASSET_ID}/thumbnail",
         )
         self.assertNotIn(API_KEY, result[0].model_dump_json())
+
+    def test_recent_requests_only_timeline_images(self):
+        items = [{"id": str(UUID(int=index + 1)), "type": "IMAGE", "visibility": visibility,
+                  "originalFileName": f"photo-{index}.jpg", "fileCreatedAt": "2026-09-01T12:00:00Z"}
+                 for index, visibility in enumerate(("timeline", "archive", "hidden", "locked"))]
+        def handler(request):
+            search_filter = json.loads(request.content)["filter"]
+            self.assertEqual(search_filter, {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}})
+            return httpx.Response(200, json={"assets": {"items": [item for item in items
+                if item["visibility"] == search_filter["visibility"]["eq"]]}})
+        self.assertEqual([str(photo.id) for photo in self.run_recent(handler)], [items[0]["id"]])
 
     def test_forwards_limit_to_immich_and_caps_returned_images(self):
         items = [
