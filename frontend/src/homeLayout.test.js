@@ -16,6 +16,19 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('lets only the Home intro header use the available width while keeping the gallery full width', () => {
+    const intro = host.querySelector('.home-intro');
+    const header = host.querySelector('.app-header');
+    const photos = host.querySelector('.photos');
+    expect(getComputedStyle(intro).width).toBe('100%');
+    expect(getComputedStyle(intro).maxWidth).toBe('none');
+    expect(getComputedStyle(intro).marginLeft).toBe('0px');
+    expect(getComputedStyle(intro).marginRight).toBe('0px');
+    expect(getComputedStyle(header).justifyContent).toBe('space-between');
+    expect(getComputedStyle(photos).width).toBe('100%');
+    expect(stylesheet.textContent).toContain('@media (max-width: 520px)');
+    expect(stylesheet.textContent).toContain('.app-header { display: flex; flex-wrap: wrap; }');
+  });
   it('keeps annual calendars scrollable with a responsive grid and matching mode-control height', () => {
     const year = document.createElement('div'); year.className = 'calendar-year';
     year.innerHTML = '<div class="calendar-year-grid"><section class="calendar-mini-month"><h3><button class="calendar-mini-month-title">January</button></h3><div class="calendar-days"></div></section></div><div class="calendar-navigation"><select></select><button class="calendar-view-toggle">Year view</button></div>';
@@ -86,7 +99,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(page).height).toBe('100dvh');
     expect(getComputedStyle(page).maxWidth).toBe('none');
     expect(getComputedStyle(page).overflowY).toBe('auto');
-    expect(getComputedStyle(intro).maxWidth).toBe('1080px');
+    expect(getComputedStyle(intro).maxWidth).toBe('none');
     expect(getComputedStyle(photos).display).toBe('flex');
     expect(getComputedStyle(photos).width).toBe('100%');
     expect(getComputedStyle(photos).minHeight).toBe('0');
