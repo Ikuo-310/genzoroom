@@ -78,7 +78,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-navigation .calendar-current-month, .calendar-navigation .calendar-view-toggle { cursor: pointer; white-space: nowrap; }
 .calendar-navigation .calendar-current-month:hover, .calendar-navigation .calendar-view-toggle:hover { border-color: #708077; background: #203029; }
 .calendar-navigation .calendar-current-month:active, .calendar-navigation .calendar-view-toggle:active { background: #293a33; }
-.calendar-year { width: 100%; max-width: 1320px; margin-inline: auto; padding: 10px; min-width: 0; min-height: 0; overflow-y: auto; border: 1px solid #35473e; border-radius: 10px; background: #192722; }
+.calendar-year { width: 100%; max-width: 1700px; margin-inline: auto; padding: 10px; min-width: 0; min-height: 0; overflow-y: auto; border: 1px solid #35473e; border-radius: 10px; background: #192722; }
 .calendar-year-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; min-width: 0; }
 .calendar-mini-month { min-width: 0; padding: 8px; border: 1px solid #35473e; border-radius: 6px; }
 .calendar-mini-month h3 { margin: 0 0 8px; color: #e6eee9; font-size: 1rem; text-align: center; }

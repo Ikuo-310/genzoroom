@@ -23,7 +23,9 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(year).minWidth).toBe('0');
     expect(getComputedStyle(year).minHeight).toBe('0');
     expect(getComputedStyle(year).overflowY).toBe('auto');
+    expect(getComputedStyle(year).maxWidth).toBe('1700px');
     expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).toBe('repeat(auto-fit, minmax(min(100%, 260px), 1fr))');
+    expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).not.toContain('scroll');
     expect(getComputedStyle(year.querySelector('.calendar-mini-month')).minWidth).toBe('0');
     expect(getComputedStyle(year.querySelector('.calendar-days')).gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
     expect(getComputedStyle(year.querySelector('.calendar-view-toggle')).height).toBe(getComputedStyle(year.querySelector('select')).height);
