@@ -91,6 +91,27 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('follows language for date order and Auto week start only in language-sync mode', async () => {
+    vi.stubGlobal('navigator', { languages: ['en-GB'] });
+    act(() => { updateSetting('dateLocale', 'auto-language'); updateSetting('weekStart', 'auto'); });
+    await mount(); click('#home-calendar-tab'); await settle();
+    const selectOrder = () => [...host.querySelectorAll<HTMLSelectElement>('.calendar-navigation select')].map(select => select.id);
+    expect(selectOrder()).toEqual(['calendar-month', 'calendar-year']);
+    expect(host.querySelector('.calendar-weekday')?.textContent).toBe('Sun');
+    await act(async () => i18n.changeLanguage('ja'));
+    expect(selectOrder()).toEqual(['calendar-year', 'calendar-month']);
+    expect(host.querySelector('.calendar-weekday')?.textContent).toBe('日');
+    click('.calendar-view-toggle'); await settle();
+    expect(selectOrder()).toEqual(['calendar-year', 'calendar-month']);
+    act(() => updateSetting('dateLocale', 'auto'));
+    expect(selectOrder()).toEqual(['calendar-month', 'calendar-year']);
+    expect(host.querySelector('.calendar-weekday')?.textContent).toBe('月');
+    act(() => updateSetting('dateLocale', 'ja-JP'));
+    await act(async () => i18n.changeLanguage('en'));
+    expect(selectOrder()).toEqual(['calendar-year', 'calendar-month']);
+    expect(host.querySelector('.calendar-weekday')?.textContent).toBe('Sun');
+  });
+
   it('orders year and month selects by the resolved date locale, independently of UI language', async () => {
     await mount(); click('#home-calendar-tab'); await settle();
     const selectOrder = () => [...host.querySelectorAll<HTMLSelectElement>('.calendar-navigation select')]

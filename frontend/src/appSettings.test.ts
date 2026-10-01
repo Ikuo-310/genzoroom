@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
 import i18n, { changeAppLanguage, currentLanguagePreference, detectLanguage, formatPhotoDate, LANGUAGE_STORAGE_KEY, readLanguagePreference } from './i18n';
+import { formatAlbumMonth } from './albums';
 
 afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailColumns', 6); updateSetting('recentPhotoCount', 100); });
 const memory = (initial: Record<string, string> = {}) => ({
@@ -8,6 +9,35 @@ const memory = (initial: Record<string, string> = {}) => ({
   setItem: (key: string, value: string) => { initial[key] = value; },
 });
 describe('browser preferences', () => {
+  it('preserves legacy browser Auto, restores language sync and falls back for invalid date preferences', () => {
+    for (const value of ['auto', 'invalid', '']) {
+      expect(readSettings(memory({ [DATE_LOCALE_KEY]: value }) as Storage).dateLocale).toBe('auto');
+    }
+    const storage = memory();
+    vi.stubGlobal('window', { localStorage: storage });
+    updateSetting('dateLocale', 'auto-language');
+    expect(storage.getItem(DATE_LOCALE_KEY)).toBe('auto-language');
+    expect(readSettings(storage as Storage).dateLocale).toBe('auto-language');
+  });
+
+  it('resolves language sync dynamically for all date formatting while browser and explicit modes stay independent', async () => {
+    vi.stubGlobal('navigator', { languages: ['en-GB'] });
+    updateSetting('dateLocale', 'auto-language');
+    const value = '2026-09-08T20:43:43';
+    for (const [language, locale] of [['ja', 'ja-JP'], ['en', 'en-US']] as const) {
+      await changeAppLanguage(language, memory());
+      expect(resolveDateLocale()).toBe(locale);
+      expect(formatPhotoDate(value)).toBe(formatPhotoDate(value, locale));
+      expect(formatAlbumMonth(value)).toBe(formatAlbumMonth(value, locale));
+      expect(resolveDateLocale('auto')).toBe('en-GB');
+      expect(resolveDateLocale('ja-JP')).toBe('ja-JP');
+      expect(resolveDateLocale('en-GB')).toBe('en-GB');
+      expect(resolveWeekStart('auto')).toBe(resolveWeekStart('auto', locale));
+    }
+    await changeAppLanguage('auto', memory());
+    expect(resolveDateLocale()).toBe('en-US');
+  });
+
   it('uses ordered browser languages and exact primary subtags with English fallback', () => {
     expect(detectLanguage(memory(), ['fr-FR', 'ja-JP', 'en-GB'])).toBe('ja');
     expect(detectLanguage(memory(), ['fr-FR', 'en-GB', 'ja-JP'])).toBe('en');

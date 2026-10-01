@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
-import { DATE_LOCALES, updateSetting, useAppSettings, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
+import { DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
 
@@ -120,8 +120,14 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
         <option value="auto">{t('settings.autoLanguage')}</option>
         {SUPPORTED_LANGUAGES.map(code => <option key={code} value={code}>{t('language.nativeName', { lng: code, defaultValue: code })}</option>)}
       </select></label>
-      <label>{t('settings.dateLocale')}<select value={settings.dateLocale} onChange={event => updateSetting('dateLocale', event.target.value as DateLocale)}>
-        <option value="auto">{t('settings.autoLocale')}</option>{DATE_LOCALES.map(locale => <option key={locale} value={locale}>{t(`settings.regions.${locale}`)}</option>)}
+      <label>{t('settings.dateLocale')}<select value={settings.dateLocale} onChange={event => {
+        const value = event.target.value as DateLocale;
+        if (DATE_LOCALE_CHOICES.includes(value)) updateSetting('dateLocale', value);
+      }}>
+        <option value="auto">{t('settings.autoLocale')}</option>
+        <option value="auto-language">{t('settings.autoLocaleLanguage')}</option>
+        <option value="" disabled>────────────</option>
+        {DATE_LOCALES.map(locale => <option key={locale} value={locale}>{t(`settings.regions.${locale}`)}</option>)}
       </select></label>
       <label>{t('settings.weekStart')}<select value={settings.weekStart} onChange={event => updateSetting('weekStart', event.target.value as WeekStart)}>
         <option value="auto">{t('settings.autoWeek')}</option><option value="sunday">{t('settings.sunday')}</option><option value="monday">{t('settings.monday')}</option>

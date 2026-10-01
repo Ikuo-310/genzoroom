@@ -341,6 +341,7 @@
     "auto": "Auto",
     "autoLanguage": "Auto (browser preferred languages)",
     "autoLocale": "Auto (browser regional settings)",
+    "autoLocaleLanguage": "Auto (follow language)",
     "autoWeek": "Auto (regional settings)",
     "dateLocale": "Date and time locale",
     "weekStart": "First day of the week",

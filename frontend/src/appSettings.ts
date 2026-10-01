@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import i18n from 'i18next';
 
 export const DATE_LOCALE_KEY = 'genzoroom.dateLocale';
 export const WEEK_START_KEY = 'genzoroom.weekStart';
@@ -6,7 +7,10 @@ export const INITIAL_IMAGE_KEY = 'genzoroom.initialImage';
 export const HOME_THUMBNAIL_COLUMNS_KEY = 'genzoroom.homeThumbnailColumns';
 export const RECENT_PHOTO_COUNT_KEY = 'genzoroom.recentPhotoCount';
 export const DATE_LOCALES = ['ja-JP', 'en-US', 'en-GB', 'de-DE', 'fr-FR', 'zh-CN', 'ko-KR'] as const;
-export type DateLocale = 'auto' | typeof DATE_LOCALES[number];
+// Keep the legacy Auto value as browser-region mode; saved preferences must not switch to language sync.
+export const DATE_LOCALE_CHOICES = ['auto', 'auto-language', ...DATE_LOCALES] as const;
+export type DateLocale = typeof DATE_LOCALE_CHOICES[number];
+const LANGUAGE_DATE_LOCALES: Record<string, string> = { ja: 'ja-JP', en: 'en-US' };
 export type WeekStart = 'auto' | 'sunday' | 'monday';
 export type InitialImage = 'auto' | 'original' | 'preview';
 export const HOME_THUMBNAIL_COLUMNS = [3, 4, 5, 6, 7, 8, 9, 10] as const;
@@ -36,7 +40,7 @@ export function readSettings(storage = browserStorage()): Settings {
     if (value !== undefined) recentPhotoCount = value;
   } catch { /* Invalid or blocked storage keeps the default recent count. */ }
   return {
-    dateLocale: readSetting(DATE_LOCALE_KEY, DATE_LOCALES, storage),
+    dateLocale: readSetting(DATE_LOCALE_KEY, DATE_LOCALE_CHOICES, storage),
     weekStart: readSetting(WEEK_START_KEY, ['sunday', 'monday'] as const, storage),
     initialImage: readSetting(INITIAL_IMAGE_KEY, ['original', 'preview'] as const, storage),
     homeThumbnailColumns,
@@ -55,6 +59,10 @@ export function useAppSettings() {
   return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => settings, () => settings);
 }
 export function resolveDateLocale(preference: DateLocale = settings.dateLocale, languages: readonly string[] = typeof navigator === 'undefined' ? [] : navigator.languages ?? []) {
+  if (preference === 'auto-language') {
+    const language = (i18n.resolvedLanguage ?? i18n.language ?? 'en').split('-')[0];
+    return LANGUAGE_DATE_LOCALES[language] ?? LANGUAGE_DATE_LOCALES.en;
+  }
   if (preference !== 'auto') return preference;
   for (const locale of languages) {
     try { return new Intl.DateTimeFormat(locale).resolvedOptions().locale; } catch { /* Ignore malformed browser tags. */ }

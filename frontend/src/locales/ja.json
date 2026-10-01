@@ -339,6 +339,7 @@
     "auto": "自動",
     "autoLanguage": "自動（ブラウザの優先言語）",
     "autoLocale": "自動（ブラウザの地域設定）",
+    "autoLocaleLanguage": "自動（言語設定に同期）",
     "autoWeek": "自動（地域設定に従う）",
     "dateLocale": "日付・時刻のロケール",
     "weekStart": "カレンダーの週初め",

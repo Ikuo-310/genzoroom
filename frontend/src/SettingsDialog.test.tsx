@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsButton, SettingsProvider } from './SettingsDialog';
 import { changeAppLanguage } from './i18n';
-import { updateSetting } from './appSettings';
+import { DATE_LOCALE_KEY, DATE_LOCALES, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 
 vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { create: vi.fn() } }));
@@ -31,6 +31,26 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('offers two date Auto modes before a disabled separator and never saves the separator', async () => {
+    await click(host.querySelector('button')!);
+    const select = dialog().querySelectorAll<HTMLSelectElement>('select')[1]!;
+    const options = [...select.options];
+    expect(options.map(option => option.value)).toEqual(['auto', 'auto-language', '', ...DATE_LOCALES]);
+    expect(options[0].textContent).toBe('Auto (browser regional settings)');
+    expect(options[1].textContent).toBe('Auto (follow language)');
+    expect(options[2].disabled).toBe(true);
+    await act(async () => { select.value = 'auto-language'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(localStorage.getItem(DATE_LOCALE_KEY)).toBe('auto-language');
+    await act(async () => { select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(localStorage.getItem(DATE_LOCALE_KEY)).toBe('auto-language');
+    await click(dialog().querySelector('header button')!); await click(host.querySelector('button')!);
+    expect(dialog().querySelectorAll<HTMLSelectElement>('select')[1]!.value).toBe('auto-language');
+    await act(async () => changeAppLanguage('ja'));
+    const translated = dialog().querySelectorAll<HTMLSelectElement>('select')[1]!.options;
+    expect(translated[0].textContent).toBe('自動（ブラウザの地域設定）');
+    expect(translated[1].textContent).toBe('自動（言語設定に同期）');
+  });
+
   it('traps focus, closes with Escape and restores focus while isolating background shortcuts', async () => {
     const trigger = host.querySelector<HTMLButtonElement>('button')!; trigger.focus();
     await click(trigger);
