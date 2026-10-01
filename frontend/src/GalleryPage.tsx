@@ -45,6 +45,7 @@ export function GalleryPage() {
   const [scrollRestoreRevision, setScrollRestoreRevision] = useState(0);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const currentYear = new Date().getFullYear();
+  const dateLocale = resolveDateLocale(settings.dateLocale);
   const [connection, setConnection] = useState<Connection>('checking');
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
@@ -594,7 +595,7 @@ export function GalleryPage() {
           {selectedCalendarDate ? <>
             <div className="album-detail-heading">
               <button type="button" className="album-back" onClick={closeCalendarDay}>← {t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}</button>
-              <h2>{new Intl.DateTimeFormat(resolveDateLocale(settings.dateLocale), { dateStyle: 'long', timeZone: 'UTC' })
+              <h2>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
                 .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
             </div>
             {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
@@ -607,7 +608,7 @@ export function GalleryPage() {
                     : renderPhotoGrid()}
           </> : <>
             <HomeCalendar year={calendarYear} month={calendarMonth} mode={calendarMode} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
-              weekStart={resolveWeekStart(settings.weekStart, resolveDateLocale(settings.dateLocale))}
+              weekStart={resolveWeekStart(settings.weekStart, dateLocale)} dateLocale={dateLocale}
               loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
               onMonthChange={changeCalendarMonth} onCurrentMonth={goToCurrentCalendarMonth}
               onNavigate={changeCalendarPeriod}

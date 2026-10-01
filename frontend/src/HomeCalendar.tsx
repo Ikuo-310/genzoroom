@@ -13,7 +13,7 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
-export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onMonthOpen, onDayOpen }: {
+export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, dateLocale, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onMonthOpen, onDayOpen }: {
   year: number;
   month: number;
   mode: CalendarViewMode;
@@ -21,6 +21,7 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
   maxYear: number;
   days: CalendarDay[];
   weekStart: number;
+  dateLocale: string;
   loading: boolean;
   onYearChange: (year: number) => void;
   onMonthChange: (month: number) => void;
@@ -33,6 +34,9 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
 }) {
   const { t } = useTranslation();
   const daysByDate = new Map(days.map(day => [day.date, day]));
+  const dateParts = new Intl.DateTimeFormat(dateLocale, { year: 'numeric', month: 'long' })
+    .formatToParts(new Date(Date.UTC(year, 0, 1)));
+  const yearFirst = dateParts.findIndex(part => part.type === 'year') < dateParts.findIndex(part => part.type === 'month');
   const previous = mode === 'year' ? { year: year - 1, month } : shiftCalendarMonth(year, month, -1);
   const next = mode === 'year' ? { year: year + 1, month } : shiftCalendarMonth(year, month, 1);
   function move(target: { year: number; month: number }) {
@@ -46,19 +50,13 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
         onClick={() => move(previous)}>←</button>
       <button type="button" className="calendar-view-toggle" onClick={() => onModeChange(mode === 'year' ? 'month' : 'year')}>
         {t(mode === 'year' ? 'calendar.monthView' : 'calendar.yearView')}</button>
-      <label className="visually-hidden" htmlFor="calendar-year">{t('calendar.year')}</label>
-      <select id="calendar-year" aria-label={t('calendar.year')} value={year}
-        onChange={event => onYearChange(Number(event.target.value))}>
-        {Array.from({ length: maxYear - minYear + 1 }, (_, index) => {
-          const optionYear = minYear + index;
-          return <option key={optionYear} value={optionYear}>{t('calendar.yearOption', { year: optionYear })}</option>;
-        })}
-      </select>
-      <label className="visually-hidden" htmlFor="calendar-month">{t('calendar.month')}</label>
-      <select id="calendar-month" aria-label={t('calendar.month')} value={month}
-        onChange={event => onMonthChange(Number(event.target.value))}>
-        {monthKeys.map((key, index) => <option key={key} value={index + 1}>{t(`calendar.months.${key}`)}</option>)}
-      </select>
+      {yearFirst ? <>
+        <YearSelect year={year} minYear={minYear} maxYear={maxYear} onChange={onYearChange} />
+        <MonthSelect month={month} onChange={onMonthChange} />
+      </> : <>
+        <MonthSelect month={month} onChange={onMonthChange} />
+        <YearSelect year={year} minYear={minYear} maxYear={maxYear} onChange={onYearChange} />
+      </>}
       <button type="button" className="calendar-current-month" onClick={mode === 'year' ? onCurrentYear : onCurrentMonth}>
         {t(mode === 'year' ? 'calendar.thisYear' : 'calendar.thisMonth')}</button>
       <button type="button" className="calendar-arrow" aria-label={t(mode === 'year' ? 'calendar.nextYear' : 'calendar.nextMonth')}
@@ -76,6 +74,31 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
     </div> : <CalendarMonthGrid year={year} month={month} daysByDate={daysByDate} weekStart={weekStart}
       loading={loading} showCounts onDayOpen={onDayOpen} />}
   </div>;
+}
+
+function YearSelect({ year, minYear, maxYear, onChange }: {
+  year: number; minYear: number; maxYear: number; onChange: (year: number) => void;
+}) {
+  const { t } = useTranslation();
+  return <>
+    <label className="visually-hidden" htmlFor="calendar-year">{t('calendar.year')}</label>
+    <select id="calendar-year" aria-label={t('calendar.year')} value={year} onChange={event => onChange(Number(event.target.value))}>
+      {Array.from({ length: maxYear - minYear + 1 }, (_, index) => {
+        const optionYear = minYear + index;
+        return <option key={optionYear} value={optionYear}>{t('calendar.yearOption', { year: optionYear })}</option>;
+      })}
+    </select>
+  </>;
+}
+
+function MonthSelect({ month, onChange }: { month: number; onChange: (month: number) => void }) {
+  const { t } = useTranslation();
+  return <>
+    <label className="visually-hidden" htmlFor="calendar-month">{t('calendar.month')}</label>
+    <select id="calendar-month" aria-label={t('calendar.month')} value={month} onChange={event => onChange(Number(event.target.value))}>
+      {monthKeys.map((key, index) => <option key={key} value={index + 1}>{t(`calendar.months.${key}`)}</option>)}
+    </select>
+  </>;
 }
 
 function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showCounts, onDayOpen }: {

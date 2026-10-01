@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
-import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
+import { HOME_THUMBNAIL_COLUMNS_KEY, resolveDateLocale, updateSetting } from './appSettings';
 import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
 import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
@@ -91,6 +91,32 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('orders year and month selects by the resolved date locale, independently of UI language', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    const selectOrder = () => [...host.querySelectorAll<HTMLSelectElement>('.calendar-navigation select')]
+      .map(select => select.id);
+    expect(selectOrder()).toEqual(['calendar-month', 'calendar-year']);
+
+    act(() => updateSetting('dateLocale', 'ja-JP'));
+    expect(selectOrder()).toEqual(['calendar-year', 'calendar-month']);
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('This month');
+
+    await act(async () => { await i18n.changeLanguage('ja'); });
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月へ');
+    act(() => updateSetting('dateLocale', 'en-GB'));
+    expect(selectOrder()).toEqual(['calendar-month', 'calendar-year']);
+
+    act(() => updateSetting('dateLocale', 'auto'));
+    const localeParts = new Intl.DateTimeFormat(resolveDateLocale('auto'), { year: 'numeric', month: 'long' })
+      .formatToParts(new Date(Date.UTC(2026, 0, 1)));
+    const expectedOrder = localeParts.findIndex(part => part.type === 'year') < localeParts.findIndex(part => part.type === 'month')
+      ? ['calendar-year', 'calendar-month'] : ['calendar-month', 'calendar-year'];
+    expect(selectOrder()).toEqual(expectedOrder);
+
+    click('.calendar-view-toggle'); await settle();
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今年へ');
+  });
+
   it('switches month/year with one annual request, keeps month, and localizes the controls', async () => {
     await mount(); click('#home-calendar-tab'); await settle();
     selectValue('#calendar-month', '8'); await settle();
@@ -109,12 +135,12 @@ describe('Home calendar', () => {
     expect(api.heatmap).toHaveBeenCalledTimes(requestCount);
     await act(async () => { await i18n.changeLanguage('ja'); });
     expect(host.querySelector('.calendar-view-toggle')?.textContent).toBe('月表示へ');
-    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今年');
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今年へ');
     click('.calendar-view-toggle'); await settle();
     expect(host.querySelector('.calendar-month')).not.toBeNull();
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
     expect(host.querySelector('.calendar-view-toggle')?.textContent).toBe('年表示へ');
-    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月');
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月へ');
     click('.calendar-view-toggle'); await settle(); selectValue('#calendar-month', '3'); await settle();
     expect(host.querySelector('.calendar-month')).not.toBeNull();
     expect(api.heatmap).toHaveBeenLastCalledWith(2026, 3, expect.any(AbortSignal));
@@ -294,7 +320,7 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.calendar-blank')).toHaveLength(0);
     await act(async () => { await i18n.changeLanguage('ja'); });
     expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー');
-    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月');
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月へ');
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('月');
   });
 
