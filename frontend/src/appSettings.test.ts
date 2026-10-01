@@ -30,10 +30,13 @@ describe('browser preferences', () => {
     expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100 });
     const storage = memory({ [DATE_LOCALE_KEY]: 'en-GB', [WEEK_START_KEY]: 'sunday', [INITIAL_IMAGE_KEY]: 'original', [HOME_THUMBNAIL_COLUMNS_KEY]: '3', [RECENT_PHOTO_COUNT_KEY]: '250' });
     expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailColumns: 3, recentPhotoCount: 250 });
+    for (const columns of [3, 4, 5, 6, 7, 8, 9, 10]) {
+      expect(readSettings(memory({ [HOME_THUMBNAIL_COLUMNS_KEY]: String(columns) }) as Storage).homeThumbnailColumns).toBe(columns);
+    }
     for (const invalidCount of ['49', '51', '501', '225', '100.0', 'invalid']) {
       expect(readSettings(memory({ [RECENT_PHOTO_COUNT_KEY]: invalidCount }) as Storage).recentPhotoCount).toBe(100);
     }
-    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_COLUMNS_KEY]: '9', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100 });
+    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_COLUMNS_KEY]: '11', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100 });
     vi.stubGlobal('window', { localStorage: storage });
     updateSetting('initialImage', 'preview'); updateSetting('weekStart', 'monday'); updateSetting('dateLocale', 'ja-JP');
     updateSetting('homeThumbnailColumns', 4);

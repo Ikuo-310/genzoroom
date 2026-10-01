@@ -38,17 +38,19 @@ describe('Home thumbnail size controls', () => {
     expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('7');
     for (let i = 0; i < 4; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
     expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.disabled).toBe(true);
-    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('8 columns');
-    for (let i = 0; i < 5; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.click());
+    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('10 columns');
+    for (let i = 0; i < 7; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.click());
     expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
   });
   it('updates the saved Home setting immediately while the slider moves', async () => {
     const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
+    const slider = home.querySelector<HTMLInputElement>('input[type="range"]')!;
+    expect(slider.min).toBe('0'); expect(slider.max).toBe('7');
     await change(home, '0');
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('8');
+    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('10');
     expect(home.querySelector('input')!.value).toBe('0');
-    await change(home, '5');
+    await change(home, '7');
     expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
   });
 });

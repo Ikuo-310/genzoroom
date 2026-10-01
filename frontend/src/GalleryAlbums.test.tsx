@@ -98,7 +98,7 @@ describe('Home album tab', () => {
     const albumGrid = host.querySelector<HTMLElement>('.album-grid')!;
     const slider = host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')!;
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '4');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '6');
       slider.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('4 columns');
