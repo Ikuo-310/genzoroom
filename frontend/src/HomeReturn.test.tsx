@@ -12,10 +12,11 @@ import { writePhotoFilterMode } from './photoFilters';
 import { EditStateApiError } from './editStateApi';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
-  heatmap: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
+  heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
-  fetchCalendarHeatmap: api.heatmap, fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail }));
+  fetchCalendarHeatmap: api.heatmap, fetchCalendarMinYear: api.minYear,
+  fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
   getAssetEditState: api.get, putAssetEditState: api.put, getAssetEditStatuses: api.statuses }));
 vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel" /> }));
@@ -57,6 +58,7 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
+  api.minYear.mockReset().mockResolvedValue(2002);
   api.albumAssets.mockReset().mockResolvedValue([photo, second]);
   api.day.mockReset().mockResolvedValue([photo]);
   api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => ({ year, month,

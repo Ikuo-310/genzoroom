@@ -62,6 +62,17 @@ export async function fetchCalendarHeatmap(year: number, month: number, signal: 
   return data as CalendarHeatmap;
 }
 
+export async function fetchCalendarMinYear(signal: AbortSignal): Promise<number | null> {
+  const response = await fetch('/api/calendar/min-year', { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Calendar minimum year request failed');
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !(data.minYear === null ||
+    typeof data.minYear === 'number' && Number.isInteger(data.minYear) && data.minYear >= 1 && data.minYear <= 9999)) {
+    throw new Error('Unexpected calendar minimum year response');
+  }
+  return data.minYear;
+}
+
 export async function fetchCalendarDayAssets(day: string, signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch(`/api/calendar/${encodeURIComponent(day)}/assets`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Calendar photos request failed');

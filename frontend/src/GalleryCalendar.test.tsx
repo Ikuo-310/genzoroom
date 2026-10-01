@@ -10,10 +10,10 @@ import type { CalendarHeatmap } from './HomeCalendar';
 import { PHOTO_FILTER_SESSION_KEY, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 
-const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
-  fetchCalendarHeatmap: api.heatmap, fetchCalendarDayAssets: api.day }));
+  fetchCalendarHeatmap: api.heatmap, fetchCalendarMinYear: api.minYear, fetchCalendarDayAssets: api.day }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
   getAssetEditStatuses: api.statuses }));
 
@@ -64,6 +64,7 @@ function selectValue(selector: string, value: string) {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
   await i18n.changeLanguage('en');
   sessionStorage.clear(); writePhotoFilterMode('both');
   updateSetting('weekStart', 'sunday'); updateSetting('dateLocale', 'en-US');
@@ -71,6 +72,7 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue(recent);
   api.albums.mockReset().mockResolvedValue([]);
+  api.minYear.mockReset().mockResolvedValue(2002);
   api.albumAssets.mockReset().mockResolvedValue(dayPhotos.slice(0, 2));
   api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => monthData(year, month));
   api.day.mockReset().mockResolvedValue(dayPhotos);
@@ -81,7 +83,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear(); writePhotoFilterMode('both');
   updateSetting('weekStart', 'auto'); updateSetting('dateLocale', 'auto');
-  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
+  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals(); vi.useRealTimers();
 });
 
 describe('Home calendar', () => {
@@ -120,26 +122,47 @@ describe('Home calendar', () => {
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
     click('#home-calendar-tab'); await settle();
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe(String(new Date().getFullYear()));
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe(String(new Date().getMonth() + 1));
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('Sun');
-    selectValue('#calendar-year', '2026'); selectValue('#calendar-month', '12'); await settle();
+    const years = [...host.querySelectorAll<HTMLOptionElement>('#calendar-year option')].map(option => Number(option.value));
+    expect(years[0]).toBe(2002);
+    expect(years.at(-1)).toBe(2026);
+    expect(years).toEqual([...years].sort((a, b) => a - b));
+    expect(years).not.toContain(1900);
+    expect(years).not.toContain(2027);
+    expect(api.minYear).toHaveBeenCalledTimes(1);
+    selectValue('#calendar-year', '2025'); selectValue('#calendar-month', '12'); await settle();
     click('[aria-label="Next month"]'); await settle();
-    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2027');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('1');
     click('[aria-label="Previous month"]'); await settle();
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('12');
+    selectValue('#calendar-year', '2026'); selectValue('#calendar-month', '12'); await settle();
+    expect(host.querySelector<HTMLButtonElement>('.calendar-arrow:last-child')?.disabled).toBe(true);
     selectValue('#calendar-month', '1'); await settle();
     click('[aria-label="Previous month"]'); await settle();
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2025');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('12');
     expect(api.heatmap).toHaveBeenCalledWith(2025, 12, expect.any(AbortSignal));
+    click('#home-recent-tab'); click('#home-calendar-tab'); await settle();
+    expect(api.minYear).toHaveBeenCalledTimes(1);
     act(() => updateSetting('weekStart', 'monday'));
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('Mon');
     expect(host.querySelectorAll('.calendar-blank')).toHaveLength(0);
     await act(async () => { await i18n.changeLanguage('ja'); });
     expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー');
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('月');
+  });
+
+  it.each(['empty', 'error'] as const)('falls back to only the current year when oldest-image metadata is %s', async result => {
+    if (result === 'empty') api.minYear.mockResolvedValueOnce(null);
+    else api.minYear.mockRejectedValueOnce(new Error('Unavailable'));
+    await mount(); click('#home-calendar-tab'); await settle();
+    const years = [...host.querySelectorAll<HTMLOptionElement>('#calendar-year option')].map(option => Number(option.value));
+    expect(years).toEqual([2026]);
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
+    expect(host.querySelector('.calendar-month')).not.toBeNull();
   });
 
   it('only opens days with data, reuses photo controls and selection, and preserves the month on return', async () => {
@@ -198,7 +221,7 @@ describe('Home calendar', () => {
     const old = deferred<CalendarHeatmap>();
     api.heatmap.mockImplementationOnce(() => old.promise)
       .mockImplementation(async (year: number, month: number) => monthData(year, month));
-    await mount(); click('#home-calendar-tab');
+    await mount(); click('#home-calendar-tab'); await settle();
     const firstSignal = api.heatmap.mock.calls[0][2] as AbortSignal;
     click('[aria-label="Next month"]'); await settle();
     expect(firstSignal.aborted).toBe(true);

@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { homeScrollContent, readHomeReturn, restoreHomeScroll, type HomeReturnContext, type HomeTab } from './homeReturn';
-import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
@@ -14,7 +14,7 @@ import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
-import { CALENDAR_FIRST_YEAR, CALENDAR_LAST_YEAR, HomeCalendar, type CalendarDay } from './HomeCalendar';
+import { HomeCalendar, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { filterPhotos, photoFiltersForMode, readPhotoFilterMode, writePhotoFilterMode } from './photoFilters';
 import {
@@ -40,6 +40,7 @@ export function GalleryPage() {
   const pageRef = useRef<HTMLElement>(null);
   const pendingScroll = useRef(homeReturn);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
+  const currentYear = new Date().getFullYear();
   const [connection, setConnection] = useState<Connection>('checking');
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
@@ -52,6 +53,8 @@ export function GalleryPage() {
   const [albumAssetState, setAlbumAssetState] = useState<'idle' | AssetState>('idle');
   const [calendarYear, setCalendarYear] = useState(() => homeReturn?.year ?? new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => homeReturn?.month ?? new Date().getMonth() + 1);
+  const [calendarMinYear, setCalendarMinYear] = useState(currentYear);
+  const [calendarMinYearReady, setCalendarMinYearReady] = useState(false);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   const [calendarState, setCalendarState] = useState<'idle' | AssetState>('idle');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(homeReturn?.date ?? null);
@@ -198,6 +201,26 @@ export function GalleryPage() {
   }, [activeTab, selectedAlbum?.id]);
 
   useEffect(() => {
+    if (activeTab !== 'calendar' || calendarMinYearReady) return;
+    const controller = new AbortController();
+    let active = true;
+    void fetchCalendarMinYear(controller.signal).then(minYear => {
+      if (!active) return;
+      const validMinYear = minYear !== null && minYear >= 1 && minYear <= currentYear ? minYear : currentYear;
+      setCalendarMinYear(validMinYear);
+      setCalendarYear(year => Math.max(validMinYear, Math.min(currentYear, year)));
+      setCalendarMinYearReady(true);
+    }).catch(() => {
+      if (!active) return;
+      setCalendarMinYear(currentYear);
+      setCalendarYear(year => Math.min(currentYear, year));
+      setCalendarMinYearReady(true);
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeTab, calendarMinYearReady, currentYear]);
+
+  useEffect(() => {
+    if (!calendarMinYearReady) return;
     if (activeTab !== 'calendar' || selectedCalendarDate !== null) return;
     const controller = new AbortController();
     let active = true;
@@ -211,7 +234,7 @@ export function GalleryPage() {
       if (active && requestId === calendarHeatmapRequestId.current) setCalendarState('error');
     });
     return () => { active = false; controller.abort(); };
-  }, [activeTab, calendarYear, calendarMonth, selectedCalendarDate]);
+  }, [activeTab, calendarYear, calendarMonth, selectedCalendarDate, calendarMinYearReady]);
 
   useEffect(() => {
     if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
@@ -335,7 +358,7 @@ export function GalleryPage() {
   }
 
   function changeCalendarYear(year: number) {
-    if (year < CALENDAR_FIRST_YEAR || year > CALENDAR_LAST_YEAR) return;
+    if (year < calendarMinYear || year > currentYear) return;
     calendarHeatmapRequestId.current += 1;
     setCalendarYear(year);
   }
@@ -490,7 +513,7 @@ export function GalleryPage() {
                   : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                     : renderPhotoGrid()}
           </> : <>
-            <HomeCalendar year={calendarYear} month={calendarMonth} days={calendarDays}
+            <HomeCalendar year={calendarYear} month={calendarMonth} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
               weekStart={resolveWeekStart(settings.weekStart, resolveDateLocale(settings.dateLocale))}
               loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
               onMonthChange={changeCalendarMonth} onDayOpen={openCalendarDay} />

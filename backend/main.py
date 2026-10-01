@@ -20,10 +20,12 @@ from immich import (
     ImmichStatus,
     AlbumSummary,
     CalendarHeatmap,
+    CalendarMinimumYear,
     RecentAsset,
     get_albums,
     get_album_assets,
     get_calendar_day_assets,
+    get_calendar_min_year,
     get_calendar_heatmap,
     check_immich_status,
     get_asset_detail,
@@ -185,6 +187,16 @@ async def calendar_heatmap(
 ) -> CalendarHeatmap:
     try:
         return await get_calendar_heatmap(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), year, month)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/calendar/min-year", response_model=CalendarMinimumYear)
+async def calendar_min_year() -> CalendarMinimumYear:
+    try:
+        return CalendarMinimumYear(minYear=await get_calendar_min_year(
+            os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"),
+        ))
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 

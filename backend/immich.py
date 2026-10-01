@@ -134,6 +134,10 @@ class CalendarHeatmap(BaseModel):
     days: list[CalendarDay]
 
 
+class CalendarMinimumYear(BaseModel):
+    minYear: int | None
+
+
 class AssetExif(BaseModel):
     date_time_original: str | None = None
     make: str | None = None
@@ -479,6 +483,49 @@ async def get_calendar_day_assets(
         immich_url, api_key, {"type": {"eq": "IMAGE"}, "takenAt": bounds},
         "localDateTime", transport=transport,
     )
+
+
+async def get_calendar_min_year(
+    immich_url: str | None,
+    api_key: str | None,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> int | None:
+    url, key = _require_configuration(immich_url, api_key)
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.post(
+                _api_url(url, "/search/metadata"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+                json={
+                    "filter": {"type": {"eq": "IMAGE"}},
+                    "orderBy": {"field": "localDateTime", "direction": "asc"},
+                    "size": 1,
+                },
+            )
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+    if response.status_code != 200:
+        raise _request_error(response)
+    try:
+        body = response.json()
+        if not isinstance(body, Mapping) or not isinstance(body.get("assets"), Mapping):
+            raise TypeError
+        items = body["assets"].get("items")
+        if not isinstance(items, list) or len(items) > 1:
+            raise TypeError
+        if not items:
+            return None
+        oldest = items[0]
+        if not isinstance(oldest, Mapping) or oldest.get("type") != "IMAGE":
+            raise TypeError
+        local_date_time = oldest.get("localDateTime")
+        if not isinstance(local_date_time, str) or not local_date_time:
+            raise TypeError
+        return datetime.fromisoformat(local_date_time.replace("Z", "+00:00")).year
+    except (KeyError, TypeError, ValueError):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
 
 async def _search_all_assets(

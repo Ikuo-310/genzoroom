@@ -7,7 +7,7 @@ from uuid import UUID
 
 import httpx
 
-from immich import ImmichRequestError, get_calendar_day_assets, get_calendar_heatmap
+from immich import ImmichRequestError, get_calendar_day_assets, get_calendar_heatmap, get_calendar_min_year
 from main import app
 
 
@@ -24,6 +24,34 @@ def page(items, next_cursor=None):
 
 
 class CalendarTests(unittest.TestCase):
+    def test_min_year_searches_one_oldest_image_and_returns_local_year(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            self.assertEqual(request.url.path, "/api/search/metadata")
+            self.assertEqual(request.headers["x-api-key"], "secret")
+            self.assertEqual(json.loads(request.content), {
+                "filter": {"type": {"eq": "IMAGE"}},
+                "orderBy": {"field": "localDateTime", "direction": "asc"}, "size": 1,
+            })
+            return page([asset(0) | {"localDateTime": "2002-03-04T05:06:07.000Z"}])
+        result = asyncio.run(get_calendar_min_year("http://immich.example", "secret",
+            transport=httpx.MockTransport(handler)))
+        self.assertEqual(result, 2002)
+        self.assertEqual(len(calls), 1)
+
+    def test_min_year_handles_no_images_and_rejects_upstream_failures(self):
+        result = asyncio.run(get_calendar_min_year("http://immich.example", "secret",
+            transport=httpx.MockTransport(lambda request: page([]))))
+        self.assertIsNone(result)
+        for response in (httpx.Response(403), httpx.Response(500), httpx.Response(200, content=b"{"),
+                         httpx.Response(200, json={"assets": {"items": "invalid"}}),
+                         page([asset(0) | {"localDateTime": None}]),
+                         page([asset(0) | {"type": "VIDEO", "localDateTime": "2002-03-04T05:06:07Z"}])):
+            with self.subTest(response=response), self.assertRaises(ImmichRequestError):
+                asyncio.run(get_calendar_min_year("http://immich.example", "secret",
+                    transport=httpx.MockTransport(lambda request: response)))
+
     def test_heatmap_queries_month_and_allowlists_presence(self):
         def handler(request):
             self.assertEqual(request.url.path, "/api/users/me/calendar-heatmap")
@@ -112,8 +140,14 @@ class CalendarTests(unittest.TestCase):
                     for path in ("/calendar/heatmap?year=0&month=9", "/calendar/heatmap?year=2026&month=13",
                                  "/calendar/heatmap?year=no&month=9", "/calendar/not-a-date/assets"):
                         self.assertEqual((await client.get(path)).status_code, 422)
+                with patch("main.get_calendar_min_year", new=AsyncMock(return_value=2002)):
+                    response = await client.get("/calendar/min-year")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json(), {"minYear": 2002})
                 with patch("main.get_calendar_heatmap", new=AsyncMock(side_effect=ImmichRequestError("authentication_failed", "Denied"))):
                     self.assertEqual((await client.get("/calendar/heatmap?year=2026&month=9")).status_code, 502)
+                with patch("main.get_calendar_min_year", new=AsyncMock(side_effect=ImmichRequestError("unreachable", "Failed"))):
+                    self.assertEqual((await client.get("/calendar/min-year")).status_code, 503)
                 with patch("main.get_calendar_day_assets", new=AsyncMock(side_effect=ImmichRequestError("unexpected_response", "Failed"))):
                     self.assertEqual((await client.get("/calendar/2026-09-30/assets")).status_code, 502)
         asyncio.run(exercise())

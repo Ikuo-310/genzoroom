@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
 
 describe('recent assets API', () => {
   it('passes the selected limit to the backend', async () => {
@@ -47,6 +47,20 @@ describe('album assets API', () => {
 });
 
 describe('calendar API', () => {
+  it('fetches and validates the calendar minimum year metadata', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ minYear: 2002 })));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchCalendarMinYear(controller.signal)).toBe(2002);
+      expect(fetch).toHaveBeenCalledWith('/api/calendar/min-year', { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response(JSON.stringify({ minYear: null })));
+      expect(await fetchCalendarMinYear(controller.signal)).toBeNull();
+      fetch.mockImplementation(async () => new Response(JSON.stringify({ minYear: '1900' })));
+      await expect(fetchCalendarMinYear(controller.signal)).rejects.toThrow('Unexpected calendar minimum year response');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('passes year and month and validates the heatmap', async () => {
     const heatmap = { year: 2026, month: 9, days: [{ date: '2026-09-30', hasAssets: true, count: 1558 }] };
     const fetch = vi.fn(async () => new Response(JSON.stringify(heatmap)));

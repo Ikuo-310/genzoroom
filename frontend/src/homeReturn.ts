@@ -1,6 +1,5 @@
 import type { AlbumSummary } from './albums';
 import { isAlbumSummary } from './api';
-import { CALENDAR_FIRST_YEAR, CALENDAR_LAST_YEAR } from './HomeCalendar';
 
 export type HomeTab = 'recent' | 'albums' | 'calendar';
 // Route state carries only browsing context; asset data and persistent settings keep their existing owners.
@@ -19,8 +18,8 @@ export function readHomeReturn(value: unknown): HomeReturnContext | null {
   const state = value as Record<string, unknown>;
   if (!['recent', 'albums', 'calendar'].includes(state.tab as string)) return null;
   const now = new Date();
-  const validMonth = Number.isInteger(state.year) && Number(state.year) >= CALENDAR_FIRST_YEAR
-    && Number(state.year) <= CALENDAR_LAST_YEAR && Number.isInteger(state.month)
+  const validMonth = Number.isInteger(state.year) && Number(state.year) >= 1
+    && Number(state.year) <= now.getFullYear() && Number.isInteger(state.month)
     && Number(state.month) >= 1 && Number(state.month) <= 12;
   const year = validMonth ? Number(state.year) : now.getFullYear();
   const month = validMonth ? Number(state.month) : now.getMonth() + 1;
