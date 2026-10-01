@@ -58,13 +58,13 @@ class CalendarTests(unittest.TestCase):
             self.assertEqual(request.url.path, "/api/timeline/bucket")
             self.assertEqual(request.headers["x-api-key"], "secret")
             self.assertEqual(dict(request.url.params), {
-                "timeBucket": "2026-07-01", "orderBy": "takenAt", "order": "desc",
+                "timeBucket": "2026-07-01T00:00:00.000Z", "orderBy": "takenAt", "order": "desc",
                 "visibility": "timeline", "isTrashed": "false", "withStacked": "true"})
             self.assertNotIn("withPartners", request.url.params)
             return bucket(ids, [False, True, True, True, False],
                 ["2026-07-15T01:00:00", "2026-07-14T23:00:00Z", "2026-07-15T00:00:00Z",
                  "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"], [0, 5.5, 0, -3.5, 0])
-        with self.assertLogs("immich", level="DEBUG") as logs:
+        with self.assertLogs("immich", level="INFO") as logs:
             result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
                 transport=httpx.MockTransport(handler)))
         diagnostic = next(line for line in logs.output if "Calendar thumbnail lookup:" in line)

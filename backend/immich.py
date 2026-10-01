@@ -662,7 +662,7 @@ async def _calendar_month_thumbnails(
             response = await client.get(
                 _api_url(url, "/timeline/bucket"),
                 headers={"x-api-key": key, "Accept": "application/json"},
-                params={"timeBucket": first.isoformat(), "orderBy": "takenAt",
+                params={"timeBucket": f"{first.isoformat()}T00:00:00.000Z", "orderBy": "takenAt",
                         "order": "desc", "visibility": "timeline", "isTrashed": "false",
                         "withStacked": "true"},
             )
@@ -722,7 +722,7 @@ async def _calendar_month_thumbnails(
         for day, asset_id in batch:
             if asset_id in jpeg_ids:
                 thumbnails.setdefault(day, f"/api/assets/{asset_id}/thumbnail")
-    logger.debug(
+    logger.info(
         "Calendar thumbnail lookup: year=%s month=%s bucket_assets=%s image_assets=%s "
         "month_candidates=%s candidate_days=%s format_results=%s jpeg_assets=%s thumbnail_days=%s",
         first.year, first.month, len(body["id"]), image_assets, len(candidates),
