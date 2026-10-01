@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import type { CalendarViewMode } from './homeReturn';
 
-export type CalendarDay = { date: string; hasAssets: boolean; count: number };
+export type CalendarDay = { date: string; hasAssets: boolean; count: number; thumbnail_url?: string | null };
 export type CalendarHeatmap = { year: number; month: number | null; days: CalendarDay[] };
 
 const weekdayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
@@ -69,10 +69,10 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
         <h3><button type="button" className="calendar-mini-month-title" onClick={() => onMonthOpen(index + 1)}>
           {t(`calendar.months.${key}`)}</button></h3>
         <CalendarMonthGrid year={year} month={index + 1} daysByDate={daysByDate} weekStart={weekStart}
-          loading={loading} showCounts={false} onDayOpen={onDayOpen} />
+          loading={loading} showThumbnails={false} onDayOpen={onDayOpen} />
       </section>)}
     </div> : <CalendarMonthGrid year={year} month={month} daysByDate={daysByDate} weekStart={weekStart}
-      loading={loading} showCounts onDayOpen={onDayOpen} />}
+      loading={loading} showThumbnails onDayOpen={onDayOpen} />}
   </div>;
 }
 
@@ -101,9 +101,9 @@ function MonthSelect({ month, onChange }: { month: number; onChange: (month: num
   </>;
 }
 
-function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showCounts, onDayOpen }: {
+function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showThumbnails, onDayOpen }: {
   year: number; month: number; daysByDate: Map<string, CalendarDay>; weekStart: number;
-  loading: boolean; showCounts: boolean; onDayOpen: (date: string) => void;
+  loading: boolean; showThumbnails: boolean; onDayOpen: (date: string) => void;
 }) {
   const { t } = useTranslation();
   const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
@@ -121,10 +121,12 @@ function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showCo
         const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const entry = daysByDate.get(date);
         const available = !loading && entry?.hasAssets === true;
-        return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${date === todayKey ? ' today' : ''}`}
-          disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date, count: entry.count }) : t('calendar.dayLabel', { date })}
-          onClick={() => onDayOpen(date)}><span className="calendar-day-number">{day}</span>
-          {available && showCounts && <span className="calendar-day-count">{t('calendar.assetCount', { count: entry.count })}</span>}
+        const thumbnail = available && showThumbnails ? entry.thumbnail_url : null;
+        return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${thumbnail ? ' has-thumbnail' : ''}${date === todayKey ? ' today' : ''}`}
+          disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date }) : t('calendar.dayLabel', { date })}
+          onClick={() => onDayOpen(date)}>
+          {thumbnail && <img className="calendar-day-thumbnail" src={thumbnail} alt="" loading="lazy" />}
+          <span className="calendar-day-number">{day}</span>
       </button>;
       })}
     </div>;

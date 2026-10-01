@@ -56,7 +56,8 @@ export async function fetchCalendarHeatmap(year: number, month: number | null, s
   const data: unknown = await response.json();
   if (!isRecord(data) || data.year !== year || data.month !== month || !Array.isArray(data.days) ||
     data.days.some(day => !isRecord(day) || typeof day.date !== 'string' || typeof day.hasAssets !== 'boolean' ||
-      typeof day.count !== 'number' || !Number.isSafeInteger(day.count) || day.count < 0)) {
+      typeof day.count !== 'number' || !Number.isSafeInteger(day.count) || day.count < 0 ||
+      !(day.thumbnail_url === undefined || day.thumbnail_url === null || typeof day.thumbnail_url === 'string'))) {
     throw new Error('Unexpected calendar heatmap response');
   }
   return data as CalendarHeatmap;

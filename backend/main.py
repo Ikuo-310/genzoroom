@@ -183,7 +183,8 @@ async def album_assets(album_id: UUID) -> list[RecentAsset]:
 
 @app.get("/calendar/heatmap", response_model=CalendarHeatmap)
 async def calendar_heatmap(
-    year: int = Query(ge=1, le=9999), month: int | None = Query(default=None, ge=1, le=12),
+    # The exclusive end must fit Python's date range, including the following January 1.
+    year: int = Query(ge=1, le=9998), month: int | None = Query(default=None, ge=1, le=12),
 ) -> CalendarHeatmap:
     try:
         return await get_calendar_heatmap(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), year, month)

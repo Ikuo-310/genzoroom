@@ -75,7 +75,8 @@ describe('calendar API', () => {
   });
 
   it('passes year and month and validates the heatmap', async () => {
-    const heatmap = { year: 2026, month: 9, days: [{ date: '2026-09-30', hasAssets: true, count: 1558 }] };
+    const heatmap = { year: 2026, month: 9, days: [{ date: '2026-09-30', hasAssets: true, count: 1558,
+      thumbnail_url: '/api/assets/cover-id/thumbnail' }] };
     const fetch = vi.fn(async () => new Response(JSON.stringify(heatmap)));
     vi.stubGlobal('fetch', fetch);
     try {
@@ -83,6 +84,9 @@ describe('calendar API', () => {
       expect(await fetchCalendarHeatmap(2026, 9, controller.signal)).toEqual(heatmap);
       expect(fetch).toHaveBeenCalledWith('/api/calendar/heatmap?year=2026&month=9',
         { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response(JSON.stringify({ ...heatmap,
+        days: [{ ...heatmap.days[0], thumbnail_url: 123 }] })));
+      await expect(fetchCalendarHeatmap(2026, 9, controller.signal)).rejects.toThrow('Unexpected calendar heatmap response');
       fetch.mockImplementation(async () => new Response(JSON.stringify({ ...heatmap, month: 8 })));
       await expect(fetchCalendarHeatmap(2026, 9, controller.signal)).rejects.toThrow('Unexpected calendar heatmap response');
       fetch.mockImplementation(async () => new Response(JSON.stringify({ ...heatmap, days: [{ date: '2026-09-30', hasAssets: true, count: -1 }] })));

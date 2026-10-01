@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator, Mapping
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from math import isfinite
 from pathlib import PurePath
 from typing import Literal
@@ -126,6 +126,7 @@ class CalendarDay(BaseModel):
     date: str
     hasAssets: bool
     count: int
+    thumbnail_url: str | None = None
 
 
 class CalendarHeatmap(BaseModel):
@@ -591,7 +592,9 @@ async def get_calendar_heatmap(
 ) -> CalendarHeatmap:
     first = date(year, month or 1, 1)
     last = date(year, month, monthrange(year, month)[1]) if month is not None else date(year, 12, 31)
-    day_count = (last - first).days + 1
+    # Immich applies an exclusive upper bound, including the final day only with next-period to.
+    end = last + timedelta(days=1)
+    day_count = (end - first).days
     url, key = _require_configuration(immich_url, api_key)
     try:
         async with httpx.AsyncClient(
@@ -600,7 +603,7 @@ async def get_calendar_heatmap(
             response = await client.get(
                 _api_url(url, "/users/me/calendar-heatmap"),
                 headers={"x-api-key": key, "Accept": "application/json"},
-                params={"from": first.isoformat(), "to": last.isoformat(), "type": "Taken"},
+                params={"from": first.isoformat(), "to": end.isoformat(), "type": "Taken"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
         raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
@@ -627,13 +630,64 @@ async def get_calendar_heatmap(
             day_counts[day_value] = count
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    thumbnails: dict[str, str] = {}
+    if month is not None:
+        try:
+            thumbnails = await _calendar_month_thumbnails(url, key, first, transport=transport)
+        except ImmichRequestError:
+            # Representative images are optional; their failure must not hide a valid heatmap.
+            pass
     return CalendarHeatmap(
         year=year, month=month,
         days=[CalendarDay(date=(first + timedelta(days=offset)).isoformat(),
                           hasAssets=day_counts.get((first + timedelta(days=offset)).isoformat(), 0) > 0,
-                          count=day_counts.get((first + timedelta(days=offset)).isoformat(), 0))
+                          count=day_counts.get((first + timedelta(days=offset)).isoformat(), 0),
+                          thumbnail_url=thumbnails.get((first + timedelta(days=offset)).isoformat()))
               for offset in range(day_count)],
     )
+
+
+async def _calendar_month_thumbnails(
+    url: str, key: str, first: date, *, transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, str]:
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.get(
+                _api_url(url, "/timeline/bucket"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+                params={"timeBucket": f"{first.isoformat()}T00:00:00.000Z", "orderBy": "takenAt",
+                        "order": "desc", "visibility": "timeline", "isTrashed": "false",
+                        "withStacked": "true", "withPartners": "true"},
+            )
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+    if response.status_code != 200:
+        raise _request_error(response)
+    try:
+        body = response.json()
+        fields = ("id", "isImage", "fileCreatedAt", "localOffsetHours")
+        if not isinstance(body, Mapping) or any(not isinstance(body.get(field), list) for field in fields):
+            raise TypeError
+        if any(len(body[field]) != len(body["id"]) for field in fields):
+            raise ValueError
+        thumbnails: dict[str, str] = {}
+        for asset_id, is_image, timestamp, offset in zip(*(body[field] for field in fields)):
+            if not isinstance(asset_id, str) or type(is_image) is not bool or not isinstance(timestamp, str):
+                raise TypeError
+            asset_id = UUID(asset_id)
+            if type(offset) not in (int, float) or not isfinite(offset):
+                raise TypeError
+            utc = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            utc = utc.replace(tzinfo=timezone.utc) if utc.tzinfo is None else utc.astimezone(timezone.utc)
+            # Match Immich Web getTimes(): UTC fileCreatedAt plus the (possibly fractional) local offset.
+            local_day = (utc + timedelta(hours=offset)).date()
+            if is_image and (local_day.year, local_day.month) == (first.year, first.month):
+                thumbnails.setdefault(local_day.isoformat(), f"/api/assets/{asset_id}/thumbnail")
+        return thumbnails
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
 
 async def get_asset_detail(

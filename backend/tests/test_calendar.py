@@ -23,13 +23,72 @@ def page(items, next_cursor=None):
     return httpx.Response(200, json={"assets": {"items": items, "nextCursor": next_cursor}})
 
 
+def bucket(ids=(), images=(), timestamps=(), offsets=()):
+    return httpx.Response(200, json={"id": list(ids), "isImage": list(images),
+        "fileCreatedAt": list(timestamps), "localOffsetHours": list(offsets)})
+
+
 class CalendarTests(unittest.TestCase):
+    def test_month_boundaries_include_last_day_and_roll_over_december(self):
+        for year, month, last, end in ((2026, 7, 31, "2026-08-01"),
+                                      (2026, 12, 31, "2027-01-01"),
+                                      (2024, 2, 29, "2024-03-01"),
+                                      (9998, 12, 31, "9999-01-01")):
+            def handler(request):
+                if request.url.path == "/api/timeline/bucket":
+                    return bucket()
+                self.assertEqual(request.url.params["from"], f"{year:04}-{month:02}-01")
+                self.assertEqual(request.url.params["to"], end)
+                return httpx.Response(200, json={"series": [{"date": f"{year:04}-{month:02}-{last}", "count": 1}]})
+            result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", year, month,
+                transport=httpx.MockTransport(handler)))
+            self.assertTrue(result.days[-1].hasAssets)
+
+    def test_month_uses_one_timeline_bucket_and_local_offsets_for_first_image(self):
+        calls = []
+        ids = [str(UUID(int=index)) for index in range(1, 6)]
+        def handler(request):
+            calls.append(request)
+            if request.url.path == "/api/users/me/calendar-heatmap":
+                return httpx.Response(200, json={"series": [{"date": "2026-07-15", "count": 3},
+                    {"date": "2026-07-16", "count": 1}, {"date": "2026-07-17", "count": 1}]})
+            self.assertEqual(request.url.path, "/api/timeline/bucket")
+            self.assertEqual(request.headers["x-api-key"], "secret")
+            self.assertEqual(dict(request.url.params), {
+                "timeBucket": "2026-07-01T00:00:00.000Z", "orderBy": "takenAt", "order": "desc",
+                "visibility": "timeline", "isTrashed": "false", "withStacked": "true", "withPartners": "true"})
+            return bucket(ids, [False, True, True, True, False],
+                ["2026-07-15T01:00:00", "2026-07-14T23:00:00Z", "2026-07-15T00:00:00Z",
+                 "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"], [0, 5.5, 0, -3.5, 0])
+        result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
+            transport=httpx.MockTransport(handler)))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result.days[14].thumbnail_url, f"/api/assets/{ids[1]}/thumbnail")
+        self.assertEqual(result.days[15].thumbnail_url, f"/api/assets/{ids[3]}/thumbnail")
+        self.assertTrue(result.days[16].hasAssets)
+        self.assertIsNone(result.days[16].thumbnail_url)
+
+    def test_optional_timeline_errors_keep_the_heatmap(self):
+        for response in (httpx.Response(403), httpx.Response(503), httpx.Response(200, content=b"{"),
+                         bucket([str(UUID(int=1))], [], [], []),
+                         bucket(["invalid"], [True], ["2026-07-01"], [0]),
+                         bucket([str(UUID(int=1))], [True], ["broken-date"], [0]),
+                         bucket([str(UUID(int=1))], [True], ["2026-07-01"], [None])):
+            def handler(request):
+                return httpx.Response(200, json={"series": [{"date": "2026-07-01", "count": 2}]}) \
+                    if request.url.path.endswith("calendar-heatmap") else response
+            with self.subTest(response=response):
+                result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
+                    transport=httpx.MockTransport(handler)))
+                self.assertTrue(result.days[0].hasAssets)
+                self.assertTrue(all(day.thumbnail_url is None for day in result.days))
+
     def test_year_heatmap_uses_one_request_and_includes_all_days(self):
         for year, length in ((2026, 365), (2024, 366)):
             calls = []
             def handler(request):
                 calls.append(request)
-                self.assertEqual(dict(request.url.params), {"from": f"{year}-01-01", "to": f"{year}-12-31", "type": "Taken"})
+                self.assertEqual(dict(request.url.params), {"from": f"{year}-01-01", "to": f"{year + 1}-01-01", "type": "Taken"})
                 self.assertEqual(request.headers["x-api-key"], "secret")
                 return httpx.Response(200, json={"series": [
                     {"date": f"{year}-01-01", "count": 2}, {"date": f"{year}-12-31", "count": 5}]})
@@ -72,8 +131,10 @@ class CalendarTests(unittest.TestCase):
 
     def test_heatmap_queries_month_and_allowlists_presence(self):
         def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                return bucket()
             self.assertEqual(request.url.path, "/api/users/me/calendar-heatmap")
-            self.assertEqual(dict(request.url.params), {"from": "2026-09-01", "to": "2026-09-30", "type": "Taken"})
+            self.assertEqual(dict(request.url.params), {"from": "2026-09-01", "to": "2026-10-01", "type": "Taken"})
             self.assertEqual(request.headers["x-api-key"], "secret")
             return httpx.Response(200, json={"from": "2026-09-01", "to": "2026-09-30", "totalCount": 2,
                 "series": [{"date": "2026-09-01", "count": 2}, {"date": "2026-09-02", "count": 0}]})
@@ -81,14 +142,16 @@ class CalendarTests(unittest.TestCase):
         result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 9,
             transport=httpx.MockTransport(handler)))
         self.assertEqual(len(result.days), 30)
-        self.assertEqual(result.days[0].model_dump(), {"date": "2026-09-01", "hasAssets": True, "count": 2})
-        self.assertEqual(result.days[1].model_dump(), {"date": "2026-09-02", "hasAssets": False, "count": 0})
+        self.assertEqual(result.days[0].model_dump(), {"date": "2026-09-01", "hasAssets": True, "count": 2, "thumbnail_url": None})
+        self.assertEqual(result.days[1].model_dump(), {"date": "2026-09-02", "hasAssets": False, "count": 0, "thumbnail_url": None})
         self.assertEqual(result.days[-1].count, 0)
         self.assertFalse(result.days[-1].hasAssets)
 
     def test_heatmap_handles_february_and_rejects_bad_upstream(self):
         def leap(request):
-            self.assertEqual(request.url.params["to"], "2024-02-29")
+            if request.url.path == "/api/timeline/bucket":
+                return bucket()
+            self.assertEqual(request.url.params["to"], "2024-03-01")
             return httpx.Response(200, json={"series": []})
         result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2024, 2,
             transport=httpx.MockTransport(leap)))
@@ -160,7 +223,8 @@ class CalendarTests(unittest.TestCase):
                     heatmap.assert_awaited_with(None, None, 2026, None)
                     self.assertEqual((await client.get("/calendar/2026-09-30/assets")).status_code, 200)
                     day_assets.assert_awaited_with(None, None, DAY)
-                    for path in ("/calendar/heatmap?year=0", "/calendar/heatmap?year=0&month=9", "/calendar/heatmap?year=2026&month=13",
+                    for path in ("/calendar/heatmap?year=9999", "/calendar/heatmap?year=9999&month=12",
+                                 "/calendar/heatmap?year=0", "/calendar/heatmap?year=0&month=9", "/calendar/heatmap?year=2026&month=13",
                                  "/calendar/heatmap?year=no&month=9", "/calendar/not-a-date/assets"):
                         self.assertEqual((await client.get(path)).status_code, 422)
                 with patch("main.get_calendar_min_year", new=AsyncMock(return_value=2002)):

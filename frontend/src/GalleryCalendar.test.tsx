@@ -31,6 +31,7 @@ function monthData(year: number, month: number): CalendarHeatmap {
     date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     hasAssets: day === 1 || day === 3,
     count: day === 1 ? 1558 : day === 3 ? 2 : 0,
+    thumbnail_url: day === 1 ? `/api/assets/${year}-${month}-cover/thumbnail` : null,
   })) };
 }
 
@@ -150,6 +151,7 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.calendar-mini-month')).toHaveLength(12);
     expect(host.querySelectorAll('.calendar-day.has-assets')).toHaveLength(24);
     expect(host.querySelectorAll('.calendar-day-count')).toHaveLength(0);
+    expect(host.querySelectorAll('.calendar-day-thumbnail')).toHaveLength(0);
     expect(host.querySelector('.calendar-mini-month h3')?.textContent).toBe('January');
     expect(host.querySelector('.calendar-view-toggle')?.textContent).toBe('Month view');
     expect(host.querySelector('.calendar-current-month')?.textContent).toBe('This year');
@@ -389,14 +391,17 @@ describe('Home calendar', () => {
     const days = [...host.querySelectorAll<HTMLButtonElement>('.calendar-day')];
     expect(days[0].disabled).toBe(false);
     expect(days[0].querySelector('.calendar-day-number')?.textContent).toBe('1');
-    expect(days[0].querySelector('.calendar-day-count')?.textContent).toBe('1558');
-    expect(days[2].querySelector('.calendar-day-count')?.textContent).toBe('2');
+    expect(host.querySelector('.calendar-day-count')).toBeNull();
+    expect(days[0].querySelector('img')?.getAttribute('src')).toBe('/api/assets/2026-9-cover/thumbnail');
+    expect(days[0].querySelector('img')?.getAttribute('loading')).toBe('lazy');
+    expect(days[2].querySelector('img')).toBeNull();
+    expect(days[2].disabled).toBe(false);
     expect(days[1].disabled).toBe(true);
     expect(days[1].querySelector('.calendar-day-count')).toBeNull();
     expect(days[1].className).not.toContain('has-assets');
     act(() => days[1].click());
     expect(api.day).not.toHaveBeenCalled();
-    act(() => days[0].click()); await settle();
+    act(() => days[0].querySelector('img')!.click()); await settle();
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(api.day).toHaveBeenCalledWith('2026-09-01', expect.any(AbortSignal));
     expect(host.querySelector('.calendar-current-month')).toBeNull();
@@ -464,6 +469,7 @@ describe('Home calendar', () => {
     const month = Number(host.querySelector<HTMLSelectElement>('#calendar-month')?.value);
     await act(async () => old.resolve(monthData(year, month === 1 ? 12 : month - 1)));
     expect(host.querySelector('.calendar-day.has-assets')).not.toBeNull();
+    expect(host.querySelector('.calendar-day-thumbnail')?.getAttribute('src')).toBe(`/api/assets/${year}-${month}-cover/thumbnail`);
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
