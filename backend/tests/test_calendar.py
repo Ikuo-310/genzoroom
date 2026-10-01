@@ -64,9 +64,20 @@ class CalendarTests(unittest.TestCase):
             return bucket(ids, [False, True, True, True, False],
                 ["2026-07-15T01:00:00", "2026-07-14T23:00:00Z", "2026-07-15T00:00:00Z",
                  "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"], [0, 5.5, 0, -3.5, 0])
-        with self.assertNoLogs("immich", level="WARNING"):
+        with self.assertLogs("immich", level="DEBUG") as logs:
             result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
                 transport=httpx.MockTransport(handler)))
+        diagnostic = next(line for line in logs.output if "Calendar thumbnail lookup:" in line)
+        for field in (
+            "year=2026", "month=7", "bucket_assets=5", "image_assets=3",
+            "month_candidates=3", "candidate_days=2", "format_results=3",
+            "jpeg_assets=3", "thumbnail_days=2",
+        ):
+            self.assertIn(field, diagnostic)
+        self.assertNotIn("secret", diagnostic)
+        self.assertNotIn("http://immich.example", diagnostic)
+        self.assertNotIn(ids[0], diagnostic)
+        self.assertFalse(any("WARNING" in line for line in logs.output))
         self.assertEqual(len(calls), 3)
         self.assertEqual(result.days[14].thumbnail_url, f"/api/assets/{ids[1]}/thumbnail")
         self.assertEqual(result.days[15].thumbnail_url, f"/api/assets/{ids[3]}/thumbnail")

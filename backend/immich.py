@@ -680,6 +680,7 @@ async def _calendar_month_thumbnails(
         if any(len(body[field]) != len(body["id"]) for field in fields):
             raise ValueError
         candidates: list[tuple[str, UUID]] = []
+        image_assets = sum(body["isImage"])
         for asset_id, is_image, timestamp, offset in zip(*(body[field] for field in fields)):
             if not isinstance(asset_id, str) or type(is_image) is not bool or not isinstance(timestamp, str):
                 raise TypeError
@@ -697,6 +698,8 @@ async def _calendar_month_thumbnails(
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
     thumbnails: dict[str, str] = {}
+    format_results = 0
+    jpeg_asset_ids: set[UUID] = set()
     for start in range(0, len(candidates), CALENDAR_FORMAT_BATCH_SIZE):
         batch = [(day, asset_id) for day, asset_id in candidates[start:start + CALENDAR_FORMAT_BATCH_SIZE]
                  if day not in thumbnails]
@@ -713,10 +716,18 @@ async def _calendar_month_thumbnails(
             logger.warning("Calendar thumbnail lookup failed: stage=format error=%s http_status=%s",
                            error.error_code, error.status_code)
             raise
+        format_results += len(assets)
         jpeg_ids = {asset.id for asset in assets if asset.format == "JPEG"}
+        jpeg_asset_ids.update(jpeg_ids)
         for day, asset_id in batch:
             if asset_id in jpeg_ids:
                 thumbnails.setdefault(day, f"/api/assets/{asset_id}/thumbnail")
+    logger.debug(
+        "Calendar thumbnail lookup: year=%s month=%s bucket_assets=%s image_assets=%s "
+        "month_candidates=%s candidate_days=%s format_results=%s jpeg_assets=%s thumbnail_days=%s",
+        first.year, first.month, len(body["id"]), image_assets, len(candidates),
+        len({day for day, _ in candidates}), format_results, len(jpeg_asset_ids), len(thumbnails),
+    )
     return thumbnails
 
 
