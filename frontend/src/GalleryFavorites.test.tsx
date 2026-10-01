@@ -135,6 +135,27 @@ describe('Home favorites', () => {
     expect(navigation?.homeReturn?.tab).toBe('favorites');
   });
 
+  it('clears only the active selection with Escape when both tabs remain in selection mode', async () => {
+    await mount();
+    await click('.photo-selection-input');
+    await click('#home-favorites-tab');
+    await click('.photo-selection-input');
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host.querySelector('.photo-card.selected')).toBeNull();
+    await click('#home-recent-tab');
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+
+    await click('#home-favorites-tab');
+    await click('.photo-selection-input');
+    await click('#home-recent-tab');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host.querySelector('.photo-card.selected')).toBeNull();
+    await click('#home-favorites-tab');
+    expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+  });
+
   it('restores Favorite offsets across tabs and prioritizes the captured darkroom return position', async () => {
     await mount(); setScroll(10, 120); await click('#home-favorites-tab'); setScroll(20, 420);
     await click('#home-recent-tab'); expectScroll(10, 120);
