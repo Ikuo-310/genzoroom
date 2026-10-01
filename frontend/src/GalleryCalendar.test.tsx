@@ -424,6 +424,16 @@ describe('Home calendar', () => {
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('day-0|day-1|day-2');
   });
 
+  it('opens a day without a representative JPEG through the usual date cell', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    const cell = host.querySelector<HTMLButtonElement>('.calendar-day.has-assets[aria-label^="2026-09-03"]')!;
+    expect(cell.querySelector('img')).toBeNull();
+    expect(cell.disabled).toBe(false);
+    act(() => cell.click()); await settle();
+    expect(api.day).toHaveBeenCalledWith('2026-09-03', expect.any(AbortSignal));
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+  });
+
   it('keeps Calendar filters independent from Recent and shared across date details', async () => {
     await mount();
     selectValue('.photo-filter-control select', 'raw');

@@ -3,6 +3,7 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
+import logging
 from pathlib import PurePath
 from typing import Literal
 from uuid import UUID
@@ -18,6 +19,7 @@ MAX_RECENT_ASSET_LIMIT = 500
 RECENT_ASSET_LIMIT_STEP = 50
 ALBUM_ASSET_PAGE_SIZE = 1000
 CALENDAR_FORMAT_BATCH_SIZE = 100
+logger = logging.getLogger(__name__)
 FORMAT_ALIASES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",
@@ -166,9 +168,10 @@ class AssetDetail(BaseModel):
 
 
 class ImmichRequestError(Exception):
-    def __init__(self, error_code: ErrorCode, message: str) -> None:
+    def __init__(self, error_code: ErrorCode, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.error_code = error_code
+        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -239,10 +242,12 @@ def _request_error(response: httpx.Response) -> ImmichRequestError:
         return ImmichRequestError(
             "authentication_failed",
             "Immich rejected the API key or its permissions are insufficient.",
+            status_code=response.status_code,
         )
     return ImmichRequestError(
         "unexpected_response",
         "Immich returned an unexpected response.",
+        status_code=response.status_code,
     )
 
 
@@ -659,11 +664,13 @@ async def _calendar_month_thumbnails(
                 headers={"x-api-key": key, "Accept": "application/json"},
                 params={"timeBucket": first.isoformat(), "orderBy": "takenAt",
                         "order": "desc", "visibility": "timeline", "isTrashed": "false",
-                        "withStacked": "true", "withPartners": "true"},
+                        "withStacked": "true"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
+        logger.warning("Calendar thumbnail lookup failed: stage=timeline error=unreachable")
         raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
     if response.status_code != 200:
+        logger.warning("Calendar thumbnail lookup failed: stage=timeline http_status=%s", response.status_code)
         raise _request_error(response)
     try:
         body = response.json()
@@ -686,6 +693,7 @@ async def _calendar_month_thumbnails(
             if is_image and (local_day.year, local_day.month) == (first.year, first.month):
                 candidates.append((local_day.isoformat(), asset_id))
     except (KeyError, TypeError, ValueError, OverflowError):
+        logger.warning("Calendar thumbnail lookup failed: stage=timeline error=unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
     thumbnails: dict[str, str] = {}
@@ -696,9 +704,15 @@ async def _calendar_month_thumbnails(
             continue
         # The bucket has no filenames. Official structured OR/id.eq search resolves formats in batches,
         # while replaying bucket order below avoids metadata search order changing the representative.
-        assets = await _search_all_assets(url, key, {
-            "type": {"eq": "IMAGE"}, "or": [{"id": {"eq": str(asset_id)}} for _, asset_id in batch],
-        }, "fileCreatedAt", transport=transport)
+        try:
+            assets = await _search_all_assets(url, key, {
+                "type": {"eq": "IMAGE"}, "or": [{"id": {"eq": str(asset_id)}} for _, asset_id in batch],
+            }, "fileCreatedAt", transport=transport)
+        except ImmichRequestError as error:
+            # Log only controlled diagnostics: upstream bodies and credentials can contain secrets.
+            logger.warning("Calendar thumbnail lookup failed: stage=format error=%s http_status=%s",
+                           error.error_code, error.status_code)
+            raise
         jpeg_ids = {asset.id for asset in assets if asset.format == "JPEG"}
         for day, asset_id in batch:
             if asset_id in jpeg_ids:

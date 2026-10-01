@@ -61,7 +61,11 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(days).minWidth).toBe('0');
     expect(getComputedStyle(days).gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
     const cell = document.createElement('button'); cell.className = 'calendar-day'; days.append(cell);
-    expect(getComputedStyle(cell).aspectRatio).toBe('1');
+    expect(getComputedStyle(cell).aspectRatio).toBe('4 / 5');
+    const year = document.createElement('div'); year.className = 'calendar-year';
+    year.innerHTML = '<section class="calendar-mini-month"><button class="calendar-day"></button></section>';
+    host.querySelector('.photos').append(year);
+    expect(getComputedStyle(year.querySelector('.calendar-day')).aspectRatio).toBe('1');
   });
   it('styles This month like the calendar selects while keeping the navigation responsive', () => {
     const navigation = document.createElement('div'); navigation.className = 'calendar-navigation';

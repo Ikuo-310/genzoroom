@@ -59,12 +59,14 @@ class CalendarTests(unittest.TestCase):
             self.assertEqual(request.headers["x-api-key"], "secret")
             self.assertEqual(dict(request.url.params), {
                 "timeBucket": "2026-07-01", "orderBy": "takenAt", "order": "desc",
-                "visibility": "timeline", "isTrashed": "false", "withStacked": "true", "withPartners": "true"})
+                "visibility": "timeline", "isTrashed": "false", "withStacked": "true"})
+            self.assertNotIn("withPartners", request.url.params)
             return bucket(ids, [False, True, True, True, False],
                 ["2026-07-15T01:00:00", "2026-07-14T23:00:00Z", "2026-07-15T00:00:00Z",
                  "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"], [0, 5.5, 0, -3.5, 0])
-        result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
-            transport=httpx.MockTransport(handler)))
+        with self.assertNoLogs("immich", level="WARNING"):
+            result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
+                transport=httpx.MockTransport(handler)))
         self.assertEqual(len(calls), 3)
         self.assertEqual(result.days[14].thumbnail_url, f"/api/assets/{ids[1]}/thumbnail")
         self.assertEqual(result.days[15].thumbnail_url, f"/api/assets/{ids[3]}/thumbnail")
@@ -72,7 +74,8 @@ class CalendarTests(unittest.TestCase):
         self.assertIsNone(result.days[16].thumbnail_url)
 
     def test_optional_timeline_errors_keep_the_heatmap(self):
-        for response in (httpx.Response(403), httpx.Response(503), httpx.Response(200, content=b"{"),
+        for response in (httpx.Response(403, json={"message": "secret"}), httpx.Response(422),
+                         httpx.Response(503), httpx.Response(200, content=b"{"),
                          bucket([str(UUID(int=1))], [], [], []),
                          bucket(["invalid"], [True], ["2026-07-01"], [0]),
                          bucket([str(UUID(int=1))], [True], ["broken-date"], [0]),
@@ -81,8 +84,14 @@ class CalendarTests(unittest.TestCase):
                 return httpx.Response(200, json={"series": [{"date": "2026-07-01", "count": 2}]}) \
                     if request.url.path.endswith("calendar-heatmap") else response
             with self.subTest(response=response):
-                result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
-                    transport=httpx.MockTransport(handler)))
+                with self.assertLogs("immich", level="WARNING") as logs:
+                    result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
+                        transport=httpx.MockTransport(handler)))
+                self.assertEqual(len(logs.output), 1)
+                self.assertIn("stage=timeline", logs.output[0])
+                self.assertNotIn("secret", logs.output[0])
+                if response.status_code != 200:
+                    self.assertIn(f"http_status={response.status_code}", logs.output[0])
                 self.assertTrue(result.days[0].hasAssets)
                 self.assertTrue(all(day.thumbnail_url is None for day in result.days))
 
@@ -138,7 +147,7 @@ class CalendarTests(unittest.TestCase):
                 f"/api/assets/{ids[0]}/thumbnail" if first_is_jpeg else None)
 
     def test_format_lookup_failure_does_not_fail_the_calendar(self):
-        for failed in (httpx.Response(403), httpx.Response(500), httpx.Response(200, content=b"{"),
+        for failed in (httpx.Response(403), httpx.Response(422), httpx.Response(500), httpx.Response(200, content=b"{"),
                        page([asset(0) | {"originalFileName": None}])):
             def handler(request):
                 if request.url.path.endswith("calendar-heatmap"):
@@ -146,8 +155,13 @@ class CalendarTests(unittest.TestCase):
                 if request.url.path == "/api/timeline/bucket":
                     return bucket([str(UUID(int=1))], [True], ["2026-07-15T00:00:00Z"], [0])
                 return failed
-            result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
-                transport=httpx.MockTransport(handler)))
+            with self.assertLogs("immich", level="WARNING") as logs:
+                result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
+                    transport=httpx.MockTransport(handler)))
+            self.assertIn("stage=format", logs.output[0])
+            self.assertNotIn("secret", logs.output[0])
+            if failed.status_code != 200:
+                self.assertIn(f"http_status={failed.status_code}", logs.output[0])
             self.assertTrue(result.days[14].hasAssets)
             self.assertIsNone(result.days[14].thumbnail_url)
 
