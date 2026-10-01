@@ -12,7 +12,7 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
-export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onDayOpen }: {
+export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onCurrentMonth, onDayOpen }: {
   year: number;
   month: number;
   minYear: number;
@@ -22,6 +22,7 @@ export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, l
   loading: boolean;
   onYearChange: (year: number) => void;
   onMonthChange: (month: number) => void;
+  onCurrentMonth: () => void;
   onDayOpen: (date: string) => void;
 }) {
   const { t } = useTranslation();
@@ -52,6 +53,7 @@ export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, l
         onChange={event => onMonthChange(Number(event.target.value))}>
         {monthKeys.map((key, index) => <option key={key} value={index + 1}>{t(`calendar.months.${key}`)}</option>)}
       </select>
+      <button type="button" className="calendar-current-month" onClick={onCurrentMonth}>{t('calendar.thisMonth')}</button>
       <button type="button" className="calendar-arrow" aria-label={t('calendar.nextMonth')}
         disabled={next.year > maxYear}
         onClick={() => { onYearChange(next.year); onMonthChange(next.month); }}>→</button>

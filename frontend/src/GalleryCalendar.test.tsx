@@ -124,6 +124,7 @@ describe('Home calendar', () => {
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe(String(new Date().getMonth() + 1));
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('This month');
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('Sun');
     const years = [...host.querySelectorAll<HTMLOptionElement>('#calendar-year option')].map(option => Number(option.value));
     expect(years[0]).toBe(2002);
@@ -152,7 +153,32 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.calendar-blank')).toHaveLength(0);
     await act(async () => { await i18n.changeLanguage('ja'); });
     expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー');
+    expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月');
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('月');
+  });
+
+  it('returns from another month to the current month and leaves an already-current month unchanged', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-year', '2024'); selectValue('#calendar-month', '4'); await settle();
+    click('.calendar-current-month'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('9');
+    expect(api.heatmap).toHaveBeenLastCalledWith(2026, 9, expect.any(AbortSignal));
+    const requestCount = api.heatmap.mock.calls.length;
+    click('.calendar-current-month'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('9');
+    expect(api.heatmap).toHaveBeenCalledTimes(requestCount);
+  });
+
+  it('keeps an in-flight current-month request valid when This month is pressed', async () => {
+    const pending = deferred<CalendarHeatmap>();
+    api.heatmap.mockReset().mockReturnValueOnce(pending.promise);
+    await mount(); click('#home-calendar-tab'); await settle();
+    click('.calendar-current-month');
+    await act(async () => pending.resolve(monthData(2026, 9)));
+    expect(host.querySelector('.calendar-day.has-assets')).not.toBeNull();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
   it.each(['empty', 'error'] as const)('falls back to only the current year when oldest-image metadata is %s', async result => {
@@ -183,6 +209,7 @@ describe('Home calendar', () => {
     act(() => days[0].click()); await settle();
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(api.day).toHaveBeenCalledWith('2026-09-01', expect.any(AbortSignal));
+    expect(host.querySelector('.calendar-current-month')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelector('.photo-filter-control')).not.toBeNull();
     expect(host.querySelector('.thumbnail-size-setting')).not.toBeNull();

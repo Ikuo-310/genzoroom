@@ -46,6 +46,7 @@
     "yearOption": "{{year}}",
     "previousMonth": "Previous month",
     "nextMonth": "Next month",
+    "thisMonth": "This month",
     "gridLabel": "Calendar for {{year}}-{{month}}",
     "dayLabel": "{{date}}",
     "dayWithAssets": "{{date}}, {{count}} assets",

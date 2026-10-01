@@ -75,6 +75,8 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-arrow { padding: 4px 9px; color: #c7d9ae; background: transparent; font-size: 1.35rem; }
 .calendar-arrow:hover:not(:disabled) { color: #e6eee9; background: #2a3932; }
 .calendar-arrow:disabled { cursor: not-allowed; }
+.calendar-current-month { padding: 6px 9px; color: #c7d9ae; background: transparent; font-size: 0.9rem; white-space: nowrap; }
+.calendar-current-month:hover { color: #e6eee9; background: #2a3932; }
 .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: clamp(2px, 0.7vw, 8px); min-width: 0; }
 .calendar-weekday { min-width: 0; padding: 2px; color: #bacac1; font-size: clamp(0.75rem, 1.5vw, 1rem); font-weight: 600; text-align: center; }
 .calendar-day { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; aspect-ratio: 1; min-width: 0; min-height: 0; padding: clamp(2px, 1vw, 12px); color: #e6eee9; background: #294138; border: 1px solid #60796a; text-align: left; }

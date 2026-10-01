@@ -60,6 +60,8 @@ beforeEach(async () => {
   api.albums.mockReset().mockResolvedValue([album]);
   api.minYear.mockReset().mockResolvedValue(2002);
   api.albumAssets.mockReset().mockResolvedValue([photo, second]);
+  api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => ({ year, month,
+    days: [{ date: `${year}-${String(month).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
   api.day.mockReset().mockResolvedValue([photo]);
   api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => ({ year, month,
     days: [{ date: `${year}-${String(month).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
@@ -130,6 +132,24 @@ describe('Home return context', () => {
     await click('#home-calendar-tab');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2024');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('2');
+  });
+
+  it('keeps the month selected by This month when returning from the darkroom', async () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    await mount(); await click('#home-calendar-tab'); await settle();
+    change('#calendar-year', String(currentYear - 1)); change('#calendar-month', '2'); await settle();
+    await click('.calendar-current-month'); await settle();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe(String(currentYear));
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe(String(currentMonth));
+    await click('.calendar-day.has-assets'); await settle();
+    await click('.photo-card-button'); await click('.workspace-actions button');
+    expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('.album-detail-heading h2')).not.toBeNull();
+    await click('.album-back');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe(String(currentYear));
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe(String(currentMonth));
   });
 
   it('keeps a failed exit in the darkroom and restores the album when exiting without saving', async () => {

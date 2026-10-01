@@ -369,6 +369,14 @@ export function GalleryPage() {
     setCalendarMonth(month);
   }
 
+  function goToCurrentCalendarMonth() {
+    const today = new Date();
+    if (calendarYear === today.getFullYear() && calendarMonth === today.getMonth() + 1) return;
+    calendarHeatmapRequestId.current += 1;
+    setCalendarYear(today.getFullYear());
+    setCalendarMonth(today.getMonth() + 1);
+  }
+
   function openCalendarDay(day: string) {
     calendarAssetRequestId.current += 1;
     calendarSelectionAnchorId.current = null;
@@ -516,7 +524,8 @@ export function GalleryPage() {
             <HomeCalendar year={calendarYear} month={calendarMonth} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
               weekStart={resolveWeekStart(settings.weekStart, resolveDateLocale(settings.dateLocale))}
               loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
-              onMonthChange={changeCalendarMonth} onDayOpen={openCalendarDay} />
+              onMonthChange={changeCalendarMonth} onCurrentMonth={goToCurrentCalendarMonth}
+              onDayOpen={openCalendarDay} />
             {calendarState === 'loading' && <p className="gallery-message" role="status">{t('calendar.loading')}</p>}
             {calendarState === 'error' && <p className="gallery-message error-text" role="alert">{t('calendar.loadFailed')}</p>}
           </>}

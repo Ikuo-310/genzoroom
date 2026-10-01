@@ -45,6 +45,7 @@
     "yearOption": "{{year}}年",
     "previousMonth": "前の月",
     "nextMonth": "次の月",
+    "thisMonth": "今月",
     "gridLabel": "{{year}}年{{month}}月のカレンダー",
     "dayLabel": "{{date}}",
     "dayWithAssets": "{{date}}、{{count}}件",
