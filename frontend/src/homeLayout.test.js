@@ -137,7 +137,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(controls.querySelector('.photo-filter-control select')).width).toBe('88px');
     expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).width).toBe('auto');
     expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).minWidth).toBe('88px');
-    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).paddingRight).toBe('14px');
+    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).paddingRight).toBe('8px');
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 760px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.home-toolbar-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
