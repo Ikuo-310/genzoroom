@@ -22,7 +22,7 @@ function isAssetDetail(value: unknown): value is AssetDetail {
   return typeof detail.preview_url === 'string' && isRecord(detail.exif);
 }
 
-function isAlbumSummary(value: unknown): value is AlbumSummary {
+export function isAlbumSummary(value: unknown): value is AlbumSummary {
   return isRecord(value) && typeof value.id === 'string' && typeof value.albumName === 'string' &&
     (value.albumThumbnailAssetId === null || typeof value.albumThumbnailAssetId === 'string') &&
     typeof value.assetCount === 'number' && Number.isInteger(value.assetCount) && value.assetCount >= 0 &&

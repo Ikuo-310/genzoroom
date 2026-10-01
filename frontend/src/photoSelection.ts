@@ -48,7 +48,7 @@ export function activateWorkspaceAsset(
   activeAssetId: string,
 ): WorkspaceNavigationState {
   return state.selectedAssets.some((asset) => asset.id === activeAssetId)
-    ? { selectedAssets: state.selectedAssets, activeAssetId }
+    ? { ...state, activeAssetId }
     : state;
 }
 

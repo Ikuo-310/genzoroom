@@ -1,7 +1,8 @@
 import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { homeScrollContent, readHomeReturn, restoreHomeScroll, type HomeReturnContext, type HomeTab } from './homeReturn';
 import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
@@ -29,28 +30,31 @@ import {
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
-type HomeTab = 'recent' | 'albums' | 'calendar';
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
   const settings = useAppSettings();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [homeReturn] = useState(() => readHomeReturn(location.state?.homeReturn));
+  const pageRef = useRef<HTMLElement>(null);
+  const pendingScroll = useRef(homeReturn);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const [connection, setConnection] = useState<Connection>('checking');
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
-  const [activeTab, setActiveTab] = useState<HomeTab>('recent');
+  const [activeTab, setActiveTab] = useState<HomeTab>(homeReturn?.tab ?? 'recent');
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
-  const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(homeReturn?.album ?? null);
   const [albumAssets, setAlbumAssets] = useState<RecentAsset[]>([]);
   const [albumAssetState, setAlbumAssetState] = useState<'idle' | AssetState>('idle');
-  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
+  const [calendarYear, setCalendarYear] = useState(() => homeReturn?.year ?? new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => homeReturn?.month ?? new Date().getMonth() + 1);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   const [calendarState, setCalendarState] = useState<'idle' | AssetState>('idle');
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(homeReturn?.date ?? null);
   const [calendarAssets, setCalendarAssets] = useState<RecentAsset[]>([]);
   const [calendarAssetState, setCalendarAssetState] = useState<'idle' | AssetState>('idle');
   const [photoFilterMode, setPhotoFilterMode] = useState(readPhotoFilterMode);
@@ -77,6 +81,24 @@ export function GalleryPage() {
       : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterMode);
+
+  useLayoutEffect(() => {
+    const context = pendingScroll.current;
+    if (!context || !pageRef.current) return;
+    // Never apply an old offset if the user changes views before the restored request completes.
+    if (context.tab !== activeTab || context.album?.id !== selectedAlbum?.id
+      || context.date !== selectedCalendarDate || context.year !== calendarYear || context.month !== calendarMonth) {
+      pendingScroll.current = null;
+      return;
+    }
+    const status = activeTab === 'recent' ? assetState : activeTab === 'albums'
+      ? selectedAlbum ? albumAssetState : albumState : selectedCalendarDate ? calendarAssetState : calendarState;
+    if (status === 'idle' || status === 'loading') return;
+    // Card dimensions are established by CSS, so restoration can run after the data's DOM commit.
+    restoreHomeScroll(pageRef.current, context);
+    pendingScroll.current = null;
+  }, [activeTab, selectedAlbum, selectedCalendarDate, calendarYear, calendarMonth,
+    assetState, albumState, albumAssetState, calendarState, calendarAssetState]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -239,13 +261,20 @@ export function GalleryPage() {
   }, [selectionMode]);
 
   function openWorkspace(asset: RecentAsset) {
-    const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id };
+    const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id, homeReturn: captureHomeReturn() };
     navigate(workspacePath(asset.id), { state });
   }
 
   function openSelectedAssets() {
     const state = createWorkspaceNavigation(selectedAssets);
-    if (state) navigate(workspacePath(state.activeAssetId), { state });
+    if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
+  }
+
+  function captureHomeReturn(): HomeReturnContext {
+    const page = pageRef.current;
+    return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
+      date: selectedCalendarDate, pageScrollTop: page?.scrollTop ?? 0,
+      contentScrollTop: page ? homeScrollContent(page)?.scrollTop ?? 0 : 0 };
   }
 
   function togglePhotoSelection(assetId: string, extendRange = false) {
@@ -362,7 +391,7 @@ export function GalleryPage() {
   }
 
   return (
-    <main className="home-page">
+    <main className="home-page" ref={pageRef}>
       <div className="home-intro">
         <header className="app-header">
           <div>

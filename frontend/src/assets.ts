@@ -27,6 +27,7 @@ export type AssetDetail = RecentAsset & {
 };
 
 export type WorkspaceNavigationState = {
+  homeReturn?: import('./homeReturn').HomeReturnContext;
   // Selection order is shared by single-photo and multi-photo workspace navigation.
   selectedAssets: RecentAsset[];
   activeAssetId: string;

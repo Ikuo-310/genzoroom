@@ -15,6 +15,7 @@ import { Filmstrip } from './Filmstrip';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { activateWorkspaceAsset, workspacePath } from './photoSelection';
+import { readHomeReturn } from './homeReturn';
 import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
@@ -268,7 +269,7 @@ export function AnshitsuPage() {
   }
 
   function navigateToAsset(nextId: string) {
-    const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId };
+    const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId, homeReturn: initialNavigation?.homeReturn };
     const nextState = activateWorkspaceAsset(currentState, nextId);
     navigate(workspacePath(nextState.activeAssetId), { state: nextState });
   }
@@ -311,7 +312,7 @@ export function AnshitsuPage() {
         setExitSaving(false);
         return;
       }
-      navigate('/');
+      returnToHome();
     } catch {
       setExitFailure({ assetId, error: 'unexpected' });
       setExitSaving(false);
@@ -323,6 +324,10 @@ export function AnshitsuPage() {
     exitRef.current = false;
     setExitFailure(null);
     setExitSaving(false);
+  }
+
+  function returnToHome() {
+    navigate('/', { state: initialNavigation?.homeReturn ? { homeReturn: initialNavigation.homeReturn } : null });
   }
 
   useEffect(() => {
@@ -617,7 +622,7 @@ export function AnshitsuPage() {
       <p>{t(exitFailure.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${exitFailure.error}`)}</p>
       <div className="edit-actions">
         <button type="button" autoFocus className="tool-button" onClick={stayInAnshitsu}>{t('workspace.stayInAnshitsu')}</button>
-        <button type="button" className="tool-button" onClick={() => navigate('/')}>{t('workspace.exitWithoutSaving')}</button>
+        <button type="button" className="tool-button" onClick={returnToHome}>{t('workspace.exitWithoutSaving')}</button>
       </div>
     </section></div>}
   </main>;
@@ -726,9 +731,10 @@ export function ExifDetails({ exif, fallbackDate, language, profile = { status: 
 
 function readNavigationState(value: unknown): WorkspaceNavigationState | null {
   if (typeof value !== 'object' || value === null || !('selectedAssets' in value) || !('activeAssetId' in value)) return null;
-  const state = value as { selectedAssets: unknown; activeAssetId: unknown };
+  const state = value as { selectedAssets: unknown; activeAssetId: unknown; homeReturn?: unknown };
   if (!Array.isArray(state.selectedAssets) || !state.selectedAssets.every(isRecentAsset) || typeof state.activeAssetId !== 'string') return null;
-  return { selectedAssets: state.selectedAssets, activeAssetId: state.activeAssetId };
+  const homeReturn = readHomeReturn(state.homeReturn);
+  return { selectedAssets: state.selectedAssets, activeAssetId: state.activeAssetId, ...(homeReturn ? { homeReturn } : {}) };
 }
 
 function detailToRecent(asset: AssetDetail): RecentAsset {

@@ -1,0 +1,178 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from './App';
+import i18n from './i18n';
+import { readHomeReturn, type HomeReturnContext } from './homeReturn';
+import { activateWorkspaceAsset } from './photoSelection';
+import type { AssetDetail } from './assets';
+import { writePhotoFilterMode } from './photoFilters';
+import { EditStateApiError } from './editStateApi';
+
+const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
+  heatmap: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
+vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
+  fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
+  fetchCalendarHeatmap: api.heatmap, fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail }));
+vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
+  getAssetEditState: api.get, putAssetEditState: api.put, getAssetEditStatuses: api.statuses }));
+vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel" /> }));
+
+const photo: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'photo.jpg',
+  date: '2026-09-01', thumbnail_url: '/thumb', preview_url: '/preview', format: 'JPEG', is_raw: false, exif: {} };
+const second = { ...photo, id: '87654321-4321-4321-8321-cba987654321', filename: 'second.jpg' };
+const album = { id: 'album-1', albumName: '車両整備関係', albumThumbnailAssetId: null,
+  assetCount: 2, startDate: null, endDate: null };
+const context: HomeReturnContext = { tab: 'recent', album: null, year: 2026, month: 9, date: null,
+  pageScrollTop: 32, contentScrollTop: 840 };
+let host: HTMLDivElement;
+let root: Root;
+async function settle() { await act(async () => { await Promise.resolve(); }); }
+async function click(selector: string) {
+  const element = host.querySelector<HTMLButtonElement>(selector);
+  if (!element) throw new Error(`Missing ${selector}`);
+  await act(async () => element.click());
+}
+async function mount(state?: unknown) {
+  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state }]}><App /></MemoryRouter>));
+}
+function change(selector: string, value: string) {
+  const select = host.querySelector<HTMLSelectElement>(selector)!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+async function openCalendarDay() {
+  await click('#home-calendar-tab');
+  change('#calendar-year', '2026'); change('#calendar-month', '9'); await settle();
+  await click('.calendar-day.has-assets');
+}
+beforeEach(async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  await i18n.changeLanguage('en'); writePhotoFilterMode('both');
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  api.recent.mockReset().mockResolvedValue([photo]);
+  api.albums.mockReset().mockResolvedValue([album]);
+  api.albumAssets.mockReset().mockResolvedValue([photo, second]);
+  api.day.mockReset().mockResolvedValue([photo]);
+  api.heatmap.mockReset().mockImplementation(async (year: number, month: number) => ({ year, month,
+    days: [{ date: `${year}-${String(month).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
+  api.detail.mockReset().mockImplementation(async (id: string) => id === photo.id ? photo : second);
+  api.get.mockReset().mockResolvedValue({ state: null });
+  api.put.mockReset().mockImplementation(async (_id, state, revision, saveId) => ({
+    state, revision: revision + 1, updatedAt: '2026-09-01T00:00:00Z', lastSaveId: saveId }));
+  api.statuses.mockReset().mockResolvedValue({});
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
+    ? { status: 'ok' } : { configured: true, connected: true }))));
+});
+afterEach(() => { act(() => root.unmount()); host.remove(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); });
+
+describe('Home return context', () => {
+  it('starts normally in Recent and returns to Recent after a successful save', async () => {
+    await mount();
+    expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+    await click('.photo-card-button');
+    await click('button[aria-label="Disable Basic"]');
+    await click('.workspace-actions button');
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('returns to the same album after multi-photo navigation and restores scroll only after assets render', async () => {
+    await mount(); await click('#home-albums-tab'); await click('.album-card');
+    host.querySelector<HTMLElement>('.home-page')!.scrollTop = 32;
+    host.querySelector<HTMLElement>('.photo-grid')!.scrollTop = 840;
+    for (const box of host.querySelectorAll<HTMLInputElement>('.photo-selection-input')) await act(async () => box.click());
+    await click('.selection-bar button:last-child');
+    await click('.filmstrip-item:last-child');
+    expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe(second.filename);
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.albumAssets.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    await click('.workspace-title-link');
+    expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(album.albumName);
+    expect(host.querySelector('.photo-grid')).toBeNull();
+    expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
+    await act(async () => resolve([photo, second]));
+    expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(32);
+    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(840);
+    expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
+    await click('.album-back'); expect(host.querySelector('.album-card')).not.toBeNull();
+    await click('#home-recent-tab'); expect(host.querySelector('.photo-card.selected')).toBeNull();
+  });
+
+  it('returns to the same Calendar day, keeps its month, and leaves other modes separate', async () => {
+    await mount(); await openCalendarDay();
+    host.querySelector<HTMLElement>('.photo-grid')!.scrollTop = 520;
+    await click('.photo-card-button'); await click('.workspace-actions button');
+    expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(520);
+    expect(host.querySelector('.recent-count-control')).toBeNull();
+    await click('.album-back');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('9');
+    await click('#home-albums-tab'); expect(host.querySelector('.album-detail-heading')).toBeNull();
+    await click('#home-recent-tab'); expect(host.querySelector('.recent-count-control')).not.toBeNull();
+  });
+
+  it('retains the Calendar month context while returning to Recent', async () => {
+    await mount(); await click('#home-calendar-tab');
+    change('#calendar-year', '2024'); change('#calendar-month', '2'); await settle();
+    await click('#home-recent-tab'); await click('.photo-card-button'); await click('.workspace-actions button');
+    expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+    await click('#home-calendar-tab');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2024');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('2');
+  });
+
+  it('keeps a failed exit in the darkroom and restores the album when exiting without saving', async () => {
+    await mount(); await click('#home-albums-tab'); await click('.album-card'); await click('.photo-card-button');
+    await click('button[aria-label="Disable Basic"]');
+    api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await click('.workspace-actions button');
+    expect(host.querySelector('.workspace-page')).not.toBeNull();
+    expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
+    await click('[role="alertdialog"] button:last-child');
+    expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(album.albumName);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['albums', 'calendar'] as const)('can restore the %s overview via an explicit return context', async tab => {
+    await mount({ homeReturn: { ...context, tab } });
+    expect(host.querySelector(`#home-${tab}-tab`)?.getAttribute('aria-selected')).toBe('true');
+    if (tab === 'calendar') {
+      expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2026');
+      expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('9');
+    } else expect(host.querySelector('.album-card')).not.toBeNull();
+  });
+
+  it('does not apply a pending Calendar offset after the user switches to Recent', async () => {
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.day.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    await mount({ homeReturn: { ...context, tab: 'calendar', date: '2026-09-01' } });
+    await click('#home-recent-tab'); await act(async () => resolve([photo]));
+    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(0);
+    expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('falls back safely for unknown modes, missing albums, and invalid dates', async () => {
+    expect(readHomeReturn({ ...context, tab: 'unknown' })).toBeNull();
+    expect(readHomeReturn({ ...context, tab: 'albums', album: { id: '' } })?.album).toBeNull();
+    expect(readHomeReturn({ ...context, tab: 'calendar', date: '2026-09-31' })?.date).toBeNull();
+    expect(readHomeReturn({ ...context, date: '2026-08-01' })?.date).toBeNull();
+    expect(readHomeReturn({ ...context, pageScrollTop: -1, contentScrollTop: Infinity })).toMatchObject({ pageScrollTop: 0, contentScrollTop: 0 });
+    await mount({ homeReturn: { tab: 'unknown' } });
+    expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('preserves the return context when activating a different workspace asset', () => {
+    expect(activateWorkspaceAsset({ selectedAssets: [photo, second], activeAssetId: photo.id, homeReturn: context }, second.id))
+      .toMatchObject({ activeAssetId: second.id, homeReturn: context });
+  });
+});
