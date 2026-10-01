@@ -41,10 +41,11 @@ describe('Home and thumbnail layout', () => {
     host.querySelector('.photos').append(navigation);
     const select = getComputedStyle(navigation.querySelector('select'));
     const button = getComputedStyle(navigation.querySelector('.calendar-current-month'));
-    for (const property of ['fontSize', 'fontWeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    for (const property of ['height', 'fontSize', 'fontWeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
       'color', 'backgroundColor', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius']) {
       expect(button[property]).toBe(select[property]);
     }
+    expect(button.height).toBe('42px');
     expect(button.whiteSpace).toBe('nowrap');
     expect(getComputedStyle(navigation).flexWrap).toBe('wrap');
     expect(button.backgroundColor).not.toBe('transparent');
