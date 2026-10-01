@@ -37,7 +37,13 @@
     "sections": "Homeの表示",
     "recentTab": "最近の写真",
     "albumsTab": "アルバム",
-    "calendarTab": "カレンダー"
+    "calendarTab": "カレンダー",
+    "favoritesTab": "お気に入り"
+  },
+  "favorites": {
+    "loading": "お気に入りを読み込み中…",
+    "loadFailed": "お気に入りの読み込みに失敗しました",
+    "empty": "お気に入りの写真はありません"
   },
   "calendar": {
     "year": "年",

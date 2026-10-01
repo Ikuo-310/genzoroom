@@ -38,7 +38,13 @@
     "sections": "Home sections",
     "recentTab": "Recent",
     "albumsTab": "Albums",
-    "calendarTab": "Calendar"
+    "calendarTab": "Calendar",
+    "favoritesTab": "Favorites"
+  },
+  "favorites": {
+    "loading": "Loading favorites…",
+    "loadFailed": "Failed to load favorites",
+    "empty": "No favorite photos"
   },
   "calendar": {
     "year": "Year",

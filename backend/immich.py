@@ -462,6 +462,18 @@ def _search_assets(body: object) -> list[RecentAsset]:
     return assets
 
 
+async def get_favorite_assets(
+    immich_url: str | None,
+    api_key: str | None,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    return await _search_all_assets(
+        immich_url, api_key,
+        {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "isFavorite": {"eq": True}},
+        "fileCreatedAt", transport=transport,
+    )
+
+
 async def get_album_assets(
     immich_url: str | None,
     api_key: str | None,

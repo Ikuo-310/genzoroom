@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type CalendarViewMode, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
-import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
@@ -51,6 +51,8 @@ export function GalleryPage() {
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
+  const [favoriteAssets, setFavoriteAssets] = useState<RecentAsset[]>([]);
+  const [favoriteState, setFavoriteState] = useState<'idle' | AssetState>('idle');
   const [activeTab, setActiveTab] = useState<HomeTab>(homeReturn?.tab ?? 'recent');
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
@@ -71,31 +73,38 @@ export function GalleryPage() {
     recent: readPhotoFilterMode('recent'),
     albums: readPhotoFilterMode('albums'),
     calendar: readPhotoFilterMode('calendar'),
+    favorites: readPhotoFilterMode('favorites'),
   }));
   const [editStatusFilterModes, setEditStatusFilterModes] = useState<Record<HomeTab, EditStatusFilterMode>>(() => ({
     recent: readEditStatusFilterMode('recent'),
     albums: readEditStatusFilterMode('albums'),
     calendar: readEditStatusFilterMode('calendar'),
+    favorites: readEditStatusFilterMode('favorites'),
   }));
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [albumSelectedAssetIds, setAlbumSelectedAssetIds] = useState<string[]>([]);
   const [calendarSelectedAssetIds, setCalendarSelectedAssetIds] = useState<string[]>([]);
+  const [favoriteSelectedAssetIds, setFavoriteSelectedAssetIds] = useState<string[]>([]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const connectionRequestId = useRef(0);
   const selectionAnchorId = useRef<string | null>(null);
   const albumSelectionAnchorId = useRef<string | null>(null);
   const calendarSelectionAnchorId = useRef<string | null>(null);
+  const favoriteSelectionAnchorId = useRef<string | null>(null);
   const albumAssetRequestId = useRef(0);
   const calendarHeatmapRequestId = useRef(0);
   const calendarAssetRequestId = useRef(0);
   const hasLoadedRecentAssets = useRef(false);
   const hasLoadedAlbums = useRef(false);
+  const hasLoadedFavorites = useRef(false);
   const recentTab = useRef<HTMLButtonElement>(null);
   const albumsTab = useRef<HTMLButtonElement>(null);
   const calendarTab = useRef<HTMLButtonElement>(null);
+  const favoritesTab = useRef<HTMLButtonElement>(null);
   const showingAlbumPhotos = activeTab === 'albums' && selectedAlbum !== null;
   const showingCalendarPhotos = activeTab === 'calendar' && selectedCalendarDate !== null;
   const editStatusAssets = activeTab === 'recent' && assetState === 'ready' ? assets
+    : activeTab === 'favorites' && favoriteState === 'ready' ? favoriteAssets
     : showingAlbumPhotos && albumAssetState === 'ready' ? albumAssets
       : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
@@ -110,7 +119,7 @@ export function GalleryPage() {
       pendingScroll.current = null;
       return;
     }
-    const status = activeTab === 'recent' ? assetState : activeTab === 'albums'
+    const status = activeTab === 'recent' ? assetState : activeTab === 'favorites' ? favoriteState : activeTab === 'albums'
       ? selectedAlbum ? albumAssetState : albumState : selectedCalendarDate ? calendarAssetState : calendarState;
     if (pending.waitingForData || status === 'idle' || status === 'loading') return;
     // Card dimensions are established by CSS, so restoration can run after the data's DOM commit.
@@ -118,7 +127,7 @@ export function GalleryPage() {
     scrollPositions.current.set(viewKey, readScrollPosition());
     pendingScroll.current = null;
   }, [activeTab, selectedAlbum, selectedCalendarDate, calendarYear, calendarMonth,
-    assetState, albumState, albumAssetState, calendarState, calendarAssetState, viewKey, scrollRestoreRevision]);
+    assetState, favoriteState, albumState, albumAssetState, calendarState, calendarAssetState, viewKey, scrollRestoreRevision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -206,6 +215,25 @@ export function GalleryPage() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (activeTab !== 'favorites' || hasLoadedFavorites.current) return;
+    const controller = new AbortController();
+    let active = true;
+    setFavoriteState('loading');
+    void fetchFavoriteAssets(controller.signal).then(data => {
+      if (!active) return;
+      hasLoadedFavorites.current = true;
+      completeScrollRequest('favorites');
+      setFavoriteAssets(data);
+      setFavoriteState('ready');
+    }).catch(() => {
+      if (!active) return;
+      completeScrollRequest('favorites');
+      setFavoriteState('error');
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab !== 'albums' || selectedAlbum === null) return;
     const controller = new AbortController();
     let active = true;
@@ -290,11 +318,11 @@ export function GalleryPage() {
   }, [activeTab, selectedCalendarDate]);
 
   // Each grid owns its selection so shared asset IDs cannot carry a selection across views.
-  const currentAssets = showingCalendarPhotos ? calendarAssets : showingAlbumPhotos ? albumAssets : assets;
-  const activeSelectedAssetIds = showingCalendarPhotos ? calendarSelectedAssetIds : showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
+  const currentAssets = activeTab === 'favorites' ? favoriteAssets : showingCalendarPhotos ? calendarAssets : showingAlbumPhotos ? albumAssets : assets;
+  const activeSelectedAssetIds = activeTab === 'favorites' ? favoriteSelectedAssetIds : showingCalendarPhotos ? calendarSelectedAssetIds : showingAlbumPhotos ? albumSelectedAssetIds : selectedAssetIds;
   const visibleAssets = filterPhotosByEditStatus(filterPhotos(currentAssets, photoFilters), editStatusFilterModes[activeTab], editStatuses);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
-  const selectionMode = (activeTab === 'recent' || showingAlbumPhotos && albumAssetState === 'ready' ||
+  const selectionMode = (activeTab === 'recent' || activeTab === 'favorites' && favoriteState === 'ready' || showingAlbumPhotos && albumAssetState === 'ready' ||
     showingCalendarPhotos && calendarAssetState === 'ready') && activeSelectedAssetIds.length > 0;
   const previousSelectionMode = useRef(selectionMode);
 
@@ -347,6 +375,7 @@ export function GalleryPage() {
     pendingScroll.current = { key: nextKey,
       position: scrollPositions.current.get(nextKey) ?? { pageScrollTop: 0, contentScrollTop: 0 },
       waitingForData: nextKey === 'recent' ? !hasLoadedRecentAssets.current
+        : nextKey === 'favorites' ? !hasLoadedFavorites.current
         : nextKey === 'albums:list' ? !hasLoadedAlbums.current : true };
   }
 
@@ -361,17 +390,21 @@ export function GalleryPage() {
   function togglePhotoSelection(assetId: string, extendRange = false) {
     const rangedSelection = extendRange
       ? addVisiblePhotoRange(activeSelectedAssetIds, visibleAssets.map((asset) => asset.id),
-        showingCalendarPhotos ? calendarSelectionAnchorId.current
+        activeTab === 'favorites' ? favoriteSelectionAnchorId.current : showingCalendarPhotos ? calendarSelectionAnchorId.current
           : showingAlbumPhotos ? albumSelectionAnchorId.current : selectionAnchorId.current, assetId)
       : null;
     if (rangedSelection) {
-      if (showingCalendarPhotos) setCalendarSelectedAssetIds(rangedSelection);
+      if (activeTab === 'favorites') setFavoriteSelectedAssetIds(rangedSelection);
+      else if (showingCalendarPhotos) setCalendarSelectedAssetIds(rangedSelection);
       else if (showingAlbumPhotos) setAlbumSelectedAssetIds(rangedSelection);
       else setSelectedAssetIds(rangedSelection);
       return;
     }
     const nextSelection = toggleSelectedAssetId(activeSelectedAssetIds, assetId);
-    if (showingCalendarPhotos) {
+    if (activeTab === 'favorites') {
+      favoriteSelectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
+      setFavoriteSelectedAssetIds(nextSelection);
+    } else if (showingCalendarPhotos) {
       calendarSelectionAnchorId.current = nextSelection.length > 0 ? assetId : null;
       setCalendarSelectedAssetIds(nextSelection);
     } else if (showingAlbumPhotos) {
@@ -384,7 +417,10 @@ export function GalleryPage() {
   }
 
   function clearPhotoSelection() {
-    if (showingCalendarPhotos) {
+    if (activeTab === 'favorites') {
+      favoriteSelectionAnchorId.current = null;
+      setFavoriteSelectedAssetIds([]);
+    } else if (showingCalendarPhotos) {
       calendarSelectionAnchorId.current = null;
       setCalendarSelectedAssetIds([]);
     } else if (showingAlbumPhotos) {
@@ -491,15 +527,15 @@ export function GalleryPage() {
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const tabs: HomeTab[] = ['recent', 'albums', 'calendar'];
+    const tabs: HomeTab[] = ['recent', 'albums', 'calendar', 'favorites'];
     const index = tabs.indexOf(activeTab);
-    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'calendar'
+    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'favorites'
       : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     if (next !== activeTab) {
       prepareScrollTransition(homeViewKey(next, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode));
       setActiveTab(next);
     }
-    (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : calendarTab).current?.focus();
+    (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : next === 'calendar' ? calendarTab : favoritesTab).current?.focus();
   }
 
   function renderPhotoGrid() {
@@ -550,13 +586,16 @@ export function GalleryPage() {
             <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
               aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
               onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
+            <button id="home-favorites-tab" ref={favoritesTab} type="button" role="tab" aria-controls="home-favorites-panel"
+              aria-selected={activeTab === 'favorites'} tabIndex={activeTab === 'favorites' ? 0 : -1}
+              onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
           </div>
           <div className="home-toolbar-controls">
-            {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
+            {(activeTab === 'recent' || activeTab === 'favorites' || showingAlbumPhotos || showingCalendarPhotos) && <PhotoFilterControls filters={photoFilters} onChange={mode => {
               setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
               writePhotoFilterMode(mode, activeTab);
             }} />}
-            {(activeTab === 'recent' || showingAlbumPhotos || showingCalendarPhotos) && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
+            {(activeTab === 'recent' || activeTab === 'favorites' || showingAlbumPhotos || showingCalendarPhotos) && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
               setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
               writeEditStatusFilterMode(mode, activeTab);
             }} />}
@@ -586,6 +625,15 @@ export function GalleryPage() {
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                 : renderPhotoGrid()}
+        </div> : activeTab === 'favorites' ? <div id="home-favorites-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-favorites-tab">
+          {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
+            onClear={clearPhotoSelection} onOpen={openSelectedAssets} />}
+          {favoriteState === 'idle' || favoriteState === 'loading'
+            ? <p className="gallery-message" role="status">{t('favorites.loading')}</p>
+            : favoriteState === 'error' ? <p className="gallery-message error-text" role="alert">{t('favorites.loadFailed')}</p>
+              : favoriteAssets.length === 0 ? <p className="gallery-message">{t('favorites.empty')}</p>
+                : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
+                  : renderPhotoGrid()}
         </div> : activeTab === 'albums' ? <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
           {selectedAlbum ? <>
             <div className="album-detail-heading">

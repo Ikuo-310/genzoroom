@@ -6,7 +6,7 @@ export type PhotoFilters = {
 };
 export type PhotoFilterMode = 'both' | 'raw' | 'nonRaw';
 export type EditStatusFilterMode = 'both' | 'edited' | 'unedited';
-export type PhotoFilterTab = 'recent' | 'albums' | 'calendar';
+export type PhotoFilterTab = 'recent' | 'albums' | 'calendar' | 'favorites';
 
 // Keep the former shared key readable for sessions created before filters were tab-scoped.
 export const PHOTO_FILTER_SESSION_KEY = 'genzoroom.homePhotoFilter';
@@ -14,12 +14,14 @@ export const PHOTO_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
   recent: `${PHOTO_FILTER_SESSION_KEY}.recent`,
   albums: `${PHOTO_FILTER_SESSION_KEY}.albums`,
   calendar: `${PHOTO_FILTER_SESSION_KEY}.calendar`,
+  favorites: `${PHOTO_FILTER_SESSION_KEY}.favorites`,
 };
 export const EDIT_STATUS_FILTER_SESSION_KEY = 'genzoroom.homeEditStatusFilter';
 export const EDIT_STATUS_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
   recent: `${EDIT_STATUS_FILTER_SESSION_KEY}.recent`,
   albums: `${EDIT_STATUS_FILTER_SESSION_KEY}.albums`,
   calendar: `${EDIT_STATUS_FILTER_SESSION_KEY}.calendar`,
+  favorites: `${EDIT_STATUS_FILTER_SESSION_KEY}.favorites`,
 };
 
 export const DEFAULT_PHOTO_FILTERS: PhotoFilters = {
@@ -31,11 +33,13 @@ const memoryPhotoFilterModes: Record<PhotoFilterTab, PhotoFilterMode> = {
   recent: 'both',
   albums: 'both',
   calendar: 'both',
+  favorites: 'both',
 };
 const memoryEditStatusFilterModes: Record<PhotoFilterTab, EditStatusFilterMode> = {
   recent: 'both',
   albums: 'both',
   calendar: 'both',
+  favorites: 'both',
 };
 
 function browserSessionStorage(): Storage | null {

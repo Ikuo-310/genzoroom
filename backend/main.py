@@ -24,6 +24,7 @@ from immich import (
     RecentAsset,
     get_albums,
     get_album_assets,
+    get_favorite_assets,
     get_calendar_day_assets,
     get_calendar_min_year,
     get_calendar_heatmap,
@@ -161,6 +162,14 @@ async def recent_assets(limit: int = Query(default=100, ge=50, le=500, multiple_
             os.getenv("IMMICH_API_KEY"),
             limit=limit,
         )
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.get("/assets/favorites", response_model=list[RecentAsset])
+async def favorite_assets() -> list[RecentAsset]:
+    try:
+        return await get_favorite_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 

@@ -32,6 +32,18 @@ function makeStorage(initial: Record<string, string> = {}) {
 }
 
 describe('photo filters', () => {
+  it('keeps Favorite filters separate and restores them after reads', () => {
+    const { storage, values } = makeStorage();
+    writePhotoFilterMode('raw', 'recent', storage);
+    writePhotoFilterMode('nonRaw', 'favorites', storage);
+    writeEditStatusFilterMode('edited', 'favorites', storage);
+    expect(PHOTO_FILTER_SESSION_KEYS.favorites).toBe('genzoroom.homePhotoFilter.favorites');
+    expect(EDIT_STATUS_FILTER_SESSION_KEYS.favorites).toBe('genzoroom.homeEditStatusFilter.favorites');
+    expect(values.get(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(readPhotoFilterMode('favorites', storage)).toBe('nonRaw');
+    expect(readEditStatusFilterMode('favorites', storage)).toBe('edited');
+    expect(readEditStatusFilterMode('recent', storage)).toBe('both');
+  });
   it('starts with RAW and Non-RAW enabled', () => {
     expect(DEFAULT_PHOTO_FILTERS).toEqual({ raw: true, nonRaw: true });
   });

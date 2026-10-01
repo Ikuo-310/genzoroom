@@ -11,10 +11,11 @@ import type { AssetDetail } from './assets';
 import { writePhotoFilterMode } from './photoFilters';
 import { EditStateApiError } from './editStateApi';
 
-const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
+const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
   heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
+  fetchFavoriteAssets: api.favorites,
   fetchCalendarHeatmap: api.heatmap, fetchCalendarMinYear: api.minYear,
   fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
@@ -68,6 +69,7 @@ beforeEach(async () => {
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
+  api.favorites.mockReset().mockResolvedValue([photo, second]);
   api.albums.mockReset().mockResolvedValue([album]);
   api.minYear.mockReset().mockResolvedValue(2002);
   api.albumAssets.mockReset().mockResolvedValue([photo, second]);
@@ -89,6 +91,13 @@ afterEach(() => { act(() => root.unmount()); host.remove();
   vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it('returns from the darkroom to Favorites and restores its scroll after the list arrives', async () => {
+    await mount(); await click('#home-favorites-tab'); setScroll(22, 622);
+    await click('.photo-card-button'); await click('.workspace-actions button');
+    expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
+    expectScroll(22, 622);
+    expect(readHomeReturn({ ...context, tab: 'favorites' })?.tab).toBe('favorites');
+  });
   it('keeps Year view scroll separate from months and other years across tabs and date details', async () => {
     api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
       days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));

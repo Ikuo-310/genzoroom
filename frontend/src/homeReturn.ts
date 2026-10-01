@@ -1,7 +1,7 @@
 import type { AlbumSummary } from './albums';
 import { isAlbumSummary } from './api';
 
-export type HomeTab = 'recent' | 'albums' | 'calendar';
+export type HomeTab = 'recent' | 'albums' | 'calendar' | 'favorites';
 export type CalendarViewMode = 'month' | 'year';
 // Route state carries only browsing context; asset data and persistent settings keep their existing owners.
 export type HomeReturnContext = {
@@ -18,7 +18,7 @@ export type HomeReturnContext = {
 export function readHomeReturn(value: unknown): HomeReturnContext | null {
   if (!value || typeof value !== 'object') return null;
   const state = value as Record<string, unknown>;
-  if (!['recent', 'albums', 'calendar'].includes(state.tab as string)) return null;
+  if (!['recent', 'albums', 'calendar', 'favorites'].includes(state.tab as string)) return null;
   const now = new Date();
   const validMonth = Number.isInteger(state.year) && Number(state.year) >= 1
     && Number(state.year) <= now.getFullYear() && Number.isInteger(state.month)
@@ -44,6 +44,7 @@ export type HomeScrollPosition = Pick<HomeReturnContext, 'pageScrollTop' | 'cont
 
 export function homeViewKey(tab: HomeTab, albumId: string | null, year: number, month: number, date: string | null, calendarMode: CalendarViewMode = 'month') {
   if (tab === 'recent') return 'recent';
+  if (tab === 'favorites') return 'favorites';
   if (tab === 'albums') return albumId ? `albums:${albumId}` : 'albums:list';
   return `calendar:${date ?? (calendarMode === 'year' ? `year:${year}` : `${year}-${String(month).padStart(2, '0')}`)}`;
 }

@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
+import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
+
+describe('favorites API', () => {
+  it('uses the favorites endpoint and validates its response', async () => {
+    const fetch = vi.fn(async () => new Response('[]'));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchFavoriteAssets(controller.signal)).toEqual([]);
+      expect(fetch).toHaveBeenCalledWith('/api/assets/favorites', { signal: controller.signal, cache: 'no-store' });
+      fetch.mockImplementation(async () => new Response('[{}]'));
+      await expect(fetchFavoriteAssets(controller.signal)).rejects.toThrow('Unexpected favorites response');
+      fetch.mockImplementation(async () => new Response('', { status: 502 }));
+      await expect(fetchFavoriteAssets(controller.signal)).rejects.toThrow('Favorites request failed');
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
 
 describe('recent assets API', () => {
   it('passes the selected limit to the backend', async () => {

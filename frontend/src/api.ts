@@ -84,6 +84,16 @@ export async function fetchCalendarDayAssets(day: string, signal: AbortSignal): 
   return data;
 }
 
+export async function fetchFavoriteAssets(signal: AbortSignal): Promise<RecentAsset[]> {
+  const response = await fetch('/api/assets/favorites', { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error('Favorites request failed');
+  const data: unknown = await response.json();
+  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+    throw new Error('Unexpected favorites response');
+  }
+  return data;
+}
+
 export async function fetchRecentAssets(limit: number, signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch(`/api/assets/recent?limit=${limit}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Recent assets request failed');
