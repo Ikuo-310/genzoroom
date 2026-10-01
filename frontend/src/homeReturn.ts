@@ -37,7 +37,15 @@ export function homeScrollContent(page: HTMLElement): HTMLElement | null {
   return page.querySelector('.photo-grid, .album-grid, .calendar-month');
 }
 
-export function restoreHomeScroll(page: HTMLElement, context: HomeReturnContext) {
+export type HomeScrollPosition = Pick<HomeReturnContext, 'pageScrollTop' | 'contentScrollTop'>;
+
+export function homeViewKey(tab: HomeTab, albumId: string | null, year: number, month: number, date: string | null) {
+  if (tab === 'recent') return 'recent';
+  if (tab === 'albums') return albumId ? `albums:${albumId}` : 'albums:list';
+  return `calendar:${date ?? `${year}-${String(month).padStart(2, '0')}`}`;
+}
+
+export function restoreHomeScroll(page: HTMLElement, context: HomeScrollPosition) {
   page.scrollTop = context.pageScrollTop;
   const content = homeScrollContent(page);
   if (content) content.scrollTop = context.contentScrollTop;

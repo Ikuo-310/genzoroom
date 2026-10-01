@@ -2,7 +2,7 @@ import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { homeScrollContent, readHomeReturn, restoreHomeScroll, type HomeReturnContext, type HomeTab } from './homeReturn';
+import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
 import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
@@ -38,7 +38,11 @@ export function GalleryPage() {
   const location = useLocation();
   const [homeReturn] = useState(() => readHomeReturn(location.state?.homeReturn));
   const pageRef = useRef<HTMLElement>(null);
-  const pendingScroll = useRef(homeReturn);
+  const scrollPositions = useRef(new Map<string, HomeScrollPosition>());
+  const pendingScroll = useRef<{ key: string; position: HomeScrollPosition; waitingForData: boolean } | null>(homeReturn
+    ? { key: homeViewKey(homeReturn.tab, homeReturn.album?.id ?? null, homeReturn.year, homeReturn.month, homeReturn.date),
+      position: homeReturn, waitingForData: true } : null);
+  const [scrollRestoreRevision, setScrollRestoreRevision] = useState(0);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const currentYear = new Date().getFullYear();
   const [connection, setConnection] = useState<Connection>('checking');
@@ -84,24 +88,25 @@ export function GalleryPage() {
       : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterMode);
+  const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate);
 
   useLayoutEffect(() => {
-    const context = pendingScroll.current;
-    if (!context || !pageRef.current) return;
+    const pending = pendingScroll.current;
+    if (!pending || !pageRef.current) return;
     // Never apply an old offset if the user changes views before the restored request completes.
-    if (context.tab !== activeTab || context.album?.id !== selectedAlbum?.id
-      || context.date !== selectedCalendarDate || context.year !== calendarYear || context.month !== calendarMonth) {
+    if (pending.key !== viewKey) {
       pendingScroll.current = null;
       return;
     }
     const status = activeTab === 'recent' ? assetState : activeTab === 'albums'
       ? selectedAlbum ? albumAssetState : albumState : selectedCalendarDate ? calendarAssetState : calendarState;
-    if (status === 'idle' || status === 'loading') return;
+    if (pending.waitingForData || status === 'idle' || status === 'loading') return;
     // Card dimensions are established by CSS, so restoration can run after the data's DOM commit.
-    restoreHomeScroll(pageRef.current, context);
+    restoreHomeScroll(pageRef.current, pending.position);
+    scrollPositions.current.set(viewKey, readScrollPosition());
     pendingScroll.current = null;
   }, [activeTab, selectedAlbum, selectedCalendarDate, calendarYear, calendarMonth,
-    assetState, albumState, albumAssetState, calendarState, calendarAssetState]);
+    assetState, albumState, albumAssetState, calendarState, calendarAssetState, viewKey, scrollRestoreRevision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,6 +153,7 @@ export function GalleryPage() {
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     void fetchRecentAssets(settings.recentPhotoCount, controller.signal).then(data => {
       if (active) {
+        completeScrollRequest('recent');
         hasLoadedRecentAssets.current = true;
         setAssets(data);
         const availableIds = new Set(data.map(asset => asset.id));
@@ -157,6 +163,7 @@ export function GalleryPage() {
       }
     }).catch(() => {
       if (active && !hasLoadedRecentAssets.current) {
+        completeScrollRequest('recent');
         setAssets([]);
         setAssetState('error');
       }
@@ -174,10 +181,14 @@ export function GalleryPage() {
     void fetchAlbums(controller.signal).then(data => {
       if (!active) return;
       hasLoadedAlbums.current = true;
+      completeScrollRequest('albums:list');
       setAlbums(data);
       setAlbumState('ready');
     }).catch(() => {
-      if (active && !hasLoadedAlbums.current) setAlbumState('error');
+      if (active && !hasLoadedAlbums.current) {
+        completeScrollRequest('albums:list');
+        setAlbumState('error');
+      }
     }).finally(() => window.clearTimeout(timeout));
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
   }, [activeTab]);
@@ -189,13 +200,17 @@ export function GalleryPage() {
     const requestId = albumAssetRequestId.current;
     void fetchAlbumAssets(selectedAlbum.id, controller.signal).then(data => {
       if (!active || requestId !== albumAssetRequestId.current) return;
+      completeScrollRequest(`albums:${selectedAlbum.id}`);
       const availableIds = new Set(data.map(asset => asset.id));
       setAlbumAssets(data);
       setAlbumSelectedAssetIds(current => current.filter(id => availableIds.has(id)));
       if (albumSelectionAnchorId.current && !availableIds.has(albumSelectionAnchorId.current)) albumSelectionAnchorId.current = null;
       setAlbumAssetState('ready');
     }).catch(() => {
-      if (active && requestId === albumAssetRequestId.current) setAlbumAssetState('error');
+      if (active && requestId === albumAssetRequestId.current) {
+        completeScrollRequest(`albums:${selectedAlbum.id}`);
+        setAlbumAssetState('error');
+      }
     });
     return () => { active = false; controller.abort(); };
   }, [activeTab, selectedAlbum?.id]);
@@ -228,10 +243,14 @@ export function GalleryPage() {
     setCalendarState('loading');
     void fetchCalendarHeatmap(calendarYear, calendarMonth, controller.signal).then(data => {
       if (!active || requestId !== calendarHeatmapRequestId.current) return;
+      completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
       setCalendarDays(data.days);
       setCalendarState('ready');
     }).catch(() => {
-      if (active && requestId === calendarHeatmapRequestId.current) setCalendarState('error');
+      if (active && requestId === calendarHeatmapRequestId.current) {
+        completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
+        setCalendarState('error');
+      }
     });
     return () => { active = false; controller.abort(); };
   }, [activeTab, calendarYear, calendarMonth, selectedCalendarDate, calendarMinYearReady]);
@@ -243,13 +262,17 @@ export function GalleryPage() {
     const requestId = calendarAssetRequestId.current;
     void fetchCalendarDayAssets(selectedCalendarDate, controller.signal).then(data => {
       if (!active || requestId !== calendarAssetRequestId.current) return;
+      completeScrollRequest(`calendar:${selectedCalendarDate}`);
       setCalendarAssets(data);
       const availableIds = new Set(data.map(asset => asset.id));
       setCalendarSelectedAssetIds(current => current.filter(id => availableIds.has(id)));
       if (calendarSelectionAnchorId.current && !availableIds.has(calendarSelectionAnchorId.current)) calendarSelectionAnchorId.current = null;
       setCalendarAssetState('ready');
     }).catch(() => {
-      if (active && requestId === calendarAssetRequestId.current) setCalendarAssetState('error');
+      if (active && requestId === calendarAssetRequestId.current) {
+        completeScrollRequest(`calendar:${selectedCalendarDate}`);
+        setCalendarAssetState('error');
+      }
     });
     return () => { active = false; controller.abort(); };
   }, [activeTab, selectedCalendarDate]);
@@ -293,11 +316,34 @@ export function GalleryPage() {
     if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
   }
 
-  function captureHomeReturn(): HomeReturnContext {
+  function readScrollPosition(): HomeScrollPosition {
     const page = pageRef.current;
-    return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
-      date: selectedCalendarDate, pageScrollTop: page?.scrollTop ?? 0,
+    return { pageScrollTop: page?.scrollTop ?? 0,
       contentScrollTop: page ? homeScrollContent(page)?.scrollTop ?? 0 : 0 };
+  }
+
+  function captureHomeReturn(): HomeReturnContext {
+    return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
+      date: selectedCalendarDate, ...readScrollPosition() };
+  }
+
+  function prepareScrollTransition(nextKey: string) {
+    if (nextKey === viewKey) return;
+    // A view left before restoration completes must retain its intended offset, not the loading DOM's offset.
+    scrollPositions.current.set(viewKey, pendingScroll.current?.key === viewKey
+      ? pendingScroll.current.position : readScrollPosition());
+    pendingScroll.current = { key: nextKey,
+      position: scrollPositions.current.get(nextKey) ?? { pageScrollTop: 0, contentScrollTop: 0 },
+      waitingForData: nextKey === 'recent' ? !hasLoadedRecentAssets.current
+        : nextKey === 'albums:list' ? !hasLoadedAlbums.current : true };
+  }
+
+  function completeScrollRequest(key: string) {
+    const pending = pendingScroll.current;
+    if (!pending || pending.key !== key || !pending.waitingForData) return;
+    pending.waitingForData = false;
+    // A ref alone cannot trigger restoration when a refetch returns the same asset array.
+    setScrollRestoreRevision(revision => revision + 1);
   }
 
   function togglePhotoSelection(assetId: string, extendRange = false) {
@@ -339,6 +385,7 @@ export function GalleryPage() {
   }
 
   function openAlbum(album: AlbumSummary) {
+    prepareScrollTransition(`albums:${album.id}`);
     // Invalidate the previous request before React runs its effect cleanup.
     albumAssetRequestId.current += 1;
     albumSelectionAnchorId.current = null;
@@ -349,6 +396,7 @@ export function GalleryPage() {
   }
 
   function closeAlbum() {
+    prepareScrollTransition('albums:list');
     albumAssetRequestId.current += 1;
     albumSelectionAnchorId.current = null;
     setAlbumSelectedAssetIds([]);
@@ -359,12 +407,14 @@ export function GalleryPage() {
 
   function changeCalendarYear(year: number) {
     if (year < calendarMinYear || year > currentYear) return;
+    prepareScrollTransition(homeViewKey('calendar', null, year, calendarMonth, null));
     calendarHeatmapRequestId.current += 1;
     setCalendarYear(year);
   }
 
   function changeCalendarMonth(month: number) {
     if (month < 1 || month > 12) return;
+    prepareScrollTransition(homeViewKey('calendar', null, calendarYear, month, null));
     calendarHeatmapRequestId.current += 1;
     setCalendarMonth(month);
   }
@@ -372,12 +422,14 @@ export function GalleryPage() {
   function goToCurrentCalendarMonth() {
     const today = new Date();
     if (calendarYear === today.getFullYear() && calendarMonth === today.getMonth() + 1) return;
+    prepareScrollTransition(homeViewKey('calendar', null, today.getFullYear(), today.getMonth() + 1, null));
     calendarHeatmapRequestId.current += 1;
     setCalendarYear(today.getFullYear());
     setCalendarMonth(today.getMonth() + 1);
   }
 
   function openCalendarDay(day: string) {
+    prepareScrollTransition(`calendar:${day}`);
     calendarAssetRequestId.current += 1;
     calendarSelectionAnchorId.current = null;
     setCalendarSelectedAssetIds([]);
@@ -387,6 +439,7 @@ export function GalleryPage() {
   }
 
   function closeCalendarDay() {
+    prepareScrollTransition(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
     calendarAssetRequestId.current += 1;
     calendarSelectionAnchorId.current = null;
     setCalendarSelectedAssetIds([]);
@@ -397,6 +450,7 @@ export function GalleryPage() {
 
   function handleTabClick(tab: HomeTab) {
     if (tab !== activeTab) {
+      prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate));
       setActiveTab(tab);
       return;
     }
@@ -413,7 +467,10 @@ export function GalleryPage() {
     const index = tabs.indexOf(activeTab);
     const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'calendar'
       : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-    setActiveTab(next);
+    if (next !== activeTab) {
+      prepareScrollTransition(homeViewKey(next, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate));
+      setActiveTab(next);
+    }
     (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : calendarTab).current?.focus();
   }
 
