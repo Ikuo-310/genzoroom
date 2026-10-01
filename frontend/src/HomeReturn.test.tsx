@@ -86,6 +86,39 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); writePhotoFilterMode('both'); vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it('keeps Year view scroll separate from months and other years across tabs and date details', async () => {
+    api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
+      days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
+    await mount(); await click('#home-calendar-tab'); change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle();
+    setScroll(8, 180);
+    await click('.calendar-view-toggle'); setScroll(26, 626);
+    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(26, 626);
+    await click('.calendar-view-toggle'); expectScroll(8, 180);
+    await click('.calendar-view-toggle'); expectScroll(26, 626);
+    change('#calendar-year', '2025'); await settle(); expectScroll(0, 0); setScroll(25, 525);
+    change('#calendar-year', '2026'); await settle(); expectScroll(26, 626);
+    await click('.calendar-day.has-assets'); setScroll(15, 415);
+    await click('#home-calendar-tab'); expectScroll(26, 626);
+    expect(host.querySelector('.calendar-year')).not.toBeNull();
+    await click('.calendar-day.has-assets'); expectScroll(15, 415);
+    await click('.album-back'); expectScroll(26, 626);
+    change('#calendar-year', '2025'); await settle(); expectScroll(25, 525);
+  });
+
+  it('restores the annual parent mode after the darkroom and prioritizes the day scroll from navigation state', async () => {
+    api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
+      days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
+    await mount(); await click('#home-calendar-tab'); change('#calendar-year', '2026'); await settle();
+    await click('.calendar-view-toggle'); await click('.calendar-day.has-assets'); setScroll(31, 931);
+    await click('.photo-card-button'); await click('.workspace-actions button'); expectScroll(31, 931);
+    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(31, 931);
+    await click('#home-calendar-tab');
+    expect(host.querySelector('.calendar-year')).not.toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
+    expect(readHomeReturn(context)?.calendarMode).toBe('month');
+    expect(readHomeReturn({ ...context, calendarMode: 'invalid' })?.calendarMode).toBe('month');
+  });
+
   it('keeps Recent and Album-list offsets separate across mouse and keyboard tab navigation', async () => {
     await mount(); setScroll(12, 480);
     await click('#home-albums-tab'); expectScroll(0, 0); setScroll(24, 260);

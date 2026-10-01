@@ -130,7 +130,7 @@ class CalendarDay(BaseModel):
 
 class CalendarHeatmap(BaseModel):
     year: int
-    month: int
+    month: int | None
     days: list[CalendarDay]
 
 
@@ -586,12 +586,12 @@ async def get_calendar_heatmap(
     immich_url: str | None,
     api_key: str | None,
     year: int,
-    month: int,
+    month: int | None = None,
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> CalendarHeatmap:
-    first = date(year, month, 1)
-    last_day = monthrange(year, month)[1]
-    last = date(year, month, last_day)
+    first = date(year, month or 1, 1)
+    last = date(year, month, monthrange(year, month)[1]) if month is not None else date(year, 12, 31)
+    day_count = (last - first).days + 1
     url, key = _require_configuration(immich_url, api_key)
     try:
         async with httpx.AsyncClient(
@@ -632,7 +632,7 @@ async def get_calendar_heatmap(
         days=[CalendarDay(date=(first + timedelta(days=offset)).isoformat(),
                           hasAssets=day_counts.get((first + timedelta(days=offset)).isoformat(), 0) > 0,
                           count=day_counts.get((first + timedelta(days=offset)).isoformat(), 0))
-              for offset in range(last_day)],
+              for offset in range(day_count)],
     )
 
 

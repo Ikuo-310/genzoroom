@@ -47,6 +47,19 @@ describe('album assets API', () => {
 });
 
 describe('calendar API', () => {
+  it('requests a whole year without month and validates the annual response', async () => {
+    const heatmap = { year: 2026, month: null, days: [{ date: '2026-08-15', hasAssets: true, count: 3 }] };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(heatmap)));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const controller = new AbortController();
+      expect(await fetchCalendarHeatmap(2026, null, controller.signal)).toEqual(heatmap);
+      expect(fetch).toHaveBeenCalledWith('/api/calendar/heatmap?year=2026', { signal: controller.signal, cache: 'no-store' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      fetch.mockImplementation(async () => new Response(JSON.stringify({ ...heatmap, month: 8 })));
+      await expect(fetchCalendarHeatmap(2026, null, controller.signal)).rejects.toThrow('Unexpected calendar heatmap response');
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('fetches and validates the calendar minimum year metadata', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ minYear: 2002 })));
     vi.stubGlobal('fetch', fetch);

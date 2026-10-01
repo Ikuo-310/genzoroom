@@ -2,7 +2,7 @@ import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
+import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type CalendarViewMode, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
 import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
@@ -40,7 +40,7 @@ export function GalleryPage() {
   const pageRef = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, HomeScrollPosition>());
   const pendingScroll = useRef<{ key: string; position: HomeScrollPosition; waitingForData: boolean } | null>(homeReturn
-    ? { key: homeViewKey(homeReturn.tab, homeReturn.album?.id ?? null, homeReturn.year, homeReturn.month, homeReturn.date),
+    ? { key: homeViewKey(homeReturn.tab, homeReturn.album?.id ?? null, homeReturn.year, homeReturn.month, homeReturn.date, homeReturn.calendarMode),
       position: homeReturn, waitingForData: true } : null);
   const [scrollRestoreRevision, setScrollRestoreRevision] = useState(0);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
@@ -57,6 +57,7 @@ export function GalleryPage() {
   const [albumAssetState, setAlbumAssetState] = useState<'idle' | AssetState>('idle');
   const [calendarYear, setCalendarYear] = useState(() => homeReturn?.year ?? new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => homeReturn?.month ?? new Date().getMonth() + 1);
+  const [calendarMode, setCalendarMode] = useState<CalendarViewMode>(homeReturn?.calendarMode ?? 'month');
   const [calendarMinYear, setCalendarMinYear] = useState(currentYear);
   const [calendarMinYearReady, setCalendarMinYearReady] = useState(false);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
@@ -88,7 +89,7 @@ export function GalleryPage() {
       : showingCalendarPhotos && calendarAssetState === 'ready' ? calendarAssets : [];
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterMode);
-  const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate);
+  const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
   useLayoutEffect(() => {
     const pending = pendingScroll.current;
@@ -241,19 +242,19 @@ export function GalleryPage() {
     let active = true;
     const requestId = ++calendarHeatmapRequestId.current;
     setCalendarState('loading');
-    void fetchCalendarHeatmap(calendarYear, calendarMonth, controller.signal).then(data => {
+    void fetchCalendarHeatmap(calendarYear, calendarMode === 'year' ? null : calendarMonth, controller.signal).then(data => {
       if (!active || requestId !== calendarHeatmapRequestId.current) return;
-      completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
+      completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
       setCalendarDays(data.days);
       setCalendarState('ready');
     }).catch(() => {
       if (active && requestId === calendarHeatmapRequestId.current) {
-        completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
+        completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
         setCalendarState('error');
       }
     });
     return () => { active = false; controller.abort(); };
-  }, [activeTab, calendarYear, calendarMonth, selectedCalendarDate, calendarMinYearReady]);
+  }, [activeTab, calendarYear, calendarMonth, calendarMode, selectedCalendarDate, calendarMinYearReady]);
 
   useEffect(() => {
     if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
@@ -324,7 +325,7 @@ export function GalleryPage() {
 
   function captureHomeReturn(): HomeReturnContext {
     return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
-      date: selectedCalendarDate, ...readScrollPosition() };
+      date: selectedCalendarDate, calendarMode, ...readScrollPosition() };
   }
 
   function prepareScrollTransition(nextKey: string) {
@@ -405,27 +406,36 @@ export function GalleryPage() {
     setSelectedAlbum(null);
   }
 
-  function changeCalendarYear(year: number) {
-    if (year < calendarMinYear || year > currentYear) return;
-    prepareScrollTransition(homeViewKey('calendar', null, year, calendarMonth, null));
+  function changeCalendarPeriod(year: number, month: number, mode: CalendarViewMode = calendarMode) {
+    if (year < calendarMinYear || year > currentYear || month < 1 || month > 12) return;
+    if (year === calendarYear && month === calendarMonth && mode === calendarMode) return;
+    // Year-crossing arrows must queue one final view key, not an intermediate year/month combination.
+    prepareScrollTransition(homeViewKey('calendar', null, year, month, null, mode));
     calendarHeatmapRequestId.current += 1;
     setCalendarYear(year);
+    setCalendarMonth(month);
+    setCalendarMode(mode);
+  }
+
+  function changeCalendarYear(year: number) {
+    changeCalendarPeriod(year, calendarMonth);
   }
 
   function changeCalendarMonth(month: number) {
-    if (month < 1 || month > 12) return;
-    prepareScrollTransition(homeViewKey('calendar', null, calendarYear, month, null));
-    calendarHeatmapRequestId.current += 1;
-    setCalendarMonth(month);
+    changeCalendarPeriod(calendarYear, month, 'month');
+  }
+
+  function changeCalendarMode(mode: CalendarViewMode) {
+    changeCalendarPeriod(calendarYear, calendarMonth, mode);
+  }
+
+  function goToCurrentCalendarYear() {
+    changeCalendarYear(new Date().getFullYear());
   }
 
   function goToCurrentCalendarMonth() {
     const today = new Date();
-    if (calendarYear === today.getFullYear() && calendarMonth === today.getMonth() + 1) return;
-    prepareScrollTransition(homeViewKey('calendar', null, today.getFullYear(), today.getMonth() + 1, null));
-    calendarHeatmapRequestId.current += 1;
-    setCalendarYear(today.getFullYear());
-    setCalendarMonth(today.getMonth() + 1);
+    changeCalendarPeriod(today.getFullYear(), today.getMonth() + 1, 'month');
   }
 
   function openCalendarDay(day: string) {
@@ -435,11 +445,14 @@ export function GalleryPage() {
     setCalendarSelectedAssetIds([]);
     setCalendarAssets([]);
     setCalendarAssetState('loading');
+    // The parent mode stays intact, while the date's month becomes the Month view destination.
+    setCalendarYear(Number(day.slice(0, 4)));
+    setCalendarMonth(Number(day.slice(5, 7)));
     setSelectedCalendarDate(day);
   }
 
   function closeCalendarDay() {
-    prepareScrollTransition(homeViewKey('calendar', null, calendarYear, calendarMonth, null));
+    prepareScrollTransition(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
     calendarAssetRequestId.current += 1;
     calendarSelectionAnchorId.current = null;
     setCalendarSelectedAssetIds([]);
@@ -450,7 +463,7 @@ export function GalleryPage() {
 
   function handleTabClick(tab: HomeTab) {
     if (tab !== activeTab) {
-      prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate));
+      prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode));
       setActiveTab(tab);
       return;
     }
@@ -468,7 +481,7 @@ export function GalleryPage() {
     const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'calendar'
       : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     if (next !== activeTab) {
-      prepareScrollTransition(homeViewKey(next, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate));
+      prepareScrollTransition(homeViewKey(next, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode));
       setActiveTab(next);
     }
     (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : calendarTab).current?.focus();
@@ -576,7 +589,7 @@ export function GalleryPage() {
         </div> : <div id="home-calendar-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-calendar-tab">
           {selectedCalendarDate ? <>
             <div className="album-detail-heading">
-              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t('calendar.backToMonth')}</button>
+              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}</button>
               <h2>{new Intl.DateTimeFormat(resolveDateLocale(settings.dateLocale), { dateStyle: 'long', timeZone: 'UTC' })
                 .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
             </div>
@@ -589,10 +602,12 @@ export function GalleryPage() {
                   : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                     : renderPhotoGrid()}
           </> : <>
-            <HomeCalendar year={calendarYear} month={calendarMonth} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
+            <HomeCalendar year={calendarYear} month={calendarMonth} mode={calendarMode} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
               weekStart={resolveWeekStart(settings.weekStart, resolveDateLocale(settings.dateLocale))}
               loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
               onMonthChange={changeCalendarMonth} onCurrentMonth={goToCurrentCalendarMonth}
+              onNavigate={changeCalendarPeriod}
+              onModeChange={changeCalendarMode} onCurrentYear={goToCurrentCalendarYear}
               onDayOpen={openCalendarDay} />
             {calendarState === 'loading' && <p className="gallery-message" role="status">{t('calendar.loading')}</p>}
             {calendarState === 'error' && <p className="gallery-message error-text" role="alert">{t('calendar.loadFailed')}</p>}

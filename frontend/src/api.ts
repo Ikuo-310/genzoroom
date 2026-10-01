@@ -50,8 +50,8 @@ export async function fetchAlbumAssets(albumId: string, signal: AbortSignal): Pr
   return data;
 }
 
-export async function fetchCalendarHeatmap(year: number, month: number, signal: AbortSignal): Promise<CalendarHeatmap> {
-  const response = await fetch(`/api/calendar/heatmap?year=${year}&month=${month}`, { signal, cache: 'no-store' });
+export async function fetchCalendarHeatmap(year: number, month: number | null, signal: AbortSignal): Promise<CalendarHeatmap> {
+  const response = await fetch(`/api/calendar/heatmap?year=${year}${month === null ? '' : `&month=${month}`}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Calendar heatmap request failed');
   const data: unknown = await response.json();
   if (!isRecord(data) || data.year !== year || data.month !== month || !Array.isArray(data.days) ||

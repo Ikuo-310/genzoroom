@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import type { CalendarViewMode } from './homeReturn';
 
 export type CalendarDay = { date: string; hasAssets: boolean; count: number };
-export type CalendarHeatmap = { year: number; month: number; days: CalendarDay[] };
+export type CalendarHeatmap = { year: number; month: number | null; days: CalendarDay[] };
 
 const weekdayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
 const monthKeys = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
@@ -12,9 +13,10 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
-export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onCurrentMonth, onDayOpen }: {
+export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onDayOpen }: {
   year: number;
   month: number;
+  mode: CalendarViewMode;
   minYear: number;
   maxYear: number;
   days: CalendarDay[];
@@ -22,24 +24,27 @@ export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, l
   loading: boolean;
   onYearChange: (year: number) => void;
   onMonthChange: (month: number) => void;
+  onNavigate: (year: number, month: number) => void;
+  onModeChange: (mode: CalendarViewMode) => void;
   onCurrentMonth: () => void;
+  onCurrentYear: () => void;
   onDayOpen: (date: string) => void;
 }) {
   const { t } = useTranslation();
-  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const offset = (firstWeekday - weekStart + 7) % 7;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const daysByDate = new Map(days.map(day => [day.date, day]));
-  const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const previous = shiftCalendarMonth(year, month, -1);
-  const next = shiftCalendarMonth(year, month, 1);
+  const previous = mode === 'year' ? { year: year - 1, month } : shiftCalendarMonth(year, month, -1);
+  const next = mode === 'year' ? { year: year + 1, month } : shiftCalendarMonth(year, month, 1);
+  function move(target: { year: number; month: number }) {
+    onNavigate(target.year, target.month);
+  }
 
-  return <div className="calendar-month">
+  return <div className={mode === 'year' ? 'calendar-year' : 'calendar-month'}>
     <div className="calendar-navigation">
-      <button type="button" className="calendar-arrow" aria-label={t('calendar.previousMonth')}
+      <button type="button" className="calendar-arrow" aria-label={t(mode === 'year' ? 'calendar.previousYear' : 'calendar.previousMonth')}
         disabled={previous.year < minYear}
-        onClick={() => { onYearChange(previous.year); onMonthChange(previous.month); }}>←</button>
+        onClick={() => move(previous)}>←</button>
+      <button type="button" className="calendar-view-toggle" onClick={() => onModeChange(mode === 'year' ? 'month' : 'year')}>
+        {t(mode === 'year' ? 'calendar.monthView' : 'calendar.yearView')}</button>
       <label className="visually-hidden" htmlFor="calendar-year">{t('calendar.year')}</label>
       <select id="calendar-year" aria-label={t('calendar.year')} value={year}
         onChange={event => onYearChange(Number(event.target.value))}>
@@ -53,12 +58,34 @@ export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, l
         onChange={event => onMonthChange(Number(event.target.value))}>
         {monthKeys.map((key, index) => <option key={key} value={index + 1}>{t(`calendar.months.${key}`)}</option>)}
       </select>
-      <button type="button" className="calendar-current-month" onClick={onCurrentMonth}>{t('calendar.thisMonth')}</button>
-      <button type="button" className="calendar-arrow" aria-label={t('calendar.nextMonth')}
+      <button type="button" className="calendar-current-month" onClick={mode === 'year' ? onCurrentYear : onCurrentMonth}>
+        {t(mode === 'year' ? 'calendar.thisYear' : 'calendar.thisMonth')}</button>
+      <button type="button" className="calendar-arrow" aria-label={t(mode === 'year' ? 'calendar.nextYear' : 'calendar.nextMonth')}
         disabled={next.year > maxYear}
-        onClick={() => { onYearChange(next.year); onMonthChange(next.month); }}>→</button>
+        onClick={() => move(next)}>→</button>
     </div>
-    <div className="calendar-days" role="group" aria-label={t('calendar.gridLabel', { year, month })}>
+    {mode === 'year' ? <div className="calendar-year-grid">
+      {monthKeys.map((key, index) => <section className="calendar-mini-month" key={key} aria-label={t(`calendar.months.${key}`)}>
+        <h3>{t(`calendar.months.${key}`)}</h3>
+        <CalendarMonthGrid year={year} month={index + 1} daysByDate={daysByDate} weekStart={weekStart}
+          loading={loading} showCounts={false} onDayOpen={onDayOpen} />
+      </section>)}
+    </div> : <CalendarMonthGrid year={year} month={month} daysByDate={daysByDate} weekStart={weekStart}
+      loading={loading} showCounts onDayOpen={onDayOpen} />}
+  </div>;
+}
+
+function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showCounts, onDayOpen }: {
+  year: number; month: number; daysByDate: Map<string, CalendarDay>; weekStart: number;
+  loading: boolean; showCounts: boolean; onDayOpen: (date: string) => void;
+}) {
+  const { t } = useTranslation();
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const offset = (firstWeekday - weekStart + 7) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return <div className="calendar-days" role="group" aria-label={t('calendar.gridLabel', { year, month })}>
       {weekdayKeys.map((_, index) => <span className="calendar-weekday" aria-hidden="true" key={index}>
         {t(`calendar.weekdays.${weekdayKeys[(weekStart + index) % 7]}`)}
       </span>)}
@@ -71,9 +98,8 @@ export function HomeCalendar({ year, month, minYear, maxYear, days, weekStart, l
         return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${date === todayKey ? ' today' : ''}`}
           disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date, count: entry.count }) : t('calendar.dayLabel', { date })}
           onClick={() => onDayOpen(date)}><span className="calendar-day-number">{day}</span>
-          {available && <span className="calendar-day-count">{t('calendar.assetCount', { count: entry.count })}</span>}
+          {available && showCounts && <span className="calendar-day-count">{t('calendar.assetCount', { count: entry.count })}</span>}
         </button>;
       })}
-    </div>
-  </div>;
+    </div>;
 }

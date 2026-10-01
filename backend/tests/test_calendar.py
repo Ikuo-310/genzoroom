@@ -24,6 +24,24 @@ def page(items, next_cursor=None):
 
 
 class CalendarTests(unittest.TestCase):
+    def test_year_heatmap_uses_one_request_and_includes_all_days(self):
+        for year, length in ((2026, 365), (2024, 366)):
+            calls = []
+            def handler(request):
+                calls.append(request)
+                self.assertEqual(dict(request.url.params), {"from": f"{year}-01-01", "to": f"{year}-12-31", "type": "Taken"})
+                self.assertEqual(request.headers["x-api-key"], "secret")
+                return httpx.Response(200, json={"series": [
+                    {"date": f"{year}-01-01", "count": 2}, {"date": f"{year}-12-31", "count": 5}]})
+            result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", year,
+                transport=httpx.MockTransport(handler)))
+            self.assertIsNone(result.month)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(result.days), length)
+            self.assertEqual(result.days[0].count, 2)
+            self.assertEqual(result.days[-1].count, 5)
+            self.assertFalse(result.days[1].hasAssets)
+
     def test_min_year_searches_one_oldest_image_and_returns_local_year(self):
         calls = []
         def handler(request):
@@ -135,9 +153,14 @@ class CalendarTests(unittest.TestCase):
                 with patch("main.get_calendar_heatmap", heatmap), patch("main.get_calendar_day_assets", day_assets):
                     self.assertEqual((await client.get("/calendar/heatmap?year=2026&month=9")).status_code, 200)
                     heatmap.assert_awaited_with(None, None, 2026, 9)
+                    heatmap.return_value = {"year": 2026, "month": None, "days": []}
+                    response = await client.get("/calendar/heatmap?year=2026")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertIsNone(response.json()["month"])
+                    heatmap.assert_awaited_with(None, None, 2026, None)
                     self.assertEqual((await client.get("/calendar/2026-09-30/assets")).status_code, 200)
                     day_assets.assert_awaited_with(None, None, DAY)
-                    for path in ("/calendar/heatmap?year=0&month=9", "/calendar/heatmap?year=2026&month=13",
+                    for path in ("/calendar/heatmap?year=0", "/calendar/heatmap?year=0&month=9", "/calendar/heatmap?year=2026&month=13",
                                  "/calendar/heatmap?year=no&month=9", "/calendar/not-a-date/assets"):
                         self.assertEqual((await client.get(path)).status_code, 422)
                 with patch("main.get_calendar_min_year", new=AsyncMock(return_value=2002)):

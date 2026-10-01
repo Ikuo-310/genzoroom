@@ -2,6 +2,7 @@ import type { AlbumSummary } from './albums';
 import { isAlbumSummary } from './api';
 
 export type HomeTab = 'recent' | 'albums' | 'calendar';
+export type CalendarViewMode = 'month' | 'year';
 // Route state carries only browsing context; asset data and persistent settings keep their existing owners.
 export type HomeReturnContext = {
   tab: HomeTab;
@@ -9,6 +10,7 @@ export type HomeReturnContext = {
   year: number;
   month: number;
   date: string | null;
+  calendarMode?: CalendarViewMode;
   pageScrollTop: number;
   contentScrollTop: number;
 };
@@ -30,19 +32,20 @@ export function readHomeReturn(value: unknown): HomeReturnContext | null {
     ? state.date : null;
   const offset = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
   return { tab: state.tab as HomeTab, album: isAlbumSummary(state.album) && state.album.id.trim() ? state.album : null,
-    year, month, date, pageScrollTop: offset(state.pageScrollTop), contentScrollTop: offset(state.contentScrollTop) };
+    year, month, date, calendarMode: state.calendarMode === 'year' ? 'year' : 'month',
+    pageScrollTop: offset(state.pageScrollTop), contentScrollTop: offset(state.contentScrollTop) };
 }
 
 export function homeScrollContent(page: HTMLElement): HTMLElement | null {
-  return page.querySelector('.photo-grid, .album-grid, .calendar-month');
+  return page.querySelector('.photo-grid, .album-grid, .calendar-month, .calendar-year');
 }
 
 export type HomeScrollPosition = Pick<HomeReturnContext, 'pageScrollTop' | 'contentScrollTop'>;
 
-export function homeViewKey(tab: HomeTab, albumId: string | null, year: number, month: number, date: string | null) {
+export function homeViewKey(tab: HomeTab, albumId: string | null, year: number, month: number, date: string | null, calendarMode: CalendarViewMode = 'month') {
   if (tab === 'recent') return 'recent';
   if (tab === 'albums') return albumId ? `albums:${albumId}` : 'albums:list';
-  return `calendar:${date ?? `${year}-${String(month).padStart(2, '0')}`}`;
+  return `calendar:${date ?? (calendarMode === 'year' ? `year:${year}` : `${year}-${String(month).padStart(2, '0')}`)}`;
 }
 
 export function restoreHomeScroll(page: HTMLElement, context: HomeScrollPosition) {
