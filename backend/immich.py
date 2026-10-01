@@ -17,6 +17,7 @@ MIN_RECENT_ASSET_LIMIT = 50
 MAX_RECENT_ASSET_LIMIT = 500
 RECENT_ASSET_LIMIT_STEP = 50
 ALBUM_ASSET_PAGE_SIZE = 1000
+CALENDAR_FORMAT_BATCH_SIZE = 100
 FORMAT_ALIASES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",
@@ -592,9 +593,8 @@ async def get_calendar_heatmap(
 ) -> CalendarHeatmap:
     first = date(year, month or 1, 1)
     last = date(year, month, monthrange(year, month)[1]) if month is not None else date(year, 12, 31)
-    # Immich applies an exclusive upper bound, including the final day only with next-period to.
-    end = last + timedelta(days=1)
-    day_count = (end - first).days
+    # Immich's service adds a day before querying the repository; API to is inclusive.
+    day_count = (last - first).days + 1
     url, key = _require_configuration(immich_url, api_key)
     try:
         async with httpx.AsyncClient(
@@ -603,7 +603,7 @@ async def get_calendar_heatmap(
             response = await client.get(
                 _api_url(url, "/users/me/calendar-heatmap"),
                 headers={"x-api-key": key, "Accept": "application/json"},
-                params={"from": first.isoformat(), "to": end.isoformat(), "type": "Taken"},
+                params={"from": first.isoformat(), "to": last.isoformat(), "type": "Taken"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
         raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
@@ -657,7 +657,7 @@ async def _calendar_month_thumbnails(
             response = await client.get(
                 _api_url(url, "/timeline/bucket"),
                 headers={"x-api-key": key, "Accept": "application/json"},
-                params={"timeBucket": f"{first.isoformat()}T00:00:00.000Z", "orderBy": "takenAt",
+                params={"timeBucket": first.isoformat(), "orderBy": "takenAt",
                         "order": "desc", "visibility": "timeline", "isTrashed": "false",
                         "withStacked": "true", "withPartners": "true"},
             )
@@ -672,7 +672,7 @@ async def _calendar_month_thumbnails(
             raise TypeError
         if any(len(body[field]) != len(body["id"]) for field in fields):
             raise ValueError
-        thumbnails: dict[str, str] = {}
+        candidates: list[tuple[str, UUID]] = []
         for asset_id, is_image, timestamp, offset in zip(*(body[field] for field in fields)):
             if not isinstance(asset_id, str) or type(is_image) is not bool or not isinstance(timestamp, str):
                 raise TypeError
@@ -684,10 +684,26 @@ async def _calendar_month_thumbnails(
             # Match Immich Web getTimes(): UTC fileCreatedAt plus the (possibly fractional) local offset.
             local_day = (utc + timedelta(hours=offset)).date()
             if is_image and (local_day.year, local_day.month) == (first.year, first.month):
-                thumbnails.setdefault(local_day.isoformat(), f"/api/assets/{asset_id}/thumbnail")
-        return thumbnails
+                candidates.append((local_day.isoformat(), asset_id))
     except (KeyError, TypeError, ValueError, OverflowError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+
+    thumbnails: dict[str, str] = {}
+    for start in range(0, len(candidates), CALENDAR_FORMAT_BATCH_SIZE):
+        batch = [(day, asset_id) for day, asset_id in candidates[start:start + CALENDAR_FORMAT_BATCH_SIZE]
+                 if day not in thumbnails]
+        if not batch:
+            continue
+        # The bucket has no filenames. Official structured OR/id.eq search resolves formats in batches,
+        # while replaying bucket order below avoids metadata search order changing the representative.
+        assets = await _search_all_assets(url, key, {
+            "type": {"eq": "IMAGE"}, "or": [{"id": {"eq": str(asset_id)}} for _, asset_id in batch],
+        }, "fileCreatedAt", transport=transport)
+        jpeg_ids = {asset.id for asset in assets if asset.format == "JPEG"}
+        for day, asset_id in batch:
+            if asset_id in jpeg_ids:
+                thumbnails.setdefault(day, f"/api/assets/{asset_id}/thumbnail")
+    return thumbnails
 
 
 async def get_asset_detail(
