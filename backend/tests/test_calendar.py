@@ -43,7 +43,7 @@ class CalendarTests(unittest.TestCase):
             self.assertEqual(result.days[-1].date, f"{year:04}-{month:02}-{last}")
             self.assertEqual(len(result.days), last)
 
-    def test_month_uses_one_timeline_bucket_and_local_offsets_for_first_jpeg(self):
+    def test_month_uses_one_timeline_bucket_and_local_offsets_for_first_non_raw_image(self):
         calls = []
         ids = [str(UUID(int=index)) for index in range(1, 6)]
         def handler(request):
@@ -64,14 +64,14 @@ class CalendarTests(unittest.TestCase):
             return bucket(ids, [False, True, True, True, False],
                 ["2026-07-15T01:00:00", "2026-07-14T23:00:00Z", "2026-07-15T00:00:00Z",
                  "2026-07-17T00:00:00Z", "2026-07-17T00:00:00Z"], [0, 5.5, 0, -3.5, 0])
-        with self.assertLogs("immich", level="INFO") as logs:
+        with self.assertLogs("immich", level="DEBUG") as logs:
             result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
                 transport=httpx.MockTransport(handler)))
         diagnostic = next(line for line in logs.output if "Calendar thumbnail lookup:" in line)
         for field in (
             "year=2026", "month=7", "bucket_assets=5", "image_assets=3",
             "month_candidates=3", "candidate_days=2", "format_results=3",
-            "jpeg_assets=3", "thumbnail_days=2",
+            "non_raw_assets=3", "thumbnail_days=2",
         ):
             self.assertIn(field, diagnostic)
         self.assertNotIn("secret", diagnostic)
@@ -106,12 +106,15 @@ class CalendarTests(unittest.TestCase):
                 self.assertTrue(result.days[0].hasAssets)
                 self.assertTrue(all(day.thumbnail_url is None for day in result.days))
 
-    def test_first_jpeg_is_selected_in_timeline_order_using_real_filenames(self):
+    def test_first_non_raw_image_is_selected_in_timeline_order_using_real_filenames(self):
         cases = ((["first.jpg", "later.dng"], 0),
-                 (["first.dng", "second.dng", "third.JPEG", "fourth.jpg"], 2),
-                 (["first.dng", "second.heic", "third.png"], None),
+                 (["first.dng", "second.jpg"], 1),
+                 (["first.dng", "second.dng", "third.png", "fourth.jpg"], 2),
+                 (["first.heic", "second.jpg"], 0),
+                 (["first.dng", "second.dng"], None),
                  (["video.mp4", "photo.jpg"], 1),
-                 (["first.jpeg", "second.jpg"], 0))
+                 (["video.mp4"], None),
+                 (["first.png", "second.heic", "third.jpg"], 0))
         for filenames, selected in cases:
             calls = []
             ids = [str(UUID(int=index + 1)) for index in range(len(filenames))]
@@ -135,10 +138,10 @@ class CalendarTests(unittest.TestCase):
                 self.assertTrue(result.days[14].hasAssets)
                 expected = None if selected is None else f"/api/assets/{ids[selected]}/thumbnail"
                 self.assertEqual(result.days[14].thumbnail_url, expected)
-                self.assertEqual(len(calls), 3)
+                self.assertEqual(len(calls), 2 if all(name == "video.mp4" for name in filenames) else 3)
 
-    def test_format_lookup_is_batched_and_skips_days_with_a_jpeg_already_found(self):
-        for first_is_jpeg, expected_sizes in ((True, [100]), (False, [100, 100, 5])):
+    def test_format_lookup_is_batched_and_skips_days_with_an_eligible_image_already_found(self):
+        for first_is_non_raw, expected_sizes in ((True, [100]), (False, [100, 100, 5])):
             sizes = []
             ids = [str(UUID(int=index + 1)) for index in range(205)]
             def handler(request):
@@ -150,12 +153,12 @@ class CalendarTests(unittest.TestCase):
                 requested = [branch["id"]["eq"] for branch in json.loads(request.content)["filter"]["or"]]
                 sizes.append(len(requested))
                 return page([asset(ids.index(asset_id)) | {"originalFileName":
-                    "photo.jpg" if first_is_jpeg and asset_id == ids[0] else "photo.dng"} for asset_id in requested])
+                    "photo.png" if first_is_non_raw and asset_id == ids[0] else "photo.dng"} for asset_id in requested])
             result = asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 7,
                 transport=httpx.MockTransport(handler)))
             self.assertEqual(sizes, expected_sizes)
             self.assertEqual(result.days[14].thumbnail_url,
-                f"/api/assets/{ids[0]}/thumbnail" if first_is_jpeg else None)
+                f"/api/assets/{ids[0]}/thumbnail" if first_is_non_raw else None)
 
     def test_format_lookup_failure_does_not_fail_the_calendar(self):
         for failed in (httpx.Response(403), httpx.Response(422), httpx.Response(500), httpx.Response(200, content=b"{"),

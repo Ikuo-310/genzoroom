@@ -699,7 +699,7 @@ async def _calendar_month_thumbnails(
 
     thumbnails: dict[str, str] = {}
     format_results = 0
-    jpeg_asset_ids: set[UUID] = set()
+    eligible_asset_ids: set[UUID] = set()
     for start in range(0, len(candidates), CALENDAR_FORMAT_BATCH_SIZE):
         batch = [(day, asset_id) for day, asset_id in candidates[start:start + CALENDAR_FORMAT_BATCH_SIZE]
                  if day not in thumbnails]
@@ -717,16 +717,16 @@ async def _calendar_month_thumbnails(
                            error.error_code, error.status_code)
             raise
         format_results += len(assets)
-        jpeg_ids = {asset.id for asset in assets if asset.format == "JPEG"}
-        jpeg_asset_ids.update(jpeg_ids)
+        eligible_ids = {asset.id for asset in assets if not asset.is_raw}
+        eligible_asset_ids.update(eligible_ids)
         for day, asset_id in batch:
-            if asset_id in jpeg_ids:
+            if asset_id in eligible_ids:
                 thumbnails.setdefault(day, f"/api/assets/{asset_id}/thumbnail")
-    logger.info(
+    logger.debug(
         "Calendar thumbnail lookup: year=%s month=%s bucket_assets=%s image_assets=%s "
-        "month_candidates=%s candidate_days=%s format_results=%s jpeg_assets=%s thumbnail_days=%s",
+        "month_candidates=%s candidate_days=%s format_results=%s non_raw_assets=%s thumbnail_days=%s",
         first.year, first.month, len(body["id"]), image_assets, len(candidates),
-        len({day for day, _ in candidates}), format_results, len(jpeg_asset_ids), len(thumbnails),
+        len({day for day, _ in candidates}), format_results, len(eligible_asset_ids), len(thumbnails),
     )
     return thumbnails
 
