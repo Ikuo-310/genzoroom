@@ -7,6 +7,7 @@ export type RecentAsset = {
   is_raw: boolean;
   stackId?: string | null;
   primaryAssetId?: string | null;
+  stackAssetCount?: number | null;
 };
 
 export type AssetExif = {

@@ -107,6 +107,7 @@
   },
   "photos": {
     "edited": "GenzoRoomで編集済み",
+    "stackAssets": "Stack、{{count}}枚",
     "recent": "最近の写真",
     "recentCount": "表示枚数",
     "recentCountOption": "{{count}}枚",

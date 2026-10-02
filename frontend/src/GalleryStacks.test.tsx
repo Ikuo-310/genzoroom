@@ -22,7 +22,7 @@ function asset(id: string, isRaw = false): RecentAsset {
   return { id, filename: `${id}.${isRaw ? 'dng' : 'jpg'}`, date: '2026-09-01',
     thumbnail_url: `/thumb/${id}`, format: isRaw ? 'DNG' : 'JPEG', is_raw: isRaw };
 }
-const stackMetadata = { stackId: 'stack-s', primaryAssetId: 'primary' };
+const stackMetadata = { stackId: 'stack-s', primaryAssetId: 'primary', stackAssetCount: 4 };
 const photos = [asset('x'), { ...asset('member', true), ...stackMetadata }, asset('y'),
   { ...asset('primary'), ...stackMetadata }];
 const album = { id: 'album-a', albumName: 'Stack album', albumThumbnailAssetId: null,
@@ -87,6 +87,8 @@ describe('Home stack display', () => {
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelectorAll('.photo-card img')[1].getAttribute('src')).toBe('/thumb/primary');
+    expect(host.querySelector('.stack-assets')?.textContent).toBe('STACK4');
+    expect(host.querySelector('.stack-assets')?.getAttribute('aria-label')).toBe('Stack, 4 assets');
     expect(api.statuses).toHaveBeenCalledWith(photos.map(a => a.id), expect.any(AbortSignal));
     expect(photos.map(a => a.id)).toEqual(['x', 'member', 'y', 'primary']);
   });
@@ -96,6 +98,7 @@ describe('Home stack display', () => {
     api.album.mockResolvedValue(subset); api.day.mockResolvedValue(subset);
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'member.dng', 'y.jpg']);
+    expect(host.querySelector('.stack-assets')?.textContent).toBe('STACK4');
   });
 
   it('applies format and edit filters before collapse without aggregating stack edit status', async () => {

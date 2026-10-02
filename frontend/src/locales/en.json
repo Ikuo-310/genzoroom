@@ -108,6 +108,7 @@
   },
   "photos": {
     "edited": "Edited in GenzoRoom",
+    "stackAssets": "Stack, {{count}} assets",
     "recent": "Recent photos",
     "recentCount": "Recent count",
     "recentCountOption": "{{count}}",

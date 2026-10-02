@@ -75,11 +75,14 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
     for item in result[:3]:
         assert item["stackId"] == STACK_ID
         assert item["primaryAssetId"] == IDS[0]
+        assert item["stackAssetCount"] == 3
     assert result[0]["id"] == result[0]["primaryAssetId"]
     assert result[3]["stackId"] == SECOND_STACK_ID
     assert result[3]["primaryAssetId"] == IDS[3]
+    assert result[3]["stackAssetCount"] == 1
     assert result[4]["stackId"] is None
     assert result[4]["primaryAssetId"] is None
+    assert result[4]["stackAssetCount"] is None
     assert result[0]["format"] == "JPEG" and not result[0]["is_raw"]
     assert all(a["format"] == "DNG" and a["is_raw"] for a in result[1:])
     assert "assets" not in result[0]
@@ -89,14 +92,14 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
 @pytest.mark.parametrize("items", [[], [asset(IDS[0])]])
 def test_successful_empty_stack_list_returns_null_metadata(kind, items):
     result = fetch(kind, items, [])
-    assert all(a["stackId"] is None and a["primaryAssetId"] is None for a in result)
+    assert all(a["stackId"] is None and a["primaryAssetId"] is None and a["stackAssetCount"] is None for a in result)
 
 
 @pytest.mark.parametrize("kind", ["album", "calendar", "favorites"])
 def test_fetches_stacks_once_after_all_search_pages(kind):
     result = fetch(kind, [asset(IDS[1])], [stack()], pages=2)
     assert len(result) == 2
-    assert all(a["stackId"] == STACK_ID for a in result)
+    assert all(a["stackId"] == STACK_ID and a["stackAssetCount"] == 3 for a in result)
 
 
 MALFORMED = [

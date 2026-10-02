@@ -116,6 +116,7 @@ class RecentAsset(BaseModel):
     is_raw: bool
     stackId: UUID | None = None
     primaryAssetId: UUID | None = None
+    stackAssetCount: int | None = None
 
 
 class AlbumSummary(BaseModel):
@@ -484,8 +485,9 @@ async def _with_asset_stacks(
         body = response.json()
         if not isinstance(body, list):
             raise TypeError
-        lookup: dict[UUID, tuple[UUID, UUID]] = {}
+        lookup: dict[UUID, tuple[UUID, UUID, int]] = {}
         seen_stacks: set[UUID] = set()
+        seen_members: set[UUID] = set()
         for stack in body:
             if not isinstance(stack, Mapping) or not isinstance(stack.get("id"), str) \
                     or not isinstance(stack.get("primaryAssetId"), str) \
@@ -502,17 +504,24 @@ async def _with_asset_stacks(
                     raise TypeError
                 member_id = UUID(member["id"])
                 # Ambiguous membership must not silently select whichever stack appeared last.
-                if member_id in lookup:
+                if member_id in seen_members:
                     raise ValueError
+                seen_members.add(member_id)
                 members.add(member_id)
-                lookup[member_id] = (stack_id, primary_id)
             if primary_id not in members:
                 raise ValueError
+            member_count = len(stack["assets"])
+            for member_id in members:
+                lookup[member_id] = (stack_id, primary_id, member_count)
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
     for asset in assets:
-        asset.stackId, asset.primaryAssetId = lookup.get(asset.id, (None, None))
+        stack_info = lookup.get(asset.id)
+        if stack_info is None:
+            asset.stackId = asset.primaryAssetId = asset.stackAssetCount = None
+        else:
+            asset.stackId, asset.primaryAssetId, asset.stackAssetCount = stack_info
     return assets
 
 

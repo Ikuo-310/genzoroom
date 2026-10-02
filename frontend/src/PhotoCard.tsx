@@ -78,9 +78,15 @@ export function PhotoCard({
         aria-pressed={selectionMode ? selected : undefined}
         aria-description={edited ? t('photos.edited') : undefined}
       >
-        <div className={`thumbnail${asset.stackId ? ' stacked' : ''}`}>
+        <div className="thumbnail">
           <img src={asset.thumbnail_url} alt="" loading="lazy" />
           <FormatBadge format={asset.format} isRaw={asset.is_raw} />
+          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 2 && (
+            <div className="stack-assets" role="img" aria-label={t('photos.stackAssets', { count: asset.stackAssetCount })}>
+              <span className="stack-badge">STACK</span>
+              <span className="stack-asset-count">{asset.stackAssetCount}</span>
+            </div>
+          )}
           <EditedBadge edited={edited} />
         </div>
         <div className="photo-info">

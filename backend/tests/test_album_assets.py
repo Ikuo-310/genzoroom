@@ -52,7 +52,7 @@ class AlbumAssetTests(unittest.TestCase):
         self.assertEqual(result[0].model_dump(mode="json"), {
             "id": str(UUID(int=1)), "filename": "photo-0.dng", "date": "2026-09-01T12:00:00.000Z",
             "thumbnail_url": f"/api/assets/{UUID(int=1)}/thumbnail", "format": "DNG", "is_raw": True,
-            "stackId": None, "primaryAssetId": None,
+            "stackId": None, "primaryAssetId": None, "stackAssetCount": None,
         })
 
     def test_follows_cursor_until_all_1558_photos_are_loaded(self):

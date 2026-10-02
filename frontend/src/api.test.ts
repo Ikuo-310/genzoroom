@@ -5,7 +5,7 @@ describe('Home asset stack metadata', () => {
   const asset = { id: 'asset-1', filename: 'member.dng', date: '2026-09-01',
     thumbnail_url: '/api/assets/asset-1/thumbnail', format: 'DNG', is_raw: true };
   const stack = { stackId: '22345678-1234-4234-9234-123456789abc',
-    primaryAssetId: '32345678-1234-4234-9234-123456789abc' };
+    primaryAssetId: '32345678-1234-4234-9234-123456789abc', stackAssetCount: 2 };
   const readers = [
     (signal: AbortSignal) => fetchRecentAssets(100, signal),
     (signal: AbortSignal) => fetchAlbumAssets('album-1', signal),
@@ -17,6 +17,16 @@ describe('Home asset stack metadata', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
     try {
       expect(await read(new AbortController().signal)).toEqual(data);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each(readers)('keeps photos when optional stack counts are missing or malformed (%#)', async read => {
+    const data = [{ ...asset, ...stack, stackAssetCount: undefined }, { ...asset, ...stack, stackAssetCount: 'bad' }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
+    try {
+      const result = await read(new AbortController().signal);
+      expect(result).toHaveLength(2);
+      expect(result[0].stackAssetCount).toBeUndefined();
+      expect(result[1].stackAssetCount).toBeNull();
     } finally { vi.unstubAllGlobals(); }
   });
   it.each(readers)('rejects malformed or incomplete stack metadata (%#)', async read => {

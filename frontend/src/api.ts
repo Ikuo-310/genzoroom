@@ -19,7 +19,20 @@ export function isRecentAsset(value: unknown): value is RecentAsset {
     typeof value.format === 'string' &&
     typeof value.is_raw === 'boolean' &&
     ((value.stackId == null && value.primaryAssetId == null) ||
-      (isUuid(value.stackId) && isUuid(value.primaryAssetId)));
+      (isUuid(value.stackId) && isUuid(value.primaryAssetId))) &&
+    (value.stackAssetCount == null ||
+      (typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 2));
+}
+
+function withSafeStackCounts(data: unknown[]): unknown[] {
+  return data.map(value => {
+    if (!isRecord(value) || value.stackAssetCount == null ||
+      typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 2) {
+      return value;
+    }
+    // A bad optional count should hide only the Stack label, never the photo itself.
+    return { ...value, stackAssetCount: null };
+  });
 }
 
 function isAssetDetail(value: unknown): value is AssetDetail {
@@ -50,10 +63,10 @@ export async function fetchAlbumAssets(albumId: string, signal: AbortSignal): Pr
   const response = await fetch(`/api/albums/${encodeURIComponent(albumId)}/assets`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Album assets request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+  if (!Array.isArray(data) || withSafeStackCounts(data).some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected album assets response');
   }
-  return data;
+  return withSafeStackCounts(data) as RecentAsset[];
 }
 
 export async function fetchCalendarHeatmap(year: number, month: number | null, signal: AbortSignal): Promise<CalendarHeatmap> {
@@ -84,30 +97,30 @@ export async function fetchCalendarDayAssets(day: string, signal: AbortSignal): 
   const response = await fetch(`/api/calendar/${encodeURIComponent(day)}/assets`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Calendar photos request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+  if (!Array.isArray(data) || withSafeStackCounts(data).some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected calendar photos response');
   }
-  return data;
+  return withSafeStackCounts(data) as RecentAsset[];
 }
 
 export async function fetchFavoriteAssets(signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch('/api/assets/favorites', { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Favorites request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || data.some(asset => !isRecentAsset(asset))) {
+  if (!Array.isArray(data) || withSafeStackCounts(data).some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected favorites response');
   }
-  return data;
+  return withSafeStackCounts(data) as RecentAsset[];
 }
 
 export async function fetchRecentAssets(limit: number, signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch(`/api/assets/recent?limit=${limit}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Recent assets request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || data.some((asset) => !isRecentAsset(asset))) {
+  if (!Array.isArray(data) || withSafeStackCounts(data).some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected recent assets response');
   }
-  return data;
+  return withSafeStackCounts(data) as RecentAsset[];
 }
 
 export async function fetchAssetDetail(assetId: string, signal: AbortSignal): Promise<AssetDetail> {
