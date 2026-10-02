@@ -84,11 +84,13 @@ export function AnshitsuPage() {
   const activeDetail = detail?.id === assetId ? detail : null;
   const settings = useAppSettings();
   const { isOpen: settingsOpen, publishGpu } = useSettingsDialog();
+  const workspaceKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
+    || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
   const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
-    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit);
+    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
   const editable = canEdit && loadStatus === 'ready';
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
@@ -114,11 +116,9 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
-  const viewerKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
-    || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (viewerKeyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
+      if (workspaceKeyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       const isFocusToggle = matchesShortcut(event, 'viewerFocusMode');
@@ -130,7 +130,7 @@ export function AnshitsuPage() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [viewerKeyboardBlocked]);
+  }, [workspaceKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
@@ -489,7 +489,7 @@ export function AnshitsuPage() {
           onSelectPasteAdjustments={() => openSelection('paste')}
           editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
           hasEditClipboard={hasClipboard}
-          keyboardBlocked={viewerKeyboardBlocked}
+          keyboardBlocked={workspaceKeyboardBlocked}
         />
       ) : (
         <section className="viewer-panel viewer-message" aria-live="polite">
@@ -507,7 +507,7 @@ export function AnshitsuPage() {
             <option value="histogram">{t('workspace.histogram')}</option>
           </select>}>
           <ScopePanel histogram={activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
-            keyboardBlocked={!editable || viewerKeyboardBlocked} />
+            keyboardBlocked={!editable || workspaceKeyboardBlocked} />
         </WorkspaceSection>
         <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
@@ -566,7 +566,7 @@ export function AnshitsuPage() {
         editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
         activeAssetId={assetId}
         disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
-        keyboardBlocked={settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null}
+        keyboardBlocked={workspaceKeyboardBlocked}
         onActivate={(nextId) => { void activateAsset(nextId); }}
       />}
     />

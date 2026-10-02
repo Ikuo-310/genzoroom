@@ -56,6 +56,18 @@ async function filmstripKey(value = 'ArrowRight', init: KeyboardEventInit = {}, 
   await flush();
   return event;
 }
+function currentHistoryEntry() {
+  return container.querySelector('.edit-history [aria-current="step"]')?.textContent;
+}
+async function editWithUndoAndRedoAvailable() {
+  await click('button[aria-label="Disable Basic"]');
+  await click('button[aria-label="Disable Color"]');
+  const undo = [...container.querySelectorAll<HTMLButtonElement>('.edit-actions button')]
+    .find((button) => button.textContent === i18n.t('workspace.undo'))!;
+  await act(async () => undo.click());
+  await flush();
+  expect(currentHistoryEntry()).toContain('Basic OFF');
+}
 
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -247,6 +259,48 @@ describe('Anshitsu Filmstrip persistence', () => {
     await act(async () => stay.click());
     expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
     expect(container.querySelector('.edit-history')?.textContent).toContain('Basic OFF');
+    expect(currentPhoto()).toBe('first.jpg');
+  });
+
+  it('blocks every Undo/Redo shortcut while a Filmstrip save-failure dialog is open, then restores them on Stay', async () => {
+    vi.useFakeTimers();
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, 'revision_conflict'));
+    await mount();
+    await editWithUndoAndRedoAvailable();
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('Stay on this photo');
+
+    const before = currentHistoryEntry();
+    for (const shortcut of [
+      { key: 'z', ctrlKey: true }, { key: 'z', metaKey: true },
+      { key: 'Z', ctrlKey: true, shiftKey: true }, { key: 'Z', metaKey: true, shiftKey: true },
+      { key: 'y', ctrlKey: true }, { key: 'y', metaKey: true },
+    ]) {
+      await filmstripKey(shortcut.key, shortcut);
+      expect(currentHistoryEntry()).toBe(before);
+    }
+
+    const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find((button) => button.textContent === 'Stay on this photo')!;
+    await act(async () => stay.click());
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    await filmstripKey('z', { ctrlKey: true });
+    expect(currentHistoryEntry()).toContain('Initial State');
+    await filmstripKey('Z', { ctrlKey: true, shiftKey: true });
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+  });
+
+  it('blocks Undo behind the Home-exit save-failure dialog', async () => {
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    await filmstripKey('h');
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('Stay in Anshitsu');
+    const before = currentHistoryEntry();
+    await filmstripKey('z', { ctrlKey: true });
+    expect(currentHistoryEntry()).toBe(before);
     expect(currentPhoto()).toBe('first.jpg');
   });
 

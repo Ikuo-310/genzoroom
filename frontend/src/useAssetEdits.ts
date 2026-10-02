@@ -60,7 +60,7 @@ function freshRecord(assetId: string): AssetEditRecord {
   };
 }
 
-export function useAssetEdits(assetId: string, enabled: boolean) {
+export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked = false) {
   const records = useRef<Record<string, AssetEditRecord>>({});
   // Presence also represents unknown: discarded assets must not fall back to an old bulk result.
   const discardedEditStatuses = useRef(new Map<string, boolean | undefined>());
@@ -246,7 +246,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
   }, [assetId, dispatch, enabled, getRecord, updateSession]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || keyboardBlocked) return;
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isNativeEditingTarget(event.target)) return;
       const type = undoShortcut(event);
@@ -256,7 +256,7 @@ export function useAssetEdits(assetId: string, enabled: boolean) {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [dispatch, enabled]);
+  }, [dispatch, enabled, keyboardBlocked]);
 
   const writeSnapshot = useCallback((id: string, snapshotValue: EditStateSnapshot | null, options: {
     allowUnloaded?: boolean; syncSession?: boolean; latestSession?: boolean;
