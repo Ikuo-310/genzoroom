@@ -163,6 +163,8 @@
     "developControls": "現像操作",
     "filmstrip": "フィルムストリップ",
     "fit": "全体表示",
+    "fitShortcutHint": "全体表示（{{shortcut}}で全体表示と直前のズーム・パンを切り替え）",
+    "beforeHoldShortcutHint": "補正前後の比較（{{shortcut}}長押しで補正前を表示）",
     "actualSize": "等倍",
     "zoomControls": "ズーム操作",
     "beforeAfter": "補正前後の比較",
@@ -340,6 +342,9 @@
     "japanese": "日本語"
   },
   "settings": {
+    "showKeyboardShortcuts": "キーボードショートカットの表示",
+    "on": "ON",
+    "off": "OFF",
     "title": "設定",
     "close": "閉じる",
     "general": "一般設定",

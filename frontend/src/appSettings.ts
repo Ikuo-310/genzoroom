@@ -6,6 +6,7 @@ export const WEEK_START_KEY = 'genzoroom.weekStart';
 export const INITIAL_IMAGE_KEY = 'genzoroom.initialImage';
 export const HOME_THUMBNAIL_COLUMNS_KEY = 'genzoroom.homeThumbnailColumns';
 export const RECENT_PHOTO_COUNT_KEY = 'genzoroom.recentPhotoCount';
+export const SHOW_KEYBOARD_SHORTCUTS_KEY = 'genzoroom.showKeyboardShortcuts';
 export const DATE_LOCALES = ['ja-JP', 'en-US', 'en-GB', 'de-DE', 'fr-FR', 'zh-CN', 'ko-KR'] as const;
 // Keep the legacy Auto value as browser-region mode; saved preferences must not switch to language sync.
 export const DATE_LOCALE_CHOICES = ['auto', 'auto-language', ...DATE_LOCALES] as const;
@@ -17,7 +18,7 @@ export const HOME_THUMBNAIL_COLUMNS = [3, 4, 5, 6, 7, 8, 9, 10] as const;
 export type HomeThumbnailColumns = typeof HOME_THUMBNAIL_COLUMNS[number];
 export const RECENT_PHOTO_COUNTS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500] as const;
 export type RecentPhotoCount = typeof RECENT_PHOTO_COUNTS[number];
-export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailColumns: HomeThumbnailColumns; recentPhotoCount: RecentPhotoCount };
+export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailColumns: HomeThumbnailColumns; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean };
 
 export function browserStorage(): Storage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.localStorage; }
@@ -30,6 +31,9 @@ export function readSetting<T extends string>(key: string, choices: readonly T[]
 export function readSettings(storage = browserStorage()): Settings {
   let homeThumbnailColumns: HomeThumbnailColumns = 6;
   let recentPhotoCount: RecentPhotoCount = 100;
+  let showKeyboardShortcuts = true;
+  try { showKeyboardShortcuts = storage?.getItem(SHOW_KEYBOARD_SHORTCUTS_KEY) !== 'false'; }
+  catch { /* Blocked storage keeps shortcut explanations enabled by default. */ }
   try {
     const value = Number(storage?.getItem(HOME_THUMBNAIL_COLUMNS_KEY));
     if (HOME_THUMBNAIL_COLUMNS.includes(value as HomeThumbnailColumns)) homeThumbnailColumns = value as HomeThumbnailColumns;
@@ -45,13 +49,14 @@ export function readSettings(storage = browserStorage()): Settings {
     initialImage: readSetting(INITIAL_IMAGE_KEY, ['original', 'preview'] as const, storage),
     homeThumbnailColumns,
     recentPhotoCount,
+    showKeyboardShortcuts,
   };
 }
 let settings = readSettings();
 const listeners = new Set<() => void>();
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings = { ...settings, [key]: value };
-  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY }[key];
+  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY }[key];
   try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }
   listeners.forEach(listener => listener());
 }

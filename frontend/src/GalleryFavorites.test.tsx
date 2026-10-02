@@ -7,6 +7,7 @@ import { GalleryPage } from './GalleryPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { homeScrollContent } from './homeReturn';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
+import { updateSetting } from './appSettings';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS } from './photoFilters';
 import i18n from './i18n';
 
@@ -59,6 +60,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en'); sessionStorage.clear(); navigation = null;
   clearWorkspaceSession();
+  updateSetting('showKeyboardShortcuts', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photos[0]]);
   api.favorites.mockReset().mockResolvedValue(photos);
@@ -146,10 +148,13 @@ describe('Home favorites', () => {
     await mount();
     expect((await pressD()).defaultPrevented).toBe(false);
     await click('.photo-selection-input');
+    act(() => updateSetting('showKeyboardShortcuts', false));
+    expect(host.querySelector<HTMLButtonElement>('.selection-actions button:last-child')!.title).toBe(i18n.t('photos.openSelected'));
     const event = await pressD();
     expect(event.defaultPrevented).toBe(true);
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
     expect(navigation?.homeReturn?.tab).toBe('recent');
+    act(() => updateSetting('showKeyboardShortcuts', true));
   });
 
   it('resumes the last workspace when D is pressed without a selection and refreshes Home return context', async () => {

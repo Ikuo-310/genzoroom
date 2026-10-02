@@ -5,6 +5,7 @@ import { AdjustedImage } from './AdjustedImage';
 import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
+import { useShortcutDisplay } from './useShortcutDisplay';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
@@ -41,6 +42,9 @@ type ImageViewerProps = {
 
 export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
+  const shortcut = useShortcutDisplay();
+  const beforeShortcut = shortcut.label('viewerBefore');
+  const fitShortcut = shortcut.label('viewerFitRestore');
   const viewportRef = useRef<HTMLDivElement>(null);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
   const [closeToolbarMenuSignal, setCloseToolbarMenuSignal] = useState(0);
@@ -210,7 +214,8 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         <span aria-hidden="true">{leftOpen ? '‹' : '›'}</span>
       </button>
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
-        <button type="button" className="tool-button" onClick={fit}>{t('workspace.fit')}</button>
+        <button type="button" className="tool-button" onClick={fit}
+          title={fitShortcut ? t('workspace.fitShortcutHint', { shortcut: fitShortcut }) : t('workspace.fit')}>{t('workspace.fit')}</button>
         <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
@@ -225,6 +230,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
           onMenuOpen={() => setContextMenuPosition(null)} closeMenuSignal={closeToolbarMenuSignal} />}
         {originalStatus && <>
           <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.previewOriginal')}
+            title={shortcut.title(t('workspace.previewOriginal'), 'viewerOriginal')}
             aria-pressed={showingOriginal} disabled={originalStatus !== 'ready' || !editSource}
             onClick={onOriginalToggle}>
             <span className={!showingOriginal ? 'active' : undefined}>{t('workspace.preview')}</span>
@@ -235,6 +241,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
           </span>}
         </>}
         <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
+          title={beforeShortcut ? t('workspace.beforeHoldShortcutHint', { shortcut: beforeShortcut }) : t('workspace.beforeAfter')}
           aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
           onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
           <span className={showBeforeAdjustments ? 'active' : undefined}>{t('workspace.before')}</span>

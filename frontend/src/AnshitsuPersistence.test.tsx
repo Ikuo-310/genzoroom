@@ -9,6 +9,8 @@ import * as editStateModule from './editState';
 import { EditStateApiError } from './editStateApi';
 import i18n from './i18n';
 import { clearWorkspaceSession, readWorkspaceSession } from './workspaceResume';
+import { updateSetting } from './appSettings';
+import { formatShortcut } from './shortcutDisplay';
 
 const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
@@ -60,6 +62,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
   clearWorkspaceSession();
+  updateSetting('showKeyboardShortcuts', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   mocked.detail.mockReset(); mocked.get.mockReset(); mocked.put.mockReset();
   mocked.detail.mockImplementation(async (id: string) => id === first.id ? first : second);
@@ -73,6 +76,25 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('shows H and Undo/Redo hints without adding H to HomeTitle, and still exits with H when OFF', async () => {
+    await mount();
+    const home = container.querySelector<HTMLButtonElement>('.workspace-actions button')!;
+    const historyButtons = [...container.querySelectorAll<HTMLButtonElement>('.edit-actions button')];
+    expect(home.title).toContain(`(${formatShortcut('workspaceReturnHome')})`);
+    for (const id of ['undo', 'redo'] as const) {
+      const button = historyButtons.find(item => item.textContent === i18n.t(`workspace.${id}`))!;
+      expect(button.title).toContain(`(${formatShortcut(id)})`);
+    }
+    expect(container.querySelector('.workspace-title-link')?.getAttribute('title') ?? '').not.toContain('(H)');
+    act(() => updateSetting('showKeyboardShortcuts', false));
+    expect(home.title).toBe(i18n.t('workspace.backToPhotos'));
+    for (const id of ['undo', 'redo'] as const) {
+      expect(historyButtons.find(item => item.textContent === i18n.t(`workspace.${id}`))!.title).toBe(i18n.t(`workspace.${id}`));
+    }
+    await filmstripKey('h');
+    expect(container.querySelector('.workspace-page')).toBeNull();
+    act(() => updateSetting('showKeyboardShortcuts', true));
+  });
   it('preserves History, Undo/Redo, Filmstrip and the existing autosave deadline across Settings', async ({ onTestFinished }) => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
     Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });

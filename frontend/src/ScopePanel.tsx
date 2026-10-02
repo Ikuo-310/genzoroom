@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { Histogram } from './histogram';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { HistogramGraph } from './HistogramGraph';
+import { useShortcutDisplay } from './useShortcutDisplay';
+import type { ShortcutId } from './editShortcuts';
 
 type Props = { histogram: Histogram | null; keyboardBlocked?: boolean };
 type Channel = 'r' | 'g' | 'b';
@@ -15,6 +17,8 @@ function toggleChannel(current: Channels, channel: Channel): Channels {
 
 export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
   const { t } = useTranslation();
+  const shortcut = useShortcutDisplay();
+  const channelShortcut: Record<Channel, ShortcutId> = { r: 'scopeRed', g: 'scopeGreen', b: 'scopeBlue' };
   const [channels, setChannels] = useState({ r: true, g: true, b: true });
   const [yOnly, setYOnly] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -46,6 +50,7 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
       <div className="histogram-channel-controls" role="group" aria-label={t('workspace.histogramChannels')}>
         <button type="button" className="tool-button before-after-controls histogram-scale-toggle"
           aria-label={t('workspace.histogramScale')} aria-description={t(expanded ? 'workspace.histogramExpanded' : 'workspace.histogramNormal')}
+          title={shortcut.title(t('workspace.histogramScale'), 'scopeScale')}
           aria-pressed={expanded} onClick={() => setExpanded((current) => !current)}>
           <span className={!expanded ? 'active' : undefined}>{t('workspace.histogramNormal')}</span>
           <span className={expanded ? 'active' : undefined}>{t('workspace.histogramExpanded')}</span>
@@ -53,10 +58,12 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
         {(['r', 'g', 'b'] as const).map((channel) => <button key={channel} type="button"
           className={`histogram-channel-button channel-${channel}${channels[channel] ? ' selected' : ''}`}
           aria-label={channelNames[channel]} aria-pressed={channels[channel]} disabled={yOnly}
+          title={shortcut.title(channelNames[channel], channelShortcut[channel])}
           onClick={() => setChannels((current) => toggleChannel(current, channel))}>
           {channel.toUpperCase()}
         </button>)}
         <button type="button" className={`histogram-y-button${yOnly ? ' selected' : ''}`} aria-pressed={yOnly}
+          title={shortcut.title(t('workspace.yOnly'), 'scopeYOnly')}
           onClick={() => setYOnly((current) => !current)}>{t('workspace.yOnly')}</button>
       </div>
     </div>

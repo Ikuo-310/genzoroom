@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import type { ShortcutId } from './editShortcuts';
+import { useShortcutDisplay } from './useShortcutDisplay';
 
 type Props = {
   disabled: boolean; hasClipboard: boolean;
@@ -12,7 +14,7 @@ type Props = {
   closeMenuSignal?: number;
 };
 
-type Action = { label: string; action: () => boolean; disabled: boolean };
+type Action = { label: string; shortcutId: ShortcutId; action: () => boolean; disabled: boolean };
 
 export function editMenuPosition(x: number, y: number, width: number, height: number, viewportWidth: number, viewportHeight: number, margin = 8) {
   return {
@@ -25,11 +27,15 @@ function EditSettingsActions({ actions, onSelect, menuItems = true }: {
   actions: Action[]; onSelect: (action: () => boolean) => void; menuItems?: boolean;
 }) {
   const { t } = useTranslation();
-  return <>{actions.map(({ label, action, disabled }, index) => <Fragment key={label}>
+  const shortcut = useShortcutDisplay();
+  return <>{actions.map(({ label, shortcutId, action, disabled }, index) => <Fragment key={label}>
     {index === 2 && <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />}
     <button type="button" className="workspace-menu-item edit-settings-menu-item"
       {...(menuItems ? { role: 'menuitem' as const } : {})}
-      disabled={disabled} onClick={() => onSelect(action)}>{t(label)}</button>
+      disabled={disabled} onClick={() => onSelect(action)}>
+      <span className="edit-settings-action-label">{t(label)}</span>
+      {shortcut.label(shortcutId) && <span className="shortcut-label" aria-hidden="true">{shortcut.label(shortcutId)}</span>}
+    </button>
   </Fragment>)}</>;
 }
 
@@ -89,10 +95,10 @@ export function EditSettingsMenu({ disabled, hasClipboard, onCopy, onPaste, onSe
   const trigger = useRef<HTMLElement>(null);
   const [toolbarKeyboardFocus, setToolbarKeyboardFocus] = useState(false);
   const actions: Action[] = [
-    { label: 'workspace.copyAll', action: onCopy, disabled },
-    { label: 'workspace.selectCopy', action: onSelectCopy, disabled },
-    { label: 'workspace.pasteCopied', action: onPaste, disabled: disabled || !hasClipboard },
-    { label: 'workspace.selectPaste', action: onSelectPaste, disabled: disabled || !hasClipboard },
+    { label: 'workspace.copyAll', shortcutId: 'copySettings', action: onCopy, disabled },
+    { label: 'workspace.selectCopy', shortcutId: 'copySelection', action: onSelectCopy, disabled },
+    { label: 'workspace.pasteCopied', shortcutId: 'pasteSettings', action: onPaste, disabled: disabled || !hasClipboard },
+    { label: 'workspace.selectPaste', shortcutId: 'pasteSelection', action: onSelectPaste, disabled: disabled || !hasClipboard },
   ];
   const selectFromToolbar = (action: () => boolean) => {
     menu.current!.open = false;

@@ -371,7 +371,7 @@ function confirm(text: 'Copy' | 'Paste') { act(() => dialogButton(text).click())
 function menuAction(text: string) {
   const trigger = host.querySelector<HTMLElement>('.edit-settings-menu summary')!;
   act(() => { trigger.focus(); trigger.click(); });
-  const button = Array.from(host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')).find((button) => button.textContent === text)!;
+  const button = Array.from(host.querySelectorAll<HTMLButtonElement>('.edit-settings-menu-actions button')).find((button) => button.querySelector('.edit-settings-action-label')?.textContent === text)!;
   act(() => button.click());
   return trigger;
 }
@@ -759,7 +759,7 @@ describe('selected settings clipboard', () => {
     expect(document.activeElement).toBe(trigger);
     openViewerContextMenu();
     menu = document.querySelector<HTMLElement>('.edit-settings-context-menu')!;
-    const action = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === actionLabel)!;
+    const action = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(button => button.querySelector('.edit-settings-action-label')?.textContent === actionLabel)!;
     act(() => action.click());
     expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
     assertInitialFocus();
@@ -828,7 +828,7 @@ describe('selected settings clipboard', () => {
     await mount();
     expect(openViewerContextMenu().defaultPrevented).toBe(true);
     const action = Array.from(document.querySelectorAll<HTMLButtonElement>('.edit-settings-context-menu button'))
-      .find((button) => button.textContent === 'Copy selected settings')!;
+      .find((button) => button.querySelector('.edit-settings-action-label')?.textContent === 'Copy selected settings')!;
     act(() => action.click());
     expect(document.querySelector('.edit-settings-context-menu')).toBeNull();
     expect(host.querySelector('dialog')).not.toBeNull();

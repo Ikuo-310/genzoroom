@@ -165,6 +165,8 @@
     "developControls": "Develop controls",
     "filmstrip": "Filmstrip",
     "fit": "Fit",
+    "fitShortcutHint": "Fit ({{shortcut}} toggles Fit / previous zoom and pan)",
+    "beforeHoldShortcutHint": "Before and after adjustments (hold {{shortcut}} for Before)",
     "actualSize": "1:1",
     "zoomControls": "Zoom controls",
     "beforeAfter": "Before and after adjustments",
@@ -342,6 +344,9 @@
     "japanese": "日本語"
   },
   "settings": {
+    "showKeyboardShortcuts": "Show keyboard shortcuts",
+    "on": "ON",
+    "off": "OFF",
     "title": "Settings",
     "close": "Close",
     "general": "General",

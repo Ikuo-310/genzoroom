@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useShortcutDisplay } from './useShortcutDisplay';
 
 type PhotoSelectionBarProps = {
   active: boolean;
@@ -9,6 +10,7 @@ type PhotoSelectionBarProps = {
 
 export function PhotoSelectionBar({ active, count, onClear, onOpen }: PhotoSelectionBarProps) {
   const { t } = useTranslation();
+  const shortcut = useShortcutDisplay();
   return <div
     className={`selection-bar ${active ? 'active' : 'inactive'}`}
     role="region"
@@ -18,7 +20,7 @@ export function PhotoSelectionBar({ active, count, onClear, onOpen }: PhotoSelec
     <strong aria-live="polite">{t('photos.selectionCount', { count })}</strong>
     <div className="selection-actions">
       <button type="button" className="selection-clear" disabled={!active} onClick={onClear}>{t('photos.clearSelection')}</button>
-      <button type="button" disabled={!active} onClick={onOpen}>{t('photos.openSelected')}</button>
+      <button type="button" disabled={!active} title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')} onClick={onOpen}>{t('photos.openSelected')}</button>
     </div>
   </div>;
 }

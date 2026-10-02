@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsButton, SettingsProvider } from './SettingsDialog';
 import { changeAppLanguage } from './i18n';
-import { DATE_LOCALE_KEY, DATE_LOCALES, updateSetting } from './appSettings';
+import { DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 
 vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { create: vi.fn() } }));
@@ -18,6 +18,7 @@ beforeEach(async () => {
   localStorage.clear();
   await changeAppLanguage('en');
   updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto');
+  updateSetting('showKeyboardShortcuts', true);
   vi.stubGlobal('isSecureContext', false);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
@@ -31,6 +32,26 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('uses native grouped radios for shortcut hints and retains session choice when storage fails', async () => {
+    await click(host.querySelector('button')!);
+    const group = dialog().querySelector<HTMLElement>('[role="radiogroup"]')!;
+    expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('Show keyboard shortcuts');
+    const radios = group.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+    expect(radios).toHaveLength(2);
+    expect(radios[0].name).toBe(radios[1].name);
+    expect(radios[0].checked).toBe(true);
+    expect(radios[1].checked).toBe(false);
+    await click(radios[1]);
+    expect(radios[1].checked).toBe(true);
+    expect(localStorage.getItem(SHOW_KEYBOARD_SHORTCUTS_KEY)).toBe('false');
+    radios[0].focus(); expect(document.activeElement).toBe(radios[0]);
+    await click(radios[0]);
+    expect(localStorage.getItem(SHOW_KEYBOARD_SHORTCUTS_KEY)).toBe('true');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Denied'); });
+    await click(radios[1]);
+    await click(dialog().querySelector('header button')!); await click(host.querySelector('button')!);
+    expect(dialog().querySelector<HTMLInputElement>('input[value="false"]')!.checked).toBe(true);
+  });
   it('offers two date Auto modes before a disabled separator and never saves the separator', async () => {
     await click(host.querySelector('button')!);
     const select = dialog().querySelectorAll<HTMLSelectElement>('select')[1]!;

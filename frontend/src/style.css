@@ -503,6 +503,16 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .settings-dialog dl > div { display: flex; gap: 16px; margin: 8px 0; }
 .settings-dialog dd { margin: 0; overflow-wrap: anywhere; }
 .settings-button { display: inline-flex; align-items: center; justify-content: center; }
+.binary-radio-choice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
+.binary-radio-options { display: inline-flex; flex-shrink: 0; border: 1px solid #526a5e; border-radius: 5px; overflow: hidden; }
+.settings-dialog .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }
+.binary-radio-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.binary-radio-options span { display: block; padding: 7px 14px; background: #17221f; }
+.binary-radio-options input:checked + span { background: #526a5e; color: #fff; }
+.binary-radio-options input:focus-visible + span { outline: 2px solid #fff; outline-offset: -3px; }
+.edit-settings-menu-item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.edit-settings-action-label { min-width: 0; overflow-wrap: anywhere; }
+.shortcut-label { margin-left: auto; font-size: 0.85em; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
   .settings-dialog label { align-items: stretch; flex-direction: column; gap: 8px; }
   .settings-dialog select { max-width: 100%; }

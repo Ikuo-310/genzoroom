@@ -391,7 +391,7 @@ describe('Viewer edit settings context menu', () => {
     expect(contextMenu(image()).defaultPrevented).toBe(true);
     let menu = document.body.querySelector<HTMLElement>('.edit-settings-context-menu')!;
     expect(menu).not.toBeNull();
-    expect(Array.from(menu.querySelectorAll('[role="menuitem"]'), (item) => item.textContent)).toEqual([
+    expect(Array.from(menu.querySelectorAll('.edit-settings-action-label'), (item) => item.textContent)).toEqual([
       'Copy all settings', 'Copy selected settings', 'Paste copied settings', 'Paste selected settings',
     ]);
     click(menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!);

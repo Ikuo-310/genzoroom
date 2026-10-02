@@ -39,12 +39,14 @@ import type { AdjustmentSliderMenuTarget } from './AdjustmentSlider';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { rememberWorkspaceSession } from './workspaceResume';
+import { useShortcutDisplay } from './useShortcutDisplay';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
   | { mode: 'paste'; assetId: string; clipboard: EditClipboard };
 
 export function AnshitsuPage() {
+  const shortcut = useShortcutDisplay();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -431,6 +433,7 @@ export function AnshitsuPage() {
       </div>
       <div className="workspace-actions">
         <button type="button" className="tool-button" disabled={exitSaving || exitFailure !== null}
+          title={shortcut.title(t('workspace.backToPhotos'), 'workspaceReturnHome')}
           onClick={() => { void exitToHome(); }}>{t('workspace.backToPhotos')}</button>
         <SettingsButton />
       </div>
@@ -445,8 +448,8 @@ export function AnshitsuPage() {
           disabled={!historyEnabled} aria-label={t('workspace.historyMenu')} aria-haspopup="menu" aria-expanded={!!historyMenu}
           onClick={(event) => { if (historyMenu) closeHistoryMenu(); else openHistoryMenu(undefined, event.currentTarget); }}>⋯</button>}>
           <div className="edit-actions">
-            <button className="tool-button" disabled={!historyEnabled || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
-            <button className="tool-button" disabled={!historyEnabled || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
+            <button className="tool-button" title={shortcut.title(t('workspace.undo'), 'undo')} disabled={!historyEnabled || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+            <button className="tool-button" title={shortcut.title(t('workspace.redo'), 'redo')} disabled={!historyEnabled || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           <div className="history-scroll-region">
           {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
