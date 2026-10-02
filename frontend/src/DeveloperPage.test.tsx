@@ -7,6 +7,7 @@ import i18n from './i18n';
 import { App } from './App';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { SMOKE_CASES, type SmokeFactory } from './webgpuSmoke';
+import type { DiagnosticsReport } from './developerDiagnostics';
 vi.mock('./GalleryPage', () => ({ GalleryPage: () => <p>Gallery route</p> }));
 vi.mock('./AnshitsuPage', () => ({ AnshitsuPage: () => <p>Anshitsu route</p> }));
 let host: HTMLDivElement, root: Root;
@@ -38,6 +39,9 @@ it('translates both languages, follows changes, never probes on mount and restor
       await act(async () => i18n.changeLanguage(language));
       expect(document.title).toBe(`${i18n.t('developer.title')} — GenzoRoom`);
       for (const key of ['title', 'imageDescription', 'numericNotes', 'recipeCase', 'run', 'comparison', 'adapter', 'execution', 'maximumDifference', 'differingChannels', 'alphaMatches', 'error']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.${key}`));
+      for (const key of ['environmentTitle', 'exportTitle', 'exportJson']) expect(host.textContent).toContain(i18n.t(`developer.${key}`));
+      for (const key of ['totalMs', 'initializationMs', 'sourceUploadMs']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.timing.${key}`));
+      expect(host.textContent).toContain(i18n.t('webgpuSmoke.timingNotes'));
       expect(host.textContent).not.toMatch(/webgpuSmoke\.|developer\.|codes\./);
       expect(host.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
     }
@@ -81,6 +85,7 @@ it.each(['en', 'ja'])('translates successful execution and safely shows optional
   expect(host.textContent).not.toContain('空文字');
   expect(host.textContent).not.toContain('webgpuSmoke.');
   expect(renderer.render).toHaveBeenCalledTimes(SMOKE_CASES.length);
+  expect(host.querySelector('tbody tr')!.textContent).toMatch(/\d+\.\d{2} ms/);
 });
 it.each(['unmount', 'pagehide'])('releases a pending diagnostic on %s and ignores its late result', async departure => {
   let resolve!: (value: never) => void;
@@ -101,4 +106,45 @@ it.each(['unmount', 'pagehide'])('releases a pending diagnostic on %s and ignore
     expect(host.textContent).toContain(i18n.t('webgpuSmoke.codes.idle'));
     expect(factory).toHaveBeenCalledOnce();
   }
+});
+
+it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data through the page in %s without requests', async language => {
+  await i18n.changeLanguage(language);
+  vi.stubGlobal('isSecureContext', false);
+  const gpu = { requestAdapter: vi.fn() };
+  vi.stubGlobal('navigator', { gpu, hardwareConcurrency: 8, userAgent: 'Test browser', platform: 'Test platform' });
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const blobs: Blob[] = [];
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: (blob: Blob) => { blobs.push(blob); return 'blob:page'; } });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const readReport = (blob: Blob) => new Promise<DiagnosticsReport>((resolve, reject) => {
+    const reader = new FileReader(); reader.onload = () => resolve(JSON.parse(String(reader.result))); reader.onerror = () => reject(reader.error); reader.readAsText(blob);
+  });
+  try {
+    const { DeveloperPage } = await import('./DeveloperPage');
+    await act(async () => root.render(<DeveloperPage />));
+    expect(host.textContent).toContain('Test browser'); expect(host.textContent).toContain('Test platform');
+    expect(host.textContent).toContain(i18n.t('developer.environmentTitle'));
+    expect(host.textContent).toContain(i18n.t('developer.notAvailable'));
+    expect(host.textContent).not.toMatch(/developer\.|webgpuSmoke\./);
+    const exportButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('developer.exportJson'))!;
+    await act(async () => exportButton.click());
+    const initial = await readReport(blobs[0]);
+    expect(initial.schemaVersion).toBe(1); expect(initial.generatedAt).toMatch(/Z$/);
+    expect(initial.environment.hardwareConcurrency).toBe(8); expect(initial.environment.deviceMemory).toBeNull();
+    expect(initial.webgpu.smoke.status).toBe('not_run');
+    expect(gpu.requestAdapter).not.toHaveBeenCalled();
+    const runButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('webgpuSmoke.run'))!;
+    await act(async () => runButton.click());
+    await act(async () => exportButton.click());
+    const failed = await readReport(blobs[1]);
+    expect(failed.webgpu.smoke.status).toBe('failed');
+    expect(failed.webgpu.smoke.error).toEqual({ code: 'insecure_context', detail: null });
+    expect(failed.webgpu.smoke.timing.totalMs).toEqual(expect.any(Number));
+    expect(failed.webgpu.smoke.cases).toHaveLength(SMOKE_CASES.length);
+    expect(JSON.stringify(failed)).not.toContain(i18n.t('webgpuSmoke.codes.insecure'));
+    expect(fetch).not.toHaveBeenCalled(); expect(gpu.requestAdapter).not.toHaveBeenCalled();
+  } finally { vi.runAllTimers(); vi.useRealTimers(); Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
 });

@@ -402,7 +402,22 @@
       "partialFailure": "GPU execution completed with failures",
       "generationMismatch": "GPU result source generation does not match the uploaded image."
     },
-    "undisclosedInfo": "Undisclosed"
+    "undisclosedInfo": "Undisclosed",
+    "adapterCapabilities": "Adapter capabilities",
+    "deviceCapabilities": "Device capabilities",
+    "features": "Features",
+    "limits": "Limits",
+    "noFeatures": "None",
+    "cpuMs": "CPU ms",
+    "gpuMs": "GPU ms",
+    "timing": {
+      "totalMs": "Total",
+      "adapterRequestMs": "Adapter request",
+      "deviceRequestMs": "Device request",
+      "initializationMs": "Initialization",
+      "sourceUploadMs": "Source upload"
+    },
+    "timingNotes": "These single-run diagnostic timings are not a strict benchmark. Scheduling, warmup, shader cache and system load affect results. Initialization includes adapter/device requests and optional GPU information; GPU time includes submission and readback, not just shader execution."
   },
   "language": {
     "nativeName": "English",
@@ -450,6 +465,23 @@
   },
   "developer": {
     "title": "Developer Diagnostics",
-    "description": "Development and diagnostic tools for GenzoRoom. Run each diagnostic explicitly."
+    "description": "Development and diagnostic tools for GenzoRoom. Run each diagnostic explicitly.",
+    "environmentTitle": "Environment / Capability",
+    "notAvailable": "Unavailable",
+    "exportTitle": "Diagnostic report",
+    "exportJson": "Export diagnostics JSON",
+    "exportFailed": "Could not export diagnostics JSON.",
+    "environmentFields": {
+      "secureContext": "Secure Context",
+      "crossOriginIsolated": "Cross-origin isolated",
+      "gpuApiAvailable": "WebGPU API available",
+      "hardwareConcurrency": "Logical processors",
+      "deviceMemory": "Device memory (GiB)",
+      "devicePixelRatio": "Device pixel ratio",
+      "viewportWidth": "Viewport width (CSS px)",
+      "viewportHeight": "Viewport height (CSS px)",
+      "userAgent": "User agent",
+      "platform": "Platform"
+    }
   }
 }

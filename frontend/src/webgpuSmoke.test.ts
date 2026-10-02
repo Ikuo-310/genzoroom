@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderAdjustments } from './adjustmentPipeline';
 import type { EditRecipe } from './editing';
 import type { GpuAdjustmentResult } from './webgpuAdjustmentRenderer';
 import { compareRgba } from './webgpuComparison';
 import { SMOKE_CASES, smokePixels, WebGpuSmoke, type SmokeEnvironment } from './webgpuSmoke';
 import type { ExposureGpu, ExposureGpuDevice } from './webgpuTypes';
+import { createWebGpuReport } from './developerDiagnostics';
+
+afterEach(() => vi.restoreAllMocks());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -50,6 +53,42 @@ describe('byte comparison shared with G1', () => {
 });
 
 describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', () => {
+  it('records unrounded overlapping timings and exports every serial case without Recipe or pixels', async () => {
+    let ticks = 0;
+    const step = 1.234567;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => ticks++ * step);
+    const fake = setup({ vendor: 'amd', architecture: 'gcn-4', device: '', description: '' });
+    Object.assign(fake.adapter, { features: new Set(['timestamp-query', 'shader-f16']),
+      limits: Object.create({ maxBufferSize: 2048, maxComputeWorkgroupSizeX: 128, privateUrl: 'secret' }) });
+    Object.assign(fake.device, { features: new Set(), limits: { maxBufferSize: 1024 } });
+    await fake.smoke.run();
+    expect(fake.smoke.state.timing).toEqual({
+      totalMs: expect.closeTo((9 + 4 * SMOKE_CASES.length) * step, 8),
+      adapterRequestMs: expect.closeTo(step, 8), deviceRequestMs: expect.closeTo(step, 8),
+      initializationMs: expect.closeTo(5 * step, 8), sourceUploadMs: expect.closeTo(step, 8),
+    });
+    expect(now).toHaveBeenCalledTimes(10 + 4 * SMOKE_CASES.length);
+    for (const row of fake.smoke.state.results) {
+      expect(row.cpuMs).toBeCloseTo(step, 8); expect(row.gpuMs).toBeCloseTo(step, 8);
+    }
+    expect(fake.gpu.requestAdapter).toHaveBeenCalledOnce();
+    expect(fake.adapter.requestDevice).toHaveBeenCalledOnce();
+    const report = createWebGpuReport(true, fake.smoke.state);
+    expect(report.smoke.status).toBe('completed');
+    expect(report.smoke.adapterInfo.data).toEqual({ vendor: 'amd', architecture: 'gcn-4', device: '', description: '' });
+    expect(report.smoke.adapterCapabilities).toEqual({
+      features: ['shader-f16', 'timestamp-query'], limits: { maxBufferSize: 2048, maxComputeWorkgroupSizeX: 128 },
+    });
+    expect(report.smoke.deviceCapabilities).toEqual({ features: [], limits: { maxBufferSize: 1024 } });
+    expect(report.smoke.cases.map(row => row.name)).toEqual(SMOKE_CASES.map(row => row.name));
+    expect(report.smoke.cases[0].timing.cpuMs).toBe(fake.smoke.state.results[0].cpuMs);
+    expect(JSON.stringify(report)).not.toMatch(/"(recipe|pixels|running|privateUrl)"/);
+    // The export model is a snapshot even while the mutable runner continues publishing.
+    fake.smoke.state.timing.totalMs = 999;
+    fake.smoke.state.adapterCapabilities!.features!.push('later');
+    expect(report.smoke.timing.totalMs).not.toBe(999);
+    expect(report.smoke.adapterCapabilities!.features).not.toContain('later');
+  });
   it('uses one uploaded image and all Recipe cases with serial CPU comparisons', async () => {
     const fake = setup();
     let active = 0;
@@ -121,6 +160,9 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     expect(fake.smoke.state.results[0].error).toBe('device lost');
     expect(fake.smoke.state.results[1].comparison?.alphaMatches).toBe(false);
     expect(fake.smoke.state.status.code).toBe('partialFailure');
+    expect(fake.smoke.state.results[0].cpuMs).toEqual(expect.any(Number));
+    expect(fake.smoke.state.results[0].gpuMs).toEqual(expect.any(Number));
+    expect(createWebGpuReport(true, fake.smoke.state).smoke.cases[0].error).toEqual({ code: 'case_failed', detail: 'device lost' });
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
   });
 

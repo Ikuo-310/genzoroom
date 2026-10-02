@@ -268,6 +268,19 @@ Results contain `{ pixels, width, height, sourceGeneration, requestId }`; `pixel
 
 The smoke page uses 512 generated pixels and individual endpoints/representative values, disabled controls/categories/ranges, combined Recipes, and cumulative stage cases. It reports differences without an automatic pixel tolerance. Node tests distinguish lifecycle mocks, a double-precision stage model against CPU, an f32 arithmetic model, and conditional real-GPU execution. Models do not compile WGSL or establish GPU `pow`/contraction accuracy. G2 was hardware-tested in Firefox and Edge: all 114 cases executed, maximum CPU/GPU byte difference was 2 in either browser, alpha matched, and no GPU execution errors occurred. G3's integrated workspace was hardware-tested on the NAS in Firefox. Edge has no reported G3 workspace verification. Mock scheduling tests do not establish real GPU drawing success.
 
+### Developer Diagnostics
+
+`/developer` is a lazy SPA route. Environment collection reads only an explicit list of passive navigator/window properties at page mount; it does not request adapters, network resources or stored settings. WebGPU diagnostics start only on the run button. Capability collection reuses that run's adapter/device, preserves empty adapter-info strings, and reads only listed numeric limits and string features. UI alone displays empty strings as `Blank`.
+
+| Diagnostics state | Owner and invariant |
+| --- | --- |
+| Environment snapshot | `DeveloperPage`; captured at mount, including viewport dimensions at that time. Unsupported optional values are `null`. |
+| Smoke status, capabilities, results and timings | `WebGpuSmoke`; reset for each explicit run, cases remain serial, and retired owners never publish late results. |
+| Export projection | `WebGpuDiagnostics` publishes a copied `WebGpuReport` to `DeveloperPage`; no renderer, pixels, Recipe or UI state crosses this boundary. |
+| JSON report | `createDiagnosticsReport()` creates a snapshot with `schemaVersion: 1` and UTC `generatedAt`; status/error codes are stable English identifiers, raw technical details are separate, and timings remain unrounded. |
+
+Environment and export fields are allowlisted: no storage, credentials, connection/page URLs, hostnames, photo identifiers/metadata, Recipe, History or clipboard are collected. Export is a local Blob download with a timestamp filename and deferred object-URL revocation; no data is sent to the backend. Single-run `performance.now()` measurements are diagnostic wall-clock durations, not benchmarks. Total includes the run and cleanup; initialization includes adapter/device requests, optional capability/info collection and pipeline creation, so those measurements overlap. Upload surrounds `setSource()`, CPU timing surrounds each CPU render, and GPU timing surrounds the awaited render through readback. Comparison and UI publication are outside per-case CPU/GPU timings. No repeat runs or warmup are added.
+
 ### Histogram collection and Scope display
 
 collectHistogram() in histogram.ts is a DOM-independent pure function over the decoded RGBA Uint8ClampedArray. It counts the 8-bit sRGB R, G, and B code values directly into 256-bin Uint32Arrays and ignores alpha. Y′ uses the nonlinear code values with 0.2126R′ + 0.7152G′ + 0.0722B′, rounded with Math.round and clamped to bins 0–255. The function does not alter its input, and each channel's bin total equals the number of pixels.

@@ -400,7 +400,22 @@
       "partialFailure": "GPU実行失敗あり",
       "generationMismatch": "GPU結果のsource generationがアップロードした画像と一致しません。"
     },
-    "undisclosedInfo": "未公開"
+    "undisclosedInfo": "未公開",
+    "adapterCapabilities": "アダプターの対応機能",
+    "deviceCapabilities": "デバイスの対応機能",
+    "features": "機能",
+    "limits": "上限値",
+    "noFeatures": "なし",
+    "cpuMs": "CPU ms",
+    "gpuMs": "GPU ms",
+    "timing": {
+      "totalMs": "合計",
+      "adapterRequestMs": "アダプター取得",
+      "deviceRequestMs": "デバイス取得",
+      "initializationMs": "初期化",
+      "sourceUploadMs": "画像アップロード"
+    },
+    "timingNotes": "単発の診断用実測時間であり、厳密なbenchmarkではありません。スケジューリング、warmup、shader cache、システム負荷の影響を受けます。初期化にはadapter/device取得と任意のGPU情報取得を含みます。GPU時間はshader実行だけでなく投入・readbackを含みます。"
   },
   "language": {
     "nativeName": "日本語",
@@ -448,6 +463,23 @@
   },
   "developer": {
     "title": "Developer Diagnostics",
-    "description": "GenzoRoomの開発・診断用ページです。各診断は実行ボタンで開始します。"
+    "description": "GenzoRoomの開発・診断用ページです。各診断は実行ボタンで開始します。",
+    "environmentTitle": "環境・対応機能",
+    "notAvailable": "利用不可",
+    "exportTitle": "診断レポート",
+    "exportJson": "診断JSONを書き出す",
+    "exportFailed": "診断JSONを書き出せませんでした。",
+    "environmentFields": {
+      "secureContext": "Secure Context",
+      "crossOriginIsolated": "クロスオリジン分離",
+      "gpuApiAvailable": "WebGPU APIの有無",
+      "hardwareConcurrency": "論理プロセッサー数",
+      "deviceMemory": "デバイスメモリ（GiB）",
+      "devicePixelRatio": "デバイスピクセル比",
+      "viewportWidth": "ビューポート幅（CSS px）",
+      "viewportHeight": "ビューポート高さ（CSS px）",
+      "userAgent": "ユーザーエージェント",
+      "platform": "プラットフォーム"
+    }
   }
 }
