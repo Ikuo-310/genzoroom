@@ -15,31 +15,47 @@ Frontend: nginx on container port 8080
   ├─ /api/immich/status  → internal Docker network
   ├─ /api/immich/about   → internal Docker network
   ├─ /api/assets/recent        → internal Docker network
+  ├─ /api/assets/favorites     → internal Docker network
+  ├─ /api/albums               → internal Docker network
+  ├─ /api/albums/{id}/assets   → internal Docker network
+  ├─ /api/calendar/*           → internal Docker network
   ├─ /api/assets/{id}          → internal Docker network
   ├─ /api/assets/{id}/thumbnail → internal Docker network
   ├─ /api/assets/{id}/preview  → internal Docker network
   ├─ /api/assets/{id}/original → internal Docker network
   ├─ /api/assets/{id}/edit-state → internal Docker network
-  └─ /api/assets/edit-status → internal Docker network
+  └─ /api/assets/edit-status   → internal Docker network
                        ↓
                      Backend: Uvicorn / FastAPI on port 8000
                        ├─ GET /health → {"status":"ok"}
                        ├─ GET /immich/status
                        ├─ GET /immich/about
                        ├─ GET /assets/recent
+                       ├─ GET /assets/favorites
+                       ├─ GET /albums
+                       ├─ GET /albums/{id}/assets
+                       ├─ GET /calendar/heatmap
+                       ├─ GET /calendar/min-year
+                       ├─ GET /calendar/{date}/assets
                        ├─ GET /assets/{id}
                        ├─ GET /assets/{id}/thumbnail
                        ├─ GET /assets/{id}/preview
                        ├─ GET /assets/{id}/original
-                       ├─ GET/PUT /assets/{id}/edit-state → SQLite /data/genzoroom.db
-                       └─ POST /assets/edit-status → SQLite /data/genzoroom.db
+                       ├─ POST /assets/edit-status → SQLite /data/genzoroom.db
+                       └─ GET/PUT /assets/{id}/edit-state → SQLite /data/genzoroom.db
                             ↓ x-api-key (server-side only)
                           Immich: authenticated read-only API
                             via LAN / routed network,
                             HTTPS URL, or shared Docker network
 ```
 
-React renders the title, connection states, and up to 100 recent photos with format badges, RAW filtering, and ordered multi-photo selection. Selected photos can be opened in Anshitsu, where the active asset drives the preview, filename, date, EXIF data, and Filmstrip selection. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and extends the right panel to the bottom edge. The Filmstrip occupies the lower row below the left panel and Viewer; when the right panel is closed, it spans the full workspace width. It uses only same-origin `/api/` URLs. There is no background polling, pagination, or search. JPEG White Balance, Basic tone, Shadows, Midtones, and Highlights Color Grading, Vibrance, and Saturation adjustments run locally in the browser.
+React Home has four tabs: Recent, Albums, Calendar, and Favorites. Recent requests 50–500 Timeline images in steps of 50 (100 by default); Favorites requests favorited Timeline images; Albums lists collections and loads assets when a collection is opened. Calendar has year, month, and date-detail views. Its availability and minimum year use Timeline IMAGE assets so Archive-only or video-only dates are not marked as photo days; month thumbnails use the first eligible non-RAW IMAGE in Timeline order. The calendar controls stay sticky inside their scroll region.
+
+Recent, Favorites, Album details, and Calendar date details use one shared photo-card grid with independent per-tab RAW / Non-RAW and edited / unedited filters, adjustable thumbnail size, edited and format badges, and ordered multi-selection with Shift+click ranges. Each photo view has its own selection state. `photoView` in `GalleryPage.tsx` resolves the active photo grid's assets, load state, selection, and edit-status inputs; Album lists and Calendar year/month views have no active photo view. `usePhotoSelection()` owns one view's selected IDs and range anchor while GalleryPage keeps one instance per photo view. Tab-specific filters use session storage; thumbnail size uses browser-saved Settings.
+
+Home keeps in-memory scroll offsets by view: Recent, Favorites, Album list and each Album ID, and Calendar year, month, and date. On Anshitsu navigation, Home passes its tab, detail context, calendar mode, and scroll coordinates in route state; the route validates that context and restores after the required view data is ready. Ordinary tab navigation uses the same view keys and pending restoration mechanism. Album-detail and Calendar-date selections remain available when switching tabs; reactivating their already-active tab returns to the parent view. These rules remain coordinated in GalleryPage rather than being spread across data hooks.
+
+The backend exposes `/assets/recent`, `/assets/favorites`, `/albums`, `/albums/{id}/assets`, `/calendar/heatmap`, `/calendar/min-year`, and `/calendar/{date}/assets` for Home browsing. Immich credentials and upstream requests remain backend-only. `/assets/edit-status` batches edit-status reads, while `/assets/{id}/edit-state` reads and writes GenzoRoom edit state in SQLite. Album asset visibility follows the existing album search behavior; Timeline visibility filters apply to Recent, Favorites, and Calendar. The shared grid opens selected photos in Anshitsu. The desktop workspace keeps History and EXIF in the independently collapsible left reference panel, places Scope above Develop controls in the independently collapsible right panel, and extends the right panel to the bottom edge. The Filmstrip occupies the lower row below the left panel and Viewer; when the right panel is closed, it spans the full workspace width. JPEG adjustments run locally in the browser.
 
 Anshitsu is desktop-first because practical photo development requires adequate space for the Viewer, Scope, Develop controls, and Filmstrip. Narrow layouts should remain usable enough to avoid critical breakage, but a dedicated mobile development workspace, or a Drawer, Tab, or vertically stacked redesign, is outside the current architecture unless explicitly planned separately. Possible future mobile workflows such as asset selection, stack management, preset application, or sending completed results to Immich should be treated separately from the full Anshitsu editing interface.
 
@@ -61,7 +77,7 @@ Display language reuses the legacy `genzoroom.language` key. Stored `en` or `ja`
 
 Date and time formatting is independent of display language. `genzoroom.dateLocale` stores an explicit supported locale or defaults to `auto`; `resolveDateLocale()` uses the first browser language accepted by `Intl.DateTimeFormat`, then the runtime's default locale. `formatPhotoDate()` is used by Home photo cards and Anshitsu date and EXIF displays. It uses `Intl.DateTimeFormat` date/time styles and preserves the wall-clock fields of timezone-less EXIF values by parsing and formatting those values in UTC; it does not assign the browser time zone to such capture times. Explicitly zoned values continue through normal browser-local formatting. The browser's time zone is not user-configurable here.
 
-`genzoroom.weekStart` independently stores `auto`, `sunday`, or `monday`. `resolveWeekStart()` returns JavaScript weekday numbering (Sunday `0` through Saturday `6`); Auto uses `Intl.Locale.getWeekInfo()` or `weekInfo` when available, mapping ISO Sunday `7` to `0`. Older environments use a deterministic region fallback (Sunday for US, CA, JP, CN, KR, TW, PH; Monday otherwise). This getter is ready for a calendar consumer; Home does not currently provide a calendar.
+`genzoroom.weekStart` independently stores `auto`, `sunday`, or `monday`. `resolveWeekStart()` returns JavaScript weekday numbering (Sunday `0` through Saturday `6`); Auto uses `Intl.Locale.getWeekInfo()` or `weekInfo` when available, mapping ISO Sunday `7` to `0`. Older environments use a deterministic region fallback (Sunday for US, CA, JP, CN, KR, TW, PH; Monday otherwise). Home Calendar uses this resolved value for both month and year views.
 
 WebGPU retains the existing `genzoroom.webgpu.enabled` key and defaults to enabled unless its value is the literal `false`. The Settings switch reports this saved preference separately from runtime availability and actual GPU drawing. Anshitsu owns `useWorkspaceGpu`; unsupported, failed, or disabled GPU processing uses the existing CPU Worker, then the existing main-thread fallback if the Worker fails. GPU active is reported only after an accepted GPU-rendered Canvas result. Home performs a full pipeline availability probe, then immediately disposes it, and does not retain a processing renderer. Settings changes are subscribed live by the workspace and do not remount it.
 

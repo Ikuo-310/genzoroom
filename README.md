@@ -13,8 +13,15 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 ### Immich browsing and Anshitsu
 
 - Authenticated, read-only Immich connectivity.
-- Up to 100 recent photos with proxied thumbnails and format badges.
-- Client-side RAW / Non-RAW filtering.
+- Home has four browsing tabs: Recent, Albums, Calendar, and Favorites.
+- Recent shows Immich Timeline images in descending order. Choose 50–500 photos in steps of 50 (100 by default); Archive assets are excluded.
+- Albums lists Immich albums and opens each album in the shared photo grid. Album visibility follows the existing Immich album behavior.
+- Calendar provides year, month, and date-detail views. Month cells show representative thumbnails; dates are active only when a Timeline image exists. Archive-only and video-only dates are not treated as photo days.
+- Favorites shows favorited Timeline images and reuses a successfully loaded list while Home remains mounted.
+- Photo grids support RAW / Non-RAW and edited / unedited filters. Each filter is independent per Home tab, and the two filters combine.
+- Choose the thumbnail size used by the Home grids.
+- Home supports ordered multi-photo selection and Shift+click range selection; selections open in Anshitsu.
+- Home restores the browsing tab, detail view, and scroll position after returning from Anshitsu, and remembers scroll position for each Home view while navigating between tabs.
 - Ordered multi-photo selection into the **Anshitsu** development workspace.
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
 - Home and Filmstrip continue to use Immich thumbnails. Anshitsu starts with the Immich preview and acquires only the selected JPEG original in the background; JPEG-only captures and Pixel `RAW-01.COVER.jpg` use the same path. The original is reused while that photo remains selected and released when leaving it. Acquisition or decode failure leaves preview editing available. Immich API credentials stay in the backend.
@@ -71,9 +78,9 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 - RAW development, including DNG, remains unimplemented. A JPEG `COVER.jpg` is handled as a JPEG original; GenzoRoom does not pair or manage it with a RAW asset.
 - Original rendering processes full-resolution pixels. WebGPU can accelerate this path when supported; CPU processing remains available and is slower on the tested NAS / Firefox setup. No detailed performance benchmark has been performed.
 - Edits made within the five-second debounce or during an in-flight save can be lost on reload or tab close; these browser events are not intercepted.
-- Recent Photos is limited to 100 items and currently has no pagination or search.
+- Recent displays the selected 50–500 item window and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
-- Immich asset Stack handling is not implemented.
+- Immich asset Stack handling and an Export Queue are not implemented.
 
 ## Not implemented
 

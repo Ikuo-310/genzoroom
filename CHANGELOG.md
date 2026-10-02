@@ -8,6 +8,9 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Home browsing tabs for Albums, Calendar, and Favorites alongside Recent. Calendar includes year, month, and date views; Favorites lists favorited Timeline images.
+- Independent per-tab RAW / Non-RAW and edited / unedited photo filters, adjustable Home thumbnail sizing, and ordered multi-photo selection with Shift+click ranges.
+- Home browsing-state and per-view scroll restoration when switching tabs and returning from Anshitsu.
 - A shared Settings dialog from Home and Anshitsu for browser-saved display language, independent date and time locale, calendar week start, WebGPU preference, and initial Preview / Original choice. Auto language follows browser preference with English fallback; Auto image choice prefers the JPEG original when WebGPU is enabled and available, switching from Preview when the original finishes loading unless the user has chosen a source manually. Settings also displays Immich server version and available build information.
 - Optional WebGPU image processing for JPEG previews and originals in Anshitsu, with a remembered GPU ON/OFF preference and automatic CPU fallback when GPU processing is unavailable or fails.
 - Anshitsu can acquire the selected JPEG original through the backend and switch between Preview and Original. Home and Filmstrip retain thumbnail browsing; both viewer sources share the current edits, and Original Info reports embedded profile details.
@@ -57,6 +60,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Recent photo count can be selected from 50 to 500 in steps of 50, with 100 as the default. Japanese Album periods use compact `YYYY/MM` labels.
 - Extended the desktop right panel to the bottom edge while placing the Filmstrip below only the left panel and Viewer. The Scope selector now sits in its heading, and its height can be resized from 15% to 40% (30% by default) and remembered by the browser; the mobile stacked layout is retained.
 - Advanced the flat recipe to version 18 with `adjustmentEnabled` flags for all sixteen numeric adjustments; Recipe v17 remains readable and migrates to v18. The recipe version is independent of edit-state snapshot format v2 and SQLite schema v1.
 - Advanced the flat in-memory recipe to version 17 with `gradingShadowsEnabled`, `gradingMidtonesEnabled`, and `gradingHighlightsEnabled`. Color Grading Reset preserves these switches; All Reset enables all three.

@@ -1,6 +1,24 @@
 # GenzoRoom 開発ノート
 
-現在の最近の写真取得上限は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+
+## Home閲覧機能のまとまり（2026-10-02・現在仕様）
+
+HomeはRecent、Albums、Calendar、Favoritesの4タブを持つ。RecentはImmich TimelineのIMAGEを新しい順に表示し、件数を50〜500件・50件刻み（初期値100件）から選ぶ。Recent、Favorites、CalendarはArchiveを含まないTimelineのIMAGEを対象にする。AlbumsはImmichのAlbum検索を使い、Album一覧・詳細ではArchive除外を追加していない。
+
+Calendarは年表示（12か月）、月表示、日付別写真一覧を持つ。日付の有無と最古年はTimeline IMAGEで判定し、Archiveのみ、またはVIDEOのみの日を写真ありにしない。月表示の代表サムネイルはTimeline順のRAW以外IMAGEから選び、年表示ではサムネイルを取得しない。日付詳細もTimeline IMAGEを表示する。年／月コントロールはCalendarのスクロール領域内でsticky表示する。
+
+FavoritesはBackendの`GET /assets/favorites`から取得し、Immichの`isFavorite=true`、IMAGE、`visibility=timeline`を条件にする。ページングは既存`_search_all_assets()`を利用し、成功した一覧は同じHome表示中に再利用する。Recent、Favorites、Album詳細、Calendar日付詳細は共通PhotoCardグリッドを使い、RAW／Non-RAWと補正あり／なしのフィルター、サムネイルサイズ、編集済み・形式badge、複数選択、Shift範囲選択、暗室への送信を備える。二つのフィルターはANDで適用し、フィルターはタブごとにsessionStorageへ保存する。サムネイルサイズは既存ブラウザー設定を使う。
+
+選択IDとShift anchorは写真ビューごとに独立し、タブ切替では保持する。GalleryPageはRecent、Favorites、Album詳細、Calendar日付詳細用の`usePhotoSelection()`をそれぞれ1つ所有する。Album詳細とCalendar日付詳細を開閉した際のselection resetは既存遷移処理で行う。
+
+Homeのscroll位置はRecent、Favorites、Album一覧、Album IDごとの詳細、Calendar年・月・日付詳細を別viewとしてメモリ上に保持する。暗室へ移動するときはタブ、Album／日付、Calendar表示モード、年月、page／content scroll位置をnavigation stateに渡し、Homeは必要なデータとDOMが準備できてから復元する。Album詳細・Calendar日付詳細ではアクティブタブの再クリックで親表示へ戻り、別タブへ移動した場合は詳細状態を保つ。
+
+Album一覧の期間は日本語UIで`YYYY/MM`（例：`2002/09〜2025/11`）、英語UIでは既存の日付locale表記を使う。
+
+Home構造の監査では、写真ビュー判定がasset・selection・edit status・toolbar等に分散し、selectionModeがtrueのままタブを切り替えるとEscape handlerが古いclear処理を参照し得る点を確認した。最小整理としてGalleryPageに`photoView`を導入し、写真ビューのassets、load state、selection、edit status対象を一か所で対応づけた。選択ID・anchor・toggle・clear・取得後の選択整理は`usePhotoSelection()`へまとめ、GalleryPageが4 instanceを保持する。Escapeは現在の写真ビューのclear関数に追従し、Recent／Favorites両方向の回帰テストを追加した。
+
+この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。Stack機能、Export Queue、RAW現像は未実装。
 
 ## Settingsダイアログ（2026-09-29・現在仕様）
 
@@ -12,7 +30,7 @@ Image Processingでは既存WebGPU設定をSettingsへ移し、ON/OFF設定と�
 
 設定キーは既存の`genzoroom.language`を再利用し、新規項目は`genzoroom.dateLocale`、`genzoroom.weekStart`、`genzoroom.initialImage`、WebGPUは既存の`genzoroom.webgpu.enabled`を使う。保存不能でもページ内の設定変更を維持する。日付表示にはIntl.DateTimeFormatを使い、タイムゾーン情報を持たないEXIF撮影日時をブラウザのタイムゾーンで確定しない。Recipe v18、History、SQLite schema 1、`processingVersion`（`jpeg-preview-srgb8-v1`）は変更していない。
 
-Homeのカレンダー／アルバム選択、翻訳エディター、キーボードショートカットのカスタマイズは未実装。
+翻訳エディター、キーボードショートカットのカスタマイズは未実装。
 
 ダイアログはフォーカストラップ、Escape、閉じるボタン、閉じた後のフォーカス復帰を備える。外側で押下と解放の両方が起きた場合だけバックドロップクリックで閉じるため、内部から外へドラッグしても閉じない。表示中は暗室のグローバルショートカットを抑止し、背面操作を伝播させない。
 
@@ -122,7 +140,7 @@ editing.tsの列挙は長いが、現在の16値・23flagのReset/equality/Histo
 
 ViewerのBefore／After切替はレシピやHistoryを変更せず、Backslash長押しはBeforeを一時表示する。Viewerの「⋯」メニューは開いている間グローバルshortcutを遮断し、Escapeで閉じると起動ボタンへfocusを戻す。3WAY範囲見出しから別のスライダーへ実際にポインターを移したときは古い見出しfocusを解除し、DOM focusと調整操作対象を一致させる。
 
-Homeは最大100件の写真一覧、RAW／非RAW filter、Shift＋clickの表示順範囲選択、選択順を保った暗室への引き渡しを備える。HomeとFilmstripは編集済みマーカーを表示する。POST `/assets/edit-status` は最大100 IDを一括確認し、未取得・未編集・編集済みを区別する。Homeの接続状態から開く接続詳細と、Home／暗室共通のGenzoRoomタイトルを使う。暗室からのタイトル操作は既存の退出保存経路を通る。
+HomeのRecent件数は50〜500件を50件刻みで選択できる（初期値100件）。写真グリッドはRAW／非RAW filter、Shift＋clickの表示順範囲選択、選択順を保った暗室への引き渡しを備える。HomeとFilmstripは編集済みマーカーを表示する。POST `/assets/edit-status` は最大100 IDを一括確認し、未取得・未編集・編集済みを区別する。Homeの接続状態から開く接続詳細と、Home／暗室共通のGenzoRoomタイトルを使う。暗室からのタイトル操作は既存の退出保存経路を通る。
 
 ## 総合コード監査 Phase 1〜3 完了
 
