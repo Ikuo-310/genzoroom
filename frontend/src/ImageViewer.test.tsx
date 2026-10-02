@@ -946,6 +946,9 @@ describe('workspace Viewer focus mode', () => {
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click());
       focusKey();
       expect(page().classList.contains('viewer-focus-mode')).toBe(false);
+      key('keydown', window, { key: 'h' });
+      expect(page().classList.contains('viewer-focus-mode')).toBe(false);
+      expect(page()).not.toBeNull();
       await act(async () => host.querySelector<HTMLButtonElement>('.settings-dialog header button')!.click());
     } finally {
       act(() => root.unmount()); root = createRoot(host);

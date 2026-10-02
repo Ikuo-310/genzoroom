@@ -58,6 +58,7 @@ export function AnshitsuPage() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [viewerFocusMode, setViewerFocusMode] = useState(false);
+  const exitToHomeRef = useRef<() => Promise<void>>(async () => {});
   const [scopePanelBasis, setScopePanelBasis] = useState(readScopePanelBasis);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   // Scope needs the effective Viewer state because the persistent choice omits held Backslash.
@@ -115,10 +116,14 @@ export function AnshitsuPage() {
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (viewerKeyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
-        || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFocusMode')
+        || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      const isFocusToggle = matchesShortcut(event, 'viewerFocusMode');
+      const isHomeExit = matchesShortcut(event, 'workspaceReturnHome');
+      if (!isFocusToggle && !isHomeExit) return;
       event.preventDefault();
-      setViewerFocusMode(current => !current);
+      if (isHomeExit) void exitToHomeRef.current();
+      else setViewerFocusMode(current => !current);
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
@@ -330,6 +335,7 @@ export function AnshitsuPage() {
       setExitSaving(false);
     }
   }
+  exitToHomeRef.current = exitToHome;
 
   function stayInAnshitsu() {
     resumeAfterExitFailure();

@@ -83,7 +83,17 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(18);
+    expect(Object.keys(shortcutBindings)).toHaveLength(19);
+  });
+
+  it('matches workspace Home only for unmodified H', () => {
+    expect(matchesShortcut(event('H'), 'workspaceReturnHome')).toBe(true);
+    expect(matchesShortcut(event('h'), 'workspaceReturnHome')).toBe(true);
+    for (const options of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+      expect(matchesShortcut(event('h', options), 'workspaceReturnHome')).toBe(false);
+    }
+    expect(Object.keys(shortcutBindings)).toHaveLength(19);
+    expect(undoShortcut(event('z', { ctrlKey: true }))).toBe('undo');
   });
 
   it('separates focus mode and Fit restore from modified commands and Redo', () => {
@@ -103,6 +113,6 @@ describe('command shortcut bindings', () => {
     for (const options of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
       expect(matchesShortcut(event('d', options), 'homeOpenSelected')).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(18);
+    expect(Object.keys(shortcutBindings)).toHaveLength(19);
   });
 });
