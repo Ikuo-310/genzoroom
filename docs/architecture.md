@@ -270,19 +270,44 @@ The smoke page uses 512 generated pixels and individual endpoints/representative
 
 ### Developer Diagnostics
 
-`/developer` is a lazy SPA route. Environment collection reads only an explicit list of passive navigator/window properties at page mount; it does not request adapters, network resources or stored settings. WebGPU diagnostics start only on the run button. Capability collection reuses that run's adapter/device, preserves empty adapter-info strings, and reads only listed numeric limits and string features. UI alone displays empty strings as `Blank`.
+`/developer` is a lazy-loaded SPA route intended for opt-in development and diagnosis, not a primary user workflow. An ordinary click on the Settings gear opens Settings as before; Ctrl/Meta-click opens `/developer` in a new tab. Opening the route only reads a passive Environment snapshot and does not fetch photos or initialize WebGPU. Diagnostic runs and manual candidate lookup require explicit actions.
+
+Environment / Capabilities stays visible above the Real JPEG and WebGPU tabs. Both diagnostic components remain mounted while the selected panel changes with `hidden`; tab selection is page-local and is not stored or encoded in the URL. JPEG candidates, manual selection, UI-only filename, JPEG report and WebGPU report therefore survive tab changes. Leaving the route releases each component's resources.
+
+`DeveloperPage` captures one Environment snapshot at mount: secure context, cross-origin isolation, WebGPU API availability, hardware concurrency, device memory, device pixel ratio, viewport dimensions, user agent and platform. Unavailable optional values are `null`. The page does not probe an adapter when it reads availability.
 
 | Diagnostics state | Owner and invariant |
 | --- | --- |
-| Environment snapshot | `DeveloperPage`; captured at mount, including viewport dimensions at that time. Unsupported optional values are `null`. |
-| Smoke status, capabilities, results and timings | `WebGpuSmoke`; reset for each explicit run, cases remain serial, and retired owners never publish late results. |
-| JPEG selection and run | `RealJpegDiagnostics` owns transient Asset selection and UI-only filenames. `RealJpegRunner` owns one original decode and GPU source per explicit run, serial cases, abort/cleanup and suppression of late results. |
-| Export projection | Diagnostics components publish copied reports to `DeveloperPage`; no Asset, renderer, pixels, Recipe or UI selection crosses this boundary. The additive `jpeg` section retains `schemaVersion: 1`. |
-| JSON report | `createDiagnosticsReport()` creates a snapshot with `schemaVersion: 1` and UTC `generatedAt`; status/error codes are stable English identifiers, raw technical details are separate, and timings remain unrounded. |
+| Environment snapshot and report snapshots | `DeveloperPage`; Environment is captured once at mount, and each export copies the current values. |
+| Real JPEG candidate list, manual selection and displayed filename | `RealJpegDiagnostics`; transient page state only. The filename is UI-only. |
+| Real JPEG run | `RealJpegRunner`; one original, one decoded source and one renderer per explicit run; serial cases and cleanup. |
+| WebGPU Smoke | `WebGpuSmoke`; one runner owns adapter/device/renderer work and serial cases for its run. |
 
-Environment and export fields are allowlisted: no storage, credentials, connection/page URLs, hostnames, photo identifiers, filenames, original/thumbnail URLs, EXIF, Recipe, History or clipboard enter reports. JPEG selection uses read-only Recent/original requests only after explicit interaction; private identity stays in transient UI/request state, and dependency errors export stable codes without raw detail. JPEG reports allow compressed size, dimensions and sanitized ICC profile description. Export is a local Blob download with a timestamp filename and deferred object-URL revocation; no data is sent to the backend. Single-run `performance.now()` measurements are diagnostic wall-clock durations, not benchmarks. Total includes the run and cleanup; initialization includes adapter/device requests, optional capability/info collection and pipeline creation, so those measurements overlap. Upload surrounds `setSource()`, CPU timing surrounds each CPU render, and GPU timing surrounds the awaited render through readback. Comparison and UI publication are outside per-case CPU/GPU timings. No repeat runs or warmup are added.
+#### Synthetic WebGPU Smoke
 
-JPEG original-fetch timing includes response body completion; decode timing reuses the production browser decode/ICC-to-sRGB/canvas/ImageData path. Source histogram is collected once, while each of the 17 cases separately measures CPU/GPU rendering and output histogram collection. Manual selection has no asset-lookup timing. GPU failure preserves CPU measurements and stops further GPU work. Full-resolution processing retains one decoded source and only the current case output, but can still require substantial memory and block during an individual synchronous CPU case.
+The WebGPU tab runs the production `WebGpuAdjustmentRenderer` against generated pixels. It is a synthetic correctness, capability and pipeline diagnostic, not a real-photo performance benchmark. It reports CPU/GPU output comparisons, adapter information, features, limits and timings. Cases cover adjustment values and endpoints, individual adjustment and category OFF behavior, combined adjustments, and stage-prefix outputs. Cases execute serially; a run owns and disposes its renderer/device, suppresses late publications after departure, and releases a device or renderer that arrives after its owner has closed.
+
+#### Real JPEG Diagnostics
+
+Real JPEG Diagnostics reuses `fetchRecentAssets()`, the original endpoint, `readJpegProfile()`, `decodeEditSource()`, `renderAdjustments()`, `WebGpuAdjustmentRenderer` and `collectHistogram()`. Automatic runs inspect at most the 50 newest Recent assets and use the first non-RAW JPEG. The explicit manual chooser displays up to 10 non-RAW JPEG candidates. Selection, candidate data and filename remain transient in the page; the filename is shown only in the UI and is never put in a report or browser storage.
+
+A run fetches the original Blob, reads its ICC/profile description, and uses the production JPEG-original path to decode into sRGB ImageData. It measures the source histogram once, creates one GPU renderer and uploads the source once. It then runs 17 serial cases through the existing CPU and GPU paths: one case for each of the 16 numeric adjustments and `all_sliders_representative`. Each individual case changes only its target value from `defaultRecipe()`; representative values are exposure `0.5` and `35` for all other adjustments. CPU and GPU outputs each receive a separately timed histogram collection. GPU failure retains CPU results and stops additional GPU cases.
+
+#### Timings and reports
+
+Real JPEG timing covers total run and cleanup, automatic asset lookup, original fetch through `response.blob()` completion, profile reading, production decode through sRGB ImageData, source histogram, GPU initialization, one source upload, and per-case CPU render, CPU histogram, GPU render/readback and GPU histogram. Manual selection has no asset-lookup timing. `gpuRenderMs` is the production renderer call through readback and CPU-side pixel copy, not pure shader execution. Initialization includes its adapter/device requests and pipeline creation. Measurements are single-run `performance.now()` wall-clock observations without benchmark warmup or repeated samples; they are not benchmark guarantees.
+
+Three local JSON downloads use `schemaVersion: 1` and an export-time snapshot:
+
+- Full: `schemaVersion`, `generatedAt`, `environment`, `webgpu`, `jpeg`.
+- JPEG-only: `schemaVersion`, `generatedAt`, `environment`, `jpeg`.
+- WebGPU-only: `schemaVersion`, `generatedAt`, `environment`, `webgpu`.
+
+Explicit report projections omit asset IDs, filenames, thumbnail/original URLs, Immich URLs, hostnames/IPs, EXIF, pixel data, histogram bins, Recipe, History, clipboard, storage contents and credentials. JPEG dependency exceptions are converted to semantic error codes without raw detail because they can contain private IDs or URLs. The page performs no telemetry or report upload; downloads use a local Blob.
+
+#### Lifecycle
+
+Each JPEG run owns its AbortController, object URL and renderer. `pagehide` aborts pending candidate/run work and disposes resources; a persisted BFCache `pageshow` creates a fresh owner. Object URLs are revoked, renderers/devices are disposed, `requestDevice()` or renderer creation that completes after departure releases its late resource, and closed owners cannot publish. Effect cleanup also handles React StrictMode and route unmount. WebGPU Smoke follows the same run-owner and departure rules. These mechanisms keep tab switching from interrupting runs while still cleaning up on page departure.
 
 ### Histogram collection and Scope display
 

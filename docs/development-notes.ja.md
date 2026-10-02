@@ -36,6 +36,38 @@ shortcut、表示設定、Home↔Anshitsu復帰、各window listenerをfocused a
 
 回帰テストは切替保存失敗中のCtrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Y、Stay後のUndo／Redo復帰、退出保存失敗中のUndo遮断を確認した。修正後のfocused auditでは報告対象のHigh／Medium／Low問題は残らなかった。現行作業ツリーでの関連Vitestは2ファイル・130件成功、TypeScript／Frontend buildと`git diff --check`も成功した。実機ブラウザ確認は行っていない。
 
+## Developer Diagnostics完了（2026-10-02・現行仕様）
+
+### Phase 1: DeveloperページとSynthetic WebGPU Smoke
+
+`/developer`をlazy-loadedなSPA routeとして追加し、Settings歯車の通常クリックはSettingsを開いたまま、Ctrl/MetaクリックではDeveloper Diagnosticsを新規タブで開く。旧`dev-webgpu.html`、`webgpuSmokeMain.ts`、独立Vite entryを削除し、React UIへ統合した。UIは日本語・英語に対応する。Developer Diagnosticsは任意の開発・診断用であり、通常利用者向けの主要導線には置かない。
+
+### Phase 2: Environment、capability、report
+
+ページ読込時のEnvironment snapshot、WebGPU adapter/device capabilities・features・limits、Synthetic Smokeの実行結果とtimingを追加した。`schemaVersion: 1`のJSON exportを導入し、既存Recipe・画像データ・Storage・認証情報をreportへ含めないprojection方針を定めた。診断結果のtelemetry送信やサーバーuploadは行わない。
+
+### Real JPEG Diagnostics
+
+Recent最大50件から最新のnon-RAW JPEGを自動選択し、手動選択では最大10候補を表示する。filenameはDeveloper UIだけに表示し、StorageやJSONへ保存しない。productionのJPEG original fetch、`readJpegProfile()`、`decodeEditSource()`によるsRGB ImageData化、`renderAdjustments()`、`WebGpuAdjustmentRenderer`、`collectHistogram()`を再利用する。16個のnumeric adjustmentと`all_sliders_representative`の計17ケースを直列実行し、CPU/GPU renderとHistogramのtimingを記録する。GPU sourceは1回だけuploadし、GPU失敗時もCPU結果を保持する。Abort、遅延resourceの解放、Object URL revokeとGPU disposeをrun lifecycleに結び付けた。
+
+実写処理の計測対象はJPEG original取得、ICC/profile、sRGB decode、source Histogram、GPU初期化・upload、各ケースのCPU/GPU処理とHistogramである。`gpuRenderMs`はshaderのみの時間ではなく、production rendererのreadbackとCPU側copyまでを含む。単発観測であり、再現可能なbenchmark保証値として扱わない。
+
+### UI整理とJSON出力
+
+Environment / Capabilitiesを常時表示し、Real JPEGとWebGPUをタブへ分けた。診断componentはmountしたまま`hidden`を切り替えるため、選択・候補・filename・結果をタブ間で保持する。タブ状態はページローカルである。JSONはFull、JPEG-only、WebGPU-onlyの3種類とし、各reportのscopeを分離しながらschemaVersion 1を維持する。実機確認でactive/inactiveタブの明暗が逆に見える問題を修正し、WebGPUの実行・export操作をJPEG側と揃えて上部へ移動した。
+
+### Firefox / Edge実機確認
+
+Firefox 157とEdge 154でWebGPU SmokeとReal JPEG Diagnosticsの成功を確認した。同一JPEG originalとDisplay P3 profileで計測でき、重いadjustment処理ではWebGPUの処理時間がCPUより大幅に短くなることを観測した。FirefoxとChromium系ではWebGPU timing特性に大きな差があった。これらは当該環境の実機観測であり、固定性能値やbrowser間のbenchmark保証ではない。Developer Diagnosticsによりbrowser/runtime差を実機で切り分けられるようになった。
+
+### 最終focused static audit
+
+Developer Diagnostics関連コードに限定した静的監査では、Critical 0／High 0／Medium 0／Low 0だった。二重run防止、Abort/dispose、遅れて返るdevice/rendererの解放、closed ownerからのlate publish抑止、StrictMode/BFCache、GPU失敗時のCPU結果保持、Object URL/GPU resource cleanup、タブ状態保持、3種類のJSON projection、schemaVersion 1、export snapshot、filename等のprivate情報の非混入を確認した。コード変更は行っていない。
+
+CPU renderとHistogram例外経路を直接検証する専用testはない。静的確認では状態遷移・cleanupに矛盾はなく、memory allocation failure等の低頻度経路を対象とする今後の回帰test候補として記録する。今回の修正は不要と判断した。
+
+既知事項として、full Vitestでは既存Node test 2ファイルの誤収集によりsuite failureとなるが、専用Node runnerは成功している。Frontend buildには500 kB超chunk warningが残る。いずれもDeveloper Diagnostics追加に起因する新規failureとは判断していない。
+
 ## Settingsダイアログ（2026-09-29・現在仕様）
 
 Homeと暗室で共通のSettingsダイアログをAppレベルで管理する。Routeや暗室を再マウントせず、暗室の編集session、HistoryとUndo/Redo、Filmstrip、既存autosave timerを保持する。Generalには表示言語（Auto／日本語／English）、表示言語から独立した日付・時刻ロケール、カレンダー週初め（Auto／日曜／月曜）を配置した。Auto言語はブラウザの優先言語を対応リソースと地域サブタグ込みで照合し、該当がなければ英語にする。日付ロケールAutoはブラウザの地域設定を使用する。週初めAutoはIntl.LocaleのweekInfoを利用し、非対応環境では地域に基づく決定的なfallbackを使う。週初め設定の取得処理は実装済みだが、Homeカレンダーはない。

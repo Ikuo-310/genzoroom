@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
+
 - Home browsing tabs for Albums, Calendar, and Favorites alongside Recent. Calendar includes year, month, and date views; Favorites lists favorited Timeline images.
 - Independent per-tab RAW / Non-RAW and edited / unedited photo filters, adjustable Home thumbnail sizing, and ordered multi-photo selection with Shift+click ranges.
 - Home browsing-state and per-view scroll restoration when switching tabs and returning from Anshitsu.
