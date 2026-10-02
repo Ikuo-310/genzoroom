@@ -28,7 +28,9 @@ Home構造の監査では、写真ビュー判定がasset・selection・edit sta
 
 Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保持し、Storage APIへ書かない。選択写真の順序とactive photoを保ち、Homeから再入場するときの`homeReturn`はその時点のHome表示状態で更新する。Recipe、History、Viewer transform等は保持しない。
 
-`showKeyboardShortcuts`はdefault ONのbrowser preferenceで、ON/OFF radio UIから変更する。Tooltip/Menuの説明表示だけを切り替え、shortcut実行は止めない。formatterは`ctrlOrMeta`だけをOS別表記にし、明示的CtrlはmacOSでもCtrlと表示する。Before長押しとFit／前回表示切替は各ボタン操作と完全同義でないため、Tooltipにその意味を明記した。将来の実装規則のcanonical sourceはAGENTS.mdとする。
+`showKeyboardShortcuts`はdefault ONのbrowser preferenceで、ON/OFF radio UIから変更する。Tooltip/Menuの説明表示だけを切り替え、shortcut実行は止めない。Primary／Alternate modifierを`shortcutModifiers.ts`へ共通化し、Windows/LinuxではCtrl／Alt、macOSではCommand／Optionとしてmatchingとformatterの両方で解決する。Undo/Redo、Copy/Paste、選択Copy/Paste、Filmstrip、Settings歯車のmodified clickは論理modifierを利用し、Ctrl+Metaのような反対側modifier同時押しは一致させない。AltGraph除外は維持し、物理modifierが必要なbindingだけ明示指定する。modifier表示を実bindingと揃え、Before長押しとFit／前回表示切替は各ボタン操作と完全同義でないためTooltipに意味を明記した。Primary-modifier clickはclick handler内で同期的にDeveloper tabを開く。将来の実装規則のcanonical sourceはAGENTS.mdとする。
+
+検証では関連shortcut/UIのVitest 5ファイル・97件、Frontend全体Vitest 74ファイル・1465件成功（2件skip）、TypeScript check、Frontend build、`git diff --check`が成功した。buildでは500 kBを超えるchunk warningが出たが、modifier変更とは無関係な既知のwarningとして扱った。実機ブラウザや物理キーボードでの確認は行っていない。
 
 ### focused code auditと修正
 
