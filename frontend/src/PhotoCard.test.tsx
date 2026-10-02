@@ -5,7 +5,7 @@ import { PhotoCard, type RecentAsset } from './PhotoCard';
 
 beforeEach(async () => i18n.changeLanguage('en'));
 
-function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean) {
+function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string) {
   const asset: RecentAsset = {
     id: 'asset-id',
     filename,
@@ -13,6 +13,7 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
     thumbnail_url: '/api/assets/asset-id/thumbnail',
     format,
     is_raw: isRaw,
+    stackId,
   };
   return renderToStaticMarkup(<PhotoCard asset={asset} edited={edited} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />);
 }
@@ -37,6 +38,21 @@ describe('PhotoCard format badge', () => {
 
     expect(markup).toContain(`>${format}</span>`);
     expect(markup).toContain(isRaw ? 'format-badge raw' : 'class="format-badge"');
+  });
+
+  it('adds the stacked thumbnail class without changing the representative format badge', () => {
+    const markup = renderBadge('JPEG', false, 'photo.jpg', true, 'stack-id');
+    expect(markup).toContain('class="thumbnail stacked"');
+    expect(markup).toContain('class="format-badge">JPEG</span>');
+    expect(markup).toContain('class="edited-badge"');
+    expect(markup).not.toContain('STACK');
+  });
+
+  it('keeps an unstacked thumbnail unchanged', () => {
+    const markup = renderBadge('DNG', true);
+    expect(markup).toContain('class="thumbnail"');
+    expect(markup).not.toContain('class="thumbnail stacked"');
+    expect(markup).toContain('class="format-badge raw">DNG</span>');
   });
 
   it('keeps a long filename in the separate metadata area', () => {

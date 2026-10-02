@@ -78,7 +78,7 @@ export function PhotoCard({
         aria-pressed={selectionMode ? selected : undefined}
         aria-description={edited ? t('photos.edited') : undefined}
       >
-        <div className="thumbnail">
+        <div className={`thumbnail${asset.stackId ? ' stacked' : ''}`}>
           <img src={asset.thumbnail_url} alt="" loading="lazy" />
           <FormatBadge format={asset.format} isRaw={asset.is_raw} />
           <EditedBadge edited={edited} />

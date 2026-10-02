@@ -142,6 +142,13 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .photo-card.selected button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .photo-card-button:focus-visible { position: relative; z-index: 1; outline: 3px solid #e6eee9; outline-offset: -3px; }
 .thumbnail { position: relative; aspect-ratio: 1; overflow: hidden; background: #090e0c; }
+.thumbnail.stacked::before,
+.thumbnail.stacked::after { position: absolute; inset: 0; border: 1px solid #52685d; border-radius: 3px; background: #17221f; content: ''; pointer-events: none; }
+.thumbnail.stacked::before { transform: translate(3px, 3px) scale(.96); }
+.thumbnail.stacked::after { transform: translate(6px, 6px) scale(.92); }
+.thumbnail.stacked img { z-index: 1; }
+.thumbnail.stacked .format-badge,
+.thumbnail.stacked .edited-badge { z-index: 2; }
 .photo-selection-control { position: absolute; top: 8px; left: 8px; z-index: 2; display: grid; width: 25px; height: 25px; place-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
 .photo-selection-control input { appearance: none; width: 21px; height: 21px; margin: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 5px rgb(0 0 0 / 75%); background: rgb(15 20 18 / 62%); cursor: pointer; }
 .photo-selection-control input:checked { background: #eef4f0; }
