@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
 import { activeAdjustmentId } from './adjustmentFocus';
-import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget } from './editShortcuts';
+import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
@@ -76,21 +76,21 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       if (keyboardBlocked || event.defaultPrevented || event.isComposing
         || event.ctrlKey || event.metaKey || event.altKey || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
-      if (event.key === ']') {
-        // JIS keyboards report this character on the physical Backslash key.
+      if (matchesShortcut(event, 'viewerOriginal')) {
+        // JIS Backslash also matches Original; keep this branch first to avoid showing Before.
         if (originalStatus === 'ready' && editSource && onOriginalToggle) {
           event.preventDefault();
           if (!event.repeat) onOriginalToggle();
-        } else if (event.code === 'Backslash') {
+        } else if (matchesShortcut(event, 'viewerBefore')) {
           event.preventDefault();
         }
-      } else if (event.code === 'Backslash') {
+      } else if (matchesShortcut(event, 'viewerBefore')) {
         event.preventDefault();
         if (!event.repeat) setBackslashHeld(true);
       }
     };
     const keyup = (event: KeyboardEvent) => {
-      if (event.code === 'Backslash') setBackslashHeld(false);
+      if (matchesShortcutKey(event, 'viewerBefore')) setBackslashHeld(false);
     };
     const release = () => setBackslashHeld(false);
     const visibilityChange = () => { if (document.hidden) release(); };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Histogram } from './histogram';
-import { isNativeEditingTarget } from './editShortcuts';
+import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { HistogramGraph } from './HistogramGraph';
 
 type Props = { histogram: Histogram | null; keyboardBlocked?: boolean };
@@ -22,9 +22,9 @@ export function ScopePanel({ histogram, keyboardBlocked = false }: Props) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const channel = event.code === 'Numpad1' ? 'r' : event.code === 'Numpad2' ? 'g' : event.code === 'Numpad3' ? 'b' : null;
-      const isYToggle = event.code === 'Numpad0';
-      const isScaleToggle = event.code === 'NumpadDecimal';
+      const channel = matchesShortcut(event, 'scopeRed') ? 'r' : matchesShortcut(event, 'scopeGreen') ? 'g' : matchesShortcut(event, 'scopeBlue') ? 'b' : null;
+      const isYToggle = matchesShortcut(event, 'scopeYOnly');
+      const isScaleToggle = matchesShortcut(event, 'scopeScale');
       if ((!channel && !isYToggle && !isScaleToggle) || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey
         || event.metaKey || event.shiftKey || isNativeEditingTarget(event.target) || keyboardBlocked
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
