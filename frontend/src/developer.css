@@ -1,0 +1,11 @@
+.developer-page { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+.developer-page h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); }
+.developer-section { margin-top: 24px; padding: 24px; background: #203029; border: 1px solid #43584d; border-radius: 12px; min-width: 0; }
+.developer-diagnostics > div { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
+.developer-page dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.developer-page dt { font-weight: 600; }
+.developer-table-scroll { overflow-x: auto; }
+.developer-page table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+.developer-page th, .developer-page td { padding: 10px; border-bottom: 1px solid #43584d; vertical-align: top; }
+.developer-page td:last-child { min-width: 180px; max-width: 360px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.developer-page :focus-visible { outline: 2px solid #e6eee9; outline-offset: 3px; }

@@ -3,9 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderAdjustments } from './adjustmentPipeline';
 import type { EditRecipe } from './editing';
 import type { GpuAdjustmentResult } from './webgpuAdjustmentRenderer';
-import i18n from './i18n';
 import { compareRgba } from './webgpuComparison';
-import { mountSmokePage, SMOKE_CASES, smokePixels, WebGpuSmoke, type SmokeEnvironment } from './webgpuSmoke';
+import { SMOKE_CASES, smokePixels, WebGpuSmoke, type SmokeEnvironment } from './webgpuSmoke';
 import type { ExposureGpu, ExposureGpuDevice } from './webgpuTypes';
 
 function deferred<T>() {
@@ -50,22 +49,6 @@ describe('byte comparison shared with G1', () => {
   });
 });
 
-it('localizes G2 UI additions through the existing language resources', async () => {
-  const original = i18n.language;
-  try {
-    for (const language of ['en', 'ja']) {
-      await i18n.changeLanguage(language);
-      const root = document.createElement('main');
-      const cleanup = mountSmokePage(root, { secureContext: true });
-      expect(root.querySelector('h1')!.textContent).toBe(i18n.t('webgpuSmoke.title'));
-      expect(root.textContent).toContain(i18n.t('webgpuSmoke.numericNotes'));
-      expect(root.textContent).toContain(i18n.t('webgpuSmoke.recipeCase'));
-      expect(root.textContent).not.toContain('webgpuSmoke.');
-      cleanup();
-    }
-  } finally { await i18n.changeLanguage(original); }
-});
-
 describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', () => {
   it('uses one uploaded image and all Recipe cases with serial CPU comparisons', async () => {
     const fake = setup();
@@ -86,9 +69,9 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
       expect(row.success).toBe(true);
       expect(row.comparison).toEqual({ maximumDifference: 0, differingChannels: 0, alphaMatches: true });
     }
-    expect(fake.smoke.state.adapter).toBe('成功');
-    expect(fake.smoke.state.device).toBe('成功');
-    expect(fake.smoke.state.info).toContain('（空文字／未公開）');
+    expect(fake.smoke.state.adapter.code).toBe('success');
+    expect(fake.smoke.state.device.code).toBe('success');
+    expect(fake.smoke.state.info.data?.vendor).toBe('');
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
     expect(smokePixels()).toHaveLength(2048);
     const tuples = Array.from({ length: 512 }, (_, i) => [...smokePixels().slice(i * 4, i * 4 + 4)]);
@@ -99,15 +82,15 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
   });
 
   it.each([
-    [{ secureContext: false }, 'Secure Context'],
-    [{ secureContext: true }, 'navigator.gpu'],
+    [{ secureContext: false }, 'insecure'],
+    [{ secureContext: true }, 'noGpu'],
   ] satisfies Array<[SmokeEnvironment, string]>)('explains preflight unavailability', async (environment, reason) => {
     const fake = setup();
     const smoke = new WebGpuSmoke(environment, vi.fn(), fake.factory);
     await smoke.run();
     expect(fake.factory).not.toHaveBeenCalled();
-    expect(smoke.state.status).toContain(reason);
-    expect(smoke.state.results.every(row => !row.success && row.error?.includes(reason))).toBe(true);
+    expect(smoke.state.status.code).toBe(reason);
+    expect(smoke.state.results.every(row => !row.success && row.errorCode === reason)).toBe(true);
   });
 
   it.each(['adapter null', 'adapter error', 'device error', 'shader error'])('displays %s', async mode => {
@@ -126,8 +109,8 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     await smoke.run();
     expect(smoke.state.results).toHaveLength(SMOKE_CASES.length);
     expect(smoke.state.results.every(row => !row.success)).toBe(true);
-    expect(smoke.state.status).toContain(mode === 'adapter null' ? 'GPUアダプター' : mode);
-    if (mode === 'shader error') expect(smoke.state.shader).toContain('WGSL validation');
+    expect(mode === 'adapter null' ? smoke.state.status.code : smoke.state.status.detail).toContain(mode === 'adapter null' ? 'noAdapter' : mode);
+    if (mode === 'shader error') expect(smoke.state.shader.detail).toContain('WGSL validation');
   });
 
   it('continues after a render failure and reports alpha differences', async () => {
@@ -137,7 +120,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     await fake.smoke.run();
     expect(fake.smoke.state.results[0].error).toBe('device lost');
     expect(fake.smoke.state.results[1].comparison?.alphaMatches).toBe(false);
-    expect(fake.smoke.state.status).toContain('失敗');
+    expect(fake.smoke.state.status.code).toBe('partialFailure');
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
   });
 
@@ -153,7 +136,7 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     };
     const smoke = new WebGpuSmoke({ secureContext: true, gpu }, vi.fn(), fake.factory);
     await smoke.run();
-    expect(smoke.state.info).toContain(fail ? 'GPU info restricted' : 'test vendor');
+    expect((fail ? smoke.state.info.detail : smoke.state.info.data?.vendor)).toContain(fail ? 'GPU info restricted' : 'test vendor');
     expect(smoke.state.results.every(row => row.success)).toBe(true);
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
   });
@@ -212,28 +195,4 @@ describe('smoke diagnostics and lifecycle (mock renderer, no GPU execution)', ()
     expect(fake.renderer.dispose).toHaveBeenCalledOnce();
     expect(fake.renderer.render).not.toHaveBeenCalled();
   });
-});
-
-it('renders diagnostic errors as text and removes execution handlers on cleanup', async () => {
-  const fake = setup();
-  const root = document.createElement('main');
-  const done = deferred<void>();
-  fake.factory.mockImplementationOnce(async (_gpu, onError) => {
-    onError(new Error('<img src=x onerror=alert(1)> WGSL'));
-    done.resolve();
-    return null as never;
-  });
-  const cleanup = mountSmokePage(root, fake.environment, fake.factory);
-  expect(root.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
-  expect(root.textContent).toContain('未実行');
-  root.querySelector('button')!.click();
-  expect(root.querySelector('button')!.disabled).toBe(true);
-  await done.promise;
-  await Promise.resolve();
-  expect(root.textContent).toContain('<img src=x onerror=alert(1)> WGSL');
-  expect(root.querySelector('img')).toBeNull();
-  expect(root.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
-  cleanup();
-  root.querySelector('button')!.click();
-  expect(fake.factory).toHaveBeenCalledOnce();
 });

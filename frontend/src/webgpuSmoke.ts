@@ -2,10 +2,9 @@ import { renderAdjustments } from './adjustmentPipeline';
 import { gpuRecipeCases, gpuComparisonPixels } from './webgpuRecipeCases';
 import { compareRgba } from './webgpuComparison';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
-import i18n from './i18n';
 import type { ExposureGpu, ExposureGpuDevice } from './webgpuTypes';
 
-interface AdapterInfo { vendor?: string; architecture?: string; device?: string; description?: string }
+export interface AdapterInfo { vendor?: string; architecture?: string; device?: string; description?: string }
 interface SmokeGpu extends ExposureGpu {
   requestAdapter(): Promise<{
     requestDevice(): Promise<ExposureGpuDevice>;
@@ -15,7 +14,7 @@ interface SmokeGpu extends ExposureGpu {
 }
 export interface SmokeEnvironment { secureContext: boolean; gpu?: SmokeGpu }
 type Renderer = Pick<WebGpuAdjustmentRenderer, 'setSource' | 'render' | 'dispose'>;
-type Factory = (gpu: ExposureGpu, onError: (error: unknown) => void) => Promise<Renderer | null>;
+export type SmokeFactory = (gpu: ExposureGpu, onError: (error: unknown) => void) => Promise<Renderer | null>;
 export const SMOKE_CASES = gpuRecipeCases();
 
 export const smokePixels = gpuComparisonPixels;
@@ -25,15 +24,21 @@ interface SmokeResult {
   success: boolean;
   comparison?: ReturnType<typeof compareRgba>;
   error?: string;
+  errorCode?: SmokeCode;
 }
+export type SmokeCode = 'notAcquired' | 'notChecked' | 'idle' | 'running' | 'success' | 'failed' | 'noAdapter' | 'noInfo' | 'infoFailed' | 'shaderFailed' | 'shaderSuccess' | 'insecure' | 'noGpu' | 'cancelled' | 'initializationFailed' | 'complete' | 'partialFailure' | 'generationMismatch';
+export interface DiagnosticValue { code: SmokeCode; detail?: string }
 export interface SmokeState {
   running: boolean;
-  adapter: string;
-  device: string;
-  shader: string;
-  info: string;
-  status: string;
+  adapter: DiagnosticValue;
+  device: DiagnosticValue;
+  shader: DiagnosticValue;
+  info: DiagnosticValue & { data?: AdapterInfo };
+  status: DiagnosticValue;
   results: SmokeResult[];
+}
+class SmokeError extends Error {
+  constructor(readonly code: SmokeCode) { super(code); }
 }
 function errorText(error: unknown) { return error instanceof Error ? error.message : String(error); }
 
@@ -43,12 +48,12 @@ export class WebGpuSmoke {
   private initializingDevice: ExposureGpuDevice | null = null;
   private closed = false;
   readonly state: SmokeState = {
-    running: false, adapter: '未取得', device: '未取得', shader: '未確認', info: '未取得',
-    status: '未実行', results: [],
+    running: false, adapter: { code: 'notAcquired' }, device: { code: 'notAcquired' }, shader: { code: 'notChecked' }, info: { code: 'notAcquired' },
+    status: { code: 'idle' }, results: [],
   };
 
   constructor(private environment: SmokeEnvironment, private update: (state: SmokeState) => void,
-    private factory: Factory = WebGpuAdjustmentRenderer.create) {}
+    private factory: SmokeFactory = WebGpuAdjustmentRenderer.create) {}
 
   dispose() {
     this.closed = true;
@@ -60,46 +65,46 @@ export class WebGpuSmoke {
 
   async run(): Promise<void> {
     if (this.closed || this.state.running) return;
-    Object.assign(this.state, { running: true, adapter: '未取得', device: '未取得', shader: '未確認',
-      info: '未取得', status: '実行中', results: [] });
+    Object.assign(this.state, { running: true, adapter: { code: 'notAcquired' }, device: { code: 'notAcquired' }, shader: { code: 'notChecked' },
+      info: { code: 'notAcquired' }, status: { code: 'running' }, results: [] });
     const publish = () => { if (!this.closed) this.update(this.state); };
     publish();
     let initializationError = '';
+    let initializationCode: SmokeCode | undefined;
     try {
-      if (!this.environment.secureContext) throw new Error('Secure Contextではありません。HTTPS等の安全なコンテキストで開いてください。');
+      if (!this.environment.secureContext) throw new SmokeError('insecure');
       const gpu = this.environment.gpu;
-      if (!gpu) throw new Error('navigator.gpuがありません。このブラウザ／環境ではWebGPUを利用できません。');
+      if (!gpu) throw new SmokeError('noGpu');
       const diagnosticGpu: ExposureGpu = {
         requestAdapter: async () => {
           let adapter: Awaited<ReturnType<SmokeGpu['requestAdapter']>>;
           try {
             adapter = await gpu.requestAdapter();
-            this.state.adapter = adapter ? '成功' : '取得できませんでした（null）';
+            this.state.adapter = { code: adapter ? 'success' : 'noAdapter' };
           } catch (error) {
-            this.state.adapter = `失敗: ${errorText(error)}`;
+            this.state.adapter = { code: 'failed', detail: errorText(error) };
             throw error;
           }
           publish();
-          if (this.closed) throw new Error('画面離脱により中止');
-          if (!adapter) throw new Error('利用可能なGPUアダプターがありません。');
+          if (this.closed) throw new SmokeError('cancelled');
+          if (!adapter) throw new SmokeError('noAdapter');
           try {
             const info = adapter.info ?? await adapter.requestAdapterInfo?.();
-            this.state.info = info ? ['vendor', 'architecture', 'device', 'description'].map(key =>
-              `${key}: ${info[key as keyof AdapterInfo] || '（空文字／未公開）'}`).join('\n') : 'GPU情報APIなし';
-          } catch (error) { this.state.info = `GPU情報を取得できませんでした: ${errorText(error)}`; }
+            this.state.info = info ? { code: 'success', data: info } : { code: 'noInfo' };
+          } catch (error) { this.state.info = { code: 'infoFailed', detail: errorText(error) }; }
           publish();
           return {
             requestDevice: async () => {
-              if (this.closed) throw new Error('画面離脱により中止');
+              if (this.closed) throw new SmokeError('cancelled');
               try {
                 const device = await adapter.requestDevice();
-                if (this.closed) { device.destroy(); throw new Error('画面離脱により中止'); }
+                if (this.closed) { device.destroy(); throw new SmokeError('cancelled'); }
                 this.initializingDevice = device;
-                this.state.device = '成功';
+                this.state.device = { code: 'success' };
                 publish();
                 return device;
               } catch (error) {
-                this.state.device = `失敗: ${errorText(error)}`;
+                this.state.device = { code: 'failed', detail: errorText(error) };
                 publish();
                 throw error;
               }
@@ -107,14 +112,14 @@ export class WebGpuSmoke {
           };
         },
       };
-      this.renderer = await this.factory(diagnosticGpu, error => { initializationError = errorText(error); });
-      this.initializingDevice = null;
+      this.renderer = await this.factory(diagnosticGpu, error => { initializationError = error instanceof SmokeError ? '' : errorText(error); initializationCode = error instanceof SmokeError ? error.code : undefined; });
+      if (this.renderer) this.initializingDevice = null;
       if (this.closed) return;
       if (!this.renderer) {
-        if (this.state.device === '成功') this.state.shader = `初期化失敗: ${initializationError || '原因不明'}`;
-        throw new Error(initializationError || 'WebGPUレンダラーを初期化できませんでした。');
+        if (this.state.device.code === 'success') this.state.shader = { code: 'shaderFailed', detail: initializationError || undefined };
+        throw initializationCode ? new SmokeError(initializationCode) : initializationError ? new Error(initializationError) : new SmokeError('initializationFailed');
       }
-      this.state.shader = 'コンパイル・Pipeline作成成功';
+      this.state.shader = { code: 'shaderSuccess' };
       publish();
       const source = smokePixels();
       const generation = await this.renderer.setSource(source, 32, 16);
@@ -123,19 +128,19 @@ export class WebGpuSmoke {
         try {
           const cpu = renderAdjustments(source, recipe);
           const result = await this.renderer.render(recipe);
-          if (result.sourceGeneration !== generation) throw new Error('GPU result source generation does not match the uploaded image.');
+          if (result.sourceGeneration !== generation) throw new SmokeError('generationMismatch');
           if (this.closed) return;
           this.state.results.push({ name, success: true, comparison: compareRgba(cpu, result.pixels) });
         } catch (error) {
           if (this.closed) return;
-          this.state.results.push({ name, success: false, error: errorText(error) });
+          this.state.results.push({ name, success: false, error: error instanceof SmokeError ? undefined : errorText(error), errorCode: error instanceof SmokeError ? error.code : undefined });
         }
         publish();
       }
-      this.state.status = this.state.results.every(result => result.success) ? 'GPU実行完了' : 'GPU実行失敗あり';
+      this.state.status = { code: this.state.results.every(result => result.success) ? 'complete' : 'partialFailure' };
     } catch (error) {
-      this.state.status = `利用不可／失敗: ${errorText(error)}`;
-      this.state.results = SMOKE_CASES.map(({ name }) => ({ name, success: false, error: errorText(error) }));
+      this.state.status = { code: error instanceof SmokeError ? error.code : 'failed', detail: error instanceof SmokeError ? undefined : errorText(error) };
+      this.state.results = SMOKE_CASES.map(({ name }) => ({ name, success: false, error: error instanceof SmokeError ? undefined : errorText(error), errorCode: error instanceof SmokeError ? error.code : undefined }));
     } finally {
       this.renderer?.dispose();
       this.renderer = null;
@@ -145,47 +150,4 @@ export class WebGpuSmoke {
       publish();
     }
   }
-}
-
-export function mountSmokePage(root: HTMLElement, environment: SmokeEnvironment, factory?: Factory) {
-  root.innerHTML = `<h1>${i18n.t('webgpuSmoke.title')}</h1>
-    <p>${i18n.t('webgpuSmoke.imageDescription')}</p>
-    <p>Secure Context: <strong id="secure"></strong> / navigator.gpu: <strong id="gpu-api"></strong></p>
-    <button type="button">スモークテストを実行</button>
-    <pre id="diagnostics" aria-live="polite"></pre>
-    <p>最大差と差異数はRGBA全チャンネルの生バイト比較です。差は自動合否判定せず実測値を表示します。</p>
-    <p>${i18n.t('webgpuSmoke.numericNotes')}</p>
-    <div class="results"><table><thead><tr><th>${i18n.t('webgpuSmoke.recipeCase')}</th><th>GPU実行</th><th>最大階調差</th>
-    <th>差異チャンネル数</th><th>アルファ一致</th><th>エラー</th></tr></thead><tbody></tbody></table></div>`;
-  root.querySelector('#secure')!.textContent = String(environment.secureContext);
-  root.querySelector('#gpu-api')!.textContent = String(Boolean(environment.gpu));
-  const button = root.querySelector('button')!;
-  const show = (state: SmokeState) => {
-    button.disabled = state.running;
-    root.querySelector('#diagnostics')!.textContent = `アダプター: ${state.adapter}\nデバイス: ${state.device}\nWGSL: ${state.shader}\nGPU情報:\n${state.info}\n状態: ${state.status}`;
-    const rows = SMOKE_CASES.map(({ name }) => state.results.find(result => result.name === name)
-      ?? { name, success: false });
-    const tbody = root.querySelector('tbody')!;
-    tbody.replaceChildren(...rows.map(result => {
-      const row = document.createElement('tr');
-      const comparison = 'comparison' in result ? result.comparison : undefined;
-      const error = 'error' in result ? result.error : undefined;
-      const values = [ result.name,
-        state.results.includes(result) ? (result.success ? '成功' : '失敗') : '未実行',
-        comparison?.maximumDifference ?? '—', comparison?.differingChannels ?? '—',
-        comparison ? (comparison.alphaMatches ? '一致' : '不一致') : '—', error ?? '—' ];
-      for (const value of values) {
-        const cell = document.createElement('td');
-        // Browser-provided error messages and GPU strings are untrusted display text.
-        cell.textContent = String(value);
-        row.append(cell);
-      }
-      return row;
-    }));
-  };
-  const smoke = new WebGpuSmoke(environment, show, factory);
-  show(smoke.state);
-  const run = () => { void smoke.run(); };
-  button.addEventListener('click', run);
-  return () => { button.removeEventListener('click', run); button.disabled = true; smoke.dispose(); };
 }

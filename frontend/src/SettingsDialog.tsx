@@ -11,7 +11,14 @@ const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGp
 export const useSettingsDialog = () => useContext(SettingsContext);
 export function SettingsButton() {
   const { open } = useSettingsDialog(); const { t } = useTranslation();
-  return <button type="button" className="tool-button settings-button" aria-label={t('settings.title')} title={t('settings.title')} onClick={open}>
+  return <button type="button" className="tool-button settings-button" aria-label={t('settings.title')} title={t('settings.title')} onClick={event => {
+    if (event.ctrlKey || event.metaKey) {
+      // Keep the popup inside the synchronous click gesture for browser popup policies.
+      window.open('/developer', '_blank', 'noopener,noreferrer');
+      return;
+    }
+    open();
+  }}>
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 3-.6 2.4-2 .9-2.2-.6-2 3.5 1.7 1.8v2L2.2 15l2 3.5 2.2-.6 2 .9L9 21h4l.6-2.2 2-.9 2.2.6 2-3.5-1.7-2v-2l1.7-1.8-2-3.5-2.2.6-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg>
   </button>;
 }

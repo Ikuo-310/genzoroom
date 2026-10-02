@@ -163,3 +163,14 @@ describe('shared Settings modal', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/original'))).toBe(false);
   });
 });
+
+it.each([{ ctrlKey: true }, { metaKey: true }])('opens Developer in a protected new tab for %o and retains normal Settings clicks', async modifiers => {
+  const open = vi.spyOn(window, 'open').mockReturnValue(null);
+  const button = host.querySelector('button')!;
+  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true, ...modifiers })));
+  expect(open).toHaveBeenCalledExactlyOnceWith('/developer', '_blank', 'noopener,noreferrer');
+  expect(dialog()).toBeNull();
+  await click(button);
+  expect(dialog().open).toBe(true);
+  expect(open).toHaveBeenCalledOnce();
+});

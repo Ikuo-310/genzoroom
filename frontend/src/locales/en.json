@@ -332,10 +332,55 @@
     "profileUnknown": "Unknown"
   },
   "webgpuSmoke": {
-    "title": "GenzoRoom WebGPU G2 Smoke Test (development)",
+    "title": "WebGPU Diagnostics",
     "imageDescription": "Compare CPU and GPU output using a generated 32×16 sRGB RGBA image. No photos are fetched or saved.",
     "recipeCase": "Recipe case",
-    "numericNotes": "Global Temperature, Tint, and Exposure/Contrast use CPU-generated LUTs; subsequent stages use WGSL f32 arithmetic. Stage-prefix cases help locate where differences begin. Small f32 differences can grow in later stages; this screen alone does not establish their cause. Case names are technical test identifiers."
+    "numericNotes": "Global Temperature, Tint, and Exposure/Contrast use CPU-generated LUTs; subsequent stages use WGSL f32 arithmetic. Stage-prefix cases help locate where differences begin. Small f32 differences can grow in later stages; this screen alone does not establish their cause. Case names are technical test identifiers.",
+    "secure": "Secure Context",
+    "api": "navigator.gpu",
+    "adapter": "Adapter",
+    "device": "Device",
+    "shader": "WGSL / pipeline",
+    "info": "GPU information",
+    "emptyInfo": "Empty / undisclosed",
+    "run": "Run smoke test",
+    "comparison": "Maximum difference and differing channels compare raw bytes across all RGBA channels. Differences are measured values, not automatic pass/fail decisions.",
+    "execution": "GPU execution",
+    "maximumDifference": "Maximum difference",
+    "differingChannels": "Differing channels",
+    "alphaMatches": "Alpha match",
+    "error": "Error",
+    "matches": "Matches",
+    "differs": "Differs",
+    "yes": "Yes",
+    "no": "No",
+    "results": "WebGPU diagnostic results",
+    "infoLabels": {
+      "vendor": "Vendor",
+      "architecture": "Architecture",
+      "device": "Device",
+      "description": "Description"
+    },
+    "codes": {
+      "notAcquired": "Not acquired",
+      "notChecked": "Not checked",
+      "idle": "Not run",
+      "running": "Running",
+      "success": "Success",
+      "failed": "Failed",
+      "noAdapter": "No GPU adapter available (null)",
+      "noInfo": "GPU information API unavailable",
+      "infoFailed": "GPU information retrieval failed",
+      "shaderFailed": "Shader / pipeline initialization failed",
+      "shaderSuccess": "Shader compilation / pipeline creation succeeded",
+      "insecure": "Not a Secure Context. Open this page in a secure context such as HTTPS.",
+      "noGpu": "navigator.gpu unavailable. WebGPU is not available in this browser / environment.",
+      "cancelled": "Cancelled on page departure",
+      "initializationFailed": "WebGPU renderer initialization failed",
+      "complete": "GPU execution complete",
+      "partialFailure": "GPU execution completed with failures",
+      "generationMismatch": "GPU result source generation does not match the uploaded image."
+    }
   },
   "language": {
     "nativeName": "English",
@@ -380,5 +425,9 @@
       "zh-CN": "China",
       "ko-KR": "South Korea"
     }
+  },
+  "developer": {
+    "title": "Developer Diagnostics",
+    "description": "Development and diagnostic tools for GenzoRoom. Run each diagnostic explicitly."
   }
 }

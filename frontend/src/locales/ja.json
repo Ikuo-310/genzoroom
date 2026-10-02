@@ -330,10 +330,55 @@
     "profileUnknown": "不明"
   },
   "webgpuSmoke": {
-    "title": "GenzoRoom WebGPU G2 Smoke Test（開発用）",
+    "title": "WebGPU診断",
     "imageDescription": "生成した32×16 sRGB RGBA画像をCPUとGPUで比較します。写真の取得・保存は行いません。",
     "recipeCase": "Recipeケース",
-    "numericNotes": "Global Temperature・Tint・Exposure/ContrastはCPU生成LUT、以降はWGSLのf32演算です。Stage prefixのケースで差が生じ始める補正を確認できます。f32の差は後段で増幅する場合があり、この画面だけでは原因を断定しません。ケース名は英語の技術的なテスト識別名です。"
+    "numericNotes": "Global Temperature・Tint・Exposure/ContrastはCPU生成LUT、以降はWGSLのf32演算です。Stage prefixのケースで差が生じ始める補正を確認できます。f32の差は後段で増幅する場合があり、この画面だけでは原因を断定しません。ケース名は英語の技術的なテスト識別名です。",
+    "secure": "Secure Context",
+    "api": "navigator.gpu",
+    "adapter": "アダプター",
+    "device": "デバイス",
+    "shader": "WGSL / pipeline",
+    "info": "GPU情報",
+    "emptyInfo": "空文字／未公開",
+    "run": "スモークテストを実行",
+    "comparison": "最大差と差異数はRGBA全チャンネルの生バイト比較です。差は自動合否判定せず実測値を表示します。",
+    "execution": "GPU実行",
+    "maximumDifference": "最大階調差",
+    "differingChannels": "差異チャンネル数",
+    "alphaMatches": "アルファ一致",
+    "error": "エラー",
+    "matches": "一致",
+    "differs": "不一致",
+    "yes": "はい",
+    "no": "いいえ",
+    "results": "WebGPU診断結果",
+    "infoLabels": {
+      "vendor": "ベンダー",
+      "architecture": "アーキテクチャ",
+      "device": "デバイス",
+      "description": "説明"
+    },
+    "codes": {
+      "notAcquired": "未取得",
+      "notChecked": "未確認",
+      "idle": "未実行",
+      "running": "実行中",
+      "success": "成功",
+      "failed": "失敗",
+      "noAdapter": "利用可能なGPUアダプターがありません（null）",
+      "noInfo": "GPU情報APIなし",
+      "infoFailed": "GPU情報取得失敗",
+      "shaderFailed": "shader / pipeline初期化失敗",
+      "shaderSuccess": "コンパイル・Pipeline作成成功",
+      "insecure": "Secure Contextではありません。HTTPS等の安全なコンテキストで開いてください。",
+      "noGpu": "navigator.gpuがありません。このブラウザ／環境ではWebGPUを利用できません。",
+      "cancelled": "画面離脱により中止",
+      "initializationFailed": "WebGPUレンダラーを初期化できませんでした。",
+      "complete": "GPU実行完了",
+      "partialFailure": "GPU実行失敗あり",
+      "generationMismatch": "GPU結果のsource generationがアップロードした画像と一致しません。"
+    }
   },
   "language": {
     "nativeName": "日本語",
@@ -378,5 +423,9 @@
       "zh-CN": "中国",
       "ko-KR": "韓国"
     }
+  },
+  "developer": {
+    "title": "Developer Diagnostics",
+    "description": "GenzoRoomの開発・診断用ページです。各診断は実行ボタンで開始します。"
   }
 }
