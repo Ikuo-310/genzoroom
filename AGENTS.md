@@ -24,6 +24,14 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Preserve existing behavior unless the requested change explicitly modifies it.
 - Identify relevant dependencies before editing a change that affects multiple subsystems.
 
+### Keyboard shortcuts
+
+- Define GenzoRoom application command bindings in the central registry in `frontend/src/editShortcuts.ts`. Keep command IDs separate from declarative bindings; components must not hard-code new command matching with `event.key` or `event.code`.
+- Use `matchesShortcut()` or, when matching a key release independent of modifiers, `matchesShortcutKey()`. Keep action execution and state ownership in the component or hook that owns the feature; do not move all keyboard handling into a global dispatcher.
+- The registry is for application commands, not every keyboard interaction. Native or local UI behavior such as Tab / Shift+Tab, Escape, Enter / Space, slider arrows, component focus navigation, and native form editing can remain with their controls. Check for conflicts with registered commands.
+- Keep command bindings as the source for future shortcut display. Generate Tooltip, Menu, or shortcut-list labels through a display formatter from registry data, including OS-specific presentation, instead of maintaining separate binding and label definitions.
+- Callers remain responsible for applicable event and availability guards, including `defaultPrevented`, IME composition, repeats, native editing targets, dialogs/menus, and feature states such as disabled, switching, or saving. If compatibility requires direct key matching, establish the existing-behavior or platform/browser reason and record it in a concise code comment or the architecture document when needed.
+
 ## Compatibility and data integrity
 
 - Treat Recipe, History, Undo/Redo, persistent edit state, and frontend/backend validation as interconnected systems. When modifying any of them, check the impact on the others.

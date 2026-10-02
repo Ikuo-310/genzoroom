@@ -20,6 +20,14 @@ Home構造の監査では、写真ビュー判定がasset・selection・edit sta
 
 この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。Stack機能、Export Queue、RAW現像は未実装。
 
+## Keyboard command architectureと現行ショートカット（2026-10-02）
+
+`editShortcuts.ts`をapplication commandのcentral registryとして整え、command ID、宣言的binding、共通matcherを分離した。binding判定はregistryへ集約し、actionの実行と状態はHome、Anshitsu、Viewer、Filmstrip、Scopeなど各機能のownerに残した。TabやEscape、slider Arrow、component内focus navigationなどのlocal/native操作まで一律にcommand化しない設計とした。将来のshortcut表示は実bindingを表示用formatterのsourceにできる形を保つ。
+
+既存互換性として、JIS配列で`key=']'`となるphysical Backslashの優先判定と、NumLock状態によらないNumpadのphysical `code`判定を維持した。Filmstripのhover／focus中の単独Arrow移動は廃止し、`Ctrl+Shift+←/→`による前後移動へ変更した。暗室では`F`がViewer集中表示、`Shift+Z`がFitと直前zoom/panの切替、`H`が既存の退出保存経路を通るHome復帰となる。Homeの`D`は選択中なら現在選択で暗室を開き、未選択なら直前の暗室へ復帰する。
+
+Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保持する。Homeから復帰するときの`homeReturn`はその時点のHome表示状態で更新する。Tooltip/Menu等に表示するshortcut labelをbindingから生成できるよう、bindingと表示文言の二重管理を避ける方針とした。今後の実装規則のcanonical sourceはAGENTS.mdとする。
+
 ## Settingsダイアログ（2026-09-29・現在仕様）
 
 Homeと暗室で共通のSettingsダイアログをAppレベルで管理する。Routeや暗室を再マウントせず、暗室の編集session、HistoryとUndo/Redo、Filmstrip、既存autosave timerを保持する。Generalには表示言語（Auto／日本語／English）、表示言語から独立した日付・時刻ロケール、カレンダー週初め（Auto／日曜／月曜）を配置した。Auto言語はブラウザの優先言語を対応リソースと地域サブタグ込みで照合し、該当がなければ英語にする。日付ロケールAutoはブラウザの地域設定を使用する。週初めAutoはIntl.LocaleのweekInfoを利用し、非対応環境では地域に基づく決定的なfallbackを使う。週初め設定の取得処理は実装済みだが、Homeカレンダーはない。
