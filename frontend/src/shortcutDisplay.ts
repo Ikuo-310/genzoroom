@@ -21,7 +21,7 @@ export function formatShortcut(id: ShortcutId, platform: ShortcutPlatform = shor
     if (binding.meta) modifiers.push(platform === 'mac' ? '⌘' : 'Meta');
     if (binding.alternate) modifiers.push(platform === 'mac' ? '⌥' : 'Alt');
     else if (binding.alt) modifiers.push(platform === 'mac' ? '⌥' : 'Alt');
-    if (binding.shift) modifiers.push('Shift');
+    if (binding.shift) modifiers.push(platform === 'mac' ? '⇧' : 'Shift');
     return [...modifiers, displayKey(binding)].join('+');
   }).join(' / ');
 }

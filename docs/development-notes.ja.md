@@ -30,6 +30,8 @@ Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保�
 
 `showKeyboardShortcuts`はdefault ONのbrowser preferenceで、ON/OFF radio UIから変更する。Tooltip/Menuの説明表示だけを切り替え、shortcut実行は止めない。Primary／Alternate modifierを`shortcutModifiers.ts`へ共通化し、Windows/LinuxではCtrl／Alt、macOSではCommand／Optionとしてmatchingとformatterの両方で解決する。Undo/Redo、Copy/Paste、選択Copy/Paste、Filmstrip、Settings歯車のmodified clickは論理modifierを利用し、Ctrl+Metaのような反対側modifier同時押しは一致させない。AltGraph除外は維持し、物理modifierが必要なbindingだけ明示指定する。modifier表示を実bindingと揃え、Before長押しとFit／前回表示切替は各ボタン操作と完全同義でないためTooltipに意味を明記した。Primary-modifier clickはclick handler内で同期的にDeveloper tabを開く。将来の実装規則のcanonical sourceはAGENTS.mdとする。
 
+modifier表示を揃えるため、macOSのShift表記を`Shift`から`⇧`へ変更した。ShiftのmatchingはOS共通の`shiftKey`のままで、Windows/Linuxの表示は`Shift`を維持する。formatter testでUndo/Redo、Filmstrip、Shift単独commandの両platform表記を確認する。
+
 検証では関連shortcut/UIのVitest 5ファイル・97件、Frontend全体Vitest 74ファイル・1465件成功（2件skip）、TypeScript check、Frontend build、`git diff --check`が成功した。buildでは500 kBを超えるchunk warningが出たが、modifier変更とは無関係な既知のwarningとして扱った。実機ブラウザや物理キーボードでの確認は行っていない。
 
 ### focused code auditと修正

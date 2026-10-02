@@ -14,17 +14,20 @@ describe('shortcut binding display', () => {
   });
   it('formats Primary and Alternate using platform-specific modifier labels', () => {
     expect(formatShortcut('undo', 'mac')).toBe('⌘+Z');
-    expect(formatShortcut('redo', 'mac')).toBe('⌘+Shift+Z / ⌘+Y');
+    expect(formatShortcut('redo', 'mac')).toBe('⌘+⇧+Z / ⌘+Y');
+    expect(formatShortcut('viewerFitRestore', 'mac')).toBe('⇧+Z');
     expect(formatShortcut('copySettings', 'mac')).toBe('⌘+C');
     expect(formatShortcut('pasteSettings', 'mac')).toBe('⌘+V');
     expect(formatShortcut('copySelection', 'mac')).toBe('⌘+⌥+C');
     expect(formatShortcut('pasteSelection', 'mac')).toBe('⌘+⌥+V');
-    expect(formatShortcut('filmstripPrevious', 'mac')).toBe('⌘+Shift+←');
-    expect(formatShortcut('filmstripNext', 'mac')).toBe('⌘+Shift+→');
+    expect(formatShortcut('filmstripPrevious', 'mac')).toBe('⌘+⇧+←');
+    expect(formatShortcut('filmstripNext', 'mac')).toBe('⌘+⇧+→');
   });
   it('formats logical arrows and physical codes', () => {
     expect(formatShortcut('filmstripPrevious', 'other')).toBe('Ctrl+Shift+←');
     expect(formatShortcut('filmstripNext', 'other')).toBe('Ctrl+Shift+→');
+    expect(formatShortcut('redo', 'other')).toBe('Ctrl+Shift+Z / Ctrl+Y');
+    expect(formatShortcut('viewerFitRestore', 'other')).toBe('Shift+Z');
     expect(formatShortcut('viewerBefore', 'other')).toBe('\\');
     expect(formatShortcut('viewerOriginal', 'other')).toBe(']');
     expect(formatShortcut('scopeRed', 'other')).toBe('Numpad 1');
