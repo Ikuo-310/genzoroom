@@ -68,6 +68,23 @@ function Harness({ src = '/first' }: { src?: string }) {
     onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
+function fitRestoreKey(target: EventTarget = window, init: KeyboardEventInit = {}) {
+  return key('keydown', target, { key: 'Z', code: 'KeyZ', shiftKey: true, ...init });
+}
+
+function zoomViewer() {
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+  act(() => mockImage.onLoad?.(800, 600));
+  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+  act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, clientX: 300, clientY: 200 })));
+  return {
+    zoom: host.querySelector('.zoom-controls output')!.textContent,
+    pan: host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform,
+  };
+}
+
 function BlockingBeforeHarness({ keyboardBlocked = false }: { keyboardBlocked?: boolean }) {
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   return <ImageViewer src="/first" alt="photo" leftOpen rightOpen recipe={defaultRecipe()}
@@ -790,5 +807,150 @@ describe('Before / After viewer state', () => {
     expect(image().dataset.before).toBe('false');
     expect(document.activeElement).toBe(focusedSlider);
     expect(host.querySelectorAll('.edit-history li')).toHaveLength(0);
+  });
+});
+
+describe('Viewer Fit restore shortcut', () => {
+  it('restores the exact zoom and pan, then clears the saved view on source change without remounting', () => {
+    const render = (src: string) => act(() => root.render(<ImageViewer src={src} alt="photo" leftOpen rightOpen
+      editSource={{ kind: 'immich-preview', url: src }} recipe={defaultRecipe()} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));
+    render('/first');
+    const saved = zoomViewer();
+    fitRestoreKey();
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('0px');
+    fitRestoreKey();
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(saved.zoom);
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(saved.pan);
+    fitRestoreKey(); render('/second'); act(() => mockImage.onLoad?.(800, 600));
+    fitRestoreKey();
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
+  });
+
+  it('clears the saved transform with explicit Fit and 1:1 controls', () => {
+    act(() => root.render(<Harness />));
+    zoomViewer(); fitRestoreKey();
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === 'Fit')!);
+    fitRestoreKey(); expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    fitRestoreKey(); fitRestoreKey(); expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+  });
+
+  it('ignores repeat, composition, modified Redo, prevented events, and blocked workspace', () => {
+    act(() => root.render(<BlockingBeforeHarness />));
+    const saved = zoomViewer();
+    for (const init of [{ repeat: true }, { isComposing: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+      expect(fitRestoreKey(window, init).defaultPrevented).toBe(false);
+      expect(host.querySelector('.zoom-controls output')!.textContent).toBe(saved.zoom);
+    }
+    const prevented = new KeyboardEvent('keydown', { key: 'Z', shiftKey: true, cancelable: true });
+    prevented.preventDefault(); act(() => window.dispatchEvent(prevented));
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(saved.zoom);
+    act(() => root.render(<BlockingBeforeHarness keyboardBlocked />));
+    expect(fitRestoreKey().defaultPrevented).toBe(false);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(saved.zoom);
+  });
+
+  it.each(['input', 'textarea', 'select', '[contenteditable]', '[role="textbox"]'])('preserves editing in %s', selector => {
+    act(() => root.render(<Harness />)); zoomViewer();
+    const container = document.createElement('div');
+    container.innerHTML = '<input type="number"><textarea></textarea><select></select><div contenteditable="true"></div><div role="textbox"></div>';
+    host.append(container);
+    expect(fitRestoreKey(container.querySelector(selector)!).defaultPrevented).toBe(false);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('56%');
+  });
+
+  it.each(['dialog[open]', '[role="dialog"]', '[role="alertdialog"]', '[role="menu"]', 'details.edit-settings-menu[open]'])
+    ('does not toggle while %s is open', selector => {
+      act(() => root.render(<Harness />)); zoomViewer();
+      const overlay = document.createElement(selector.startsWith('details') ? 'details' : selector.startsWith('dialog') ? 'dialog' : 'div');
+      if (selector.includes('[open]')) overlay.setAttribute('open', '');
+      if (selector.startsWith('details')) overlay.className = 'edit-settings-menu';
+      const role = selector.match(/role="(.*?)"/)?.[1]; if (role) overlay.setAttribute('role', role);
+      host.append(overlay);
+      expect(fitRestoreKey().defaultPrevented).toBe(false);
+      expect(host.querySelector('.zoom-controls output')!.textContent).toBe('56%');
+    });
+});
+
+describe('workspace Viewer focus mode', () => {
+  async function mountWorkspace() {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => new Blob(['jpeg']), json: async () => ({ edited: {} }) })));
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = () => 'blob:focus-original'; static revokeObjectURL = vi.fn(); });
+    const selectedAssets = ['first', 'second'].map(id => ({ id, filename: `${id}.jpg`, date: '2026-09-01T10:00:00',
+      thumbnail_url: `/${id}/thumbnail`, format: 'JPEG', is_raw: false }));
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/anshitsu/first', state: { selectedAssets, activeAssetId: 'first' } }]}>
+      <SettingsProvider><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></SettingsProvider></MemoryRouter>));
+  }
+  const focusKey = (target: EventTarget = window, init: KeyboardEventInit = {}) => key('keydown', target, { key: 'f', code: 'KeyF', ...init });
+  const page = () => host.querySelector('.workspace-page')!;
+
+  it('preserves mounted UI, panel choices, focus, and hidden component shortcuts', async () => {
+    await mountWorkspace();
+    click(host.querySelector<HTMLButtonElement>('.viewer-toolbar > .panel-toggle')!);
+    const body = host.querySelector('.workspace-body')!;
+    const panels = [...host.querySelectorAll('.workspace-side-panel')];
+    const filmstrip = host.querySelector('.filmstrip')!;
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    act(() => viewport.focus());
+    focusKey(); expect(page().classList.contains('viewer-focus-mode')).toBe(true);
+    expect(body.className).toBe('workspace-body right-open viewer-focus-mode');
+    expect([...host.querySelectorAll('.workspace-side-panel')]).toEqual(panels);
+    expect(host.querySelector('.filmstrip')).toBe(filmstrip);
+    expect(host.querySelector('.viewer-viewport')).toBe(viewport);
+    expect(document.activeElement).toBe(viewport);
+    expect(key('keydown', window, { key: ']', code: 'Backslash' }).defaultPrevented).toBe(true);
+    expect(image().dataset.before).toBe('false');
+    expect(key('keydown').defaultPrevented).toBe(true); expect(image().dataset.before).toBe('true'); key('keyup');
+    const saved = zoomViewer(); fitRestoreKey(); fitRestoreKey();
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(saved.zoom);
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(saved.pan);
+    key('keydown', window, { key: 'ArrowDown', code: 'Numpad2' });
+    expect(host.querySelector('.channel-g')?.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { key('keydown', window, { key: 'ArrowRight', ctrlKey: true, shiftKey: true }); });
+    expect(host.querySelector('.workspace-asset-title')!.textContent).toContain('second.jpg');
+    expect(page().classList.contains('viewer-focus-mode')).toBe(true);
+    expect(host.querySelector('.filmstrip')).toBe(filmstrip);
+    await act(async () => { key('keydown', window, { key: 'ArrowLeft', ctrlKey: true, shiftKey: true }); });
+    expect(host.querySelector('.workspace-asset-title')!.textContent).toContain('first.jpg');
+    focusKey(); expect(page().classList.contains('viewer-focus-mode')).toBe(false);
+    expect(body.className).toBe('workspace-body right-open');
+    expect(host.querySelector('.channel-g')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('ignores repeat, composition, modifiers, prevented events and native editing', async () => {
+    await mountWorkspace();
+    for (const init of [{ repeat: true }, { isComposing: true }, { ctrlKey: true }, { shiftKey: true }, { metaKey: true }, { altKey: true }]) {
+      expect(focusKey(window, init).defaultPrevented).toBe(false);
+    }
+    const prevented = new KeyboardEvent('keydown', { key: 'f', cancelable: true });
+    prevented.preventDefault(); act(() => window.dispatchEvent(prevented));
+    for (const selector of ['input', 'textarea', 'select', '[contenteditable]', '[role="textbox"]']) {
+      const container = document.createElement('div');
+      container.innerHTML = '<input type="text"><textarea></textarea><select></select><div contenteditable="true"></div><div role="textbox"></div>';
+      host.append(container); expect(focusKey(container.querySelector(selector)!).defaultPrevented).toBe(false); container.remove();
+    }
+    expect(page().classList.contains('viewer-focus-mode')).toBe(false);
+  });
+
+  it('ignores dialogs, menus and the Settings keyboard block', async () => {
+    await mountWorkspace();
+    for (const markup of ['<dialog open></dialog>', '<div role="dialog"></div>', '<div role="alertdialog"></div>', '<div role="menu"></div>', '<details class="edit-settings-menu" open></details>']) {
+      const wrapper = document.createElement('div'); wrapper.innerHTML = markup; host.append(wrapper);
+      expect(focusKey().defaultPrevented).toBe(false); wrapper.remove();
+    }
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
+    try {
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click());
+      focusKey();
+      expect(page().classList.contains('viewer-focus-mode')).toBe(false);
+      await act(async () => host.querySelector<HTMLButtonElement>('.settings-dialog header button')!.click());
+    } finally {
+      act(() => root.unmount()); root = createRoot(host);
+      Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+      Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+    }
   });
 });

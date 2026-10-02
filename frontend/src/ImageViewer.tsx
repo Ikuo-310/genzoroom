@@ -50,6 +50,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
+  const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
@@ -111,6 +112,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
     setImageSize({ x: 0, y: 0 });
     setFitMode(true);
     setPan({ x: 0, y: 0 });
+    previousTransform.current = null;
   }, [src, editSource?.kind, editSource?.url]);
 
   useEffect(() => {
@@ -133,17 +135,41 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
     return () => observer.disconnect();
   }, [fitMode, imageSize]);
 
+  // Explicit view controls discard the return point instead of reviving an older zoom.
   function fit() {
+    previousTransform.current = null;
     setFitMode(true);
     setScale(fitScale);
     setPan({ x: 0, y: 0 });
   }
 
   function setActualSize() {
+    previousTransform.current = null;
     setFitMode(false);
     setScale(1);
     setPan({ x: 0, y: 0 });
   }
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (keyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
+        || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFitRestore')
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      event.preventDefault();
+      if (!fitMode) {
+        previousTransform.current = { scale, pan };
+        setFitMode(true);
+        setScale(fitScale);
+        setPan({ x: 0, y: 0 });
+      } else if (previousTransform.current) {
+        setFitMode(false);
+        setScale(previousTransform.current.scale);
+        setPan(previousTransform.current.pan);
+      }
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [keyboardBlocked, fitMode, scale, pan, fitScale]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
     const next = clampZoom(nextValue);

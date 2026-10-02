@@ -31,6 +31,8 @@ export const shortcutBindings = {
   pasteSelection: [{ key: 'v', ignoreCase: true, ...clipboardModifiers, alt: true }],
   viewerOriginal: [{ key: ']', ...commandModifiers }],
   viewerBefore: [{ code: 'Backslash', ...commandModifiers }],
+  viewerFocusMode: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false }],
+  viewerFitRestore: [{ key: 'z', ignoreCase: true, ...commandModifiers, shift: true }],
   scopeRed: [{ code: 'Numpad1', ...commandModifiers, shift: false }],
   scopeGreen: [{ code: 'Numpad2', ...commandModifiers, shift: false }],
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false }],

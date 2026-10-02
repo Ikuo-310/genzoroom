@@ -6,19 +6,20 @@ import { clampResizedSidebar, fitSidebarWidths, readSidebarWidths, saveSidebarWi
 type WorkspaceLayoutProps = {
   leftOpen: boolean;
   rightOpen: boolean;
+  viewerFocusMode?: boolean;
   leftPanel: ReactNode;
   viewer: ReactNode;
   rightPanel: ReactNode;
   filmstrip: ReactNode;
 };
 
-export function WorkspaceLayout({ leftOpen, rightOpen, leftPanel, viewer, rightPanel, filmstrip }: WorkspaceLayoutProps) {
+export function WorkspaceLayout({ leftOpen, rightOpen, viewerFocusMode = false, leftPanel, viewer, rightPanel, filmstrip }: WorkspaceLayoutProps) {
   const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState(readSidebarWidths);
   const widthsRef = useRef(widths);
   const [containerWidth, setContainerWidth] = useState(0);
-  const layoutClass = `workspace-body${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`;
+  const layoutClass = `workspace-body${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}${viewerFocusMode ? ' viewer-focus-mode' : ''}`;
   const fitted = fitSidebarWidths(widths, containerWidth, leftOpen, rightOpen);
   const style = {
     '--left-panel-width': `${fitted.left}px`,

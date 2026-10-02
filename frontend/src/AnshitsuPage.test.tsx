@@ -289,6 +289,18 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain(`class="sidebar-resize-handle left" role="separator" aria-label="Resize left panel" aria-orientation="vertical"${leftOpen ? '' : ' hidden=""'}`);
     expect(markup).toContain(`class="sidebar-resize-handle right" role="separator" aria-label="Resize right panel" aria-orientation="vertical"${rightOpen ? '' : ' hidden=""'}`);
   });
+
+  it('adds focus layout class while retaining panels, handles and Filmstrip', () => {
+    const markup = renderToStaticMarkup(<WorkspaceLayout leftOpen={false} rightOpen viewerFocusMode
+      leftPanel={<p>Left panel</p>} rightPanel={<p>Right panel</p>}
+      viewer={<section className="viewer-panel">Viewer</section>} filmstrip={<section className="filmstrip">Filmstrip</section>} />);
+    expect(markup).toContain('class="workspace-body right-open viewer-focus-mode"');
+    expect(markup).toContain('class="workspace-side-panel left-panel" hidden=""');
+    expect(markup).toContain('class="workspace-side-panel right-panel"');
+    expect(markup).toContain('Resize left panel');
+    expect(markup).toContain('Resize right panel');
+    expect(markup).toContain('class="filmstrip"');
+  });
 });
 
 function historyEntry(before: number, after: number): EditEntry {

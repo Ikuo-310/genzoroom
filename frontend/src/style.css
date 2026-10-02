@@ -466,6 +466,16 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .selection-actions { display: grid; grid-template-columns: 1fr 1fr; }
 }
 
+/* Keep these overrides after narrow layouts so focus mode always fills the workspace. */
+.workspace-page.viewer-focus-mode { grid-template-rows: minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+.workspace-page.viewer-focus-mode .workspace-header,
+.workspace-body.viewer-focus-mode .workspace-side-panel,
+.workspace-body.viewer-focus-mode .sidebar-resize-handle,
+.workspace-body.viewer-focus-mode .filmstrip,
+.workspace-body.viewer-focus-mode .viewer-toolbar { display: none; }
+.workspace-body.viewer-focus-mode { display: grid; grid-template-areas: 'viewer'; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.workspace-body.viewer-focus-mode .viewer-panel { grid-template-rows: minmax(0, 1fr); min-height: 0; }
+
 .grading-range-header .adjustment-subsection-title { flex: 1; }
 .grading-range-title { display: block; width: 100%; padding: 4px 6px; border: 0; border-radius: 4px; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .grading-range-title:hover:not(:disabled) { background: #303033; }

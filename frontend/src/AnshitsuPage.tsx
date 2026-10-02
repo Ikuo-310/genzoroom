@@ -37,7 +37,7 @@ import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './Adj
 import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './adjustmentSelection';
 import type { AdjustmentSliderMenuTarget } from './AdjustmentSlider';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
-import { editClipboardShortcut, isNativeEditingTarget } from './editShortcuts';
+import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -57,6 +57,7 @@ export function AnshitsuPage() {
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [viewerFocusMode, setViewerFocusMode] = useState(false);
   const [scopePanelBasis, setScopePanelBasis] = useState(readScopePanelBasis);
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
   // Scope needs the effective Viewer state because the persistent choice omits held Backslash.
@@ -111,6 +112,17 @@ export function AnshitsuPage() {
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
   const viewerKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
     || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (viewerKeyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
+        || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFocusMode')
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      event.preventDefault();
+      setViewerFocusMode(current => !current);
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [viewerKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
@@ -392,7 +404,7 @@ export function AnshitsuPage() {
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, [enterSelectedOperationPanel]);
-  return <main className="workspace-page" onFocus={event => {
+  return <main className={`workspace-page${viewerFocusMode ? ' viewer-focus-mode' : ''}`} onFocus={event => {
     if (event.target instanceof HTMLInputElement && event.target.matches('.adjustment-range')
       && selectedOperationPanelRef.current?.contains(event.target)) {
       lastFocusedAdjustment.current = ADJUSTMENT_IDS.find(id => id === event.target.dataset.adjustmentId) ?? null;
@@ -419,6 +431,7 @@ export function AnshitsuPage() {
     <WorkspaceLayout
       leftOpen={leftOpen}
       rightOpen={rightOpen}
+      viewerFocusMode={viewerFocusMode}
       leftPanel={<>
         <WorkspaceSection title={t('workspace.history')} className="left-history-section" headerAction={<button type="button" className="tool-button workspace-section-action history-menu-trigger"
           disabled={!historyEnabled} aria-label={t('workspace.historyMenu')} aria-haspopup="menu" aria-expanded={!!historyMenu}

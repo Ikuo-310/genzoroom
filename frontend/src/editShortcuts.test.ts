@@ -83,6 +83,17 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(15);
+    expect(Object.keys(shortcutBindings)).toHaveLength(17);
+  });
+
+  it('separates focus mode and Fit restore from modified commands and Redo', () => {
+    for (let mask = 0; mask < 16; mask++) {
+      const ctrlKey = !!(mask & 1), metaKey = !!(mask & 2), altKey = !!(mask & 4), shiftKey = !!(mask & 8);
+      for (const key of ['f', 'F']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFocusMode'))
+        .toBe(!ctrlKey && !metaKey && !altKey && !shiftKey);
+      for (const key of ['z', 'Z']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFitRestore'))
+        .toBe(!ctrlKey && !metaKey && !altKey && shiftKey);
+    }
+    expect(undoShortcut(event('Z', { ctrlKey: true, shiftKey: true }))).toBe('redo');
   });
 });
