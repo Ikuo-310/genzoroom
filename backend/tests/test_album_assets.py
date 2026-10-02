@@ -1,3 +1,5 @@
+from stack_test_helpers import with_empty_stacks
+
 import asyncio
 import json
 import unittest
@@ -28,7 +30,7 @@ def search_response(items: list[dict], next_cursor: str | None = None) -> httpx.
 def run_search(handler):
     return asyncio.run(get_album_assets(
         "http://immich.example:2283", "secret-key", ALBUM_ID,
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(with_empty_stacks(handler)),
     ))
 
 

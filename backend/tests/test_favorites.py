@@ -1,3 +1,5 @@
+from stack_test_helpers import with_empty_stacks
+
 import asyncio
 import json
 from unittest.mock import AsyncMock, patch
@@ -14,7 +16,7 @@ ASSET = {"id": "12345678-1234-4234-9234-123456789abc", "type": "IMAGE",
 
 
 def run_search(handler):
-    return asyncio.run(get_favorite_assets("http://immich.example", "key", transport=httpx.MockTransport(handler)))
+    return asyncio.run(get_favorite_assets("http://immich.example", "key", transport=httpx.MockTransport(with_empty_stacks(handler))))
 
 
 def test_favorites_conditions_and_cursor_use_shared_search():

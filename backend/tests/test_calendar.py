@@ -1,3 +1,5 @@
+from stack_test_helpers import with_empty_stacks
+
 import asyncio
 import json
 import unittest
@@ -73,7 +75,7 @@ class CalendarTests(unittest.TestCase):
             body = json.loads(request.content)
             self.assertEqual(body["filter"]["visibility"], {"eq": "timeline"})
             return page([item for item in items if item["visibility"] == body["filter"]["visibility"]["eq"]])
-        transport = httpx.MockTransport(handler)
+        transport = httpx.MockTransport(with_empty_stacks(handler))
         photos = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY, transport=transport))
         self.assertEqual([str(photo.id) for photo in photos], [items[1]["id"]])
         minimum = asyncio.run(get_calendar_min_year("http://immich.example", "secret", transport=transport))
@@ -351,7 +353,7 @@ class CalendarTests(unittest.TestCase):
             })
             return page([asset(0), asset(1, "VIDEO")])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
-            transport=httpx.MockTransport(handler)))
+            transport=httpx.MockTransport(with_empty_stacks(handler))))
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].model_dump(mode="json"), {
             "id": str(UUID(int=1)), "filename": "photo-0.dng", "date": "2026-09-30T12:00:00.000Z",
@@ -367,7 +369,7 @@ class CalendarTests(unittest.TestCase):
             return page([asset(index) for index in range(1000)], "page-2") if len(bodies) == 1 else page(
                 [asset(index) for index in range(1000, 1558)])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
-            transport=httpx.MockTransport(handler)))
+            transport=httpx.MockTransport(with_empty_stacks(handler))))
         self.assertEqual(len(result), 1558)
         self.assertEqual(bodies[1]["cursor"], "page-2")
         self.assertEqual({key: value for key, value in bodies[1].items() if key != "cursor"}, bodies[0])
@@ -379,10 +381,10 @@ class CalendarTests(unittest.TestCase):
             return page([asset(0)], "next") if calls == 1 else httpx.Response(503)
         with self.assertRaises(ImmichRequestError):
             asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
-                transport=httpx.MockTransport(failed)))
+                transport=httpx.MockTransport(with_empty_stacks(failed))))
         with self.assertRaises(ImmichRequestError) as cycle:
             asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
-                transport=httpx.MockTransport(lambda request: page([asset(0)], "same"))))
+                transport=httpx.MockTransport(with_empty_stacks(lambda request: page([asset(0)], "same")))))
         self.assertEqual(cycle.exception.error_code, "unexpected_response")
 
     def test_routes_validate_inputs_and_map_upstream_errors(self):

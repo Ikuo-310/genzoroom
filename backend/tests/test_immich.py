@@ -1,3 +1,5 @@
+from stack_test_helpers import with_empty_stacks
+
 import asyncio
 import io
 import json
@@ -154,7 +156,7 @@ class ImmichAssetTests(unittest.TestCase):
                 url,
                 api_key,
                 limit=limit,
-                transport=httpx.MockTransport(handler),
+                transport=httpx.MockTransport(with_empty_stacks(handler)),
             )
         )
 

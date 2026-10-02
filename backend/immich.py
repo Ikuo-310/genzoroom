@@ -432,7 +432,7 @@ async def get_recent_assets(
             "Immich returned an unexpected response.",
         ) from None
 
-    return assets[:limit]
+    return await _with_asset_stacks(url, key, assets[:limit], transport=transport)
 
 
 def _search_assets(body: object) -> list[RecentAsset]:
@@ -453,16 +453,6 @@ def _search_assets(body: object) -> list[RecentAsset]:
         if not isinstance(filename, str) or not isinstance(date, str):
             raise TypeError
         image_format, is_raw = classify_image_format(filename)
-        stack_id = primary_asset_id = None
-        # Missing upstream metadata does not prove that an asset is unstacked.
-        stack = item.get("stack")
-        if stack is not None:
-            if not isinstance(stack, Mapping):
-                raise TypeError
-            if not isinstance(stack.get("id"), str) or not isinstance(stack.get("primaryAssetId"), str):
-                raise TypeError
-            stack_id = UUID(stack["id"])
-            primary_asset_id = UUID(stack["primaryAssetId"])
         assets.append(RecentAsset(
             id=asset_id,
             filename=filename,
@@ -470,10 +460,71 @@ def _search_assets(body: object) -> list[RecentAsset]:
             thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
             format=image_format,
             is_raw=is_raw,
-            stackId=stack_id,
-            primaryAssetId=primary_asset_id,
         ))
     return assets
+
+
+async def _with_asset_stacks(
+    url: str, key: str, assets: list[RecentAsset],
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    try:
+        async with httpx.AsyncClient(
+            timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        ) as client:
+            response = await client.get(
+                _api_url(url, "/stacks"),
+                headers={"x-api-key": key, "Accept": "application/json"},
+            )
+    except (httpx.InvalidURL, httpx.RequestError) as error:
+        raise ImmichRequestError("unreachable", "The Immich server could not be reached.") from error
+    if response.status_code != 200:
+        raise _request_error(response)
+    try:
+        body = response.json()
+        if not isinstance(body, list):
+            raise TypeError
+        lookup: dict[UUID, tuple[UUID, UUID]] = {}
+        seen_stacks: set[UUID] = set()
+        for stack in body:
+            if not isinstance(stack, Mapping) or not isinstance(stack.get("id"), str) \
+                    or not isinstance(stack.get("primaryAssetId"), str) \
+                    or not isinstance(stack.get("assets"), list):
+                raise TypeError
+            stack_id = UUID(stack["id"])
+            primary_id = UUID(stack["primaryAssetId"])
+            if stack_id in seen_stacks:
+                raise ValueError
+            seen_stacks.add(stack_id)
+            members: set[UUID] = set()
+            for member in stack["assets"]:
+                if not isinstance(member, Mapping) or not isinstance(member.get("id"), str):
+                    raise TypeError
+                member_id = UUID(member["id"])
+                # Ambiguous membership must not silently select whichever stack appeared last.
+                if member_id in lookup:
+                    raise ValueError
+                members.add(member_id)
+                lookup[member_id] = (stack_id, primary_id)
+            if primary_id not in members:
+                raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
+    for asset in assets:
+        asset.stackId, asset.primaryAssetId = lookup.get(asset.id, (None, None))
+    return assets
+
+
+async def _search_home_assets(
+    immich_url: str | None, api_key: str | None,
+    search_filter: dict[str, object], order_field: str,
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    url, key = _require_configuration(immich_url, api_key)
+    assets = await _search_all_assets(url, key, search_filter, order_field, transport=transport)
+    # Join once after pagination, rather than fetching stacks for each page or asset.
+    return await _with_asset_stacks(url, key, assets, transport=transport)
 
 
 async def get_favorite_assets(
@@ -481,7 +532,7 @@ async def get_favorite_assets(
     api_key: str | None,
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
-    return await _search_all_assets(
+    return await _search_home_assets(
         immich_url, api_key,
         {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "isFavorite": {"eq": True}},
         "fileCreatedAt", transport=transport,
@@ -494,7 +545,7 @@ async def get_album_assets(
     album_id: UUID,
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
-    return await _search_all_assets(
+    return await _search_home_assets(
         immich_url, api_key,
         {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(album_id)]}},
         "fileCreatedAt", transport=transport,
@@ -512,7 +563,7 @@ async def get_calendar_day_assets(
     next_day = selected_day + timedelta(days=1)
     # Immich v3.2.4 applies takenAt to fileCreatedAt; use its half-open UTC range as requested.
     bounds = {"gte": f"{selected_day.isoformat()}T00:00:00.000Z", "lt": f"{next_day.isoformat()}T00:00:00.000Z"}
-    return await _search_all_assets(
+    return await _search_home_assets(
         immich_url, api_key,
         {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "takenAt": bounds},
         "localDateTime", transport=transport,
