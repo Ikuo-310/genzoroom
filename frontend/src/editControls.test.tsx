@@ -802,10 +802,13 @@ describe('production Basic control wiring', () => {
     const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
     const reset = row.querySelector<HTMLButtonElement>('.adjustment-reset')!;
     expect(row.querySelector('label')!.textContent).toBe(label);
+    expect(row.querySelector('label')!.hasAttribute('title')).toBe(false);
     expect(input.getAttribute('aria-label')).toBe(`${label} value`);
     expect(reset.getAttribute('aria-label')).toBe(`Reset ${label}`);
     expect(row.querySelector('.adjustment-unit')).toBeNull();
     expect(row.querySelector('.adjustment-power')?.getAttribute('aria-label')).toBe(`Disable ${label}`);
+    expect(row.querySelector('.adjustment-power')?.getAttribute('title')).toBe(`Disable ${label}`);
+    expect(reset.getAttribute('title')).toBe(`Reset ${label}`);
     for (const element of [slider, input]) {
       expect([element.min, element.max, element.step]).toEqual([min, max, step]);
     }

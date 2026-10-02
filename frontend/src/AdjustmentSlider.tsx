@@ -195,7 +195,7 @@ export function AdjustmentSlider(props: Props) {
       const trigger = range.current && !range.current.disabled ? range.current : power.current;
       if (trigger) props.onOpenContextMenu({ adjustmentId: props.adjustmentId, trigger, x: event.clientX, y: event.clientY });
     }}>
-    <label id={labelId} htmlFor={rangeId} title={props.label}>{props.label}</label>
+    <label id={labelId} htmlFor={rangeId}>{props.label}</label>
     <input ref={range} id={rangeId} data-adjustment-id={props.adjustmentId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
       value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
