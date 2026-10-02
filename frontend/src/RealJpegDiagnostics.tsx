@@ -5,8 +5,9 @@ import type { RecentAsset } from './assets';
 import { JPEG_CASES, RealJpegRunner, recentJpegCandidates, type JpegDiagnosticsDependencies, type JpegRunState } from './jpegDiagnostics';
 import { emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 
-export function RealJpegDiagnostics({ onReport, dependencies }: {
+export function RealJpegDiagnostics({ onReport, dependencies, onExport, exportError }: {
   onReport?: (report: JpegReport) => void; dependencies?: Partial<JpegDiagnosticsDependencies>;
+  onExport?: () => void; exportError?: boolean;
 }) {
   const { t } = useTranslation();
   const runner = useRef<RealJpegRunner | null>(null);
@@ -63,7 +64,9 @@ export function RealJpegDiagnostics({ onReport, dependencies }: {
         if (!manual) setTargetFilename(null);
         void runner.current?.run(manual);
       }}>{t('jpegDiagnostics.run')}</button>
+      <button type="button" onClick={onExport}>{t('developer.exportCurrentJson')}</button>
     </div>
+    {exportError && <p role="alert">{t('developer.jpegExportFailed')}</p>}
     {candidateStatus !== 'idle' && <p role="status">{t(`jpegDiagnostics.candidates.${candidateStatus}`)}</p>}
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
       {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={manual?.id === asset.id}

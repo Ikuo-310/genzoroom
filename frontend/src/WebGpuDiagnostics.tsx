@@ -71,9 +71,9 @@ export function WebGpuDiagnostics({ environment, factory, onReport, onExport, ex
     </>}
     <div className="developer-actions">
       <button type="button" disabled={!state || state.running} onClick={() => { void owner.current?.run(); }}>{t('webgpuSmoke.run')}</button>
-      <button type="button" onClick={onExport}>{t('developer.exportJson')}</button>
+      <button type="button" onClick={onExport}>{t('developer.exportCurrentJson')}</button>
     </div>
-    {exportError && <p role="alert">{t('developer.exportFailed')}</p>}
+    {exportError && <p role="alert">{t('developer.webgpuExportFailed')}</p>}
     <p role="status" aria-live="polite" aria-atomic="true">{state && describe(state.status)}</p>
     <p>{t('webgpuSmoke.comparison')}</p><p>{t('webgpuSmoke.numericNotes')}</p>
     <p>{t('webgpuSmoke.timingNotes')}</p>

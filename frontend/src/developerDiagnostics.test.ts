@@ -2,8 +2,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   captureAdapterInfo, captureGpuCapabilities, collectDiagnosticsEnvironment, createDiagnosticsReport,
-  createWebGpuReport, exportDiagnosticsReport,
+  createJpegDiagnosticsReport, createWebGpuDiagnosticsReport, createWebGpuReport, exportDiagnosticsReport,
+  exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport,
 } from './developerDiagnostics';
+import { emptyJpegReport } from './jpegDiagnosticsReport';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -78,5 +80,31 @@ it('also releases the download URL when clicking the link fails', () => {
     expect(() => exportDiagnosticsReport(createDiagnosticsReport(collectDiagnosticsEnvironment(), createWebGpuReport(false, null)))).toThrow('Download failed');
     vi.runAllTimers(); expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:failed');
     expect(document.querySelector('a[download]')).toBeNull();
+  } finally { Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
+});
+
+it('projects each diagnostic scope explicitly and uses a distinct download name', () => {
+  const environment = collectDiagnosticsEnvironment(); const webgpu = createWebGpuReport(false, null);
+  const jpeg = emptyJpegReport('manual');
+  Object.assign(jpeg.source, { filename: 'PRIVATE.JPG', assetId: 'secret' });
+  const full = createDiagnosticsReport(environment, webgpu, new Date('2026-10-02T08:30:00.000Z'), jpeg);
+  const onlyJpeg = createJpegDiagnosticsReport(environment, jpeg, new Date('2026-10-02T08:30:00.000Z'));
+  const onlyWebGpu = createWebGpuDiagnosticsReport(environment, webgpu, new Date('2026-10-02T08:30:00.000Z'));
+  expect(Object.keys(full)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'webgpu', 'jpeg']);
+  expect(Object.keys(onlyJpeg)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'jpeg']);
+  expect(Object.keys(onlyWebGpu)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'webgpu']);
+  expect(JSON.stringify([full, onlyJpeg, onlyWebGpu])).not.toMatch(/PRIVATE\.JPG|assetId|secret/);
+
+  const names: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:scoped' });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  try {
+    exportDiagnosticsReport(full); exportJpegDiagnosticsReport(onlyJpeg); exportWebGpuDiagnosticsReport(onlyWebGpu);
+    expect(names).toEqual([
+      'genzoroom-diagnostics-20261002T083000Z.json',
+      'genzoroom-jpeg-diagnostics-20261002T083000Z.json',
+      'genzoroom-webgpu-diagnostics-20261002T083000Z.json',
+    ]);
   } finally { Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
 });

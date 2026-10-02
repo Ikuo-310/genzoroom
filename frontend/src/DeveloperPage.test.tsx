@@ -39,7 +39,7 @@ it('translates both languages, follows changes, never probes on mount and restor
       await act(async () => i18n.changeLanguage(language));
       expect(document.title).toBe(`${i18n.t('developer.title')} — GenzoRoom`);
       for (const key of ['title', 'imageDescription', 'numericNotes', 'recipeCase', 'run', 'comparison', 'adapter', 'execution', 'maximumDifference', 'differingChannels', 'alphaMatches', 'error']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.${key}`));
-    for (const key of ['environmentTitle', 'exportJson']) expect(host.textContent).toContain(i18n.t(`developer.${key}`));
+      for (const key of ['environmentTitle', 'exportJson', 'jpegTab', 'webgpuTab', 'exportCurrentJson']) expect(host.textContent).toContain(i18n.t(`developer.${key}`));
       for (const key of ['totalMs', 'initializationMs', 'sourceUploadMs']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.timing.${key}`));
       expect(host.textContent).toContain(i18n.t('webgpuSmoke.timingNotes'));
       expect(host.textContent).not.toMatch(/webgpuSmoke\.|developer\.|codes\./);
@@ -132,8 +132,26 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(host.textContent).not.toMatch(/developer\.|webgpuSmoke\./);
     const exportButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('developer.exportJson'))!;
     expect(exportButton.closest('.developer-actions')).not.toBeNull();
-    expect(exportButton.previousElementSibling?.textContent).toBe(i18n.t('webgpuSmoke.run'));
+    expect(exportButton.closest('.developer-section')?.querySelector('h2')?.id).toBe('environment-title');
     expect(host.querySelector('#diagnostic-export-title')).toBeNull();
+    const jpegPanel = host.querySelector<HTMLElement>('#jpeg-panel')!;
+    const webgpuPanel = host.querySelector<HTMLElement>('#webgpu-panel')!;
+    expect(jpegPanel.hidden).toBe(false); expect(webgpuPanel.hidden).toBe(true);
+    expect(host.querySelector('[role="tablist"]')).not.toBeNull();
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('jpeg-tab');
+    expect(jpegPanel.getAttribute('aria-labelledby')).toBe('jpeg-tab');
+    expect(host.querySelector('#environment-title')).not.toBeNull();
+    const jpegSection = jpegPanel.querySelector('section'); const webgpuSection = webgpuPanel.querySelector('section');
+    const webgpuTab = host.querySelector<HTMLButtonElement>('#webgpu-tab')!;
+    await act(async () => webgpuTab.focus());
+    await act(async () => webgpuTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    expect(document.activeElement).toBe(webgpuTab);
+    await act(async () => webgpuTab.click());
+    expect(jpegPanel.hidden).toBe(true); expect(webgpuPanel.hidden).toBe(false);
+    expect(webgpuTab.getAttribute('aria-selected')).toBe('true');
+    await act(async () => host.querySelector<HTMLButtonElement>('#jpeg-tab')!.click());
+    expect(jpegPanel.querySelector('section')).toBe(jpegSection);
+    expect(webgpuPanel.querySelector('section')).toBe(webgpuSection);
     await act(async () => exportButton.click());
     const initial = await readReport(blobs[0]);
     expect(initial.schemaVersion).toBe(1); expect(initial.generatedAt).toMatch(/Z$/);
@@ -141,6 +159,7 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(initial.webgpu.smoke.status).toBe('not_run');
     expect(initial.jpeg.status).toBe('not_run');
     expect(gpu.requestAdapter).not.toHaveBeenCalled();
+    await act(async () => webgpuTab.click());
     const runButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('webgpuSmoke.run'))!;
     await act(async () => runButton.click());
     await act(async () => exportButton.click());
@@ -150,6 +169,53 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(failed.webgpu.smoke.timing.totalMs).toEqual(expect.any(Number));
     expect(failed.webgpu.smoke.cases).toHaveLength(SMOKE_CASES.length);
     expect(JSON.stringify(failed)).not.toContain(i18n.t('webgpuSmoke.codes.insecure'));
+    await act(async () => host.querySelector<HTMLButtonElement>('#jpeg-tab')!.click());
+    expect(host.querySelector<HTMLElement>('#webgpu-panel')!.hidden).toBe(true);
+    await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
+    expect(host.querySelector('#webgpu-panel')!.textContent).toContain(i18n.t('webgpuSmoke.codes.insecure'));
     expect(fetch).not.toHaveBeenCalled(); expect(gpu.requestAdapter).not.toHaveBeenCalled();
   } finally { vi.runAllTimers(); vi.useRealTimers(); Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
+});
+
+it.each(['en', 'ja'])('shows export failures beside the matching full, JPEG and WebGPU actions in %s', async language => {
+  await i18n.changeLanguage(language);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:failed-export' });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('Download failed'); });
+  try {
+    const { DeveloperPage } = await import('./DeveloperPage');
+    await act(async () => root.render(<DeveloperPage />));
+    const byText = (value: string, parent: ParentNode = host) => [...parent.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === value)!;
+    await act(async () => byText(i18n.t('developer.exportJson')).click());
+    expect(host.querySelector('#environment-title')?.parentElement?.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('developer.fullExportFailed'));
+    const jpegPanel = host.querySelector('#jpeg-panel')!;
+    await act(async () => byText(i18n.t('developer.exportCurrentJson'), jpegPanel).click());
+    expect(jpegPanel.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('developer.jpegExportFailed'));
+    await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
+    const webgpuPanel = host.querySelector('#webgpu-panel')!;
+    await act(async () => byText(i18n.t('developer.exportCurrentJson'), webgpuPanel).click());
+    expect(webgpuPanel.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('developer.webgpuExportFailed'));
+  } finally {
+    vi.runAllTimers(); vi.useRealTimers(); Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL');
+  }
+});
+
+it('keeps the manually selected JPEG, filename and candidate list while switching tabs', async () => {
+  const asset = { id: 'selected-id', filename: 'PRIVATE_selected.JPG', date: '2026-01-01T00:00:00Z', thumbnail_url: '/private-thumb', format: 'JPEG', is_raw: false };
+  const fetch = vi.fn(async () => ({ ok: true, json: async () => [asset] })); vi.stubGlobal('fetch', fetch);
+  const { DeveloperPage } = await import('./DeveloperPage');
+  await act(async () => root.render(<DeveloperPage />));
+  const jpegPanel = host.querySelector('#jpeg-panel')!;
+  const button = (key: string) => [...jpegPanel.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === i18n.t(`jpegDiagnostics.${key}`))!;
+  await act(async () => button('choose').click());
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => jpegPanel.querySelector<HTMLButtonElement>('.developer-jpeg-candidates button')!.click());
+  const candidate = jpegPanel.querySelector('.developer-jpeg-candidates');
+  expect(jpegPanel.textContent).toContain('PRIVATE_selected.JPG');
+  await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('#jpeg-tab')!.click());
+  expect(jpegPanel.querySelector('.developer-jpeg-candidates')).toBe(candidate);
+  expect(jpegPanel.textContent).toContain('PRIVATE_selected.JPG');
+  expect(fetch).toHaveBeenCalledOnce();
 });
