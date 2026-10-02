@@ -22,11 +22,19 @@ Home構造の監査では、写真ビュー判定がasset・selection・edit sta
 
 ## Keyboard command architectureと現行ショートカット（2026-10-02）
 
-`editShortcuts.ts`をapplication commandのcentral registryとして整え、command ID、宣言的binding、共通matcherを分離した。binding判定はregistryへ集約し、actionの実行と状態はHome、Anshitsu、Viewer、Filmstrip、Scopeなど各機能のownerに残した。TabやEscape、slider Arrow、component内focus navigationなどのlocal/native操作まで一律にcommand化しない設計とした。将来のshortcut表示は実bindingを表示用formatterのsourceにできる形を保つ。
+`editShortcuts.ts`に`ShortcutId`、`shortcutBindings`、`matchesShortcut()`／`matchesShortcutKey()`を持つapplication command registryを整えた。binding判定はregistryへ集約し、actionの実行と状態はHome、Anshitsu、Viewer、Filmstrip、Scopeなど各機能のownerに残した。TabやEscape、slider Arrow、component内focus navigationなどのlocal/native操作まで一律にcommand化しない設計とした。`shortcutDisplay.ts`と`useShortcutDisplay.ts`を追加し、bindingからTooltip／Menu表示を生成して設定へ反映する。
 
-既存互換性として、JIS配列で`key=']'`となるphysical Backslashの優先判定と、NumLock状態によらないNumpadのphysical `code`判定を維持した。Filmstripのhover／focus中の単独Arrow移動は廃止し、`Ctrl+Shift+←/→`による前後移動へ変更した。暗室では`F`がViewer集中表示、`Shift+Z`がFitと直前zoom/panの切替、`H`が既存の退出保存経路を通るHome復帰となる。Homeの`D`は選択中なら現在選択で暗室を開き、未選択なら直前の暗室へ復帰する。
+既存互換性として、JIS配列で`key=']'`となるphysical Backslashの優先判定、NumLock状態によらないNumpadのphysical `code`判定、AltGraph等のmodifier guardを維持した。Filmstripのhover／focus中の単独Arrow移動は廃止し、`Ctrl+Shift+←/→`による前後移動へ変更した。暗室では`F`がViewer集中表示、`Shift+Z`がFitと直前zoom/panの切替、`H`が既存の退出保存経路を通るHome復帰となる。Homeの`D`は選択中なら現在選択で暗室を開き、未選択なら直前の暗室へ復帰する。
 
-Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保持する。Homeから復帰するときの`homeReturn`はその時点のHome表示状態で更新する。Tooltip/Menu等に表示するshortcut labelをbindingから生成できるよう、bindingと表示文言の二重管理を避ける方針とした。今後の実装規則のcanonical sourceはAGENTS.mdとする。
+Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保持し、Storage APIへ書かない。選択写真の順序とactive photoを保ち、Homeから再入場するときの`homeReturn`はその時点のHome表示状態で更新する。Recipe、History、Viewer transform等は保持しない。
+
+`showKeyboardShortcuts`はdefault ONのbrowser preferenceで、ON/OFF radio UIから変更する。Tooltip/Menuの説明表示だけを切り替え、shortcut実行は止めない。formatterは`ctrlOrMeta`だけをOS別表記にし、明示的CtrlはmacOSでもCtrlと表示する。Before長押しとFit／前回表示切替は各ボタン操作と完全同義でないため、Tooltipにその意味を明記した。将来の実装規則のcanonical sourceはAGENTS.mdとする。
+
+### focused code auditと修正
+
+shortcut、表示設定、Home↔Anshitsu復帰、各window listenerをfocused auditした結果はHigh 0／Medium 1／Low 0だった。唯一のMediumは、写真切替の保存失敗alertdialog中にUndo／Redoが背面のRecipe／Historyを変更できる問題だった。Anshitsuのworkspace共通keyboard block状態を`useAssetEdits`へ渡し、`failedSwitch`と`exitFailure`を含むblock中はUndo／Redo listenerを停止するよう修正した。Stayでdialogを閉じると通常のUndo／Redoへ戻る。
+
+回帰テストは切替保存失敗中のCtrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Y、Stay後のUndo／Redo復帰、退出保存失敗中のUndo遮断を確認した。修正後のfocused auditでは報告対象のHigh／Medium／Low問題は残らなかった。現行作業ツリーでの関連Vitestは2ファイル・130件成功、TypeScript／Frontend buildと`git diff --check`も成功した。実機ブラウザ確認は行っていない。
 
 ## Settingsダイアログ（2026-09-29・現在仕様）
 
