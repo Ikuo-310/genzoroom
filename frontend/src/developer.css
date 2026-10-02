@@ -4,6 +4,7 @@
 .developer-diagnostics > div { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
 .developer-page dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .developer-page dt { font-weight: 600; }
+.developer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .developer-table-scroll { overflow-x: auto; }
 .developer-page table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
 .developer-page th, .developer-page td { padding: 10px; border-bottom: 1px solid #43584d; vertical-align: top; }

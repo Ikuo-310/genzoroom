@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { SMOKE_CASES, WebGpuSmoke, type DiagnosticValue, type SmokeEnvironment, type SmokeFactory, type SmokeState } from './webgpuSmoke';
 import { createWebGpuReport, type WebGpuReport } from './developerDiagnostics';
 
-export function WebGpuDiagnostics({ environment, factory, onReport }: {
+export function WebGpuDiagnostics({ environment, factory, onReport, onExport, exportError }: {
   environment?: SmokeEnvironment; factory?: SmokeFactory; onReport?: (report: WebGpuReport) => void;
+  onExport?: () => void; exportError?: boolean;
 }) {
   const { t } = useTranslation();
   const owner = useRef<WebGpuSmoke | null>(null);
@@ -68,7 +69,11 @@ export function WebGpuDiagnostics({ environment, factory, onReport }: {
       <dl className="developer-diagnostics">{(['totalMs', 'adapterRequestMs', 'deviceRequestMs', 'initializationMs', 'sourceUploadMs'] as const).map(key =>
         <div key={key}><dt>{t(`webgpuSmoke.timing.${key}`)}</dt><dd>{milliseconds(state.timing[key])}</dd></div>)}</dl>
     </>}
-    <button type="button" disabled={!state || state.running} onClick={() => { void owner.current?.run(); }}>{t('webgpuSmoke.run')}</button>
+    <div className="developer-actions">
+      <button type="button" disabled={!state || state.running} onClick={() => { void owner.current?.run(); }}>{t('webgpuSmoke.run')}</button>
+      <button type="button" onClick={onExport}>{t('developer.exportJson')}</button>
+    </div>
+    {exportError && <p role="alert">{t('developer.exportFailed')}</p>}
     <p role="status" aria-live="polite" aria-atomic="true">{state && describe(state.status)}</p>
     <p>{t('webgpuSmoke.comparison')}</p><p>{t('webgpuSmoke.numericNotes')}</p>
     <p>{t('webgpuSmoke.timingNotes')}</p>

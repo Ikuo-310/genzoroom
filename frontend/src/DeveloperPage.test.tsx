@@ -39,7 +39,7 @@ it('translates both languages, follows changes, never probes on mount and restor
       await act(async () => i18n.changeLanguage(language));
       expect(document.title).toBe(`${i18n.t('developer.title')} — GenzoRoom`);
       for (const key of ['title', 'imageDescription', 'numericNotes', 'recipeCase', 'run', 'comparison', 'adapter', 'execution', 'maximumDifference', 'differingChannels', 'alphaMatches', 'error']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.${key}`));
-      for (const key of ['environmentTitle', 'exportTitle', 'exportJson']) expect(host.textContent).toContain(i18n.t(`developer.${key}`));
+    for (const key of ['environmentTitle', 'exportJson']) expect(host.textContent).toContain(i18n.t(`developer.${key}`));
       for (const key of ['totalMs', 'initializationMs', 'sourceUploadMs']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.timing.${key}`));
       expect(host.textContent).toContain(i18n.t('webgpuSmoke.timingNotes'));
       expect(host.textContent).not.toMatch(/webgpuSmoke\.|developer\.|codes\./);
@@ -130,6 +130,9 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(host.textContent).toContain(i18n.t('developer.notAvailable'));
     expect(host.textContent).not.toMatch(/developer\.|webgpuSmoke\./);
     const exportButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('developer.exportJson'))!;
+    expect(exportButton.closest('.developer-actions')).not.toBeNull();
+    expect(exportButton.previousElementSibling?.textContent).toBe(i18n.t('webgpuSmoke.run'));
+    expect(host.querySelector('#diagnostic-export-title')).toBeNull();
     await act(async () => exportButton.click());
     const initial = await readReport(blobs[0]);
     expect(initial.schemaVersion).toBe(1); expect(initial.generatedAt).toMatch(/Z$/);

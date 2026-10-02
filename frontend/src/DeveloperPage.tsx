@@ -30,15 +30,10 @@ export function DeveloperPage() {
         <div key={key}><dt>{t(`developer.environmentFields.${key}`)}</dt><dd>{value === null ? t('developer.notAvailable')
           : typeof value === 'boolean' ? t(`webgpuSmoke.${value ? 'yes' : 'no'}`) : value}</dd></div>)}</dl>
     </section>
-    <WebGpuDiagnostics onReport={acceptReport} />
-    <section className="developer-section" aria-labelledby="diagnostic-export-title">
-      <h2 id="diagnostic-export-title">{t('developer.exportTitle')}</h2>
-      <button type="button" onClick={() => {
+    <WebGpuDiagnostics onReport={acceptReport} exportError={exportFailed} onExport={() => {
         setExportFailed(false);
         try { exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu)); }
         catch { setExportFailed(true); }
-      }}>{t('developer.exportJson')}</button>
-      {exportFailed && <p role="alert">{t('developer.exportFailed')}</p>}
-    </section>
+      }} />
   </main>;
 }
