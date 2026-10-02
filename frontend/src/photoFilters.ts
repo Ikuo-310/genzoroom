@@ -4,6 +4,8 @@ export type PhotoFilters = {
   raw: boolean;
   nonRaw: boolean;
 };
+export type StackFilterMode = 'both' | 'stacked' | 'unstacked';
+export type StackFilterTab = 'recent' | 'albums' | 'calendar';
 export type PhotoFilterMode = 'both' | 'raw' | 'nonRaw';
 export type EditStatusFilterMode = 'both' | 'edited' | 'unedited';
 export type PhotoFilterTab = 'recent' | 'albums' | 'calendar' | 'favorites';
@@ -145,4 +147,34 @@ export function filterPhotosByEditStatus<T extends { id: string }>(
     // Unknown statuses stay visible while batch lookup is pending or has failed.
     return status === undefined || (mode === 'edited' ? status : !status);
   });
+}
+
+export const STACK_FILTER_SESSION_KEYS: Record<StackFilterTab, string> = {
+  recent: 'genzoroom.homeStackFilter.recent',
+  albums: 'genzoroom.homeStackFilter.albums',
+  calendar: 'genzoroom.homeStackFilter.calendar',
+};
+const memoryStackFilterModes: Record<StackFilterTab, StackFilterMode> = {
+  recent: 'both', albums: 'both', calendar: 'both',
+};
+
+export function readStackFilterMode(
+  tab: StackFilterTab = 'recent', storage = browserSessionStorage(),
+): StackFilterMode {
+  if (storage === null) return memoryStackFilterModes[tab];
+  try {
+    const stored = storage.getItem(STACK_FILTER_SESSION_KEYS[tab]);
+    memoryStackFilterModes[tab] = stored === 'stacked' || stored === 'unstacked' ? stored : 'both';
+  } catch {
+    // Keep each tab's in-memory choice when browser storage is blocked.
+  }
+  return memoryStackFilterModes[tab];
+}
+
+export function writeStackFilterMode(
+  mode: StackFilterMode, tab: StackFilterTab = 'recent', storage = browserSessionStorage(),
+): void {
+  memoryStackFilterModes[tab] = mode;
+  try { storage?.setItem(STACK_FILTER_SESSION_KEYS[tab], mode); }
+  catch { /* Preserve the tab's choice in memory when browser storage is blocked. */ }
 }

@@ -106,6 +106,10 @@
     "dateRange": "{{start}}〜{{end}}"
   },
   "photos": {
+    "stackFilterLabel": "スタック",
+    "allStacks": "両方",
+    "stackedOnly": "STACKあり",
+    "unstackedOnly": "STACKなし",
     "edited": "GenzoRoomで編集済み",
     "stackAssets": "Stack、{{count}}枚",
     "recent": "最近の写真",

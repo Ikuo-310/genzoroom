@@ -115,6 +115,7 @@ h2 { margin: 0; font-size: 1.35rem; }
 .home-control-label { color: #bacac1; font-size: 0.74rem; line-height: 1.2; white-space: nowrap; }
 .home-control select { max-width: 100%; padding: 4px 22px 4px 8px; color: #e6eee9; background: #17221f; border: 1px solid #526a5e; border-radius: 6px; font: inherit; font-size: 0.82rem; }
 .home-control select:focus-visible { outline: 3px solid #e6eee9; outline-offset: 2px; }
+.stack-filter-control select { width: auto; min-width: 88px; padding-right: 8px; }
 .photo-filter-control select { width: 88px; }
 .edit-status-filter-control select { width: auto; min-width: 88px; padding-right: 8px; }
 .gallery-message { margin: 0; color: #bacac1; }

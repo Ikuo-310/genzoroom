@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
 import type { HomeTab } from './homeReturn';
-import { writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
+import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), album: vi.fn(), day: vi.fn(), favorites: vi.fn(),
@@ -33,6 +33,7 @@ let host: HTMLDivElement;
 
 function resetFilters() {
   sessionStorage.clear();
+  for (const tab of ['recent', 'albums', 'calendar'] as const) writeStackFilterMode('both', tab);
   for (const tab of tabs) {
     writePhotoFilterMode('both', tab);
     writeEditStatusFilterMode('both', tab);
@@ -101,7 +102,7 @@ describe('Home stack display', () => {
     expect(host.querySelector('.stack-assets')?.textContent).toBe('STACK4');
   });
 
-  it('applies format and edit filters before collapse without aggregating stack edit status', async () => {
+  it('aggregates Stack edits before type expansion and collapse', async () => {
     await mount();
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(0);
@@ -111,9 +112,11 @@ describe('Home stack display', () => {
     expect(filenames()).toEqual(['x.jpg', 'y.jpg', 'primary.jpg']);
     change('.photo-filter-control select', 'both');
     change('.edit-status-filter-control select', 'edited');
-    expect(filenames()).toEqual(['member.dng']);
+    expect(filenames()).toEqual(['primary.jpg']);
     change('.photo-filter-control select', 'nonRaw');
-    expect(filenames()).toEqual([]);
+    expect(filenames()).toEqual(['primary.jpg']);
+    change('.edit-status-filter-control select', 'unedited');
+    expect(filenames()).toEqual(['x.jpg', 'y.jpg']);
     expect(api.statuses).toHaveBeenCalledTimes(1);
     expect(api.recent).toHaveBeenCalledTimes(1);
   });
@@ -139,8 +142,40 @@ describe('Home stack display', () => {
       .toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
   });
 
+  it.each(['recent', 'albums', 'calendar'] as const)('shows the Stack filter first and combines it with type on %s', async tab => {
+    await mount(tab);
+    const controls = [...host.querySelectorAll('.home-toolbar-controls > .home-control')];
+    expect(controls.slice(0, 3).map(c => c.className)).toEqual([
+      'home-control stack-filter-control', 'home-control edit-status-filter-control', 'home-control photo-filter-control',
+    ]);
+    change('.stack-filter-control select', 'stacked');
+    expect(filenames()).toEqual(['primary.jpg']);
+    change('.photo-filter-control select', 'raw');
+    expect(filenames()).toEqual(['member.dng']);
+    expect(host.querySelector('.stack-assets')?.textContent).toBe('STACK4');
+    change('.photo-filter-control select', 'nonRaw');
+    expect(filenames()).toEqual(['primary.jpg']);
+    change('.stack-filter-control select', 'unstacked');
+    expect(filenames()).toEqual(['x.jpg', 'y.jpg']);
+  });
+
+  it('restores the tab Stack choice after remounting without affecting selection on filter changes', async () => {
+    await mount();
+    change('.stack-filter-control select', 'stacked');
+    change('.photo-filter-control select', 'raw');
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    change('.stack-filter-control select', 'unstacked');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+    act(() => root.render(<div />));
+    await mount();
+    expect(host.querySelector<HTMLSelectElement>('.stack-filter-control select')!.value).toBe('unstacked');
+  });
+
   it('preserves the existing Favorites member display', async () => {
     await mount('favorites');
     expect(filenames()).toEqual(photos.map(a => a.filename));
+    expect(host.querySelector('.stack-filter-control')).toBeNull();
+    change('.edit-status-filter-control select', 'edited');
+    expect(filenames()).toEqual(['member.dng']);
   });
 });

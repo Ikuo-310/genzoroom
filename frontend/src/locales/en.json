@@ -107,6 +107,10 @@
     "dateRange": "{{start}} – {{end}}"
   },
   "photos": {
+    "stackFilterLabel": "Stack",
+    "allStacks": "Both",
+    "stackedOnly": "With STACK",
+    "unstackedOnly": "Without STACK",
     "edited": "Edited in GenzoRoom",
     "stackAssets": "Stack, {{count}} assets",
     "recent": "Recent photos",

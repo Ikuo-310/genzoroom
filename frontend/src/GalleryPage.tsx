@@ -1,4 +1,6 @@
-import { collapseImmichStacks } from './immichStacks';
+import { StackFilterControls } from './StackFilterControls';
+import { readStackFilterMode, writeStackFilterMode, type StackFilterMode, type StackFilterTab } from './photoFilters';
+import { collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -77,6 +79,9 @@ export function GalleryPage() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(homeReturn?.date ?? null);
   const [calendarAssets, setCalendarAssets] = useState<RecentAsset[]>([]);
   const [calendarAssetState, setCalendarAssetState] = useState<'idle' | AssetState>('idle');
+  const [stackFilterModes, setStackFilterModes] = useState<Record<StackFilterTab, StackFilterMode>>(() => ({
+    recent: readStackFilterMode('recent'), albums: readStackFilterMode('albums'), calendar: readStackFilterMode('calendar'),
+  }));
   const [photoFilterModes, setPhotoFilterModes] = useState<Record<HomeTab, PhotoFilterMode>>(() => ({
     recent: readPhotoFilterMode('recent'),
     albums: readPhotoFilterMode('albums'),
@@ -333,8 +338,13 @@ export function GalleryPage() {
   // The active view owns its selection; shared asset IDs never carry selection across views.
   const currentAssets = photoView?.assets ?? [];
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
-  const filteredAssets = filterPhotosByEditStatus(filterPhotos(currentAssets, photoFilters), editStatusFilterModes[activeTab], editStatuses);
-  const visibleAssets = photoView?.kind === 'favorites' ? filteredAssets : collapseImmichStacks(filteredAssets);
+  const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, stackFilterModes[activeTab]);
+  const editFilteredAssets = activeTab === 'favorites'
+    ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses)
+    : filterImmichStacksByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses);
+  const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
+  const visibleAssets = activeTab !== 'favorites' && photoFilterModes[activeTab] === 'both'
+    ? collapseImmichStacks(typedAssets) : typedAssets;
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
@@ -583,13 +593,17 @@ export function GalleryPage() {
               onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
           </div>
           <div className="home-toolbar-controls">
-            {photoView && <PhotoFilterControls filters={photoFilters} onChange={mode => {
-              setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
-              writePhotoFilterMode(mode, activeTab);
+            {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
+              setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
+              writeStackFilterMode(mode, activeTab);
             }} />}
             {photoView && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
               setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
               writeEditStatusFilterMode(mode, activeTab);
+            }} />}
+            {photoView && <PhotoFilterControls filters={photoFilters} onChange={mode => {
+              setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
+              writePhotoFilterMode(mode, activeTab);
             }} />}
             {activeTab === 'recent' && <>
               <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
