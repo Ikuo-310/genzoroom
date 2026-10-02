@@ -15,6 +15,7 @@ import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
+import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { HomeCalendar, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
@@ -92,6 +93,8 @@ export function GalleryPage() {
   const calendarSelection = usePhotoSelection();
   const favoriteSelection = usePhotoSelection();
   const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const openSelectedAssetsRef = useRef<() => void>(() => {});
+  const selectedAssetsCountRef = useRef(0);
   const connectionRequestId = useRef(0);
   const albumAssetRequestId = useRef(0);
   const calendarHeatmapRequestId = useRef(0);
@@ -343,7 +346,15 @@ export function GalleryPage() {
     if (!selectionMode) return;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (shouldClearSelectionOnEscape(event, true)) photoView?.selection.clear();
+      if (shouldClearSelectionOnEscape(event, true)) {
+        photoView?.selection.clear();
+        return;
+      }
+      if (!selectionMode || selectedAssetsCountRef.current === 0 || event.defaultPrevented || event.isComposing || event.repeat
+        || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'homeOpenSelected')
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      event.preventDefault();
+      openSelectedAssetsRef.current();
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -359,6 +370,8 @@ export function GalleryPage() {
     const state = createWorkspaceNavigation(selectedAssets);
     if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
   }
+  selectedAssetsCountRef.current = selectedAssets.length;
+  openSelectedAssetsRef.current = openSelectedAssets;
 
   function readScrollPosition(): HomeScrollPosition {
     const page = pageRef.current;

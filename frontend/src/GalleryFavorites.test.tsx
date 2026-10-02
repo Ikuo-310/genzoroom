@@ -33,6 +33,11 @@ async function mount() {
   </Routes></MemoryRouter>));
 }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click()); }
+async function pressD(target: EventTarget = window, options: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key: 'D', bubbles: true, cancelable: true, ...options });
+  await act(async () => { target.dispatchEvent(event); });
+  return event;
+}
 async function change(selector: string, value: string) {
   await act(async () => {
     const select = host.querySelector<HTMLSelectElement>(selector)!;
@@ -130,9 +135,45 @@ describe('Home favorites', () => {
     await click('#home-favorites-tab'); expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
     await click('.selection-clear'); expect(host.querySelector('.selection-bar')).toBeNull();
     await click('.photo-selection-input');
-    await click('.selection-actions button:last-child');
+    await pressD();
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
     expect(navigation?.homeReturn?.tab).toBe('favorites');
+  });
+
+  it('opens the selected Recent photo with D and ignores D without a selection', async () => {
+    await mount();
+    expect((await pressD()).defaultPrevented).toBe(false);
+    await click('.photo-selection-input');
+    const event = await pressD();
+    expect(event.defaultPrevented).toBe(true);
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
+    expect(navigation?.homeReturn?.tab).toBe('recent');
+  });
+
+  it('ignores D with modifiers, during editing, IME, repeats, or an open menu', async () => {
+    await mount(); await click('#home-favorites-tab'); await click('.photo-selection-input');
+    for (const options of [{ repeat: true }, { isComposing: true }, { shiftKey: true }, { ctrlKey: true },
+      { altKey: true }, { metaKey: true }]) {
+      expect((await pressD(window, options)).defaultPrevented).toBe(false);
+    }
+    const prevented = new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true });
+    prevented.preventDefault(); await act(async () => { window.dispatchEvent(prevented); });
+    const nativeTargets = ['<input type="text">', '<input type="number">', '<textarea></textarea>', '<select></select>',
+      '<div contenteditable="true"></div>', '<div role="textbox"></div>'];
+    for (const markup of nativeTargets) {
+      const wrapper = document.createElement('div'); wrapper.innerHTML = markup; host.append(wrapper);
+      expect((await pressD(wrapper.firstElementChild!)).defaultPrevented).toBe(false);
+      wrapper.remove();
+    }
+    for (const role of ['dialog', 'alertdialog', 'menu']) {
+      const overlay = document.createElement(role === 'dialog' ? 'dialog' : 'div');
+      if (role === 'dialog') overlay.setAttribute('open', ''); else overlay.setAttribute('role', role);
+      document.body.append(overlay);
+      try { expect((await pressD()).defaultPrevented).toBe(false); } finally { overlay.remove(); }
+    }
+    const menu = document.createElement('details'); menu.className = 'edit-settings-menu'; menu.open = true; document.body.append(menu);
+    try { expect((await pressD()).defaultPrevented).toBe(false); } finally { menu.remove(); }
+    expect(navigation).toBeNull();
   });
 
   it('clears only the active selection with Escape when both tabs remain in selection mode', async () => {

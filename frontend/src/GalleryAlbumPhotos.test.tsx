@@ -47,6 +47,7 @@ async function mount() {
 }
 
 function click(selector: string) { act(() => host.querySelector<HTMLButtonElement>(selector)!.click()); }
+function pressD() { act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))); }
 async function settle() { await act(async () => { await Promise.resolve(); }); }
 function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
   const select = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
@@ -192,7 +193,7 @@ describe('album photo view', () => {
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     click('#home-albums-tab');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
-    click('.selection-bar button:last-child');
+    pressD();
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('album-0|album-2');
   });
 

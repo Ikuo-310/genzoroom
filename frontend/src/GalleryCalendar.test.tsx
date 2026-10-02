@@ -59,6 +59,7 @@ async function mount() {
   </Routes></MemoryRouter>); });
 }
 function click(selector: string) { act(() => host.querySelector<HTMLButtonElement>(selector)!.click()); }
+function pressD() { act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))); }
 async function settle() { await act(async () => { await Promise.resolve(); }); }
 function selectValue(selector: string, value: string) {
   const select = host.querySelector<HTMLSelectElement>(selector)!;
@@ -423,7 +424,7 @@ describe('Home calendar', () => {
     act(() => boxes[0].click());
     act(() => boxes[2].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
-    click('.selection-bar button:last-child');
+    pressD();
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('day-0|day-1|day-2');
   });
 

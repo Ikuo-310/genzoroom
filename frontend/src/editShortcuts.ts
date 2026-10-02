@@ -33,6 +33,7 @@ export const shortcutBindings = {
   viewerBefore: [{ code: 'Backslash', ...commandModifiers }],
   viewerFocusMode: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false }],
   viewerFitRestore: [{ key: 'z', ignoreCase: true, ...commandModifiers, shift: true }],
+  homeOpenSelected: [{ key: 'd', ignoreCase: true, ...commandModifiers, shift: false }],
   scopeRed: [{ code: 'Numpad1', ...commandModifiers, shift: false }],
   scopeGreen: [{ code: 'Numpad2', ...commandModifiers, shift: false }],
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false }],
