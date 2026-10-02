@@ -2,6 +2,7 @@ import { StackFilterControls } from './StackFilterControls';
 import { readStackFilterMode, writeStackFilterMode, type StackFilterMode, type StackFilterTab } from './photoFilters';
 import { collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
+import { resolveWorkspaceAssets } from './workspaceAssetResolver';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -9,7 +10,7 @@ import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type
 import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
 import type { AlbumSummary } from './albums';
 import { AlbumCard } from './AlbumCard';
-import type { RecentAsset, WorkspaceNavigationState } from './assets';
+import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
@@ -58,6 +59,7 @@ export function GalleryPage() {
   const currentYear = new Date().getFullYear();
   const dateLocale = resolveDateLocale(settings.dateLocale);
   const [connection, setConnection] = useState<Connection>('checking');
+  const [workspaceOpenError, setWorkspaceOpenError] = useState<'unsupported' | 'ambiguous' | null>(null);
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
@@ -132,6 +134,8 @@ export function GalleryPage() {
   const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
   const photoFilters = photoFiltersForMode(photoFilterModes[activeTab]);
   const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+
+  useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
 
   useLayoutEffect(() => {
     const pending = pendingScroll.current;
@@ -387,12 +391,23 @@ export function GalleryPage() {
   }, [selectionMode, photoView?.selection.clear, navigate]);
 
   function openWorkspace(asset: RecentAsset) {
-    const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id, homeReturn: captureHomeReturn() };
-    navigate(workspacePath(asset.id), { state });
+    openWorkspaceAssets([asset]);
   }
 
   function openSelectedAssets() {
-    const state = createWorkspaceNavigation(selectedAssets);
+    openWorkspaceAssets(selectedAssets);
+  }
+
+  function openWorkspaceAssets(assetsToOpen: RecentAsset[]) {
+    const resolution = activeTab === 'favorites'
+      ? { status: 'resolved' as const, assets: assetsToOpen }
+      : resolveWorkspaceAssets(assetsToOpen, currentAssets);
+    if (resolution.status !== 'resolved') {
+      setWorkspaceOpenError(resolution.status);
+      return;
+    }
+    setWorkspaceOpenError(null);
+    const state = createWorkspaceNavigation(resolution.assets);
     if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
   }
   selectedAssetsCountRef.current = selectedAssets.length;
@@ -619,6 +634,7 @@ export function GalleryPage() {
             </div>}
           </div>
         </div>
+        {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unsupported' ? 'photos.workspaceUnsupported' : 'photos.workspaceAmbiguous')}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {selectionMode && <PhotoSelectionBar
           active={selectionMode}

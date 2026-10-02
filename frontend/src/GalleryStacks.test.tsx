@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
-import type { RecentAsset } from './assets';
+import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import i18n from './i18n';
@@ -30,6 +30,12 @@ const album = { id: 'album-a', albumName: 'Stack album', albumThumbnailAssetId: 
 const tabs: HomeTab[] = ['recent', 'albums', 'calendar', 'favorites'];
 let root: Root;
 let host: HTMLDivElement;
+let navigation: WorkspaceNavigationState | null;
+
+function WorkspaceProbe() {
+  navigation = useLocation().state as WorkspaceNavigationState;
+  return <div>Workspace</div>;
+}
 
 function resetFilters() {
   sessionStorage.clear();
@@ -41,6 +47,7 @@ function resetFilters() {
 }
 
 beforeEach(async () => {
+  navigation = null;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
@@ -67,7 +74,10 @@ async function mount(tab: HomeTab = 'recent') {
     year: 2026, month: 9, date: tab === 'calendar' ? '2026-09-01' : null,
     calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0 };
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn } }]}>
-    <GalleryPage />
+    <Routes>
+      <Route path="/" element={<GalleryPage />} />
+      <Route path="/anshitsu/:assetId" element={<WorkspaceProbe />} />
+    </Routes>
   </MemoryRouter>));
 }
 
@@ -84,6 +94,65 @@ function change(selector: string, value: string) {
 }
 
 describe('Home stack display', () => {
+  it.each(['recent', 'albums', 'calendar'] as const)('opens non-RAW from a RAW primary on %s', async tab => {
+    const members = photos.map(photo => photo.stackId ? { ...photo, primaryAssetId: 'member' } : photo);
+    api.recent.mockResolvedValue(members); api.album.mockResolvedValue(members); api.day.mockResolvedValue(members);
+    await mount(tab);
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    expect(navigation?.activeAssetId).toBe('primary');
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
+    expect(navigation?.homeReturn?.tab).toBe(tab);
+  });
+
+  it('opens non-RAW when clicking a Stack RAW member through the RAW filter', async () => {
+    await mount();
+    change('.photo-filter-control select', 'raw');
+    await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
+  });
+
+  it('resolves hidden selected members, preserves selection order and deduplicates before navigation', async () => {
+    await mount();
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    change('.photo-filter-control select', 'raw');
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    change('.photo-filter-control select', 'nonRaw');
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[2].click());
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', 'primary', 'y']);
+  });
+
+  it.each(['unsupported', 'ambiguous'] as const)('blocks single and multi selection for %s Stacks without changing selection', async status => {
+    const members = status === 'unsupported' ? photos.slice(0, 3)
+      : [...photos.slice(0, 3), { ...asset('a'), ...stackMetadata }, { ...asset('b'), ...stackMetadata }];
+    api.recent.mockResolvedValue(members);
+    await mount();
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    expect(navigation).toBeNull();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Cannot open the selection');
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    expect(navigation).toBeNull();
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+  });
+
+  it('keeps Favorites RAW clicks and selected members unchanged', async () => {
+    await mount('favorites');
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[3].click());
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['member', 'primary']);
+  });
+
+  it('opens the clicked Favorites RAW Asset itself', async () => {
+    await mount('favorites');
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    expect(navigation?.activeAssetId).toBe('member');
+  });
+
   it.each(['recent', 'albums', 'calendar'] as const)('collapses the %s grid and looks up statuses for all fetched IDs', async tab => {
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);

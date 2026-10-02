@@ -113,6 +113,8 @@
     "unstackedOnly": "Without STACK",
     "edited": "Edited in GenzoRoom",
     "stackAssets": "Stack, {{count}} assets",
+    "workspaceUnsupported": "Cannot open the selection: a Stack has no supported non-RAW photo among the loaded assets.",
+    "workspaceAmbiguous": "Cannot open the selection: a Stack has multiple non-RAW photos and its primary is not a loaded non-RAW photo.",
     "recent": "Recent photos",
     "recentCount": "Recent count",
     "recentCountOption": "{{count}}",
