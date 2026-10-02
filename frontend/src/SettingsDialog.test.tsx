@@ -164,12 +164,23 @@ describe('shared Settings modal', () => {
   });
 });
 
-it.each([{ ctrlKey: true }, { metaKey: true }])('opens Developer in a protected new tab for %o and retains normal Settings clicks', async modifiers => {
+it.each([
+  { platform: 'Win32', primary: { ctrlKey: true }, opposite: { metaKey: true } },
+  { platform: 'MacIntel', primary: { metaKey: true }, opposite: { ctrlKey: true } },
+])('opens Developer only for the platform Primary click: %o', async ({ platform, primary, opposite }) => {
+  vi.stubGlobal('navigator', { platform });
   const open = vi.spyOn(window, 'open').mockReturnValue(null);
   const button = host.querySelector('button')!;
-  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true, ...modifiers })));
+  const afterClick = vi.fn();
+  window.addEventListener('click', afterClick, { once: true });
+  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true, ...primary })));
   expect(open).toHaveBeenCalledExactlyOnceWith('/developer', '_blank', 'noopener,noreferrer');
+  expect(open.mock.invocationCallOrder[0]).toBeLessThan(afterClick.mock.invocationCallOrder[0]);
   expect(dialog()).toBeNull();
+  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true, ...opposite })));
+  expect(open).toHaveBeenCalledOnce();
+  expect(dialog().open).toBe(true);
+  await click(dialog().querySelector('header button')!);
   await click(button);
   expect(dialog().open).toBe(true);
   expect(open).toHaveBeenCalledOnce();

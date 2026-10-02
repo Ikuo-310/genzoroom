@@ -12,13 +12,15 @@ describe('shortcut binding display', () => {
     expect(formatShortcut('undo', 'other')).toBe('Ctrl+Z');
     expect(formatShortcut('redo', 'other')).toBe('Ctrl+Shift+Z / Ctrl+Y');
   });
-  it('changes only ctrlOrMeta to Command on macOS', () => {
+  it('formats Primary and Alternate using platform-specific modifier labels', () => {
     expect(formatShortcut('undo', 'mac')).toBe('⌘+Z');
     expect(formatShortcut('redo', 'mac')).toBe('⌘+Shift+Z / ⌘+Y');
-    expect(formatShortcut('copySettings', 'mac')).toBe('Ctrl+C');
-    expect(formatShortcut('pasteSettings', 'mac')).toBe('Ctrl+V');
-    expect(formatShortcut('copySelection', 'mac')).toBe('Ctrl+Alt+C');
-    expect(formatShortcut('filmstripPrevious', 'mac')).toBe('Ctrl+Shift+←');
+    expect(formatShortcut('copySettings', 'mac')).toBe('⌘+C');
+    expect(formatShortcut('pasteSettings', 'mac')).toBe('⌘+V');
+    expect(formatShortcut('copySelection', 'mac')).toBe('⌘+⌥+C');
+    expect(formatShortcut('pasteSelection', 'mac')).toBe('⌘+⌥+V');
+    expect(formatShortcut('filmstripPrevious', 'mac')).toBe('⌘+Shift+←');
+    expect(formatShortcut('filmstripNext', 'mac')).toBe('⌘+Shift+→');
   });
   it('formats logical arrows and physical codes', () => {
     expect(formatShortcut('filmstripPrevious', 'other')).toBe('Ctrl+Shift+←');

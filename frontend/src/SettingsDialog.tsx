@@ -5,6 +5,7 @@ import { DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type 
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
 import { BinaryRadioChoice } from './BinaryRadioChoice';
+import { isPrimaryModifier } from './shortcutModifiers';
 
 type GpuStatus = { enabled: boolean; availability: GpuAvailability; active: boolean; setPreference: (value: boolean) => void };
 const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGpu: (_value: GpuStatus | null) => {} });
@@ -12,7 +13,7 @@ export const useSettingsDialog = () => useContext(SettingsContext);
 export function SettingsButton() {
   const { open } = useSettingsDialog(); const { t } = useTranslation();
   return <button type="button" className="tool-button settings-button" aria-label={t('settings.title')} title={t('settings.title')} onClick={event => {
-    if (event.ctrlKey || event.metaKey) {
+    if (isPrimaryModifier(event.nativeEvent)) {
       // Keep the popup inside the synchronous click gesture for browser popup policies.
       window.open('/developer', '_blank', 'noopener,noreferrer');
       return;
