@@ -42,7 +42,7 @@ export function WebGpuDiagnostics({ environment, factory }: { environment?: Smok
       {state && <>
         {(['adapter', 'device', 'shader'] as const).map(key => <div key={key}><dt>{t(`webgpuSmoke.${key}`)}</dt><dd>{describe(state[key])}</dd></div>)}
         <div><dt>{t('webgpuSmoke.info')}</dt><dd>{state.info.data
-          ? <dl>{(['vendor', 'architecture', 'device', 'description'] as const).map(key => <div key={key}><dt>{t(`webgpuSmoke.infoLabels.${key}`)}</dt><dd>{state.info.data?.[key] || t('webgpuSmoke.emptyInfo')}</dd></div>)}</dl>
+          ? <dl>{(['vendor', 'architecture', 'device', 'description'] as const).map(key => <div key={key}><dt>{t(`webgpuSmoke.infoLabels.${key}`)}</dt><dd>{state.info.data?.[key] === '' ? 'Blank' : state.info.data?.[key] ?? t('webgpuSmoke.undisclosedInfo')}</dd></div>)}</dl>
           : describe(state.info)}</dd></div>
       </>}
     </dl>

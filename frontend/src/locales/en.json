@@ -68,8 +68,29 @@
     "photosLoading": "Loading photos for this day…",
     "photosLoadFailed": "Photos for this day could not be loaded.",
     "photosEmpty": "No photos on this day",
-    "weekdays": { "sunday": "Sun", "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed", "thursday": "Thu", "friday": "Fri", "saturday": "Sat" },
-    "months": { "january": "January", "february": "February", "march": "March", "april": "April", "may": "May", "june": "June", "july": "July", "august": "August", "september": "September", "october": "October", "november": "November", "december": "December" }
+    "weekdays": {
+      "sunday": "Sun",
+      "monday": "Mon",
+      "tuesday": "Tue",
+      "wednesday": "Wed",
+      "thursday": "Thu",
+      "friday": "Fri",
+      "saturday": "Sat"
+    },
+    "months": {
+      "january": "January",
+      "february": "February",
+      "march": "March",
+      "april": "April",
+      "may": "May",
+      "june": "June",
+      "july": "July",
+      "august": "August",
+      "september": "September",
+      "october": "October",
+      "november": "November",
+      "december": "December"
+    }
   },
   "albums": {
     "open": "Open album {{name}}",
@@ -342,7 +363,7 @@
     "device": "Device",
     "shader": "WGSL / pipeline",
     "info": "GPU information",
-    "emptyInfo": "Empty / undisclosed",
+    "emptyInfo": "Blank",
     "run": "Run smoke test",
     "comparison": "Maximum difference and differing channels compare raw bytes across all RGBA channels. Differences are measured values, not automatic pass/fail decisions.",
     "execution": "GPU execution",
@@ -380,7 +401,8 @@
       "complete": "GPU execution complete",
       "partialFailure": "GPU execution completed with failures",
       "generationMismatch": "GPU result source generation does not match the uploaded image."
-    }
+    },
+    "undisclosedInfo": "Undisclosed"
   },
   "language": {
     "nativeName": "English",

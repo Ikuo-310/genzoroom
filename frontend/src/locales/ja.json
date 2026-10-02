@@ -67,8 +67,29 @@
     "photosLoading": "この日の写真を読み込んでいます…",
     "photosLoadFailed": "この日の写真を読み込めませんでした。",
     "photosEmpty": "この日に写真はありません",
-    "weekdays": { "sunday": "日", "monday": "月", "tuesday": "火", "wednesday": "水", "thursday": "木", "friday": "金", "saturday": "土" },
-    "months": { "january": "1月", "february": "2月", "march": "3月", "april": "4月", "may": "5月", "june": "6月", "july": "7月", "august": "8月", "september": "9月", "october": "10月", "november": "11月", "december": "12月" }
+    "weekdays": {
+      "sunday": "日",
+      "monday": "月",
+      "tuesday": "火",
+      "wednesday": "水",
+      "thursday": "木",
+      "friday": "金",
+      "saturday": "土"
+    },
+    "months": {
+      "january": "1月",
+      "february": "2月",
+      "march": "3月",
+      "april": "4月",
+      "may": "5月",
+      "june": "6月",
+      "july": "7月",
+      "august": "8月",
+      "september": "9月",
+      "october": "10月",
+      "november": "11月",
+      "december": "12月"
+    }
   },
   "albums": {
     "open": "アルバム「{{name}}」を開く",
@@ -340,7 +361,7 @@
     "device": "デバイス",
     "shader": "WGSL / pipeline",
     "info": "GPU情報",
-    "emptyInfo": "空文字／未公開",
+    "emptyInfo": "Blank",
     "run": "スモークテストを実行",
     "comparison": "最大差と差異数はRGBA全チャンネルの生バイト比較です。差は自動合否判定せず実測値を表示します。",
     "execution": "GPU実行",
@@ -378,7 +399,8 @@
       "complete": "GPU実行完了",
       "partialFailure": "GPU実行失敗あり",
       "generationMismatch": "GPU結果のsource generationがアップロードした画像と一致しません。"
-    }
+    },
+    "undisclosedInfo": "未公開"
   },
   "language": {
     "nativeName": "日本語",
