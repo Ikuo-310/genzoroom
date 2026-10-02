@@ -1,3 +1,4 @@
+import { collapseImmichStacks } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -332,7 +333,8 @@ export function GalleryPage() {
   // The active view owns its selection; shared asset IDs never carry selection across views.
   const currentAssets = photoView?.assets ?? [];
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
-  const visibleAssets = filterPhotosByEditStatus(filterPhotos(currentAssets, photoFilters), editStatusFilterModes[activeTab], editStatuses);
+  const filteredAssets = filterPhotosByEditStatus(filterPhotos(currentAssets, photoFilters), editStatusFilterModes[activeTab], editStatuses);
+  const visibleAssets = photoView?.kind === 'favorites' ? filteredAssets : collapseImmichStacks(filteredAssets);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
