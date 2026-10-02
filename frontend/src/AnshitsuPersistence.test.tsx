@@ -8,6 +8,7 @@ import type { AssetDetail, WorkspaceNavigationState } from './assets';
 import * as editStateModule from './editState';
 import { EditStateApiError } from './editStateApi';
 import i18n from './i18n';
+import { clearWorkspaceSession, readWorkspaceSession } from './workspaceResume';
 
 const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
@@ -58,6 +59,7 @@ beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
+  clearWorkspaceSession();
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   mocked.detail.mockReset(); mocked.get.mockReset(); mocked.put.mockReset();
   mocked.detail.mockImplementation(async (id: string) => id === first.id ? first : second);
@@ -68,7 +70,7 @@ beforeEach(async () => {
     state: snapshot, revision: revision + 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: saveId,
   }));
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
   it('preserves History, Undo/Redo, Filmstrip and the existing autosave deadline across Settings', async ({ onTestFinished }) => {
@@ -575,6 +577,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     if (!home) throw new Error('Missing Home navigation button');
     await act(async () => { home.click(); }); await flush();
     expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(readWorkspaceSession()).toBeNull();
     const exit = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Exit without saving');
     if (!exit) throw new Error('Missing discard exit button');
@@ -582,6 +585,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(container.querySelector('.workspace-page')).toBeNull();
     expect(container.textContent).toContain('Recent photos');
     expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(readWorkspaceSession()).toMatchObject({ selectedAssets: [{ id: first.id }, { id: second.id }], activeAssetId: first.id });
   });
 
   it('disables repeated Home requests while the final save is in flight', async () => {
@@ -601,6 +605,18 @@ describe('Anshitsu Filmstrip persistence', () => {
     });
     await flush();
     expect(container.querySelector('.workspace-page')).toBeNull();
+  });
+
+  it('remembers the active Filmstrip photo when Home is reached through the normal H exit', async () => {
+    await mount();
+    const secondPhoto = container.querySelector<HTMLButtonElement>('.filmstrip-item[aria-label="second.jpg"]');
+    if (!secondPhoto) throw new Error('Missing second Filmstrip photo');
+    await act(async () => { secondPhoto.click(); }); await flush();
+    expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('h'); await flush();
+    expect(readWorkspaceSession()).toMatchObject({
+      selectedAssets: [{ id: first.id }, { id: second.id }], activeAssetId: second.id,
+    });
   });
 
   it('does not show the exit save failure message when compaction fails but the fallback save succeeds', async () => {

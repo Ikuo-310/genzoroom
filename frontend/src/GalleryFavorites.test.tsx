@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { homeScrollContent } from './homeReturn';
+import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS } from './photoFilters';
 import i18n from './i18n';
 
@@ -57,6 +58,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en'); sessionStorage.clear(); navigation = null;
+  clearWorkspaceSession();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photos[0]]);
   api.favorites.mockReset().mockResolvedValue(photos);
@@ -64,7 +66,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); clearWorkspaceSession(); vi.unstubAllGlobals(); });
 
 describe('Home favorites', () => {
   it('loads lazily, reuses the grid and avoids refetching the successful list on tab switches or reactivation', async () => {
@@ -148,6 +150,45 @@ describe('Home favorites', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
     expect(navigation?.homeReturn?.tab).toBe('recent');
+  });
+
+  it('resumes the last workspace when D is pressed without a selection and refreshes Home return context', async () => {
+    rememberWorkspaceSession({ selectedAssets: photos.slice(0, 3), activeAssetId: 'photo-2', homeReturn: {
+      tab: 'recent', album: null, year: 2026, month: 9, date: null, calendarMode: 'month',
+      pageScrollTop: 1, contentScrollTop: 2,
+    } });
+    await mount(); await click('#home-favorites-tab');
+    setScroll(45, 120);
+    const event = await pressD();
+    expect(event.defaultPrevented).toBe(true);
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
+    expect(navigation?.activeAssetId).toBe('photo-2');
+    expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', pageScrollTop: 45, contentScrollTop: 120 });
+    await click('.return-home');
+    expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
+    expectScroll(45, 120);
+  });
+
+  it('prefers the current selection over a remembered workspace', async () => {
+    rememberWorkspaceSession({ selectedAssets: photos.slice(1, 3), activeAssetId: 'photo-2' });
+    await mount(); await click('.photo-selection-input');
+    expect((await pressD()).defaultPrevented).toBe(true);
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
+    expect(navigation?.activeAssetId).toBe('photo-0');
+  });
+
+  it('keeps D inert without a selection when a resume is blocked by its event guards', async () => {
+    rememberWorkspaceSession({ selectedAssets: photos.slice(0, 2), activeAssetId: 'photo-1' });
+    await mount();
+    for (const options of [{ repeat: true }, { isComposing: true }, { shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+      expect((await pressD(window, options)).defaultPrevented).toBe(false);
+    }
+    const target = document.createElement('input'); host.append(target);
+    expect((await pressD(target)).defaultPrevented).toBe(false);
+    target.remove();
+    const dialog = document.createElement('dialog'); dialog.open = true; document.body.append(dialog);
+    try { expect((await pressD()).defaultPrevented).toBe(false); } finally { dialog.remove(); }
+    expect(navigation).toBeNull();
   });
 
   it('ignores D with modifiers, during editing, IME, repeats, or an open menu', async () => {

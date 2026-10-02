@@ -16,6 +16,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { HomeCalendar, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
@@ -94,6 +95,10 @@ export function GalleryPage() {
   const favoriteSelection = usePhotoSelection();
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const openSelectedAssetsRef = useRef<() => void>(() => {});
+  const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
+    tab: 'recent', album: null, year: new Date().getFullYear(), month: new Date().getMonth() + 1,
+    date: null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0,
+  }));
   const selectedAssetsCountRef = useRef(0);
   const connectionRequestId = useRef(0);
   const albumAssetRequestId = useRef(0);
@@ -343,23 +348,31 @@ export function GalleryPage() {
   }, [selectionMode]);
 
   useEffect(() => {
-    if (!selectionMode) return;
-
     function handleKeyDown(event: KeyboardEvent) {
-      if (shouldClearSelectionOnEscape(event, true)) {
-        photoView?.selection.clear();
+      if (shouldClearSelectionOnEscape(event, selectionMode)) {
+        if (selectionMode) photoView?.selection.clear();
         return;
       }
-      if (!selectionMode || selectedAssetsCountRef.current === 0 || event.defaultPrevented || event.isComposing || event.repeat
+      if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'homeOpenSelected')
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      if (selectionMode && selectedAssetsCountRef.current > 0) {
+        event.preventDefault();
+        openSelectedAssetsRef.current();
+        return;
+      }
+      if (selectionMode) return;
+      const resume = readWorkspaceSession();
+      if (!resume) return;
       event.preventDefault();
-      openSelectedAssetsRef.current();
+      navigate(workspacePath(resume.activeAssetId), {
+        state: { ...resume, homeReturn: captureHomeReturnRef.current() },
+      });
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectionMode, photoView?.selection.clear]);
+  }, [selectionMode, photoView?.selection.clear, navigate]);
 
   function openWorkspace(asset: RecentAsset) {
     const state: WorkspaceNavigationState = { selectedAssets: [asset], activeAssetId: asset.id, homeReturn: captureHomeReturn() };
@@ -383,6 +396,7 @@ export function GalleryPage() {
     return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
       date: selectedCalendarDate, calendarMode, ...readScrollPosition() };
   }
+  captureHomeReturnRef.current = captureHomeReturn;
 
   function prepareScrollTransition(nextKey: string) {
     if (nextKey === viewKey) return;

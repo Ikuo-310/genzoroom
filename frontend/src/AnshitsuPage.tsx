@@ -38,6 +38,7 @@ import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './ad
 import type { AdjustmentSliderMenuTarget } from './AdjustmentSlider';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { rememberWorkspaceSession } from './workspaceResume';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -345,6 +346,7 @@ export function AnshitsuPage() {
   }
 
   function returnToHome() {
+    rememberWorkspaceSession({ selectedAssets, activeAssetId: assetId, homeReturn: initialNavigation?.homeReturn });
     navigate('/', { state: initialNavigation?.homeReturn ? { homeReturn: initialNavigation.homeReturn } : null });
   }
 
