@@ -18,5 +18,6 @@
 .developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }
 .developer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; border-bottom: 1px solid #43584d; }
 .developer-tabs [role="tab"] { border-radius: 8px 8px 0 0; }
-.developer-tabs [role="tab"][aria-selected="true"] { background: #43584d; }
+.developer-tabs [role="tab"][aria-selected="true"] { color: #17221f; background: #d1e2bf; }
+.developer-tabs [role="tab"][aria-selected="false"] { color: #e6eee9; background: #43584d; }
 .developer-page [role="tabpanel"]:focus-visible { outline-offset: 5px; }
