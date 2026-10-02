@@ -35,6 +35,7 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Run backend pytest with `I:\code\genzoroom\backend` as the working directory.
   Example:
   `I:\code\genzoroom\.venv\Scripts\python.exe -m pytest`
+- If running this executable in the normal sandbox fails with `Permission denied` (including a `uv` trampoline error), rerun the same executable and arguments with privileged execution. Do not switch to `Activate.ps1`, `activate.bat`, or another Python environment.
 
 ## Testing
 
