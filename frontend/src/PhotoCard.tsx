@@ -83,7 +83,6 @@ export function PhotoCard({
           <FormatBadge format={asset.format} isRaw={asset.is_raw} />
           {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 2 && (
             <div className="stack-assets" role="img" aria-label={t('photos.stackAssets', { count: asset.stackAssetCount })}>
-              <span className="stack-badge">STACK</span>
               <span className="stack-asset-count">{asset.stackAssetCount}</span>
             </div>
           )}

@@ -44,7 +44,6 @@ describe('PhotoCard format badge', () => {
   it.each([2, 3, 12])('shows the original format and total Stack count %s', count => {
     const markup = renderBadge('DNG', true, 'photo.dng', true, 'stack-id', count);
     expect(markup).toContain('class="format-badge raw">DNG</span>');
-    expect(markup).toContain('class="stack-badge">STACK</span>');
     expect(markup).toContain(`class="stack-asset-count">${count}</span>`);
     expect(markup).toContain(`aria-label="Stack, ${count} assets"`);
     expect(markup).toContain('class="edited-badge"');
