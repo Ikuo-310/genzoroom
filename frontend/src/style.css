@@ -507,7 +507,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .binary-radio-options { display: inline-flex; flex-shrink: 0; border: 1px solid #526a5e; border-radius: 5px; overflow: hidden; }
 .settings-dialog .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }
 .binary-radio-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.binary-radio-options span { display: block; padding: 7px 14px; background: #17221f; }
+.binary-radio-options span { display: block; min-width: 42px; padding: 5px 10px; background: #17221f; font-size: 0.81rem; text-align: center; }
 .binary-radio-options input:checked + span { background: #526a5e; color: #fff; }
 .binary-radio-options input:focus-visible + span { outline: 2px solid #fff; outline-offset: -3px; }
 .edit-settings-menu-item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
