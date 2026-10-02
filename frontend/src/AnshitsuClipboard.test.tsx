@@ -1518,9 +1518,9 @@ describe('focus entry into the selected operation panel', () => {
     enter(viewport); expect(document.activeElement).toBe(viewport);
     await act(async () => resolveSave(stored(first.id, rendered.recipe!)));
   });
-  it('keeps the remembered ID through photo changes and allows Filmstrip arrows', async () => {
+  it('keeps the remembered ID through global Filmstrip shortcut photo changes', async () => {
     await mount(); act(() => slider('contrast').focus()); const firstThumb = host.querySelector<HTMLButtonElement>('.filmstrip button')!;
-    act(() => firstThumb.focus()); key(firstThumb, 'ArrowRight', { ctrlKey: false });
+    act(() => firstThumb.focus()); key(window, 'ArrowRight', { ctrlKey: true, shiftKey: true });
     await act(async () => {});
     expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(second.filename);
     const viewport = activatePreview(); enter(viewport); expect(document.activeElement).toBe(slider('contrast'));
@@ -1528,24 +1528,24 @@ describe('focus entry into the selected operation panel', () => {
 });
 
 
-describe('Filmstrip hover versus slider arrow priority', () => {
-  it('switches the photo from a hovered gap without changing a still focused slider value', async () => {
+describe('Filmstrip shortcut versus slider arrow priority', () => {
+  it('leaves unmodified arrows to a focused slider and moves globally with Ctrl+Shift+Arrow', async () => {
     await mount();
     const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
     act(() => range.focus()); key(range, 'ArrowRight', { ctrlKey: false });
-    const filmstrip = host.querySelector<HTMLElement>('.filmstrip-scroll')!;
-    const move = new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 20 });
-    Object.defineProperty(move, 'movementX', { value: 8 }); act(() => filmstrip.dispatchEvent(move));
     expect(document.activeElement).toBe(range);
     const before = range.value;
     expect(before).toBe('0.01');
-    const event = key(range, 'ArrowRight', { ctrlKey: false });
-    expect(event.defaultPrevented).toBe(true); expect(range.value).toBe(before);
+    const arrow = key(range, 'ArrowRight', { ctrlKey: false });
+    expect(arrow.defaultPrevented).toBe(true); expect(range.value).not.toBe(before);
+    const editedValue = range.value;
+    const event = key(range, 'ArrowRight', { ctrlKey: true, shiftKey: true });
+    expect(event.defaultPrevented).toBe(true); expect(range.value).toBe(editedValue);
     await act(async () => {});
     expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(second.filename);
-    expect(rows.get(first.id)?.state.currentRecipe.adjustments.exposure).toBe(0.01);
-    key(window, 'ArrowLeft', { ctrlKey: false }); await act(async () => {});
+    expect(rows.get(first.id)?.state.currentRecipe.adjustments.exposure).toBe(Number(editedValue));
+    key(window, 'ArrowLeft', { ctrlKey: true, shiftKey: true }); await act(async () => {});
     expect(host.querySelector('.workspace-asset-title')!.textContent).toContain(first.filename);
-    expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.value).toBe(before);
+    expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.value).toBe(editedValue);
   });
 });

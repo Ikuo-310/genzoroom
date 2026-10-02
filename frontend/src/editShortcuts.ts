@@ -36,6 +36,8 @@ export const shortcutBindings = {
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false }],
   scopeYOnly: [{ code: 'Numpad0', ...commandModifiers, shift: false }],
   scopeScale: [{ code: 'NumpadDecimal', ...commandModifiers, shift: false }],
+  filmstripPrevious: [{ key: 'ArrowLeft', ctrl: true, meta: false, alt: false, shift: true, excludeAltGraph: true }],
+  filmstripNext: [{ key: 'ArrowRight', ctrl: true, meta: false, alt: false, shift: true, excludeAltGraph: true }],
 } as const satisfies Record<string, readonly ShortcutBinding[]>;
 
 export type ShortcutId = keyof typeof shortcutBindings;

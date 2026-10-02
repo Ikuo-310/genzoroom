@@ -68,10 +68,21 @@ describe('command shortcut bindings', () => {
     }
   });
 
+  it('matches Filmstrip movement only for Ctrl+Shift+Arrow without AltGraph', () => {
+    for (const [id, key] of [['filmstripPrevious', 'ArrowLeft'], ['filmstripNext', 'ArrowRight']] as const) {
+      expect(matchesShortcut(event(key, { ctrlKey: true, shiftKey: true }), id)).toBe(true);
+      expect(matchesShortcut(event(key, { ctrlKey: true, shiftKey: true }, true), id)).toBe(false);
+      for (const options of [{ shiftKey: true }, { ctrlKey: true }, { ctrlKey: true, shiftKey: true, altKey: true },
+        { ctrlKey: true, shiftKey: true, metaKey: true }]) {
+        expect(matchesShortcut(event(key, options), id)).toBe(false);
+      }
+    }
+  });
+
   it('keeps event availability outside the binding matcher', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(13);
+    expect(Object.keys(shortcutBindings)).toHaveLength(15);
   });
 });

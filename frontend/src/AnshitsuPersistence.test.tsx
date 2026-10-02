@@ -47,16 +47,6 @@ async function mount() {
   await flush();
 }
 const currentPhoto = () => container.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label');
-function hoverFilmstrip() {
-  const event = new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 20 });
-  Object.defineProperty(event, 'movementX', { value: 1 });
-  act(() => container.querySelector('.filmstrip-scroll')!.dispatchEvent(event));
-}
-function leaveFilmstrip() {
-  const event = new MouseEvent('pointermove', { bubbles: true, clientX: 300, clientY: 20 });
-  Object.defineProperty(event, 'movementX', { value: 1 });
-  act(() => document.body.dispatchEvent(event));
-}
 async function filmstripKey(value = 'ArrowRight', init: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
   await act(async () => { target.dispatchEvent(event); });
@@ -88,7 +78,6 @@ describe('Anshitsu Filmstrip persistence', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
     vi.useFakeTimers(); await mount();
     await click('button[aria-label="Disable Basic"]');
-    hoverFilmstrip();
     const history = container.querySelector('.edit-history')!.innerHTML;
     const getCount = mocked.get.mock.calls.length;
     await advance(3000);
@@ -185,11 +174,11 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
     expect(mocked.statuses).toHaveBeenCalledTimes(1);
   });
-  it('navigates in both directions after route changes without saving a clean photo', async () => {
-    await mount(); hoverFilmstrip();
-    await filmstripKey(); expect(currentPhoto()).toBe('second.jpg');
-    await filmstripKey(); expect(currentPhoto()).toBe('second.jpg');
-    await filmstripKey('ArrowLeft'); expect(currentPhoto()).toBe('first.jpg');
+  it('navigates globally in both directions without saving a clean photo', async () => {
+    await mount();
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true }); expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true }); expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('ArrowLeft', { ctrlKey: true, shiftKey: true }); expect(currentPhoto()).toBe('first.jpg');
     expect(mocked.put).not.toHaveBeenCalled();
     expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id, first.id]);
   });
@@ -198,12 +187,12 @@ describe('Anshitsu Filmstrip persistence', () => {
     vi.useFakeTimers();
     const pending = deferred<any>();
     mocked.put.mockReturnValueOnce(pending.promise);
-    await mount(); await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
-    await filmstripKey();
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(currentPhoto()).toBe('first.jpg');
     expect(mocked.put).toHaveBeenCalledTimes(1);
-    for (let index = 0; index < 4; index++) await filmstripKey('ArrowRight', { repeat: true });
-    await filmstripKey('ArrowLeft');
+    for (let index = 0; index < 4; index++) await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true, repeat: true });
+    await filmstripKey('ArrowLeft', { ctrlKey: true, shiftKey: true });
     expect(mocked.put).toHaveBeenCalledTimes(1);
     expect(mocked.get).toHaveBeenCalledTimes(1);
     const [id, state, revision, saveId] = mocked.put.mock.calls[0];
@@ -218,11 +207,11 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('uses the existing save-failure confirmation and retains edits on Stay', async () => {
     vi.useFakeTimers();
     mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict', 409, 'revision_conflict'));
-    await mount(); await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
-    await filmstripKey();
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(currentPhoto()).toBe('first.jpg');
-    await filmstripKey();
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
@@ -233,26 +222,17 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe('first.jpg');
   });
 
-  it('prioritizes hovered Filmstrip arrows, then preserves slider, Shift and number editing after pointer exit', async () => {
-    vi.useFakeTimers(); await mount(); hoverFilmstrip();
-    const ranges = container.querySelectorAll<HTMLInputElement>('.adjustment-range');
-    await act(async () => ranges[0].focus());
-    await filmstripKey('ArrowRight', {}, ranges[0]);
-    expect(ranges[0].value).toBe('0');
-    expect(currentPhoto()).toBe('second.jpg');
-    leaveFilmstrip();
-    const activeRange = container.querySelectorAll<HTMLInputElement>('.adjustment-range')[0];
-    await act(async () => activeRange.focus());
-    await filmstripKey('ArrowRight', {}, activeRange);
-    expect(activeRange.value).toBe('1');
-    await filmstripKey('ArrowDown', { shiftKey: true }, activeRange);
-    const nextRange = container.querySelectorAll<HTMLInputElement>('.adjustment-range')[1];
-    expect(document.activeElement).toBe(nextRange);
-    await filmstripKey('ArrowRight', { shiftKey: true }, nextRange);
-    expect(document.activeElement).toBe(container.querySelectorAll('.adjustment-number')[1]);
-    await filmstripKey('ArrowRight', {}, document.activeElement!);
+  it('moves globally from slider focus while leaving ordinary slider arrows available', async () => {
+    await mount();
+    const range = container.querySelector<HTMLInputElement>('.adjustment-range')!;
+    await act(async () => range.focus());
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true }, range);
     expect(currentPhoto()).toBe('second.jpg');
     expect(mocked.put).not.toHaveBeenCalled();
+    const activeRange = container.querySelector<HTMLInputElement>('.adjustment-range')!;
+    await act(async () => activeRange.focus());
+    await filmstripKey('ArrowRight', {}, activeRange);
+    expect(currentPhoto()).toBe('second.jpg');
   });
 
   it('blocks Filmstrip keys while a History menu or confirmation dialog is open', async ({ onTestFinished }) => {
@@ -267,7 +247,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     HTMLDialogElement.prototype.close = function () { this.open = false; };
     vi.useFakeTimers(); await mount();
-    await click('button[aria-label="Disable Basic"]'); hoverFilmstrip();
+    await click('button[aria-label="Disable Basic"]');
     await click('.history-menu-trigger');
     await filmstripKey(); expect(currentPhoto()).toBe('first.jpg');
     const clear = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]

@@ -14,20 +14,20 @@ function Harness({ disabled = false, blocked = false, items = assets }: { disabl
   const [active, setActive] = useState('a');
   return <><Filmstrip assets={items} activeAssetId={active} disabled={disabled} keyboardBlocked={blocked}
     onActivate={(id) => { activate(id); setActive(id); }} />
-    <input type="range" /><input type="number" /><input type="text" /><button className="other">Other</button></>;
+    <input type="range" /><input type="number" /><input type="text" /><textarea /><select><option>one</option></select>
+    <div contentEditable /><div role="textbox" /><button className="other">Other</button></>;
 }
 const scroll = () => host.querySelector<HTMLElement>('.filmstrip-scroll')!;
 const item = (index: number) => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[index];
 const current = () => host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label');
-function hover(inside = true) {
-  const event = new MouseEvent('pointermove', { bubbles: true, clientX: inside ? 20 : 200, clientY: 20 });
-  Object.defineProperty(event, 'movementX', { value: 1 });
-  act(() => (inside ? scroll() : document.body).dispatchEvent(event));
-}
-function key(value = 'ArrowRight', target: EventTarget = window, init: KeyboardEventInit = {}) {
+function key(value: string, target: EventTarget = window, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...init });
   act(() => target.dispatchEvent(event));
   return event;
+}
+function move(direction: 'previous' | 'next', target: EventTarget = window, init: KeyboardEventInit = {}) {
+  return key(direction === 'previous' ? 'ArrowLeft' : 'ArrowRight', target,
+    { ctrlKey: true, shiftKey: true, ...init });
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -37,111 +37,96 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('Filmstrip keyboard navigation', () => {
-  it('uses current selection order on hovered gaps, stops at edges and stops after pointer exit', () => {
-    expect(key().defaultPrevented).toBe(false);
-    hover();
-    expect(key('ArrowLeft').defaultPrevented).toBe(true);
-    expect(activate).not.toHaveBeenCalled();
-    key(); expect(current()).toBe('b.jpg');
-    key(); expect(current()).toBe('c.jpg');
-    key(); expect(activate.mock.calls).toEqual([['b'], ['c']]);
-    key('ArrowLeft'); expect(current()).toBe('b.jpg');
-    hover(false);
-    key(); expect(current()).toBe('b.jpg');
-  });
-
-  it('prioritizes real Filmstrip hover over a retained range focus, then returns arrows to the range', () => {
-    const range = host.querySelector<HTMLInputElement>('input[type="range"]')!;
-    act(() => range.focus()); hover();
-    expect(document.activeElement).toBe(range);
-    expect(key('ArrowRight', range).defaultPrevented).toBe(true);
-    expect(activate).toHaveBeenCalledWith('b');
-    expect(document.activeElement).toBe(range);
-    hover(false);
-    expect(key('ArrowLeft', range).defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(range);
-  });
-
-  it('does not treat an unchanged pointer position as Filmstrip hover', () => {
-    const stationary = new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 });
-    act(() => scroll().dispatchEvent(stationary));
-    expect(key().defaultPrevented).toBe(false); expect(activate).not.toHaveBeenCalled();
-  });
-
-  it('supports focused thumbnails outside hover and follows focus with preventScroll', () => {
-    act(() => item(0).focus());
-    expect(key('ArrowRight', item(0)).defaultPrevented).toBe(true);
+  it('moves globally in both directions without hover or Filmstrip focus', () => {
+    expect(move('next').defaultPrevented).toBe(true);
     expect(current()).toBe('b.jpg');
-    expect(document.activeElement).toBe(item(1));
-    key('ArrowLeft', item(1)); expect(document.activeElement).toBe(item(0));
-    expect(key('Tab', item(0)).defaultPrevented).toBe(false);
-    const enter = key('Enter', item(2));
-    expect(enter.defaultPrevented).toBe(false);
-    // Native Enter/Space activation is not synthesized by jsdom.
-    act(() => item(2).click()); expect(current()).toBe('c.jpg');
-    expect(key(' ', item(1)).defaultPrevented).toBe(false);
-    act(() => item(1).click()); expect(current()).toBe('b.jpg');
+    expect(move('next').defaultPrevented).toBe(true);
+    expect(current()).toBe('c.jpg');
+    expect(move('next').defaultPrevented).toBe(true);
+    expect(current()).toBe('c.jpg');
+    expect(move('previous').defaultPrevented).toBe(true);
+    expect(current()).toBe('b.jpg');
+    expect(activate.mock.calls).toEqual([['b'], ['c'], ['b']]);
   });
 
-  it.each(['input[type="number"]', 'input[type="text"]', '.other'])
-    ('does not override focus on %s despite hover', (selector) => {
-      hover(); const target = host.querySelector<HTMLElement>(selector)!;
-      act(() => target.focus()); key('ArrowRight', target);
-      expect(activate).not.toHaveBeenCalled();
-      expect(document.activeElement).toBe(target);
-    });
+  it('works while an ordinary Viewer-like control is focused and keeps that focus', () => {
+    const target = host.querySelector<HTMLButtonElement>('.other')!;
+    act(() => target.focus());
+    expect(move('next', target).defaultPrevented).toBe(true);
+    expect(current()).toBe('b.jpg');
+    expect(document.activeElement).toBe(target);
+  });
 
-  it.each([{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }])
-    ('preserves modified keys %j', (modifier) => {
-      hover(); expect(key('ArrowRight', window, modifier).defaultPrevented).toBe(false);
-      expect(activate).not.toHaveBeenCalled();
-    });
-
-  it('ignores already processed events and blocked/disabled navigation', () => {
-    hover();
-    const event = new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true });
-    event.preventDefault(); act(() => window.dispatchEvent(event));
-    expect(activate).not.toHaveBeenCalled();
-    act(() => root.render(<Harness blocked />)); key();
-    expect(activate).not.toHaveBeenCalled();
-    act(() => root.render(<Harness disabled />)); expect(key().defaultPrevented).toBe(false);
-    expect(activate).not.toHaveBeenCalled();
-    act(() => root.render(<Harness items={[assets[0]]} />)); key();
+  it('does not intercept standalone arrows or incomplete/extra modifiers', () => {
+    for (const options of [{}, { ctrlKey: true }, { shiftKey: true }, { ctrlKey: true, shiftKey: true, altKey: true },
+      { ctrlKey: true, shiftKey: true, metaKey: true }, { ctrlKey: true, shiftKey: true, metaKey: true, altKey: true }]) {
+      for (const arrow of ['ArrowLeft', 'ArrowRight']) {
+        expect(key(arrow, window, options).defaultPrevented).toBe(false);
+      }
+    }
     expect(activate).not.toHaveBeenCalled();
   });
 
-  it('does not consume hovered arrow keys while a menu is open', () => {
-    hover();
-    const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); document.body.append(menu);
+  it('ignores repeated, composing, and already prevented commands', () => {
+    expect(move('next', window, { repeat: true }).defaultPrevented).toBe(false);
+    expect(move('next', window, { isComposing: true }).defaultPrevented).toBe(false);
+    const prevented = new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, shiftKey: true, cancelable: true });
+    prevented.preventDefault(); act(() => window.dispatchEvent(prevented));
+    expect(current()).toBe('a.jpg');
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it.each(['input[type="number"]', 'input[type="text"]', 'textarea', 'select', '[contenteditable]', '[role="textbox"]'])
+    ('preserves native editing in %s', (selector) => {
+      const target = host.querySelector<HTMLElement>(selector)!;
+      act(() => target.focus());
+      expect(move('next', target).defaultPrevented).toBe(false);
+      expect(activate).not.toHaveBeenCalled();
+    });
+
+  it('ignores blocked and disabled filmstrips', () => {
+    act(() => root.render(<Harness blocked />));
+    expect(move('next').defaultPrevented).toBe(false);
+    expect(activate).not.toHaveBeenCalled();
+    act(() => root.render(<Harness disabled />));
+    expect(move('next').defaultPrevented).toBe(false);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it.each(['dialog', 'alertdialog', 'menu'])('ignores commands while a %s is open', (role) => {
+    const overlay = role === 'dialog' ? document.createElement('dialog') : document.createElement('div');
+    if (role === 'dialog') (overlay as HTMLDialogElement).setAttribute('open', '');
+    else overlay.setAttribute('role', role);
+    document.body.append(overlay);
     try {
-      expect(key().defaultPrevented).toBe(false);
+      expect(move('next').defaultPrevented).toBe(false);
       expect(activate).not.toHaveBeenCalled();
-    } finally { menu.remove(); }
+    } finally { overlay.remove(); }
   });
 
-  it.each([[120, 212, 200], [260, 352, 252], [80, 172, 180]])
-    ('reveals only the active thumbnail at %s..%s after a click or rerender', (left, right, expected) => {
-      Object.defineProperty(scroll(), 'clientWidth', { configurable: true, value: 200 });
-      vi.spyOn(scroll(), 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
-      vi.spyOn(item(1), 'getBoundingClientRect').mockReturnValue({ left, right } as DOMRect);
-      scroll().scrollLeft = 200;
-      act(() => item(1).click());
-      expect(scroll().scrollLeft).toBe(expected);
-      expect(scroll().scrollTop).toBe(0);
-      expect(document.documentElement.scrollTop).toBe(0);
-      expect(document.documentElement.scrollLeft).toBe(0);
-    });
+  it('ignores the edit settings menu and preserves active thumbnail reveal', () => {
+    const menu = document.createElement('details'); menu.className = 'edit-settings-menu'; menu.open = true;
+    document.body.append(menu);
+    try { expect(move('next').defaultPrevented).toBe(false); } finally { menu.remove(); }
 
-  it('reveals keyboard destinations after rerender and keeps the page stationary', () => {
     Object.defineProperty(scroll(), 'clientWidth', { configurable: true, value: 200 });
     vi.spyOn(scroll(), 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
     vi.spyOn(item(1), 'getBoundingClientRect').mockImplementation(() => ({
       left: 260 - scroll().scrollLeft, right: 352 - scroll().scrollLeft,
     } as DOMRect));
-    hover(); key();
+    move('next');
     expect(current()).toBe('b.jpg');
     expect(scroll().scrollLeft).toBe(52);
+    expect(document.activeElement).toBe(document.body);
     expect(document.documentElement.scrollTop).toBe(0);
     expect(document.documentElement.scrollLeft).toBe(0);
+  });
+
+  it('reveals active thumbnails after clicks without moving focus', () => {
+    Object.defineProperty(scroll(), 'clientWidth', { configurable: true, value: 200 });
+    vi.spyOn(scroll(), 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
+    vi.spyOn(item(1), 'getBoundingClientRect').mockReturnValue({ left: 260, right: 352 } as DOMRect);
+    act(() => item(1).click());
+    expect(scroll().scrollLeft).toBe(52);
   });
 });
