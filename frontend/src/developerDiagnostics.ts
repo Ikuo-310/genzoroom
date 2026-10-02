@@ -1,4 +1,5 @@
 import type { AdapterInfo, DiagnosticValue, SmokeCode, SmokeState } from './webgpuSmoke';
+import { createJpegReport, emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 
 export interface DiagnosticsEnvironment {
   secureContext: boolean | null;
@@ -120,6 +121,7 @@ export interface DiagnosticsReport {
   generatedAt: string;
   environment: DiagnosticsEnvironment;
   webgpu: WebGpuReport;
+  jpeg: JpegReport;
 }
 const diagnostic = (value?: DiagnosticValue): ReportDiagnostic => ({
   status: value ? STATUS_CODES[value.code] : 'not_acquired', detail: value?.detail ?? null,
@@ -164,9 +166,9 @@ export function createWebGpuReport(apiAvailable: boolean, state: SmokeState | nu
 }
 
 export function createDiagnosticsReport(environment: DiagnosticsEnvironment, webgpu: WebGpuReport,
-  date = new Date()): DiagnosticsReport {
+  date = new Date(), jpeg: JpegReport = emptyJpegReport()): DiagnosticsReport {
   // Copy the data snapshot so a run continuing after export cannot alter this report.
-  return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu })) as DiagnosticsReport;
+  return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu, jpeg: createJpegReport(jpeg) })) as DiagnosticsReport;
 }
 
 export function exportDiagnosticsReport(report: DiagnosticsReport): void {

@@ -483,5 +483,113 @@
       "userAgent": "User agent",
       "platform": "Platform"
     }
+  },
+  "jpegDiagnostics": {
+    "title": "Real JPEG Diagnostics",
+    "description": "Measure full-resolution JPEG processing using a recent Immich original. Runs only when requested; photos and filenames are not exported.",
+    "selection": {
+      "automatic": "Automatic",
+      "manual": "Manually selected"
+    },
+    "choose": "Choose from recent JPEGs",
+    "automatic": "Return to automatic selection",
+    "run": "Run real JPEG diagnostics",
+    "candidateLabel": "Recent JPEG candidates",
+    "candidateAlt": "JPEG candidate {{number}}",
+    "candidates": {
+      "loading": "Loading recent JPEGs…",
+      "ready": "Choose a thumbnail to keep using the same photo.",
+      "failed": "Could not load recent JPEG candidates.",
+      "empty": "No JPEG candidate in the latest 50 assets."
+    },
+    "status": {
+      "not_run": "Not run",
+      "running": "Running",
+      "completed": "Completed",
+      "completed_with_errors": "Completed with errors or unavailable GPU",
+      "cancelled": "Cancelled",
+      "no_jpeg_candidate": "No JPEG candidate in the latest 50 assets",
+      "failed": "Failed"
+    },
+    "phase": {
+      "idle": "Starting",
+      "asset_lookup": "Finding latest JPEG",
+      "original_fetch": "Fetching original",
+      "profile_read": "Reading ICC profile",
+      "decode": "Decoding to sRGB ImageData",
+      "source_histogram": "Source histogram",
+      "gpu_initialization": "GPU initialization",
+      "gpu_upload": "GPU source upload",
+      "cases": "Processing case"
+    },
+    "compressedBytes": "Compressed size (bytes)",
+    "dimensions": "Decoded dimensions",
+    "profile": "ICC / profile",
+    "profileStatus": {
+      "not_read": "Not read",
+      "embedded": "Embedded ICC",
+      "none": "No embedded ICC",
+      "unknown": "Unknown profile"
+    },
+    "gpuStatus": "GPU status",
+    "gpu": {
+      "not_run": "Not run",
+      "ready": "Ready",
+      "completed": "Completed",
+      "unavailable": "Unavailable",
+      "failed": "Failed"
+    },
+    "timing": {
+      "totalMs": "Total",
+      "assetLookupMs": "Asset lookup (automatic only)",
+      "originalFetchMs": "Original fetch through Blob completion",
+      "profileReadMs": "ICC / profile read",
+      "decodeToSrgbImageDataMs": "Decode to sRGB ImageData",
+      "sourceHistogramMs": "Source histogram",
+      "gpuInitializationMs": "GPU initialization",
+      "gpuSourceUploadMs": "GPU source upload"
+    },
+    "columns": {
+      "case": "Case",
+      "cpuRenderMs": "CPU render",
+      "cpuHistogramMs": "CPU histogram",
+      "gpuRenderMs": "GPU render / readback",
+      "gpuHistogramMs": "GPU histogram",
+      "status": "Status / Error"
+    },
+    "timingNotes": "Single-run diagnostic timings are not a strict benchmark. Original fetch includes Blob download; decode covers the production JPEG/ICC → sRGB Canvas → ImageData path. GPU render includes parameter preparation, submission and CPU readback. Processing is serial; scheduling, warmup, cache and system load affect timings. — means not measured or not applicable. Large originals can take time and use substantial memory.",
+    "error": {
+      "asset_lookup_failed": "Asset lookup failed",
+      "original_fetch_failed": "Original fetch failed",
+      "profile_failed": "ICC / profile read failed",
+      "decode_failed": "JPEG decode failed",
+      "source_histogram_failed": "Source histogram failed",
+      "cpu_render_failed": "CPU render failed",
+      "cpu_histogram_failed": "CPU histogram failed",
+      "gpu_unavailable": "WebGPU unavailable",
+      "gpu_initialization_failed": "GPU initialization failed",
+      "gpu_upload_failed": "GPU source upload failed",
+      "gpu_render_failed": "GPU render failed; remaining GPU cases skipped",
+      "gpu_histogram_failed": "GPU histogram failed; remaining GPU cases skipped"
+    },
+    "case": {
+      "temperature": "Temperature",
+      "tint": "Tint",
+      "exposure": "Exposure",
+      "contrast": "Contrast",
+      "highlights": "Highlights",
+      "whites": "Whites",
+      "shadows": "Shadows",
+      "blacks": "Blacks",
+      "shadowsTemperature": "Shadows temperature",
+      "shadowsTint": "Shadows tint",
+      "midtonesTemperature": "Midtones temperature",
+      "midtonesTint": "Midtones tint",
+      "highlightsTemperature": "Highlights temperature",
+      "highlightsTint": "Highlights tint",
+      "vibrance": "Vibrance",
+      "saturation": "Saturation",
+      "all_sliders_representative": "All sliders representative"
+    }
   }
 }

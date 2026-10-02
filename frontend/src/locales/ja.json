@@ -481,5 +481,113 @@
       "userAgent": "ユーザーエージェント",
       "platform": "プラットフォーム"
     }
+  },
+  "jpegDiagnostics": {
+    "title": "実写JPEG診断",
+    "description": "Immichの最近のJPEG原版を使い、フル解像度の処理時間を観測します。操作時のみ実行し、写真やファイル名は書き出しません。",
+    "selection": {
+      "automatic": "自動選択",
+      "manual": "手動選択"
+    },
+    "choose": "最近のJPEGから選択",
+    "automatic": "自動選択へ戻す",
+    "run": "実写JPEG診断を実行",
+    "candidateLabel": "最近のJPEG候補",
+    "candidateAlt": "JPEG候補 {{number}}",
+    "candidates": {
+      "loading": "最近のJPEGを取得中…",
+      "ready": "サムネイルを選択すると、同じ写真で繰り返し診断できます。",
+      "failed": "最近のJPEG候補を取得できませんでした。",
+      "empty": "最新50件にJPEG候補がありません。"
+    },
+    "status": {
+      "not_run": "未実行",
+      "running": "実行中",
+      "completed": "完了",
+      "completed_with_errors": "エラーまたはGPU利用不可を含めて完了",
+      "cancelled": "中止",
+      "no_jpeg_candidate": "最新50件にJPEG候補がありません",
+      "failed": "失敗"
+    },
+    "phase": {
+      "idle": "開始中",
+      "asset_lookup": "最新JPEGを検索中",
+      "original_fetch": "原版を取得中",
+      "profile_read": "ICCプロファイルを解析中",
+      "decode": "sRGB ImageDataへデコード中",
+      "source_histogram": "入力画像のHistogram",
+      "gpu_initialization": "GPU初期化中",
+      "gpu_upload": "GPUへ画像アップロード中",
+      "cases": "ケース処理中"
+    },
+    "compressedBytes": "圧縮サイズ（bytes）",
+    "dimensions": "デコード後の寸法",
+    "profile": "ICC / profile",
+    "profileStatus": {
+      "not_read": "未解析",
+      "embedded": "埋め込みICC",
+      "none": "埋め込みICCなし",
+      "unknown": "不明なプロファイル"
+    },
+    "gpuStatus": "GPU状態",
+    "gpu": {
+      "not_run": "未実行",
+      "ready": "準備完了",
+      "completed": "完了",
+      "unavailable": "利用不可",
+      "failed": "失敗"
+    },
+    "timing": {
+      "totalMs": "合計",
+      "assetLookupMs": "対象検索（自動選択のみ）",
+      "originalFetchMs": "原版取得（Blob完了まで）",
+      "profileReadMs": "ICC / profile解析",
+      "decodeToSrgbImageDataMs": "sRGB ImageDataへのデコード",
+      "sourceHistogramMs": "入力画像のHistogram",
+      "gpuInitializationMs": "GPU初期化",
+      "gpuSourceUploadMs": "GPU画像アップロード"
+    },
+    "columns": {
+      "case": "ケース",
+      "cpuRenderMs": "CPU処理",
+      "cpuHistogramMs": "CPU Histogram",
+      "gpuRenderMs": "GPU処理 / readback",
+      "gpuHistogramMs": "GPU Histogram",
+      "status": "状態 / エラー"
+    },
+    "timingNotes": "単発の診断用実測時間であり、厳密なbenchmarkではありません。原版取得はBlob完了まで、デコードは本番のJPEG/ICC → sRGB Canvas → ImageData全体、GPU処理はパラメーター準備・投入・CPU readbackまでを含みます。各ケースは直列実行し、スケジューリング、warmup、cache、負荷の影響を受けます。— は未計測または計測対象外です。大きな原版では時間とメモリを多く使います。",
+    "error": {
+      "asset_lookup_failed": "対象検索に失敗",
+      "original_fetch_failed": "原版取得に失敗",
+      "profile_failed": "ICC / profile解析に失敗",
+      "decode_failed": "JPEGデコードに失敗",
+      "source_histogram_failed": "入力画像のHistogramに失敗",
+      "cpu_render_failed": "CPU処理に失敗",
+      "cpu_histogram_failed": "CPU Histogramに失敗",
+      "gpu_unavailable": "WebGPU利用不可",
+      "gpu_initialization_failed": "GPU初期化に失敗",
+      "gpu_upload_failed": "GPU画像アップロードに失敗",
+      "gpu_render_failed": "GPU処理に失敗し、残りのGPUケースを中止",
+      "gpu_histogram_failed": "GPU Histogramに失敗し、残りのGPUケースを中止"
+    },
+    "case": {
+      "temperature": "色温度",
+      "tint": "色かぶり補正",
+      "exposure": "露出",
+      "contrast": "コントラスト",
+      "highlights": "ハイライト",
+      "whites": "白レベル",
+      "shadows": "シャドウ",
+      "blacks": "黒レベル",
+      "shadowsTemperature": "シャドウの色温度",
+      "shadowsTint": "シャドウの色かぶり補正",
+      "midtonesTemperature": "中間調の色温度",
+      "midtonesTint": "中間調の色かぶり補正",
+      "highlightsTemperature": "ハイライトの色温度",
+      "highlightsTint": "ハイライトの色かぶり補正",
+      "vibrance": "自然な彩度",
+      "saturation": "彩度",
+      "all_sliders_representative": "全スライダーの代表値"
+    }
   }
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
+import { RealJpegDiagnostics } from './RealJpegDiagnostics';
+import { emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 import { collectDiagnosticsEnvironment, createDiagnosticsReport, createWebGpuReport, exportDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
 import './developer.css';
 
@@ -9,6 +11,8 @@ export function DeveloperPage() {
   const [environment] = useState(collectDiagnosticsEnvironment);
   const [webgpu, setWebgpu] = useState(() => createWebGpuReport(environment.gpuApiAvailable, null));
   const [exportFailed, setExportFailed] = useState(false);
+  const [jpeg, setJpeg] = useState(emptyJpegReport);
+  const acceptJpegReport = useCallback((report: JpegReport) => setJpeg(report), []);
   const acceptReport = useCallback((report: WebGpuReport) => setWebgpu(report), []);
   useEffect(() => {
     const original = document.title;
@@ -30,9 +34,10 @@ export function DeveloperPage() {
         <div key={key}><dt>{t(`developer.environmentFields.${key}`)}</dt><dd>{value === null ? t('developer.notAvailable')
           : typeof value === 'boolean' ? t(`webgpuSmoke.${value ? 'yes' : 'no'}`) : value}</dd></div>)}</dl>
     </section>
+    <RealJpegDiagnostics onReport={acceptJpegReport} />
     <WebGpuDiagnostics onReport={acceptReport} exportError={exportFailed} onExport={() => {
         setExportFailed(false);
-        try { exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu)); }
+        try { exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu, new Date(), jpeg)); }
         catch { setExportFailed(true); }
       }} />
   </main>;

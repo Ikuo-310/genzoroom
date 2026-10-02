@@ -10,3 +10,9 @@
 .developer-page th, .developer-page td { padding: 10px; border-bottom: 1px solid #43584d; vertical-align: top; }
 .developer-page td:last-child { min-width: 180px; max-width: 360px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .developer-page :focus-visible { outline: 2px solid #e6eee9; outline-offset: 3px; }
+.developer-jpeg-target { overflow-wrap: anywhere; }
+.developer-jpeg-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 16px; }
+.developer-jpeg-candidates button { min-width: 0; padding: 8px; background: #293b32; color: inherit; border: 2px solid transparent; }
+.developer-jpeg-candidates button[aria-pressed="true"] { border-color: #d1e2bf; }
+.developer-jpeg-candidates img { display: block; width: 100%; height: 110px; object-fit: contain; }
+.developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }

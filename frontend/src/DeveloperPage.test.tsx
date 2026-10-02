@@ -43,7 +43,8 @@ it('translates both languages, follows changes, never probes on mount and restor
       for (const key of ['totalMs', 'initializationMs', 'sourceUploadMs']) expect(host.textContent).toContain(i18n.t(`webgpuSmoke.timing.${key}`));
       expect(host.textContent).toContain(i18n.t('webgpuSmoke.timingNotes'));
       expect(host.textContent).not.toMatch(/webgpuSmoke\.|developer\.|codes\./);
-      expect(host.querySelectorAll('tbody tr')).toHaveLength(SMOKE_CASES.length);
+      expect(host.querySelectorAll('section[aria-labelledby="webgpu-title"] tbody tr')).toHaveLength(SMOKE_CASES.length);
+      expect(host.textContent).toContain(i18n.t('jpegDiagnostics.title'));
     }
     expect(gpu.requestAdapter).not.toHaveBeenCalled();
     act(() => root.unmount()); root = createRoot(host);
@@ -138,6 +139,7 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(initial.schemaVersion).toBe(1); expect(initial.generatedAt).toMatch(/Z$/);
     expect(initial.environment.hardwareConcurrency).toBe(8); expect(initial.environment.deviceMemory).toBeNull();
     expect(initial.webgpu.smoke.status).toBe('not_run');
+    expect(initial.jpeg.status).toBe('not_run');
     expect(gpu.requestAdapter).not.toHaveBeenCalled();
     const runButton = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('webgpuSmoke.run'))!;
     await act(async () => runButton.click());
