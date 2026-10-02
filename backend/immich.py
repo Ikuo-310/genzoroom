@@ -114,6 +114,8 @@ class RecentAsset(BaseModel):
     thumbnail_url: str
     format: str
     is_raw: bool
+    stackId: UUID | None = None
+    primaryAssetId: UUID | None = None
 
 
 class AlbumSummary(BaseModel):
@@ -451,6 +453,16 @@ def _search_assets(body: object) -> list[RecentAsset]:
         if not isinstance(filename, str) or not isinstance(date, str):
             raise TypeError
         image_format, is_raw = classify_image_format(filename)
+        stack_id = primary_asset_id = None
+        # Missing upstream metadata does not prove that an asset is unstacked.
+        stack = item.get("stack")
+        if stack is not None:
+            if not isinstance(stack, Mapping):
+                raise TypeError
+            if not isinstance(stack.get("id"), str) or not isinstance(stack.get("primaryAssetId"), str):
+                raise TypeError
+            stack_id = UUID(stack["id"])
+            primary_asset_id = UUID(stack["primaryAssetId"])
         assets.append(RecentAsset(
             id=asset_id,
             filename=filename,
@@ -458,6 +470,8 @@ def _search_assets(body: object) -> list[RecentAsset]:
             thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
             format=image_format,
             is_raw=is_raw,
+            stackId=stack_id,
+            primaryAssetId=primary_asset_id,
         ))
     return assets
 

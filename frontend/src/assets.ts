@@ -5,6 +5,8 @@ export type RecentAsset = {
   thumbnail_url: string;
   format: string;
   is_raw: boolean;
+  stackId?: string | null;
+  primaryAssetId?: string | null;
 };
 
 export type AssetExif = {

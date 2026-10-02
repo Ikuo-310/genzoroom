@@ -356,6 +356,7 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(result[0].model_dump(mode="json"), {
             "id": str(UUID(int=1)), "filename": "photo-0.dng", "date": "2026-09-30T12:00:00.000Z",
             "thumbnail_url": f"/api/assets/{UUID(int=1)}/thumbnail", "format": "DNG", "is_raw": True,
+            "stackId": None, "primaryAssetId": None,
         })
 
     def test_day_follows_cursor_past_1000_and_rejects_partial_results(self):

@@ -6,6 +6,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export function isRecentAsset(value: unknown): value is RecentAsset {
   return isRecord(value) &&
     typeof value.id === 'string' &&
@@ -13,7 +17,9 @@ export function isRecentAsset(value: unknown): value is RecentAsset {
     typeof value.date === 'string' &&
     typeof value.thumbnail_url === 'string' &&
     typeof value.format === 'string' &&
-    typeof value.is_raw === 'boolean';
+    typeof value.is_raw === 'boolean' &&
+    ((value.stackId == null && value.primaryAssetId == null) ||
+      (isUuid(value.stackId) && isUuid(value.primaryAssetId)));
 }
 
 function isAssetDetail(value: unknown): value is AssetDetail {

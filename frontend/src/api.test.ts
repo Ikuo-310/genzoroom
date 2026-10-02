@@ -1,6 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
 
+describe('Home asset stack metadata', () => {
+  const asset = { id: 'asset-1', filename: 'member.dng', date: '2026-09-01',
+    thumbnail_url: '/api/assets/asset-1/thumbnail', format: 'DNG', is_raw: true };
+  const stack = { stackId: '22345678-1234-4234-9234-123456789abc',
+    primaryAssetId: '32345678-1234-4234-9234-123456789abc' };
+  const readers = [
+    (signal: AbortSignal) => fetchRecentAssets(100, signal),
+    (signal: AbortSignal) => fetchAlbumAssets('album-1', signal),
+    (signal: AbortSignal) => fetchCalendarDayAssets('2026-09-01', signal),
+    fetchFavoriteAssets,
+  ];
+  it.each(readers)('preserves stack metadata and accepts older non-stack responses (%#)', async read => {
+    const data = [asset, { ...asset, stackId: null, primaryAssetId: null }, { ...asset, ...stack }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
+    try {
+      expect(await read(new AbortController().signal)).toEqual(data);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each(readers)('rejects malformed or incomplete stack metadata (%#)', async read => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    try {
+      for (const metadata of [{ ...stack, stackId: 'bad' }, { ...stack, primaryAssetId: 'bad' },
+        { stackId: stack.stackId }, { ...stack, primaryAssetId: 123 }]) {
+        fetch.mockResolvedValue(new Response(JSON.stringify([{ ...asset, ...metadata }])));
+        await expect(read(new AbortController().signal)).rejects.toThrow('Unexpected');
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
 describe('favorites API', () => {
   it('uses the favorites endpoint and validates its response', async () => {
     const fetch = vi.fn(async () => new Response('[]'));
