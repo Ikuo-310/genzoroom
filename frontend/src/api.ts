@@ -131,5 +131,7 @@ export async function fetchAssetDetail(assetId: string, signal: AbortSignal): Pr
   if (!response.ok) throw new Error('Asset detail request failed');
   const data: unknown = await response.json();
   if (!isAssetDetail(data)) throw new Error('Unexpected asset detail response');
-  return data;
+  // Optional malformed GPS must not turn a readable photo into a fatal detail error.
+  const coordinate = (value: unknown, limit: number) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit ? value : undefined;
+  return { ...data, exif: { ...data.exif, latitude: coordinate(data.exif.latitude, 90), longitude: coordinate(data.exif.longitude, 180) } };
 }

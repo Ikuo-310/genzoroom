@@ -608,6 +608,18 @@
     }
   },
   "stackManagement": {
+    "detecting": "Detecting stack candidates…",
+    "partialFailure": "Some photo details could not be loaded. You can detect again.",
+    "allFailure": "Photo details could not be loaded. NAME candidates are preserved. You can detect again.",
+    "noUnmatched": "No photos outside stack candidates",
+    "group": "Stack candidate {{index}}",
+    "matched": "Matched",
+    "mismatch": "Mismatch",
+    "unavailable": "Information unavailable",
+    "error": "Failed to retrieve or parse photo information",
+    "nameExact": "Exact basename match",
+    "namePixel": "Known Pixel filename normalization",
+    "cover": "Automatic COVER candidate",
     "title": "Stack Management",
     "backHome": "Back to HOME",
     "actions": "Stack actions",

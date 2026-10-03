@@ -344,7 +344,8 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertTrue(detail.is_raw)
         self.assertEqual(detail.exif.focal_length, 35)
         self.assertEqual(detail.exif.width, 6000)
-        self.assertNotIn("latitude", detail.exif.model_dump())
+        self.assertEqual(detail.exif.latitude, 35.0)
+        self.assertEqual(detail.exif.longitude, 139.0)
         self.assertNotIn(API_KEY, detail.model_dump_json())
 
     def test_asset_detail_handles_missing_exif_safely(self):
@@ -416,6 +417,39 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(body["filename"], "photo.jpg")
         self.assertEqual(body["date"], "2026-09-01T12:00:00.000Z")
         self.assertEqual(body["exif"], {"make": "Example Camera Co.", "f_number": 2.8, "width": 6000})
+
+    def test_optional_gps_coordinates_preserve_detail_and_reject_malformed_values(self):
+        cases = [(None, None, None), (35.123, 90, 35.123), (0, 90, 0.0),
+                 (-90, 90, -90.0), (180, 180, 180.0), (91, 90, None),
+                 (-181, 180, None), ("35.0", 90, None), (True, 90, None),
+                 ({}, 90, None), (float("inf"), 90, None),
+                 (float("nan"), 90, None), (10 ** 1000, 90, None)]
+        for value, limit, expected in cases:
+            field = "longitude" if limit == 180 else "latitude"
+            with self.subTest(field=field, value=value):
+                detail = self.run_detail_with_exif({field: value})
+                self.assertEqual(getattr(detail.exif, field), expected)
+                self.assertEqual(detail.exif.make, "Example Camera Co.")
+                self.assertEqual(detail.exif.f_number, 2.8)
+                if expected is None:
+                    self.assertNotIn(field, detail.exif.model_dump(exclude_none=True))
+        detail = self.run_detail_with_exif({})
+        self.assertIsNone(detail.exif.latitude)
+        self.assertIsNone(detail.exif.longitude)
+
+    def test_gps_is_added_to_the_existing_detail_endpoint_contract(self):
+        detail = self.run_detail_with_exif({"latitude": 35.123, "longitude": 139.456})
+
+        async def request_detail():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+                return await client.get(f"/assets/{ASSET_ID}")
+
+        with patch("main.get_asset_detail", new=AsyncMock(return_value=detail)):
+            response = asyncio.run(request_detail())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["exif"]["latitude"], 35.123)
+        self.assertEqual(response.json()["exif"]["longitude"], 139.456)
+        self.assertEqual(response.json()["filename"], detail.filename)
 
     def test_proxies_preview_instead_of_the_original_asset(self):
         image = b"fake-preview"

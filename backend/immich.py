@@ -157,6 +157,8 @@ class AssetExif(BaseModel):
     exposure_compensation: float | None = None
     width: int | None = None
     height: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class AssetDetail(BaseModel):
@@ -189,6 +191,13 @@ def _optional_string(value: object) -> str | None:
 
 def _optional_number(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _optional_coordinate(value: object, limit: float) -> float | None:
+    # Invalid optional GPS must not prevent opening an otherwise valid photo.
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not -limit <= value <= limit:
+        return None
+    return float(value) if isfinite(value) else None
 
 
 def _optional_integer(value: object) -> int | None:
@@ -905,6 +914,8 @@ async def get_asset_detail(
             exposure_compensation=_optional_number(exif.get("exposureCompensation")),
             width=_optional_integer(exif.get("exifImageWidth")),
             height=_optional_integer(exif.get("exifImageHeight")),
+            latitude=_optional_coordinate(exif.get("latitude"), 90),
+            longitude=_optional_coordinate(exif.get("longitude"), 180),
         ),
     )
 

@@ -55,6 +55,19 @@ Recent, Favorites, Album details, and Calendar date details use one shared photo
 
 Home keeps in-memory scroll offsets by view: Recent, Favorites, Album list and each Album ID, and Calendar year, month, and date. On Anshitsu navigation, Home passes its tab, detail context, calendar mode, and scroll coordinates in route state; the route validates that context and restores after the required view data is ready. Ordinary tab navigation uses the same view keys and pending restoration mechanism. Album-detail and Calendar-date selections remain available when switching tabs; reactivating their already-active tab returns to the parent view. These rules remain coordinated in GalleryPage rather than being spread across data hooks.
 
+### Stack management drafts
+
+Home sends ordered concrete selected assets and its return context to `/stack`; this path bypasses the Anshitsu asset resolver. `stackCandidateDetection.ts` generates local, unsent `DraftStack` groups only from unstacked filename families containing both RAW and Non-RAW members. Stems are case-sensitive; only the known Pixel RAW COVER/ORIGINAL naming pattern is normalized. TIME (EXIF capture-time spread at most two seconds), CAM (complete trimmed case-insensitive make/model pairs), and GPS (complete valid coordinate spreads at most 1e-5 degrees) provide matched/mismatch/unavailable/error evidence without creating or rejecting NAME groups. COVER prefers the newest JPEG, then the newest Non-RAW, then the newest member; valid dates outrank invalid dates, and ties retain selection order.
+
+| State | Owner | Update and invariant |
+| --- | --- | --- |
+| `groups`, `unmatched` | `useStackCandidateDetection` | Rebuilt on entry or re-detection from the navigation asset snapshot. Every unique selected asset appears exactly once; existing Immich Stack members remain unmatched. Draft IDs are UI-only, distinct from Immich IDs. |
+| `request` generation, controller, busy flag | `useStackCandidateDetection` | At most four detail workers per active generation. Cleanup or replacement aborts and invalidates the old generation; stale results cannot publish. Busy blocks duplicate re-detection. Only NAME candidate members are fetched. Detail failures preserve NAME groups and mark TIME/CAM/GPS as error; missing fields are unavailable, and present unparseable fields are error. |
+| `selectedIds` | `StackManagementPage` | Individual photo clicks and clear-selection update local selection, independently of COVER and Home selection. Re-detection retains it. No draft or selection persistence is added. |
+| `homeThumbnailColumns` | Existing browser-saved Settings store | The shared `HomeThumbnailSizeControl` updates the saved preference (`--stack-columns`). Transient `useStackColumns` clamps it against usable content width to `--stack-effective-columns` for both grids without writing settings; widening restores the preferred count. Groups span their member count, capped to visible columns; excess members wrap inside the group. |
+
+The header and control bar stay outside the content scroll container. Re-detection reads the existing detail API; optional malformed GPS is omitted without failing the photo. No Immich Stack writes or manual group operations are implemented.
+
 ### Keyboard command architecture
 
 `frontend/src/editShortcuts.ts` is the central registry for application command bindings. Its `shortcutBindings` registry maps the `ShortcutId` union to declarative key/code and modifier definitions. `matchesShortcut()` matches a command including its modifiers; `matchesShortcutKey()` matches the physical/logical key without requiring the original modifiers, as needed for release handling. The registry owns command identity and binding matching, while Home, Anshitsu, ImageViewer, Filmstrip, ScopePanel, and other feature owners keep their own listeners, action execution, availability, and state. GenzoRoom does not use a monolithic global shortcut dispatcher.

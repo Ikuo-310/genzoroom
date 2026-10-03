@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
+import { fetchAssetDetail, fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
 
 describe('Home asset stack metadata', () => {
   const asset = { id: 'asset-1', filename: 'member.dng', date: '2026-09-01',
@@ -164,5 +164,20 @@ describe('calendar API', () => {
       fetch.mockImplementation(async () => new Response(JSON.stringify([{ ...photo, is_raw: 'false' }])));
       await expect(fetchCalendarDayAssets('2026-09-30', controller.signal)).rejects.toThrow('Unexpected calendar photos response');
     } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe('optional detail GPS', () => {
+  it.each([undefined, null, 'bad', true, {}, 91, -91])('ignores invalid latitude without losing detail: %j', async latitude => {
+    const data = { id: 'asset-1', filename: 'photo.jpg', date: '2026-10-01', thumbnail_url: '/thumb', preview_url: '/preview', is_raw: false, format: 'JPEG', exif: { make: 'Camera', latitude, longitude: 139 } };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
+    try { const detail = await fetchAssetDetail(data.id, new AbortController().signal); expect(detail.exif.latitude).toBeUndefined(); expect(detail.exif.longitude).toBe(139); expect(detail.exif.make).toBe('Camera'); } finally { vi.unstubAllGlobals(); }
+  });
+  it('keeps zero and boundary GPS values and ignores out-of-range longitude', async () => {
+    for (const [latitude, longitude, expected] of [[0, 0, 0], [-90, 180, 180], [90, 181, undefined]] as const) {
+      const data = { id: 'a', filename: 'a.jpg', date: '', thumbnail_url: '/t', preview_url: '/p', is_raw: false, format: 'JPEG', exif: { latitude, longitude } };
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
+      try { const detail = await fetchAssetDetail('a', new AbortController().signal); expect(detail.exif.latitude).toBe(latitude); expect(detail.exif.longitude).toBe(expected); } finally { vi.unstubAllGlobals(); }
+    }
   });
 });

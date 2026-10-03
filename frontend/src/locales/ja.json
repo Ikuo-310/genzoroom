@@ -606,6 +606,18 @@
     }
   },
   "stackManagement": {
+    "detecting": "自動判定中…",
+    "partialFailure": "一部の写真情報を取得できませんでした。再検出できます。",
+    "allFailure": "写真情報を取得できませんでした。NAME候補を維持しています。再検出できます。",
+    "noUnmatched": "STACK候補外の写真はありません",
+    "group": "STACK候補 {{index}}",
+    "matched": "一致",
+    "mismatch": "不一致",
+    "unavailable": "情報なし",
+    "error": "写真情報の取得または解析に失敗",
+    "nameExact": "拡張子を除いたファイル名が完全一致",
+    "namePixel": "Pixelの既知のファイル名を正規化",
+    "cover": "自動COVER候補",
     "title": "STACK管理",
     "backHome": "HOMEへ戻る",
     "actions": "STACK操作",

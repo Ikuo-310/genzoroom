@@ -22,6 +22,8 @@ export type AssetExif = {
   exposure_compensation?: number;
   width?: number;
   height?: number;
+  latitude?: number;
+  longitude?: number;
 };
 
 export type AssetDetail = RecentAsset & {
