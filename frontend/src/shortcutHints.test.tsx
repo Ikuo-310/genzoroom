@@ -33,7 +33,7 @@ describe('visual shortcut hints', () => {
       const original = host.querySelector<HTMLButtonElement>(`[aria-label="${i18n.t('workspace.previewOriginal')}"]`)!;
       const before = host.querySelector<HTMLButtonElement>(`[aria-label="${i18n.t('workspace.beforeAfter')}"]`)!;
       const fit = host.querySelector<HTMLButtonElement>('.zoom-controls button')!;
-      const open = host.querySelector<HTMLButtonElement>('.selection-actions button:last-child')!;
+      const open = host.querySelector<HTMLButtonElement>('.selection-open-workspace')!;
       expect(open.title).toContain(`(${formatShortcut('homeOpenSelected')})`);
       expect(original.title).toContain(`(${formatShortcut('viewerOriginal')})`);
       expect(before.title).toBe(i18n.t('workspace.beforeHoldShortcutHint', { shortcut: formatShortcut('viewerBefore') }));

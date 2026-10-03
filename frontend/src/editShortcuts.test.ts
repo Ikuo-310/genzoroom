@@ -99,7 +99,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(19);
+    expect(Object.keys(shortcutBindings)).toHaveLength(20);
   });
 
   it('matches workspace Home only for unmodified H', () => {
@@ -128,6 +128,6 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(19);
+    expect(Object.keys(shortcutBindings)).toHaveLength(20);
   });
 });

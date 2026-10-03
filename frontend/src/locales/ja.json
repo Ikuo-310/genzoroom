@@ -106,6 +106,7 @@
     "dateRange": "{{start}}〜{{end}}"
   },
   "photos": {
+    "openStacks": "STACK管理へ",
     "stackFilterLabel": "スタック",
     "allStacks": "両方",
     "stackedOnly": "STACKあり",
@@ -603,5 +604,18 @@
       "saturation": "彩度",
       "all_sliders_representative": "全スライダーの代表値"
     }
+  },
+  "stackManagement": {
+    "title": "STACK管理",
+    "backHome": "HOMEへ戻る",
+    "actions": "STACK操作",
+    "selectionCount": "{{count}}件選択",
+    "add": "選択中のSTACKに追加",
+    "detect": "再検出",
+    "send": "Immichへ送信",
+    "candidates": "STACK候補",
+    "unmatched": "STACK候補外",
+    "noCandidates": "STACK候補はまだありません",
+    "empty": "Homeで写真を選択してSTACK管理へ送ってください"
   }
 }

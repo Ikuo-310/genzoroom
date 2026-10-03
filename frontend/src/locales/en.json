@@ -107,6 +107,7 @@
     "dateRange": "{{start}} – {{end}}"
   },
   "photos": {
+    "openStacks": "Manage Stacks",
     "stackFilterLabel": "Stack",
     "allStacks": "Both",
     "stackedOnly": "With STACK",
@@ -605,5 +606,18 @@
       "saturation": "Saturation",
       "all_sliders_representative": "All sliders representative"
     }
+  },
+  "stackManagement": {
+    "title": "Stack Management",
+    "backHome": "Back to HOME",
+    "actions": "Stack actions",
+    "selectionCount": "{{count}} selected",
+    "add": "Add to selected stack",
+    "detect": "Detect again",
+    "send": "Send to Immich",
+    "candidates": "Stack candidates",
+    "unmatched": "Outside stack candidates",
+    "noCandidates": "No stack candidates yet",
+    "empty": "Select photos on Home and send them to Manage Stacks"
   }
 }

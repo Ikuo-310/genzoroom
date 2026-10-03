@@ -149,7 +149,7 @@ describe('Home favorites', () => {
     expect((await pressD()).defaultPrevented).toBe(false);
     await click('.photo-selection-input');
     act(() => updateSetting('showKeyboardShortcuts', false));
-    expect(host.querySelector<HTMLButtonElement>('.selection-actions button:last-child')!.title).toBe(i18n.t('photos.openSelected'));
+    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.title).toBe(i18n.t('photos.openSelected'));
     const event = await pressD();
     expect(event.defaultPrevented).toBe(true);
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);

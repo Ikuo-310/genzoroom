@@ -263,7 +263,7 @@ describe('Home return context', () => {
     host.querySelector<HTMLElement>('.home-page')!.scrollTop = 32;
     host.querySelector<HTMLElement>('.photo-grid')!.scrollTop = 840;
     for (const box of host.querySelectorAll<HTMLInputElement>('.photo-selection-input')) await act(async () => box.click());
-    await click('.selection-bar button:last-child');
+    await click('.selection-open-workspace');
     await click('.filmstrip-item:last-child');
     expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe(second.filename);
     let resolve!: (assets: AssetDetail[]) => void;
