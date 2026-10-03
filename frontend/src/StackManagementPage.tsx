@@ -241,7 +241,7 @@ export function StackManagementPage() {
           {draft.writeResults[`delete:${group.immichStackId}`] && <span className="stack-evidence error">{t(draft.writeResults[`delete:${group.immichStackId}`].status === 'unknown' ? 'stackManagement.sendUnknown' : 'stackManagement.sendFailure')}</span>}
         </p>)}
       </section>
-      <section aria-labelledby="stack-unmatched-heading" className={dropTarget === 'unmatched' ? 'stack-unmatched-drop-target' : ''}
+      <section aria-labelledby="stack-unmatched-heading" className={`${displayed.unmatched.length ? '' : 'stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
         onDragOver={event => { if (canAcceptDrop(event, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === 'unmatched') setDropTarget(null); }}
         onDrop={event => acceptDrop(event, null)}>

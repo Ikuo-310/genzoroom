@@ -26,3 +26,9 @@ it('styles unmatched selection independently from the Cover badge', () => {
   expect(css).not.toMatch(/\.stack-management-page \.stack-cover\s*\{/);
   expect(css).toContain('.stack-cover-badge {');
 });
+
+it('gives the empty unmatched drop target a compact minimum hit area', () => {
+  const css = readFileSync('src/style.css', 'utf8');
+  expect(css).toMatch(/\.stack-unmatched-empty\s*\{\s*min-height:\s*120px;\s*\}/);
+  expect(css).toContain('.stack-unmatched-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--selection); }');
+});

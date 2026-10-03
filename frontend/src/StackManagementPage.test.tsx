@@ -63,6 +63,7 @@ it('renders compact header, isolated scroll sections and enables sending complet
   expect(host.querySelector('.stack-home-title')?.textContent).toBe('GenzoRoom'); expect(host.querySelector('h1')?.textContent).toBe('Stack Management');
   expect(host.querySelector('[aria-label="Settings"]')).not.toBeNull(); expect(host.querySelector('#stack-candidates-heading')).not.toBeNull();
   expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(0);
+  expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.classList.contains('stack-unmatched-empty')).toBe(true);
   expect(host.querySelector('#stack-candidates-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(2);
   expect(host.querySelectorAll('.stack-control-bar button:disabled')).toHaveLength(3);
   await click('.stack-photo'); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
@@ -169,6 +170,7 @@ it('disables duplicate detection while loading and preserves photo selection aft
 });
 it('reuses the saved thumbnail controller outside content and updates shared column count immediately', async () => {
   await mount('/stack', { selectedAssets: [...photos, { ...photos[1], id: 'single', filename: 'single.jpg' }] });
+  expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.classList.contains('stack-unmatched-empty')).toBe(false);
   expect(host.querySelector('.stack-control-bar .thumbnail-size-control')).not.toBeNull(); expect(host.querySelector('.stack-content .thumbnail-size-control')).toBeNull();
   const page = host.querySelector<HTMLElement>('.stack-management-page')!;
   expect(page.style.getPropertyValue('--stack-columns')).toBe('6');
