@@ -18,6 +18,8 @@ GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. ngi
 
 GenzoRoom uses read endpoints and explicitly confirmed Stack create/update/delete operations. No upload, asset deletion, or unrelated write permissions are needed. Stack creation also requires ownership of the requested assets under Immich access validation.
 
+The nginx proxy keeps its normal 10-second read timeout for `/api/` requests. The exact `/api/stacks/apply` location uses 90 minutes because a 500-operation batch can make one membership preflight request and up to two sequential Immich writes per operation; at the backend's configured 5-second read timeout this is about 83 minutes 25 seconds, with margin for application processing. This endpoint-specific timeout does not alter response buffering or the unknown-outcome behavior for requests that cannot be confirmed.
+
 ## Configuration
 
 | Variable | Required | Purpose |

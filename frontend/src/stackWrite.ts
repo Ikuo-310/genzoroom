@@ -2,11 +2,26 @@ import type { DraftStack } from './stackCandidateDetection';
 
 export type StackWriteOperation = { operationId: string; type: 'create' | 'update' | 'delete'; stackId?: string; memberIds?: string[]; primaryAssetId?: string };
 export type StackWriteResult = { operationId: string; status: 'success' | 'failed' | 'unknown' | 'blocked'; stackId?: string; releasedStackId?: string; errorCode?: string };
-export type StackWritePlan = { operations: StackWriteOperation[]; unchanged: string[] };
+export type StackWritePlan = { operations: StackWriteOperation[]; unchanged: string[]; operationGroupIds?: Record<string, string> };
 
 export function buildStackWritePlan(groups: readonly DraftStack[], source: readonly DraftStack[]): StackWritePlan {
   const operations: StackWriteOperation[] = [], unchanged: string[] = [];
+  const operationGroupIds: Record<string, string> = {};
   const members = new Set<string>(), lineages = new Set<string>();
+  const reservedIds = new Set(groups.map(group => group.id));
+  for (const original of source) if (original.origin === 'immich') reservedIds.add(`delete:${original.immichStackId}`);
+  const usedOperationIds = new Set<string>();
+  const allocateOperationId = (preferred: string, groupId?: string) => {
+    let operationId = preferred;
+    if (operationId.length > 200 || usedOperationIds.has(operationId)) {
+      let suffix = operations.length;
+      do { operationId = `stack-op-${suffix++}`; }
+      while (reservedIds.has(operationId) || usedOperationIds.has(operationId));
+      if (groupId !== undefined) operationGroupIds[operationId] = groupId;
+    }
+    usedOperationIds.add(operationId);
+    return operationId;
+  };
   for (const group of groups) {
     const memberIds = group.members.map(asset => asset.id);
     if (new Set(memberIds).size !== memberIds.length || memberIds.length < 2 || !memberIds.includes(group.coverAssetId)) throw new Error('Invalid draft membership');
@@ -25,15 +40,15 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
         unchanged.push(group.id); continue;
       }
     }
-    operations.push({ operationId: group.id, type: group.origin === 'immich' ? 'update' : 'create',
+    operations.push({ operationId: allocateOperationId(group.id, group.id), type: group.origin === 'immich' ? 'update' : 'create',
       ...(group.origin === 'immich' ? { stackId: group.immichStackId } : {}), memberIds, primaryAssetId: group.coverAssetId });
   }
   for (const original of source) {
     if (original.origin === 'immich' && !groups.some(group => group.origin === 'immich' && group.immichStackId === original.immichStackId)) {
-      operations.push({ operationId: `delete:${original.immichStackId}`, type: 'delete', stackId: original.immichStackId });
+      operations.push({ operationId: allocateOperationId(`delete:${original.immichStackId}`), type: 'delete', stackId: original.immichStackId });
     }
   }
-  return { operations, unchanged };
+  return { operations, unchanged, ...(Object.keys(operationGroupIds).length ? { operationGroupIds } : {}) };
 }
 
 export async function sendStackWritePlan(operations: readonly StackWriteOperation[], signal: AbortSignal): Promise<StackWriteResult[]> {

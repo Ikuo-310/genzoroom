@@ -1,6 +1,6 @@
 import { expect, it, vi, afterEach } from 'vitest';
 import type { RecentAsset } from './assets';
-import type { DraftStack } from './stackCandidateDetection';
+import { detectStackCandidates, type DraftStack } from './stackCandidateDetection';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 import { emptyStackDraft, stackDraftReducer as reduce } from './useEditableStackDraft';
 const asset=(id:string):RecentAsset=>({id,filename:id+'.jpg',format:'JPEG',is_raw:false,date:'2026-01-01',thumbnail_url:'/thumb'});
@@ -66,4 +66,18 @@ it('validates complete result mapping and treats malformed or lost responses as 
   fetch.mockResolvedValue(new Response(JSON.stringify(body)));await expect(sendStackWritePlan([operation],new AbortController().signal)).rejects.toThrow();
  }
  fetch.mockRejectedValue(new Error('lost'));await expect(sendStackWritePlan([operation],new AbortController().signal)).rejects.toThrow();
+});
+it('uses a bounded backend operation ID for long filename families and maps completion to that draft group',()=>{
+ const basename='x'.repeat(190);
+ const detected=detectStackCandidates([
+  {...asset('long-raw'),filename:`${basename}.dng`,format:'DNG',is_raw:true},
+  {...asset('long-jpeg'),filename:`${basename}.jpg`,format:'JPEG',is_raw:false},
+ ]);
+ const group=detected.groups[0];expect(group.id.length).toBeGreaterThan(200);
+ const plan=buildStackWritePlan(detected.groups,[]);
+ expect(plan.operations).toHaveLength(1);expect(plan.operations[0].operationId.length).toBeLessThanOrEqual(200);
+ expect(plan.operationGroupIds?.[plan.operations[0].operationId]).toBe(group.id);
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:detected,assets:detected.groups[0].members});
+ draft=reduce(draft,{type:'writeResults',plan,results:[result(plan.operations[0].operationId,'success',{stackId:'12345678-1234-4234-8234-123456789abc'})]});
+ expect(draft.groups).toHaveLength(0);expect(draft.writeResults[group.id].status).toBe('success');
 });

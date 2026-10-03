@@ -171,12 +171,32 @@ export async function fetchSelectedImmichStacks(stackIds: readonly string[], sig
 }
 
 export async function refreshSelectedImmichStacks(assetIds: readonly string[], signal: AbortSignal): Promise<ImmichStack[]> {
-  if (assetIds.length > 1000 || assetIds.some(id => !isUuid(id))) throw new Error('Invalid asset IDs');
-  const response = await fetch('/api/stacks/refresh', { method: 'POST', signal, cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
-  if (!response.ok) throw new Error('Stacks refresh failed');
-  const stacks = validateImmichStacks(await response.json());
+  if (assetIds.some(id => !isUuid(id))) throw new Error('Invalid asset IDs');
+  const uniqueAssets = [...new Set(assetIds.map(id => id.toLowerCase()))];
+  if (!uniqueAssets.length) return [];
+  const byId = new Map<string, ImmichStack>();
+  for (let start = 0; start < uniqueAssets.length; start += 1000) {
+    const chunk = uniqueAssets.slice(start, start + 1000);
+    const response = await fetch('/api/stacks/refresh', { method: 'POST', signal, cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds: chunk }) });
+    if (!response.ok) throw new Error('Stacks refresh failed');
+    const stacks = validateImmichStacks(await response.json());
+    for (const stack of stacks) {
+      const previous = byId.get(stack.id);
+      // A Stack selected on both sides of a chunk boundary must resolve to the same full snapshot.
+      if (previous && stackSignature(previous) !== stackSignature(stack)) throw new Error('Unexpected stacks refresh');
+      if (!previous) byId.set(stack.id, stack);
+    }
+  }
+  const stacks = validateImmichStacks([...byId.values()]);
   const ids = new Set(assetIds.map(id => id.toLowerCase()));
   if (stacks.some(stack => !stack.assets.some(asset => ids.has(asset.id)))) throw new Error('Unexpected stacks refresh');
   return stacks;
+}
+
+function stackSignature(stack: ImmichStack): string {
+  return JSON.stringify({ id: stack.id, primaryAssetId: stack.primaryAssetId,
+    assets: [...stack.assets].sort((a, b) => a.id.localeCompare(b.id)).map(asset => ({ id: asset.id, filename: asset.filename,
+      date: asset.date, thumbnail_url: asset.thumbnail_url, format: asset.format, is_raw: asset.is_raw,
+      stackId: asset.stackId, primaryAssetId: asset.primaryAssetId, stackAssetCount: asset.stackAssetCount })) });
 }

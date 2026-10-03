@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isRecentAsset } from './api';
@@ -38,6 +38,7 @@ export function StackManagementPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
+  const sourceGeneration = `${location.key}:${JSON.stringify(location.state) ?? 'null'}`;
   const assets = navigation?.selectedAssets ?? EMPTY_ASSETS;
   const immich = useSelectedImmichStacks(assets);
   const detectionAssets = useMemo(() => {
@@ -52,13 +53,23 @@ export function StackManagementPage() {
   const { draft, dispatch, ready } = useEditableStackDraft(integration.source, busy || immich.error, integration.assets);
   const { selectedIds, addTargetStackId } = draft;
   const [confirmRedetect, setConfirmRedetect] = useState(false);
+  const [redetecting, setRedetecting] = useState(false);
   const [confirmSend, setConfirmSend] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const sendRequest = useRef<AbortController | null>(null);
-  useEffect(() => () => { sendRequest.current?.abort(); }, []);
+  const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
+  const currentGeneration = useRef(sourceGeneration);
+  useLayoutEffect(() => {
+    if (currentGeneration.current === sourceGeneration) return;
+    currentGeneration.current = sourceGeneration;
+    sendRequest.current?.controller.abort();
+    sendRequest.current = null;
+    setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
+    setRedetecting(false); setDragging(null); setDropTarget(null);
+  }, [sourceGeneration]);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -67,14 +78,15 @@ export function StackManagementPage() {
   const startSend = async () => {
     if (!canSend || sendRequest.current) return;
     setConfirmSend(false); setSending(true); setSendStatus('sending');
-    const controller = new AbortController(); sendRequest.current = controller;
-    // Confirmation is local completion; unchanged groups need no upstream request.
-    dispatch({ type: 'writeResults', plan: { operations: [], unchanged: plan.unchanged }, results: [] });
+    const controller = new AbortController();
+    const request = { controller, generation: currentGeneration.current };
+    sendRequest.current = request;
     let results: StackWriteResult[];
     try { results = await sendStackWritePlan(plan.operations, controller.signal); }
     catch { results = plan.operations.map(op => ({ operationId: op.operationId, status: 'unknown' })); }
-    if (controller.signal.aborted) return;
-    dispatch({ type: 'writeResults', plan: { ...plan, unchanged: [] }, results });
+    if (controller.signal.aborted || sendRequest.current !== request || currentGeneration.current !== request.generation) return;
+    // Unchanged local completion waits for the same generation check as remote results.
+    dispatch({ type: 'writeResults', plan, results });
     setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
       : results.some(result => result.status !== 'success') ? 'sendFailure' : 'sendSuccess');
     sendRequest.current = null; setSending(false);
@@ -82,7 +94,7 @@ export function StackManagementPage() {
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
   const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
-  const displayed = ready ? draft : integration.source;
+  const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
   const payloadFrom = (transfer: DataTransfer) => readStackDragPayload(transfer)
     ?? (isStackDrag(transfer) ? dragging : null);
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
@@ -114,7 +126,7 @@ export function StackManagementPage() {
   }, [canEdit, canAdd, selectedUnmatched.length]);
   const runRedetect = () => {
     setSendStatus(null);
-    dispatch({ type: 'reset' });
+    setRedetecting(true);
     // Resolving a fresh membership list also supplies fresh auto-detection inputs.
     immich.retry(true);
   };
@@ -131,6 +143,7 @@ export function StackManagementPage() {
   const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
   const { isOpen: settingsOpen } = useSettingsDialog();
   const shortcut = useShortcutDisplay();
+  useEffect(() => { if (ready && redetecting) setRedetecting(false); }, [ready, redetecting]);
   const returnHome = useCallback(() => {
     navigate('/', { state: navigation?.homeReturn ? { homeReturn: navigation.homeReturn } : null });
   }, [navigate, navigation?.homeReturn]);

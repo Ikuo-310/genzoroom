@@ -27,6 +27,9 @@ def execute(operations,existing=(),outcomes=()):
     return result.results,calls
 @pytest.mark.parametrize('kind',['create','update','delete'])
 def test_valid(kind): assert StackApplyRequest(operations=[op(kind)]).operations[0].type==kind
+def test_operation_id_length_boundary():
+    assert len(StackApplyRequest(operations=[op(name='x'*200)]).operations[0].operationId)==200
+    with pytest.raises(ValidationError): StackApplyRequest(operations=[op(name='x'*201)])
 @pytest.mark.parametrize('invalid',[op(memberIds=[A]),op('update',memberIds=[A]),op(memberIds=[A,A]),op(primaryAssetId=C),op(stackId=STACK_ID),op('delete',memberIds=[A,B]),op('delete',primaryAssetId=A),op('update',stackId=None),op(memberIds=['bad',B]),op('delete',stackId='bad'),op(operationId=''),op(extra=True)])
 def test_invalid_operation(invalid):
     with pytest.raises(ValidationError): StackApplyRequest(operations=[invalid])

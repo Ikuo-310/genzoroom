@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { fetchSelectedImmichStacks } from './api';
+import { fetchSelectedImmichStacks, refreshSelectedImmichStacks } from './api';
 
 const id = '12345678-1234-4234-9234-123456789abc';
 const other = '22345678-1234-4234-9234-123456789abc';
@@ -45,6 +45,31 @@ it('canonicalizes UUID casing so COVER still identifies a member',async()=>{
   assets:value.assets.map(a=>({...a,id:a.id.toUpperCase(),stackId:a.stackId.toUpperCase(),primaryAssetId:a.primaryAssetId.toUpperCase()}))};
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify([upper]))));
  expect(await fetchSelectedImmichStacks([stackId],new AbortController().signal)).toEqual([value]);
+});
+
+const generatedAssetIds=(count:number)=>Array.from({length:count},(_,index)=>`42345678-1234-4234-9234-${String(index+100).padStart(12,'0')}`);
+it.each([1001,2005])('refreshes %i selected assets in sequential chunks of at most 1000 with one abort signal',async(count)=>{
+ const ids=generatedAssetIds(count),signal=new AbortController().signal;
+ const fetch=vi.fn(async(_url:string,_init:RequestInit)=>new Response('[]'));vi.stubGlobal('fetch',fetch);
+ expect(await refreshSelectedImmichStacks(ids,signal)).toEqual([]);
+ expect(fetch.mock.calls.map(call=>JSON.parse(call[1].body as string).assetIds.length)).toEqual(count===1001?[1000,1]:[1000,1000,5]);
+ expect(fetch.mock.calls.every(call=>call[0]==='/api/stacks/refresh'&&call[1].signal===signal)).toBe(true);
+});
+it('deduplicates an identical full Stack returned across a refresh chunk boundary and rejects conflicting copies',async()=>{
+ const ids=generatedAssetIds(1001);ids[0]=id;ids[1000]=other;const signal=new AbortController().signal;
+ const fetch=vi.fn(async(_url:string,_init:RequestInit)=>new Response(JSON.stringify([stack()])));vi.stubGlobal('fetch',fetch);
+ expect(await refreshSelectedImmichStacks(ids,signal)).toEqual([stack()]);expect(fetch).toHaveBeenCalledTimes(2);
+ const changed=stack();changed.primaryAssetId=other;changed.assets=changed.assets.map(member=>({...member,primaryAssetId:other}));
+ fetch.mockResolvedValueOnce(new Response(JSON.stringify([stack()]))).mockResolvedValueOnce(new Response(JSON.stringify([changed])));
+ await expect(refreshSelectedImmichStacks(ids,signal)).rejects.toThrow('Unexpected');
+});
+it('fails a complete refresh on any failed chunk and stops after a shared abort',async()=>{
+ const ids=generatedAssetIds(1001),signal=new AbortController().signal;
+ const failed=vi.fn().mockResolvedValueOnce(new Response('[]')).mockResolvedValueOnce(new Response('',{status:502}));vi.stubGlobal('fetch',failed);
+ await expect(refreshSelectedImmichStacks(ids,signal)).rejects.toThrow('Stacks refresh failed');expect(failed).toHaveBeenCalledTimes(2);
+ const controller=new AbortController();let calls=0;
+ const aborted=vi.fn(async(_url:string,init:RequestInit)=>{calls++;if(calls===1)controller.abort();if((init.signal as AbortSignal).aborted)throw new DOMException('Aborted','AbortError');return new Response('[]');});vi.stubGlobal('fetch',aborted);
+ await expect(refreshSelectedImmichStacks(ids,controller.signal)).rejects.toThrow('Aborted');expect(aborted).toHaveBeenCalledOnce();
 });
 
 it('refreshes membership from selected asset IDs and accepts dissolved selections',async()=>{

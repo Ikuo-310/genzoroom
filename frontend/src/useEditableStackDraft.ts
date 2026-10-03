@@ -49,9 +49,10 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
     const removed = new Set(action.plan.unchanged);
     const writeResults = { ...state.writeResults };
     for (const result of action.results) {
-      writeResults[result.operationId] = result;
       const op = action.plan.operations.find(operation => operation.operationId === result.operationId)!;
-      if (result.status === 'success' && op.type !== 'delete') removed.add(op.operationId);
+      const groupId = op.type === 'delete' ? null : action.plan.operationGroupIds?.[result.operationId] ?? op.operationId;
+      writeResults[groupId ?? `delete:${op.stackId}`] = result;
+      if (result.status === 'success' && groupId !== null) removed.add(groupId);
       for (const source of state.sourceGroups ?? []) {
         if ((source.origin === 'immich' && (source.immichStackId === result.releasedStackId
           || (result.status === 'success' && source.immichStackId === op.stackId))) || removed.has(source.id)) completedSourceIds.add(source.id);

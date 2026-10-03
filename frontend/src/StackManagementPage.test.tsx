@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
@@ -15,7 +15,9 @@ const photos = [
   { id: 'jpeg', filename: 'selected.jpg', format: 'JPEG', is_raw: false, date: '2026-09-01', thumbnail_url: '/jpeg' },
 ];
 let host: HTMLDivElement, root: Root;
-async function mount(path = '/', state?: unknown) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><App /></MemoryRouter>)); }
+let navigateTest: (path: string, state?: unknown) => void = () => {};
+function NavigationProbe() { const navigate = useNavigate(); navigateTest = (path, state) => navigate(path, { state }); return null; }
+async function mount(path = '/', state?: unknown) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><App /><NavigationProbe /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLElement>(selector)!.click()); }
 async function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
   await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options })); });
@@ -533,6 +535,29 @@ it('aborts the frontend wait on Home navigation without resending the write',asy
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(signal?.aborted).toBe(false);await press('H');expect(signal?.aborted).toBe(true);expect(fetch.mock.calls.filter(call=>call[0]==='/api/stacks/apply')).toHaveLength(1);
 });
+it('aborts and ignores a successful send result after same-route navigation changes the selection',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ const next=[
+  {...photos[0],id:'next-raw',filename:'next.dng'},
+  {...photos[1],id:'next-jpeg',filename:'next.jpg'},
+ ];
+ api.detail.mockImplementation(async(id:string)=>({id,filename:id==='next-raw'?'next.dng':'next.jpg',format:id.endsWith('raw')?'DNG':'JPEG',is_raw:id.endsWith('raw'),date:'2026-09-01',thumbnail_url:'/next',exif:{},preview_url:'/preview'}));
+ const finishes:Array<(response:Response)=>void>=[],signals:AbortSignal[]=[];
+ const fetch=vi.fn((_url:string,init:RequestInit)=>{signals.push(init.signal as AbortSignal);return new Promise<Response>(resolve=>{finishes.push(resolve);});});vi.stubGlobal('fetch',fetch);
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[1]]});await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(signals[0].aborted).toBe(false);
+ await act(async()=>navigateTest('/stack',{selectedAssets:[...next,existingMembers[1]]}));
+ expect(signals[0].aborted).toBe(true);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(signals[1].aborted).toBe(false);expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');
+ await act(async()=>finishes[0](new Response(JSON.stringify({results:[{operationId:'draft:auto:selected',status:'success',stackId:existingStackId}]}))));
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(2);
+ expect(host.textContent).toContain('next.dng');
+ expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');expect(signals[1].aborted).toBe(false);
+ expect(host.textContent).not.toContain('Applied to Immich.');
+ await act(async()=>finishes[1](new Response(JSON.stringify({results:[{operationId:'draft:auto:next',status:'success',stackId:existingStackId}]}))));
+ expect(button('Send to Immich').getAttribute('aria-busy')).not.toBe('true');
+});
 it('refreshes latest membership after unknown create without relying on old Stack IDs',async()=>{
  await mount('/stack',{selectedAssets:photos});
  vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new Error('lost')));
@@ -543,6 +568,14 @@ it('refreshes latest membership after unknown create without relying on old Stac
  expect(api.refresh.mock.calls[0][0]).toEqual(['raw','jpeg']);
  expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
  expect(button('Send to Immich').disabled).toBe(false);expect(api.detail).toHaveBeenCalledTimes(2);
+});
+it('retains the current draft when a chunked re-detection refresh fails and allows retry',async()=>{
+ api.refresh.mockRejectedValueOnce(new Error('chunk failed')).mockResolvedValueOnce([]);
+ await mount('/stack',{selectedAssets:photos});expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+ await act(async()=>button('Detect again').click());
+ expect(api.refresh).toHaveBeenCalledTimes(1);expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+ await act(async()=>button('Detect again').click());
+ expect(api.refresh).toHaveBeenCalledTimes(2);expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
 });
 function dragTransfer(payload?: {assetId:string;sourceGroupId:string|null}, extraTypes:string[]=[]): DataTransfer {
  const store=new Map<string,string>(), types:string[]=[...extraTypes], transfer={
