@@ -7,6 +7,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 ![GenzoRoom Anshitsu workspace showing a JPEG before and after photo development](docs/images/Anshitsu_Sakura.jpg)
 
 *Before and after comparison of a JPEG edited in the desktop Anshitsu workspace.*
+
 ## Current features
 
 ### Immich browsing and Anshitsu
