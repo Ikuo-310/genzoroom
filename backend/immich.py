@@ -6,11 +6,14 @@ from math import isfinite
 import logging
 from pathlib import PurePath
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
+from time import monotonic
 
 import anyio
 import httpx
 from pydantic import BaseModel
+
+from backend_logging import backend_logger
 
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 DEFAULT_RECENT_ASSET_LIMIT = 100
@@ -80,19 +83,21 @@ async def get_immich_about(
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> ImmichAbout:
     # Optional diagnostics must not affect connection checks or photo APIs.
+    response = None
     try:
         url, key = _require_configuration(immich_url, api_key)
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/server/about"),
+            response = await _immich_request(
+                client, "GET", url, "/server/about",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
         if response.status_code != 200:
             raise _request_error(response)
         body = response.json()
         if not isinstance(body, Mapping) or not _optional_string(body.get("version")):
+            _log_response_failure(response, "unexpected_response")
             return ImmichAbout(error_code="unexpected_response")
         # Allowlist public build labels; never proxy the raw upstream payload.
         return ImmichAbout(**{
@@ -104,6 +109,8 @@ async def get_immich_about(
     except (httpx.InvalidURL, httpx.RequestError):
         return ImmichAbout(error_code="unreachable")
     except ValueError:
+        if response is not None:
+            _log_response_failure(response, "unexpected_response")
         return ImmichAbout(error_code="unexpected_response")
 
 
@@ -269,6 +276,44 @@ def _request_error(response: httpx.Response) -> ImmichRequestError:
     )
 
 
+def _log_response_failure(response: httpx.Response, error_code: str) -> None:
+    trace = response.extensions.get("genzoroom_diagnostics")
+    if trace is None or trace.get("failed"):
+        return
+    trace["failed"] = True
+    backend_logger.add(level="warn", component="immich", event="request.failed", context={
+        **trace["context"], "httpStatus": response.status_code,
+        "durationMs": max(0, round((monotonic() - trace["started"]) * 1000, 3)), "errorCode": error_code,
+    })
+
+
+async def _immich_request(client, method: str, url: str, endpoint: str, *,
+                          expected_status=200, stream=False, request_id=None, **kwargs):
+    # Endpoint comes from explicit logical paths, never request.url, headers, query or bodies.
+    context = {"requestId": request_id or uuid4().hex, "method": method, "endpoint": endpoint}
+    started = monotonic()
+    backend_logger.add(level="debug", component="immich", event="request.start", context=context)
+    try:
+        if stream:
+            response = await client.send(client.build_request(method, _api_url(url, endpoint), **kwargs), stream=True)
+        else:
+            response = await client.request(method, _api_url(url, endpoint), **kwargs)
+    except (httpx.RequestError, httpx.InvalidURL):
+        backend_logger.add(level="warn", component="immich", event="request.failed", context={
+            **context, "durationMs": max(0, round((monotonic() - started) * 1000, 3)), "errorCode": "unreachable",
+        })
+        raise
+    response.extensions["genzoroom_diagnostics"] = {"context": context, "started": started}
+    # Streaming duration ends at response headers; consuming pixels would change stream semantics.
+    backend_logger.add(level="debug", component="immich", event="request.response", context={
+        **context, "httpStatus": response.status_code,
+        "durationMs": max(0, round((monotonic() - started) * 1000, 3)), "success": response.status_code == expected_status,
+    })
+    if response.status_code != expected_status:
+        _log_response_failure(response, _request_error(response).error_code)
+    return response
+
+
 async def check_immich_status(
     immich_url: str | None,
     api_key: str | None,
@@ -304,8 +349,8 @@ async def check_immich_status(
             trust_env=False,
             transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/users/me"),
+            response = await _immich_request(
+                client, "GET", url, "/users/me",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
     except (httpx.InvalidURL, httpx.RequestError):
@@ -334,6 +379,7 @@ async def check_immich_status(
         body = None
 
     if not isinstance(body, Mapping) or not isinstance(body.get("id"), str):
+        _log_response_failure(response, "unexpected_response")
         return _status_error(
             "unexpected_response",
             "Immich returned an unexpected response.",
@@ -362,8 +408,8 @@ async def get_albums(
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/albums"),
+            response = await _immich_request(
+                client, "GET", url, "/albums",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
@@ -396,6 +442,7 @@ async def get_albums(
                 endDate=_album_date(item.get("endDate")),
             ))
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError(
             "unexpected_response", "Immich returned an unexpected response.",
         ) from None
@@ -422,8 +469,8 @@ async def get_recent_assets(
             trust_env=False,
             transport=transport,
         ) as client:
-            response = await client.post(
-                _api_url(url, "/search/metadata"),
+            response = await _immich_request(
+                client, "POST", url, "/search/metadata",
                 headers={"x-api-key": key, "Accept": "application/json"},
                 json={
                     "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
@@ -443,6 +490,7 @@ async def get_recent_assets(
     try:
         assets = _search_assets(response.json())
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError(
             "unexpected_response",
             "Immich returned an unexpected response.",
@@ -488,8 +536,8 @@ async def _get_asset_stacks(
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/stacks"),
+            response = await _immich_request(
+                client, "GET", url, "/stacks",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
@@ -525,6 +573,7 @@ async def _get_asset_stacks(
             if primary_id not in members:
                 raise ValueError
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     return body
 
@@ -646,8 +695,8 @@ async def get_calendar_min_year(
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.post(
-                _api_url(url, "/search/metadata"),
+            response = await _immich_request(
+                client, "POST", url, "/search/metadata",
                 headers={"x-api-key": key, "Accept": "application/json"},
                 json={
                     "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
@@ -676,6 +725,7 @@ async def get_calendar_min_year(
             raise TypeError
         return datetime.fromisoformat(local_date_time.replace("Z", "+00:00")).year
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
 
@@ -702,8 +752,8 @@ async def _search_all_assets(
                 }
                 if cursor is not None:
                     request_body["cursor"] = cursor
-                response = await client.post(
-                    _api_url(url, "/search/metadata"),
+                response = await _immich_request(
+                    client, "POST", url, "/search/metadata",
                     headers={"x-api-key": key, "Accept": "application/json"},
                     json=request_body,
                 )
@@ -720,6 +770,7 @@ async def _search_all_assets(
                     if next_cursor is not None and not body["assets"]["items"]:
                         raise TypeError
                 except (KeyError, TypeError, ValueError):
+                    _log_response_failure(response, "unexpected_response")
                     raise ImmichRequestError(
                         "unexpected_response", "Immich returned an unexpected response.",
                     ) from None
@@ -749,8 +800,8 @@ async def get_calendar_heatmap(
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/users/me/calendar-heatmap"),
+            response = await _immich_request(
+                client, "GET", url, "/users/me/calendar-heatmap",
                 headers={"x-api-key": key, "Accept": "application/json"},
                 params={"from": first.isoformat(), "to": last.isoformat(), "type": "Taken"},
             )
@@ -778,6 +829,7 @@ async def get_calendar_heatmap(
             seen_days.add(day_value)
             day_counts[day_value] = count
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     thumbnails: dict[str, str] = {}
     image_days: set[str] = set()
@@ -817,8 +869,8 @@ async def _calendar_month_images(
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, "/timeline/bucket"),
+            response = await _immich_request(
+                client, "GET", url, "/timeline/bucket",
                 headers={"x-api-key": key, "Accept": "application/json"},
                 params={"timeBucket": f"{first.isoformat()}T00:00:00.000Z", "orderBy": "takenAt",
                         "order": "desc", "visibility": "timeline", "isTrashed": "false",
@@ -852,6 +904,7 @@ async def _calendar_month_images(
             if is_image and (local_day.year, local_day.month) == (first.year, first.month):
                 candidates.append((local_day.isoformat(), asset_id))
     except (KeyError, TypeError, ValueError, OverflowError):
+        _log_response_failure(response, "unexpected_response")
         logger.warning("Calendar data lookup failed: stage=timeline error=unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     return _CalendarMonthImages(candidates, len(body["id"]), image_assets)
@@ -912,8 +965,8 @@ async def get_asset_detail(
             trust_env=False,
             transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, f"/assets/{asset_id}"),
+            response = await _immich_request(
+                client, "GET", url, f"/assets/{asset_id}",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
@@ -937,6 +990,7 @@ async def get_asset_detail(
         exif = exif_value if isinstance(exif_value, Mapping) else {}
         image_format, is_raw = classify_image_format(filename)
     except (KeyError, TypeError, ValueError):
+        _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError(
             "unexpected_response",
             "Immich returned an unexpected response.",
@@ -985,8 +1039,8 @@ async def _get_asset_image(
             trust_env=False,
             transport=transport,
         ) as client:
-            response = await client.get(
-                _api_url(url, f"/assets/{asset_id}/thumbnail"),
+            response = await _immich_request(
+                client, "GET", url, f"/assets/{asset_id}/thumbnail",
                 headers={"x-api-key": key, "Accept": "image/*"},
                 params={"size": size},
             )
@@ -1053,6 +1107,9 @@ class ImmichOriginal:
         try:
             async for chunk in self.response.aiter_bytes(64 * 1024):
                 yield chunk
+        except httpx.RequestError:
+            _log_response_failure(self.response, "unreachable")
+            raise
         finally:
             # This also runs on a downstream disconnect or a mid-stream timeout.
             await self.close()
@@ -1074,13 +1131,14 @@ async def get_asset_original(
     )
     response = None
     try:
-        response = await client.send(client.build_request(
-            "GET", _api_url(url, f"/assets/{asset_id}/original"),
+        response = await _immich_request(
+            client, "GET", url, f"/assets/{asset_id}/original", stream=True,
             headers={"x-api-key": key, "Accept": "image/jpeg"},
-        ), stream=True)
+        )
         if response.status_code != 200:
             raise _request_error(response)
         if response.headers.get("content-type", "").split(";")[0].strip().lower() != "image/jpeg":
+            _log_response_failure(response, "unexpected_response")
             raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
         return ImmichOriginal(response=response, client=client)
     except BaseException as error:

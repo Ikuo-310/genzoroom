@@ -9,6 +9,7 @@ from starlette.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state, get_edit_statuses
@@ -41,6 +42,32 @@ from immich import (
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
+
+
+class BackendLogLevelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    level: LogLevel
+
+
+@app.get("/developer/logs/backend")
+def developer_backend_logs() -> dict:
+    return backend_logger.create_report()
+
+
+@app.delete("/developer/logs/backend", status_code=204)
+def clear_developer_backend_logs() -> Response:
+    backend_logger.clear()
+    return Response(status_code=204)
+
+
+@app.get("/developer/logs/backend/level")
+def developer_backend_log_level() -> dict[str, LogLevel]:
+    return {"level": backend_logger.get_level()}
+
+
+@app.put("/developer/logs/backend/level")
+def set_developer_backend_log_level(payload: BackendLogLevelRequest) -> dict[str, LogLevel]:
+    return {"level": backend_logger.set_level(payload.level)}
 
 
 @app.get("/immich/about", response_model=ImmichAbout, response_model_exclude_none=True)
