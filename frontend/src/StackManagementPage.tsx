@@ -152,7 +152,9 @@ function StackEvidenceHeader({ group }: { group: DraftStack }) {
   if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence unavailable" title={t('stackManagement.manual')}>MANUAL</span></div>;
   return <div className="stack-group-indicators">{labels.map(([key, label]) => {
     const state = group.evidence[key];
-    const detail = key === 'name' ? t(group.evidence.nameReason === 'exact' ? 'stackManagement.nameExact' : 'stackManagement.namePixel') : t(`stackManagement.${state}`);
+    const nameReasonKey = group.evidence.nameReason === 'exact' ? 'nameExact'
+      : group.evidence.nameReason === 'pixel-normalized' ? 'namePixel' : 'nameMismatch';
+    const detail = key === 'name' ? t(`stackManagement.${nameReasonKey}`) : t(`stackManagement.${state}`);
     return <span key={key} className={`stack-evidence ${state}`} title={`${label}: ${t(`stackManagement.${state}`)}${key === 'name' ? ` — ${detail}` : ''}`}><span aria-hidden="true">{label}</span><span className="visually-hidden">{label}: {t(`stackManagement.${state}`)}</span></span>;
   })}</div>;
 }

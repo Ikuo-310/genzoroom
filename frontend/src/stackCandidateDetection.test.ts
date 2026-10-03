@@ -9,9 +9,9 @@ describe('filename candidates', () => {
     const groups = detectStackCandidates(pair).groups;
     expect(groups).toHaveLength(1); expect(groups[0].members).toEqual(pair); expect(groups[0].evidence.nameReason).toBe('exact'); expect(groups[0].origin).toBe('auto'); expect(groups[0].id).toMatch(/^draft:auto:/);
   });
-  it('does not merge different or case-different stems, even with identical metadata', () => {
+  it('does not treat different or case-different stems as NAME matches without complete fallback evidence', () => {
     const assets = [pair[0], asset('other', 'img_1234.JPG', false)];
-    expect(detectStackCandidates(assets, new Map(assets.map(a => [a.id, { date_time_original: a.date, make: 'Same', model: 'Same', latitude: 1, longitude: 1 }]))).groups).toHaveLength(0);
+    expect(detectStackCandidates(assets, new Map(assets.map(a => [a.id, { date_time_original: a.date, make: a.id, model: 'Same', latitude: 1, longitude: 1 }]))).groups).toHaveLength(0);
     expect(detectStackCandidates([pair[0], asset('other', 'IMG_1235.JPG', false)]).groups).toHaveLength(0);
   });
   it('normalizes only known Pixel COVER/ORIGINAL filenames and separates timestamps', () => {
@@ -46,6 +46,61 @@ describe('filename candidates', () => {
     const otherRaw = asset('b-raw', 'B.dng', true), otherJpg = asset('b-jpg', 'B.jpg', false), unmatched = asset('single', 'single.jpg', false);
     const result = detectStackCandidates([otherRaw, pair[1], unmatched, pair[0], otherJpg, pair[0]]);
     expect(result.groups.map(g => g.members.map(a => a.id))).toEqual([['b-raw', 'b-jpg'], ['jpg', 'raw']]); expect(result.unmatched).toEqual([unmatched]);
+  });
+});
+describe('EXIF fallback candidates', () => {
+  const exif = (overrides: AssetExif = {}): AssetExif => ({ date_time_original: '2026:10:01 08:25:49', make: 'Camera', model: 'Model', latitude: 35, longitude: 139, ...overrides });
+  const fallbackPair = [asset('fallback-raw', 'capture-01.dng', true), asset('fallback-jpeg', 'exported-01.jpg', false, '2026-10-02T08:25:49Z')];
+  const details = (members: readonly RecentAsset[], overrides: Record<string, AssetExif> = {}) => new Map(members.map(member => [member.id, overrides[member.id] ?? exif()]));
+
+  it('creates a two-member fallback candidate with mismatch NAME and matched EXIF evidence', () => {
+    const result = detectStackCandidates(fallbackPair, details(fallbackPair));
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]).toMatchObject({ members: fallbackPair, coverAssetId: 'fallback-jpeg', origin: 'auto', evidence: { name: 'mismatch', nameReason: 'exif-fallback', time: 'matched', camera: 'matched', gps: 'matched' } });
+    expect(result.unmatched).toEqual([]);
+  });
+
+  it.each([
+    ['TIME mismatch', exif({ date_time_original: '2026:10:01 08:25:53' })],
+    ['CAM mismatch', exif({ model: 'Other' })],
+    ['GPS mismatch', exif({ latitude: 36 })],
+    ['GPS unavailable', exif({ latitude: undefined })],
+  ])('rejects fallback when %s', (_label, jpegExif) => {
+    const result = detectStackCandidates(fallbackPair, details(fallbackPair, { 'fallback-jpeg': jpegExif }));
+    expect(result.groups).toHaveLength(0);
+    expect(result.unmatched).toEqual(fallbackPair);
+  });
+
+  it('rejects failed or incomplete details and excludes existing Immich Stack members', () => {
+    expect(detectStackCandidates(fallbackPair, details(fallbackPair), new Set(['fallback-raw'])).groups).toHaveLength(0);
+    expect(detectStackCandidates(fallbackPair, new Map([['fallback-raw', exif()]])).groups).toHaveLength(0);
+    const stacked = { ...fallbackPair[0], stackId: 'immich-stack' };
+    expect(detectStackCandidates([stacked, fallbackPair[1]], details([stacked, fallbackPair[1]])).groups).toHaveLength(0);
+  });
+
+  it('rejects ambiguous edges in either direction and larger fully ambiguous sets', () => {
+    const raw = asset('r', 'raw.dng', true), raw2 = asset('r2', 'raw2.dng', true);
+    const jpeg = asset('j', 'jpeg.jpg', false), jpeg2 = asset('j2', 'jpeg2.jpg', false);
+    for (const members of [[fallbackPair[0], jpeg, jpeg2], [raw, raw2, fallbackPair[1]], [raw, raw2, jpeg, jpeg2]]) {
+      expect(detectStackCandidates(members, details(members)).groups).toHaveLength(0);
+      expect(detectStackCandidates(members, details(members)).unmatched).toEqual(members);
+    }
+  });
+
+  it('creates independent unique pairs while retaining NAME member priority and exact partition', () => {
+    const nameRaw = asset('name-raw', 'NAME.dng', true), nameJpeg = asset('name-jpeg', 'NAME.jpg', false);
+    const rawA = asset('raw-a', 'raw-a.dng', true), jpegA = asset('jpeg-a', 'jpeg-a.jpg', false);
+    const rawB = asset('raw-b', 'raw-b.dng', true), jpegB = asset('jpeg-b', 'jpeg-b.jpg', false);
+    const assets = [nameRaw, rawA, nameJpeg, jpegA, rawB, jpegB];
+    const result = detectStackCandidates(assets, details(assets, {
+      'name-raw': exif({ model: 'Name' }), 'name-jpeg': exif({ model: 'Name' }),
+      'raw-a': exif({ model: 'A' }), 'jpeg-a': exif({ model: 'A' }),
+      'raw-b': exif({ model: 'B' }), 'jpeg-b': exif({ model: 'B' }),
+    }));
+    expect(result.groups.map(group => group.members.map(member => member.id))).toEqual([['name-raw', 'name-jpeg'], ['raw-a', 'jpeg-a'], ['raw-b', 'jpeg-b']]);
+    const allIds = [...result.groups.flatMap(group => group.members.map(member => member.id)), ...result.unmatched.map(member => member.id)];
+    expect(allIds).toHaveLength(assets.length);
+    expect(new Set(allIds).size).toBe(assets.length);
   });
 });
 describe('EXIF evidence', () => {

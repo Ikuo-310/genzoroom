@@ -115,7 +115,7 @@ it('preserves NAME drafts and offers retry after partial or total detail failure
   const detect = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Detect again')!;
   expect(detect.disabled).toBe(false);
   api.detail.mockRejectedValue(new Error('Offline')); await act(async () => detect.click());
-  expect(host.textContent).toContain('Photo details could not be loaded. NAME candidates are preserved');
+  expect(host.textContent).toContain('Photo details could not be loaded. Existing candidates are preserved; EXIF fallback candidates are hidden');
   expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
   api.detail.mockImplementation(async (id: string) => ({ ...photos.find(a => a.id === id), exif: {} })); await act(async () => detect.click());
   expect(host.querySelector('.stack-status')).toBeNull();
@@ -160,6 +160,47 @@ it('exposes translated status text and tooltips while labels stay English', asyn
  await act(async () => { await i18n.changeLanguage('ja'); });
  expect(host.querySelector('.stack-evidence.mismatch .visually-hidden')?.textContent).toBe('TIME: 不一致');
  expect(host.querySelector('.stack-evidence [aria-hidden]')?.textContent).toBe('NAME');
+});
+
+it('renders EXIF fallback with a mismatch NAME label and three matched evidence indicators', async () => {
+ const fallback = [
+  { ...photos[0], id:'fallback-raw', filename:'capture.dng' },
+  { ...photos[1], id:'fallback-jpeg', filename:'exported.jpg' },
+ ];
+ api.detail.mockImplementation(async (id:string) => ({...photos[0], id, exif:{date_time_original:'2026:10:01 08:25:49', make:'Camera', model:'Model', latitude:35, longitude:139}, preview_url:'/preview'}));
+ await mount('/stack', {selectedAssets:fallback});
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+ expect(host.querySelector('.stack-evidence.mismatch .visually-hidden')?.textContent).toBe('NAME: Mismatch');
+ expect(host.querySelector('.stack-evidence.mismatch')?.getAttribute('title')).toContain('Filename family mismatch');
+ expect(host.querySelectorAll('.stack-evidence.matched')).toHaveLength(3);
+});
+it('keeps EXIF fallback groups editable, addable, purgeable and redetectable', async () => {
+ const fallback = [
+  { ...photos[0], id:'fallback-raw', filename:'capture.dng' },
+  { ...photos[1], id:'fallback-jpeg', filename:'exported.jpg' },
+  ...singles,
+ ];
+ api.detail.mockImplementation(async (id:string) => ({...photos[0], id, exif:{date_time_original:'2026:10:01 08:25:49', make:'Camera', model:id.startsWith('fallback-') ? 'Model' : 'Other', latitude:35, longitude:139}, preview_url:'/preview'}));
+ await mount('/stack', {selectedAssets:fallback});
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+ await click('[aria-label="Set capture.dng as COVER"]');
+ await click('.stack-unmatched-grid .stack-photo');
+ await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
+ await click('.stack-set-target');
+ const group = host.querySelector('.stack-candidate-group')!;
+ expect(Array.from(group.querySelectorAll('.stack-filename')).map(node => node.textContent)).toEqual(['capture.dng','exported.jpg','x.jpg','y.jpg']);
+ expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('capture.dng');
+ expect(group.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
+ expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
+ expect(unmatched()).toEqual([]);
+ await act(async()=>button('Detect again').click());
+ expect(host.querySelector('dialog')).not.toBeNull();
+ await act(async()=>button('Continue').click());
+ expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('exported.jpg');
+ expect(host.querySelector('.stack-group-indicators')?.textContent).not.toBe('MANUAL');
+ await click('[aria-label="Remove exported.jpg from draft Stack"]');
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+ expect(unmatched()).toEqual(['capture.dng','exported.jpg','x.jpg','y.jpg']);
 });
 it('clamps both grids to content width without writing the shared preference and restores it on widening', async () => {
  let resize!: ResizeObserverCallback;

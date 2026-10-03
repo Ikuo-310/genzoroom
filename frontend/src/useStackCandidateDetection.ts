@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAssetDetail } from './api';
 import type { AssetExif, RecentAsset } from './assets';
-import { detectStackCandidates } from './stackCandidateDetection';
+import { detectStackCandidates, stackCandidateDetailTargets } from './stackCandidateDetection';
 
 const DETAIL_CONCURRENCY = 4;
 
@@ -9,6 +9,7 @@ export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
   const [result, setResult] = useState(() => detectStackCandidates(assets));
   const [loading, setLoading] = useState(false);
   const [failureCount, setFailureCount] = useState(0);
+  const [detailCount, setDetailCount] = useState(0);
   const request = useRef<{ generation: number; controller: AbortController | null; busy: boolean }>({ generation: 0, controller: null, busy: false });
 
   const detect = useCallback(() => {
@@ -19,10 +20,11 @@ export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
     current.controller = controller;
     const snapshot = [...new Map(assets.map(asset => [asset.id, asset])).values()];
     const initial = detectStackCandidates(snapshot);
-    const candidates = initial.groups.flatMap(group => group.members);
+    const candidates = stackCandidateDetailTargets(snapshot);
     current.busy = candidates.length > 0;
     setResult(initial);
     setFailureCount(0);
+    setDetailCount(candidates.length);
     setLoading(current.busy);
     if (!candidates.length) return;
     const details = new Map<string, AssetExif>();
@@ -68,5 +70,5 @@ export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
     // Guard the synchronous click interval before React commits the disabled button.
     if (!request.current.busy) detect();
   };
-  return { ...result, loading, failureCount, detailCount: result.groups.reduce((count, group) => count + group.members.length, 0), redetect };
+  return { ...result, loading, failureCount, detailCount, redetect };
 }

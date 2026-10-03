@@ -1,7 +1,7 @@
 import type { AssetExif, RecentAsset } from './assets';
 
 export type MatchState = 'matched' | 'mismatch' | 'unavailable' | 'error';
-export type NameReason = 'exact' | 'pixel-normalized';
+export type NameReason = 'exact' | 'pixel-normalized' | 'exif-fallback';
 export type DraftStack = {
   id: string;
   members: RecentAsset[];
@@ -107,5 +107,47 @@ export function detectStackCandidates(assets: readonly RecentAsset[], details: R
     groups.push({ id: `draft:auto:${key}`, members, coverAssetId: chooseStackCover(members), origin: 'auto',
       evidence: { name: 'matched', nameReason: family.reason, ...evidenceFor(members, details, failures) } });
   }
+  const unmatched = uniqueAssets.filter(asset => !grouped.has(asset.id));
+  const fallbackPool = unmatched.filter(asset => asset.stackId == null);
+  const raw = fallbackPool.filter(asset => asset.is_raw);
+  const nonRaw = fallbackPool.filter(asset => !asset.is_raw);
+  if (raw.length && nonRaw.length) {
+    const edges: Array<{ raw: RecentAsset; nonRaw: RecentAsset }> = [];
+    for (const rawAsset of raw) for (const nonRawAsset of nonRaw) {
+      const rawFamily = filenameFamily(rawAsset.filename)?.key;
+      const nonRawFamily = filenameFamily(nonRawAsset.filename)?.key;
+      if (rawFamily != null && rawFamily === nonRawFamily) continue;
+      if (!details.has(rawAsset.id) || !details.has(nonRawAsset.id)) continue;
+      const evidence = evidenceFor([rawAsset, nonRawAsset], details, failures);
+      if (evidence.time === 'matched' && evidence.camera === 'matched' && evidence.gps === 'matched') {
+        edges.push({ raw: rawAsset, nonRaw: nonRawAsset });
+      }
+    }
+    const rawDegree = new Map<string, number>();
+    const nonRawDegree = new Map<string, number>();
+    for (const edge of edges) {
+      rawDegree.set(edge.raw.id, (rawDegree.get(edge.raw.id) ?? 0) + 1);
+      nonRawDegree.set(edge.nonRaw.id, (nonRawDegree.get(edge.nonRaw.id) ?? 0) + 1);
+    }
+    const order = new Map(uniqueAssets.map((asset, index) => [asset.id, index]));
+    for (const edge of edges) {
+      if (rawDegree.get(edge.raw.id) !== 1 || nonRawDegree.get(edge.nonRaw.id) !== 1) continue;
+      const members = [edge.raw, edge.nonRaw].sort((a, b) => order.get(a.id)! - order.get(b.id)!);
+      members.forEach(asset => grouped.add(asset.id));
+      groups.push({ id: `draft:exif:${edge.raw.id}:${edge.nonRaw.id}`, members, coverAssetId: chooseStackCover(members), origin: 'auto',
+        evidence: { name: 'mismatch', nameReason: 'exif-fallback', time: 'matched', camera: 'matched', gps: 'matched' } });
+    }
+    groups.sort((a, b) => order.get(a.members[0].id)! - order.get(b.members[0].id)!);
+  }
   return { groups, unmatched: uniqueAssets.filter(asset => !grouped.has(asset.id)) };
+}
+
+export function stackCandidateDetailTargets(assets: readonly RecentAsset[]): RecentAsset[] {
+  const snapshot = [...new Map(assets.map(asset => [asset.id, asset])).values()];
+  const initial = detectStackCandidates(snapshot);
+  const nameMembers = initial.groups.flatMap(group => group.members);
+  const fallbackPool = initial.unmatched.filter(asset => asset.stackId == null);
+  const hasBothFormats = fallbackPool.some(asset => asset.is_raw) && fallbackPool.some(asset => !asset.is_raw);
+  const targets = hasBothFormats ? [...nameMembers, ...fallbackPool] : nameMembers;
+  return [...new Map(targets.map(asset => [asset.id, asset])).values()];
 }
