@@ -2,6 +2,26 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## STACK管理 第2フェーズ完了（2026-10-03・現行仕様）
+
+Homeで選択したassetを対象に、basename完全一致または既知Pixel naming patternのnormalizeによる自動STACK候補判定を追加した。候補はImmich Stack未所属で、同じfilename familyにRAWとNon-RAWを含む2 asset以上の組み合わせとし、Immichへ変更を送らずlocal draft Stack groupとして表示する。TIME／CAM／GPSは候補の補助evidenceとして表示する。
+
+Asset detailはcandidate memberだけに要求し、最大4件のbounded concurrency、AbortController、世代管理、再検出時の旧request破棄を行う。一部取得失敗でもNAME candidateは維持する。GPS latitude／longitudeをAsset detail EXIFへoptional追加し、CoverはRecentAsset.dateを使って最新JPEG、最新Non-RAW、最新memberの順で自動選択する。Homeと共有するthumbnail size controlを利用し、狭い表示幅ではuser preferenceを変更せずeffective columnsを減らす。NAME／TIME／CAM／GPS indicatorはmatched／mismatch／unavailable／errorの4状態とし、色に加えてscreen reader向けの状態textを設けた。
+
+### 監査指摘と修正
+
+監査で見つかった次の3件を修正した。
+
+1. candidate外assetにもdetail APIを要求していたため、NAME candidate memberだけに限定した。
+2. 狭いviewportで保存列数をそのまま使いサムネイルが細くなっていたため、saved columnsとeffective columnsを分離した。
+3. indicator状態が色とtitleに依存していたため、4状態へ整理し、screen-reader-accessibleな状態textを追加した。
+
+### NAS実機確認
+
+利用者によるNAS実機確認では、実データのRAW + JPEG 2枚組を自動候補化し、複数の組が独立したdraft Stack groupとして表示されること、JPEGがCOVERに選ばれること、NAME／TIME／CAM／GPS indicator、候補外assetの下段表示を確認した。thumbnail size変更後もgroup memberが外側gridで分断されず、group単位でreflowすることを確認した。実在する3枚組Stackは確認対象になかったため3枚組の実機確認は未実施。3枚以上のlayoutはコードとtestsで一般化している。
+
+以下は未実装であり、次の機能段階に残す。Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集。
+
 ## Home閲覧機能のまとまり（2026-10-02・現在仕様）
 
 HomeはRecent、Albums、Calendar、Favoritesの4タブを持つ。RecentはImmich TimelineのIMAGEを新しい順に表示し、件数を50〜500件・50件刻み（初期値100件）から選ぶ。Recent、Favorites、CalendarはArchiveを含まないTimelineのIMAGEを対象にする。AlbumsはImmichのAlbum検索を使い、Album一覧・詳細ではArchive除外を追加していない。
@@ -18,7 +38,7 @@ Album一覧の期間は日本語UIで`YYYY/MM`（例：`2002/09〜2025/11`）、
 
 Home構造の監査では、写真ビュー判定がasset・selection・edit status・toolbar等に分散し、selectionModeがtrueのままタブを切り替えるとEscape handlerが古いclear処理を参照し得る点を確認した。最小整理としてGalleryPageに`photoView`を導入し、写真ビューのassets、load state、selection、edit status対象を一か所で対応づけた。選択ID・anchor・toggle・clear・取得後の選択整理は`usePhotoSelection()`へまとめ、GalleryPageが4 instanceを保持する。Escapeは現在の写真ビューのclear関数に追従し、Recent／Favorites両方向の回帰テストを追加した。
 
-この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。Stack機能、Export Queue、RAW現像は未実装。
+この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。STACK管理のdraft候補表示は第2フェーズまで実装済み。Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集は未実装。Export QueueとRAW現像も未実装。
 
 ## Keyboard command architectureと現行ショートカット（2026-10-02）
 

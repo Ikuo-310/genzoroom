@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Stack management groups Home-selected RAW / JPEG assets into draft candidates by filename family, shows NAME / TIME / CAM / GPS evidence and an automatic cover, and shares Home thumbnail sizing with automatic column adjustment on narrow screens.
+
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
 - Home browsing tabs for Albums, Calendar, and Favorites alongside Recent. Calendar includes year, month, and date views; Favorites lists favorited Timeline images.
