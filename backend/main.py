@@ -10,6 +10,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from edit_state import InvalidEditState, validate_snapshot
+from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state, get_edit_statuses
 
 from immich import (
@@ -159,6 +160,24 @@ def _upstream_error(error: ImmichRequestError) -> HTTPException:
 class StackResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stackIds: list[UUID] = Field(max_length=100)
+
+
+class StackRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetIds: list[UUID] = Field(max_length=1000)
+
+
+@app.post("/stacks/refresh", response_model=list[ImmichStack])
+async def refresh_selected_stacks(payload: StackRefreshRequest) -> list[ImmichStack]:
+    try:
+        return await resolve_stacks(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), [], asset_ids=payload.assetIds)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+
+
+@app.post("/stacks/apply", response_model=StackApplyResponse, response_model_exclude_none=True)
+async def write_stacks(payload: StackApplyRequest) -> StackApplyResponse:
+    return await apply_stacks(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), payload)
 
 
 @app.post("/stacks/resolve", response_model=list[ImmichStack])

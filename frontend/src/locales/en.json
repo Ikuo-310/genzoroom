@@ -608,6 +608,14 @@
     }
   },
   "stackManagement": {
+    "sendLimit": "Send up to 500 Stack changes at a time, with up to 1,000 photos per Stack. Reduce the candidates before sending.",
+    "sending": "Applying Stacks to Immich…",
+    "deletePending": "Immich Stack pending dissolution: {{filename}} ({{count}} photos). Photos remain locally available.",
+    "sendSuccess": "Applied to Immich.",
+    "sendConfirm": "Apply Stack changes to Immich? New {{create}}, update {{update}}, dissolve {{delete}}.",
+    "sendUnknown": "Some Stack outcomes could not be confirmed. Detect again before sending.",
+    "sendFailure": "Some Stacks could not be applied to Immich. Send again to retry.",
+    "sendBlocked": "This Stack was not sent because a required membership change did not complete.",
     "newStack": "New Stack",
     "manual": "Manually assembled Stack",
     "purgeGroup": "Dissolve draft Stack",

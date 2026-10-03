@@ -2,9 +2,12 @@ import { useEffect, useReducer } from 'react';
 import type { RecentAsset } from './assets';
 import { isStackDraftModified, reconcileImmichLineage } from './immichStackDraft';
 import { chooseStackCover, type DraftStack, type StackDetection } from './stackCandidateDetection';
+import type { StackWritePlan, StackWriteResult } from './stackWrite';
 
 export type EditableStackDraft = StackDetection & {
   sourceGroups: DraftStack[] | null;
+  completedSourceIds: Set<string>;
+  writeResults: Record<string, StackWriteResult>;
   selectedIds: Set<string>;
   addTargetStackId: string | null;
   modified: boolean;
@@ -12,10 +15,11 @@ export type EditableStackDraft = StackDetection & {
   order: ReadonlyMap<string, number>;
 };
 export const emptyStackDraft: EditableStackDraft = {
-  groups: [], unmatched: [], sourceGroups: null, selectedIds: new Set(), addTargetStackId: null,
+  groups: [], unmatched: [], sourceGroups: null, completedSourceIds: new Set(), writeResults: {}, selectedIds: new Set(), addTargetStackId: null,
   modified: false, manualCounter: 0, order: new Map(),
 };
 export type StackDraftAction =
+  | { type: 'writeResults'; plan: StackWritePlan; results: StackWriteResult[] }
   | { type: 'initialize'; source: StackDetection; assets: readonly RecentAsset[] }
   | { type: 'reset' }
   | { type: 'clear' }
@@ -29,14 +33,46 @@ export type StackDraftAction =
   | { type: 'cover'; groupId: string; assetId: string };
 
 function normalize(state: EditableStackDraft): EditableStackDraft {
-  const groups = reconcileImmichLineage(state.groups, state.sourceGroups ?? []);
+  const source = (state.sourceGroups ?? []).filter(group => !state.completedSourceIds.has(group.id));
+  const groups = reconcileImmichLineage(state.groups, source);
   const unmatched = [...state.unmatched].sort((a, b) => (state.order.get(a.id) ?? Infinity) - (state.order.get(b.id) ?? Infinity));
   const ids = new Set(unmatched.map(asset => asset.id));
-  return { ...state, groups, modified: isStackDraftModified(groups, state.sourceGroups ?? []), unmatched, selectedIds: new Set([...state.selectedIds].filter(id => ids.has(id))),
+  return { ...state, groups, modified: isStackDraftModified(groups, source), unmatched, selectedIds: new Set([...state.selectedIds].filter(id => ids.has(id))),
     addTargetStackId: state.groups.some(group => group.id === state.addTargetStackId) ? state.addTargetStackId : null };
 }
 
 export function stackDraftReducer(state: EditableStackDraft, action: StackDraftAction): EditableStackDraft {
+  if (action.type === 'writeResults') {
+    const completedSourceIds = new Set(state.completedSourceIds);
+    const removed = new Set(action.plan.unchanged);
+    const writeResults = { ...state.writeResults };
+    for (const result of action.results) {
+      writeResults[result.operationId] = result;
+      const op = action.plan.operations.find(operation => operation.operationId === result.operationId)!;
+      if (result.status === 'success' && op.type !== 'delete') removed.add(op.operationId);
+      for (const source of state.sourceGroups ?? []) {
+        if ((source.origin === 'immich' && (source.immichStackId === result.releasedStackId
+          || (result.status === 'success' && source.immichStackId === op.stackId))) || removed.has(source.id)) completedSourceIds.add(source.id);
+      }
+    }
+    for (const id of removed) {
+      completedSourceIds.add(id);
+      const current = state.groups.find(group => group.id === id);
+      if (current?.origin === 'immich') {
+        for (const original of state.sourceGroups ?? []) {
+          if (original.origin === 'immich' && original.immichStackId === current.immichStackId) completedSourceIds.add(original.id);
+        }
+      }
+    }
+    const groups = state.groups.filter(group => !removed.has(group.id)).map(group => {
+      const result = writeResults[group.id];
+      if (group.origin !== 'immich' || result?.releasedStackId !== group.immichStackId) return group;
+      // A replacement can fail after its delete committed; retry must create, never delete again.
+      const { immichStackId: _stack, originalMemberIds: _members, originalPrimaryAssetId: _primary, ...local } = group;
+      return { ...local, origin: 'manual' as const, modified: true };
+    });
+    return normalize({ ...state, groups, completedSourceIds, writeResults, selectedIds: new Set(), addTargetStackId: null });
+  }
   if (action.type === 'initialize') return {
     ...emptyStackDraft, manualCounter: state.manualCounter, sourceGroups: action.source.groups,
     order: new Map(action.assets.map((asset, index) => [asset.id, index])),

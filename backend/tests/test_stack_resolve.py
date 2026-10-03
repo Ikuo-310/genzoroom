@@ -95,3 +95,10 @@ def test_route_validates_bounded_uuid_request_and_maps_errors():
                 mocked.side_effect = ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
                 assert (await client.post("/stacks/resolve", json={"stackIds": [STACK_ID]})).status_code == 502
     asyncio.run(run())
+
+def test_refresh_finds_latest_stacks_by_asset_instead_of_stale_stack_id():
+    body=[full_stack(SECOND_STACK_ID,IDS[:2])]
+    result=asyncio.run(resolve_stacks('http://immich.example','key',[],asset_ids=[UUID(IDS[0])],transport=httpx.MockTransport(lambda request:httpx.Response(200,json=body))))
+    assert str(result[0].id)==SECOND_STACK_ID
+    result=asyncio.run(resolve_stacks('http://immich.example','key',[],asset_ids=[UUID(IDS[3])],transport=httpx.MockTransport(lambda request:httpx.Response(200,json=body))))
+    assert result==[]

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isRecentAsset } from './api';
@@ -18,6 +18,7 @@ import { useSelectedImmichStacks } from './useSelectedImmichStacks';
 import { mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
+import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 
@@ -41,29 +42,55 @@ export function StackManagementPage() {
   const detectionAssets = useMemo(() => {
     if (immich.loading || immich.error) return EMPTY_ASSETS;
     const memberIds = new Set(immich.stacks.flatMap(stack => stack.assets.map(asset => asset.id.toLowerCase())));
-    return assets.filter(asset => asset.stackId == null && !memberIds.has(asset.id.toLowerCase()));
-  }, [assets, immich.stacks, immich.loading, immich.error]);
+    return assets.filter(asset => (immich.refreshed || asset.stackId == null) && !memberIds.has(asset.id.toLowerCase()))
+      .map(asset => immich.refreshed ? { ...asset, stackId: null, primaryAssetId: null, stackAssetCount: null } : asset);
+  }, [assets, immich.stacks, immich.loading, immich.error, immich.refreshed]);
   const detection = useStackCandidateDetection(detectionAssets);
   const integration = useMemo(() => mergeImmichStackSource(detection, immich.stacks, assets), [detection.groups, detection.unmatched, immich.stacks, assets]);
   const busy = detection.loading || immich.loading;
   const { draft, dispatch, ready } = useEditableStackDraft(integration.source, busy || immich.error, integration.assets);
   const { selectedIds, addTargetStackId } = draft;
   const [confirmRedetect, setConfirmRedetect] = useState(false);
+  const [confirmSend, setConfirmSend] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<string | null>(null);
+  const sendRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => { sendRequest.current?.abort(); }, []);
+  const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
+  const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
+  const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
+  const oversized = plan.operations.length > 500 || plan.operations.some(op => (op.memberIds?.length ?? 0) > 1000);
+  const canSend = ready && !sending && !confirmRedetect && !unknown && !oversized && (draft.groups.length > 0 || source.some(group => group.origin === 'immich'));
+  const startSend = async () => {
+    if (!canSend || sendRequest.current) return;
+    setConfirmSend(false); setSending(true); setSendStatus('sending');
+    const controller = new AbortController(); sendRequest.current = controller;
+    // Confirmation is local completion; unchanged groups need no upstream request.
+    dispatch({ type: 'writeResults', plan: { operations: [], unchanged: plan.unchanged }, results: [] });
+    let results: StackWriteResult[];
+    try { results = await sendStackWritePlan(plan.operations, controller.signal); }
+    catch { results = plan.operations.map(op => ({ operationId: op.operationId, status: 'unknown' })); }
+    if (controller.signal.aborted) return;
+    dispatch({ type: 'writeResults', plan: { ...plan, unchanged: [] }, results });
+    setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
+      : results.some(result => result.status !== 'success') ? 'sendFailure' : 'sendSuccess');
+    sendRequest.current = null; setSending(false);
+  };
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
-  const canEdit = ready && !confirmRedetect;
+  const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
   const displayed = ready ? draft : integration.source;
   const addSelected = useCallback((targetGroupId?: string) => {
     if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
   }, [canEdit, canAdd, selectedUnmatched.length]);
   const runRedetect = () => {
+    setSendStatus(null);
     dispatch({ type: 'reset' });
     // Resolving a fresh membership list also supplies fresh auto-detection inputs.
-    if (assets.some(asset => asset.stackId != null)) immich.retry();
-    else detection.redetect();
+    immich.retry(true);
   };
   const redetect = () => {
-    if (busy || (!ready && !immich.error)) return;
+    if (busy || sending || confirmSend || (!ready && !immich.error)) return;
     if (draft.modified) setConfirmRedetect(true);
     else runRedetect();
   };
@@ -90,7 +117,7 @@ export function StackManagementPage() {
       if (settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
-        || confirmRedetect) return;
+        || confirmRedetect || confirmSend) return;
       if (matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
       else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
       // Escape dismisses local page selection and Add targeting rather than an application command.
@@ -100,7 +127,7 @@ export function StackManagementPage() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [settingsOpen, returnHome, confirmRedetect, canAdd, addSelected]);
+  }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected]);
 
   return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}>
     <header className="stack-management-header">
@@ -120,11 +147,13 @@ export function StackManagementPage() {
       </div>
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
-        <button type="button" disabled={busy || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
-        <button type="button" disabled>{t('stackManagement.send')}</button>
+        <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
+        <button type="button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
       </div>
     </div>
-    <div ref={contentRef} className="stack-content" aria-busy={busy}>
+    <div ref={contentRef} className="stack-content" aria-busy={busy || sending}>
+      {sendStatus && <p className="stack-status" role="status">{t(`stackManagement.${sendStatus}`)}</p>}
+      {oversized && <p className="stack-status" role="status">{t('stackManagement.sendLimit')}</p>}
       {immich.loading && <p className="stack-status" role="status">{t('stackManagement.loadingImmich')}</p>}
       {immich.error && <p className="stack-status" role="alert">{t('stackManagement.immichFailure')}</p>}
       {detection.loading && <p className="stack-status" role="status">{t('stackManagement.detecting')}</p>}
@@ -138,7 +167,7 @@ export function StackManagementPage() {
             <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit}
               title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
               onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
-            <StackEvidenceHeader group={group} />
+            <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} />
             <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
               onClick={() => selectedUnmatched.length
@@ -151,6 +180,10 @@ export function StackManagementPage() {
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
             onPurge={() => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
+        {source.filter(group => group.origin === 'immich' && !draft.groups.some(current => current.origin === 'immich' && current.immichStackId === group.immichStackId)).map(group => group.origin === 'immich' && <p key={group.id} className="stack-status" role="status">
+          {t('stackManagement.deletePending', { count: group.members.length, filename: group.members.find(asset => asset.id === group.originalPrimaryAssetId)?.filename })}
+          {draft.writeResults[`delete:${group.immichStackId}`] && <span className="stack-evidence error">{t(draft.writeResults[`delete:${group.immichStackId}`].status === 'unknown' ? 'stackManagement.sendUnknown' : 'stackManagement.sendFailure')}</span>}
+        </p>)}
       </section>
       <section aria-labelledby="stack-unmatched-heading">
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
@@ -160,12 +193,19 @@ export function StackManagementPage() {
       </section>
     </div>
     {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
+    {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
+      create: plan.operations.filter(op => op.type === 'create').length, update: plan.operations.filter(op => op.type === 'update').length, delete: plan.operations.filter(op => op.type === 'delete').length,
+    })} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
   </main>;
 }
 
-function StackEvidenceHeader({ group }: { group: DraftStack }) {
+function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
+  if (result && result.status !== 'success') {
+    const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure');
+    return <div className="stack-group-indicators"><span className="stack-evidence error" title={description}><span aria-hidden="true">{group.origin === 'immich' ? 'IMMICH' : group.origin === 'manual' || group.modified ? 'MANUAL' : 'STACK'}</span><span className="visually-hidden">{description}</span></span></div>;
+  }
   if (group.origin === 'immich') {
     const description = t(group.modified ? 'stackManagement.immichModified' : 'stackManagement.immichUnchanged');
     return <div className="stack-group-indicators"><span className={`stack-evidence ${group.modified ? 'mismatch' : 'matched'}`} title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;

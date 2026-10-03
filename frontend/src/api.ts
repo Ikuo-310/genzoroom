@@ -136,13 +136,13 @@ export async function fetchAssetDetail(assetId: string, signal: AbortSignal): Pr
   return { ...data, exif: { ...data.exif, latitude: coordinate(data.exif.latitude, 90), longitude: coordinate(data.exif.longitude, 180) } };
 }
 
-export function validateImmichStacks(data: unknown, requestedIds: readonly string[]): ImmichStack[] {
-  const requested = new Set(requestedIds.map(id => id.toLowerCase()));
+export function validateImmichStacks(data: unknown, requestedIds?: readonly string[]): ImmichStack[] {
+  const requested = requestedIds ? new Set(requestedIds.map(id => id.toLowerCase())) : null;
   const stacks = new Set<string>(), members = new Set<string>();
   if (!Array.isArray(data)) throw new Error('Unexpected stacks response');
   for (const stack of data) {
     if (!isRecord(stack) || !isUuid(stack.id) || !isUuid(stack.primaryAssetId)
-      || !requested.has(stack.id.toLowerCase()) || stacks.has(stack.id.toLowerCase())
+      || (requested !== null && !requested.has(stack.id.toLowerCase())) || stacks.has(stack.id.toLowerCase())
       || !Array.isArray(stack.assets) || stack.assets.length < 2) throw new Error('Unexpected stacks response');
     stacks.add(stack.id.toLowerCase());
     for (const asset of stack.assets) {
@@ -154,7 +154,7 @@ export function validateImmichStacks(data: unknown, requestedIds: readonly strin
     }
     if (!stack.assets.some((asset: RecentAsset) => asset.id.toLowerCase() === (stack.primaryAssetId as string).toLowerCase())) throw new Error('Unexpected stacks response');
   }
-  if (stacks.size !== requested.size) throw new Error('Unexpected stacks response');
+  if (requested !== null && stacks.size !== requested.size) throw new Error('Unexpected stacks response');
   // UUID casing must not leave a valid primary unmatched by case-sensitive UI IDs.
   return (data as ImmichStack[]).map(stack => ({ ...stack, id: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase(),
     assets: stack.assets.map(asset => ({ ...asset, id: asset.id.toLowerCase(), stackId: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase() })) }));
@@ -168,4 +168,15 @@ export async function fetchSelectedImmichStacks(stackIds: readonly string[], sig
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackIds: ids }) });
   if (!response.ok) throw new Error('Stacks request failed');
   return validateImmichStacks(await response.json(), ids);
+}
+
+export async function refreshSelectedImmichStacks(assetIds: readonly string[], signal: AbortSignal): Promise<ImmichStack[]> {
+  if (assetIds.length > 1000 || assetIds.some(id => !isUuid(id))) throw new Error('Invalid asset IDs');
+  const response = await fetch('/api/stacks/refresh', { method: 'POST', signal, cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds }) });
+  if (!response.ok) throw new Error('Stacks refresh failed');
+  const stacks = validateImmichStacks(await response.json());
+  const ids = new Set(assetIds.map(id => id.toLowerCase()));
+  if (stacks.some(stack => !stack.assets.some(asset => ids.has(asset.id)))) throw new Error('Unexpected stacks refresh');
+  return stacks;
 }

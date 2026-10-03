@@ -13,8 +13,10 @@ GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. ngi
   - `user.read` for the authenticated connection check.
   - `asset.read` for recent-photo metadata and asset details.
   - `asset.view` for thumbnails and previews.
+  - `stack.read` for membership and full Stack resolution.
+  - `stack.create`, `stack.update`, and `stack.delete` for confirmed STACK management writes.
 
-GenzoRoom currently uses read-only Immich endpoints. Do not grant upload, update, delete, or other write permissions unless a future feature explicitly requires them.
+GenzoRoom uses read endpoints and explicitly confirmed Stack create/update/delete operations. No upload, asset deletion, or unrelated write permissions are needed. Stack creation also requires ownership of the requested assets under Immich access validation.
 
 ## Configuration
 

@@ -7,8 +7,8 @@ import { App } from './App';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
 import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
-const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn(), resolve: vi.fn() }));
-vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail, fetchSelectedImmichStacks: api.resolve }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn(), resolve: vi.fn(), refresh: vi.fn() }));
+vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail, fetchSelectedImmichStacks: api.resolve, refreshSelectedImmichStacks: api.refresh }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getAssetEditStatuses: api.statuses }));
 const photos = [
   { id: 'raw', filename: 'selected.dng', format: 'DNG', is_raw: true, date: '2026-09-01', thumbnail_url: '/raw' },
@@ -29,6 +29,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en'); sessionStorage.clear(); localStorage.clear(); updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailColumns', 6);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos.find(a => a.id === id), exif: {}, preview_url: '/preview' }));
   api.resolve.mockReset().mockRejectedValue(new Error('No Stack fixture'));
+  api.refresh.mockReset().mockImplementation(async (ids: string[], signal: AbortSignal) => ids.some(id => /^[0-9a-f]{8}-/i.test(id)) ? api.resolve([], signal) : []);
   api.recent.mockResolvedValue(photos); api.favorites.mockResolvedValue(photos); api.statuses.mockResolvedValue({});
   document.title = 'GenzoRoom'; host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -53,7 +54,7 @@ it('guards S and opens concrete RAW through the button', async () => {
   const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); host.append(menu); await press('s'); menu.remove();
   expect(host.querySelector('.stack-management-page')).toBeNull(); await click('button[title="Manage Stacks (S)"]'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
 });
-it('renders compact header, isolated scroll sections and local selection with disabled future actions', async () => {
+it('renders compact header, isolated scroll sections and enables sending completed candidates', async () => {
   await mount('/stack', { selectedAssets: photos });
   const content = host.querySelector('.stack-content')!;
   expect(content.contains(host.querySelector('.stack-management-header'))).toBe(false); expect(content.contains(host.querySelector('.stack-control-bar'))).toBe(false);
@@ -61,7 +62,7 @@ it('renders compact header, isolated scroll sections and local selection with di
   expect(host.querySelector('[aria-label="Settings"]')).not.toBeNull(); expect(host.querySelector('#stack-candidates-heading')).not.toBeNull();
   expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(0);
   expect(host.querySelector('#stack-candidates-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(2);
-  expect(host.querySelectorAll('.stack-control-bar button:disabled')).toHaveLength(4);
+  expect(host.querySelectorAll('.stack-control-bar button:disabled')).toHaveLength(3);
   await click('.stack-photo'); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
   await click('.stack-control-bar button'); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
   await click('.stack-home-title'); expect(host.querySelector('.home-page')).not.toBeNull();
@@ -452,4 +453,94 @@ it('shows MANUAL after member Purge that leaves two members and retains a non-pu
  expect(host.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
  expect(unmatched()).toEqual(['selected.dng']);
+});
+
+it('confirms sending with counts, Cancel focus and Escape dismissal',async()=>{
+ await mount('/stack',{selectedAssets:photos});
+ expect(button('Send to Immich').disabled).toBe(false);
+ await act(async()=>button('Send to Immich').click());
+ expect(host.querySelector('dialog')?.textContent).toContain('New 1, update 0, dissolve 0');
+ expect(document.activeElement?.textContent).toBe('Cancel');
+ await press('Escape',{},document.activeElement!);expect(host.querySelector('dialog')).toBeNull();
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+});
+it('sends only once, disables editing, cleans candidates and preserves unmatched for further work',async()=>{
+ let finish!:(value:Response)=>void;
+ const fetch=vi.fn((_url: string, _init: RequestInit)=>new Promise<Response>(resolve=>{finish=resolve;}));vi.stubGlobal('fetch',fetch);
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ await act(async()=>button('Send to Immich').click());
+ await act(async()=>{button('Continue').click();button('Continue')?.click();});
+ expect(fetch).toHaveBeenCalledOnce();expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');
+ for(const control of host.querySelectorAll<HTMLButtonElement>('.stack-photo,.stack-purge-group,.stack-purge-member,.stack-set-target')) expect(control.disabled).toBe(true);
+ expect(button('Detect again').disabled).toBe(true);
+ const payload=JSON.parse(fetch.mock.calls[0][1].body as string);
+ await act(async()=>finish(new Response(JSON.stringify({results:[{operationId:payload.operations[0].operationId,status:'success',stackId:existingStackId}]}))));
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
+ for(const photo of Array.from(host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo'))) await act(async()=>photo.click());
+ await act(async()=>button('New Stack').click());expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+});
+it('removes unchanged without writes and exposes delete failure with a safe manual retry',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ const fetch=vi.fn();vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(fetch).not.toHaveBeenCalled();expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+ expect(button('Send to Immich').disabled).toBe(true);
+ await act(async()=>button('Detect again').click());await click('.stack-purge-group');
+ fetch.mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'failed',errorCode:'authentication_failed'}))})));
+ await act(async()=>button('Send to Immich').click());expect(host.querySelector('dialog')?.textContent).toContain('dissolve 1');
+ await act(async()=>button('Continue').click());
+ expect(host.textContent).toContain('pending dissolution');expect(unmatched()).toHaveLength(3);expect(button('Send to Immich').disabled).toBe(false);
+ fetch.mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'success'}))})));
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.textContent).not.toContain('pending dissolution');expect(unmatched()).toHaveLength(3);
+});
+it('retains unknown work, labels outcome uncertainty and requires redetection before resend',async()=>{
+ await mount('/stack',{selectedAssets:photos});
+ const fetch=vi.fn().mockRejectedValue(new Error('lost'));vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+ expect(host.querySelector('.stack-evidence.error')?.getAttribute('title')).toContain('outcomes could not be confirmed');
+ expect(button('Send to Immich').disabled).toBe(true);expect(fetch).toHaveBeenCalledOnce();
+ await act(async()=>button('Detect again').click());
+ if(button('Continue')) await act(async()=>button('Continue').click());
+ expect(api.refresh).toHaveBeenCalledOnce();expect(button('Send to Immich').disabled).toBe(false);
+});
+it('retains failed candidate with accessible red status and retries only on explicit confirmation',async()=>{
+ await mount('/stack',{selectedAssets:photos});
+ const fetch=vi.fn().mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'failed'}))})));vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.querySelector('.stack-evidence.error .visually-hidden')?.textContent).toContain('could not be applied');
+ expect(button('Send to Immich').disabled).toBe(false);expect(fetch).toHaveBeenCalledOnce();
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('applies a partial batch by removing only successes and marking failed work',async()=>{
+ const more=photos.map(asset=>({...asset,id:'second-'+asset.id,filename:'second.'+(asset.is_raw?'dng':'jpg')}));
+ api.detail.mockImplementation(async(id:string)=>({id,exif:{}}));
+ await mount('/stack',{selectedAssets:[...photos,...more,...singles]});
+ const fetch=vi.fn(async(_url:string,init:RequestInit)=>{
+  const operations=JSON.parse(init.body as string).operations;
+  return new Response(JSON.stringify({results:operations.map((op:{operationId:string},index:number)=>({operationId:op.operationId,status:index?'failed':'success',...(index?{}:{stackId:existingStackId})}))}));
+ });vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
+ expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('[role="status"]')?.textContent).toContain('could not be applied');
+});
+it('aborts the frontend wait on Home navigation without resending the write',async()=>{
+ let signal:AbortSignal|undefined;
+ const fetch=vi.fn((url:string,init:RequestInit)=>{if(url!=='/api/stacks/apply') return Promise.resolve(new Response('{}'));signal=init.signal as AbortSignal;return new Promise<Response>(()=>{});});vi.stubGlobal('fetch',fetch);
+ await mount('/stack',{selectedAssets:photos});
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(signal?.aborted).toBe(false);await press('H');expect(signal?.aborted).toBe(true);expect(fetch.mock.calls.filter(call=>call[0]==='/api/stacks/apply')).toHaveLength(1);
+});
+it('refreshes latest membership after unknown create without relying on old Stack IDs',async()=>{
+ await mount('/stack',{selectedAssets:photos});
+ vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new Error('lost')));
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ const created={id:existingStackId,primaryAssetId:'jpeg',assets:photos.map(asset=>({...asset,stackId:existingStackId,primaryAssetId:'jpeg',stackAssetCount:2}))};
+ api.refresh.mockResolvedValue([created]);
+ await act(async()=>button('Detect again').click());
+ expect(api.refresh.mock.calls[0][0]).toEqual(['raw','jpeg']);
+ expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ expect(button('Send to Immich').disabled).toBe(false);expect(api.detail).toHaveBeenCalledTimes(2);
 });

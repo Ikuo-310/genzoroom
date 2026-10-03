@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-export function StackRedetectDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+export function StackRedetectDialog({ onConfirm, onCancel, title, body }: { onConfirm: () => void; onCancel: () => void; title?: string; body?: string }) {
   const { t } = useTranslation();
   const titleId = useId(), bodyId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -40,8 +40,8 @@ export function StackRedetectDialog({ onConfirm, onCancel }: { onConfirm: () => 
         buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
       } else if (event.key === 'Escape' && !event.shiftKey) { event.preventDefault(); onCancel(); }
     }}>
-    <h2 id={titleId}>{t('stackManagement.detect')}</h2>
-    <p id={bodyId}>{t('stackManagement.redetectConfirm')}</p>
+    <h2 id={titleId}>{title ?? t('stackManagement.detect')}</h2>
+    <p id={bodyId}>{body ?? t('stackManagement.redetectConfirm')}</p>
     <div className="selection-confirm-actions">
       <button ref={cancel} type="button" onClick={onCancel}>{t('workspace.historyCancel')}</button>
       <button type="button" onClick={onConfirm}>{t('workspace.historyContinue')}</button>

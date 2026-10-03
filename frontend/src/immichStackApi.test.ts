@@ -46,3 +46,17 @@ it('canonicalizes UUID casing so COVER still identifies a member',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify([upper]))));
  expect(await fetchSelectedImmichStacks([stackId],new AbortController().signal)).toEqual([value]);
 });
+
+it('refreshes membership from selected asset IDs and accepts dissolved selections',async()=>{
+ const {refreshSelectedImmichStacks}=await import('./api');
+ const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify([stack()])));vi.stubGlobal('fetch',fetch);
+ const signal=new AbortController().signal;
+ expect(await refreshSelectedImmichStacks([other],signal)).toEqual([stack()]);
+ expect(fetch.mock.calls[0][0]).toBe('/api/stacks/refresh');expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({assetIds:[other]});
+ fetch.mockResolvedValue(new Response('[]'));expect(await refreshSelectedImmichStacks([id],signal)).toEqual([]);
+ fetch.mockResolvedValue(new Response(JSON.stringify([stack()])));
+ await expect(refreshSelectedImmichStacks([stackId],signal)).rejects.toThrow('Unexpected');
+ await expect(refreshSelectedImmichStacks(['bad'],signal)).rejects.toThrow('Invalid');
+ fetch.mockResolvedValue(new Response(JSON.stringify([{...stack(),assets:[asset(id),asset(id)]}])));
+ await expect(refreshSelectedImmichStacks([id],signal)).rejects.toThrow('Unexpected');
+});

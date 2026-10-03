@@ -550,15 +550,18 @@ async def _with_asset_stacks(
 
 async def resolve_stacks(
     immich_url: str | None, api_key: str | None, stack_ids: list[UUID],
-    *, transport: httpx.AsyncBaseTransport | None = None,
+    *, transport: httpx.AsyncBaseTransport | None = None, asset_ids: list[UUID] | None = None,
 ) -> list[ImmichStack]:
     if len(stack_ids) > 100:
         raise ValueError("At most 100 stacks may be resolved.")
     requested = list(dict.fromkeys(stack_ids))
-    if not requested:
+    if not requested and not asset_ids:
         return []
     url, key = _require_configuration(immich_url, api_key)
     stacks = await _get_asset_stacks(url, key, transport=transport)
+    if asset_ids is not None:
+        selected = set(asset_ids)
+        requested = [UUID(stack['id']) for stack in stacks if any(UUID(member['id']) in selected for member in stack['assets'])]
     lookup = {UUID(stack["id"]): stack for stack in stacks}
     try:
         result = []
