@@ -19,6 +19,7 @@ import { mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
+import { canDropStackPayload, isStackDrag, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 
@@ -54,6 +55,8 @@ export function StackManagementPage() {
   const [confirmSend, setConfirmSend] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<StackDragPayload | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<AbortController | null>(null);
   useEffect(() => () => { sendRequest.current?.abort(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
@@ -80,6 +83,32 @@ export function StackManagementPage() {
   const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
   const displayed = ready ? draft : integration.source;
+  const payloadFrom = (transfer: DataTransfer) => readStackDragPayload(transfer)
+    ?? (isStackDrag(transfer) ? dragging : null);
+  const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
+    if (!canEdit || event.dataTransfer.files.length) { event.preventDefault(); return false; }
+    try {
+      event.dataTransfer.setData(STACK_DRAG_TYPE, JSON.stringify(payload));
+      event.dataTransfer.effectAllowed = 'move';
+      setDragging(payload);
+      return true;
+    } catch { event.preventDefault(); return false; }
+  };
+  const handleDragEnd = () => { setDragging(null); setDropTarget(null); };
+  const canAcceptDrop = (event: React.DragEvent, targetId: string | null) => {
+    if (!canEdit || !isStackDrag(event.dataTransfer)) return false;
+    const payload = payloadFrom(event.dataTransfer);
+    return payload !== null && canDropStackPayload(payload, targetId, draft.groups, draft.unmatched);
+  };
+  const acceptDrop = (event: React.DragEvent, targetId: string | null) => {
+    if (!canAcceptDrop(event, targetId)) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+    const payload = payloadFrom(event.dataTransfer)!;
+    if (targetId === null) dispatch({ type: 'purgeMember', groupId: payload.sourceGroupId!, assetId: payload.assetId });
+    else if (payload.sourceGroupId === null) dispatch({ type: 'dropUnmatched', assetId: payload.assetId, targetGroupId: targetId });
+    else dispatch({ type: 'moveMember', assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, targetGroupId: targetId });
+    setDragging(null); setDropTarget(null);
+  };
   const addSelected = useCallback((targetGroupId?: string) => {
     if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
   }, [canEdit, canAdd, selectedUnmatched.length]);
@@ -160,8 +189,17 @@ export function StackManagementPage() {
       {detection.failureCount > 0 && <p className="stack-status" role="status">{t(detection.failureCount === detection.detailCount ? 'stackManagement.allFailure' : 'stackManagement.partialFailure')}</p>}
       <section aria-labelledby="stack-candidates-heading">
         <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
-        <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section
-          key={group.id} className={`stack-candidate-group${addTargetStackId === group.id ? ' stack-add-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
+        <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
+          key={group.id} className={`stack-candidate-group${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
+          onDragOver={event => {
+            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
+            if (canAcceptDrop(event, group.id)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(group.id); }
+          }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === group.id) setDropTarget(null); }}
+          onDrop={event => {
+            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
+            acceptDrop(event, group.id);
+          }}
           style={{ '--stack-member-count': group.members.length } as CSSProperties}>
           <header className="stack-group-header">
             <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit}
@@ -177,6 +215,8 @@ export function StackManagementPage() {
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
             selected={false} member cover={asset.id === group.coverAssetId} disabled={!canEdit}
+            dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
+            onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: group.id })} onDragEnd={handleDragEnd}
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
             onPurge={() => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
@@ -185,10 +225,16 @@ export function StackManagementPage() {
           {draft.writeResults[`delete:${group.immichStackId}`] && <span className="stack-evidence error">{t(draft.writeResults[`delete:${group.immichStackId}`].status === 'unknown' ? 'stackManagement.sendUnknown' : 'stackManagement.sendFailure')}</span>}
         </p>)}
       </section>
-      <section aria-labelledby="stack-unmatched-heading">
+      <section aria-labelledby="stack-unmatched-heading" className={dropTarget === 'unmatched' ? 'stack-unmatched-drop-target' : ''}
+        onDragOver={event => { if (canAcceptDrop(event, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === 'unmatched') setDropTarget(null); }}
+        onDrop={event => acceptDrop(event, null)}>
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
         {displayed.unmatched.length ? <div className="stack-unmatched-grid">{displayed.unmatched.map(asset => <StackPhoto
-          key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit} onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
+          key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
+          dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === null}
+          onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: null })} onDragEnd={handleDragEnd}
+          onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
           : <p className="stack-empty">{t(assets.length ? 'stackManagement.noUnmatched' : 'stackManagement.empty')}</p>}
       </section>
     </div>
@@ -220,14 +266,19 @@ function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: St
   })}</div>;
 }
 
-function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, onToggle, onPurge }: {
+function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, dragging = false, onDragStart, onDragEnd, onToggle, onPurge }: {
   asset: RecentAsset; selected: boolean; cover?: boolean; member?: boolean; disabled?: boolean;
+  dragging?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean; onDragEnd: () => void;
   onToggle: () => void; onPurge?: () => void;
 }) {
   const { t } = useTranslation();
-  return <div className="stack-photo-wrapper"><button disabled={disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}`} type="button" aria-pressed={member ? cover : selected}
+  const suppressClick = useRef(false);
+  return <div className="stack-photo-wrapper"><button disabled={disabled} draggable={!disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${dragging ? ' stack-photo-dragging' : ''}`} type="button" aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
-    aria-description={cover ? t('stackManagement.cover') : undefined} onClick={onToggle}>
+    aria-description={cover ? t('stackManagement.cover') : undefined}
+    onDragStart={event => { suppressClick.current = onDragStart(event); }}
+    onDragEnd={() => { onDragEnd(); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
+    onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}>
     <div className="stack-thumbnail"><img src={asset.thumbnail_url} alt="" loading="lazy" /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>

@@ -565,6 +565,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-group-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px; padding: 2px 0 7px; font-size: 0.7rem; }
 .stack-group-indicators { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .stack-photo-wrapper { position: relative; min-width: 0; }
+.stack-photo-dragging { opacity: 0.55; }
+.stack-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stack-unmatched-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--selection); }
 .stack-management-page .stack-icon-button { width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 1rem; }
 .stack-purge-member { position: absolute; left: 4px; top: 4px; }
 .stack-add-target { border-color: var(--accent); }
@@ -573,7 +576,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-redetect-dialog::backdrop { background: rgb(0 0 0 / 55%); }
 .stack-redetect-dialog h2 { font-size: 1.1rem; margin: 0; }
 .stack-redetect-dialog button:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
-.stack-evidence { padding: 2px 5px; border-radius: 3px; }
+.stack-evidence { padding: 2px 5px; border-radius: 3px; cursor: default; user-select: none; }
 .stack-evidence.matched { background: var(--status-match); color: var(--status-text); }
 .stack-evidence.unavailable { background: var(--status-unavailable); color: var(--text-secondary); }
 .stack-evidence.mismatch { background: var(--status-mismatch); color: var(--status-warning-text); }

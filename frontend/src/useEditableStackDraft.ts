@@ -30,7 +30,9 @@ export type StackDraftAction =
   | { type: 'target'; groupId: string }
   | { type: 'purgeGroup'; groupId: string }
   | { type: 'purgeMember'; groupId: string; assetId: string }
-  | { type: 'cover'; groupId: string; assetId: string };
+  | { type: 'cover'; groupId: string; assetId: string }
+  | { type: 'dropUnmatched'; assetId: string; targetGroupId: string }
+  | { type: 'moveMember'; assetId: string; sourceGroupId: string; targetGroupId: string };
 
 function normalize(state: EditableStackDraft): EditableStackDraft {
   const source = (state.sourceGroups ?? []).filter(group => !state.completedSourceIds.has(group.id));
@@ -92,6 +94,34 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
   if (action.type === 'target') {
     if (!state.groups.some(group => group.id === action.groupId)) return state;
     return { ...state, addTargetStackId: state.addTargetStackId === action.groupId ? null : action.groupId };
+  }
+  if (action.type === 'dropUnmatched') {
+    const asset = state.unmatched.find(current => current.id === action.assetId);
+    const target = state.groups.find(current => current.id === action.targetGroupId);
+    if (!asset || !target || state.groups.some(group => group.members.some(member => member.id === asset.id))
+      || target.members.some(member => member.id === asset.id)) return state;
+    return normalize({ ...state, modified: true, unmatched: state.unmatched.filter(current => current.id !== asset.id),
+      selectedIds: new Set([...state.selectedIds].filter(id => id !== asset.id)), addTargetStackId: null,
+      groups: state.groups.map(group => group === target ? { ...group, modified: true, members: [...group.members, asset] } : group) });
+  }
+  if (action.type === 'moveMember') {
+    if (action.sourceGroupId === action.targetGroupId) return state;
+    const source = state.groups.find(group => group.id === action.sourceGroupId);
+    const target = state.groups.find(group => group.id === action.targetGroupId);
+    const asset = source?.members.find(member => member.id === action.assetId);
+    if (!source || !target || !asset || target.members.some(member => member.id === asset.id)
+      || state.groups.some(group => group !== source && group.members.some(member => member.id === asset.id))
+      || state.unmatched.some(member => member.id === asset.id)) return state;
+    const remaining = source.members.filter(member => member.id !== asset.id);
+    const dissolve = remaining.length < 2;
+    const nextGroups = state.groups.filter(group => !dissolve || group !== source).map(group => {
+      if (group === target) return { ...group, modified: true, members: [...group.members, asset] };
+      if (group !== source) return group;
+      return { ...group, members: remaining, modified: true,
+        coverAssetId: source.coverAssetId === asset.id ? chooseStackCover(remaining) : source.coverAssetId };
+    });
+    return normalize({ ...state, modified: true, groups: nextGroups,
+      unmatched: dissolve ? [...state.unmatched, ...remaining] : state.unmatched, addTargetStackId: null });
   }
   if (action.type === 'add' || action.type === 'create') {
     const members = state.unmatched.filter(asset => state.selectedIds.has(asset.id));

@@ -14,6 +14,11 @@ it('uses distinct semantic status colors', () => {
  for (const [state, token] of [['matched','match'],['mismatch','mismatch'],['unavailable','unavailable'],['error','error']]) expect(css).toContain('.stack-evidence.' + state + ' { background: var(--status-' + token + ')');
 });
 
+it('keeps semantic status indicators non-selectable with a default cursor', () => {
+ const css = readFileSync('src/style.css', 'utf8');
+ expect(css).toMatch(/\.stack-evidence\s*\{[^}]*cursor:\s*default;[^}]*user-select:\s*none;/);
+});
+
 it('styles unmatched selection independently from the Cover badge', () => {
   const css = readFileSync('src/style.css', 'utf8');
   expect(css).toContain('.stack-management-page .stack-photo.stack-selection-active { background: var(--selection); border-color: var(--accent); }');

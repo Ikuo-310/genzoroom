@@ -544,3 +544,95 @@ it('refreshes latest membership after unknown create without relying on old Stac
  expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
  expect(button('Send to Immich').disabled).toBe(false);expect(api.detail).toHaveBeenCalledTimes(2);
 });
+function dragTransfer(payload?: {assetId:string;sourceGroupId:string|null}, extraTypes:string[]=[]): DataTransfer {
+ const store=new Map<string,string>(), types:string[]=[...extraTypes], transfer={
+  files:[] as unknown as FileList,types,
+  setData:(type:string,value:string)=>{store.set(type,value);if(!types.includes(type))types.push(type);},
+  getData:(type:string)=>store.get(type)??'',clearData:()=>{store.clear();types.splice(0);},
+  effectAllowed:'all',dropEffect:'none',
+ };
+ if(payload)transfer.setData('application/x-genzoroom-stack-photo+json',JSON.stringify(payload));
+ return transfer as unknown as DataTransfer;
+}
+function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|null):DragEvent {
+ const event=new Event(type,{bubbles:true,cancelable:true}) as DragEvent;
+ Object.defineProperty(event,'dataTransfer',{value:transfer});
+ if(type==='dragleave')Object.defineProperty(event,'relatedTarget',{value:relatedTarget??null});
+ return event;
+}
+it('moves unmatched by internal native drop, highlights valid targets and preserves Cover and selection',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
+ const group=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo-wrapper:first-child .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ expect(source.draggable).toBe(true);expect(source.classList.contains('stack-photo-dragging')).toBe(true);
+ await act(async()=>group.dispatchEvent(dragEvent('dragover',transfer)));
+ expect(group.classList.contains('stack-drop-target')).toBe(true);
+ const drop=dragEvent('drop',transfer);await act(async()=>group.dispatchEvent(drop));
+ expect(drop.defaultPrevented).toBe(true);expect(group.querySelectorAll('.stack-photo')).toHaveLength(3);
+ expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+ expect(unmatched()).toEqual(['y.jpg']);expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ expect(host.querySelector('.stack-drop-target')).toBeNull();expect(host.querySelector('.stack-photo-dragging')).toBeNull();
+});
+it('moves an Immich member to another group and back without changing Cover or send classification',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[...photos,existingMembers[1]]});
+ const [immich,auto]=Array.from(host.querySelectorAll<HTMLElement>('.stack-candidate-group'));
+ const cover=immich.querySelector('.stack-cover .stack-filename')?.textContent;
+ const source=immich.querySelector<HTMLButtonElement>('.stack-photo')!;const transfer=dragTransfer({assetId:'hidden-first',sourceGroupId:'draft:immich:'+existingStackId});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ await act(async()=>auto.dispatchEvent(dragEvent('dragover',transfer)));
+ expect(auto.classList.contains('stack-drop-target')).toBe(true);
+ await act(async()=>auto.dispatchEvent(dragEvent('drop',transfer)));
+ expect(immich.querySelectorAll('.stack-photo')).toHaveLength(2);expect(auto.querySelectorAll('.stack-photo')).toHaveLength(3);
+ expect(immich.querySelector('.stack-evidence.mismatch [aria-hidden]')?.textContent).toBe('IMMICH');
+ expect(auto.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
+ expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe(cover);
+ const autoId=auto.dataset.stackId!;
+ const moved=auto.querySelector<HTMLButtonElement>('[aria-label="Set hidden.jpg as COVER"]')!;
+ const back=dragTransfer({assetId:'hidden-first',sourceGroupId:autoId});
+ await act(async()=>moved.dispatchEvent(dragEvent('dragstart',back)));
+ await act(async()=>immich.dispatchEvent(dragEvent('drop',back)));
+ expect(immich.querySelectorAll('.stack-photo')).toHaveLength(3);
+ expect(immich.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe(cover);
+});
+it('purgess a member dropped into unmatched, ignores external/malformed/same-group drops, and keeps indicators out of hit targets',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1],singles[0]]});
+ const group=host.querySelector<HTMLElement>('.stack-candidate-group')!,target=host.querySelector<HTMLElement>('#stack-unmatched-heading')!.parentElement!;
+ const source=group.querySelector<HTMLButtonElement>('.stack-photo')!;
+ const payload={assetId:'hidden-first',sourceGroupId:`draft:immich:${existingStackId}`};
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',dragTransfer(payload))));
+ const malformed=dragEvent('dragover',dragTransfer(undefined,['application/x-genzoroom-stack-photo+json']));
+ await act(async()=>group.dispatchEvent(malformed));expect(malformed.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
+ const external=dragEvent('drop',dragTransfer(undefined,['Files']));await act(async()=>target.dispatchEvent(external));
+ expect(external.defaultPrevented).toBe(false);expect(unmatched()).toEqual(['x.jpg']);
+ const indicator=group.querySelector('.stack-group-indicators')!;
+ const overIndicator=dragEvent('dragover',dragTransfer(payload));await act(async()=>indicator.dispatchEvent(overIndicator));
+ expect(overIndicator.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
+ const same=dragEvent('dragover',dragTransfer(payload));await act(async()=>group.dispatchEvent(same));expect(same.defaultPrevented).toBe(false);
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',dragTransfer(payload))));
+});
+it('disables native dragging while unavailable or sending and suppresses the post-drag click',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const group=host.querySelector<HTMLElement>('.stack-candidate-group')!,cover=group.querySelector<HTMLButtonElement>('.stack-cover')!;
+ expect(cover.draggable).toBe(true);const original=cover.querySelector('.stack-filename')?.textContent;
+ const transfer=dragTransfer({assetId:'jpeg',sourceGroupId:group.getAttribute('aria-label')});
+ await act(async()=>{cover.dispatchEvent(dragEvent('dragstart',transfer));cover.dispatchEvent(dragEvent('dragend',transfer));cover.click();});
+ expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe(original);
+ const fetch=vi.fn((_url:string,init:RequestInit)=>new Promise<Response>(()=>{void init;}));vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.querySelector('.stack-unmatched-grid .stack-photo')?.getAttribute('draggable')).toBe('false');
+});
+it('keeps semantic status indicators accessible and outside drag sources',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[...photos,existingMembers[1],...singles]});
+ await click('.stack-unmatched-grid .stack-photo-wrapper:first-child .stack-photo');await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');await act(async()=>button('New Stack').click());
+ const indicators=Array.from(host.querySelectorAll<HTMLElement>('.stack-evidence'));
+ const labels=new Set(indicators.map(node=>node.querySelector('[aria-hidden="true"]')?.textContent?.trim() ?? node.textContent?.trim()));
+ for(const label of ['NAME','TIME','CAM','GPS','IMMICH','MANUAL'])expect(labels.has(label),`missing ${label}: ${[...labels].join(', ')}`).toBe(true);
+ for(const indicator of indicators)expect(indicator.closest('[draggable="true"]')).toBeNull();
+ expect(host.querySelector('.stack-photo')?.getAttribute('draggable')).toBe('true');
+ expect(host.querySelector('.stack-cover')?.getAttribute('aria-label')).toContain('COVER');
+});
