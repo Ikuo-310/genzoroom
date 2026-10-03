@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from 'react';
 import type { RecentAsset } from './assets';
+import { isStackDraftModified, reconcileImmichLineage } from './immichStackDraft';
 import { chooseStackCover, type DraftStack, type StackDetection } from './stackCandidateDetection';
 
 export type EditableStackDraft = StackDetection & {
@@ -28,9 +29,10 @@ export type StackDraftAction =
   | { type: 'cover'; groupId: string; assetId: string };
 
 function normalize(state: EditableStackDraft): EditableStackDraft {
+  const groups = reconcileImmichLineage(state.groups, state.sourceGroups ?? []);
   const unmatched = [...state.unmatched].sort((a, b) => (state.order.get(a.id) ?? Infinity) - (state.order.get(b.id) ?? Infinity));
   const ids = new Set(unmatched.map(asset => asset.id));
-  return { ...state, unmatched, selectedIds: new Set([...state.selectedIds].filter(id => ids.has(id))),
+  return { ...state, groups, modified: isStackDraftModified(groups, state.sourceGroups ?? []), unmatched, selectedIds: new Set([...state.selectedIds].filter(id => ids.has(id))),
     addTargetStackId: state.groups.some(group => group.id === state.addTargetStackId) ? state.addTargetStackId : null };
 }
 
@@ -74,8 +76,8 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
   if (!group.members.some(member => member.id === action.assetId)) return state;
   if (action.type === 'cover') {
     if (group.coverAssetId === action.assetId) return state;
-    return { ...state, modified: true, groups: state.groups.map(current => current === group
-      ? { ...group, coverAssetId: action.assetId, ...(group.origin === 'immich' ? { modified: true } : {}) } : current) };
+    return normalize({ ...state, modified: true, groups: state.groups.map(current => current === group
+      ? { ...group, coverAssetId: action.assetId, ...(group.origin === 'immich' ? { modified: true } : {}) } : current) });
   }
   const members = group.members.filter(member => member.id !== action.assetId);
   const dissolved = members.length < 2;

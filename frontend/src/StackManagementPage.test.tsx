@@ -286,6 +286,30 @@ it('waits for both full Stack resolution and auto detail completion before enabl
  for(const control of host.querySelectorAll<HTMLButtonElement>('.stack-photo,.stack-set-target,.stack-purge-member,.stack-purge-group')) expect(control.disabled).toBe(false);
  expect(button('Detect again').disabled).toBe(false);
 });
+it('restores the green indicator and redetects without confirmation after Cover restoration',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ await click('[aria-label="Set hidden.jpg as COVER"]');
+ expect(host.querySelector('.stack-evidence.mismatch [aria-hidden]')?.textContent).toBe('IMMICH');
+ await click('[aria-label="Set primary.dng as COVER"]');
+ expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ await act(async()=>button('Detect again').click());
+ expect(api.resolve).toHaveBeenCalledTimes(2);expect(button('Continue')).toBeUndefined();
+});
+it('restores green IMMICH after member Add and exact group recreation without a redetect confirmation',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ await click('[aria-label="Remove hidden.png from draft Stack"]');
+ expect(host.querySelector('.stack-evidence.mismatch [aria-hidden]')?.textContent).toBe('IMMICH');
+ await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ await click('.stack-purge-group');
+ for(const photo of Array.from(host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo'))) await act(async()=>photo.click());
+ await act(async()=>button('New Stack').click());
+ expect(host.querySelector('.stack-group-indicators')?.textContent).not.toContain('MANUAL');
+ await click('[aria-label="Set primary.dng as COVER"]');
+ expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ await act(async()=>button('Detect again').click());
+ expect(api.resolve).toHaveBeenCalledTimes(2);expect(button('Continue')).toBeUndefined();
+});
 it('confirms before redetection and restores the latest Immich primary on Continue',async()=>{
  api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
  await click('[aria-label="Set hidden.jpg as COVER"]');await click('.stack-set-target');
