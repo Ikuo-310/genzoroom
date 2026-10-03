@@ -32,9 +32,13 @@
 .developer-log-sources { display: inline-flex; max-width: 100%; border: 1px solid #43584d; border-radius: 8px; overflow: hidden; }
 .developer-log-sources button { border-radius: 0; min-width: 0; padding: 10px 12px; }
 .developer-log-sources button + button { border-left: 1px solid #43584d; }
-.developer-log-sources [aria-pressed="true"] { background: #d1e2bf; color: #17221f; }
-.developer-log-console { background: #090e0b; color: #e6eee9; border: 1px solid #43584d; border-radius: 8px; padding: 16px; min-height: 320px; max-height: 65vh; overflow: auto; font: 0.85rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.developer-log-sources button[aria-pressed="true"] { background: #d1e2bf; color: #17221f; border-color: #d1e2bf; }
+.developer-log-sources button[aria-pressed="false"] { background: #43584d; color: #e6eee9; }
+.developer-log-console { background: #090e0b; color: #e6eee9; border: 1px solid #43584d; border-radius: 8px; padding: 16px; height: clamp(480px, 58vh, 820px); min-height: 480px; max-height: 820px; overflow: auto; font: 0.85rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .developer-log-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 3px 0; }
+/* Compact controls keep diagnostic data visible without shrinking the click target excessively. */
+.developer-page button, .developer-page select { min-height: 36px; padding-block: 6px; }
+.developer-page .developer-tabs [role="tab"] { min-height: 40px; padding-block: 8px; }
 @media (max-width: 800px) {
   .developer-log-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .developer-log-common { grid-column: 1 / -1; margin-top: 0; flex-direction: row; flex-wrap: wrap; }
@@ -42,5 +46,5 @@
 @media (max-width: 520px) {
   .developer-log-controls { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .developer-log-common { margin-top: 16px; }
-  .developer-log-console { padding: 12px; }
+  .developer-log-console { height: clamp(360px, 58vh, 600px); min-height: 360px; max-height: 600px; padding: 12px; }
 }

@@ -202,7 +202,8 @@ def test_large_batch_reports_dropped_evidence_and_retains_final_outcome(logger):
     results = apply_batch(logger, ["success"] * 500, "debug")
     assert all(result.status == "success" for result in results)
     report = logger.create_report()
-    assert len(report["entries"]) == 1000 and report["buffer"]["droppedEntryCount"] > 0
+    assert 1000 < len(report["entries"]) < 5000
+    assert report["buffer"] == {"capacity": 5000, "droppedEntryCount": 0}
     assert report["entries"][-1]["event"] == "batch.result"
     assert report["entries"][-1]["context"]["successCount"] == 500
     assert len([entry for entry in report["entries"] if entry["event"] == "operation.result"]) == 500

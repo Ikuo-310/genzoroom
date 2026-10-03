@@ -72,7 +72,8 @@ it('shows source selection, all technical fields and escaped text without live a
   expect(viewer().hasAttribute('aria-live')).toBe(false); expect(viewer().getAttribute('tabindex')).toBe('0');
   for (const scope of ['Frontend', 'Backend', 'ALL']) {
     await click([...host.querySelectorAll<HTMLButtonElement>('.developer-log-sources button')].find(item => item.textContent === scope)!);
-    expect(host.querySelector('.developer-log-sources [aria-pressed="true"]')!.textContent).toBe(scope);
+    expect([...host.querySelectorAll<HTMLButtonElement>('.developer-log-sources button')]
+      .filter(item => item.getAttribute('aria-pressed') === 'true').map(item => item.textContent)).toEqual([scope]);
     if (scope === 'Frontend') expect(viewer().textContent).not.toContain('request.response');
     if (scope === 'Backend') expect(viewer().textContent).not.toContain('apply.completed');
   }
@@ -195,10 +196,10 @@ it('records safe Backend failure transitions once, keeps snapshots and records a
 it('displays both overflow counts without discarding technical entries', async () => {
   frontendLogger.setLevel('debug');
   for (let index = 0; index < 1002; index++) frontendLogger.add({ level: 'debug', component: 'test', event: 'entry', context: { index } });
-  report.buffer = { capacity: 1000, droppedEntryCount: 20 };
+  report.buffer = { capacity: 5000, droppedEntryCount: 20 };
   await mount();
   expect(host.textContent).toContain(i18n.t('developer.logs.truncated', { source: 'Frontend', count: 2, capacity: 1000 }));
-  expect(host.textContent).toContain(i18n.t('developer.logs.truncated', { source: 'Backend', count: 20, capacity: 1000 }));
+  expect(host.textContent).toContain(i18n.t('developer.logs.truncated', { source: 'Backend', count: 20, capacity: 5000 }));
   await click(action('frontend', 'clear'));
   expect(frontendLogger.getBufferStats().droppedEntryCount).toBe(0);
 });

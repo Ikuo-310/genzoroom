@@ -80,17 +80,17 @@ def test_message_limit_and_ring_clear():
     logger.set_level("info")
     for index in range(BACKEND_LOG_CAPACITY):
         add(logger, context={"index": index})
-    assert len(logger.get_entries()) == 1000
-    add(logger, message="x" * 512, context={"index": 1000})
+    assert len(logger.get_entries()) == BACKEND_LOG_CAPACITY
+    add(logger, message="x" * 512, context={"index": BACKEND_LOG_CAPACITY})
     entries = logger.get_entries()
-    assert len(entries) == 1000
-    assert [entry["context"]["index"] for entry in entries] == list(range(1, 1001))
+    assert len(entries) == BACKEND_LOG_CAPACITY
+    assert [entry["context"]["index"] for entry in entries] == list(range(1, BACKEND_LOG_CAPACITY + 1))
     assert entries[-1]["message"] == "x" * 512
-    assert logger.create_report()["buffer"] == {"capacity": 1000, "droppedEntryCount": 1}
+    assert logger.create_report()["buffer"] == {"capacity": 5000, "droppedEntryCount": 1}
     add(logger, message="x" * 513)
     assert "message" not in logger.get_entries()[-1]
     logger.set_level("off")
-    assert len(logger.get_entries()) == 1000
+    assert len(logger.get_entries()) == BACKEND_LOG_CAPACITY
     logger.clear()
     assert logger.get_entries() == [] and logger.get_level() == "off"
     assert logger.create_report()["buffer"]["droppedEntryCount"] == 0
@@ -186,8 +186,8 @@ def test_concurrent_add_read_level_and_clear_are_safe():
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(write, range(8)))
     entries = logger.get_entries()
-    assert len(entries) == 1000
-    assert len({(entry["context"]["worker"], entry["context"]["index"]) for entry in entries}) == 1000
+    assert len(entries) == 8 * 150
+    assert len({(entry["context"]["worker"], entry["context"]["index"]) for entry in entries}) == 8 * 150
     assert [entry["timestamp"] for entry in entries] == sorted(entry["timestamp"] for entry in entries)
     with ThreadPoolExecutor(max_workers=4) as executor:
         list(executor.map(lambda _: (logger.clear(), add(logger), logger.create_report()), range(20)))

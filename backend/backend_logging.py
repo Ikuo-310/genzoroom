@@ -11,7 +11,7 @@ from typing import Literal
 LogLevel = Literal["off", "error", "warn", "info", "debug"]
 LogEntryLevel = Literal["error", "warn", "info", "debug"]
 DEFAULT_BACKEND_LOG_LEVEL: LogLevel = "off"
-BACKEND_LOG_CAPACITY = 1000
+BACKEND_LOG_CAPACITY = 5000
 MAX_LOG_CONTEXT_BYTES = 4096
 _PRIORITIES = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4}
 _IDENTIFIER = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,95}")

@@ -14,7 +14,7 @@ export interface LogEntry {
   context?: { [key: string]: LogContextValue };
 }
 export type FrontendLogEntry = LogEntry & { source: 'frontend' };
-export interface LogBufferStats { capacity: 1000; droppedEntryCount: number }
+export interface LogBufferStats { capacity: number; droppedEntryCount: number }
 // Message and context values must be caller-selected technical data, never user content or secrets.
 export type FrontendLogInput = Pick<LogEntry, 'level' | 'component' | 'event' | 'message' | 'context'>;
 export interface FrontendLogsReport {
@@ -137,9 +137,9 @@ export function createFrontendLogsReport(entries: readonly FrontendLogEntry[], d
     ...(buffer === undefined ? {} : { buffer: projectLogBufferStats(buffer) }) };
 }
 
-export function projectLogBufferStats(buffer: LogBufferStats): LogBufferStats {
-  if (buffer.capacity !== FRONTEND_LOG_CAPACITY || !Number.isSafeInteger(buffer.droppedEntryCount) || buffer.droppedEntryCount < 0) throw new Error('Invalid buffer statistics');
-  return { capacity: FRONTEND_LOG_CAPACITY, droppedEntryCount: buffer.droppedEntryCount };
+export function projectLogBufferStats(buffer: LogBufferStats, expectedCapacity = FRONTEND_LOG_CAPACITY): LogBufferStats {
+  if (buffer.capacity !== expectedCapacity || !Number.isSafeInteger(buffer.droppedEntryCount) || buffer.droppedEntryCount < 0) throw new Error('Invalid buffer statistics');
+  return { capacity: expectedCapacity, droppedEntryCount: buffer.droppedEntryCount };
 }
 
 export function exportFrontendLogsReport(report: FrontendLogsReport): void {

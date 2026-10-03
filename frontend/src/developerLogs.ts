@@ -1,6 +1,7 @@
 import { createFrontendLogsReport, projectLogEntry, projectLogBufferStats, type FrontendLogEntry, type LogEntry, type LogLevel, type LogBufferStats } from './frontendLogging';
 
 export const LOG_LEVELS: readonly LogLevel[] = ['off', 'error', 'warn', 'info', 'debug'];
+export const BACKEND_LOG_CAPACITY = 5000;
 export type BackendLogEntry = LogEntry & { source: 'backend' };
 export interface BackendLogsReport {
   schemaVersion: 1;
@@ -28,7 +29,7 @@ export function parseBackendLevel(value: unknown): LogLevel {
 
 export function parseBackendLogsReport(value: unknown): BackendLogsReport {
   if (!record(value) || value.schemaVersion !== 1 || value.source !== 'backend' || !utc(value.generatedAt)
-    || !Array.isArray(value.entries) || value.entries.length > 1000) throw new Error('Invalid backend logs report');
+    || !Array.isArray(value.entries) || value.entries.length > BACKEND_LOG_CAPACITY) throw new Error('Invalid backend logs report');
   const entries = value.entries.map(entry => {
     if (!record(entry) || entry.source !== 'backend' || !utc(entry.timestamp)
       || typeof entry.level !== 'string' || !LOG_LEVELS.includes(entry.level as LogLevel) || entry.level === 'off'
@@ -40,7 +41,7 @@ export function parseBackendLogsReport(value: unknown): BackendLogsReport {
   let buffer: LogBufferStats | undefined;
   if (value.buffer !== undefined) {
     if (!record(value.buffer)) throw new Error('Invalid buffer statistics');
-    buffer = projectLogBufferStats(value.buffer as unknown as LogBufferStats);
+    buffer = projectLogBufferStats(value.buffer as unknown as LogBufferStats, BACKEND_LOG_CAPACITY);
   }
   return { schemaVersion: 1, generatedAt: new Date(value.generatedAt).toISOString(), source: 'backend', entries,
     ...(buffer === undefined ? {} : { buffer }) };

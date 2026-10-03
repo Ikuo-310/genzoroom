@@ -55,11 +55,11 @@ it('formats browser local timezone with milliseconds independently of language',
   expect(formatLogTimestamp('invalid')).toBe('—');
 });
 it('preserves optional overflow evidence in Backend and All snapshots and rejects invalid counts', () => {
-  const parsed = parseBackendLogsReport({ ...report, buffer: { capacity: 1000, droppedEntryCount: 23, secret: 'PRIVATE' } });
+  const parsed = parseBackendLogsReport({ ...report, buffer: { capacity: 5000, droppedEntryCount: 23, secret: 'PRIVATE' } });
   const all = createAllLogsReport([frontend], parsed, new Date(), { capacity: 1000, droppedEntryCount: 12 });
-  expect(all.buffers).toEqual({ frontend: { capacity: 1000, droppedEntryCount: 12 }, backend: { capacity: 1000, droppedEntryCount: 23 } });
+  expect(all.buffers).toEqual({ frontend: { capacity: 1000, droppedEntryCount: 12 }, backend: { capacity: 5000, droppedEntryCount: 23 } });
   expect(JSON.stringify(all)).not.toContain('PRIVATE');
-  for (const buffer of [{ capacity: 1000, droppedEntryCount: -1 }, { capacity: 1000, droppedEntryCount: Infinity }, { capacity: 2000, droppedEntryCount: 0 }, null]) {
+  for (const buffer of [{ capacity: 5000, droppedEntryCount: -1 }, { capacity: 5000, droppedEntryCount: Infinity }, { capacity: 1000, droppedEntryCount: 0 }, null]) {
     expect(() => parseBackendLogsReport({ ...report, buffer })).toThrow();
   }
   expect(parseBackendLogsReport(report).buffer).toBeUndefined();
