@@ -13,6 +13,8 @@ GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. ngi
   - `user.read` for the authenticated connection check.
   - `asset.read` for recent-photo metadata and asset details.
   - `asset.view` for thumbnails and previews.
+  - `asset.download` for selected JPEG originals.
+  - `server.about` for optional Immich version and build information in Settings.
   - `stack.read` for membership and full Stack resolution.
   - `stack.create`, `stack.update`, and `stack.delete` for confirmed STACK management writes.
 
@@ -170,8 +172,9 @@ When using the same-host override, include both `-f` arguments in operational co
 Check the following when the backend or Immich connection fails:
 
 - Confirm that `IMMICH_URL` is reachable from the backend container, including its scheme, host, and port.
-- Confirm that `IMMICH_API_KEY` is current and has `user.read`, `asset.read`, and `asset.view` permissions.
+- Confirm that `IMMICH_API_KEY` is current and has `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions.
 - If the connection check succeeds but photos fail, verify `asset.read` and `asset.view` specifically.
+- If photo browsing works but STACK management cannot resolve or send Stacks, verify `stack.read` and the required `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.download` is used only for selected JPEG originals; `server.about` is optional Settings information.
 - For same-host deployments, confirm the external network name, Immich Docker DNS name, additional Compose path, and Docker endpoint.
 - Backend port `8000` is intentionally unavailable from the host; test through the frontend's `/api/` routes.
 

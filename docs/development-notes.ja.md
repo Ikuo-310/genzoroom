@@ -2,7 +2,25 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
-## STACK管理 第2フェーズ完了（2026-10-03・現行仕様）
+## STACK管理 完成記録（2026-10-03・現行仕様）
+
+HomeのRecent／Album／CalendarではImmich Stackのfilterとcollapseを利用できる。Immich Stackのmember metadataを使って、Stack badgeとmember数を表示し、Type filterに応じてStack単位または個別asset表示へ切り替える。Favoritesを含むHomeの順序付きselectionは、concrete assetのままSTACK管理へ渡す。
+
+STACK管理ページでは、選択assetからlocal draft Stackを生成し、既存Immich Stackもfull memberで取り込む。basename完全一致、Pixel RAW／Motion Photo命名normalizeで自動候補を作る。filenameが一致しない場合は、TIME／CAM／GPSが一致する一意な1 RAW + 1 Non-RAWだけをEXIF fallback候補にする。Coverを自動選択し、NAME／TIME／CAM／GPS evidence、既存StackのIMMICH、ローカル変更のMANUAL indicatorを表示する。
+
+draft編集はCover変更、unmatchedからのAdd、Purge、新規MANUAL Stack作成、desktop Drag & Drop（unmatched → Stack、Stack → Stack、Stack → unmatched）に対応する。元Immich Stackのmember集合とCoverへ戻すとlineageを復元する。送信は最終draft状態からunchanged／create／update／deleteを分類し、unchangedではAPI writeを行わない。Cover-only変更はprimary更新。Immich v3.2.4ではmembership更新を直接行わず、旧Stackをreleaseしてreplacementをcreateする。
+
+送信結果はpartial success、failed、blocked、unknownを区別する。結果不明時はblind retryを許可せず、再検出を要求する。release後のreplacement失敗は旧Stack IDを保持し、dependency failureはblockedとして扱う。送信中に別selectionへ移動した場合、旧requestをabortし、旧responseやunchanged local completionが新しいdraftへ混入しない。再検出は1,000件単位でrefreshし、chunkをまたいで返る同一full Stackを重複排除する。long filename由来のUI group IDは変えず、Backend送信時だけ200文字以内のoperation IDへ対応付ける。
+
+最終横断監査でMediumの4件（STACK送信のnginx timeout、same-route stale send response、長いoperation ID、1,000件超refresh）を検出し、修正した。`/api/stacks/apply`だけ90分timeoutとし、通常の`/api/`は10秒のまま。focused re-auditでは今回の4件に残存findingなし。
+
+関連Frontend Stack testは14ファイル・198件、Backend Stack testは3ファイル・202件が成功。TypeScript check、Frontend build、`git diff --check`も成功した。buildには500 kB超のchunk warningがある。
+
+利用者の実機報告では、NAS上のFirefoxで主要なSTACK操作を確認済み。Chromeについて、STACK管理の実機確認済み範囲を示す記録はなく、ここでは確認済みとは扱わない。これらは利用者による実機確認であり、今回の文書更新作業でブラウザーやNASを操作したものではない。
+
+## STACK管理 第2フェーズ完了（2026-10-03・当時の完了記録）
+
+以下は第2フェーズ当時の実装記録であり、現在のSTACK管理仕様と未実装範囲は冒頭の「STACK管理 完成記録」を参照する。
 
 Homeで選択したassetを対象に、basename完全一致または既知Pixel naming patternのnormalizeによる自動STACK候補判定を追加した。候補はImmich Stack未所属で、同じfilename familyにRAWとNon-RAWを含む2 asset以上の組み合わせとし、Immichへ変更を送らずlocal draft Stack groupとして表示する。TIME／CAM／GPSは候補の補助evidenceとして表示する。
 
@@ -20,7 +38,7 @@ Asset detailはcandidate memberだけに要求し、最大4件のbounded concurr
 
 利用者によるNAS実機確認では、実データのRAW + JPEG 2枚組を自動候補化し、複数の組が独立したdraft Stack groupとして表示されること、JPEGがCOVERに選ばれること、NAME／TIME／CAM／GPS indicator、候補外assetの下段表示を確認した。thumbnail size変更後もgroup memberが外側gridで分断されず、group単位でreflowすることを確認した。実在する3枚組Stackは確認対象になかったため3枚組の実機確認は未実施。3枚以上のlayoutはコードとtestsで一般化している。
 
-以下は未実装であり、次の機能段階に残す。Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集。
+第2フェーズ時点では、Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集を後続段階へ残していた。これらは後続フェーズで実装済み。
 
 ## Home閲覧機能のまとまり（2026-10-02・現在仕様）
 
@@ -38,7 +56,7 @@ Album一覧の期間は日本語UIで`YYYY/MM`（例：`2002/09〜2025/11`）、
 
 Home構造の監査では、写真ビュー判定がasset・selection・edit status・toolbar等に分散し、selectionModeがtrueのままタブを切り替えるとEscape handlerが古いclear処理を参照し得る点を確認した。最小整理としてGalleryPageに`photoView`を導入し、写真ビューのassets、load state、selection、edit status対象を一か所で対応づけた。選択ID・anchor・toggle・clear・取得後の選択整理は`usePhotoSelection()`へまとめ、GalleryPageが4 instanceを保持する。Escapeは現在の写真ビューのclear関数に追従し、Recent／Favorites両方向の回帰テストを追加した。
 
-この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。STACK管理のdraft候補表示は第2フェーズまで実装済み。Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集は未実装。Export QueueとRAW現像も未実装。
+この整理では写真ビューの選択と現在ビューの決定だけを対象にした。data fetch、Home return、scroll restore、panel描画、tab registry、connection statusはGalleryPageに残した。これらは取得再利用、非同期完了後のscroll復元、Album／Calendar固有の階層と結びついており、Stack等の具体的な仕様が固まる前に一括抽象化すると所有者と例外条件が見えにくくなるためである。STACK管理の現行実装は冒頭にまとめた。Export QueueとRAW現像は未実装。
 
 ## Keyboard command architectureと現行ショートカット（2026-10-02）
 

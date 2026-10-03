@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Stack management groups Home-selected RAW / JPEG assets into draft candidates by filename family, shows NAME / TIME / CAM / GPS evidence and an automatic cover, and shares Home thumbnail sizing with automatic column adjustment on narrow screens.
+- Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Confirmed drafts can be written back to Immich.
 
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
@@ -65,6 +65,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Home photo views can filter stacked assets and collapse Immich Stack members with a count badge; type filters can show the individual assets. STACK management uses the same Immich API key and requires Stack read/write permissions.
 - Recent photo count can be selected from 50 to 500 in steps of 50, with 100 as the default. Japanese Album periods use compact `YYYY/MM` labels.
 - Extended the desktop right panel to the bottom edge while placing the Filmstrip below only the left panel and Viewer. The Scope selector now sits in its heading, and its height can be resized from 15% to 40% (30% by default) and remembered by the browser; the mobile stacked layout is retained.
 - Advanced the flat recipe to version 18 with `adjustmentEnabled` flags for all sixteen numeric adjustments; Recipe v17 remains readable and migrates to v18. The recipe version is independent of edit-state snapshot format v2 and SQLite schema v1.
@@ -84,6 +85,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Long-running Stack sends use a dedicated proxy timeout; a response from a previous Stack selection cannot change a new draft; long filename candidates remain writable; and re-detection supports selections over 1,000 assets.
 - Prevent Undo/Redo shortcuts from changing the background edit session while save-failure dialogs are open.
 - Keep NumLock-off Histogram keypad shortcuts from being consumed as adjustment-slider arrow controls while preserving native numeric input.
 - Preserve the exact snapshot, expected revision, and save ID for retries when a PUT may have committed but its response is uncertain, including HTTP 408/5xx and unreadable or invalid success responses. Genuine 409 conflicts are not automatically merged.

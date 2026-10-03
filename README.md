@@ -1,6 +1,6 @@
 # GenzoRoom
 
-GenzoRoom is an early-development, self-hosted browser interface for developing and color-correcting photos managed by [Immich](https://immich.app/). It connects to Immich through a read-only backend and applies non-destructive adjustments locally to JPEG previews or, in Anshitsu, the selected JPEG original.
+GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, and developing JPEGs; Export remains unimplemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
@@ -12,15 +12,16 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 
 ### Immich browsing and Anshitsu
 
-- Authenticated, read-only Immich connectivity.
+- Authenticated Immich photo access through the backend, with confirmed STACK management writes described below.
 - Home has four browsing tabs: Recent, Albums, Calendar, and Favorites.
 - Recent shows Immich Timeline images in descending order. Choose 50–500 photos in steps of 50 (100 by default); Archive assets are excluded.
 - Albums lists Immich albums and opens each album in the shared photo grid. Album visibility follows the existing Immich album behavior.
 - Calendar provides year, month, and date-detail views. Month cells show representative thumbnails; dates are active only when a Timeline image exists. Archive-only and video-only dates are not treated as photo days.
 - Favorites shows favorited Timeline images and reuses a successfully loaded list while Home remains mounted.
 - Photo grids support RAW / Non-RAW and edited / unedited filters. Each filter is independent per Home tab, and the two filters combine.
+- Recent, Album, and Calendar photo views can filter stacked versus unstacked assets. With both RAW and Non-RAW types visible, Immich Stack members collapse to one representative card with a member-count badge; choosing one type shows individual assets. Favorites keeps its existing individual-asset view.
 - Choose the thumbnail size used by the Home grids.
-- Home supports ordered multi-photo selection and Shift+click range selection. Press `D` to open the current selection in Anshitsu, or, with no selection, resume the last Anshitsu workspace from the current SPA session.
+- Home supports ordered multi-photo selection and Shift+click range selection. Press `S` or use the selection action to open the selected concrete assets in STACK management; press `D` to open the current selection in Anshitsu, or, with no selection, resume the last Anshitsu workspace from the current SPA session.
 - Home restores the browsing tab, detail view, and scroll position after returning from Anshitsu, and remembers scroll position for each Home view while navigating between tabs.
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
 - Shortcut modifier labels follow the platform: Windows/Linux use Ctrl, Alt, and Shift, while macOS uses Command (⌘), Option (⌥), and Shift (⇧).
@@ -49,6 +50,17 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Browser-saved image preferences, including WebGPU enablement and Anshitsu's initial image choice (Auto, Original preferred, or Preview preferred). Auto prefers the original when WebGPU is enabled and available; otherwise it keeps the preview. The preview is shown while a selected JPEG original loads, then switches automatically when ready unless Preview is preferred or the user has manually chosen a source.
 - Settings shows Immich server version and available build information alongside GenzoRoom and backend connection status. Preferences are stored in the browser; the Immich API key stays on the backend.
 
+### STACK management
+
+- Send an ordered Home selection, including RAW assets and Favorites selections, to a separate STACK management workspace. Existing Immich Stacks are resolved with their complete membership before editing.
+- Detect RAW / JPEG candidates by exact filename family, including supported Pixel RAW and Motion Photo naming patterns. When names differ, a unique one-RAW / one-Non-RAW pair can be suggested when TIME, camera make/model, and GPS EXIF evidence all match.
+- Untouched auto candidates show NAME / TIME / CAM / GPS evidence. Existing Immich groups keep the IMMICH indicator (yellow when modified); manual groups and auto groups with member changes show MANUAL. The workspace selects a COVER automatically and lets you change it.
+- Add unmatched photos to a Stack, Purge groups or members, create manual Stacks, and move photos between groups or back to the unmatched area with desktop Drag & Drop. Returning a group to its original Immich membership and COVER restores its original Stack lineage.
+- On confirmed send, the final draft is classified as unchanged, create, update, or delete. Unchanged Stacks do not issue a write; Cover-only changes update the primary. Immich v3.2.4 membership changes release the old Stack and create its replacement. Partial outcomes are shown; uncertain outcomes block blind retry and require re-detection.
+- The workspace is desktop-browser oriented. Touch Drag & Drop, Stack/group reordering, and external file drop are not supported.
+
+### JPEG edit state and saving
+
 Anshitsu loads saved JPEG edit state before enabling Develop controls. Dirty edits are autosaved with their full History after five seconds of inactivity, and a dirty photo is saved before a Filmstrip switch. The **Back to photos** control performs a final sequential save for every photo edited in that Anshitsu session and compacts each History. If a save response is lost, GenzoRoom retries that exact snapshot, revision, and save ID before sending a newer snapshot; genuine revision conflicts are reported without merging. Reloading or closing the browser during the debounce or an in-flight save can still lose the latest edits; Browser Back and tab-close interception are not implemented. A failed final save offers the choice to stay in Anshitsu or exit without saving.
 
 ### Current adjustments
@@ -76,18 +88,21 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 
 - The working and Histogram pipeline remains browser-managed 8-bit sRGB. Embedded sRGB and Display P3 profiles are considered during original decoding and converted into that working space; this is not a wide-gamut or HDR pipeline.
 - HEIC, PNG, RAW, and other non-JPEG assets are not editable.
-- RAW development, including DNG, remains unimplemented. A JPEG `COVER.jpg` is handled as a JPEG original; GenzoRoom does not pair or manage it with a RAW asset.
+- RAW development, including DNG, remains unimplemented. STACK management can group a JPEG with its RAW capture, but only the JPEG is editable; a JPEG `COVER.jpg` is handled through the JPEG original path.
 - Original rendering processes full-resolution pixels. WebGPU can accelerate this path when supported; CPU processing remains available and is slower on the tested NAS / Firefox setup. No detailed performance benchmark has been performed.
 - Edits made within the five-second debounce or during an in-flight save can be lost on reload or tab close; these browser events are not intercepted.
 - Recent displays the selected 50–500 item window and currently has no pagination or search.
 - Anshitsu is desktop-first; there is no dedicated mobile editing workspace.
-- Immich asset Stack handling and an Export Queue are not implemented.
+- STACK management is available in desktop browsers; touch Drag & Drop and Stack/group reordering are not supported.
 
 ## Not implemented
 
 - RAW development pipeline.
+- Export and Export Queue.
+- Automatic Immich Stack attachment for re-imported or exported assets.
+- Stack/group reordering through Drag & Drop.
+- Touch Drag & Drop in STACK management.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.
-- Export or write-back to Immich.
 - Waveform Monitor (WFM), RGB Parade, and Vectorscope. Histogram is implemented in the Scope area.
 - Masking or local adjustments.
 - Crop or rotate tools.
@@ -98,12 +113,12 @@ These are current boundaries, not release commitments or a promised roadmap.
 
 ## Security and data handling
 
-- GenzoRoom calls read-only Immich endpoints. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, and `server.about` permissions; `asset.download` retrieves JPEG originals and `server.about` retrieves the server version and public build information shown in Settings.
+- Normal photo access uses Immich read endpoints. Confirmed STACK management additionally uses only Stack create/update/delete operations; it does not modify image originals, delete assets, upload files, or perform unrelated Immich writes. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.download` retrieves selected JPEG originals and `server.about` supplies the server information shown in Settings.
 - The Immich API key is supplied to the backend through environment variables. It is not sent to the frontend or embedded in the frontend image.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
 - The provided containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
-- GenzoRoom does not modify originals or call Immich write endpoints. Its SQLite edit-state API stores only GenzoRoom recipes and History.
+- GenzoRoom does not modify image originals. Its SQLite edit-state API stores only GenzoRoom recipes and History; Stack membership writes are limited to explicitly confirmed STACK management operations.
 
 Never commit a real API key or bake one into a container image. See the [deployment guide](docs/deployment.md) for configuration and network options.
 
@@ -111,7 +126,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 
 - Docker Engine with Docker Compose v2, or Portainer connected to a Docker Standalone environment.
 - An existing Immich server reachable from the GenzoRoom backend container.
-- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, and `server.about` permissions.
+- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. Stack permissions are used by confirmed STACK management operations.
 - A browser that can reach the GenzoRoom frontend. The default host port is `3190` and can be changed with `GENZOROOM_PORT`.
 
 ## Quick start
