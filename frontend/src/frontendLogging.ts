@@ -30,12 +30,20 @@ export const FRONTEND_LOG_CAPACITY = 1000;
 export const MAX_LOG_CONTEXT_BYTES = 4096;
 const priorities: Record<LogLevel, number> = { off: 0, error: 1, warn: 2, info: 3, debug: 4 };
 const identifier = /^[a-zA-Z][a-zA-Z0-9_.-]{0,95}$/;
-const privateKey = /apikey|cookie|authorization|token|password|secret|credential|recipe|history|clipboard|binary|pixels|payload/;
+// Match content names, not substrings: historyCursor and payloadBytes are useful diagnostics.
+const privateKeys = new Set([
+  'apikey', 'immichapikey', 'authorization', 'cookie', 'cookies', 'password', 'secret', 'credential', 'credentials',
+  'token', 'accesstoken', 'refreshtoken', 'sessiontoken', 'authtoken', 'sessioncredential', 'urlcredential',
+  'headers', 'requestheaders', 'responseheaders', 'url', 'fullurl', 'immichurl', 'querystring',
+  'body', 'requestbody', 'responsebody', 'payload', 'binary', 'photobinary', 'binarypayload',
+  'pixels', 'pixelbuffer', 'arraybuffer', 'bytes', 'previewbytes', 'thumbnailbytes', 'originalbytes',
+  'recipe', 'rawrecipe', 'history', 'rawhistory', 'clipboard', 'clipboardcontent',
+]);
 
 function copyContext(context: FrontendLogInput['context']): FrontendLogInput['context'] {
   if (context === undefined) return undefined;
   // Callers must explicitly supply safe metadata, never user content, URLs or credentials.
-  // This bounded check rejects suspicious contexts; it cannot redact secrets in arbitrary text.
+  // Prune known private fields while preserving siblings; arbitrary text is the caller's responsibility.
   let remaining = 64;
   function copy(value: LogContextValue, depth: number): LogContextValue {
     if (--remaining < 0 || depth > 3) throw new Error('Context too large');
@@ -45,9 +53,13 @@ function copyContext(context: FrontendLogInput['context']): FrontendLogInput['co
     if (typeof value !== 'object' || value === null) throw new Error('Invalid context');
     if (Array.isArray(value)) return value.map(item => copy(item, depth + 1));
     if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new Error('Invalid context');
-    return Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(value)).map(([key, descriptor]) => {
-      if (key.length > 64 || privateKey.test(key.toLowerCase().replace(/[^a-z0-9]/g, '')) || !('value' in descriptor)) throw new Error('Unsafe context');
-      return [key, copy(descriptor.value, depth + 1)];
+    const fields = Object.entries(Object.getOwnPropertyDescriptors(value));
+    if (fields.length > remaining) throw new Error('Context too large');
+    return Object.fromEntries(fields.flatMap(([key, descriptor]) => {
+      if (key.length > 64) throw new Error('Invalid context key');
+      if (privateKeys.has(key.toLowerCase().replace(/[^a-z0-9]/g, ''))) { remaining--; return []; }
+      if (!('value' in descriptor)) throw new Error('Invalid context');
+      return [[key, copy(descriptor.value, depth + 1)]];
     }));
   }
   try {

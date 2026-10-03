@@ -122,7 +122,8 @@ def test_post_two_members_and_immediate_verify_members_are_distinguishable(logge
     result, calls = run_create(logger, stack_response(actual))
     assert result.status == "success" and str(result.stackId) == NEW
     assert calls == [("GET", "/api/stacks"), ("POST", "/api/stacks"), ("GET", f"/api/stacks/{NEW}")]
-    entries = [entry for entry in logger.get_entries() if entry["component"] == "stack_write"]
+    report_entries = json.loads(json.dumps(logger.create_report()))["entries"]
+    entries = [entry for entry in report_entries if entry["component"] == "stack_write"]
     start, response, verify, final = [entry["context"] for entry in entries]
     assert start["operationId"] == response["operationId"] == verify["operationId"] == "draft:manual:17"
     assert start["memberIds"] == response["requestedMemberIds"] == verify["expectedMemberIds"] == [A, B]

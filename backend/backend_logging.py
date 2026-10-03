@@ -15,9 +15,20 @@ BACKEND_LOG_CAPACITY = 1000
 MAX_LOG_CONTEXT_BYTES = 4096
 _PRIORITIES = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4}
 _IDENTIFIER = re.compile(r"[a-zA-Z][a-zA-Z0-9_.-]{0,95}")
-_PRIVATE_KEY = re.compile(
-    r"apikey|cookie|authorization|token|password|secret|credential|recipe|history|clipboard|binary|pixels|payload"
-)
+# Match content names, not substrings: historyCursor and payloadBytes are useful diagnostics.
+_PRIVATE_KEYS = {
+    "apikey", "immichapikey", "authorization", "cookie", "cookies", "password", "secret", "credential", "credentials",
+    "token", "accesstoken", "refreshtoken", "sessiontoken", "authtoken", "sessioncredential", "urlcredential",
+    "headers", "requestheaders", "responseheaders", "url", "fullurl", "immichurl", "querystring",
+    "body", "requestbody", "responsebody", "payload", "binary", "photobinary", "binarypayload",
+    "pixels", "pixelbuffer", "arraybuffer", "bytes", "previewbytes", "thumbnailbytes", "originalbytes",
+    "recipe", "rawrecipe", "history", "rawhistory", "clipboard", "clipboardcontent",
+}
+
+
+def _text_length(value: str) -> int:
+    # Use UTF-16 units like JavaScript so supplementary characters share the same limits.
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 def _utc_timestamp(value: datetime) -> str:
@@ -47,15 +58,21 @@ def _copy_context(context: object) -> dict | None:
             if not math.isfinite(value):
                 raise ValueError("Invalid number")
             return value
-        if type(value) is str and len(value) <= 256:
+        if type(value) is str and _text_length(value) <= 256:
             return value
         if type(value) is list:
             return [copy(item, depth + 1) for item in value]
         if type(value) is dict:
+            if len(value) > remaining:
+                raise ValueError("Context too large")
             result = {}
             for key, item in value.items():
-                if type(key) is not str or len(key) > 64 or _PRIVATE_KEY.search(re.sub(r"[^a-z0-9]", "", key.lower())):
-                    raise ValueError("Unsafe context key")
+                if type(key) is not str or _text_length(key) > 64:
+                    raise ValueError("Invalid context key")
+                # Remove only the private field; safe siblings still explain the operation.
+                if re.sub(r"[^a-z0-9]", "", key.lower()) in _PRIVATE_KEYS:
+                    remaining -= 1
+                    continue
                 result[key] = copy(item, depth + 1)
             return result
         raise ValueError("Invalid context value")
@@ -75,7 +92,7 @@ def _entry_fields(*, level: object, component: object, event: object, message: o
     if type(level) is not str or level not in _PRIORITIES or level == "off" or not _valid_identifiers(component, event):
         raise ValueError("Invalid log entry")
     result = {"source": "backend", "level": level, "component": component, "event": event}
-    if type(message) is str and len(message) <= 512:
+    if type(message) is str and _text_length(message) <= 512:
         result["message"] = message
     safe_context = _copy_context(context)
     if safe_context is not None:

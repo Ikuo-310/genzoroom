@@ -98,16 +98,45 @@ def test_message_limit_and_ring_clear():
     assert BackendLogger().get_level() == "off"
 
 
-@pytest.mark.parametrize("key", ["apiKey", "api_key", "Cookie", "Authorization", "sessionToken", "password",
-    "secret", "urlCredential", "Recipe", "History", "Clipboard", "photoBinary", "pixels", "payload"])
+@pytest.mark.parametrize("key", ["apiKey", "api_key", "IMMICH_API_KEY", "Cookie", "Authorization", "accessToken",
+    "refreshToken", "sessionToken", "authToken", "password", "secret", "credential", "urlCredential",
+    "Recipe", "History", "Clipboard", "photoBinary", "pixels", "payload", "binaryPayload", "pixelBuffer",
+    "requestHeaders", "responseHeaders", "requestBody", "responseBody", "fullUrl", "queryString"])
 def test_private_context_keys_also_rejected_during_report_projection(key):
     logger = BackendLogger()
     logger.set_level("debug")
     add(logger, context={"count": 1, "nested": {key: "PRIVATE_FIXTURE"}})
     entry = logger.get_entries()[0]
-    assert "context" not in entry
+    assert entry["context"] == {"count": 1, "nested": {}}
     entry["context"] = {key: "PRIVATE_FIXTURE"}
     assert "PRIVATE_FIXTURE" not in json.dumps(create_backend_logs_report([entry]))
+
+
+def test_safe_metadata_survives_pruning_and_report():
+    safe = {"assetId": "asset-1", "stackId": "stack-1", "memberIds": ["asset-1", "asset-2"], "operationId": "draft:17",
+        "requestId": "request-1", "generationId": 2, "saveId": "save-1", "tokenCount": 3, "recipeVersion": 1,
+        "historyCursor": 0, "historyLength": 2, "payloadBytes": 512, "pixelCount": 64, "durationMs": 12.3,
+        "errorCode": "unreachable", "exceptionType": "ReadTimeout", "endpoint": "/stacks", "httpStatus": 201,
+        "state": "completed", "phase": "apply", "attempt": 1, "aborted": False, "stale": True, "processingVersion": 1}
+    logger = BackendLogger()
+    logger.set_level("debug")
+    add(logger, message="Request completed", context={**safe, "authorization": "PRIVATE", "nested": {"status": "ok", "api_key": "PRIVATE"}})
+    expected = {**safe, "nested": {"status": "ok"}}
+    assert logger.get_entries()[0]["context"] == expected
+    report = logger.create_report()
+    assert report["entries"][0]["message"] == "Request completed"
+    assert report["entries"][0]["context"] == expected
+    assert "PRIVATE" not in json.dumps(report)
+
+
+def test_utf16_string_and_message_limits_match_frontend():
+    logger = BackendLogger()
+    logger.set_level("debug")
+    add(logger, message="😀" * 256, context={"value": "😀" * 128})
+    assert logger.get_entries()[0]["message"] == "😀" * 256
+    assert logger.get_entries()[0]["context"] == {"value": "😀" * 128}
+    add(logger, message="😀" * 257, context={"value": "😀" * 129})
+    assert "message" not in logger.get_entries()[1] and "context" not in logger.get_entries()[1]
 
 
 def test_unsafe_contexts_are_omitted_without_losing_entry():

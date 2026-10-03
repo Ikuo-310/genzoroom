@@ -50,12 +50,44 @@ it('wraps the ring in chronological insertion order, clears it and retains the c
   expect(createFrontendLogger().getLevel()).toBe('off');
 });
 
-it.each(['api_key', 'Cookie', 'Authorization', 'sessionToken', 'password', 'secret', 'urlCredential', 'Recipe', 'History', 'Clipboard', 'photoBinary'])('rejects the entire context containing %s, also during export', key => {
+it.each(['apiKey', 'api_key', 'IMMICH_API_KEY', 'Cookie', 'Authorization', 'accessToken', 'refreshToken', 'sessionToken', 'authToken', 'password', 'secret', 'credential', 'urlCredential', 'Recipe', 'History', 'Clipboard', 'photoBinary', 'binaryPayload', 'pixelBuffer', 'requestHeaders', 'responseHeaders', 'requestBody', 'responseBody', 'fullUrl', 'queryString'])('prunes %s while preserving safe siblings, also during export', key => {
   const logger = createFrontendLogger(); logger.setLevel('debug');
   logger.add({ level: 'warn', component: 'test', event: 'privacy', context: { nested: { [key]: 'PRIVATE_FIXTURE' }, count: 1 } });
-  expect(logger.getEntries()[0].context).toBeUndefined();
+  expect(logger.getEntries()[0].context).toEqual({ nested: {}, count: 1 });
   const entry = { ...logger.getEntries()[0], context: { [key]: 'PRIVATE_FIXTURE' }, extra: 'PRIVATE_EXTRA' };
-  expect(JSON.stringify(createFrontendLogsReport([entry]))).not.toMatch(/PRIVATE|context|extra/);
+  expect(JSON.stringify(createFrontendLogsReport([entry]))).not.toMatch(/PRIVATE|extra/);
+  expect(createFrontendLogsReport([entry]).entries[0].context).toEqual({});
+});
+
+it('retains technical metadata and short messages through pruning, snapshots and export', () => {
+  const safe = { assetId: 'asset-1', stackId: 'stack-1', memberIds: ['asset-1', 'asset-2'], operationId: 'draft:17',
+    requestId: 'request-1', generationId: 2, saveId: 'save-1', tokenCount: 3, recipeVersion: 1,
+    historyCursor: 0, historyLength: 2, payloadBytes: 512, pixelCount: 64, durationMs: 12.3,
+    errorCode: 'unreachable', exceptionType: 'ReadTimeout', endpoint: '/stacks', httpStatus: 201,
+    state: 'completed', phase: 'apply', attempt: 1, aborted: false, stale: true, processingVersion: 1 };
+  const logger = createFrontendLogger(); logger.setLevel('debug');
+  logger.add({ level: 'debug', component: 'test', event: 'metadata', message: 'Request completed',
+    context: { ...safe, authorization: 'PRIVATE', nested: { status: 'ok', api_key: 'PRIVATE' } } });
+  const expected = { ...safe, nested: { status: 'ok' } };
+  expect(logger.getEntries()[0].context).toEqual(expected);
+  const report = createFrontendLogsReport(logger.getEntries());
+  expect(report.entries[0].message).toBe('Request completed');
+  expect(report.entries[0].context).toEqual(expected);
+  expect(JSON.stringify(report)).not.toContain('PRIVATE');
+});
+
+it('keeps byte, depth, node and UTF-16 string/message boundaries', () => {
+  const logger = createFrontendLogger(); logger.setLevel('debug');
+  logger.add({ level: 'debug', component: 'test', event: 'boundary', message: '😀'.repeat(256),
+    context: { value: '😀'.repeat(128) } });
+  expect(logger.getEntries()[0].message).toHaveLength(512);
+  expect(logger.getEntries()[0].context).toEqual({ value: '😀'.repeat(128) });
+  for (const context of [{ value: '😀'.repeat(129) }, { nested: { a: { b: { c: 1 } } } },
+    Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`field${index}`, index])),
+    Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`field${index}`, 'あ'.repeat(256)]))]) {
+    logger.add({ level: 'debug', component: 'test', event: 'boundary', message: '😀'.repeat(257), context });
+  }
+  expect(logger.getEntries().slice(1).every(entry => entry.context === undefined && entry.message === undefined)).toBe(true);
 });
 
 it('rejects oversized, circular, binary, non-finite and accessor contexts without interrupting logging', () => {
