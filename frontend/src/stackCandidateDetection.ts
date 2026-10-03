@@ -6,10 +6,11 @@ export type DraftStack = {
   id: string;
   members: RecentAsset[];
   coverAssetId: string;
-  origin: 'auto' | 'manual';
   modified?: boolean;
   evidence: { name: MatchState; nameReason: NameReason; time: MatchState; camera: MatchState; gps: MatchState };
-};
+} & ({ origin: 'auto' | 'manual' } | {
+  origin: 'immich'; immichStackId: string; originalPrimaryAssetId: string; originalMemberIds: readonly string[];
+});
 export type StackDetection = { groups: DraftStack[]; unmatched: RecentAsset[] };
 
 export function filenameFamily(filename: string): { key: string; reason: NameReason } | null {

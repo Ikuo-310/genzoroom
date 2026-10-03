@@ -74,7 +74,8 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
   if (!group.members.some(member => member.id === action.assetId)) return state;
   if (action.type === 'cover') {
     if (group.coverAssetId === action.assetId) return state;
-    return { ...state, modified: true, groups: state.groups.map(current => current === group ? { ...group, coverAssetId: action.assetId } : current) };
+    return { ...state, modified: true, groups: state.groups.map(current => current === group
+      ? { ...group, coverAssetId: action.assetId, ...(group.origin === 'immich' ? { modified: true } : {}) } : current) };
   }
   const members = group.members.filter(member => member.id !== action.assetId);
   const dissolved = members.length < 2;

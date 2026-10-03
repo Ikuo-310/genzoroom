@@ -7,6 +7,8 @@ const DETAIL_CONCURRENCY = 4;
 
 export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
   const [result, setResult] = useState(() => detectStackCandidates(assets));
+  // Membership can replace inputs before the effect runs; never authorize editing the preceding result.
+  const [resultAssets, setResultAssets] = useState(assets);
   const [loading, setLoading] = useState(false);
   const [failureCount, setFailureCount] = useState(0);
   const [detailCount, setDetailCount] = useState(0);
@@ -23,6 +25,7 @@ export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
     const candidates = stackCandidateDetailTargets(snapshot);
     current.busy = candidates.length > 0;
     setResult(initial);
+    setResultAssets(assets);
     setFailureCount(0);
     setDetailCount(candidates.length);
     setLoading(current.busy);
@@ -70,5 +73,5 @@ export function useStackCandidateDetection(assets: readonly RecentAsset[]) {
     // Guard the synchronous click interval before React commits the disabled button.
     if (!request.current.busy) detect();
   };
-  return { ...result, loading, failureCount, detailCount, redetect };
+  return { ...result, loading: loading || resultAssets !== assets, failureCount, detailCount, redetect };
 }

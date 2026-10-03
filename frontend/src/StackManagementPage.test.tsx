@@ -7,8 +7,8 @@ import { App } from './App';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
 import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
-const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn() }));
-vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn(), resolve: vi.fn() }));
+vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail, fetchSelectedImmichStacks: api.resolve }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getAssetEditStatuses: api.statuses }));
 const photos = [
   { id: 'raw', filename: 'selected.dng', format: 'DNG', is_raw: true, date: '2026-09-01', thumbnail_url: '/raw' },
@@ -28,6 +28,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
   await i18n.changeLanguage('en'); sessionStorage.clear(); localStorage.clear(); updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailColumns', 6);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos.find(a => a.id === id), exif: {}, preview_url: '/preview' }));
+  api.resolve.mockReset().mockRejectedValue(new Error('No Stack fixture'));
   api.recent.mockResolvedValue(photos); api.favorites.mockResolvedValue(photos); api.statuses.mockResolvedValue({});
   document.title = 'GenzoRoom'; host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -87,14 +88,13 @@ it('retains shared Settings and Primary+Settings developer behavior and blocks H
   await click('.settings-button'); expect(host.querySelector('dialog[open]')).not.toBeNull();
   await press('h'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); open.mockRestore();
 });
-it('shows NAME/TIME/CAM/GPS and COVER, partitions candidates and existing Stacks without duplicates', async () => {
-  const stacked = { ...photos[1], id: 'stacked', stackId: '22345678-1234-4234-9234-123456789abc', primaryAssetId: '32345678-1234-4234-9234-123456789abc' };
+it('shows NAME/TIME/CAM/GPS and COVER and partitions NAME candidates without duplicates', async () => {
   api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id, exif: { date_time_original: '2026:10:01 08:25:49', make: 'Camera', model: 'Model', latitude: 35, longitude: 139 } }));
-  await mount('/stack', { selectedAssets: [...photos, stacked, photos[0]] });
-  expect(host.querySelectorAll('.stack-photo')).toHaveLength(3);
+  await mount('/stack', { selectedAssets: [...photos, photos[0]] });
+  expect(host.querySelectorAll('.stack-photo')).toHaveLength(2);
   expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
   expect(host.querySelector<HTMLElement>('.stack-candidate-group')!.style.getPropertyValue('--stack-member-count')).toBe('2');
-  expect(host.querySelector('.stack-unmatched-grid .stack-filename')?.textContent).toBe('selected.jpg');
+  expect(host.querySelector('.stack-unmatched-grid .stack-filename')).toBeNull();
   expect(Array.from(host.querySelectorAll('.stack-evidence')).map(e => e.querySelector('[aria-hidden]')?.textContent)).toEqual(['NAME', 'TIME', 'CAM', 'GPS']);
   expect(host.querySelectorAll('.stack-evidence.matched')).toHaveLength(4);
   expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
@@ -224,8 +224,78 @@ it('provides explicit error text for failed detail in addition to color', async 
 });
 
 const singles = [{ ...photos[1], id: 'x', filename: 'x.jpg' }, { ...photos[1], id: 'y', filename: 'y.jpg' }];
+const existingStackId='52345678-1234-4234-9234-123456789abc';
+const existingPrimary='62345678-1234-4234-9234-123456789abc';
+const existingMembers=[
+ {...photos[1],id:'72345678-1234-4234-9234-123456789abc',filename:'hidden.jpg'},
+ {...photos[0],id:existingPrimary,filename:'primary.dng'},
+ {...photos[1],id:'82345678-1234-4234-9234-123456789abc',filename:'hidden.png',format:'PNG'},
+].map(asset=>({...asset,stackId:existingStackId,primaryAssetId:existingPrimary,stackAssetCount:3}));
+const existingStack={id:existingStackId,primaryAssetId:existingPrimary,assets:existingMembers};
 const button = (text: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === text)!;
 const unmatched = () => Array.from(host.querySelectorAll('.stack-unmatched-grid .stack-filename')).map(e => e.textContent);
+
+it('shows full Immich membership beside auto candidates and keeps the Immich primary Cover',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[1],existingMembers[0],singles[0]]});
+ expect(api.resolve).toHaveBeenCalledOnce();expect(api.resolve.mock.calls[0][0]).toEqual([existingStackId]);
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(2);expect(host.querySelectorAll('.stack-photo')).toHaveLength(6);
+ expect(unmatched()).toEqual(['x.jpg']);
+ const immich=host.querySelector('.stack-candidate-group')!;
+ expect(Array.from(immich.querySelectorAll('.stack-filename')).map(e=>e.textContent)).toEqual(['hidden.jpg','primary.dng','hidden.png']);
+ expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe('primary.dng');
+ expect(immich.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+ expect(immich.querySelector('.visually-hidden')?.textContent).toBe('Immich Stack');
+ expect(immich.querySelectorAll('.stack-evidence')).toHaveLength(1);
+ expect(api.detail.mock.calls.map(call=>call[0]).sort()).toEqual(['jpeg','raw']);
+ await click('[aria-label="Set hidden.jpg as COVER"]');
+ expect(immich.querySelector('.stack-evidence.mismatch')?.getAttribute('title')).toBe('Immich Stack with unsaved changes');
+ expect(immich.querySelector('.stack-group-indicators')?.textContent).toContain('IMMICH');
+ expect(immich.querySelector('.stack-group-indicators')?.textContent).not.toContain('MANUAL');
+ await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ expect(immich.querySelectorAll('.stack-filename')).toHaveLength(4);
+ expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe('hidden.jpg');
+});
+it('blocks editing during Immich resolution and provides a safe retry after failure',async()=>{
+ let fail!:(error:Error)=>void;api.resolve.mockImplementation(()=>new Promise((_resolve,reject)=>{fail=reject;}));
+ await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ expect(host.textContent).toContain('Loading Immich Stacks');expect(host.querySelectorAll('.stack-photo')).toHaveLength(0);
+ expect(button('Detect again').disabled).toBe(true);expect(button('New Stack').disabled).toBe(true);
+ await act(async()=>fail(new Error('offline')));
+ expect(host.querySelector('[role="alert"]')?.textContent).toContain('Immich Stack information could not be loaded');
+ expect(host.querySelectorAll('.stack-photo')).toHaveLength(0);expect(button('New Stack').disabled).toBe(true);
+ expect(button('Detect again').disabled).toBe(false);
+ api.resolve.mockResolvedValue([existingStack]);await act(async()=>button('Detect again').click());
+ expect(host.querySelectorAll('.stack-photo')).toHaveLength(3);expect(host.querySelector<HTMLButtonElement>('.stack-photo')?.disabled).toBe(false);
+ expect(host.querySelector('button[disabled]')?.textContent).not.toBe('Detect again');
+});
+it('waits for both full Stack resolution and auto detail completion before enabling editing',async()=>{
+ let finishStacks!:(value:typeof existingStack[])=>void;
+ const details:Array<()=>void>=[];
+ api.resolve.mockImplementation(()=>new Promise(resolve=>{finishStacks=resolve;}));
+ api.detail.mockImplementation((id:string)=>new Promise(resolve=>details.push(()=>resolve({id,exif:{}}))));
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[1]]});
+ expect(button('Detect again').disabled).toBe(true);
+ await act(async()=>finishStacks([existingStack]));
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(2);
+ for(const control of host.querySelectorAll<HTMLButtonElement>('.stack-photo,.stack-set-target,.stack-purge-member,.stack-purge-group')) expect(control.disabled).toBe(true);
+ expect(details).toHaveLength(2);
+ await act(async()=>details.forEach(resolve=>resolve()));
+ for(const control of host.querySelectorAll<HTMLButtonElement>('.stack-photo,.stack-set-target,.stack-purge-member,.stack-purge-group')) expect(control.disabled).toBe(false);
+ expect(button('Detect again').disabled).toBe(false);
+});
+it('confirms before redetection and restores the latest Immich primary on Continue',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ await click('[aria-label="Set hidden.jpg as COVER"]');await click('.stack-set-target');
+ await act(async()=>button('Detect again').click());await act(async()=>button('Cancel').click());
+ expect(api.resolve).toHaveBeenCalledOnce();expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('hidden.jpg');
+ expect(host.querySelector('.stack-add-target')).not.toBeNull();
+ const latestPrimary=existingMembers[2].id;
+ api.resolve.mockResolvedValue([{...existingStack,primaryAssetId:latestPrimary,assets:existingMembers.map(a=>({...a,primaryAssetId:latestPrimary}))}]);
+ await act(async()=>button('Detect again').click());await act(async()=>button('Continue').click());
+ expect(api.resolve).toHaveBeenCalledTimes(2);expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('hidden.png');
+ expect(host.querySelector('.stack-add-target')).toBeNull();expect(host.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
+});
 
 it('changes Cover only on member click and keeps evidence; member Purge does not toggle selection', async () => {
  await mount('/stack', {selectedAssets: [...photos, ...singles]});

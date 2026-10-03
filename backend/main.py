@@ -22,6 +22,8 @@ from immich import (
     CalendarHeatmap,
     CalendarMinimumYear,
     RecentAsset,
+    ImmichStack,
+    resolve_stacks,
     get_albums,
     get_album_assets,
     get_favorite_assets,
@@ -152,6 +154,19 @@ async def immich_status() -> ImmichStatus:
 def _upstream_error(error: ImmichRequestError) -> HTTPException:
     status_code = 503 if error.error_code in ("configuration_missing", "unreachable") else 502
     return HTTPException(status_code=status_code, detail=str(error))
+
+
+class StackResolveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stackIds: list[UUID] = Field(max_length=100)
+
+
+@app.post("/stacks/resolve", response_model=list[ImmichStack])
+async def selected_stacks(payload: StackResolveRequest) -> list[ImmichStack]:
+    try:
+        return await resolve_stacks(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), payload.stackIds)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
 
 
 @app.get("/assets/recent", response_model=list[RecentAsset])

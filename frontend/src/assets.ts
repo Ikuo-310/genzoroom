@@ -10,6 +10,8 @@ export type RecentAsset = {
   stackAssetCount?: number | null;
 };
 
+export type ImmichStack = { id: string; primaryAssetId: string; assets: RecentAsset[] };
+
 export type AssetExif = {
   date_time_original?: string;
   make?: string;

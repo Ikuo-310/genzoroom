@@ -14,6 +14,8 @@ import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
 import { useEditableStackDraft } from './useEditableStackDraft';
+import { useSelectedImmichStacks } from './useSelectedImmichStacks';
+import { mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 
@@ -35,26 +37,39 @@ export function StackManagementPage() {
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
   const assets = navigation?.selectedAssets ?? EMPTY_ASSETS;
-  const detection = useStackCandidateDetection(assets);
-  const { draft, dispatch, ready } = useEditableStackDraft(detection, detection.loading, assets);
+  const immich = useSelectedImmichStacks(assets);
+  const detectionAssets = useMemo(() => {
+    if (immich.loading || immich.error) return EMPTY_ASSETS;
+    const memberIds = new Set(immich.stacks.flatMap(stack => stack.assets.map(asset => asset.id.toLowerCase())));
+    return assets.filter(asset => asset.stackId == null && !memberIds.has(asset.id.toLowerCase()));
+  }, [assets, immich.stacks, immich.loading, immich.error]);
+  const detection = useStackCandidateDetection(detectionAssets);
+  const integration = useMemo(() => mergeImmichStackSource(detection, immich.stacks, assets), [detection.groups, detection.unmatched, immich.stacks, assets]);
+  const busy = detection.loading || immich.loading;
+  const { draft, dispatch, ready } = useEditableStackDraft(integration.source, busy || immich.error, integration.assets);
   const { selectedIds, addTargetStackId } = draft;
   const [confirmRedetect, setConfirmRedetect] = useState(false);
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
   const canEdit = ready && !confirmRedetect;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
-  const displayed = ready ? draft : detection;
+  const displayed = ready ? draft : integration.source;
   const addSelected = useCallback((targetGroupId?: string) => {
     if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
   }, [canEdit, canAdd, selectedUnmatched.length]);
+  const runRedetect = () => {
+    dispatch({ type: 'reset' });
+    // Resolving a fresh membership list also supplies fresh auto-detection inputs.
+    if (assets.some(asset => asset.stackId != null)) immich.retry();
+    else detection.redetect();
+  };
   const redetect = () => {
-    if (!ready) return;
+    if (busy || (!ready && !immich.error)) return;
     if (draft.modified) setConfirmRedetect(true);
-    else { dispatch({ type: 'reset' }); detection.redetect(); }
+    else runRedetect();
   };
   const continueRedetect = () => {
     setConfirmRedetect(false);
-    dispatch({ type: 'reset' });
-    detection.redetect();
+    runRedetect();
   };
   const { homeThumbnailColumns } = useAppSettings();
   const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
@@ -99,17 +114,19 @@ export function StackManagementPage() {
     <div className="stack-control-bar" role="region" aria-label={t('stackManagement.actions')}>
       <div className="stack-control-actions">
         <strong aria-live="polite">{t('stackManagement.selectionCount', { count: selectedIds.size })}</strong>
-        <button type="button" disabled={!selectedIds.size} onClick={() => dispatch({ type: 'clearSelection' })}>{t('photos.clearSelection')}</button>
+        <button type="button" disabled={!canEdit || !selectedIds.size} onClick={() => dispatch({ type: 'clearSelection' })}>{t('photos.clearSelection')}</button>
         <button type="button" disabled={!canAdd} onClick={() => addSelected()} title={shortcut.title(t('stackManagement.add'), 'stackAddSelected')}>{t('stackManagement.add')}</button>
         <button type="button" disabled={!canEdit || selectedUnmatched.length < 2} onClick={() => dispatch({ type: 'create' })}>{t('stackManagement.newStack')}</button>
       </div>
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
-        <button type="button" disabled={!ready || confirmRedetect || !assets.length} aria-busy={detection.loading} onClick={redetect}>{t('stackManagement.detect')}</button>
+        <button type="button" disabled={busy || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
         <button type="button" disabled>{t('stackManagement.send')}</button>
       </div>
     </div>
-    <div ref={contentRef} className="stack-content" aria-busy={detection.loading}>
+    <div ref={contentRef} className="stack-content" aria-busy={busy}>
+      {immich.loading && <p className="stack-status" role="status">{t('stackManagement.loadingImmich')}</p>}
+      {immich.error && <p className="stack-status" role="alert">{t('stackManagement.immichFailure')}</p>}
       {detection.loading && <p className="stack-status" role="status">{t('stackManagement.detecting')}</p>}
       {detection.failureCount > 0 && <p className="stack-status" role="status">{t(detection.failureCount === detection.detailCount ? 'stackManagement.allFailure' : 'stackManagement.partialFailure')}</p>}
       <section aria-labelledby="stack-candidates-heading">
@@ -149,6 +166,10 @@ export function StackManagementPage() {
 function StackEvidenceHeader({ group }: { group: DraftStack }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
+  if (group.origin === 'immich') {
+    const description = t(group.modified ? 'stackManagement.immichModified' : 'stackManagement.immichUnchanged');
+    return <div className="stack-group-indicators"><span className={`stack-evidence ${group.modified ? 'mismatch' : 'matched'}`} title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;
+  }
   if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence unavailable" title={t('stackManagement.manual')}>MANUAL</span></div>;
   return <div className="stack-group-indicators">{labels.map(([key, label]) => {
     const state = group.evidence[key];

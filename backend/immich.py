@@ -119,6 +119,12 @@ class RecentAsset(BaseModel):
     stackAssetCount: int | None = None
 
 
+class ImmichStack(BaseModel):
+    id: UUID
+    primaryAssetId: UUID
+    assets: list[RecentAsset]
+
+
 class AlbumSummary(BaseModel):
     id: UUID
     albumName: str
@@ -474,10 +480,10 @@ def _search_assets(body: object) -> list[RecentAsset]:
     return assets
 
 
-async def _with_asset_stacks(
-    url: str, key: str, assets: list[RecentAsset],
+async def _get_asset_stacks(
+    url: str, key: str,
     *, transport: httpx.AsyncBaseTransport | None = None,
-) -> list[RecentAsset]:
+) -> list[Mapping]:
     try:
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
@@ -494,7 +500,6 @@ async def _with_asset_stacks(
         body = response.json()
         if not isinstance(body, list):
             raise TypeError
-        lookup: dict[UUID, tuple[UUID, UUID, int]] = {}
         seen_stacks: set[UUID] = set()
         seen_members: set[UUID] = set()
         for stack in body:
@@ -519,11 +524,20 @@ async def _with_asset_stacks(
                 members.add(member_id)
             if primary_id not in members:
                 raise ValueError
-            member_count = len(stack["assets"])
-            for member_id in members:
-                lookup[member_id] = (stack_id, primary_id, member_count)
     except (KeyError, TypeError, ValueError):
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    return body
+
+
+async def _with_asset_stacks(
+    url: str, key: str, assets: list[RecentAsset],
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    stacks = await _get_asset_stacks(url, key, transport=transport)
+    lookup = {
+        UUID(member["id"]): (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(stack["assets"]))
+        for stack in stacks for member in stack["assets"]
+    }
     # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
     for asset in assets:
         stack_info = lookup.get(asset.id)
@@ -532,6 +546,37 @@ async def _with_asset_stacks(
         else:
             asset.stackId, asset.primaryAssetId, asset.stackAssetCount = stack_info
     return assets
+
+
+async def resolve_stacks(
+    immich_url: str | None, api_key: str | None, stack_ids: list[UUID],
+    *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[ImmichStack]:
+    if len(stack_ids) > 100:
+        raise ValueError("At most 100 stacks may be resolved.")
+    requested = list(dict.fromkeys(stack_ids))
+    if not requested:
+        return []
+    url, key = _require_configuration(immich_url, api_key)
+    stacks = await _get_asset_stacks(url, key, transport=transport)
+    lookup = {UUID(stack["id"]): stack for stack in stacks}
+    try:
+        result = []
+        for stack_id in requested:
+            stack = lookup[stack_id]
+            # Never discard video or malformed members and expose a partial editable Stack.
+            if len(stack["assets"]) < 2 or any(member.get("type") != "IMAGE" for member in stack["assets"]):
+                raise ValueError
+            assets = _search_assets({"assets": {"items": stack["assets"]}})
+            primary_id = UUID(stack["primaryAssetId"])
+            for asset in assets:
+                asset.stackId = stack_id
+                asset.primaryAssetId = primary_id
+                asset.stackAssetCount = len(assets)
+            result.append(ImmichStack(id=stack_id, primaryAssetId=primary_id, assets=assets))
+        return result
+    except (KeyError, TypeError, ValueError):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
 
 
 async def _search_home_assets(
