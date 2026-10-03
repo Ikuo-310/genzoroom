@@ -550,7 +550,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-candidate-grid .stack-empty { grid-column: 1 / -1; }
 /* Groups occupy one outer-grid item; excess members wrap only inside their group. */
 .stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); min-width: 0; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px; }
-.stack-management-page .stack-photo { min-width: 0; padding: 0; overflow: hidden; text-align: left; }
+.stack-management-page .stack-photo { width: 100%; min-width: 0; padding: 0; overflow: hidden; text-align: left; }
 .stack-management-page .stack-photo[aria-pressed="true"] { background: var(--selection); border-color: var(--accent); }
 .stack-thumbnail { position: relative; aspect-ratio: 4 / 3; background: var(--bg-panel); }
 .stack-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
@@ -562,7 +562,17 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 }
 
 .stack-group-members { display: grid; grid-template-columns: repeat(min(var(--stack-member-count), var(--stack-effective-columns)), minmax(0, 1fr)); gap: 12px; }
-.stack-group-header { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 2px 0 7px; font-size: 0.7rem; }
+.stack-group-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px; padding: 2px 0 7px; font-size: 0.7rem; }
+.stack-group-indicators { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.stack-photo-wrapper { position: relative; min-width: 0; }
+.stack-management-page .stack-icon-button { width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 1rem; }
+.stack-purge-member { position: absolute; left: 4px; top: 4px; }
+.stack-add-target { border-color: var(--accent); }
+.stack-add-target .stack-group-header { background: var(--selection); border-radius: 3px; }
+.stack-redetect-dialog { width: min(420px, calc(100vw - 32px)); padding: 20px; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 6px; }
+.stack-redetect-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.stack-redetect-dialog h2 { font-size: 1.1rem; margin: 0; }
+.stack-redetect-dialog button:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stack-evidence { padding: 2px 5px; border-radius: 3px; }
 .stack-evidence.matched { background: var(--status-match); color: var(--status-text); }
 .stack-evidence.unavailable { background: var(--status-unavailable); color: var(--text-secondary); }

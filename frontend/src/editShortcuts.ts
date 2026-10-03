@@ -39,6 +39,7 @@ export const shortcutBindings = {
   viewerFitRestore: [{ key: 'z', ignoreCase: true, ...commandModifiers, shift: true, alt: false }],
   homeOpenSelected: [{ key: 'd', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeOpenStackManager: [{ key: 's', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  stackAddSelected: [{ key: 'a', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   workspaceReturnHome: [{ key: 'h', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   scopeRed: [{ code: 'Numpad1', ...commandModifiers, shift: false, alt: false }],
   scopeGreen: [{ code: 'Numpad2', ...commandModifiers, shift: false, alt: false }],

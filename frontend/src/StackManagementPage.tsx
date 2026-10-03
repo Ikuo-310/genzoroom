@@ -13,6 +13,8 @@ import { FormatBadge } from './FormatBadge';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
+import { useEditableStackDraft } from './useEditableStackDraft';
+import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
@@ -34,8 +36,24 @@ export function StackManagementPage() {
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
   const assets = navigation?.selectedAssets ?? EMPTY_ASSETS;
   const detection = useStackCandidateDetection(assets);
-  // This selection belongs to the management session, independently of Home selection.
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const { draft, dispatch, ready } = useEditableStackDraft(detection, detection.loading, assets);
+  const { selectedIds, addTargetStackId } = draft;
+  const [confirmRedetect, setConfirmRedetect] = useState(false);
+  const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
+  const canEdit = ready && !confirmRedetect;
+  const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
+  const displayed = ready ? draft : detection;
+  const addSelected = useCallback(() => { if (canAdd) dispatch({ type: 'add' }); }, [canAdd]);
+  const redetect = () => {
+    if (!ready) return;
+    if (draft.modified) setConfirmRedetect(true);
+    else { dispatch({ type: 'reset' }); detection.redetect(); }
+  };
+  const continueRedetect = () => {
+    setConfirmRedetect(false);
+    dispatch({ type: 'reset' });
+    detection.redetect();
+  };
   const { homeThumbnailColumns } = useAppSettings();
   const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
   const { isOpen: settingsOpen } = useSettingsDialog();
@@ -55,21 +73,17 @@ export function StackManagementPage() {
       if (settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
-        || !matchesShortcut(event, 'workspaceReturnHome')) return;
-      event.preventDefault();
-      returnHome();
+        || confirmRedetect) return;
+      if (matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
+      else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
+      // Escape dismisses local page selection and Add targeting rather than an application command.
+      else if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault(); dispatch({ type: 'clear' });
+      }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [settingsOpen, returnHome]);
-
-  function toggle(id: string) {
-    setSelectedIds(previous => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
+  }, [settingsOpen, returnHome, confirmRedetect, canAdd, addSelected]);
 
   return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}>
     <header className="stack-management-header">
@@ -83,12 +97,13 @@ export function StackManagementPage() {
     <div className="stack-control-bar" role="region" aria-label={t('stackManagement.actions')}>
       <div className="stack-control-actions">
         <strong aria-live="polite">{t('stackManagement.selectionCount', { count: selectedIds.size })}</strong>
-        <button type="button" disabled={!selectedIds.size} onClick={() => setSelectedIds(new Set())}>{t('photos.clearSelection')}</button>
-        <button type="button" disabled>{t('stackManagement.add')}</button>
+        <button type="button" disabled={!selectedIds.size} onClick={() => dispatch({ type: 'clearSelection' })}>{t('photos.clearSelection')}</button>
+        <button type="button" disabled={!canAdd} onClick={addSelected} title={shortcut.title(t('stackManagement.add'), 'stackAddSelected')}>{t('stackManagement.add')}</button>
+        <button type="button" disabled={!canEdit || selectedUnmatched.length < 2} onClick={() => dispatch({ type: 'create' })}>{t('stackManagement.newStack')}</button>
       </div>
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
-        <button type="button" disabled={detection.loading || !assets.length} aria-busy={detection.loading} onClick={detection.redetect}>{t('stackManagement.detect')}</button>
+        <button type="button" disabled={!ready || confirmRedetect || !assets.length} aria-busy={detection.loading} onClick={redetect}>{t('stackManagement.detect')}</button>
         <button type="button" disabled>{t('stackManagement.send')}</button>
       </div>
     </div>
@@ -97,44 +112,60 @@ export function StackManagementPage() {
       {detection.failureCount > 0 && <p className="stack-status" role="status">{t(detection.failureCount === detection.detailCount ? 'stackManagement.allFailure' : 'stackManagement.partialFailure')}</p>}
       <section aria-labelledby="stack-candidates-heading">
         <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
-        <div className="stack-candidate-grid">{detection.groups.length ? detection.groups.map((group, index) => <section
-          key={group.id} className="stack-candidate-group" aria-label={t('stackManagement.group', { index: index + 1 })}
+        <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section
+          key={group.id} className={`stack-candidate-group${addTargetStackId === group.id ? ' stack-add-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           style={{ '--stack-member-count': group.members.length } as CSSProperties}>
-          <StackEvidenceHeader group={group} />
+          <header className="stack-group-header">
+            <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit}
+              title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
+              onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
+            <StackEvidenceHeader group={group} />
+            <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
+              title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
+              onClick={() => dispatch({ type: 'target', groupId: group.id })}>+</button>
+            {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
+          </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
-            selected={selectedIds.has(asset.id)} cover={asset.id === group.coverAssetId} onToggle={() => toggle(asset.id)} />)}</div>
+            selected={false} member cover={asset.id === group.coverAssetId} disabled={!canEdit}
+            onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
+            onPurge={() => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
       </section>
       <section aria-labelledby="stack-unmatched-heading">
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
-        {detection.unmatched.length ? <div className="stack-unmatched-grid">{detection.unmatched.map(asset => <StackPhoto
-          key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onToggle={() => toggle(asset.id)} />)}</div>
+        {displayed.unmatched.length ? <div className="stack-unmatched-grid">{displayed.unmatched.map(asset => <StackPhoto
+          key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit} onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
           : <p className="stack-empty">{t(assets.length ? 'stackManagement.noUnmatched' : 'stackManagement.empty')}</p>}
       </section>
     </div>
+    {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
   </main>;
 }
 
 function StackEvidenceHeader({ group }: { group: DraftStack }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
-  return <header className="stack-group-header">{labels.map(([key, label]) => {
+  if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence unavailable" title={t('stackManagement.manual')}>MANUAL</span></div>;
+  return <div className="stack-group-indicators">{labels.map(([key, label]) => {
     const state = group.evidence[key];
     const detail = key === 'name' ? t(group.evidence.nameReason === 'exact' ? 'stackManagement.nameExact' : 'stackManagement.namePixel') : t(`stackManagement.${state}`);
     return <span key={key} className={`stack-evidence ${state}`} title={`${label}: ${t(`stackManagement.${state}`)}${key === 'name' ? ` — ${detail}` : ''}`}><span aria-hidden="true">{label}</span><span className="visually-hidden">{label}: {t(`stackManagement.${state}`)}</span></span>;
-  })}</header>;
+  })}</div>;
 }
 
-function StackPhoto({ asset, selected, cover = false, onToggle }: {
-  asset: RecentAsset; selected: boolean; cover?: boolean; onToggle: () => void;
+function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, onToggle, onPurge }: {
+  asset: RecentAsset; selected: boolean; cover?: boolean; member?: boolean; disabled?: boolean;
+  onToggle: () => void; onPurge?: () => void;
 }) {
   const { t } = useTranslation();
-  return <button className={`stack-photo${cover ? ' stack-cover' : ''}`} type="button" aria-pressed={selected}
-    aria-label={t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
+  return <div className="stack-photo-wrapper"><button disabled={disabled} className={`stack-photo${cover ? ' stack-cover' : ''}`} type="button" aria-pressed={member ? cover : selected}
+    aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
     aria-description={cover ? t('stackManagement.cover') : undefined} onClick={onToggle}>
     <div className="stack-thumbnail"><img src={asset.thumbnail_url} alt="" loading="lazy" /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>
     <span className="stack-filename" title={asset.filename}>{asset.filename}</span>
-  </button>;
+  </button>{onPurge && <button className="stack-icon-button stack-purge-member" type="button" disabled={disabled}
+    title={t('stackManagement.purgeMember', { filename: asset.filename })} aria-label={t('stackManagement.purgeMember', { filename: asset.filename })}
+    onClick={event => { event.stopPropagation(); onPurge(); }}>×</button>}</div>;
 }

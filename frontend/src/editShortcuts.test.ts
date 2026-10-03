@@ -99,7 +99,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(20);
+    expect(Object.keys(shortcutBindings)).toHaveLength(21);
   });
 
   it('matches workspace Home only for unmodified H', () => {
@@ -128,6 +128,15 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(20);
+    expect(Object.keys(shortcutBindings)).toHaveLength(21);
+  });
+  it('matches Stack Add only for unmodified A without matching other commands', () => {
+    for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
+      const value = event('A', { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) });
+      expect(matchesShortcut(value, 'stackAddSelected', platform)).toBe(mask === 0);
+      if (mask === 0) for (const id of Object.keys(shortcutBindings) as ShortcutId[]) {
+        if (id !== 'stackAddSelected') expect(matchesShortcut(value, id, platform)).toBe(false);
+      }
+    }
   });
 });

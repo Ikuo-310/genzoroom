@@ -22,6 +22,20 @@ describe('filename candidates', () => {
     for (const name of ['IMG_1234.RAW-01.COVER.jpg', 'PXL_20261001_082549596.EDIT.jpg', 'PXL_20261001_082549596.RAW-01.UNKNOWN.jpg', 'PXL_20261001_082549596.RAW-01.COVER.extra.jpg', 'PXL_20261001_082549.RAW-01.COVER.jpg']) expect(filenameFamily(name)?.reason).toBe('exact');
     expect(detectStackCandidates([asset('a', 'PXL_20261001_082549596.EDIT.jpg', false), asset('b', files[1], true)]).groups).toHaveLength(0);
   });
+  it('normalizes the known Pixel Motion Photo MP marker without accepting other suffixes', () => {
+    const jpeg = asset('motion-jpeg', 'PXL_20260917_051042180.RAW-01.MP.COVER.jpg', false);
+    const raw = asset('motion-raw', 'PXL_20260917_051042180.RAW-02.ORIGINAL.dng', true);
+    expect(filenameFamily(jpeg.filename)).toEqual({ key: 'PXL_20260917_051042180', reason: 'pixel-normalized' });
+    expect(detectStackCandidates([jpeg, raw]).groups[0].members).toEqual([jpeg, raw]);
+    const groups = detectStackCandidates([
+      jpeg, raw,
+      asset('unknown', 'PXL_20260917_051042180.RAW-01.MPX.COVER.jpg', false),
+      asset('other-time', 'PXL_20260917_051042181.RAW-02.ORIGINAL.dng', true),
+    ]).groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members.map(member => member.id)).toEqual(['motion-jpeg', 'motion-raw']);
+    expect(filenameFamily('PXL_20260917_051042180.RAW-01.MP.COVER.extra.jpg')?.reason).toBe('exact');
+  });
   it('requires RAW and Non-RAW and excludes all existing Stack members', () => {
     for (const raw of [true, false]) expect(detectStackCandidates(pair.map(a => ({ ...a, is_raw: raw }))).groups).toHaveLength(0);
     const stacked = { ...pair[0], stackId: 'existing' };

@@ -7,12 +7,13 @@ export type DraftStack = {
   members: RecentAsset[];
   coverAssetId: string;
   origin: 'auto' | 'manual';
+  modified?: boolean;
   evidence: { name: MatchState; nameReason: NameReason; time: MatchState; camera: MatchState; gps: MatchState };
 };
 export type StackDetection = { groups: DraftStack[]; unmatched: RecentAsset[] };
 
 export function filenameFamily(filename: string): { key: string; reason: NameReason } | null {
-  const pixel = /^(PXL_\d{8}_\d{9})\.RAW-\d+\.(?:COVER|ORIGINAL)\.[A-Za-z0-9]+$/.exec(filename);
+  const pixel = /^(PXL_\d{8}_\d{9})\.RAW-\d+\.(?:MP\.)?(?:COVER|ORIGINAL)\.[A-Za-z0-9]+$/.exec(filename);
   if (pixel) return { key: pixel[1], reason: 'pixel-normalized' };
   const dot = filename.lastIndexOf('.');
   if (dot <= 0 || dot === filename.length - 1) return null;

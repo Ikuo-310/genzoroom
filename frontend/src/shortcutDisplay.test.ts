@@ -5,6 +5,8 @@ describe('shortcut binding display', () => {
   it('formats plain keys and modifier commands', () => {
     expect(formatShortcut('workspaceReturnHome', 'other')).toBe('H');
     expect(formatShortcut('homeOpenSelected', 'other')).toBe('D');
+    expect(formatShortcut('stackAddSelected', 'other')).toBe('A');
+    expect(formatShortcut('stackAddSelected', 'mac')).toBe('A');
     expect(formatShortcut('viewerFocusMode', 'other')).toBe('F');
     expect(formatShortcut('viewerFitRestore', 'other')).toBe('Shift+Z');
     expect(formatShortcut('copySettings', 'other')).toBe('Ctrl+C');
