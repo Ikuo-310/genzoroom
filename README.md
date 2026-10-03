@@ -4,10 +4,9 @@ GenzoRoom is an early-development, self-hosted browser interface for developing 
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
-![GenzoRoom Anshitsu workspace with the Viewer, RGB and Y′ Histogram Scope, History, EXIF, Develop controls, and Filmstrip](docs/images/260928_Histogram.png)
+![GenzoRoom Anshitsu workspace showing a JPEG before and after photo development](docs/images/Anshitsu_Sakura.jpg)
 
-*The desktop Anshitsu workspace with the Histogram Scope in the upper-right panel.*
-
+*Before and after comparison of a JPEG edited in the desktop Anshitsu workspace.*
 ## Current features
 
 ### Immich browsing and Anshitsu
