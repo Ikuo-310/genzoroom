@@ -80,6 +80,37 @@ it('localizes and restores title, guards H, and ignores D/S', async () => {
   for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { repeat: true }]) await press('h', options);
   await press('d'); await press('s'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); await press('h'); expect(document.title).toBe('GenzoRoom');
 });
+it('uses Primary+Z for one local Undo, preserves native/dialog/sending guards, and adds no Redo', async () => {
+ await mount('/stack',{selectedAssets:photos});
+ const coverName=()=>host.querySelector('.stack-cover .stack-filename')?.textContent;
+ expect(coverName()).toBe('selected.jpg');
+ await press('z',{ctrlKey:true}); expect(coverName()).toBe('selected.jpg');
+ await click('[aria-label="Set selected.dng as COVER"]'); expect(coverName()).toBe('selected.dng');
+ await press('z',{ctrlKey:true,shiftKey:true}); await press('y',{ctrlKey:true}); expect(coverName()).toBe('selected.dng');
+ const input=document.createElement('input');host.append(input);await press('z',{ctrlKey:true},input);input.remove();expect(coverName()).toBe('selected.dng');
+ await press('z',{ctrlKey:true});expect(coverName()).toBe('selected.jpg');
+ await press('z',{ctrlKey:true});expect(coverName()).toBe('selected.jpg');
+ await click('[aria-label="Set selected.dng as COVER"]');
+ await click('.settings-button'); expect(host.querySelector('dialog[open]')).not.toBeNull();
+ await press('z',{ctrlKey:true}); expect(coverName()).toBe('selected.dng');
+ await click('.settings-button');
+ let finish!:(value:Response)=>void;
+ vi.stubGlobal('fetch',vi.fn((_url:string,_init:RequestInit)=>new Promise<Response>(resolve=>{finish=resolve;})));
+ await act(async()=>button('Send to Immich').click());
+ await press('z',{ctrlKey:true}); expect(coverName()).toBe('selected.dng');
+ await act(async()=>button('Continue').click());
+ expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');
+ await press('z',{ctrlKey:true}); expect(coverName()).toBe('selected.dng');
+ await act(async()=>finish(new Response(JSON.stringify({results:[]}))));
+});
+it('discards the one-step Undo snapshot when /stack navigation gets a new source generation', async () => {
+ await mount('/stack',{selectedAssets:photos});
+ await click('[aria-label="Set selected.dng as COVER"]');
+ expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
+ await act(async()=>navigateTest('/stack',{selectedAssets:photos}));
+ await press('z',{ctrlKey:true});
+ expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+});
 it('retains shared Settings and Primary+Settings developer behavior and blocks H while Settings is open', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });

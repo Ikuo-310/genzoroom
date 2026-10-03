@@ -64,11 +64,12 @@ export function StackManagementPage() {
   useLayoutEffect(() => {
     if (currentGeneration.current === sourceGeneration) return;
     currentGeneration.current = sourceGeneration;
+    dispatch({ type: 'clearUndo' });
     sendRequest.current?.controller.abort();
     sendRequest.current = null;
     setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
     setRedetecting(false); setDragging(null); setDropTarget(null);
-  }, [sourceGeneration]);
+  }, [sourceGeneration, dispatch]);
   useEffect(() => () => { sendRequest.current?.controller.abort(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
@@ -77,6 +78,7 @@ export function StackManagementPage() {
   const canSend = ready && !sending && !confirmRedetect && !unknown && !oversized && (draft.groups.length > 0 || source.some(group => group.origin === 'immich'));
   const startSend = async () => {
     if (!canSend || sendRequest.current) return;
+    dispatch({ type: 'clearUndo' });
     setConfirmSend(false); setSending(true); setSendStatus('sending');
     const controller = new AbortController();
     const request = { controller, generation: currentGeneration.current };
@@ -161,6 +163,7 @@ export function StackManagementPage() {
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
         || confirmRedetect || confirmSend) return;
       if (matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
+      else if (matchesShortcut(event, 'undo') && canEdit && draft.undoSnapshot) { event.preventDefault(); dispatch({ type: 'undo' }); }
       else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
       // Escape dismisses local page selection and Add targeting rather than an application command.
       else if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
@@ -169,7 +172,7 @@ export function StackManagementPage() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected]);
+  }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
 
   return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}>
     <header className="stack-management-header">

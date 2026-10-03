@@ -13,10 +13,12 @@ export type EditableStackDraft = StackDetection & {
   modified: boolean;
   manualCounter: number;
   order: ReadonlyMap<string, number>;
+  undoSnapshot: StackDraftSnapshot | null;
 };
+type StackDraftSnapshot = Pick<EditableStackDraft, 'groups' | 'unmatched' | 'manualCounter'>;
 export const emptyStackDraft: EditableStackDraft = {
   groups: [], unmatched: [], sourceGroups: null, completedSourceIds: new Set(), writeResults: {}, selectedIds: new Set(), addTargetStackId: null,
-  modified: false, manualCounter: 0, order: new Map(),
+  modified: false, manualCounter: 0, order: new Map(), undoSnapshot: null,
 };
 export type StackDraftAction =
   | { type: 'writeResults'; plan: StackWritePlan; results: StackWriteResult[] }
@@ -32,7 +34,10 @@ export type StackDraftAction =
   | { type: 'purgeMember'; groupId: string; assetId: string }
   | { type: 'cover'; groupId: string; assetId: string }
   | { type: 'dropUnmatched'; assetId: string; targetGroupId: string }
-  | { type: 'moveMember'; assetId: string; sourceGroupId: string; targetGroupId: string };
+  | { type: 'moveMember'; assetId: string; sourceGroupId: string; targetGroupId: string }
+  | { type: 'undo' }
+  | { type: 'clearUndo' };
+type StackDraftEditAction = Exclude<StackDraftAction, { type: 'undo' | 'clearUndo' }>;
 
 function normalize(state: EditableStackDraft): EditableStackDraft {
   const source = (state.sourceGroups ?? []).filter(group => !state.completedSourceIds.has(group.id));
@@ -43,7 +48,7 @@ function normalize(state: EditableStackDraft): EditableStackDraft {
     addTargetStackId: state.groups.some(group => group.id === state.addTargetStackId) ? state.addTargetStackId : null };
 }
 
-export function stackDraftReducer(state: EditableStackDraft, action: StackDraftAction): EditableStackDraft {
+function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditAction): EditableStackDraft {
   if (action.type === 'writeResults') {
     const completedSourceIds = new Set(state.completedSourceIds);
     const removed = new Set(action.plan.unchanged);
@@ -74,7 +79,7 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
       const { immichStackId: _stack, originalMemberIds: _members, originalPrimaryAssetId: _primary, ...local } = group;
       return { ...local, origin: 'manual' as const, modified: true };
     });
-    return normalize({ ...state, groups, completedSourceIds, writeResults, selectedIds: new Set(), addTargetStackId: null });
+    return normalize({ ...state, groups, completedSourceIds, writeResults, selectedIds: new Set(), addTargetStackId: null, undoSnapshot: null });
   }
   if (action.type === 'initialize') return {
     ...emptyStackDraft, manualCounter: state.manualCounter, sourceGroups: action.source.groups,
@@ -152,6 +157,23 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
   return normalize({ ...state, modified: true,
     groups: dissolved ? state.groups.filter(current => current !== group) : state.groups.map(current => current === group ? updated : current),
     unmatched: [...state.unmatched, ...(dissolved ? group.members : group.members.filter(member => member.id === action.assetId))] });
+}
+
+const UNDOABLE_ACTIONS = new Set<StackDraftAction['type']>([
+  'cover', 'add', 'create', 'purgeMember', 'purgeGroup', 'dropUnmatched', 'moveMember',
+]);
+
+export function stackDraftReducer(state: EditableStackDraft, action: StackDraftAction): EditableStackDraft {
+  if (action.type === 'clearUndo') return state.undoSnapshot ? { ...state, undoSnapshot: null } : state;
+  if (action.type === 'undo') {
+    if (!state.undoSnapshot) return state;
+    // Only local draft structure is historical; source and write outcomes must stay current.
+    return normalize({ ...state, ...state.undoSnapshot, undoSnapshot: null, selectedIds: new Set(), addTargetStackId: null });
+  }
+  const next = reduceStackDraft(state, action);
+  if (action.type === 'initialize' || action.type === 'reset' || action.type === 'writeResults') return next;
+  if (!UNDOABLE_ACTIONS.has(action.type) || next === state) return next;
+  return { ...next, undoSnapshot: { groups: state.groups, unmatched: state.unmatched, manualCounter: state.manualCounter } };
 }
 
 export function useEditableStackDraft(source: StackDetection, loading: boolean, assets: readonly RecentAsset[]) {

@@ -80,3 +80,72 @@ it('clears selection and target together and resets all edits on initialization'
   const reset=reduce(draft,{type:'initialize',source,assets}); expect(reset.modified).toBe(false);
   expect(reset.groups).toEqual(source.groups); expect(reset.selectedIds.size).toBe(0); expect(reset.addTargetStackId).toBeNull();
 });
+
+it('undoes every local Stack composition action as one step', () => {
+  const original = initial();
+  const cases: Array<[StackDraftAction[], (draft: ReturnType<typeof initial>) => void]> = [
+    [[{ type: 'cover', groupId: first, assetId: 'a' }], draft => expect(draft.groups[0].coverAssetId).toBe('b')],
+    [[{ type: 'select', assetId: 'x' }, { type: 'target', groupId: first }, { type: 'add' }], draft => {
+      expect(ids(draft.unmatched)).toContain('x'); expect(ids(draft.groups[0].members)).not.toContain('x');
+    }],
+    [[{ type: 'select', assetId: 'x' }, { type: 'select', assetId: 'y' }, { type: 'create' }], draft => {
+      expect(draft.groups.some(group => group.origin === 'manual')).toBe(false); expect(draft.manualCounter).toBe(0);
+    }],
+    [[{ type: 'purgeMember', groupId: first, assetId: 'a' }], draft => expect(ids(draft.groups[0].members)).toEqual(['a', 'b', 'c'])],
+    [[{ type: 'purgeGroup', groupId: first }], draft => expect(draft.groups[0].id).toBe(first)],
+    [[{ type: 'moveMember', assetId: 'a', sourceGroupId: first, targetGroupId: second }], draft => {
+      expect(ids(draft.groups.find(group => group.id === first)!.members)).toEqual(['a', 'b', 'c']);
+    }],
+    [[{ type: 'dropUnmatched', assetId: 'x', targetGroupId: first }], draft => expect(ids(draft.unmatched)).toContain('x')],
+    [[{ type: 'purgeMember', groupId: second, assetId: 'd' }], draft => expect(ids(draft.groups.find(group => group.id === second)!.members)).toEqual(['d', 'e'])],
+  ];
+  for (const [edits, verify] of cases) {
+    let edited = edits.reduce(reduce, original);
+    expect(edited.undoSnapshot).not.toBeNull();
+    edited = reduce(edited, { type: 'undo' });
+    expect(edited.groups).toEqual(original.groups); expect(edited.unmatched).toEqual(original.unmatched);
+    verify(edited); expect(edited.undoSnapshot).toBeNull(); expect(reduce(edited, { type: 'undo' })).toBe(edited);
+  }
+});
+
+it('keeps only the newest edit snapshot and leaves no-op edits from consuming it', () => {
+  let draft = reduce(initial(), { type: 'cover', groupId: first, assetId: 'a' });
+  const firstEditGroups = draft.groups;
+  draft = reduce(draft, { type: 'cover', groupId: first, assetId: 'a' });
+  expect(draft.groups).toBe(firstEditGroups);
+  const invalidAdd = reduce(draft, { type: 'add', targetGroupId: 'missing' });
+  expect(invalidAdd).toBe(draft);
+  draft = reduce(draft, { type: 'dropUnmatched', assetId: 'missing', targetGroupId: first });
+  expect(draft.undoSnapshot).not.toBeNull();
+  draft = reduce(draft, { type: 'cover', groupId: first, assetId: 'c' });
+  draft = reduce(draft, { type: 'undo' });
+  expect(draft.groups[0].coverAssetId).toBe('a');
+  expect(draft.modified).toBe(true);
+});
+
+it('clears Undo on source initialization, reset, and write result application', () => {
+  const edited = reduce(initial(), { type: 'cover', groupId: first, assetId: 'a' });
+  expect(reduce(edited, { type: 'initialize', source, assets }).undoSnapshot).toBeNull();
+  expect(reduce(edited, { type: 'reset' }).undoSnapshot).toBeNull();
+  expect(reduce(edited, { type: 'writeResults', plan: { operations: [], unchanged: [] }, results: [] }).undoSnapshot).toBeNull();
+});
+
+it('reconciles Immich lineage after Undo and does not collide manual IDs', () => {
+  const immichGroup = { ...source.groups[0], origin: 'immich' as const, immichStackId: 'stack-id',
+    originalMemberIds: source.groups[0].members.map(asset => asset.id), originalPrimaryAssetId: source.groups[0].coverAssetId };
+  const immichSource = { ...source, groups: [immichGroup] };
+  const immich = reduce(emptyStackDraft, { type: 'initialize', source: immichSource, assets });
+  const undone = reduce(reduce(immich, { type: 'cover', groupId: immichGroup.id, assetId: 'a' }), { type: 'undo' });
+  expect(undone.groups[0]).toMatchObject({ origin: 'immich', immichStackId: 'stack-id', modified: false });
+  expect(undone.groups[0].coverAssetId).toBe(immichGroup.coverAssetId);
+  let manual = reduce(undone, { type: 'select', assetId: 'x' });
+  manual = reduce(manual, { type: 'select', assetId: 'y' });
+  manual = reduce(manual, { type: 'create' });
+  const undoneManual = reduce(manual, { type: 'undo' });
+  expect(undoneManual.groups.map(group => group.id)).toEqual([immichGroup.id]);
+  let after = reduce(undone, { type: 'select', assetId: 'x' });
+  after = reduce(after, { type: 'select', assetId: 'y' });
+  after = reduce(after, { type: 'create' });
+  expect(after.groups.at(-1)?.id).toBe('draft:manual:1');
+  expect(new Set(after.groups.map(group => group.id)).size).toBe(after.groups.length);
+});
