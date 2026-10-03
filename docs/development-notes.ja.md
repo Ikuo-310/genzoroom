@@ -8,7 +8,13 @@ HomeのRecent／Album／CalendarではImmich Stackのfilterとcollapseを利用�
 
 STACK管理ページでは、選択assetからlocal draft Stackを生成し、既存Immich Stackもfull memberで取り込む。basename完全一致、Pixel RAW／Motion Photo命名normalizeで自動候補を作る。filenameが一致しない場合は、TIME／CAM／GPSが一致する一意な1 RAW + 1 Non-RAWだけをEXIF fallback候補にする。Coverを自動選択し、NAME／TIME／CAM／GPS evidence、既存StackのIMMICH、ローカル変更のMANUAL indicatorを表示する。
 
-draft編集はCover変更、unmatchedからのAdd、Purge、新規MANUAL Stack作成、desktop Drag & Drop（unmatched → Stack、Stack → Stack、Stack → unmatched）に対応する。元Immich Stackのmember集合とCoverへ戻すとlineageを復元する。送信は最終draft状態からunchanged／create／update／deleteを分類し、unchangedではAPI writeを行わない。Cover-only変更はprimary更新。Immich v3.2.4ではmembership更新を直接行わず、旧Stackをreleaseしてreplacementをcreateする。
+draft編集はCover変更、unmatchedからのAdd、Purge、新規MANUAL Stack作成、desktop Drag & Drop（unmatched → Stack、Stack → Stack、Stack → unmatched、unmatched photo → unmatched photo）に対応する。unmatched photo同士のdropは2枚からmanual Stackをatomicに作り、member orderはHome/orderに従い、Coverは既存`chooseStackCover()`規則を使う。Stack memberをunmatched photoへ落とした場合は新規作成に解釈せず、既存Purgeを維持する。dropで作ったStackもPrimary+Zの1-step Undoで2枚を元位置へ戻せる。元Immich Stackのmember集合とCoverへ戻すとlineageを復元する。送信は最終draft状態からunchanged／create／update／deleteを分類し、unchangedではAPI writeを行わない。Cover-only変更はprimary更新。Immich v3.2.4ではmembership更新を直接行わず、旧Stackをreleaseしてreplacementをcreateする。
+
+STACK管理のUndoは直前のlocal draft構成変更を一度だけ戻す。Primary+Zのみで、RedoとUndoボタンは提供しない。snapshotはgroups／unmatched／manualCounter相当のdraft構造に限り、sourceやImmich送信結果は戻さない。source initialize／navigation generation／send開始／write result／resetで破棄し、Undo後は現sourceに対してmodifiedとImmich lineageを再計算する。no-op操作は有効なsnapshotを保持する。draft永続化は未実装。
+
+unmatchedが0件のときのSTACK候補外sectionは`min-height: 200px`とし、Stack memberのPurge用drop面積を広げた。候補外assetがある場合は既存gridの自然な高さを使い、drop highlightはsection全体に表示する。
+
+利用者の実機確認報告では、1-step Undo、unmatched同士のdropによるMANUAL Stack作成、Stack memberからunmatchedへのPurgeを含むD&D全体の挙動が想定どおり動作した。ブラウザー名や環境など、この報告に含まれない条件は確認済みとして記載しない。
 
 送信結果はpartial success、failed、blocked、unknownを区別する。結果不明時はblind retryを許可せず、再検出を要求する。release後のreplacement失敗は旧Stack IDを保持し、dependency failureはblockedとして扱う。送信中に別selectionへ移動した場合、旧requestをabortし、旧responseやunchanged local completionが新しいdraftへ混入しない。再検出は1,000件単位でrefreshし、chunkをまたいで返る同一full Stackを重複排除する。long filename由来のUI group IDは変えず、Backend送信時だけ200文字以内のoperation IDへ対応付ける。
 

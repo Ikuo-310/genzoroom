@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Confirmed drafts can be written back to Immich.
+- Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit, and the empty unmatched drop target is larger for easier Purge. Confirmed drafts can be written back to Immich.
 
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
