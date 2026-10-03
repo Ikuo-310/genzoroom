@@ -41,3 +41,13 @@ export function canDropStackPayload(payload: StackDragPayload, targetGroupId: st
     && !groups.some(group => group.id !== payload.sourceGroupId && group.members.some(member => member.id === payload.assetId))
     && !unmatched.some(asset => asset.id === payload.assetId);
 }
+
+export function canCreateStackFromUnmatchedDrop(payload: StackDragPayload, targetAssetId: string,
+  groups: readonly { members: readonly { id: string }[] }[], unmatched: readonly { id: string }[]) {
+  const { assetId, sourceGroupId } = payload;
+  if (sourceGroupId !== null || !assetId || assetId.length > 500 || !targetAssetId || targetAssetId.length > 500 || assetId === targetAssetId) return false;
+  const occursOnceUnmatched = (id: string) => unmatched.filter(asset => asset.id === id).length === 1;
+  const belongsToGroup = (id: string) => groups.some(group => group.members.some(member => member.id === id));
+  return occursOnceUnmatched(assetId) && occursOnceUnmatched(targetAssetId)
+    && !belongsToGroup(assetId) && !belongsToGroup(targetAssetId);
+}

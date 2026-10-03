@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE } from './stackDragDrop';
+import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE } from './stackDragDrop';
 const members=[{id:'a'},{id:'b'}], other=[{id:'c'},{id:'d'}], outside=[{id:'e'}];
 const groups=[{id:'one',members},{id:'two',members:other}], unmatched=outside;
 const transfer=(types:string[],data:string,files:File[]=[])=>(
@@ -22,4 +22,14 @@ it('allows only live assets moved between eligible distinct targets',()=>{
  expect(canDropStackPayload({assetId:'e',sourceGroupId:null},null,groups,unmatched)).toBe(false);
  expect(canDropStackPayload({assetId:'e',sourceGroupId:null},'missing',groups,unmatched)).toBe(false);
  expect(canDropStackPayload({assetId:'a',sourceGroupId:'one'},'two',groups,[...unmatched,{id:'a'}])).toBe(false);
+});
+it('accepts only distinct, uniquely unmatched photo targets for unmatched-to-unmatched creation',()=>{
+ const payload={assetId:'e',sourceGroupId:null};
+ expect(canCreateStackFromUnmatchedDrop(payload,'f',groups,[...unmatched,{id:'f'}])).toBe(true);
+ expect(canCreateStackFromUnmatchedDrop(payload,'e',groups,unmatched)).toBe(false);
+ expect(canCreateStackFromUnmatchedDrop({assetId:'a',sourceGroupId:'one'},'e',groups,unmatched)).toBe(false);
+ expect(canCreateStackFromUnmatchedDrop(payload,'missing',groups,unmatched)).toBe(false);
+ expect(canCreateStackFromUnmatchedDrop(payload,'f',groups,[...unmatched,{id:'e'},{id:'f'}])).toBe(false);
+ expect(canCreateStackFromUnmatchedDrop(payload,'a',groups,[...unmatched,{id:'a'}])).toBe(false);
+ expect(canCreateStackFromUnmatchedDrop(payload,'f',[...groups,{id:'three',members:[{id:'f'}]}],[...unmatched,{id:'f'}])).toBe(false);
 });

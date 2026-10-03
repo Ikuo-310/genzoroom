@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
-import { detectStackCandidates } from './stackCandidateDetection';
+import { chooseStackCover, detectStackCandidates } from './stackCandidateDetection';
+import { buildStackWritePlan } from './stackWrite';
 import { emptyStackDraft, stackDraftReducer as reduce, type StackDraftAction } from './useEditableStackDraft';
 
 const assets: RecentAsset[] = [
@@ -148,4 +149,44 @@ it('reconciles Immich lineage after Undo and does not collide manual IDs', () =>
   after = reduce(after, { type: 'create' });
   expect(after.groups.at(-1)?.id).toBe('draft:manual:1');
   expect(new Set(after.groups.map(group => group.id)).size).toBe(after.groups.length);
+});
+
+it('creates a manual Stack atomically from two unmatched photos, preserves order, Cover rules and create classification', () => {
+  const original = initial();
+  const extra = { ...assets[0], id: 'z', filename: 'last.jpg' };
+  const before = { ...original, unmatched: original.unmatched.map(asset => asset.id === 'x' ? { ...asset, date: '2026-10-02' }
+    : asset.id === 'y' ? { ...asset, date: '2026-10-03' } : asset).concat(extra),
+    order: new Map([...original.order, [extra.id, assets.length]]) };
+  const created = reduce(before, { type: 'createFromUnmatchedDrop', draggedAssetId: 'x', targetAssetId: 'y' });
+  const group = created.groups.at(-1)!;
+  expect(group).toMatchObject({ id: 'draft:manual:1', origin: 'manual', coverAssetId: 'y' });
+  expect(group.coverAssetId).toBe(chooseStackCover(group.members));
+  expect(ids(group.members)).toEqual(['x', 'y']); expect(ids(created.unmatched)).toEqual(['z']);
+  expect(created.manualCounter).toBe(1);
+  expect(buildStackWritePlan(created.groups, created.sourceGroups ?? []).operations.find(op => op.operationId === group.id)?.type).toBe('create');
+  const undone = reduce(created, { type: 'undo' });
+  expect(undone.groups).toEqual(before.groups); expect(ids(undone.unmatched)).toEqual(['x', 'y', 'z']);
+  expect(undone.manualCounter).toBe(0);
+  const recreated = reduce(undone, { type: 'createFromUnmatchedDrop', draggedAssetId: 'y', targetAssetId: 'x' });
+  expect(recreated.groups.at(-1)?.id).toBe(group.id);
+  expect(new Set(recreated.groups.map(item => item.id)).size).toBe(recreated.groups.length);
+});
+
+it('ignores invalid unmatched photo drops without replacing the current Undo snapshot', () => {
+  const base = initial();
+  const edited = reduce(base, { type: 'cover', groupId: first, assetId: 'a' });
+  const invalid = [
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: 'x', targetAssetId: 'x' },
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: 'absent', targetAssetId: 'x' },
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: 'x', targetAssetId: 'absent' },
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: 'a', targetAssetId: 'x' },
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: 'x', targetAssetId: 'b' },
+    { ...edited, type: 'createFromUnmatchedDrop' as const, draggedAssetId: '', targetAssetId: 'x' },
+  ];
+  for (const action of invalid) {
+    const { type: _type, draggedAssetId, targetAssetId } = action;
+    expect(reduce(edited, { type: 'createFromUnmatchedDrop', draggedAssetId, targetAssetId })).toBe(edited);
+  }
+  const duplicate = { ...edited, unmatched: [...edited.unmatched, edited.unmatched[0]] };
+  expect(reduce(duplicate, { type: 'createFromUnmatchedDrop', draggedAssetId: 'x', targetAssetId: 'y' })).toBe(duplicate);
 });

@@ -34,6 +34,7 @@ export type StackDraftAction =
   | { type: 'purgeMember'; groupId: string; assetId: string }
   | { type: 'cover'; groupId: string; assetId: string }
   | { type: 'dropUnmatched'; assetId: string; targetGroupId: string }
+  | { type: 'createFromUnmatchedDrop'; draggedAssetId: string; targetAssetId: string }
   | { type: 'moveMember'; assetId: string; sourceGroupId: string; targetGroupId: string }
   | { type: 'undo' }
   | { type: 'clearUndo' };
@@ -110,6 +111,20 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
       selectedIds: new Set([...state.selectedIds].filter(id => id !== asset.id)), addTargetStackId: null,
       groups: state.groups.map(group => group === target ? { ...group, modified: true, members: [...group.members, asset] } : group) });
   }
+  if (action.type === 'createFromUnmatchedDrop') {
+    const { draggedAssetId, targetAssetId } = action;
+    if (!draggedAssetId || draggedAssetId.length > 500 || !targetAssetId || targetAssetId.length > 500 || draggedAssetId === targetAssetId) return state;
+    const ids = new Set([draggedAssetId, targetAssetId]);
+    if (ids.size !== 2 || state.unmatched.filter(asset => asset.id === draggedAssetId).length !== 1
+      || state.unmatched.filter(asset => asset.id === targetAssetId).length !== 1
+      || state.unmatched.some(asset => ids.has(asset.id) && (!asset.id || asset.id.length > 500))
+      || state.groups.some(group => group.members.some(member => ids.has(member.id)))) return state;
+    const members = state.unmatched.filter(asset => ids.has(asset.id));
+    const group: DraftStack = { id: `draft:manual:${state.manualCounter + 1}`, origin: 'manual', members,
+      coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
+    return normalize({ ...state, modified: true, groups: [...state.groups, group], unmatched: state.unmatched.filter(asset => !ids.has(asset.id)),
+      selectedIds: new Set([...state.selectedIds].filter(id => !ids.has(id))), addTargetStackId: null, manualCounter: state.manualCounter + 1 });
+  }
   if (action.type === 'moveMember') {
     if (action.sourceGroupId === action.targetGroupId) return state;
     const source = state.groups.find(group => group.id === action.sourceGroupId);
@@ -160,7 +175,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
 }
 
 const UNDOABLE_ACTIONS = new Set<StackDraftAction['type']>([
-  'cover', 'add', 'create', 'purgeMember', 'purgeGroup', 'dropUnmatched', 'moveMember',
+  'cover', 'add', 'create', 'createFromUnmatchedDrop', 'purgeMember', 'purgeGroup', 'dropUnmatched', 'moveMember',
 ]);
 
 export function stackDraftReducer(state: EditableStackDraft, action: StackDraftAction): EditableStackDraft {

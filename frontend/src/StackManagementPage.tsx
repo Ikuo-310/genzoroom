@@ -19,7 +19,7 @@ import { mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
-import { canDropStackPayload, isStackDrag, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
+import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 
@@ -97,8 +97,13 @@ export function StackManagementPage() {
   const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
   const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
-  const payloadFrom = (transfer: DataTransfer) => readStackDragPayload(transfer)
-    ?? (isStackDrag(transfer) ? dragging : null);
+  const payloadFrom = (transfer: DataTransfer) => {
+    const payload = readStackDragPayload(transfer);
+    if (payload) return payload;
+    // Some browsers hide drag data before drop; only an empty transfer may use the active in-page drag fallback.
+    try { return isStackDrag(transfer) && transfer.getData(STACK_DRAG_TYPE) === '' ? dragging : null; }
+    catch { return null; }
+  };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
     if (!canEdit || event.dataTransfer.files.length) { event.preventDefault(); return false; }
     try {
@@ -113,6 +118,11 @@ export function StackManagementPage() {
     if (!canEdit || !isStackDrag(event.dataTransfer)) return false;
     const payload = payloadFrom(event.dataTransfer);
     return payload !== null && canDropStackPayload(payload, targetId, draft.groups, draft.unmatched);
+  };
+  const canAcceptUnmatchedPhotoDrop = (event: React.DragEvent, targetAssetId: string) => {
+    if (!canEdit || !isStackDrag(event.dataTransfer)) return false;
+    const payload = payloadFrom(event.dataTransfer);
+    return payload !== null && canCreateStackFromUnmatchedDrop(payload, targetAssetId, draft.groups, draft.unmatched);
   };
   const acceptDrop = (event: React.DragEvent, targetId: string | null) => {
     if (!canAcceptDrop(event, targetId)) return;
@@ -248,6 +258,21 @@ export function StackManagementPage() {
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
         {displayed.unmatched.length ? <div className="stack-unmatched-grid">{displayed.unmatched.map(asset => <StackPhoto
           key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
+          dropTarget={dropTarget === `unmatched:${asset.id}`}
+          onDropTargetDragOver={event => {
+            if (!canAcceptUnmatchedPhotoDrop(event, asset.id)) return;
+            event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDropTarget(`unmatched:${asset.id}`);
+          }}
+          onDropTargetDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === `unmatched:${asset.id}`) setDropTarget(null);
+          }}
+          onDropTargetDrop={event => {
+            if (!canAcceptUnmatchedPhotoDrop(event, asset.id)) return;
+            const payload = payloadFrom(event.dataTransfer)!;
+            event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move';
+            dispatch({ type: 'createFromUnmatchedDrop', draggedAssetId: payload.assetId, targetAssetId: asset.id });
+            setDragging(null); setDropTarget(null);
+          }}
           dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === null}
           onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: null })} onDragEnd={handleDragEnd}
           onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
@@ -282,14 +307,18 @@ function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: St
   })}</div>;
 }
 
-function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, dragging = false, onDragStart, onDragEnd, onToggle, onPurge }: {
+function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, dragging = false, dropTarget = false,
+  onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
   asset: RecentAsset; selected: boolean; cover?: boolean; member?: boolean; disabled?: boolean;
-  dragging?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean; onDragEnd: () => void;
+  dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean; onDragEnd: () => void;
   onToggle: () => void; onPurge?: () => void;
+  onDropTargetDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDropTargetDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDropTargetDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation();
   const suppressClick = useRef(false);
-  return <div className="stack-photo-wrapper"><button disabled={disabled} draggable={!disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${dragging ? ' stack-photo-dragging' : ''}`} type="button" aria-pressed={member ? cover : selected}
+  return <div className="stack-photo-wrapper" onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled} draggable={!disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
     aria-description={cover ? t('stackManagement.cover') : undefined}
     onDragStart={event => { suppressClick.current = onDragStart(event); }}
