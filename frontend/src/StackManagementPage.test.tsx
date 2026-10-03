@@ -191,6 +191,8 @@ it('keeps EXIF fallback groups editable, addable, purgeable and redetectable', a
  expect(Array.from(group.querySelectorAll('.stack-filename')).map(node => node.textContent)).toEqual(['capture.dng','exported.jpg','x.jpg','y.jpg']);
  expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('capture.dng');
  expect(group.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
+ expect(group.querySelector('.stack-evidence.mismatch')?.getAttribute('title')).toBe('Manually assembled Stack');
+ expect(group.querySelector('.stack-evidence.unavailable')).toBeNull();
  expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
  expect(unmatched()).toEqual([]);
  await act(async()=>button('Detect again').click());

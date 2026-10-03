@@ -170,7 +170,7 @@ function StackEvidenceHeader({ group }: { group: DraftStack }) {
     const description = t(group.modified ? 'stackManagement.immichModified' : 'stackManagement.immichUnchanged');
     return <div className="stack-group-indicators"><span className={`stack-evidence ${group.modified ? 'mismatch' : 'matched'}`} title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;
   }
-  if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence unavailable" title={t('stackManagement.manual')}>MANUAL</span></div>;
+  if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence mismatch" title={t('stackManagement.manual')}>MANUAL</span></div>;
   return <div className="stack-group-indicators">{labels.map(([key, label]) => {
     const state = group.evidence[key];
     const nameReasonKey = group.evidence.nameReason === 'exact' ? 'nameExact'
