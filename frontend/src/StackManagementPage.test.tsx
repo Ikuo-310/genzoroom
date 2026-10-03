@@ -100,7 +100,11 @@ it('shows NAME/TIME/CAM/GPS and COVER, partitions candidates and existing Stacks
   expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
   expect(host.querySelector('.stack-cover-badge')?.textContent).toBe('COVER');
   expect(host.querySelector('.stack-cover')?.getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelector('.stack-cover')?.classList.contains('stack-selection-active')).toBe(false);
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(0);
   await click('.stack-cover'); expect(host.querySelector('.stack-cover')?.getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelector('.stack-cover-badge')?.textContent).toBe('COVER');
+  expect(host.querySelector('.stack-cover')?.classList.contains('stack-selection-active')).toBe(false);
   expect(host.querySelector<HTMLButtonElement>('button:last-child[disabled]')).not.toBeNull();
 });
 it('preserves NAME drafts and offers retry after partial or total detail failure', async () => {
@@ -194,27 +198,57 @@ it('changes Cover only on member click and keeps evidence; member Purge does not
  expect(unmatched()).toEqual(['selected.dng','selected.jpg','x.jpg','y.jpg']);
  expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
 });
-it('sets one Add target without immediately adding, then adds in unmatched order using A', async () => {
+it('uses plus to toggle or switch Add target when no unmatched photos are selected', async () => {
+ const other = photos.map(a=>({...a,id:'other-'+a.id,filename:'other.'+(a.is_raw?'dng':'jpg')}));
+ api.detail.mockImplementation(async (id:string)=>({id,exif:{}}));
+ await mount('/stack',{selectedAssets:[...photos,...other]});
+ const targets=host.querySelectorAll<HTMLButtonElement>('.stack-set-target');
+ await act(async()=>targets[0].click()); expect(targets[0].getAttribute('aria-pressed')).toBe('true');
+ await act(async()=>targets[1].click()); expect(targets[0].getAttribute('aria-pressed')).toBe('false'); expect(targets[1].getAttribute('aria-pressed')).toBe('true');
+ await act(async()=>targets[1].click()); expect(host.querySelector('.stack-add-target')).toBeNull();
+ expect(host.querySelectorAll('.stack-unmatched-grid .stack-photo')).toHaveLength(0);
+});
+it('keeps the existing A and control-bar Add action paths', async () => {
+ const more = [{ ...photos[1], id:'z', filename:'z.jpg' }, { ...photos[1], id:'w', filename:'w.jpg' }];
+ const other = photos.map(a=>({...a,id:'other-'+a.id,filename:'other.'+(a.is_raw?'dng':'jpg')}));
+ api.detail.mockImplementation(async (id:string)=>({id,exif:{}}));
+ await mount('/stack',{selectedAssets:[...photos,...singles,...more,...other]});
+ const targets=host.querySelectorAll<HTMLButtonElement>('.stack-set-target');
+ await act(async()=>targets[0].click());
+ await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
+ await click('.stack-unmatched-grid .stack-photo');
+ expect(button('Add to selected stack').title).toContain('(A)');
+ await press('A');
+ expect(unmatched()).toEqual(['y.jpg','z.jpg']); expect(host.querySelector('.stack-add-target')).toBeNull();
+ expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
+ expect(host.querySelector('.stack-candidate-group .stack-group-indicators')?.textContent).toBe('MANUAL');
+
+ await act(async()=>targets[1].click());
+ await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
+ await click('.stack-unmatched-grid .stack-photo');
+ await act(async()=>button('Add to selected stack').click());
+ expect(unmatched()).toEqual([]); expect(host.querySelector('.stack-add-target')).toBeNull();
+ expect(host.querySelectorAll('.stack-candidate-group')[1].querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
+});
+it('lets selected unmatched photos be added directly with plus without using the bar or A', async () => {
  const other = photos.map(a=>({...a,id:'other-'+a.id,filename:'other.'+(a.is_raw?'dng':'jpg')}));
  api.detail.mockImplementation(async (id:string)=>({id,exif:{}}));
  await mount('/stack',{selectedAssets:[...photos,...singles,...other]});
  await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
  await click('.stack-unmatched-grid .stack-photo');
- const targets=host.querySelectorAll<HTMLButtonElement>('.stack-set-target');
- await act(async()=>targets[0].click());
- expect(unmatched()).toEqual(['x.jpg','y.jpg']); expect(host.querySelectorAll('.stack-add-target')).toHaveLength(1);
- await act(async()=>targets[1].click()); expect(targets[0].getAttribute('aria-pressed')).toBe('false');
- await act(async()=>targets[1].click()); expect(host.querySelector('.stack-add-target')).toBeNull();
- await act(async()=>targets[0].click());
- expect(button('Add to selected stack').title).toContain('(A)');
- await press('A');
- expect(unmatched()).toEqual([]); expect(host.querySelector('.stack-add-target')).toBeNull();
- expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
- const first=host.querySelector('.stack-candidate-group')!;
- expect(Array.from(first.querySelectorAll('.stack-filename')).map(e=>e.textContent)).toEqual(['selected.dng','selected.jpg','x.jpg','y.jpg']);
- expect(first.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
- expect(first.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
- expect(button('Send to Immich').disabled).toBe(true);
+ expect(host.querySelectorAll('.stack-unmatched-grid .stack-photo.stack-selection-active')).toHaveLength(2);
+ const beforeCount=host.querySelectorAll('.stack-candidate-group')[1].querySelectorAll('.stack-filename').length;
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>('.stack-set-target')[1].click());
+ expect(unmatched()).toEqual([]); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
+ expect(host.querySelector('.stack-add-target')).toBeNull();
+ const after=host.querySelectorAll('.stack-candidate-group')[1];
+ expect(Array.from(after.querySelectorAll('.stack-filename')).map(e=>e.textContent)).toEqual(['other.dng','other.jpg','x.jpg','y.jpg']);
+ expect(after.querySelector('.stack-cover .stack-filename')?.textContent).toBe('other.jpg');
+ expect(after.querySelectorAll('.stack-cover-badge')).toHaveLength(1);
+ expect(after.querySelector('.stack-cover')?.classList.contains('stack-selection-active')).toBe(false);
+ expect(after.querySelector('.stack-cover')?.getAttribute('aria-label')).toBe('Current COVER: other.jpg');
+ expect(after.querySelector('.stack-group-indicators')?.textContent).toBe('MANUAL');
+ expect(after.querySelectorAll('.stack-filename')).toHaveLength(beforeCount+2);
 });
 it('creates a manual Stack from two selected unmatched photos and dissolves it in original order', async () => {
  await mount('/stack',{selectedAssets:singles});
@@ -241,7 +275,7 @@ it('blocks all manual editing until detail completion and cannot roll back subse
 it('asks before discarding edits, focuses Cancel, retains state on Cancel and resets on Continue', async () => {
  await mount('/stack',{selectedAssets:[...photos,...singles]});
  await click('[aria-label="Set selected.dng as COVER"]');
- await click('.stack-unmatched-grid .stack-photo'); await click('.stack-set-target');
+ await click('.stack-set-target'); await click('.stack-unmatched-grid .stack-photo');
  const requests=api.detail.mock.calls.length;
  await act(async()=>button('Detect again').click());
  expect(document.activeElement?.textContent).toBe('Cancel'); expect(api.detail).toHaveBeenCalledTimes(requests);

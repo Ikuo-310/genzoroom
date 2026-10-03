@@ -43,7 +43,9 @@ export function StackManagementPage() {
   const canEdit = ready && !confirmRedetect;
   const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
   const displayed = ready ? draft : detection;
-  const addSelected = useCallback(() => { if (canAdd) dispatch({ type: 'add' }); }, [canAdd]);
+  const addSelected = useCallback((targetGroupId?: string) => {
+    if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
+  }, [canEdit, canAdd, selectedUnmatched.length]);
   const redetect = () => {
     if (!ready) return;
     if (draft.modified) setConfirmRedetect(true);
@@ -98,7 +100,7 @@ export function StackManagementPage() {
       <div className="stack-control-actions">
         <strong aria-live="polite">{t('stackManagement.selectionCount', { count: selectedIds.size })}</strong>
         <button type="button" disabled={!selectedIds.size} onClick={() => dispatch({ type: 'clearSelection' })}>{t('photos.clearSelection')}</button>
-        <button type="button" disabled={!canAdd} onClick={addSelected} title={shortcut.title(t('stackManagement.add'), 'stackAddSelected')}>{t('stackManagement.add')}</button>
+        <button type="button" disabled={!canAdd} onClick={() => addSelected()} title={shortcut.title(t('stackManagement.add'), 'stackAddSelected')}>{t('stackManagement.add')}</button>
         <button type="button" disabled={!canEdit || selectedUnmatched.length < 2} onClick={() => dispatch({ type: 'create' })}>{t('stackManagement.newStack')}</button>
       </div>
       <div className="stack-control-actions">
@@ -122,7 +124,9 @@ export function StackManagementPage() {
             <StackEvidenceHeader group={group} />
             <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
-              onClick={() => dispatch({ type: 'target', groupId: group.id })}>+</button>
+              onClick={() => selectedUnmatched.length
+                ? addSelected(group.id)
+                : dispatch({ type: 'target', groupId: group.id })}>+</button>
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
@@ -158,7 +162,7 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
   onToggle: () => void; onPurge?: () => void;
 }) {
   const { t } = useTranslation();
-  return <div className="stack-photo-wrapper"><button disabled={disabled} className={`stack-photo${cover ? ' stack-cover' : ''}`} type="button" aria-pressed={member ? cover : selected}
+  return <div className="stack-photo-wrapper"><button disabled={disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}`} type="button" aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
     aria-description={cover ? t('stackManagement.cover') : undefined} onClick={onToggle}>
     <div className="stack-thumbnail"><img src={asset.thumbnail_url} alt="" loading="lazy" /><FormatBadge format={asset.format} isRaw={asset.is_raw} />

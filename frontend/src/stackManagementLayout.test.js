@@ -13,3 +13,11 @@ it('uses distinct semantic status colors', () => {
  const css = readFileSync('src/style.css', 'utf8');
  for (const [state, token] of [['matched','match'],['mismatch','mismatch'],['unavailable','unavailable'],['error','error']]) expect(css).toContain('.stack-evidence.' + state + ' { background: var(--status-' + token + ')');
 });
+
+it('styles unmatched selection independently from the Cover badge', () => {
+  const css = readFileSync('src/style.css', 'utf8');
+  expect(css).toContain('.stack-management-page .stack-photo.stack-selection-active { background: var(--selection); border-color: var(--accent); }');
+  expect(css).not.toContain('.stack-management-page .stack-photo[aria-pressed="true"]');
+  expect(css).not.toMatch(/\.stack-management-page \.stack-cover\s*\{/);
+  expect(css).toContain('.stack-cover-badge {');
+});

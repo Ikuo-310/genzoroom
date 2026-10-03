@@ -19,7 +19,7 @@ export type StackDraftAction =
   | { type: 'reset' }
   | { type: 'clear' }
   | { type: 'clearSelection' }
-  | { type: 'add' }
+  | { type: 'add'; targetGroupId?: string }
   | { type: 'create' }
   | { type: 'select'; assetId: string }
   | { type: 'target'; groupId: string }
@@ -57,13 +57,14 @@ export function stackDraftReducer(state: EditableStackDraft, action: StackDraftA
   }
   if (action.type === 'add' || action.type === 'create') {
     const members = state.unmatched.filter(asset => state.selectedIds.has(asset.id));
-    if (action.type === 'create' ? members.length < 2 : !members.length || !state.groups.some(group => group.id === state.addTargetStackId)) return state;
+    const targetGroupId = action.type === 'add' ? action.targetGroupId ?? state.addTargetStackId : null;
+    if (action.type === 'create' ? members.length < 2 : !members.length || !state.groups.some(group => group.id === targetGroupId)) return state;
     const ids = new Set(members.map(asset => asset.id));
     const group: DraftStack = { id: `draft:manual:${state.manualCounter + 1}`, origin: 'manual', members,
       coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
     return normalize({ ...state, modified: true, unmatched: state.unmatched.filter(asset => !ids.has(asset.id)), addTargetStackId: null,
       manualCounter: state.manualCounter + (action.type === 'create' ? 1 : 0),
-      groups: action.type === 'create' ? [...state.groups, group] : state.groups.map(current => current.id === state.addTargetStackId
+      groups: action.type === 'create' ? [...state.groups, group] : state.groups.map(current => current.id === targetGroupId
         ? { ...current, modified: true, members: [...current.members, ...members.filter(asset => !current.members.some(member => member.id === asset.id))] } : current) });
   }
   const group = state.groups.find(current => current.id === action.groupId);
