@@ -1,3 +1,4 @@
+import { downloadJsonReport } from './jsonReportDownload';
 import type { AdapterInfo, DiagnosticValue, SmokeCode, SmokeState } from './webgpuSmoke';
 import { createJpegReport, emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 
@@ -181,20 +182,6 @@ export function createWebGpuDiagnosticsReport(environment: DiagnosticsEnvironmen
   return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu })) as WebGpuDiagnosticsReport;
 }
 
-function exportReport(report: { generatedAt: string }, prefix: string): void {
-  const blob = new Blob([JSON.stringify(report, null, 2) + '\n'], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${prefix}-${report.generatedAt.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}.json`;
-  document.body.append(link);
-  try { link.click(); } finally {
-    link.remove();
-    // Defer revocation until the browser has consumed the download gesture.
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-}
-
-export function exportDiagnosticsReport(report: DiagnosticsReport): void { exportReport(report, 'genzoroom-diagnostics'); }
-export function exportJpegDiagnosticsReport(report: JpegDiagnosticsReport): void { exportReport(report, 'genzoroom-jpeg-diagnostics'); }
-export function exportWebGpuDiagnosticsReport(report: WebGpuDiagnosticsReport): void { exportReport(report, 'genzoroom-webgpu-diagnostics'); }
+export function exportDiagnosticsReport(report: DiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-diagnostics'); }
+export function exportJpegDiagnosticsReport(report: JpegDiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-jpeg-diagnostics'); }
+export function exportWebGpuDiagnosticsReport(report: WebGpuDiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-webgpu-diagnostics'); }
