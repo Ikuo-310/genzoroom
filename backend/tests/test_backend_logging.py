@@ -86,12 +86,14 @@ def test_message_limit_and_ring_clear():
     assert len(entries) == 1000
     assert [entry["context"]["index"] for entry in entries] == list(range(1, 1001))
     assert entries[-1]["message"] == "x" * 512
+    assert logger.create_report()["buffer"] == {"capacity": 1000, "droppedEntryCount": 1}
     add(logger, message="x" * 513)
     assert "message" not in logger.get_entries()[-1]
     logger.set_level("off")
     assert len(logger.get_entries()) == 1000
     logger.clear()
     assert logger.get_entries() == [] and logger.get_level() == "off"
+    assert logger.create_report()["buffer"]["droppedEntryCount"] == 0
     logger.set_level("debug")
     add(logger)
     assert len(logger.get_entries()) == 1

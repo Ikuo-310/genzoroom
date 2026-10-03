@@ -12,8 +12,11 @@ vi.mock('./GalleryPage', () => ({ GalleryPage: () => <p>Gallery route</p> }));
 vi.mock('./AnshitsuPage', () => ({ AnshitsuPage: () => <p>Anshitsu route</p> }));
 let host: HTMLDivElement, root: Root;
 let originalLanguage: string, originalTitle: string;
+const logsResponse = (url: string) => ({ ok: true, json: async () => url.endsWith('/level') ? { level: 'off' }
+  : { schemaVersion: 1, generatedAt: '2026-10-03T16:00:00.000Z', source: 'backend', entries: [] } });
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => logsResponse(url)));
   originalLanguage = i18n.language; originalTitle = document.title;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -109,12 +112,12 @@ it.each(['unmount', 'pagehide'])('releases a pending diagnostic on %s and ignore
   }
 });
 
-it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data through the page in %s without requests', async language => {
+it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data through the page in %s without photo or GPU requests', async language => {
   await i18n.changeLanguage(language);
   vi.stubGlobal('isSecureContext', false);
   const gpu = { requestAdapter: vi.fn() };
   vi.stubGlobal('navigator', { gpu, hardwareConcurrency: 8, userAgent: 'Test browser', platform: 'Test platform' });
-  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  const fetch = vi.fn(async (url: string) => logsResponse(url)); vi.stubGlobal('fetch', fetch);
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const blobs: Blob[] = [];
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: (blob: Blob) => { blobs.push(blob); return 'blob:page'; } });
@@ -136,16 +139,16 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(host.querySelector('#diagnostic-export-title')).toBeNull();
     const jpegPanel = host.querySelector<HTMLElement>('#jpeg-panel')!;
     const webgpuPanel = host.querySelector<HTMLElement>('#webgpu-panel')!;
-    expect(jpegPanel.hidden).toBe(false); expect(webgpuPanel.hidden).toBe(true);
+    expect(jpegPanel.hidden).toBe(true); expect(webgpuPanel.hidden).toBe(true);
     expect(host.querySelector('[role="tablist"]')).not.toBeNull();
-    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('jpeg-tab');
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('logs-tab');
     expect(jpegPanel.getAttribute('aria-labelledby')).toBe('jpeg-tab');
     expect(host.querySelector('#environment-title')).not.toBeNull();
     const jpegSection = jpegPanel.querySelector('section'); const webgpuSection = webgpuPanel.querySelector('section');
     const webgpuTab = host.querySelector<HTMLButtonElement>('#webgpu-tab')!;
     await act(async () => webgpuTab.focus());
     await act(async () => webgpuTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
-    expect(document.activeElement).toBe(webgpuTab);
+    expect(document.activeElement).toBe(host.querySelector('#logs-tab'));
     await act(async () => webgpuTab.click());
     expect(jpegPanel.hidden).toBe(true); expect(webgpuPanel.hidden).toBe(false);
     expect(webgpuTab.getAttribute('aria-selected')).toBe('true');
@@ -173,7 +176,8 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(host.querySelector<HTMLElement>('#webgpu-panel')!.hidden).toBe(true);
     await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
     expect(host.querySelector('#webgpu-panel')!.textContent).toContain(i18n.t('webgpuSmoke.codes.insecure'));
-    expect(fetch).not.toHaveBeenCalled(); expect(gpu.requestAdapter).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.every(([url]) => url.startsWith('/api/developer/logs/'))).toBe(true);
+    expect(gpu.requestAdapter).not.toHaveBeenCalled();
   } finally { vi.runAllTimers(); vi.useRealTimers(); Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
 });
 
@@ -203,7 +207,7 @@ it.each(['en', 'ja'])('shows export failures beside the matching full, JPEG and 
 
 it('keeps the manually selected JPEG, filename and candidate list while switching tabs', async () => {
   const asset = { id: 'selected-id', filename: 'PRIVATE_selected.JPG', date: '2026-01-01T00:00:00Z', thumbnail_url: '/private-thumb', format: 'JPEG', is_raw: false };
-  const fetch = vi.fn(async () => ({ ok: true, json: async () => [asset] })); vi.stubGlobal('fetch', fetch);
+  const fetch = vi.fn(async (url: string) => url.startsWith('/api/developer/logs/') ? logsResponse(url) : { ok: true, json: async () => [asset] }); vi.stubGlobal('fetch', fetch);
   const { DeveloperPage } = await import('./DeveloperPage');
   await act(async () => root.render(<DeveloperPage />));
   const jpegPanel = host.querySelector('#jpeg-panel')!;
@@ -217,5 +221,26 @@ it('keeps the manually selected JPEG, filename and candidate list while switchin
   await act(async () => host.querySelector<HTMLButtonElement>('#jpeg-tab')!.click());
   expect(jpegPanel.querySelector('.developer-jpeg-candidates')).toBe(candidate);
   expect(jpegPanel.textContent).toContain('PRIVATE_selected.JPG');
-  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls.filter(([url]) => !url.startsWith('/api/developer/logs/'))).toHaveLength(1);
+});
+
+it('selects Logs initially and follows three-tab keyboard order while retaining every panel', async () => {
+  const { DeveloperPage } = await import('./DeveloperPage');
+  await act(async () => root.render(<DeveloperPage />));
+  const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const panels = [...host.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab']);
+  expect(panels.map(panel => panel.hidden)).toEqual([false, true, true]);
+  const jpeg = host.querySelector('#jpeg-panel section'), webgpu = host.querySelector('#webgpu-panel section');
+  const press = async (key: string, expected: number) => {
+    const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true')!;
+    await act(async () => selected.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    expect(document.activeElement).toBe(tabs[expected]);
+    expect(tabs.map(tab => tab.tabIndex)).toEqual(tabs.map((_, index) => index === expected ? 0 : -1));
+    expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(tabs.map((_, index) => String(index === expected)));
+  };
+  await press('ArrowLeft', 2); await press('ArrowRight', 0); await press('ArrowRight', 1);
+  await press('ArrowRight', 2); await press('Home', 0); await press('End', 2);
+  expect(host.querySelector('#jpeg-panel section')).toBe(jpeg); expect(host.querySelector('#webgpu-panel section')).toBe(webgpu);
+  expect(host.querySelector('#environment-title')?.closest('section')?.compareDocumentPosition(host.querySelector('[role="tablist"]')!)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

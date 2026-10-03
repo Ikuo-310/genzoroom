@@ -31,7 +31,8 @@ def test_developer_api_lifecycle_without_private_collection_or_upstream_requests
                 response = await request("GET", "/developer/logs/backend", headers={"Authorization": "PRIVATE_HEADER", "Cookie": "session=PRIVATE_COOKIE"})
                 assert response.status_code == 200
                 report = response.json()
-                assert set(report) == {"schemaVersion", "generatedAt", "source", "entries"}
+                assert set(report) == {"schemaVersion", "generatedAt", "source", "entries", "buffer"}
+                assert report["buffer"] == {"capacity": 1000, "droppedEntryCount": 0}
                 assert report["schemaVersion"] == 1 and report["source"] == "backend" and report["generatedAt"].endswith("Z")
                 assert report["entries"] == logger.get_entries()
                 assert "level" not in report

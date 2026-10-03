@@ -2,10 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
+import { DeveloperLogs } from './DeveloperLogsPanel';
 import { emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 import { collectDiagnosticsEnvironment, createDiagnosticsReport, createJpegDiagnosticsReport, createWebGpuDiagnosticsReport,
   createWebGpuReport, exportDiagnosticsReport, exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
 import './developer.css';
+
+const diagnosticTabs = ['logs', 'jpeg', 'webgpu'] as const;
+type DiagnosticTab = typeof diagnosticTabs[number];
 
 export function DeveloperPage() {
   const { t } = useTranslation();
@@ -13,14 +17,13 @@ export function DeveloperPage() {
   const [webgpu, setWebgpu] = useState(() => createWebGpuReport(environment.gpuApiAvailable, null));
   const [exportFailed, setExportFailed] = useState({ full: false, jpeg: false, webgpu: false });
   const [jpeg, setJpeg] = useState(emptyJpegReport);
-  const [selectedTab, setSelectedTab] = useState<'jpeg' | 'webgpu'>('jpeg');
-  const jpegTab = useRef<HTMLButtonElement>(null);
-  const webgpuTab = useRef<HTMLButtonElement>(null);
+  const [selectedTab, setSelectedTab] = useState<DiagnosticTab>('logs');
+  const tabButtons = useRef<Partial<Record<DiagnosticTab, HTMLButtonElement | null>>>({});
   const acceptJpegReport = useCallback((report: JpegReport) => setJpeg(report), []);
   const acceptReport = useCallback((report: WebGpuReport) => setWebgpu(report), []);
-  const selectTab = (tab: 'jpeg' | 'webgpu', focus = false) => {
+  const selectTab = (tab: DiagnosticTab, focus = false) => {
     setSelectedTab(tab);
-    if (focus) (tab === 'jpeg' ? jpegTab : webgpuTab).current?.focus();
+    if (focus) tabButtons.current[tab]?.focus();
   };
   const exportFull = () => {
     setExportFailed(value => ({ ...value, full: false }));
@@ -61,15 +64,18 @@ export function DeveloperPage() {
     </section>
     <div role="tablist" aria-label={t('developer.diagnosticTabs')} className="developer-tabs" onKeyDown={event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault(); selectTab(selectedTab === 'jpeg' ? 'webgpu' : 'jpeg', true);
+        const focused = diagnosticTabs.find(tab => tabButtons.current[tab] === event.target) ?? selectedTab;
+        const offset = event.key === 'ArrowLeft' ? -1 : 1;
+        event.preventDefault(); selectTab(diagnosticTabs[(diagnosticTabs.indexOf(focused) + offset + diagnosticTabs.length) % diagnosticTabs.length], true);
       } else if (event.key === 'Home' || event.key === 'End') {
-        event.preventDefault(); selectTab(event.key === 'Home' ? 'jpeg' : 'webgpu', true);
+        event.preventDefault(); selectTab(event.key === 'Home' ? diagnosticTabs[0] : diagnosticTabs[diagnosticTabs.length - 1], true);
       }
     }}>
-      <button ref={jpegTab} id="jpeg-tab" role="tab" type="button" aria-selected={selectedTab === 'jpeg'}
-        aria-controls="jpeg-panel" tabIndex={selectedTab === 'jpeg' ? 0 : -1} onClick={() => selectTab('jpeg')}>{t('developer.jpegTab')}</button>
-      <button ref={webgpuTab} id="webgpu-tab" role="tab" type="button" aria-selected={selectedTab === 'webgpu'}
-        aria-controls="webgpu-panel" tabIndex={selectedTab === 'webgpu' ? 0 : -1} onClick={() => selectTab('webgpu')}>{t('developer.webgpuTab')}</button>
+      {diagnosticTabs.map(tab => <button key={tab} ref={button => { tabButtons.current[tab] = button; }} id={`${tab}-tab`} role="tab" type="button" aria-selected={selectedTab === tab}
+        aria-controls={`${tab}-panel`} tabIndex={selectedTab === tab ? 0 : -1} onClick={() => selectTab(tab)}>{t(`developer.${tab}Tab`)}</button>)}
+    </div>
+    <div id="logs-panel" role="tabpanel" aria-labelledby="logs-tab" tabIndex={0} hidden={selectedTab !== 'logs'}>
+      <DeveloperLogs />
     </div>
     <div id="jpeg-panel" role="tabpanel" aria-labelledby="jpeg-tab" tabIndex={0} hidden={selectedTab !== 'jpeg'}>
       <RealJpegDiagnostics onReport={acceptJpegReport} onExport={exportJpeg} exportError={exportFailed.jpeg} />

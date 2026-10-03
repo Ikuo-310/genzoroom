@@ -288,9 +288,13 @@ def _log_response_failure(response: httpx.Response, error_code: str) -> None:
 
 
 async def _immich_request(client, method: str, url: str, endpoint: str, *,
-                          expected_status=200, stream=False, request_id=None, **kwargs):
+                          expected_status=200, stream=False, request_id=None, batch_id=None, operation_id=None, **kwargs):
     # Endpoint comes from explicit logical paths, never request.url, headers, query or bodies.
     context = {"requestId": request_id or uuid4().hex, "method": method, "endpoint": endpoint}
+    if batch_id is not None:
+        context["batchId"] = batch_id
+    if operation_id is not None:
+        context["operationId"] = operation_id
     started = monotonic()
     backend_logger.add(level="debug", component="immich", event="request.start", context=context)
     try:
@@ -530,14 +534,14 @@ def _search_assets(body: object) -> list[RecentAsset]:
 
 async def _get_asset_stacks(
     url: str, key: str,
-    *, transport: httpx.AsyncBaseTransport | None = None,
+    *, transport: httpx.AsyncBaseTransport | None = None, batch_id: str | None = None,
 ) -> list[Mapping]:
     try:
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
         ) as client:
             response = await _immich_request(
-                client, "GET", url, "/stacks",
+                client, "GET", url, "/stacks", batch_id=batch_id,
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:

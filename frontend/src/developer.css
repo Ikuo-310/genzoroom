@@ -21,3 +21,26 @@
 .developer-tabs [role="tab"][aria-selected="true"] { color: #17221f; background: #d1e2bf; }
 .developer-tabs [role="tab"][aria-selected="false"] { color: #e6eee9; background: #43584d; }
 .developer-page [role="tabpanel"]:focus-visible { outline-offset: 5px; }
+.developer-log-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(160px, 0.65fr); gap: 16px; align-items: start; }
+.developer-log-card { padding: 20px; }
+.developer-log-card h2 { margin-top: 0; }
+.developer-log-level { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
+.developer-log-level select { max-width: 100%; min-width: 100px; padding: 8px; background: #17221f; color: #e6eee9; border: 1px solid #43584d; border-radius: 6px; }
+.developer-log-common { margin-top: 24px; align-items: stretch; flex-direction: column; }
+.developer-log-common button, .developer-log-card button { white-space: normal; overflow-wrap: anywhere; }
+.developer-log-toolbar { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; margin: 20px 0 12px; align-items: center; }
+.developer-log-sources { display: inline-flex; max-width: 100%; border: 1px solid #43584d; border-radius: 8px; overflow: hidden; }
+.developer-log-sources button { border-radius: 0; min-width: 0; padding: 10px 12px; }
+.developer-log-sources button + button { border-left: 1px solid #43584d; }
+.developer-log-sources [aria-pressed="true"] { background: #d1e2bf; color: #17221f; }
+.developer-log-console { background: #090e0b; color: #e6eee9; border: 1px solid #43584d; border-radius: 8px; padding: 16px; min-height: 320px; max-height: 65vh; overflow: auto; font: 0.85rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.developer-log-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 3px 0; }
+@media (max-width: 800px) {
+  .developer-log-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .developer-log-common { grid-column: 1 / -1; margin-top: 0; flex-direction: row; flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+  .developer-log-controls { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .developer-log-common { margin-top: 16px; }
+  .developer-log-console { padding: 12px; }
+}

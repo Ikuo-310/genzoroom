@@ -100,7 +100,7 @@ def _entry_fields(*, level: object, component: object, event: object, message: o
     return result
 
 
-def create_backend_logs_report(entries: list[dict], date: datetime | None = None) -> dict:
+def create_backend_logs_report(entries: list[dict], date: datetime | None = None, *, buffer_stats: dict | None = None) -> dict:
     projected = []
     for entry in entries:
         timestamp = entry.get("timestamp")
@@ -112,8 +112,14 @@ def create_backend_logs_report(entries: list[dict], date: datetime | None = None
             level=entry.get("level"), component=entry.get("component"), event=entry.get("event"),
             message=entry.get("message"), context=entry.get("context"),
         )})
-    return {"schemaVersion": 1, "generatedAt": _utc_timestamp(date if date is not None else datetime.now(timezone.utc)),
-            "source": "backend", "entries": projected}
+    report = {"schemaVersion": 1, "generatedAt": _utc_timestamp(date if date is not None else datetime.now(timezone.utc)),
+              "source": "backend", "entries": projected}
+    if buffer_stats is not None:
+        capacity, dropped = buffer_stats.get("capacity"), buffer_stats.get("droppedEntryCount")
+        if capacity != BACKEND_LOG_CAPACITY or type(dropped) is not int or dropped < 0:
+            raise ValueError("Invalid buffer statistics")
+        report["buffer"] = {"capacity": BACKEND_LOG_CAPACITY, "droppedEntryCount": dropped}
+    return report
 
 
 class BackendLogger:
@@ -123,6 +129,7 @@ class BackendLogger:
         # The bounded deque keeps the newest diagnostic session without unbounded growth.
         self._lock = Lock()
         self._entries: deque[dict] = deque(maxlen=BACKEND_LOG_CAPACITY)
+        self._dropped_entry_count = 0
 
     def get_level(self) -> LogLevel:
         with self._lock:
@@ -146,7 +153,10 @@ class BackendLogger:
                 fields = _entry_fields(level=level, component=component, event=event, message=message, context=context)
             except ValueError:
                 return
-            self._entries.append({"timestamp": _utc_timestamp(datetime.now(timezone.utc)), **fields})
+            entry = {"timestamp": _utc_timestamp(datetime.now(timezone.utc)), **fields}
+            if len(self._entries) == BACKEND_LOG_CAPACITY:
+                self._dropped_entry_count += 1
+            self._entries.append(entry)
 
     def get_entries(self) -> list[dict]:
         with self._lock:
@@ -155,10 +165,14 @@ class BackendLogger:
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
+            self._dropped_entry_count = 0
 
     def create_report(self) -> dict:
         with self._lock:
-            return create_backend_logs_report(list(self._entries))
+            # Counts and entries share the same lock so overflow evidence matches the snapshot.
+            return create_backend_logs_report(list(self._entries), buffer_stats={
+                "capacity": BACKEND_LOG_CAPACITY, "droppedEntryCount": self._dropped_entry_count,
+            })
 
 
 # Never attach handlers to root/Uvicorn/httpx: they may contain private request data.

@@ -106,14 +106,14 @@ def _validate_written(response, op, expected_id=None):
     return stack_id
 
 
-async def _verify_created(client, url, headers, op, stack_id):
-    context = {"requestId": uuid4().hex, "stackId": str(stack_id),
+async def _verify_created(client, url, headers, op, stack_id, batch_id):
+    context = {"batchId": batch_id, "requestId": uuid4().hex, "stackId": str(stack_id),
                "expectedMemberIds": [str(member) for member in op.memberIds]}
     response = None
     # Verification is diagnostic only: unreadable or mismatched state cannot reverse a committed POST.
     try:
         response = await _immich_request(client, "GET", url, f"/stacks/{stack_id}",
-                                         request_id=context["requestId"], headers=headers)
+                                         request_id=context["requestId"], batch_id=batch_id, operation_id=op.operationId, headers=headers)
         if response.status_code != 200:
             raise _request_error(response)
         body = response.json()
@@ -137,14 +137,25 @@ async def _verify_created(client, url, headers, op, stack_id):
         _log_operation(op, "verify.failed", level="warn", **context, errorCode=code)
 
 
-def _operation_results(ops, results):
+def _operation_results(ops, results, batch_id):
+    counts = {status: sum(result.status == status for result in results) for status in ("success", "failed", "unknown", "blocked")}
     for op, result in zip(ops, results):
-        fields = {"status": result.status}
+        fields = {"batchId": batch_id, "status": result.status}
         for field in ("stackId", "releasedStackId", "errorCode"):
             value = getattr(result, field)
             if value is not None:
                 fields[field] = str(value)
-        _log_operation(op, "operation.result", level="info" if result.status == "success" else "warn", **fields)
+        # Failed/unknown writes are terminal for this requested operation; dependency blocks are recoverable.
+        severity = "error" if result.status in ("failed", "unknown") else "warn" if result.status == "blocked" else "info"
+        _log_operation(op, "operation.result", level=severity, **fields)
+    overall = "success" if counts["success"] == len(results) else "partial_failure" if counts["success"] else "failure"
+    # A retained final summary still explains large batches whose detailed evidence has overflowed.
+    backend_logger.add(level="info" if overall == "success" else "warn" if overall == "partial_failure" else "error",
+                       component="stack_write", event="batch.result", context={
+                           "batchId": batch_id, "operationCount": len(results), "successCount": counts["success"],
+                           "failedCount": counts["failed"], "unknownCount": counts["unknown"],
+                           "blockedCount": counts["blocked"], "overallResult": overall,
+                       })
     return StackApplyResponse(results=results)
 
 
@@ -152,11 +163,14 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
     ops = payload.operations
     if not ops:
         return StackApplyResponse(results=[])
+    batch_id = uuid4().hex
+    backend_logger.add(level="debug", component="stack_write", event="batch.start",
+                       context={"batchId": batch_id, "operationCount": len(ops)})
     try:
         url, key = _require_configuration(immich_url, api_key)
-        stacks = await _get_asset_stacks(url, key, transport=transport)
+        stacks = await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id)
     except ImmichRequestError as error:
-        return _operation_results(ops, [StackWriteResult(operationId=op.operationId, status="failed", errorCode=error.error_code) for op in ops])
+        return _operation_results(ops, [StackWriteResult(operationId=op.operationId, status="failed", errorCode=error.error_code) for op in ops], batch_id)
     lookup = {UUID(stack["id"]): stack for stack in stacks}
     owners = {UUID(asset["id"]): UUID(stack["id"]) for stack in stacks for asset in stack["assets"]}
     results = {}
@@ -166,24 +180,24 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
     async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, trust_env=False, follow_redirects=False, transport=transport) as client:
         async def write(op, method, path, body=None, expected_id=None):
             request_id = uuid4().hex
-            _log_operation(op, "operation.start", requestId=request_id, method=method, endpoint=path,
+            _log_operation(op, "operation.start", batchId=batch_id, requestId=request_id, method=method, endpoint=path,
                            memberIds=[str(member) for member in op.memberIds] if op.memberIds is not None else [])
             response = None
             try:
                 expected_status = 204 if method == "DELETE" else 201 if method == "POST" else 200
                 response = await _immich_request(client, method, url, path, expected_status=expected_status,
-                                                 request_id=request_id, headers=headers, json=body)
+                                                 request_id=request_id, batch_id=batch_id, operation_id=op.operationId, headers=headers, json=body)
                 if response.status_code != expected_status:
-                    _log_operation(op, "operation.response", level="warn", requestId=request_id, method=method,
+                    _log_operation(op, "operation.response", level="warn", batchId=batch_id, requestId=request_id, method=method,
                                    endpoint=path, httpStatus=response.status_code, errorCode=_request_error(response).error_code)
                     # A returned error is definite; malformed/redirected success cannot establish outcome.
                     status = "failed" if response.status_code >= 400 else "unknown"
                     return StackWriteResult(operationId=op.operationId, status=status, errorCode=_request_error(response).error_code)
                 stack_id = None if method == "DELETE" else _validate_written(response, op, expected_id)
                 if method == "DELETE":
-                    _log_operation(op, "operation.response", requestId=request_id, method=method, endpoint=path, httpStatus=response.status_code)
+                    _log_operation(op, "operation.response", batchId=batch_id, requestId=request_id, method=method, endpoint=path, httpStatus=response.status_code)
                 elif method == "POST" and backend_logger.get_level() == "debug":
-                    await _verify_created(client, url, headers, op, stack_id)
+                    await _verify_created(client, url, headers, op, stack_id, batch_id)
                 return StackWriteResult(operationId=op.operationId, status="success", stackId=stack_id)
             except (httpx.RequestError, httpx.InvalidURL):
                 return StackWriteResult(operationId=op.operationId, status="unknown", errorCode="unreachable")
@@ -226,4 +240,4 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 results[op.operationId] = await write(op, "PUT", f"/stacks/{op.stackId}", {"primaryAssetId": str(op.primaryAssetId)}, op.stackId)
             if op.operationId in replacements:
                 results[op.operationId].releasedStackId = op.stackId
-    return _operation_results(ops, [results[op.operationId] for op in ops])
+    return _operation_results(ops, [results[op.operationId] for op in ops], batch_id)

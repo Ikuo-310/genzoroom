@@ -123,7 +123,7 @@ def test_post_two_members_and_immediate_verify_members_are_distinguishable(logge
     assert result.status == "success" and str(result.stackId) == NEW
     assert calls == [("GET", "/api/stacks"), ("POST", "/api/stacks"), ("GET", f"/api/stacks/{NEW}")]
     report_entries = json.loads(json.dumps(logger.create_report()))["entries"]
-    entries = [entry for entry in report_entries if entry["component"] == "stack_write"]
+    entries = [entry for entry in report_entries if entry["component"] == "stack_write" and entry["event"] not in {"batch.start", "batch.result"}]
     start, response, verify, final = [entry["context"] for entry in entries]
     assert start["operationId"] == response["operationId"] == verify["operationId"] == "draft:manual:17"
     assert start["memberIds"] == response["requestedMemberIds"] == verify["expectedMemberIds"] == [A, B]
@@ -139,6 +139,73 @@ def test_post_two_members_and_immediate_verify_members_are_distinguishable(logge
     assert verify["requestId"] == verify_request["context"]["requestId"]
     assert entries[2]["level"] == ("debug" if matches else "warn")
     assert final["status"] == "success"
+    batch_id = final["batchId"]
+    assert all(entry["context"]["batchId"] == batch_id for entry in report_entries)
+    assert report_entries[-1]["event"] == "batch.result" and report_entries[-1]["context"]["overallResult"] == "success"
+
+
+def apply_batch(logger, outcomes, level="info"):
+    logger.set_level(level)
+    ops = [{"operationId": f"op-{index}", "type": "create", "memberIds": [str(UUID(int=2 * index + 1)), str(UUID(int=2 * index + 2))],
+            "primaryAssetId": str(UUID(int=2 * index + 1))} for index in range(len(outcomes))]
+    created = {}
+    index = 0
+    def handler(request):
+        nonlocal index
+        if request.method == "GET":
+            if request.url.path == "/api/stacks":
+                if all(outcome == "blocked" for outcome in outcomes):
+                    return httpx.Response(200, json=[{"id": str(UUID(int=10000 + position)), "primaryAssetId": op["primaryAssetId"],
+                        "assets": [{"id": member} for member in op["memberIds"]]} for position, op in enumerate(ops)])
+                return httpx.Response(200, json=[])
+            return httpx.Response(200, json=created[request.url.path.split("/")[-1]])
+        current = index; index += 1
+        if outcomes[current] == "failed": return httpx.Response(403)
+        if outcomes[current] == "unknown": raise httpx.ReadTimeout("PRIVATE_ERROR", request=request)
+        stack_id = str(UUID(int=10000 + current))
+        body = {"id": stack_id, "primaryAssetId": ops[current]["primaryAssetId"], "assets": [{"id": member} for member in ops[current]["memberIds"]]}
+        created[stack_id] = body
+        return httpx.Response(201, json=body)
+    result = asyncio.run(apply_stacks(PRIVATE_URL, PRIVATE_KEY, StackApplyRequest(operations=ops), transport=httpx.MockTransport(handler)))
+    return result.results
+
+
+@pytest.mark.parametrize("outcomes,overall,severity", [(["success", "success"], "success", "info"),
+    (["success", "failed"], "partial_failure", "warn"), (["failed", "unknown"], "failure", "error"),
+    (["blocked", "blocked"], "failure", "error")])
+def test_terminal_operation_and_batch_severities(logger, outcomes, overall, severity):
+    results = apply_batch(logger, outcomes)
+    assert [result.status for result in results] == outcomes
+    entries = json.loads(json.dumps(logger.create_report()))["entries"]
+    operations = [entry for entry in entries if entry["event"] == "operation.result"]
+    assert [entry["level"] for entry in operations] == [{"success": "info", "failed": "error", "unknown": "error", "blocked": "warn"}[value] for value in outcomes]
+    summary = entries[-1]
+    assert summary["event"] == "batch.result" and summary["level"] == severity
+    assert summary["context"]["overallResult"] == overall
+    assert summary["context"]["operationCount"] == 2
+    for status in ["success", "failed", "unknown", "blocked"]:
+        assert summary["context"][f"{status}Count"] == outcomes.count(status)
+    assert all(entry["context"]["batchId"] == summary["context"]["batchId"] for entry in operations)
+
+
+@pytest.mark.parametrize("outcomes", [["failed"], ["unknown"], ["blocked"]])
+def test_error_only_retains_terminal_failure_evidence(logger, outcomes):
+    apply_batch(logger, outcomes, "error")
+    entries = logger.create_report()["entries"]
+    assert entries and all(entry["level"] == "error" for entry in entries)
+    assert entries[-1]["event"] == "batch.result" and entries[-1]["context"]["overallResult"] == "failure"
+    if outcomes != ["blocked"]:
+        assert entries[0]["event"] == "operation.result"
+
+
+def test_large_batch_reports_dropped_evidence_and_retains_final_outcome(logger):
+    results = apply_batch(logger, ["success"] * 500, "debug")
+    assert all(result.status == "success" for result in results)
+    report = logger.create_report()
+    assert len(report["entries"]) == 1000 and report["buffer"]["droppedEntryCount"] > 0
+    assert report["entries"][-1]["event"] == "batch.result"
+    assert report["entries"][-1]["context"]["successCount"] == 500
+    assert len([entry for entry in report["entries"] if entry["event"] == "operation.result"]) == 500
 
 
 @pytest.mark.parametrize("verify,code", [(httpx.ConnectError("PRIVATE_ERROR"), "unreachable"),
@@ -148,7 +215,7 @@ def test_verify_failure_does_not_reverse_successful_post(logger, verify, code):
     assert result.status == "success" and len(calls) == 3
     entry = next(entry for entry in logger.get_entries() if entry["event"] == "verify.failed")
     assert entry["context"]["errorCode"] == code
-    assert logger.get_entries()[-1]["context"]["status"] == "success"
+    assert logger.get_entries()[-1]["context"]["overallResult"] == "success"
 
 
 @pytest.mark.parametrize("level", ["off", "error", "warn", "info"])

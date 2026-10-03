@@ -14,6 +14,7 @@ export interface LogEntry {
   context?: { [key: string]: LogContextValue };
 }
 export type FrontendLogEntry = LogEntry & { source: 'frontend' };
+export interface LogBufferStats { capacity: 1000; droppedEntryCount: number }
 // Message and context values must be caller-selected technical data, never user content or secrets.
 export type FrontendLogInput = Pick<LogEntry, 'level' | 'component' | 'event' | 'message' | 'context'>;
 export interface FrontendLogsReport {
@@ -21,6 +22,7 @@ export interface FrontendLogsReport {
   generatedAt: string;
   source: 'frontend';
   entries: FrontendLogEntry[];
+  buffer?: LogBufferStats;
 }
 
 // Diagnostics are opt-in; reload must not enable continuous collection or persistence.
@@ -73,6 +75,7 @@ export function createFrontendLogger() {
   let level = DEFAULT_FRONTEND_LOG_LEVEL;
   const buffer: Array<FrontendLogEntry | undefined> = new Array(FRONTEND_LOG_CAPACITY);
   let start = 0, size = 0;
+  let droppedEntryCount = 0;
   return {
     getLevel(): LogLevel { return level; },
     setLevel(value: LogLevel): void {
@@ -93,7 +96,7 @@ export function createFrontendLogger() {
       };
       buffer[(start + size) % FRONTEND_LOG_CAPACITY] = entry;
       if (size < FRONTEND_LOG_CAPACITY) size++;
-      else start = (start + 1) % FRONTEND_LOG_CAPACITY;
+      else { start = (start + 1) % FRONTEND_LOG_CAPACITY; droppedEntryCount++; }
     },
     getEntries(): FrontendLogEntry[] {
       return Array.from({ length: size }, (_, index) => {
@@ -101,29 +104,44 @@ export function createFrontendLogger() {
         return { ...entry, ...(entry.context === undefined ? {} : { context: copyContext(entry.context) }) };
       });
     },
-    clear(): void { buffer.fill(undefined); start = 0; size = 0; },
+    getBufferStats(): LogBufferStats { return { capacity: FRONTEND_LOG_CAPACITY, droppedEntryCount }; },
+    clear(): void { buffer.fill(undefined); start = 0; size = 0; droppedEntryCount = 0; },
   };
 }
 
 export const frontendLogger = createFrontendLogger();
 
-export function createFrontendLogsReport(entries: readonly FrontendLogEntry[], date = new Date()): FrontendLogsReport {
+export function projectLogEntry(entry: LogEntry): LogEntry {
+  if (typeof entry.timestamp !== 'string' || !entry.timestamp.endsWith('Z') || !Number.isFinite(Date.parse(entry.timestamp))
+    || (entry.source !== 'frontend' && entry.source !== 'backend')
+    || !Object.hasOwn(priorities, entry.level) || priorities[entry.level] === 0
+    || typeof entry.component !== 'string' || typeof entry.event !== 'string'
+    || !identifier.test(entry.component) || !identifier.test(entry.event)) throw new Error('Invalid log entry');
+  const context = copyContext(entry.context);
+  // Both sources use the same known-field/privacy projection at display and export boundaries.
+  return {
+    timestamp: new Date(entry.timestamp).toISOString(), source: entry.source, level: entry.level,
+    component: entry.component, event: entry.event,
+    ...(typeof entry.message === 'string' && entry.message.length <= 512 ? { message: entry.message } : {}),
+    ...(context === undefined ? {} : { context }),
+  };
+}
+
+export function createFrontendLogsReport(entries: readonly FrontendLogEntry[], date = new Date(), buffer?: LogBufferStats): FrontendLogsReport {
   // Project known fields again so extra caller properties cannot enter an exported report.
   const projected = entries.map(entry => {
-    if (!entry.timestamp.endsWith('Z') || !Number.isFinite(Date.parse(entry.timestamp)) || entry.source !== 'frontend'
-      || !Object.hasOwn(priorities, entry.level) || priorities[entry.level] === 0
-      || !identifier.test(entry.component) || !identifier.test(entry.event)) throw new Error('Invalid log entry');
-    const context = copyContext(entry.context);
-    return {
-      timestamp: new Date(entry.timestamp).toISOString(), source: 'frontend' as const, level: entry.level,
-      component: entry.component, event: entry.event,
-      ...(typeof entry.message === 'string' && entry.message.length <= 512 ? { message: entry.message } : {}),
-      ...(context === undefined ? {} : { context }),
-    };
+    if (entry.source !== 'frontend') throw new Error('Invalid log entry');
+    return projectLogEntry(entry) as FrontendLogEntry;
   });
-  return { schemaVersion: 1, generatedAt: date.toISOString(), source: 'frontend', entries: projected };
+  return { schemaVersion: 1, generatedAt: date.toISOString(), source: 'frontend', entries: projected,
+    ...(buffer === undefined ? {} : { buffer: projectLogBufferStats(buffer) }) };
+}
+
+export function projectLogBufferStats(buffer: LogBufferStats): LogBufferStats {
+  if (buffer.capacity !== FRONTEND_LOG_CAPACITY || !Number.isSafeInteger(buffer.droppedEntryCount) || buffer.droppedEntryCount < 0) throw new Error('Invalid buffer statistics');
+  return { capacity: FRONTEND_LOG_CAPACITY, droppedEntryCount: buffer.droppedEntryCount };
 }
 
 export function exportFrontendLogsReport(report: FrontendLogsReport): void {
-  downloadJsonReport(createFrontendLogsReport(report.entries, new Date(report.generatedAt)), 'genzoroom-frontend-logs');
+  downloadJsonReport(createFrontendLogsReport(report.entries, new Date(report.generatedAt), report.buffer), 'genzoroom-frontend-logs');
 }

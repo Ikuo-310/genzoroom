@@ -484,6 +484,34 @@
     "jpegExportFailed": "Could not export Real JPEG diagnostics JSON.",
     "webgpuExportFailed": "Could not export WebGPU diagnostics JSON.",
     "diagnosticTabs": "Diagnostic sections",
+    "logsTab": "Logs",
+    "logs": {
+      "level": "Log level",
+      "clear": "Clear logs",
+      "export": "Export logs JSON",
+      "clearAll": "Clear all logs",
+      "exportAll": "Export all logs JSON",
+      "refresh": "Refresh",
+      "source": "Log source",
+      "viewer": "Diagnostic log viewer",
+      "empty": "No logs",
+      "loading": "Loading Backend logs…",
+      "truncated": "{{source}}: {{count}} older log entries were dropped (capacity {{capacity}}). This snapshot is incomplete.",
+      "levelUnavailable": "Backend log level is unavailable. Refresh to retry.",
+      "levelUpdateFailed": "Could not update Backend log level.",
+      "partialClearFailed": "Some logs could not be cleared. See the source-specific error.",
+      "allExportFailed": "Could not export all logs JSON. No incomplete report was downloaded.",
+      "frontend": {
+        "clearFailed": "Could not clear Frontend logs.",
+        "exportFailed": "Could not export Frontend logs JSON."
+      },
+      "backend": {
+        "logsUnavailable": "Backend logs are unavailable.",
+        "refreshFailed": "Could not refresh Backend logs. Frontend logs were refreshed; the previous Backend snapshot is retained.",
+        "clearFailed": "Could not clear Backend logs.",
+        "exportFailed": "Could not export Backend logs JSON."
+      }
+    },
     "jpegTab": "Real JPEG",
     "webgpuTab": "WebGPU",
     "environmentFields": {

@@ -24,6 +24,16 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Preserve existing behavior unless the requested change explicitly modifies it.
 - Identify relevant dependencies before editing a change that affects multiple subsystems.
 
+### Structured diagnostics / logging
+
+- For features and fixes, consider diagnostic boundaries: network request/response/failure, asynchronous start/completion, generation changes, stale results, abort/cancellation, retry/attempt, save/load, validation mismatch, fallback, partial outcomes, batch/chunk processing, and important frontend/backend state transitions. Select useful boundaries; do not log every click.
+- Reuse the existing structured loggers, schemas, and privacy boundaries. Preserve useful technical metadata such as asset/Stack/member/primary IDs, operation/request/correlation/generation/save IDs, revision, counts, sizes/bytes, timing, method, logical endpoint, HTTP status, phase/state/result, errorCode, exceptionType, versions, cursors, retries, and safe expected/actual validation data.
+- Never record API keys, authorization/session credentials, cookies, passwords, access/refresh tokens, raw headers/bodies, full URLs, photo binaries/pixel buffers, Recipe/History bodies, Clipboard content, casually collected absolute filesystem paths, or unlimited user text. Safe derived metadata such as recipeVersion, historyCursor/historyLength, payloadBytes, and pixelCount remains allowed.
+- Logging failure must not fail the underlying operation or change its semantics. Restrict expensive diagnostic verification or extra network requests to explicit levels such as debug. Do not automatically capture stdlib/Uvicorn/httpx/browser-console output. Check both frontend and backend impacts when changing logging rules.
+- Choose severity by the effect on the GenzoRoom operation, not upstream HTTP status alone: error means required work cannot complete normally; warn means a recoverable abnormal condition (validation/verification mismatch, fallback, partial failure, stale state, unexpected shape, or exhausted retry while higher-level work continues); info means significant operation lifecycle/outcome or a material state transition; debug means detailed reproduction evidence, requests/responses, per-operation metadata, generations, chunks, timing, and internal transitions.
+- Levels are cumulative (error; error+warn; error+warn+info; all at debug; none at off). Choose the lowest severity that preserves the event where it is useful. Do not inflate routine success to warn/error or hide important abnormal conditions at debug.
+- When lower-level warnings ultimately cause a required GenzoRoom operation to fail, emit an operation-level error for the terminal failure rather than only retaining lower-level warnings. For batch work, distinguish recoverable partial failure from failure of the required overall operation.
+
 ### Keyboard shortcuts
 
 - Define GenzoRoom application command bindings in the central registry in `frontend/src/editShortcuts.ts`. Keep command IDs separate from declarative bindings; components must not hard-code new command matching with `event.key` or `event.code`.

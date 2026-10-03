@@ -42,9 +42,15 @@ it('wraps the ring in chronological insertion order, clears it and retains the c
   }
   const entries = logger.getEntries();
   expect(entries).toHaveLength(FRONTEND_LOG_CAPACITY);
+  expect(logger.getBufferStats()).toEqual({ capacity: 1000, droppedEntryCount: 1003 });
+  const report = createFrontendLogsReport(entries, new Date(), logger.getBufferStats());
+  expect(report.buffer).toEqual({ capacity: 1000, droppedEntryCount: 1003 });
+  const stats = logger.getBufferStats(); stats.droppedEntryCount = 0;
+  expect(logger.getBufferStats().droppedEntryCount).toBe(1003);
   expect(entries.map(entry => entry.context!.index)).toEqual(Array.from({ length: FRONTEND_LOG_CAPACITY }, (_, index) => index + FRONTEND_LOG_CAPACITY + 3));
   logger.setLevel('off'); expect(logger.getEntries()).toHaveLength(FRONTEND_LOG_CAPACITY);
   logger.clear(); expect(logger.getEntries()).toEqual([]); expect(logger.getLevel()).toBe('off');
+  expect(logger.getBufferStats().droppedEntryCount).toBe(0);
   logger.setLevel('error'); logger.add({ level: 'error', component: 'test', event: 'after.clear' });
   expect(logger.getEntries()).toHaveLength(1);
   expect(createFrontendLogger().getLevel()).toBe('off');

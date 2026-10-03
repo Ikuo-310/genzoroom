@@ -482,6 +482,34 @@
     "jpegExportFailed": "実写JPEG診断JSONを書き出せませんでした。",
     "webgpuExportFailed": "WebGPU診断JSONを書き出せませんでした。",
     "diagnosticTabs": "診断項目",
+    "logsTab": "ログ",
+    "logs": {
+      "level": "Log level",
+      "clear": "ログクリア",
+      "export": "ログJSON出力",
+      "clearAll": "全ログクリア",
+      "exportAll": "全ログJSON出力",
+      "refresh": "リフレッシュ",
+      "source": "ログの表示元",
+      "viewer": "診断ログビューアー",
+      "empty": "ログなし",
+      "loading": "Backendログを取得中…",
+      "truncated": "{{source}}：古いログ{{count}}件を破棄しました（上限{{capacity}}件）。このsnapshotには欠落があります。",
+      "levelUnavailable": "BackendのLog levelを取得できません。リフレッシュで再試行できます。",
+      "levelUpdateFailed": "BackendのLog levelを変更できませんでした。",
+      "partialClearFailed": "一部のログをクリアできませんでした。対象のエラーを確認してください。",
+      "allExportFailed": "全ログJSONを書き出せませんでした。不完全なレポートは出力していません。",
+      "frontend": {
+        "clearFailed": "Frontendログをクリアできませんでした。",
+        "exportFailed": "FrontendログJSONを書き出せませんでした。"
+      },
+      "backend": {
+        "logsUnavailable": "Backendログを取得できません。",
+        "refreshFailed": "Backendログを更新できませんでした。Frontendログは更新し、Backendの前回取得分は保持しています。",
+        "clearFailed": "Backendログをクリアできませんでした。",
+        "exportFailed": "BackendログJSONを書き出せませんでした。"
+      }
+    },
     "jpegTab": "実写JPEG",
     "webgpuTab": "WebGPU",
     "environmentFields": {
