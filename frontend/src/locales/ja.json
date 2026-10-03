@@ -636,7 +636,7 @@
   "stackManagement": {
     "sendLimit": "一度に送信できるのは500件まで、1つのSTACKは1,000枚までです。候補を減らしてから送信してください。",
     "sending": "Immichへ反映中…",
-    "deletePending": "Immich STACKを解除予定: {{filename}}（{{count}}枚）。写真はローカルで引き続き整理できます。",
+    "pendingSummary": "未送信: 新規 {{create}} / 更新 {{update}} / 解除 {{delete}}",
     "sendSuccess": "Immichへ反映しました。",
     "sendConfirm": "STACKの変更をImmichへ反映しますか？ 新規 {{create}}、更新 {{update}}、解除 {{delete}}。",
     "sendUnknown": "一部のSTACKの反映結果を確認できませんでした。再検出して確認してください。",

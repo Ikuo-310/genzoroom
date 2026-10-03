@@ -270,6 +270,13 @@ const existingMembers=[
  {...photos[1],id:'82345678-1234-4234-9234-123456789abc',filename:'hidden.png',format:'PNG'},
 ].map(asset=>({...asset,stackId:existingStackId,primaryAssetId:existingPrimary,stackAssetCount:3}));
 const existingStack={id:existingStackId,primaryAssetId:existingPrimary,assets:existingMembers};
+const secondStackId='92345678-1234-4234-9234-123456789abc';
+const secondPrimary='a2345678-1234-4234-9234-123456789abc';
+const secondMembers=[
+ {...photos[0],id:'b2345678-1234-4234-9234-123456789abc',filename:'second.dng'},
+ {...photos[1],id:secondPrimary,filename:'second.jpg'},
+].map(asset=>({...asset,stackId:secondStackId,primaryAssetId:secondPrimary,stackAssetCount:2}));
+const secondStack={id:secondStackId,primaryAssetId:secondPrimary,assets:secondMembers};
 const button = (text: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === text)!;
 const unmatched = () => Array.from(host.querySelectorAll('.stack-unmatched-grid .stack-filename')).map(e => e.textContent);
 
@@ -490,6 +497,51 @@ it('shows MANUAL after member Purge that leaves two members and retains a non-pu
  expect(unmatched()).toEqual(['selected.dng']);
 });
 
+it('hides the pending summary when the write plan has no operations',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ expect(host.querySelector('.stack-pending-summary')).toBeNull();
+});
+it('summarizes one pending create in the toolbar',async()=>{
+ await mount('/stack',{selectedAssets:photos});
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 1 / Update 0 / Dissolve 0');
+ await act(async()=>i18n.changeLanguage('ja'));
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('未送信: 新規 1 / 更新 0 / 解除 0');
+});
+it('summarizes one pending update in the toolbar',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ await click('[aria-label="Set hidden.jpg as COVER"]');
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 1 / Dissolve 0');
+});
+it('summarizes one pending delete in the toolbar without a candidate status row',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ await click('.stack-purge-group');
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 0 / Dissolve 1');
+ expect(host.querySelectorAll('.stack-candidate-grid .stack-status')).toHaveLength(0);
+});
+it('shares create, update and delete counts between the toolbar and send confirmation',async()=>{
+ api.resolve.mockResolvedValue([existingStack,secondStack]);
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[1],secondMembers[1]]});
+ await click('[aria-label="Set hidden.jpg as COVER"]');
+ await click(`[data-stack-id="draft:immich:${secondStackId}"] .stack-purge-group`);
+ const summary='Pending: New 1 / Update 1 / Dissolve 1';
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe(summary);
+ await act(async()=>button('Send to Immich').click());
+ expect(host.querySelector('dialog')?.textContent).toContain('New 1, update 1, dissolve 1');
+});
+it('summarizes multiple pending deletes without listing individual stacks',async()=>{
+ api.resolve.mockResolvedValue([existingStack,secondStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[1],secondMembers[1]]});
+ await click(`[data-stack-id="draft:immich:${existingStackId}"] .stack-purge-group`);
+ await click(`[data-stack-id="draft:immich:${secondStackId}"] .stack-purge-group`);
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 0 / Dissolve 2');
+ expect(host.querySelectorAll('.stack-candidate-grid .stack-status')).toHaveLength(0);
+ expect(host.querySelector('.stack-candidate-grid')?.textContent).not.toContain('pending dissolution');
+ expect(host.querySelector('.stack-candidate-grid')?.textContent).not.toContain('hidden.jpg');
+ expect(host.querySelector('.stack-candidate-grid')?.textContent).not.toContain('second.jpg');
+});
 it('confirms sending with counts, Cancel focus and Escape dismissal',async()=>{
  await mount('/stack',{selectedAssets:photos});
  expect(button('Send to Immich').disabled).toBe(false);
@@ -524,10 +576,11 @@ it('removes unchanged without writes and exposes delete failure with a safe manu
  fetch.mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'failed',errorCode:'authentication_failed'}))})));
  await act(async()=>button('Send to Immich').click());expect(host.querySelector('dialog')?.textContent).toContain('dissolve 1');
  await act(async()=>button('Continue').click());
- expect(host.textContent).toContain('pending dissolution');expect(unmatched()).toHaveLength(3);expect(button('Send to Immich').disabled).toBe(false);
+ expect(host.textContent).toContain('could not be applied');expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 0 / Dissolve 1');
+ expect(host.querySelectorAll('.stack-candidate-grid .stack-status')).toHaveLength(0);expect(unmatched()).toHaveLength(3);expect(button('Send to Immich').disabled).toBe(false);
  fetch.mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'success'}))})));
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- expect(host.textContent).not.toContain('pending dissolution');expect(unmatched()).toHaveLength(3);
+ expect(host.querySelector('.stack-pending-summary')).toBeNull();expect(unmatched()).toHaveLength(3);
 });
 it('retains unknown work, labels outcome uncertainty and requires redetection before resend',async()=>{
  await mount('/stack',{selectedAssets:photos});
@@ -559,7 +612,7 @@ it('applies a partial batch by removing only successes and marking failed work',
  });vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
- expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('[role="status"]')?.textContent).toContain('could not be applied');
+ expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-content > [role="status"]')?.textContent).toContain('could not be applied');
 });
 it('aborts the frontend wait on Home navigation without resending the write',async()=>{
  let signal:AbortSignal|undefined;

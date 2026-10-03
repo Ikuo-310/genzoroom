@@ -74,6 +74,9 @@ export function StackManagementPage() {
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
+  const createCount = plan.operations.filter(op => op.type === 'create').length;
+  const updateCount = plan.operations.filter(op => op.type === 'update').length;
+  const deleteCount = plan.operations.filter(op => op.type === 'delete').length;
   const oversized = plan.operations.length > 500 || plan.operations.some(op => (op.memberIds?.length ?? 0) > 1000);
   const canSend = ready && !sending && !confirmRedetect && !unknown && !oversized && (draft.groups.length > 0 || source.some(group => group.origin === 'immich'));
   const startSend = async () => {
@@ -200,6 +203,9 @@ export function StackManagementPage() {
         <button type="button" disabled={!canAdd} onClick={() => addSelected()} title={shortcut.title(t('stackManagement.add'), 'stackAddSelected')}>{t('stackManagement.add')}</button>
         <button type="button" disabled={!canEdit || selectedUnmatched.length < 2} onClick={() => dispatch({ type: 'create' })}>{t('stackManagement.newStack')}</button>
       </div>
+      {plan.operations.length > 0 && <span className="stack-pending-summary" role="status">
+        {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}
+      </span>}
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
@@ -246,10 +252,6 @@ export function StackManagementPage() {
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
             onPurge={() => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
-        {source.filter(group => group.origin === 'immich' && !draft.groups.some(current => current.origin === 'immich' && current.immichStackId === group.immichStackId)).map(group => group.origin === 'immich' && <p key={group.id} className="stack-status" role="status">
-          {t('stackManagement.deletePending', { count: group.members.length, filename: group.members.find(asset => asset.id === group.originalPrimaryAssetId)?.filename })}
-          {draft.writeResults[`delete:${group.immichStackId}`] && <span className="stack-evidence error">{t(draft.writeResults[`delete:${group.immichStackId}`].status === 'unknown' ? 'stackManagement.sendUnknown' : 'stackManagement.sendFailure')}</span>}
-        </p>)}
       </section>
       <section aria-labelledby="stack-unmatched-heading" className={`${displayed.unmatched.length ? '' : 'stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
         onDragOver={event => { if (canAcceptDrop(event, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
@@ -281,7 +283,7 @@ export function StackManagementPage() {
     </div>
     {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
-      create: plan.operations.filter(op => op.type === 'create').length, update: plan.operations.filter(op => op.type === 'update').length, delete: plan.operations.filter(op => op.type === 'delete').length,
+      create: createCount, update: updateCount, delete: deleteCount,
     })} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
   </main>;
 }
