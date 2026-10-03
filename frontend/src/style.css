@@ -562,7 +562,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 }
 
 .stack-group-members { display: grid; grid-template-columns: repeat(min(var(--stack-member-count), var(--stack-effective-columns)), minmax(0, 1fr)); gap: 12px; }
-.stack-unmatched-empty { min-height: 120px; }
+.stack-unmatched-empty { min-height: 200px; }
 .stack-group-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px; padding: 2px 0 7px; font-size: 0.7rem; }
 .stack-group-indicators { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .stack-photo-wrapper { position: relative; min-width: 0; }
