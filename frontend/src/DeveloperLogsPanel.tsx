@@ -77,6 +77,11 @@ export function DeveloperLogs() {
     return () => { request.current?.abort(); request.current = null; };
   }, []);
 
+  useEffect(() => frontendLogger.subscribe(() => {
+    setFrontendLevel(frontendLogger.getLevel());
+    snapshotFrontend();
+  }), []);
+
   function changeFrontendLevel(value: LogLevel) { frontendLogger.setLevel(value); setFrontendLevel(value); }
   function changeBackendLevel(value: LogLevel) {
     void runBackend('level', async (signal, current) => {

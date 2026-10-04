@@ -75,6 +75,19 @@ it('shows the same diagnostic level order and labels for Frontend and Backend', 
   await select('backend', 'debug');
   expect(level).toBe('debug');
 });
+it('updates Frontend and ALL views when shared logger entries, level or clear change remotely', async () => {
+  await mount();
+  await act(async () => frontendLogger.setLevel('debug'));
+  expect(card('frontend').querySelector('select')!.value).toBe('debug');
+  await act(async () => frontendLogger.add({ level: 'debug', component: 'stack_resolve', event: 'validation.mismatch',
+    context: { selectedAssetId: 'asset-1', expectedStackId: 'stack-1', memberIds: ['asset-1', 'asset-2'] } }));
+  expect(viewer().textContent).toContain('stack_resolve  validation.mismatch');
+  expect(viewer().textContent).toContain('memberIds');
+  await click([...host.querySelectorAll<HTMLButtonElement>('.developer-log-sources button')].find(item => item.textContent === 'Frontend')!);
+  expect(viewer().textContent).toContain('validation.mismatch');
+  await act(async () => frontendLogger.clear());
+  expect(viewer().textContent).toContain(i18n.t('developer.logs.empty'));
+});
 it('shows source selection, all technical fields and escaped text without live announcements', async () => {
   frontendLogger.setLevel('info'); feEntry();
   await mount();

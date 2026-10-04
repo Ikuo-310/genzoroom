@@ -1,10 +1,26 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { createFrontendLogger, createFrontendLogsReport, exportFrontendLogsReport,
-  DEFAULT_FRONTEND_LOG_LEVEL, FRONTEND_LOG_CAPACITY, type LogLevel, type LogEntryLevel } from './frontendLogging';
+  DEFAULT_FRONTEND_LOG_LEVEL, FRONTEND_LOG_CAPACITY, FRONTEND_LOG_CHANNEL_NAME, type FrontendLogChannel, type LogLevel, type LogEntryLevel } from './frontendLogging';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 const levels: LogEntryLevel[] = ['error', 'warn', 'info', 'debug'];
+
+function createChannelNetwork() {
+  const channels: TestChannel[] = [];
+  class TestChannel implements FrontendLogChannel {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    readonly sent: unknown[] = [];
+    constructor(readonly name: string) { channels.push(this); }
+    postMessage(message: unknown): void {
+      this.sent.push(structuredClone(message));
+      for (const peer of channels) if (peer !== this && peer.name === this.name) peer.onmessage?.({ data: structuredClone(message) } as MessageEvent);
+    }
+    close(): void { const index = channels.indexOf(this); if (index >= 0) channels.splice(index, 1); }
+    deliver(message: unknown): void { this.onmessage?.({ data: message } as MessageEvent); }
+  }
+  return { channels, channelFactory: (name: string) => new TestChannel(name) };
+}
 
 it.each< [LogLevel, number] >([['off', 0], ['error', 1], ['warn', 2], ['info', 3], ['debug', 4]])('filters at %s', (level, count) => {
   const logger = createFrontendLogger();
@@ -15,6 +31,108 @@ it.each< [LogLevel, number] >([['off', 0], ['error', 1], ['warn', 2], ['info', 3
   levels.forEach(level => logger.add({ level, component: 'test', event: 'filter' }));
   expect(logger.getEntries().map(entry => entry.level)).toEqual(levels.slice(0, count));
   expect(logger.getLevel()).toBe(level);
+});
+
+it('shares levels, answers a new tab handshake and does not echo remote level updates', () => {
+  const network = createChannelNetwork();
+  const first = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  expect(first.getLevel()).toBe('off');
+  first.setLevel('debug');
+  const second = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  expect(network.channels.map(channel => channel.name)).toEqual([FRONTEND_LOG_CHANNEL_NAME, FRONTEND_LOG_CHANNEL_NAME]);
+  expect(second.getLevel()).toBe('debug');
+  const secondSent = network.channels[1].sent.length;
+  expect(network.channels[0].sent).toContainEqual({ type: 'level.set', level: 'debug' });
+  expect(network.channels[0].sent).toContainEqual({ type: 'level.state', level: 'debug' });
+  expect(network.channels[1].sent).toContainEqual({ type: 'level.request' });
+  network.channels[0].deliver({ type: 'level.set', level: 'warn' });
+  expect(first.getLevel()).toBe('warn');
+  expect(network.channels[0].sent).toHaveLength(3);
+  expect(network.channels[1].sent).toHaveLength(secondSent);
+  first.dispose(); second.dispose();
+});
+
+it('keeps the default OFF with no peer and syncs local entries after source filtering and privacy projection', () => {
+  const network = createChannelNetwork();
+  const local = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  local.add({ level: 'info', component: 'test', event: 'disabled' });
+  expect(local.getEntries()).toEqual([]);
+  expect(network.channels[0].sent.some(message => (message as { type?: string }).type === 'entry')).toBe(false);
+
+  const remote = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  local.setLevel('info');
+  expect(remote.getLevel()).toBe('info');
+  local.add({ level: 'debug', component: 'test', event: 'filtered' });
+  local.add({ level: 'info', component: 'stack_resolve', event: 'validation.mismatch', context: {
+    assetId: 'asset-1', memberIds: ['asset-1', 'asset-2'], authorization: 'PRIVATE',
+  } });
+  expect(local.getEntries()).toHaveLength(1);
+  expect(remote.getEntries()).toEqual(local.getEntries());
+  expect(remote.getEntries()[0].context).toEqual({ assetId: 'asset-1', memberIds: ['asset-1', 'asset-2'] });
+  expect(JSON.stringify(network.channels[0].sent)).not.toContain('PRIVATE');
+  expect(network.channels[0].sent.filter(message => (message as { type?: string }).type === 'entry')).toHaveLength(1);
+  const remoteSent = network.channels[1].sent.length;
+  expect(remoteSent).toBe(1);
+  local.dispose(); remote.dispose();
+});
+
+it('reprojects remote entries, ignores malformed messages and notifies local subscribers', () => {
+  const network = createChannelNetwork();
+  const local = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  const remote = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  const observed = vi.fn();
+  remote.subscribe(observed);
+  network.channels[0].postMessage({ type: 'entry', entry: {
+    timestamp: '2026-10-03T16:00:00.000Z', source: 'frontend', level: 'warn', component: 'stack_resolve', event: 'validation.mismatch',
+    context: { selectedAssetId: 'asset-1', cookie: 'PRIVATE' }, unexpected: 'discarded',
+  } });
+  expect(remote.getEntries()).toHaveLength(1);
+  expect(remote.getEntries()[0].context).toEqual({ selectedAssetId: 'asset-1' });
+  expect(network.channels[1].sent.filter(message => (message as { type?: string }).type === 'entry')).toHaveLength(0);
+  expect(observed).toHaveBeenCalledOnce();
+  network.channels[0].postMessage({ type: 'entry', entry: { timestamp: 'invalid', source: 'frontend', level: 'debug', component: 'bad', event: 'entry' } });
+  network.channels[0].postMessage({ type: 'unknown', secret: 'PRIVATE' });
+  expect(remote.getEntries()).toHaveLength(1);
+  expect(() => local.add({ level: 'info', component: 'test', event: 'still.running' })).not.toThrow();
+  local.dispose(); remote.dispose();
+});
+
+it('synchronizes clear without echo and resets local and remote drop counts', () => {
+  const network = createChannelNetwork();
+  const local = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  const remote = createFrontendLogger({ broadcast: true, channelFactory: network.channelFactory });
+  local.setLevel('debug');
+  for (let index = 0; index <= FRONTEND_LOG_CAPACITY; index++) {
+    local.add({ level: 'debug', component: 'test', event: 'overflow', context: { index } });
+  }
+  expect(local.getBufferStats().droppedEntryCount).toBe(1);
+  expect(remote.getBufferStats().droppedEntryCount).toBe(1);
+  const remoteClearCount = network.channels[1].sent.filter(message => (message as { type?: string }).type === 'clear').length;
+  local.clear();
+  expect(local.getEntries()).toEqual([]); expect(remote.getEntries()).toEqual([]);
+  expect(local.getBufferStats().droppedEntryCount).toBe(0); expect(remote.getBufferStats().droppedEntryCount).toBe(0);
+  expect(network.channels[0].sent.filter(message => (message as { type?: string }).type === 'clear')).toHaveLength(1);
+  expect(network.channels[1].sent.filter(message => (message as { type?: string }).type === 'clear')).toHaveLength(remoteClearCount);
+  local.dispose(); remote.dispose();
+});
+
+it('isolates unavailable channels, posting failures and listener exceptions from local logging', () => {
+  const unavailable = createFrontendLogger({ broadcast: true, channelFactory: () => { throw new Error('channel unavailable'); } });
+  unavailable.setLevel('debug'); unavailable.add({ level: 'debug', component: 'test', event: 'local' });
+  expect(unavailable.getEntries()).toHaveLength(1);
+
+  let onmessage: ((event: MessageEvent) => void) | null = null;
+  const broken = createFrontendLogger({ broadcast: true, channelFactory: () => ({
+    get onmessage() { return onmessage; }, set onmessage(value) { onmessage = value; },
+    postMessage() { throw new Error('transport unavailable'); }, close() { throw new Error('close unavailable'); },
+  }) });
+  const listener = vi.fn(); broken.subscribe(() => { throw new Error('observer failed'); }); broken.subscribe(listener);
+  expect(() => broken.setLevel('info')).not.toThrow();
+  expect(() => broken.add({ level: 'info', component: 'test', event: 'local' })).not.toThrow();
+  expect(broken.getEntries()).toHaveLength(1); expect(listener).toHaveBeenCalledTimes(2);
+  expect(() => broken.clear()).not.toThrow(); expect(broken.getEntries()).toEqual([]);
+  expect(() => broken.dispose()).not.toThrow(); expect(unavailable.getLevel()).toBe('debug');
+  unavailable.dispose();
 });
 
 it('captures UTC frontend entries and keeps deep snapshots across input, getter and report mutations', () => {
