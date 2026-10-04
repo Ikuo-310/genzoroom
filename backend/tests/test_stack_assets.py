@@ -117,10 +117,54 @@ MALFORMED = [
 
 @pytest.mark.parametrize("kind", KINDS)
 @pytest.mark.parametrize("body", MALFORMED)
-def test_malformed_stack_list_fails_entire_home_request(kind, body):
-    with pytest.raises(ImmichRequestError) as error:
-        fetch(kind, [asset(IDS[0])], body)
-    assert error.value.error_code == "unexpected_response"
+def test_malformed_stack_entries_are_skipped_for_home(kind, body):
+    if not isinstance(body, list):
+        with pytest.raises(ImmichRequestError) as error:
+            fetch(kind, [asset(IDS[0])], body)
+        assert error.value.error_code == "unexpected_response"
+        return
+
+    result = fetch(kind, [asset(IDS[0])], body)
+    assert len(result) == 1
+    assert result[0]["stackId"] is None
+    assert result[0]["primaryAssetId"] is None
+    assert result[0]["stackAssetCount"] is None
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_home_skips_incomplete_stack_and_keeps_valid_stack_metadata(kind):
+    valid = stack()
+    incomplete = stack(SECOND_STACK_ID, IDS[3], [IDS[3]])
+    incomplete["primaryAssetId"] = IDS[4]
+    result = fetch(kind, [asset(i) for i in IDS[:4]], [valid, incomplete])
+
+    assert all(item["stackId"] == STACK_ID and item["stackAssetCount"] == 3 for item in result[:3])
+    assert result[3]["stackId"] is None
+    assert result[3]["primaryAssetId"] is None
+    assert result[3]["stackAssetCount"] is None
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_home_skips_all_stacks_with_ambiguous_member_and_keeps_unrelated_stack(kind):
+    overlapping = stack(SECOND_STACK_ID, IDS[0], [IDS[0], IDS[3]])
+    unrelated_id = str(UUID(int=100))
+    unrelated = stack(unrelated_id, IDS[4], [IDS[4], IDS[5]])
+    result = fetch(kind, [asset(i) for i in IDS[:6]], [stack(), overlapping, unrelated])
+
+    assert all(result[index]["stackId"] is None for index in (0, 1, 2, 3))
+    assert result[4]["stackId"] == unrelated_id
+    assert result[4]["primaryAssetId"] == IDS[4]
+    assert result[4]["stackAssetCount"] == 2
+    assert result[5]["stackId"] == unrelated_id
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_home_skips_stack_with_duplicate_member_inside_entry(kind):
+    duplicate_member = stack(member_ids=[IDS[0], IDS[0]])
+    result = fetch(kind, [asset(IDS[0])], [duplicate_member])
+    assert result[0]["stackId"] is None
+    assert result[0]["primaryAssetId"] is None
+    assert result[0]["stackAssetCount"] is None
 
 
 @pytest.mark.parametrize("kind", KINDS)

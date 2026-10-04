@@ -539,6 +539,7 @@ def _search_assets(body: object) -> list[RecentAsset]:
 async def _get_asset_stacks(
     url: str, key: str,
     *, transport: httpx.AsyncBaseTransport | None = None, batch_id: str | None = None,
+    strict: bool = True,
 ) -> list[Mapping]:
     try:
         async with httpx.AsyncClient(
@@ -556,6 +557,8 @@ async def _get_asset_stacks(
         body = response.json()
         if not isinstance(body, list):
             raise TypeError
+        if not strict:
+            return _valid_home_stack_entries(body)
         seen_stacks: set[UUID] = set()
         seen_members: set[UUID] = set()
         for stack in body:
@@ -586,11 +589,51 @@ async def _get_asset_stacks(
     return body
 
 
+def _valid_home_stack_entries(body: list[object]) -> list[Mapping]:
+    candidates: list[tuple[Mapping, UUID, set[UUID]]] = []
+    for stack in body:
+        try:
+            if not isinstance(stack, Mapping) or not isinstance(stack.get("id"), str) \
+                    or not isinstance(stack.get("primaryAssetId"), str) \
+                    or not isinstance(stack.get("assets"), list):
+                continue
+            stack_id = UUID(stack["id"])
+            primary_id = UUID(stack["primaryAssetId"])
+            members: set[UUID] = set()
+            for member in stack["assets"]:
+                if not isinstance(member, Mapping) or not isinstance(member.get("id"), str):
+                    raise ValueError
+                member_id = UUID(member["id"])
+                if member_id in members:
+                    raise ValueError
+                members.add(member_id)
+            if primary_id not in members:
+                raise ValueError
+            candidates.append((stack, stack_id, members))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    stack_id_counts: dict[UUID, int] = {}
+    member_owners: dict[UUID, set[int]] = {}
+    for index, (_, stack_id, members) in enumerate(candidates):
+        stack_id_counts[stack_id] = stack_id_counts.get(stack_id, 0) + 1
+        for member_id in members:
+            member_owners.setdefault(member_id, set()).add(index)
+    ambiguous_entries = {
+        index for owners in member_owners.values() if len(owners) > 1 for index in owners
+    }
+    return [
+        stack for index, (stack, stack_id, _) in enumerate(candidates)
+        if stack_id_counts[stack_id] == 1 and index not in ambiguous_entries
+    ]
+
+
 async def _with_asset_stacks(
     url: str, key: str, assets: list[RecentAsset],
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
-    stacks = await _get_asset_stacks(url, key, transport=transport)
+    # Home remains available when Immich exposes an incomplete Stack snapshot; editing keeps strict validation.
+    stacks = await _get_asset_stacks(url, key, transport=transport, strict=False)
     lookup = {
         UUID(member["id"]): (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(stack["assets"]))
         for stack in stacks for member in stack["assets"]
