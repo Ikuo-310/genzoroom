@@ -22,6 +22,8 @@ MAX_RECENT_ASSET_LIMIT = 500
 RECENT_ASSET_LIMIT_STEP = 50
 ALBUM_ASSET_PAGE_SIZE = 1000
 CALENDAR_FORMAT_BATCH_SIZE = 100
+RECENT_DIAGNOSTIC_ID_SAMPLE_SIZE = 20
+RECENT_RAW_DETAIL_LIMIT = 10
 logger = logging.getLogger(__name__)
 FORMAT_ALIASES = {
     "jpg": "JPEG",
@@ -495,8 +497,17 @@ async def get_recent_assets(
     if response.status_code != 200:
         raise _request_error(response)
 
+    diagnostics_enabled = False
     try:
-        assets = _search_assets(response.json())
+        diagnostics_enabled = backend_logger.get_level() == "debug"
+    except Exception:
+        pass
+    try:
+        if diagnostics_enabled:
+            search_body = response.json()
+            assets = _search_assets(search_body)
+        else:
+            assets = _search_assets(response.json())
     except (KeyError, TypeError, ValueError):
         _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError(
@@ -504,7 +515,183 @@ async def get_recent_assets(
             "Immich returned an unexpected response.",
         ) from None
 
-    return await _with_asset_stacks(url, key, assets[:limit], transport=transport)
+    result = await _with_asset_stacks(url, key, assets[:limit], transport=transport)
+    if diagnostics_enabled:
+        # Independent probes keep a failure in one diagnostic path from skipping the others.
+        try:
+            raw_items = _observe_recent_raw_assets(search_body)
+        except Exception:
+            raw_items = []
+        try:
+            await _observe_recent_search_variants(url, key, limit, transport=transport)
+        except Exception:
+            pass
+        try:
+            await _observe_recent_raw_details(url, key, raw_items, transport=transport)
+        except Exception:
+            pass
+    return result
+
+
+def _diagnostic_text(value: object, limit: int = 128) -> str | None:
+    return value[:limit] if isinstance(value, str) else None
+
+
+def _add_recent_diagnostic(event: str, context: dict) -> None:
+    try:
+        backend_logger.add(level="debug", component="immich.search" if event != "recent.raw_state_observed"
+                           else "immich.asset", event=event, context=context)
+    except Exception:
+        pass
+
+
+def _recent_search_items(body: object) -> list[Mapping] | None:
+    if not isinstance(body, Mapping) or not isinstance(body.get("assets"), Mapping):
+        return None
+    items = body["assets"].get("items")
+    if not isinstance(items, list) or any(not isinstance(item, Mapping) for item in items):
+        return None
+    return items
+
+
+def _is_raw_search_item(item: Mapping) -> bool:
+    filename = item.get("originalFileName")
+    return isinstance(filename, str) and classify_image_format(filename)[1]
+
+
+def _observe_recent_raw_assets(body: object) -> list[Mapping]:
+    items = _recent_search_items(body) or []
+    raw_items = [item for item in items if _is_raw_search_item(item)]
+    for item in raw_items:
+        filename = item.get("originalFileName")
+        image_format, _ = classify_image_format(filename)
+        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        context = {
+            "assetId": _diagnostic_text(item.get("id"), 64),
+            "originalFileName": _diagnostic_text(filename),
+            "type": _diagnostic_text(item.get("type")),
+            "visibility": _diagnostic_text(item.get("visibility")),
+            "isTrashed": item.get("isTrashed") if type(item.get("isTrashed")) is bool else None,
+            "isArchived": item.get("isArchived") if type(item.get("isArchived")) is bool else None,
+            "stackIdPresent": "stackId" in item,
+            "stackId": _diagnostic_text(item.get("stackId"), 64),
+            "extension": extension[:16],
+            "format": image_format,
+            "isRaw": True,
+            "fileCreatedAt": _diagnostic_text(item.get("fileCreatedAt")),
+            "localDateTime": _diagnostic_text(item.get("localDateTime")),
+        }
+        _add_recent_diagnostic("recent.asset_observed", context)
+    return raw_items
+
+
+def _recent_variant_context(mode: str, http_status: int | None, body: object) -> dict:
+    items = _recent_search_items(body)
+    if items is None:
+        return {
+            "mode": mode, "httpStatus": http_status, "resultCount": None,
+            "rawAssetCount": None, "rawAssetIds": [], "rawAssetSampleCount": 0,
+            "stackMemberLikeCount": None, "stackMemberLikeIds": [], "stackMemberSampleCount": 0,
+        }
+    raw_ids = [str(item.get("id"))[:64] for item in items if _is_raw_search_item(item) and item.get("id") is not None]
+    stack_fields = ("stack", "stackId", "primaryAssetId", "stackAssetCount")
+    stack_items = [item for item in items if any(field in item for field in stack_fields)]
+    stack_ids = [str(item.get("id"))[:64] for item in stack_items if item.get("id") is not None]
+    return {
+        "mode": mode, "httpStatus": http_status, "resultCount": len(items),
+        "rawAssetCount": len(raw_ids), "rawAssetIds": raw_ids[:RECENT_DIAGNOSTIC_ID_SAMPLE_SIZE],
+        "rawAssetSampleCount": min(len(raw_ids), RECENT_DIAGNOSTIC_ID_SAMPLE_SIZE),
+        "stackMemberLikeCount": len(stack_items),
+        "stackMemberLikeIds": stack_ids[:RECENT_DIAGNOSTIC_ID_SAMPLE_SIZE],
+        "stackMemberSampleCount": min(len(stack_ids), RECENT_DIAGNOSTIC_ID_SAMPLE_SIZE),
+    }
+
+
+async def _observe_recent_search_variants(
+    url: str, key: str, limit: int, *, transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
+    variants = (("omitted", None), ("false", False), ("true", True))
+    async with httpx.AsyncClient(
+        timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+    ) as client:
+        for mode, with_stacked in variants:
+            request_body: dict[str, object] = {
+                "filter": {
+                    "type": {"eq": "IMAGE"},
+                    "visibility": {"eq": "timeline"},
+                    "trashedAt": {"eq": None},
+                },
+                "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
+                "size": limit,
+            }
+            if with_stacked is not None:
+                request_body["withStacked"] = with_stacked
+            try:
+                response = await _immich_request(
+                    client, "POST", url, "/search/metadata",
+                    headers={"x-api-key": key, "Accept": "application/json"}, json=request_body,
+                )
+                body = response.json() if response.status_code == 200 else None
+                context = _recent_variant_context(mode, response.status_code, body)
+            except Exception:
+                context = _recent_variant_context(mode, None, None)
+            _add_recent_diagnostic("recent.with_stacked_observed", context)
+
+
+def _recent_raw_detail_context(asset_id: str, http_status: int | None, body: object) -> dict:
+    context = {"assetId": asset_id, "httpStatus": http_status, "observationResult": "observed"}
+    if http_status is not None and http_status != 200:
+        context["observationResult"] = "http_failure"
+        return context
+    if not isinstance(body, Mapping):
+        context["observationResult"] = "invalid_response"
+        return context
+    stack = body.get("stack")
+    stack = stack if isinstance(stack, Mapping) else {}
+    context.update({
+        "originalFileName": _diagnostic_text(body.get("originalFileName")),
+        "type": _diagnostic_text(body.get("type")),
+        "visibility": _diagnostic_text(body.get("visibility")),
+        "isTrashed": body.get("isTrashed") if type(body.get("isTrashed")) is bool else None,
+        "isArchived": body.get("isArchived") if type(body.get("isArchived")) is bool else None,
+        "stackId": _diagnostic_text(body.get("stackId") or stack.get("id"), 64),
+        "stackIdPresent": "stackId" in body or "id" in stack,
+        "primaryAssetId": _diagnostic_text(body.get("primaryAssetId") or stack.get("primaryAssetId"), 64),
+        "stackPresent": "stack" in body,
+        "deletedAt": _diagnostic_text(body.get("deletedAt")),
+        "deletedAtPresent": "deletedAt" in body,
+        "trashedAt": _diagnostic_text(body.get("trashedAt")),
+        "trashedAtPresent": "trashedAt" in body,
+        "duplicateId": _diagnostic_text(body.get("duplicateId"), 64),
+        "duplicateIdPresent": "duplicateId" in body,
+        "livePhotoVideoId": _diagnostic_text(body.get("livePhotoVideoId"), 64),
+        "livePhotoVideoIdPresent": "livePhotoVideoId" in body,
+    })
+    return context
+
+
+async def _observe_recent_raw_details(
+    url: str, key: str, raw_items: list[Mapping], *, transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
+    asset_ids = [item.get("id") for item in raw_items[:RECENT_RAW_DETAIL_LIMIT]
+                 if isinstance(item.get("id"), str)]
+    if not asset_ids:
+        return
+    async with httpx.AsyncClient(
+        timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+    ) as client:
+        for asset_id in asset_ids:
+            try:
+                response = await _immich_request(
+                    client, "GET", url, f"/assets/{asset_id}",
+                    headers={"x-api-key": key, "Accept": "application/json"},
+                )
+                body = response.json() if response.status_code == 200 else None
+                context = _recent_raw_detail_context(asset_id, response.status_code, body)
+            except Exception:
+                context = _recent_raw_detail_context(asset_id, None, None)
+                context["observationResult"] = "request_failed"
+            _add_recent_diagnostic("recent.raw_state_observed", context)
 
 
 def _search_assets(body: object) -> list[RecentAsset]:
