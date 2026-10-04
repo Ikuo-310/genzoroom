@@ -47,6 +47,16 @@ def test_create_primary_first_and_response_set_order():
     results,calls=execute([op(primaryAssetId=B)],outcomes=[written(primary=B)])
     assert results[0].status=='success' and str(results[0].stackId)==NEW
     assert calls==[('POST','/api/stacks',{'assetIds':[B,A]})]
+
+def test_singleton_repair_and_delete_reuse_existing_write_paths():
+    existing = [stack(member_ids=[A])]
+    results, calls = execute([op('update')], existing, [httpx.Response(204), written()])
+    assert results[0].status == 'success'
+    assert [call[0] for call in calls] == ['DELETE', 'POST']
+    assert calls[1][2] == {'assetIds': [A, B]}
+    results, calls = execute([op('delete')], existing, [httpx.Response(204)])
+    assert results[0].status == 'success'
+    assert [call[0] for call in calls] == ['DELETE']
 def test_cover_update_and_delete():
     results,calls=execute([op('update',primaryAssetId=B)],[stack(member_ids=[A,B])],[written(primary=B,stack_id=STACK_ID,code=200)])
     assert results[0].status=='success' and calls==[('PUT',f'/api/stacks/{STACK_ID}',{'primaryAssetId':B})]

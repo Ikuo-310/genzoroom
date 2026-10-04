@@ -24,7 +24,7 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
   };
   for (const group of groups) {
     const memberIds = group.members.map(asset => asset.id);
-    if (new Set(memberIds).size !== memberIds.length || memberIds.length < 2 || !memberIds.includes(group.coverAssetId)) throw new Error('Invalid draft membership');
+    if (new Set(memberIds).size !== memberIds.length || memberIds.length < 1 || !memberIds.includes(group.coverAssetId)) throw new Error('Invalid draft membership');
     for (const id of memberIds) {
       if (members.has(id)) throw new Error('Duplicate draft membership');
       members.add(id);
@@ -37,9 +37,12 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
       const snapshot = matches[0];
       if (!snapshot || snapshot.origin !== 'immich') throw new Error('Missing original Stack');
       if (memberIds.length === snapshot.originalMemberIds.length && snapshot.originalMemberIds.every(id => memberIds.includes(id)) && group.coverAssetId === snapshot.originalPrimaryAssetId) {
+        // An unrepaired singleton must remain visible after sending, so it is not completed as unchanged.
+        if (snapshot.originalMemberIds.length === 1) continue;
         unchanged.push(group.id); continue;
       }
     }
+    if (memberIds.length < 2) throw new Error('Invalid draft membership');
     operations.push({ operationId: allocateOperationId(group.id, group.id), type: group.origin === 'immich' ? 'update' : 'create',
       ...(group.origin === 'immich' ? { stackId: group.immichStackId } : {}), memberIds, primaryAssetId: group.coverAssetId });
   }

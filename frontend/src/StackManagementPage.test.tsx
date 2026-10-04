@@ -270,6 +270,48 @@ const existingMembers=[
  {...photos[1],id:'82345678-1234-4234-9234-123456789abc',filename:'hidden.png',format:'PNG'},
 ].map(asset=>({...asset,stackId:existingStackId,primaryAssetId:existingPrimary,stackAssetCount:3}));
 const existingStack={id:existingStackId,primaryAssetId:existingPrimary,assets:existingMembers};
+const singletonMember={...existingMembers[1],stackAssetCount:1};
+const singletonStack={...existingStack,assets:[singletonMember]};
+it.each(['en','ja'])('keeps the singleton warning and its localized description after an empty send: %s',async(language)=>{
+ await i18n.changeLanguage(language);api.resolve.mockResolvedValue([singletonStack]);
+ await mount('/stack',{selectedAssets:[singletonMember]});
+ const label=language==='ja'?'Immich側の異常STACK: 1枚':'Invalid Immich Stack: 1 asset';
+ expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
+ expect(host.querySelector('.stack-evidence.singleton-warning')?.getAttribute('title')).toBe(label);
+ expect(host.querySelector('.stack-evidence.singleton-warning')?.textContent).toContain(label);
+ expect(host.querySelectorAll('.stack-cover-badge')).toHaveLength(1);
+ await act(async()=>button(i18n.t('stackManagement.send')).click());
+ await act(async()=>button(i18n.t('workspace.historyContinue')).click());
+ expect(fetch).not.toHaveBeenCalled();expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
+});
+it('adds a member to a singleton, keeps the warning until repair succeeds, then completes it',async()=>{
+ api.resolve.mockResolvedValue([singletonStack]);
+ await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
+ await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ expect(host.querySelectorAll('.stack-singleton-warning .stack-photo')).toHaveLength(2);
+ expect(host.querySelector('.stack-evidence.singleton-warning')).not.toBeNull();
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 1 / Dissolve 0');
+ vi.mocked(fetch).mockImplementation(async(_url,init)=>{
+  const op=JSON.parse(init!.body as string).operations[0];
+  expect(op).toMatchObject({type:'update',stackId:existingStackId,memberIds:[existingPrimary,'x']});
+  return new Response(JSON.stringify({results:[{operationId:op.operationId,status:'success',stackId:existingStackId}]}));
+ });
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(host.querySelector('.stack-singleton-warning')).toBeNull();expect(fetch).toHaveBeenCalledOnce();
+});
+it('keeps both the singleton source warning and write failure evidence after a failed repair',async()=>{
+ api.resolve.mockResolvedValue([singletonStack]);
+ await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
+ await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ vi.mocked(fetch).mockImplementation(async(_url,init)=>{
+  const op=JSON.parse(init!.body as string).operations[0];
+  return new Response(JSON.stringify({results:[{operationId:op.operationId,status:'failed'}]}));
+ });
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ const title=host.querySelector('.stack-evidence.singleton-warning')?.getAttribute('title');
+ expect(title).toContain('Invalid Immich Stack: 1 asset');expect(title).toContain(i18n.t('stackManagement.sendFailure'));
+ expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
+});
 const secondStackId='92345678-1234-4234-9234-123456789abc';
 const secondPrimary='a2345678-1234-4234-9234-123456789abc';
 const secondMembers=[

@@ -57,7 +57,7 @@ def test_reuses_home_membership_validation(body):
     assert error.value.error_code == "unexpected_response"
 
 
-@pytest.mark.parametrize("mutation", ["unknown", "video", "missing_filename", "bad_date", "singleton"])
+@pytest.mark.parametrize("mutation", ["unknown", "video", "missing_filename", "bad_date", "empty"])
 def test_rejects_unknown_or_partial_editable_stacks(mutation):
     item = deepcopy(full_stack())
     if mutation == "unknown":
@@ -69,7 +69,27 @@ def test_rejects_unknown_or_partial_editable_stacks(mutation):
     elif mutation == "bad_date":
         item["assets"][1]["fileCreatedAt"] = None
     else:
-        item["assets"] = item["assets"][:1]
+        item["assets"] = []
+    with pytest.raises(ImmichRequestError):
+        resolve([item])
+
+
+def test_resolves_singleton_image_snapshot_and_refreshes_it():
+    item = full_stack(member_ids=IDS[:1])
+    resolved = resolve([item])[0]
+    assert len(resolved.assets) == 1
+    member = resolved.assets[0]
+    assert member.stackId == resolved.id == UUID(STACK_ID)
+    assert member.primaryAssetId == resolved.primaryAssetId == UUID(IDS[0])
+    assert member.stackAssetCount == 1
+    refreshed = asyncio.run(resolve_stacks("http://immich.example", "key", [], asset_ids=[UUID(IDS[0])],
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[item]))))
+    assert refreshed == [resolved]
+
+
+def test_rejects_singleton_video_snapshot():
+    item = full_stack(member_ids=IDS[:1])
+    item["assets"][0]["type"] = "VIDEO"
     with pytest.raises(ImmichRequestError):
         resolve([item])
 

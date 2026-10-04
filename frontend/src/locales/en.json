@@ -668,6 +668,7 @@
     "loadingImmich": "Loading Immich Stacks…",
     "immichFailure": "Immich Stack information could not be loaded. Detect again to retry.",
     "immichUnchanged": "Immich Stack",
+    "immichSingleton": "Invalid Immich Stack: 1 asset",
     "immichModified": "Immich Stack with unsaved changes",
     "cover": "COVER",
     "title": "Stack Management",

@@ -36,18 +36,29 @@ it('rejects malformed, missing, duplicated or inconsistent full memberships', as
   await expect(fetchSelectedImmichStacks(body === bad[bad.length-1] ? [stackId,other] : [stackId], new AbortController().signal)).rejects.toThrow('Unexpected');
  }
 });
-it('classifies singleton and omitted requested Stacks without exposing response bodies',async()=>{
- const singleton={...stack(),assets:[asset(id)]};
+it('resolves and refreshes a valid singleton but still rejects omitted requested Stacks',async()=>{
+ const singleton={...stack(),assets:[{...asset(id),stackAssetCount:1}]};
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify([singleton]))));
- await expect(fetchSelectedImmichStacks([stackId],new AbortController().signal)).rejects.toMatchObject({
-  code:'singleton_stack',details:{stackId,primaryAssetId:id,memberCount:1,memberIds:[id]},
- });
+ expect(await fetchSelectedImmichStacks([stackId],new AbortController().signal)).toEqual([singleton]);
+ expect(await refreshSelectedImmichStacks([id],new AbortController().signal)).toEqual([singleton]);
  vi.stubGlobal('fetch',vi.fn(async()=>new Response('[]')));
  await expect(fetchSelectedImmichStacks([stackId],new AbortController().signal)).rejects.toMatchObject({
   code:'requested_stack_missing',details:{missingStackIds:[stackId]},
  });
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify([{}]))));
  await expect(fetchSelectedImmichStacks([stackId],new AbortController().signal)).rejects.toMatchObject({code:'unexpected_stack_response'});
+});
+
+it('rejects empty or inconsistent singleton snapshots', async()=>{
+ const member={...asset(id),stackAssetCount:1};
+ for(const value of [
+  {...stack(),assets:[]}, {...stack(),assets:[{...member,stackAssetCount:2}]},
+  {...stack(),assets:[{...member,stackId:other}]}, {...stack(),assets:[{...member,primaryAssetId:other}]},
+  {...stack(),primaryAssetId:other,assets:[{...member,primaryAssetId:other}]},
+ ]) {
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify([value]))));
+  await expect(fetchSelectedImmichStacks([stackId],new AbortController().signal)).rejects.toMatchObject({code:'unexpected_stack_response'});
+ }
 });
 it('propagates backend failure instead of returning a partial success', async () => {
  vi.stubGlobal('fetch', vi.fn(async () => new Response('',{status:502})));

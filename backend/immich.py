@@ -620,8 +620,8 @@ async def resolve_stacks(
         result = []
         for stack_id in requested:
             stack = lookup[stack_id]
-            # Never discard video or malformed members and expose a partial editable Stack.
-            if len(stack["assets"]) < 2 or any(member.get("type") != "IMAGE" for member in stack["assets"]):
+            # Singleton snapshots can be repaired; never hide video or malformed members in a partial Stack.
+            if len(stack["assets"]) < 1 or any(member.get("type") != "IMAGE" for member in stack["assets"]):
                 raise ValueError
             assets = _search_assets({"assets": {"items": stack["assets"]}})
             primary_id = UUID(stack["primaryAssetId"])

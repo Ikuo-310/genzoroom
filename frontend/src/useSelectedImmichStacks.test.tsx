@@ -27,6 +27,14 @@ it('extracts unique Stack IDs for one request and skips non-Stack selections',as
  expect(current.loading).toBe(true);await act(async()=>pending.shift()!.resolve(stacks));expect(current.stacks).toEqual(stacks);
  await render(photos.map(({stackId: _s,primaryAssetId: _p,...asset})=>asset));expect(fetchStacks).toHaveBeenCalledOnce();expect(current.loading).toBe(false);
 });
+it('accepts singleton resolution and logs successful memberCount 1',async()=>{
+ frontendLogger.setLevel('debug');
+ const member={...photos[0],stackAssetCount:1};
+ const snapshot={id:stackId,primaryAssetId:member.id,assets:[member]};
+ await render([member]);await act(async()=>pending.shift()!.resolve([snapshot]));
+ expect(current.error).toBe(false);expect(current.stacks).toEqual([snapshot]);
+ expect(frontendLogger.getEntries().find(entry=>entry.event==='resolve.success')).toMatchObject({context:{memberCount:1,returnedStackCount:1}});
+});
 it('aborts superseded and unmounted requests and rejects late publications',async()=>{
  await render(photos);const old=pending.shift()!;
  await render([...photos]);expect(old.signal.aborted).toBe(true);

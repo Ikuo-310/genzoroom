@@ -584,6 +584,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-evidence.unavailable { background: var(--status-unavailable); color: var(--text-secondary); }
 .stack-evidence.mismatch { background: var(--status-mismatch); color: var(--status-warning-text); }
 .stack-evidence.error { background: var(--status-error); color: var(--status-text); }
+.stack-candidate-group.stack-singleton-warning { background: #351c20; border-color: #d75a69; }
+.stack-evidence.singleton-warning { background: #a51d2d; color: #fff; }
 .stack-cover-badge { position: absolute; left: 6px; bottom: 6px; padding: 2px 5px; border: 1px solid var(--cover-outline); border-radius: 3px; background: var(--bg-elevated); color: var(--accent); font-size: 0.65rem; font-weight: 600; }
 .stack-status { margin: 0 0 12px; color: var(--text-secondary); font-size: 0.85rem; }
 .stack-management-page .thumbnail-size-icon { width: 28px; height: 28px; padding: 5px; }

@@ -11,6 +11,14 @@ const selected=[stack.assets[1],asset('a','two.dng',true),asset('single','single
 const source=()=>mergeImmichStackSource(detectStackCandidates(selected),[stack],selected);
 const initial=()=>{const combined=source();return reduce(emptyStackDraft,{type:'initialize',source:combined.source,assets:combined.assets});};
 const groupId='draft:immich:stack';
+it('merges a singleton as an unmodified Immich source with its sole member as COVER',()=>{
+ const member={...stack.assets[0],primaryAssetId:stack.assets[0].id,stackAssetCount:1};
+ const snapshot={id:stack.id,primaryAssetId:member.id,assets:[member]};
+ const combined=mergeImmichStackSource(detectStackCandidates([member]),[snapshot],[member]);
+ const draft=reduce(emptyStackDraft,{type:'initialize',source:combined.source,assets:combined.assets});
+ expect(draft.groups[0]).toMatchObject({origin:'immich',members:[member],coverAssetId:member.id,originalMemberIds:[member.id],originalPrimaryAssetId:member.id,modified:false});
+ expect(draft.unmatched).toEqual([]);expect(draft.modified).toBe(false);
+});
 it('clears member and Cover differences on restoration, regardless of member order',()=>{
  const original=initial();
  let draft=reduce(original,{type:'purgeMember',groupId,assetId:'hidden-first'});

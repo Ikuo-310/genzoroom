@@ -161,12 +161,7 @@ export function validateImmichStacks(data: unknown, requestedIds?: readonly stri
     if (!isRecord(stack) || !isUuid(stack.id) || !isUuid(stack.primaryAssetId)
       || (requested !== null && !requested.has(stack.id.toLowerCase())) || stacks.has(stack.id.toLowerCase())
       || !Array.isArray(stack.assets)) throw new ImmichStacksError('unexpected_stack_response');
-    if (stack.assets.length === 1) {
-      const member = stack.assets[0];
-      throw new ImmichStacksError('singleton_stack', { stackId: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase(),
-        memberCount: 1, memberIds: isRecord(member) && isUuid(member.id) ? [member.id.toLowerCase()] : [] });
-    }
-    if (stack.assets.length < 2) throw new ImmichStacksError('unexpected_stack_response');
+    if (stack.assets.length < 1) throw new ImmichStacksError('unexpected_stack_response');
     stacks.add(stack.id.toLowerCase());
     for (const asset of stack.assets) {
       if (!isRecentAsset(asset) || !isUuid(asset.id) || members.has(asset.id.toLowerCase())

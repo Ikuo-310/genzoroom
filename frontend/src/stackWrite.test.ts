@@ -7,11 +7,44 @@ const asset=(id:string):RecentAsset=>({id,filename:id+'.jpg',format:'JPEG',is_ra
 const a=asset('a'),b=asset('b'),c=asset('c'),d=asset('d');
 const evidence={name:'unavailable',nameReason:'exact',time:'unavailable',camera:'unavailable',gps:'unavailable'} as const;
 const original:DraftStack={id:'old',origin:'immich',immichStackId:'stack',members:[a,b],coverAssetId:'a',originalMemberIds:['a','b'],originalPrimaryAssetId:'a',evidence};
+const singleton:DraftStack={...original,members:[a],originalMemberIds:['a']};
 const manual:DraftStack={id:'new',origin:'manual',members:[a,c],coverAssetId:'a',evidence};
 const initial=()=>reduce(emptyStackDraft,{type:'initialize',source:{groups:[original],unmatched:[c,d]},assets:[a,b,c,d]});
 const sources=(draft:ReturnType<typeof initial>)=>draft.sourceGroups!.filter(g=>!draft.completedSourceIds.has(g.id));
 const result=(operationId:string,status:StackWriteResult['status'],extra={})=>({operationId,status,...extra});
 afterEach(()=>vi.unstubAllGlobals());
+it('keeps an unchanged singleton outside write and completion while normal unchanged Stacks still complete',async()=>{
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[singleton],unmatched:[c]},assets:[a,c]});
+ const plan=buildStackWritePlan(draft.groups,[singleton]);
+ expect(plan).toEqual({operations:[],unchanged:[]});
+ const fetch=vi.fn();vi.stubGlobal('fetch',fetch);
+ const results=await sendStackWritePlan(plan.operations,new AbortController().signal);
+ expect(fetch).not.toHaveBeenCalled();
+ draft=reduce(draft,{type:'writeResults',plan,results});
+ expect(draft.groups).toHaveLength(1);expect(draft.completedSourceIds.size).toBe(0);expect(draft.modified).toBe(false);
+ expect(buildStackWritePlan([original],[original]).unchanged).toEqual(['old']);
+});
+it('repairs or purges singleton sources using existing update/delete completion',()=>{
+ for(const mode of ['add','dropUnmatched','purgeGroup'] as const) {
+  let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[singleton],unmatched:[c]},assets:[a,c]});
+  if(mode==='add') draft=reduce(reduce(draft,{type:'select',assetId:'c'}),{type:'add',targetGroupId:'old'});
+  else if(mode==='dropUnmatched') draft=reduce(draft,{type:'dropUnmatched',assetId:'c',targetGroupId:'old'});
+  else draft=reduce(draft,{type:'purgeGroup',groupId:'old'});
+  const plan=buildStackWritePlan(draft.groups,[singleton]);
+  expect(plan.operations[0]).toMatchObject({type:mode==='purgeGroup'?'delete':'update',stackId:'stack'});
+  if(mode!=='purgeGroup') {
+   expect(plan.operations[0].memberIds).toEqual(['a','c']);
+   expect(draft.groups[0]).toMatchObject({origin:'immich',originalMemberIds:['a'],modified:true});
+   const undone=reduce(draft,{type:'undo'});expect(undone.groups[0].members).toEqual([a]);
+  } else expect(draft.unmatched).toEqual([a,c]);
+  draft=reduce(draft,{type:'writeResults',plan,results:[result(plan.operations[0].operationId,'success')]});
+  expect(draft.groups).toEqual([]);expect(draft.completedSourceIds.has('old')).toBe(true);expect(draft.modified).toBe(false);
+ }
+});
+it('rejects modified singleton and local one-member drafts',()=>{
+ expect(()=>buildStackWritePlan([{...singleton,members:[c],coverAssetId:'c'}],[singleton])).toThrow('Invalid draft membership');
+ expect(()=>buildStackWritePlan([{...singleton,origin:'manual'}],[])).toThrow('Invalid draft membership');
+});
 it('classifies current sets and Cover, ignoring history, order and modified flag',()=>{
  expect(buildStackWritePlan([{...original,members:[b,a],modified:true}],[original])).toEqual({unchanged:['old'],operations:[]});
  for(const changed of [{...original,members:[a,b,c]},{...original,coverAssetId:'b'}]) expect(buildStackWritePlan([changed],[original]).operations[0].type).toBe('update');

@@ -222,7 +222,7 @@ export function StackManagementPage() {
       <section aria-labelledby="stack-candidates-heading">
         <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
         <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
-          key={group.id} className={`stack-candidate-group${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
+          key={group.id} className={`stack-candidate-group${group.origin === 'immich' && group.originalMemberIds.length === 1 ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
             if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
             if (canAcceptDrop(event, group.id)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(group.id); }
@@ -291,6 +291,12 @@ export function StackManagementPage() {
 function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
+  if (group.origin === 'immich' && group.originalMemberIds.length === 1) {
+    const failure = result && result.status !== 'success'
+      ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure') : null;
+    const description = [t('stackManagement.immichSingleton'), failure].filter(Boolean).join(' — ');
+    return <div className="stack-group-indicators"><span className="stack-evidence singleton-warning" title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;
+  }
   if (result && result.status !== 'success') {
     const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure');
     return <div className="stack-group-indicators"><span className="stack-evidence error" title={description}><span aria-hidden="true">{group.origin === 'immich' ? 'IMMICH' : group.origin === 'manual' || group.modified ? 'MANUAL' : 'STACK'}</span><span className="visually-hidden">{description}</span></span></div>;

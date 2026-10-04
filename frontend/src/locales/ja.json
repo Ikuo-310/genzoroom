@@ -666,6 +666,7 @@
     "loadingImmich": "ImmichのSTACK情報を取得中…",
     "immichFailure": "ImmichのSTACK情報を取得できませんでした。再検出してください。",
     "immichUnchanged": "ImmichのSTACK",
+    "immichSingleton": "Immich側の異常STACK: 1枚",
     "immichModified": "未送信の変更があるImmichのSTACK",
     "cover": "COVER",
     "title": "STACK管理",
