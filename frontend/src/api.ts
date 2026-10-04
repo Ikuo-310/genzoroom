@@ -10,6 +10,23 @@ function isUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
+export type ImmichStacksErrorCode = 'request_failed' | 'unexpected_stack_response' | 'singleton_stack'
+  | 'requested_stack_missing' | 'selected_member_missing' | 'unexpected_stack_refresh';
+export interface ImmichStacksErrorDetails {
+  stackId?: string;
+  primaryAssetId?: string;
+  memberCount?: number;
+  memberIds?: string[];
+  missingStackIds?: string[];
+  httpStatus?: number;
+}
+export class ImmichStacksError extends Error {
+  constructor(readonly code: ImmichStacksErrorCode, readonly details: ImmichStacksErrorDetails = {}, message = 'Unexpected stacks response') {
+    super(message);
+    this.name = 'ImmichStacksError';
+  }
+}
+
 export function isRecentAsset(value: unknown): value is RecentAsset {
   return isRecord(value) &&
     typeof value.id === 'string' &&
@@ -139,22 +156,31 @@ export async function fetchAssetDetail(assetId: string, signal: AbortSignal): Pr
 export function validateImmichStacks(data: unknown, requestedIds?: readonly string[]): ImmichStack[] {
   const requested = requestedIds ? new Set(requestedIds.map(id => id.toLowerCase())) : null;
   const stacks = new Set<string>(), members = new Set<string>();
-  if (!Array.isArray(data)) throw new Error('Unexpected stacks response');
+  if (!Array.isArray(data)) throw new ImmichStacksError('unexpected_stack_response');
   for (const stack of data) {
     if (!isRecord(stack) || !isUuid(stack.id) || !isUuid(stack.primaryAssetId)
       || (requested !== null && !requested.has(stack.id.toLowerCase())) || stacks.has(stack.id.toLowerCase())
-      || !Array.isArray(stack.assets) || stack.assets.length < 2) throw new Error('Unexpected stacks response');
+      || !Array.isArray(stack.assets)) throw new ImmichStacksError('unexpected_stack_response');
+    if (stack.assets.length === 1) {
+      const member = stack.assets[0];
+      throw new ImmichStacksError('singleton_stack', { stackId: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase(),
+        memberCount: 1, memberIds: isRecord(member) && isUuid(member.id) ? [member.id.toLowerCase()] : [] });
+    }
+    if (stack.assets.length < 2) throw new ImmichStacksError('unexpected_stack_response');
     stacks.add(stack.id.toLowerCase());
     for (const asset of stack.assets) {
       if (!isRecentAsset(asset) || !isUuid(asset.id) || members.has(asset.id.toLowerCase())
         || asset.stackId?.toLowerCase() !== stack.id.toLowerCase()
         || asset.primaryAssetId?.toLowerCase() !== stack.primaryAssetId.toLowerCase()
-        || asset.stackAssetCount !== stack.assets.length) throw new Error('Unexpected stacks response');
+        || asset.stackAssetCount !== stack.assets.length) throw new ImmichStacksError('unexpected_stack_response');
       members.add(asset.id.toLowerCase());
     }
-    if (!stack.assets.some((asset: RecentAsset) => asset.id.toLowerCase() === (stack.primaryAssetId as string).toLowerCase())) throw new Error('Unexpected stacks response');
+    if (!stack.assets.some((asset: RecentAsset) => asset.id.toLowerCase() === (stack.primaryAssetId as string).toLowerCase())) throw new ImmichStacksError('unexpected_stack_response');
   }
-  if (requested !== null && stacks.size !== requested.size) throw new Error('Unexpected stacks response');
+  if (requested !== null) {
+    const missingStackIds = [...requested].filter(id => !stacks.has(id));
+    if (missingStackIds.length) throw new ImmichStacksError('requested_stack_missing', { missingStackIds });
+  }
   // UUID casing must not leave a valid primary unmatched by case-sensitive UI IDs.
   return (data as ImmichStack[]).map(stack => ({ ...stack, id: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase(),
     assets: stack.assets.map(asset => ({ ...asset, id: asset.id.toLowerCase(), stackId: stack.id.toLowerCase(), primaryAssetId: stack.primaryAssetId.toLowerCase() })) }));
@@ -166,8 +192,11 @@ export async function fetchSelectedImmichStacks(stackIds: readonly string[], sig
   if (!ids.length) return [];
   const response = await fetch('/api/stacks/resolve', { method: 'POST', signal, cache: 'no-store',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackIds: ids }) });
-  if (!response.ok) throw new Error('Stacks request failed');
-  return validateImmichStacks(await response.json(), ids);
+  if (!response.ok) throw new ImmichStacksError('request_failed', { httpStatus: response.status }, 'Stacks request failed');
+  let data: unknown;
+  try { data = await response.json(); }
+  catch { throw new ImmichStacksError('unexpected_stack_response'); }
+  return validateImmichStacks(data, ids);
 }
 
 export async function refreshSelectedImmichStacks(assetIds: readonly string[], signal: AbortSignal): Promise<ImmichStack[]> {
@@ -179,18 +208,21 @@ export async function refreshSelectedImmichStacks(assetIds: readonly string[], s
     const chunk = uniqueAssets.slice(start, start + 1000);
     const response = await fetch('/api/stacks/refresh', { method: 'POST', signal, cache: 'no-store',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds: chunk }) });
-    if (!response.ok) throw new Error('Stacks refresh failed');
-    const stacks = validateImmichStacks(await response.json());
+    if (!response.ok) throw new ImmichStacksError('request_failed', { httpStatus: response.status }, 'Stacks refresh failed');
+    let data: unknown;
+    try { data = await response.json(); }
+    catch { throw new ImmichStacksError('unexpected_stack_response'); }
+    const stacks = validateImmichStacks(data);
     for (const stack of stacks) {
       const previous = byId.get(stack.id);
       // A Stack selected on both sides of a chunk boundary must resolve to the same full snapshot.
-      if (previous && stackSignature(previous) !== stackSignature(stack)) throw new Error('Unexpected stacks refresh');
+      if (previous && stackSignature(previous) !== stackSignature(stack)) throw new ImmichStacksError('unexpected_stack_refresh', {}, 'Unexpected stacks refresh');
       if (!previous) byId.set(stack.id, stack);
     }
   }
   const stacks = validateImmichStacks([...byId.values()]);
   const ids = new Set(assetIds.map(id => id.toLowerCase()));
-  if (stacks.some(stack => !stack.assets.some(asset => ids.has(asset.id)))) throw new Error('Unexpected stacks refresh');
+  if (stacks.some(stack => !stack.assets.some(asset => ids.has(asset.id)))) throw new ImmichStacksError('unexpected_stack_refresh', {}, 'Unexpected stacks refresh');
   return stacks;
 }
 

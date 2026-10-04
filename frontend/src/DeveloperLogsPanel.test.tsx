@@ -62,6 +62,19 @@ it('controls levels independently and retains existing entries after level chang
   expect(host.textContent).toContain(i18n.t('developer.logs.levelUpdateFailed'));
   await select('frontend', 'off'); expect(frontendLogger.getEntries().some(entry => entry.event === 'apply.completed')).toBe(true);
 });
+it('shows the same diagnostic level order and labels for Frontend and Backend', async () => {
+  await mount();
+  const expected = [['off', 'OFF'], ['info', 'INFO'], ['warn', 'WARN'], ['error', 'ERROR'], ['debug', 'ALL (DEBUG)']];
+  for (const source of ['frontend', 'backend']) {
+    const options = [...card(source).querySelectorAll<HTMLOptionElement>('select option')].map(option => [option.value, option.textContent]);
+    expect(options).toEqual(expected);
+  }
+  expect(card('frontend').querySelector<HTMLOptionElement>('select option:last-child')?.value).toBe('debug');
+  await select('frontend', 'debug');
+  expect(frontendLogger.getLevel()).toBe('debug');
+  await select('backend', 'debug');
+  expect(level).toBe('debug');
+});
 it('shows source selection, all technical fields and escaped text without live announcements', async () => {
   frontendLogger.setLevel('info'); feEntry();
   await mount();

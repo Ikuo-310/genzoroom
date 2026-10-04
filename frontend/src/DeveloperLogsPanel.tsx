@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createFrontendLogsReport, exportFrontendLogsReport, frontendLogger, type LogLevel, type LogBufferStats } from './frontendLogging';
 import { clearBackendLogs, createAllLogsReport, formatLogTimestamp, getBackendLogLevel, getBackendLogsReport,
-  DeveloperLogsError, LOG_LEVELS, mergeLogEntries, setBackendLogLevel, type BackendLogEntry } from './developerLogs';
+  DeveloperLogsError, mergeLogEntries, setBackendLogLevel, type BackendLogEntry } from './developerLogs';
 import { downloadJsonReport } from './jsonReportDownload';
 
 type Scope = 'frontend' | 'backend' | 'all';
 type BackendAction = 'load' | 'refresh' | 'level' | 'clear' | 'export';
+const LOG_LEVEL_OPTIONS: readonly { value: LogLevel; label: string }[] = [
+  { value: 'off', label: 'OFF' }, { value: 'info', label: 'INFO' }, { value: 'warn', label: 'WARN' },
+  { value: 'error', label: 'ERROR' }, { value: 'debug', label: 'ALL (DEBUG)' },
+];
 export function DeveloperLogs() {
   const { t } = useTranslation();
   const [frontendLevel, setFrontendLevel] = useState(frontendLogger.getLevel);
@@ -138,7 +142,7 @@ export function DeveloperLogs() {
             disabled={source === 'backend' && (busy !== null || backendLevel === null)}
             onChange={event => source === 'frontend' ? changeFrontendLevel(event.target.value as LogLevel) : changeBackendLevel(event.target.value as LogLevel)}>
             {source === 'backend' && backendLevel === null && <option value="">{t('developer.notAvailable')}</option>}
-            {LOG_LEVELS.map(level => <option key={level} value={level}>{level.toUpperCase()}</option>)}
+            {LOG_LEVEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         <div className="developer-actions">
