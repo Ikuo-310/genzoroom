@@ -573,7 +573,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-group-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px; padding: 2px 0 7px; font-size: 0.7rem; }
 .stack-group-indicators { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .stack-photo-wrapper { position: relative; min-width: 0; }
-.stack-photo-dragging { opacity: 0.55; }
+.stack-photo-dragging { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stack-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stack-unmatched-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--selection); }
 .stack-management-page .stack-icon-button { width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 1rem; }
