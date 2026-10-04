@@ -71,18 +71,16 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
     # Membership comes from the list even if search metadata is stale.
     items[-1]["stack"] = {"id": STACK_ID, "primaryAssetId": IDS[0]}
     result = fetch(kind, items, [stack(), stack(SECOND_STACK_ID, IDS[3], [IDS[3]])])
-    assert len(result) == 5
-    for item in result[:3]:
-        assert item["stackId"] == STACK_ID
-        assert item["primaryAssetId"] == IDS[0]
-        assert item["stackAssetCount"] == 3
-    assert result[0]["id"] == result[0]["primaryAssetId"]
-    assert result[3]["stackId"] == SECOND_STACK_ID
-    assert result[3]["primaryAssetId"] == IDS[3]
-    assert result[3]["stackAssetCount"] == 1
-    assert result[4]["stackId"] is None
-    assert result[4]["primaryAssetId"] is None
-    assert result[4]["stackAssetCount"] is None
+    assert [item["id"] for item in result] == [IDS[0], IDS[3], IDS[4]]
+    assert result[0]["stackId"] == STACK_ID
+    assert result[0]["primaryAssetId"] == IDS[0]
+    assert result[0]["stackAssetCount"] == 3
+    assert result[1]["stackId"] == SECOND_STACK_ID
+    assert result[1]["primaryAssetId"] == IDS[3]
+    assert result[1]["stackAssetCount"] == 1
+    assert result[2]["stackId"] is None
+    assert result[2]["primaryAssetId"] is None
+    assert result[2]["stackAssetCount"] is None
     assert result[0]["format"] == "JPEG" and not result[0]["is_raw"]
     assert all(a["format"] == "DNG" and a["is_raw"] for a in result[1:])
     assert "assets" not in result[0]
@@ -97,7 +95,7 @@ def test_successful_empty_stack_list_returns_null_metadata(kind, items):
 
 @pytest.mark.parametrize("kind", ["album", "calendar", "favorites"])
 def test_fetches_stacks_once_after_all_search_pages(kind):
-    result = fetch(kind, [asset(IDS[1])], [stack()], pages=2)
+    result = fetch(kind, [asset(IDS[0])], [stack()], pages=2)
     assert len(result) == 2
     assert all(a["stackId"] == STACK_ID and a["stackAssetCount"] == 3 for a in result)
 
@@ -109,7 +107,7 @@ MALFORMED = [
     [stack() | {"assets": None}], [stack() | {"assets": {}}],
     [stack() | {"assets": ["bad"]}], [stack() | {"assets": [{}]}],
     [stack() | {"assets": [{"id": "bad"}]}], [stack() | {"assets": [{"id": 123}]}],
-    [stack() | {"assets": []}], [stack(primary_id=IDS[4])],
+    [stack() | {"assets": []}],
     [stack(), stack(SECOND_STACK_ID)], [stack(), stack()],
     [stack(member_ids=[IDS[0], IDS[0]])],
 ]
@@ -132,16 +130,26 @@ def test_malformed_stack_entries_are_skipped_for_home(kind, body):
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_home_skips_incomplete_stack_and_keeps_valid_stack_metadata(kind):
+def test_home_hides_remaining_member_when_stack_primary_is_missing(kind):
     valid = stack()
     incomplete = stack(SECOND_STACK_ID, IDS[3], [IDS[3]])
     incomplete["primaryAssetId"] = IDS[4]
     result = fetch(kind, [asset(i) for i in IDS[:4]], [valid, incomplete])
 
-    assert all(item["stackId"] == STACK_ID and item["stackAssetCount"] == 3 for item in result[:3])
-    assert result[3]["stackId"] is None
-    assert result[3]["primaryAssetId"] is None
-    assert result[3]["stackAssetCount"] is None
+    assert [item["id"] for item in result] == [IDS[0]]
+    assert result[0]["stackId"] == STACK_ID and result[0]["stackAssetCount"] == 3
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_home_accepts_missing_primary_snapshot_but_hides_its_remaining_child(kind):
+    missing_child = str(UUID(int=20))
+    missing_primary = stack(SECOND_STACK_ID, IDS[4], [missing_child])
+    items = [asset(IDS[0]), asset(IDS[1]), asset(IDS[2]), asset(missing_child), asset(IDS[6])]
+    result = fetch(kind, items, [stack(), missing_primary])
+
+    assert [item["id"] for item in result] == [IDS[0], IDS[6]]
+    assert result[0]["stackId"] == STACK_ID
+    assert result[1]["stackId"] is None
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -152,10 +160,11 @@ def test_home_skips_all_stacks_with_ambiguous_member_and_keeps_unrelated_stack(k
     result = fetch(kind, [asset(i) for i in IDS[:6]], [stack(), overlapping, unrelated])
 
     assert all(result[index]["stackId"] is None for index in (0, 1, 2, 3))
+    assert len(result) == 5
+    assert result[4]["id"] == IDS[4]
     assert result[4]["stackId"] == unrelated_id
     assert result[4]["primaryAssetId"] == IDS[4]
     assert result[4]["stackAssetCount"] == 2
-    assert result[5]["stackId"] == unrelated_id
 
 
 @pytest.mark.parametrize("kind", KINDS)

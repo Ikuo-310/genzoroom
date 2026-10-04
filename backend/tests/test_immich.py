@@ -239,6 +239,48 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(result[0].filename, "photo-1.jpg")
         self.assertEqual(result[-1].filename, "photo-250.jpg")
 
+    def test_recent_paginates_after_removing_stack_children_until_limit_is_filled(self):
+        primary_id = str(UUID(int=900))
+        child_ids = [str(UUID(int=index)) for index in range(1, 51)]
+        visible_ids = [str(UUID(int=index)) for index in range(100, 150)]
+        search_requests = []
+
+        def search_item(asset_id):
+            return {"id": asset_id, "type": "IMAGE", "originalFileName": f"{asset_id}.jpg",
+                    "fileCreatedAt": "2026-09-01T12:00:00Z"}
+
+        def handler(request):
+            if request.url.path == "/api/stacks":
+                return httpx.Response(200, json=[{
+                    "id": str(UUID(int=901)), "primaryAssetId": primary_id,
+                    "assets": [{"id": primary_id}, *[{"id": asset_id} for asset_id in child_ids]],
+                }])
+            body = json.loads(request.content)
+            search_requests.append(body)
+            if len(search_requests) == 1:
+                return httpx.Response(200, json={"assets": {
+                    "items": [search_item(asset_id) for asset_id in child_ids], "nextCursor": "page-2",
+                }})
+            return httpx.Response(200, json={"assets": {
+                "items": [search_item(asset_id) for asset_id in visible_ids], "nextCursor": None,
+            }})
+
+        result = asyncio.run(get_recent_assets(
+            IMMICH_URL, API_KEY, limit=50, transport=httpx.MockTransport(handler),
+        ))
+
+        self.assertEqual([str(item.id) for item in result], visible_ids)
+        self.assertEqual(len(search_requests), 2)
+        for request_body in search_requests:
+            self.assertEqual(request_body["filter"], {
+                "type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "trashedAt": {"eq": None},
+            })
+            self.assertEqual(request_body["orderBy"], {"field": "fileCreatedAt", "direction": "desc"})
+            self.assertEqual(request_body["size"], 50)
+            self.assertNotIn("withStacked", request_body)
+        self.assertNotIn("cursor", search_requests[0])
+        self.assertEqual(search_requests[1]["cursor"], "page-2")
+
     def test_rejects_invalid_limits_before_requesting_immich(self):
         for limit in (49, 51, 0, 501, 1000, True):
             with self.subTest(limit=limit):

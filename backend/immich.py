@@ -503,11 +503,9 @@ async def get_recent_assets(
     except Exception:
         pass
     try:
-        if diagnostics_enabled:
-            search_body = response.json()
-            assets = _search_assets(search_body)
-        else:
-            assets = _search_assets(response.json())
+        search_body = response.json()
+        assets = _search_assets(search_body)
+        next_cursor = _recent_next_cursor(search_body)
     except (KeyError, TypeError, ValueError):
         _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError(
@@ -515,7 +513,49 @@ async def get_recent_assets(
             "Immich returned an unexpected response.",
         ) from None
 
-    result = await _with_asset_stacks(url, key, assets[:limit], transport=transport)
+    stacks = await _get_asset_stacks(url, key, transport=transport, strict=False)
+    result = _attach_home_stack_metadata(assets, stacks)[:limit]
+    if next_cursor is not None and len(result) < limit:
+        seen_cursors = {next_cursor}
+        try:
+            async with httpx.AsyncClient(
+                timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+            ) as client:
+                while next_cursor is not None and len(result) < limit:
+                    request_body: dict[str, object] = {
+                        "filter": {
+                            "type": {"eq": "IMAGE"},
+                            "visibility": {"eq": "timeline"},
+                            "trashedAt": {"eq": None},
+                        },
+                        "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
+                        "size": limit,
+                        "cursor": next_cursor,
+                    }
+                    page_response = await _immich_request(
+                        client, "POST", url, "/search/metadata",
+                        headers={"x-api-key": key, "Accept": "application/json"}, json=request_body,
+                    )
+                    if page_response.status_code != 200:
+                        raise _request_error(page_response)
+                    try:
+                        page_body = page_response.json()
+                        page_assets = _search_assets(page_body)
+                        next_cursor = _recent_next_cursor(page_body)
+                        if next_cursor is not None and next_cursor in seen_cursors:
+                            raise TypeError
+                    except (KeyError, TypeError, ValueError):
+                        _log_response_failure(page_response, "unexpected_response")
+                        raise ImmichRequestError(
+                            "unexpected_response", "Immich returned an unexpected response.",
+                        ) from None
+                    if next_cursor is not None:
+                        seen_cursors.add(next_cursor)
+                    result.extend(_attach_home_stack_metadata(page_assets, stacks)[:limit - len(result)])
+        except (httpx.InvalidURL, httpx.RequestError) as error:
+            raise ImmichRequestError(
+                "unreachable", "The Immich server could not be reached.",
+            ) from error
     if diagnostics_enabled:
         # Independent probes keep a failure in one diagnostic path from skipping the others.
         try:
@@ -723,6 +763,18 @@ def _search_assets(body: object) -> list[RecentAsset]:
     return assets
 
 
+def _recent_next_cursor(body: object) -> str | None:
+    if not isinstance(body, Mapping) or not isinstance(body.get("assets"), Mapping):
+        raise TypeError
+    items = body["assets"].get("items")
+    if not isinstance(items, list):
+        raise TypeError
+    cursor = body["assets"].get("nextCursor")
+    if cursor is not None and (not isinstance(cursor, str) or not cursor or not items):
+        raise TypeError
+    return cursor
+
+
 async def _get_asset_stacks(
     url: str, key: str,
     *, transport: httpx.AsyncBaseTransport | None = None, batch_id: str | None = None,
@@ -794,7 +846,7 @@ def _valid_home_stack_entries(body: list[object]) -> list[Mapping]:
                 if member_id in members:
                     raise ValueError
                 members.add(member_id)
-            if primary_id not in members:
+            if not members:
                 raise ValueError
             candidates.append((stack, stack_id, members))
         except (KeyError, TypeError, ValueError):
@@ -821,6 +873,10 @@ async def _with_asset_stacks(
 ) -> list[RecentAsset]:
     # Home remains available when Immich exposes an incomplete Stack snapshot; editing keeps strict validation.
     stacks = await _get_asset_stacks(url, key, transport=transport, strict=False)
+    return _attach_home_stack_metadata(assets, stacks)
+
+
+def _attach_home_stack_metadata(assets: list[RecentAsset], stacks: list[Mapping]) -> list[RecentAsset]:
     lookup = {
         UUID(member["id"]): (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(stack["assets"]))
         for stack in stacks for member in stack["assets"]
@@ -832,7 +888,8 @@ async def _with_asset_stacks(
             asset.stackId = asset.primaryAssetId = asset.stackAssetCount = None
         else:
             asset.stackId, asset.primaryAssetId, asset.stackAssetCount = stack_info
-    return assets
+    # A missing primary can leave only Stack children in search results; those are never Home cards.
+    return [asset for asset in assets if asset.stackId is None or asset.id == asset.primaryAssetId]
 
 
 async def resolve_stacks(

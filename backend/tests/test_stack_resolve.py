@@ -57,6 +57,13 @@ def test_reuses_home_membership_validation(body):
     assert error.value.error_code == "unexpected_response"
 
 
+def test_stack_management_keeps_rejecting_missing_primary_member():
+    malformed = stack(primary_id=IDS[4])
+    with pytest.raises(ImmichRequestError) as error:
+        resolve([malformed])
+    assert error.value.error_code == "unexpected_response"
+
+
 @pytest.mark.parametrize("mutation", ["unknown", "video", "missing_filename", "bad_date", "empty"])
 def test_rejects_unknown_or_partial_editable_stacks(mutation):
     item = deepcopy(full_stack())
