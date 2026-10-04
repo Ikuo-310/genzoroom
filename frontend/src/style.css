@@ -574,7 +574,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-group-indicators { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .stack-photo-wrapper { position: relative; min-width: 0; }
 .stack-photo-dragging { outline: 2px solid var(--accent); outline-offset: 1px; }
-.stack-drag-preview { position: fixed; z-index: 10000; margin: 0; padding: 0; opacity: 1; filter: none; box-shadow: none; border: 0; pointer-events: none; user-select: none; }
+.stack-drag-preview { position: fixed; z-index: 10000; margin: 0; padding: 0; opacity: 0.88; filter: none; box-shadow: none; border: 0; pointer-events: none; user-select: none; }
 .stack-native-drag-image { position: fixed; left: -10000px; top: -10000px; display: block; width: 1px; height: 1px; margin: 0; padding: 0; opacity: 0; pointer-events: none; }
 .stack-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stack-unmatched-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--selection); }

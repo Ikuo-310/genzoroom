@@ -804,9 +804,10 @@ it('suppresses native drag ghost and follows the pointer with a thumbnail-sized 
  await mount('/stack',{selectedAssets:[...photos,...singles]});
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
  const sourceImage=source.querySelector<HTMLImageElement>('.stack-thumbnail img')!;
- vi.spyOn(sourceImage,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,180,120));
+ const getBounds=vi.spyOn(sourceImage,'getBoundingClientRect').mockReturnValue(new DOMRect(20,30,180,120));
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
- await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer,undefined,{clientX:100,clientY:80})));
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer,undefined,{clientX:110,clientY:90})));
+ expect(getBounds).toHaveBeenCalled();
  expect(setDragImage).toHaveBeenCalledOnce();
  const [nativeImage,offsetX,offsetY]=setDragImage.mock.calls[0] as [HTMLDivElement,number,number];
  expect(nativeImage.className).toBe('stack-native-drag-image');expect(nativeImage.isConnected).toBe(true);
@@ -815,17 +816,32 @@ it('suppresses native drag ghost and follows the pointer with a thumbnail-sized 
  expect(preview.tagName).toBe('IMG');expect(preview.isConnected).toBe(true);expect(preview.src).toBe(sourceImage.src);
  expect(preview.textContent).toBe('');expect(preview.children).toHaveLength(0);
  expect(preview.style.width).toBe('180px');expect(preview.style.height).toBe('120px');
- expect(preview.style.objectFit).toBe('contain');expect(preview.style.opacity).toBe('1');expect(preview.style.filter).toBe('none');
+ expect(preview.style.objectFit).toBe('contain');expect(preview.style.opacity).toBe('0.88');expect(preview.style.filter).toBe('none');
  expect(preview.style.boxShadow).toBe('none');expect(preview.style.border).toBe('0px');
- expect(preview.style.left).toBe('112px');expect(preview.style.top).toBe('92px');
+ expect(preview.style.left).toBe('20px');expect(preview.style.top).toBe('30px');
  const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
  await act(async()=>target.dispatchEvent(dragEvent('dragover',transfer,undefined,{clientX:200,clientY:150})));
- expect(preview.style.left).toBe('212px');expect(preview.style.top).toBe('162px');
+ expect(preview.style.left).toBe('110px');expect(preview.style.top).toBe('90px');
  expect(document.body.querySelector('.stack-drag-preview')).toBe(preview);
  expect(setDragImage).toHaveBeenCalledOnce();
  expect(frontendLogger.getEntries().find(entry=>entry.event==='dragstart')?.context).toMatchObject({customPreviewCreated:true,nativeGhostSuppressed:true});
  await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
  expect(preview.isConnected).toBe(false);expect(nativeImage.isConnected).toBe(false);
+});
+it('preserves a lower-right thumbnail grab point while the preview follows the pointer',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const sourceImage=source.querySelector<HTMLImageElement>('.stack-thumbnail img')!;
+ vi.spyOn(sourceImage,'getBoundingClientRect').mockReturnValue(new DOMRect(40,50,180,120));
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ Object.assign(transfer,{setDragImage:vi.fn()});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer,undefined,{clientX:215,clientY:165})));
+ const preview=document.body.querySelector<HTMLImageElement>('.stack-drag-preview')!;
+ expect(preview.style.left).toBe('40px');expect(preview.style.top).toBe('50px');
+ const main=host.querySelector<HTMLElement>('.stack-management-page')!;
+ await act(async()=>main.dispatchEvent(dragEvent('dragover',transfer,undefined,{clientX:300,clientY:280})));
+ expect(preview.style.left).toBe('125px');expect(preview.style.top).toBe('165px');
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
 });
 it('continues internal D&D when native ghost suppression throws',async()=>{
  frontendLogger.setLevel('debug');

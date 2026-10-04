@@ -70,6 +70,7 @@ export function StackManagementPage() {
   const dragPayloadForEndLog = useRef<StackDragPayload | null>(null);
   const dragPreviewRef = useRef<HTMLImageElement | null>(null);
   const nativeDragImageRef = useRef<HTMLDivElement | null>(null);
+  const dragPreviewGrabOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const dragoverLogged = useRef(new Map<string, string>());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
@@ -81,14 +82,16 @@ export function StackManagementPage() {
     removeDragElement(dragPreviewRef.current);
     removeDragElement(nativeDragImageRef.current);
     dragPreviewRef.current = null; nativeDragImageRef.current = null;
+    dragPreviewGrabOffsetRef.current = null;
   };
   const moveDragPreview = (clientX: number, clientY: number) => {
     const preview = dragPreviewRef.current;
-    if (!preview) return;
+    const grabOffset = dragPreviewGrabOffsetRef.current;
+    if (!preview || !grabOffset) return;
     const x = Number.isFinite(clientX) ? clientX : 0;
     const y = Number.isFinite(clientY) ? clientY : 0;
-    preview.style.left = `${x + 12}px`;
-    preview.style.top = `${y + 12}px`;
+    preview.style.left = `${x - grabOffset.x}px`;
+    preview.style.top = `${y - grabOffset.y}px`;
   };
   useLayoutEffect(() => {
     if (currentGeneration.current === sourceGeneration) return;
@@ -266,16 +269,24 @@ export function StackManagementPage() {
       const rect = sourceImage.getBoundingClientRect();
       const width = Math.max(1, Math.round(rect.width));
       const height = Math.max(1, Math.round(rect.height));
+      const pointerX = Number.isFinite(event.clientX) ? event.clientX : rect.left;
+      const pointerY = Number.isFinite(event.clientY) ? event.clientY : rect.top;
+      const rawGrabX = pointerX - rect.left;
+      const rawGrabY = pointerY - rect.top;
+      dragPreviewGrabOffsetRef.current = {
+        x: Math.min(width, Math.max(0, Number.isFinite(rawGrabX) ? rawGrabX : 0)),
+        y: Math.min(height, Math.max(0, Number.isFinite(rawGrabY) ? rawGrabY : 0)),
+      };
       const preview = sourceImage.cloneNode(false) as HTMLImageElement;
       preview.removeAttribute('class');
       preview.removeAttribute('style');
       preview.draggable = false;
       preview.loading = 'eager';
       preview.className = 'stack-drag-preview';
-      Object.assign(preview.style, { width: `${width}px`, height: `${height}px`, objectFit: 'contain', opacity: '1', filter: 'none', boxShadow: 'none', border: '0' });
+      Object.assign(preview.style, { width: `${width}px`, height: `${height}px`, objectFit: 'contain', opacity: '0.88', filter: 'none', boxShadow: 'none', border: '0' });
       document.body.appendChild(preview);
       dragPreviewRef.current = preview;
-      moveDragPreview(event.clientX, event.clientY);
+      moveDragPreview(pointerX, pointerY);
       customPreviewCreated = true;
     } catch {
       removeDragElement(dragPreviewRef.current);
