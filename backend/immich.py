@@ -3,7 +3,6 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
-import json
 import logging
 from pathlib import PurePath
 from typing import Literal
@@ -233,33 +232,6 @@ def classify_image_format(filename: str) -> tuple[str, bool]:
     return image_format, image_format in RAW_FORMATS
 
 
-def _observation_key_chunks(values: Mapping) -> list[list[str]]:
-    names = []
-    for key in values:
-        if not isinstance(key, str):
-            continue
-        name = key
-        units = len(name.encode("utf-16-le", errors="surrogatepass")) // 2
-        if units > 256:
-            name = name[:255] + "…"
-        names.append(name)
-    names.sort()
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    encoded_size = 0
-    for name in names:
-        item_size = len(json.dumps(name, ensure_ascii=False).encode("utf-8")) + 1
-        # Logger limits count each array item and cap serialized bytes independently.
-        if current and (len(current) >= 20 or encoded_size + item_size > 3000):
-            chunks.append(current)
-            current, encoded_size = [], 0
-        current.append(name)
-        encoded_size += item_size
-    if current or not chunks:
-        chunks.append(current)
-    return chunks
-
-
 def _log_asset_detail_observed(body: Mapping, asset_id: UUID, image_format: str, is_raw: bool) -> None:
     try:
         if backend_logger.get_level() != "debug":
@@ -267,36 +239,24 @@ def _log_asset_detail_observed(body: Mapping, asset_id: UUID, image_format: str,
         exif_value = body.get("exifInfo")
         exif = exif_value if isinstance(exif_value, Mapping) else {}
         visibility_value = body.get("visibility")
-        asset_id_text = str(asset_id)
-        backend_logger.add(level="debug", component="immich.asset", event="detail.observed", context={
-            "assetId": asset_id_text,
+        context = {
+            "assetId": str(asset_id),
             "type": body.get("type") if body.get("type") == "IMAGE" else None,
             "visibility": visibility_value if isinstance(visibility_value, str)
             and visibility_value in {"timeline", "archive", "hidden", "locked"} else None,
+            "hasExifInfo": isinstance(exif_value, Mapping),
             "exifInfoPresent": "exifInfo" in body,
             "exifInfoFieldCount": len(exif),
-            "topLevelFieldCount": len(body),
+            "exifInfoKeys": sorted(key for key in exif if isinstance(key, str)),
+            "topLevelKeys": sorted(key for key in body if isinstance(key, str)),
+            "deletedAtPresent": "deletedAt" in body,
+            "trashedAtPresent": "trashedAt" in body,
+            "stackIdPresent": "stackId" in body,
+            "thumbhashPresent": "thumbhash" in body,
             "format": image_format,
             "isRaw": is_raw,
-        })
-        presence_fields = ("deletedAt", "trashedAt", "stackId", "duplicateId", "livePhotoVideoId", "thumbhash",
-                           "exifInfo", "visibility", "isArchived", "isFavorite", "isOffline", "hasMetadata")
-        backend_logger.add(level="debug", component="immich.asset", event="detail.presence", context={
-            "assetId": asset_id_text, **{f"{field}Present": field in body for field in presence_fields},
-        })
-        top_level_chunks = _observation_key_chunks(body)
-        for index, keys in enumerate(top_level_chunks):
-            backend_logger.add(level="debug", component="immich.asset", event="detail.keys", context={
-                "assetId": asset_id_text, "keyCount": len(body), "chunkIndex": index,
-                "chunkCount": len(top_level_chunks), "keys": keys,
-            })
-        if isinstance(exif_value, Mapping):
-            exif_chunks = _observation_key_chunks(exif_value)
-            for index, keys in enumerate(exif_chunks):
-                backend_logger.add(level="debug", component="immich.asset", event="detail.exif-keys", context={
-                    "assetId": asset_id_text, "keyCount": len(exif_value), "chunkIndex": index,
-                    "chunkCount": len(exif_chunks), "keys": keys,
-                })
+        }
+        backend_logger.add(level="debug", component="immich.asset", event="detail.observed", context=context)
     except Exception:
         # Diagnostic metadata must not change whether an otherwise valid asset can be opened.
         pass
