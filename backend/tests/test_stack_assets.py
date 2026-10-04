@@ -44,8 +44,11 @@ def fetch(kind, items, stacks, *, pages=1):
         assert request.method == "POST"
         assert request.url.path == "/api/search/metadata"
         search_count += 1
+        assert json.loads(request.content)["withStacked"] is False
         if search_count > 1:
-            assert json.loads(request.content)["cursor"] == "next"
+            body = json.loads(request.content)
+            assert body["cursor"] == "next"
+            assert body["withStacked"] is False
         return httpx.Response(200, json={"assets": {"items": items,
                               "nextCursor": "next" if search_count < pages else None}})
 
@@ -86,6 +89,19 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
     assert result[0]["format"] == "JPEG" and not result[0]["is_raw"]
     assert all(a["format"] == "DNG" and a["is_raw"] for a in result[1:])
     assert "assets" not in result[0]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_home_cover_and_non_stack_asset_keep_expected_metadata(kind):
+    result = fetch(kind, [asset(IDS[0]), asset(IDS[3])],
+                   [stack(member_ids=[IDS[0], IDS[1]])])
+    assert len(result) == 2
+    assert result[0]["stackId"] == STACK_ID
+    assert result[0]["primaryAssetId"] == IDS[0]
+    assert result[0]["stackAssetCount"] == 2
+    assert result[1]["stackId"] is None
+    assert result[1]["primaryAssetId"] is None
+    assert result[1]["stackAssetCount"] is None
 
 
 @pytest.mark.parametrize("kind", KINDS)

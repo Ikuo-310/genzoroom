@@ -486,6 +486,7 @@ async def get_recent_assets(
                     },
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                     "size": limit,
+                    "withStacked": False,
                 },
             )
     except (httpx.InvalidURL, httpx.RequestError) as error:
@@ -876,7 +877,9 @@ async def _search_home_assets(
 ) -> list[RecentAsset]:
     url, key = _require_configuration(immich_url, api_key)
     home_filter = {**search_filter, "trashedAt": {"eq": None}}
-    assets = await _search_all_assets(url, key, home_filter, order_field, transport=transport)
+    assets = await _search_all_assets(
+        url, key, home_filter, order_field, transport=transport, with_stacked=False,
+    )
     # Join once after pagination, rather than fetching stacks for each page or asset.
     return await _with_asset_stacks(url, key, assets, transport=transport)
 
@@ -973,7 +976,7 @@ async def _search_all_assets(
     api_key: str | None,
     search_filter: dict[str, object],
     order_field: str,
-    *, transport: httpx.AsyncBaseTransport | None = None,
+    *, transport: httpx.AsyncBaseTransport | None = None, with_stacked: bool | None = None,
 ) -> list[RecentAsset]:
     url, key = _require_configuration(immich_url, api_key)
     assets: list[RecentAsset] = []
@@ -989,6 +992,8 @@ async def _search_all_assets(
                     "orderBy": {"field": order_field, "direction": "desc"},
                     "size": ALBUM_ASSET_PAGE_SIZE,
                 }
+                if with_stacked is not None:
+                    request_body["withStacked"] = with_stacked
                 if cursor is not None:
                     request_body["cursor"] = cursor
                 response = await _immich_request(

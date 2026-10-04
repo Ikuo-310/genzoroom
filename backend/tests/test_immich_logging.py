@@ -137,8 +137,8 @@ def test_debug_recent_compares_with_stacked_and_observes_bounded_raw_detail(logg
     assert len(result) == 25
     assert result[0].filename == "photo-0.dng" and result[0].stackId is None
     assert len(search_bodies) == 4
-    assert "withStacked" not in search_bodies[0]
     assert "withStacked" not in search_bodies[1]
+    assert search_bodies[0]["withStacked"] is False
     assert search_bodies[2]["withStacked"] is False
     assert search_bodies[3]["withStacked"] is True
     assert all(body["filter"]["trashedAt"] == {"eq": None} for body in search_bodies)

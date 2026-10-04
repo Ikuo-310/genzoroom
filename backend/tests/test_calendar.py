@@ -106,7 +106,9 @@ class CalendarTests(unittest.TestCase):
                 return httpx.Response(200, json={"series": [{"date": "2026-07-15", "count": 3},
                     {"date": "2026-07-16", "count": 1}, {"date": "2026-07-17", "count": 1}]})
             if request.url.path == "/api/search/metadata":
-                self.assertEqual(json.loads(request.content)["filter"], {
+                metadata_request = json.loads(request.content)
+                self.assertNotIn("withStacked", metadata_request)
+                self.assertEqual(metadata_request["filter"], {
                     "type": {"eq": "IMAGE"}, "or": [{"id": {"eq": ids[index]}} for index in (1, 2, 3)]})
                 return page([asset(index) | {"originalFileName": f"image-{index}.jpg"} for index in (3, 2, 1)])
             self.assertEqual(request.url.path, "/api/timeline/bucket")
@@ -182,6 +184,7 @@ class CalendarTests(unittest.TestCase):
                 self.assertEqual(request.url.path, "/api/search/metadata")
                 self.assertEqual(request.headers["x-api-key"], "secret")
                 body = json.loads(request.content)
+                self.assertNotIn("withStacked", body)
                 self.assertEqual(body["filter"], {"type": {"eq": "IMAGE"},
                     "or": [{"id": {"eq": ids[index]}} for index, name in enumerate(filenames) if name != "video.mp4"]})
                 return page([asset(index) | {"originalFileName": name}
@@ -204,7 +207,9 @@ class CalendarTests(unittest.TestCase):
                 if request.url.path == "/api/timeline/bucket":
                     return bucket(ids, [True] * 205, ["2026-07-15T00:00:00Z"] * 205, [0] * 205)
                 self.assertEqual(request.url.path, "/api/search/metadata")
-                requested = [branch["id"]["eq"] for branch in json.loads(request.content)["filter"]["or"]]
+                metadata_request = json.loads(request.content)
+                self.assertNotIn("withStacked", metadata_request)
+                requested = [branch["id"]["eq"] for branch in metadata_request["filter"]["or"]]
                 sizes.append(len(requested))
                 return page([asset(ids.index(asset_id)) | {"originalFileName":
                     "photo.png" if first_is_non_raw and asset_id == ids[0] else "photo.dng"} for asset_id in requested])
@@ -351,6 +356,7 @@ class CalendarTests(unittest.TestCase):
                     "gte": "2026-09-30T00:00:00.000Z", "lt": "2026-10-01T00:00:00.000Z"},
                     "trashedAt": {"eq": None}},
                 "orderBy": {"field": "localDateTime", "direction": "desc"}, "size": 1000,
+                "withStacked": False,
             })
             return page([asset(0), asset(1, "VIDEO")])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
@@ -367,6 +373,7 @@ class CalendarTests(unittest.TestCase):
         def handler(request):
             body = json.loads(request.content)
             bodies.append(body)
+            self.assertIs(body["withStacked"], False)
             return page([asset(index) for index in range(1000)], "page-2") if len(bodies) == 1 else page(
                 [asset(index) for index in range(1000, 1558)])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
