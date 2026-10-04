@@ -58,6 +58,7 @@ export function StackManagementPage() {
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
+  const draggingRef = useRef<StackDragPayload | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
@@ -68,9 +69,9 @@ export function StackManagementPage() {
     sendRequest.current?.controller.abort();
     sendRequest.current = null;
     setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
-    setRedetecting(false); setDragging(null); setDropTarget(null);
+    setRedetecting(false); draggingRef.current = null; setDragging(null); setDropTarget(null);
   }, [sourceGeneration, dispatch]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); }, []);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); draggingRef.current = null; }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -103,8 +104,8 @@ export function StackManagementPage() {
   const payloadFrom = (transfer: DataTransfer) => {
     const payload = readStackDragPayload(transfer);
     if (payload) return payload;
-    // Some browsers hide drag data before drop; only an empty transfer may use the active in-page drag fallback.
-    try { return isStackDrag(transfer) && transfer.getData(STACK_DRAG_TYPE) === '' ? dragging : null; }
+    // Chrome can hide custom data during dragover; the ref is synchronous while React state awaits rendering.
+    try { return isStackDrag(transfer) && transfer.getData(STACK_DRAG_TYPE) === '' ? draggingRef.current : null; }
     catch { return null; }
   };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
@@ -112,11 +113,13 @@ export function StackManagementPage() {
     try {
       event.dataTransfer.setData(STACK_DRAG_TYPE, JSON.stringify(payload));
       event.dataTransfer.effectAllowed = 'move';
+      draggingRef.current = payload;
       setDragging(payload);
       return true;
     } catch { event.preventDefault(); return false; }
   };
-  const handleDragEnd = () => { setDragging(null); setDropTarget(null); };
+  const clearDrag = () => { draggingRef.current = null; setDragging(null); setDropTarget(null); };
+  const handleDragEnd = () => clearDrag();
   const canAcceptDrop = (event: React.DragEvent, targetId: string | null) => {
     if (!canEdit || !isStackDrag(event.dataTransfer)) return false;
     const payload = payloadFrom(event.dataTransfer);
@@ -134,7 +137,7 @@ export function StackManagementPage() {
     if (targetId === null) dispatch({ type: 'purgeMember', groupId: payload.sourceGroupId!, assetId: payload.assetId });
     else if (payload.sourceGroupId === null) dispatch({ type: 'dropUnmatched', assetId: payload.assetId, targetGroupId: targetId });
     else dispatch({ type: 'moveMember', assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, targetGroupId: targetId });
-    setDragging(null); setDropTarget(null);
+    clearDrag();
   };
   const addSelected = useCallback((targetGroupId?: string) => {
     if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
@@ -275,7 +278,7 @@ export function StackManagementPage() {
             const payload = payloadFrom(event.dataTransfer)!;
             event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move';
             dispatch({ type: 'createFromUnmatchedDrop', draggedAssetId: payload.assetId, targetAssetId: asset.id });
-            setDragging(null); setDropTarget(null);
+            clearDrag();
           }}
           dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === null}
           onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: null })} onDragEnd={handleDragEnd}
