@@ -236,11 +236,6 @@ export function StackManagementPage() {
         openPostDragWindow(session, session.droppedAt);
       }
       const defaultPreventedBefore = dragEvent.defaultPrevented;
-      let preventedByGlobalHandler = false;
-      if (listenerScope === 'window' && dragEvent.cancelable && !defaultPreventedBefore) {
-        dragEvent.preventDefault();
-        preventedByGlobalHandler = dragEvent.defaultPrevented;
-      }
       if (frontendLogger.getLevel() !== 'debug') return;
       const observed = observeTransfer(dragEvent.dataTransfer);
       if (observed.filesLength > 0) return;
@@ -251,14 +246,13 @@ export function StackManagementPage() {
         assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, listenerScope,
         dragSessionId: session?.dragSessionId ?? null,
         eventPhase: dragEvent.eventPhase, defaultPrevented: dragEvent.defaultPrevented, defaultPreventedBefore, cancelable: dragEvent.cancelable,
-        preventedByGlobalHandler,
         dataTransferTypes: observed.dataTransferTypes, filesLength: observed.filesLength,
         hasCustomMime: observed.hasCustomMime, refPayloadPresent: true,
         statePayloadPresent: draggingStateRef.current !== null, payloadSource: observed.payloadSource, targetKind, targetTagName,
       };
       if (event.type === 'dragover') {
         const key = JSON.stringify([listenerScope, targetKind, targetTagName, context.defaultPreventedBefore,
-          context.defaultPrevented, preventedByGlobalHandler, context.hasCustomMime, context.payloadSource,
+          context.defaultPrevented, context.hasCustomMime, context.payloadSource,
           context.refPayloadPresent, context.statePayloadPresent, context.eventPhase]);
         if (globalDragoverLogged.current.has(key) || globalDragoverLogged.current.size >= 100) return;
         globalDragoverLogged.current.add(key);
