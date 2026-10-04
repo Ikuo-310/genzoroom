@@ -2,6 +2,15 @@ import { expect, it } from 'vitest';
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE } from './stackDragDrop';
 const members=[{id:'a'},{id:'b'}], other=[{id:'c'},{id:'d'}], outside=[{id:'e'}];
 const groups=[{id:'one',members},{id:'two',members:other}], unmatched=outside;
+it('rejects singleton drop destinations and member drags while normal destinations remain eligible',()=>{
+ const singleton={id:'singleton',members:[{id:'s'}],origin:'immich',originalMemberIds:['s']};
+ const all=[...groups,singleton];
+ expect(canDropStackPayload({assetId:'e',sourceGroupId:null},'singleton',all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'a',sourceGroupId:'one'},'singleton',all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'s',sourceGroupId:'singleton'},'one',all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'s',sourceGroupId:'singleton'},null,all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'e',sourceGroupId:null},'one',all,unmatched)).toBe(true);
+});
 const transfer=(types:string[],data:string,files:File[]=[])=>(
  ({types,files,getData:(type:string)=>type===STACK_DRAG_TYPE?data:''}) as unknown as DataTransfer
 );

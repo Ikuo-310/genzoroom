@@ -37,10 +37,11 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
       const snapshot = matches[0];
       if (!snapshot || snapshot.origin !== 'immich') throw new Error('Missing original Stack');
       if (memberIds.length === snapshot.originalMemberIds.length && snapshot.originalMemberIds.every(id => memberIds.includes(id)) && group.coverAssetId === snapshot.originalPrimaryAssetId) {
-        // An unrepaired singleton must remain visible after sending, so it is not completed as unchanged.
+        // A dissolve-only singleton must remain visible after sending, so it is not completed as unchanged.
         if (snapshot.originalMemberIds.length === 1) continue;
         unchanged.push(group.id); continue;
       }
+      if (snapshot.originalMemberIds.length === 1) throw new Error('Singleton Stack is dissolve-only');
     }
     if (memberIds.length < 2) throw new Error('Invalid draft membership');
     operations.push({ operationId: allocateOperationId(group.id, group.id), type: group.origin === 'immich' ? 'update' : 'create',

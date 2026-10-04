@@ -24,25 +24,19 @@ it('keeps an unchanged singleton outside write and completion while normal uncha
  expect(draft.groups).toHaveLength(1);expect(draft.completedSourceIds.size).toBe(0);expect(draft.modified).toBe(false);
  expect(buildStackWritePlan([original],[original]).unchanged).toEqual(['old']);
 });
-it('repairs or purges singleton sources using existing update/delete completion',()=>{
- for(const mode of ['add','dropUnmatched','purgeGroup'] as const) {
+it('purges singleton sources using existing delete completion and Undo',()=>{
   let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[singleton],unmatched:[c]},assets:[a,c]});
-  if(mode==='add') draft=reduce(reduce(draft,{type:'select',assetId:'c'}),{type:'add',targetGroupId:'old'});
-  else if(mode==='dropUnmatched') draft=reduce(draft,{type:'dropUnmatched',assetId:'c',targetGroupId:'old'});
-  else draft=reduce(draft,{type:'purgeGroup',groupId:'old'});
+  draft=reduce(draft,{type:'purgeGroup',groupId:'old'});
   const plan=buildStackWritePlan(draft.groups,[singleton]);
-  expect(plan.operations[0]).toMatchObject({type:mode==='purgeGroup'?'delete':'update',stackId:'stack'});
-  if(mode!=='purgeGroup') {
-   expect(plan.operations[0].memberIds).toEqual(['a','c']);
-   expect(draft.groups[0]).toMatchObject({origin:'immich',originalMemberIds:['a'],modified:true});
-   const undone=reduce(draft,{type:'undo'});expect(undone.groups[0].members).toEqual([a]);
-  } else expect(draft.unmatched).toEqual([a,c]);
+  expect(plan.operations).toEqual([{operationId:'delete:stack',type:'delete',stackId:'stack'}]);
+  expect(draft.unmatched).toEqual([a,c]);
+  const undone=reduce(draft,{type:'undo'});expect(undone.groups[0].members).toEqual([a]);
   draft=reduce(draft,{type:'writeResults',plan,results:[result(plan.operations[0].operationId,'success')]});
   expect(draft.groups).toEqual([]);expect(draft.completedSourceIds.has('old')).toBe(true);expect(draft.modified).toBe(false);
- }
 });
 it('rejects modified singleton and local one-member drafts',()=>{
- expect(()=>buildStackWritePlan([{...singleton,members:[c],coverAssetId:'c'}],[singleton])).toThrow('Invalid draft membership');
+ expect(()=>buildStackWritePlan([{...singleton,members:[c],coverAssetId:'c'}],[singleton])).toThrow('Singleton Stack is dissolve-only');
+ expect(()=>buildStackWritePlan([{...singleton,members:[a,c]}],[singleton])).toThrow('Singleton Stack is dissolve-only');
  expect(()=>buildStackWritePlan([{...singleton,origin:'manual'}],[])).toThrow('Invalid draft membership');
 });
 it('classifies current sets and Cover, ignoring history, order and modified flag',()=>{

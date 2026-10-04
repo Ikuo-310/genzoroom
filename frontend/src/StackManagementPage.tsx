@@ -15,7 +15,7 @@ import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
 import { useEditableStackDraft } from './useEditableStackDraft';
 import { useSelectedImmichStacks } from './useSelectedImmichStacks';
-import { mergeImmichStackSource } from './immichStackDraft';
+import { isSingletonImmichStack, mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
@@ -93,12 +93,12 @@ export function StackManagementPage() {
     // Unchanged local completion waits for the same generation check as remote results.
     dispatch({ type: 'writeResults', plan, results });
     setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
-      : results.some(result => result.status !== 'success') ? 'sendFailure' : 'sendSuccess');
+      : results.some(result => result.status !== 'success') ? 'sendFailure' : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
     sendRequest.current = null; setSending(false);
   };
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
   const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
-  const canAdd = canEdit && addTargetStackId !== null && selectedUnmatched.length > 0;
+  const canAdd = canEdit && draft.groups.some(group => group.id === addTargetStackId && !isSingletonImmichStack(group)) && selectedUnmatched.length > 0;
   const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
   const payloadFrom = (transfer: DataTransfer) => {
     const payload = readStackDragPayload(transfer);
@@ -206,6 +206,7 @@ export function StackManagementPage() {
       {plan.operations.length > 0 && <span className="stack-pending-summary" role="status">
         {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}
       </span>}
+      {sendStatus && <span className="stack-send-status" role="status">{t(`stackManagement.${sendStatus}`)}</span>}
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
@@ -213,7 +214,6 @@ export function StackManagementPage() {
       </div>
     </div>
     <div ref={contentRef} className="stack-content" aria-busy={busy || sending}>
-      {sendStatus && <p className="stack-status" role="status">{t(`stackManagement.${sendStatus}`)}</p>}
       {oversized && <p className="stack-status" role="status">{t('stackManagement.sendLimit')}</p>}
       {immich.loading && <p className="stack-status" role="status">{t('stackManagement.loadingImmich')}</p>}
       {immich.error && <p className="stack-status" role="alert">{t('stackManagement.immichFailure')}</p>}
@@ -222,7 +222,7 @@ export function StackManagementPage() {
       <section aria-labelledby="stack-candidates-heading">
         <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
         <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
-          key={group.id} className={`stack-candidate-group${group.origin === 'immich' && group.originalMemberIds.length === 1 ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
+          key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
             if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
             if (canAcceptDrop(event, group.id)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(group.id); }
@@ -238,7 +238,7 @@ export function StackManagementPage() {
               title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
               onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
             <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} />
-            <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
+            <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit || isSingletonImmichStack(group)} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
               onClick={() => selectedUnmatched.length
                 ? addSelected(group.id)
@@ -246,11 +246,11 @@ export function StackManagementPage() {
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
-            selected={false} member cover={asset.id === group.coverAssetId} disabled={!canEdit}
+            selected={false} member cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)}
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
             onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: group.id })} onDragEnd={handleDragEnd}
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
-            onPurge={() => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
+            onPurge={isSingletonImmichStack(group) ? undefined : () => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
       </section>
       <section aria-labelledby="stack-unmatched-heading" className={`${displayed.unmatched.length ? '' : 'stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
@@ -291,7 +291,7 @@ export function StackManagementPage() {
 function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
-  if (group.origin === 'immich' && group.originalMemberIds.length === 1) {
+  if (isSingletonImmichStack(group)) {
     const failure = result && result.status !== 'success'
       ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure') : null;
     const description = [t('stackManagement.immichSingleton'), failure].filter(Boolean).join(' — ');

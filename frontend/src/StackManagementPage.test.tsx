@@ -283,34 +283,49 @@ it.each(['en','ja'])('keeps the singleton warning and its localized description 
  await act(async()=>button(i18n.t('stackManagement.send')).click());
  await act(async()=>button(i18n.t('workspace.historyContinue')).click());
  expect(fetch).not.toHaveBeenCalled();expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
+ expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(language==='ja'?'変更はありません。':'No changes to apply.');
+ expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-content > [role="status"]')).toBeNull();
 });
-it('adds a member to a singleton, keeps the warning until repair succeeds, then completes it',async()=>{
+it('disables singleton Add and COVER, rejects drops, and permits Purge followed by DELETE',async()=>{
  api.resolve.mockResolvedValue([singletonStack]);
  await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
+ const group=host.querySelector<HTMLElement>('.stack-singleton-warning')!;
+ expect(group.querySelector<HTMLButtonElement>('.stack-set-target')!.disabled).toBe(true);
+ expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.disabled).toBe(true);
+ expect(group.querySelector('.stack-purge-member')).toBeNull();
  await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
- expect(host.querySelectorAll('.stack-singleton-warning .stack-photo')).toHaveLength(2);
+ expect(button(i18n.t('stackManagement.add')).disabled).toBe(true);expect(group.classList.contains('stack-add-target')).toBe(false);
+ const transfer={types:['application/x-genzoroom-stack-photo+json'],files:[],getData:()=>JSON.stringify({assetId:'x',sourceGroupId:null})};
+ const over=new Event('dragover',{bubbles:true,cancelable:true});Object.defineProperty(over,'dataTransfer',{value:transfer});
+ await act(async()=>group.dispatchEvent(over));expect(over.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
+ const drop=new Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});
+ await act(async()=>group.dispatchEvent(drop));
+ expect(host.querySelectorAll('.stack-singleton-warning .stack-photo')).toHaveLength(1);
  expect(host.querySelector('.stack-evidence.singleton-warning')).not.toBeNull();
- expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 1 / Dissolve 0');
+ await click('.stack-purge-group');expect(host.querySelector('.stack-singleton-warning')).toBeNull();
+ expect(host.querySelector('.stack-pending-summary')?.textContent).toBe('Pending: New 0 / Update 0 / Dissolve 1');
  vi.mocked(fetch).mockImplementation(async(_url,init)=>{
   const op=JSON.parse(init!.body as string).operations[0];
-  expect(op).toMatchObject({type:'update',stackId:existingStackId,memberIds:[existingPrimary,'x']});
+  expect(op).toEqual({operationId:`delete:${existingStackId}`,type:'delete',stackId:existingStackId});
   return new Response(JSON.stringify({results:[{operationId:op.operationId,status:'success',stackId:existingStackId}]}));
  });
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelector('.stack-singleton-warning')).toBeNull();expect(fetch).toHaveBeenCalledOnce();
+ expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe('Applied to Immich.');
+ expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
 });
-it('keeps both the singleton source warning and write failure evidence after a failed repair',async()=>{
+it('shows a failed singleton DELETE result in the toolbar',async()=>{
  api.resolve.mockResolvedValue([singletonStack]);
  await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
- await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ await click('.stack-purge-group');
  vi.mocked(fetch).mockImplementation(async(_url,init)=>{
   const op=JSON.parse(init!.body as string).operations[0];
   return new Response(JSON.stringify({results:[{operationId:op.operationId,status:'failed'}]}));
  });
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- const title=host.querySelector('.stack-evidence.singleton-warning')?.getAttribute('title');
- expect(title).toContain('Invalid Immich Stack: 1 asset');expect(title).toContain(i18n.t('stackManagement.sendFailure'));
- expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
+ expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailure'));
+ expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
 });
 const secondStackId='92345678-1234-4234-9234-123456789abc';
 const secondPrimary='a2345678-1234-4234-9234-123456789abc';
@@ -630,6 +645,8 @@ it('retains unknown work, labels outcome uncertainty and requires redetection be
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
  expect(host.querySelector('.stack-evidence.error')?.getAttribute('title')).toContain('outcomes could not be confirmed');
+ expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendUnknown'));
+ expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
  expect(button('Send to Immich').disabled).toBe(true);expect(fetch).toHaveBeenCalledOnce();
  await act(async()=>button('Detect again').click());
  if(button('Continue')) await act(async()=>button('Continue').click());
@@ -654,7 +671,7 @@ it('applies a partial batch by removing only successes and marking failed work',
  });vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
- expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-content > [role="status"]')?.textContent).toContain('could not be applied');
+ expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toContain('could not be applied');
 });
 it('aborts the frontend wait on Home navigation without resending the write',async()=>{
  let signal:AbortSignal|undefined;

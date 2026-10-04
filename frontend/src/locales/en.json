@@ -641,6 +641,7 @@
     "sending": "Applying Stacks to Immich…",
     "pendingSummary": "Pending: New {{create}} / Update {{update}} / Dissolve {{delete}}",
     "sendSuccess": "Applied to Immich.",
+    "sendNoChanges": "No changes to apply.",
     "sendConfirm": "Apply Stack changes to Immich? New {{create}}, update {{update}}, dissolve {{delete}}.",
     "sendUnknown": "Some Stack outcomes could not be confirmed. Detect again before sending.",
     "sendFailure": "Some Stacks could not be applied to Immich. Send again to retry.",

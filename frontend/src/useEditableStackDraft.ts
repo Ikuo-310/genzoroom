@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from 'react';
 import type { RecentAsset } from './assets';
-import { isStackDraftModified, reconcileImmichLineage } from './immichStackDraft';
+import { isSingletonImmichStack, isStackDraftModified, reconcileImmichLineage } from './immichStackDraft';
 import { chooseStackCover, type DraftStack, type StackDetection } from './stackCandidateDetection';
 import type { StackWritePlan, StackWriteResult } from './stackWrite';
 
@@ -46,7 +46,7 @@ function normalize(state: EditableStackDraft): EditableStackDraft {
   const unmatched = [...state.unmatched].sort((a, b) => (state.order.get(a.id) ?? Infinity) - (state.order.get(b.id) ?? Infinity));
   const ids = new Set(unmatched.map(asset => asset.id));
   return { ...state, groups, modified: isStackDraftModified(groups, source), unmatched, selectedIds: new Set([...state.selectedIds].filter(id => ids.has(id))),
-    addTargetStackId: state.groups.some(group => group.id === state.addTargetStackId) ? state.addTargetStackId : null };
+    addTargetStackId: groups.some(group => group.id === state.addTargetStackId && !isSingletonImmichStack(group)) ? state.addTargetStackId : null };
 }
 
 function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditAction): EditableStackDraft {
@@ -99,13 +99,13 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
     return { ...state, selectedIds };
   }
   if (action.type === 'target') {
-    if (!state.groups.some(group => group.id === action.groupId)) return state;
+    if (!state.groups.some(group => group.id === action.groupId && !isSingletonImmichStack(group))) return state;
     return { ...state, addTargetStackId: state.addTargetStackId === action.groupId ? null : action.groupId };
   }
   if (action.type === 'dropUnmatched') {
     const asset = state.unmatched.find(current => current.id === action.assetId);
     const target = state.groups.find(current => current.id === action.targetGroupId);
-    if (!asset || !target || state.groups.some(group => group.members.some(member => member.id === asset.id))
+    if (!asset || !target || isSingletonImmichStack(target) || state.groups.some(group => group.members.some(member => member.id === asset.id))
       || target.members.some(member => member.id === asset.id)) return state;
     return normalize({ ...state, modified: true, unmatched: state.unmatched.filter(current => current.id !== asset.id),
       selectedIds: new Set([...state.selectedIds].filter(id => id !== asset.id)), addTargetStackId: null,
@@ -130,7 +130,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
     const source = state.groups.find(group => group.id === action.sourceGroupId);
     const target = state.groups.find(group => group.id === action.targetGroupId);
     const asset = source?.members.find(member => member.id === action.assetId);
-    if (!source || !target || !asset || target.members.some(member => member.id === asset.id)
+    if (!source || !target || !asset || isSingletonImmichStack(source) || isSingletonImmichStack(target) || target.members.some(member => member.id === asset.id)
       || state.groups.some(group => group !== source && group.members.some(member => member.id === asset.id))
       || state.unmatched.some(member => member.id === asset.id)) return state;
     const remaining = source.members.filter(member => member.id !== asset.id);
@@ -147,7 +147,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
   if (action.type === 'add' || action.type === 'create') {
     const members = state.unmatched.filter(asset => state.selectedIds.has(asset.id));
     const targetGroupId = action.type === 'add' ? action.targetGroupId ?? state.addTargetStackId : null;
-    if (action.type === 'create' ? members.length < 2 : !members.length || !state.groups.some(group => group.id === targetGroupId)) return state;
+    if (action.type === 'create' ? members.length < 2 : !members.length || !state.groups.some(group => group.id === targetGroupId && !isSingletonImmichStack(group))) return state;
     const ids = new Set(members.map(asset => asset.id));
     const group: DraftStack = { id: `draft:manual:${state.manualCounter + 1}`, origin: 'manual', members,
       coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
@@ -160,6 +160,8 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
   if (!group) return state;
   if (action.type === 'purgeGroup') return normalize({ ...state, modified: true,
     groups: state.groups.filter(current => current !== group), unmatched: [...state.unmatched, ...group.members] });
+  // Invalid singleton sources are dissolve-only, including actions dispatched outside the UI.
+  if (isSingletonImmichStack(group)) return state;
   if (!group.members.some(member => member.id === action.assetId)) return state;
   if (action.type === 'cover') {
     if (group.coverAssetId === action.assetId) return state;

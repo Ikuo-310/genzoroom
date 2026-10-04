@@ -1,6 +1,10 @@
 import type { ImmichStack, RecentAsset } from './assets';
 import type { DraftStack, StackDetection } from './stackCandidateDetection';
 
+export function isSingletonImmichStack(group: { origin?: string; originalMemberIds?: readonly string[] }) {
+  return group.origin === 'immich' && group.originalMemberIds?.length === 1;
+}
+
 function sameMemberIds(current: readonly string[], original: readonly string[]) {
   const ids = new Set(current);
   return ids.size === current.length && new Set(original).size === original.length

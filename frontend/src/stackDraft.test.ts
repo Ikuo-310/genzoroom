@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
 import { chooseStackCover, detectStackCandidates } from './stackCandidateDetection';
 import { buildStackWritePlan } from './stackWrite';
+import type { DraftStack } from './stackCandidateDetection';
 import { emptyStackDraft, stackDraftReducer as reduce, type StackDraftAction } from './useEditableStackDraft';
 
 const assets: RecentAsset[] = [
@@ -14,6 +15,21 @@ const initial = () => reduce(emptyStackDraft, { type: 'initialize', source, asse
 const actions = (...list: StackDraftAction[]) => list.reduce(reduce, initial());
 const ids = (list: readonly RecentAsset[]) => list.map(asset => asset.id);
 const first = source.groups[0].id, second = source.groups[1].id;
+
+it('allows only group Purge for singleton sources, guarding all dispatched editing actions',()=>{
+ const singleton:DraftStack={...source.groups[0],id:'singleton',origin:'immich',immichStackId:'stack',members:[assets[0]],coverAssetId:'a',originalMemberIds:['a'],originalPrimaryAssetId:'a'};
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[singleton,source.groups[1]],unmatched:[assets[1]]},assets});
+ draft=reduce(draft,{type:'select',assetId:'x'});
+ const edits:StackDraftAction[]=[{type:'target',groupId:'singleton'},{type:'add',targetGroupId:'singleton'},
+  {type:'dropUnmatched',assetId:'x',targetGroupId:'singleton'},
+  {type:'moveMember',assetId:'d',sourceGroupId:second,targetGroupId:'singleton'},
+  {type:'moveMember',assetId:'a',sourceGroupId:'singleton',targetGroupId:second},
+  {type:'cover',groupId:'singleton',assetId:'a'},{type:'purgeMember',groupId:'singleton',assetId:'a'}];
+ for(const action of edits) expect(reduce(draft,action)).toBe(draft);
+ const purged=reduce(draft,{type:'purgeGroup',groupId:'singleton'});
+ expect(purged.groups.map(group=>group.id)).toEqual([second]);expect(purged.unmatched.map(asset=>asset.id)).toEqual(['a','x']);
+ expect(reduce(purged,{type:'undo'}).groups[0]).toEqual({...singleton,modified:false});
+});
 
 it('copies the source without mutating its groups, members or evidence', () => {
   const draft = initial();

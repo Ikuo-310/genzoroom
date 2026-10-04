@@ -1,3 +1,5 @@
+import { isSingletonImmichStack } from './immichStackDraft';
+
 export const STACK_DRAG_TYPE = 'application/x-genzoroom-stack-photo+json';
 export type StackDragPayload = { assetId: string; sourceGroupId: string | null };
 
@@ -25,13 +27,14 @@ export function readStackDragPayload(transfer: Pick<DataTransfer, 'types' | 'fil
 }
 
 export function canDropStackPayload(payload: StackDragPayload, targetGroupId: string | null,
-  groups: readonly { id: string; members: readonly { id: string }[] }[], unmatched: readonly { id: string }[]) {
+  groups: readonly { id: string; members: readonly { id: string }[]; origin?: string; originalMemberIds?: readonly string[] }[], unmatched: readonly { id: string }[]) {
+  if (payload.sourceGroupId !== null && groups.some(group => group.id === payload.sourceGroupId && isSingletonImmichStack(group))) return false;
   if (targetGroupId === null) {
     return payload.sourceGroupId !== null
       && groups.some(group => group.id === payload.sourceGroupId && group.members.some(member => member.id === payload.assetId));
   }
   const target = groups.find(group => group.id === targetGroupId);
-  if (!target || target.members.some(member => member.id === payload.assetId)) return false;
+  if (!target || isSingletonImmichStack(target) || target.members.some(member => member.id === payload.assetId)) return false;
   if (payload.sourceGroupId === null) {
     return unmatched.some(asset => asset.id === payload.assetId)
       && !groups.some(group => group.members.some(member => member.id === payload.assetId));
