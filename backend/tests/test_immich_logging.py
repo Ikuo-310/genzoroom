@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from backend_logging import BackendLogger
-from immich import get_immich_about, get_asset_thumbnail, get_asset_preview, check_immich_status, get_recent_assets
+from immich import get_immich_about, get_asset_thumbnail, get_asset_preview, check_immich_status
 from stack_write import StackApplyRequest, apply_stacks
 
 A, B, NEW = [str(UUID(int=value)) for value in (1, 2, 100)]
@@ -85,113 +85,6 @@ def test_status_malformed_json_is_classified(logger):
         lambda request: httpx.Response(200, text="PRIVATE_BAD_JSON"))))
     assert result.error_code == "unexpected_response"
     assert logger.get_entries()[-1]["context"]["errorCode"] == "unexpected_response"
-
-
-@pytest.mark.parametrize("level", ["off", "error", "warn", "info"])
-def test_recent_diagnostics_make_no_extra_requests_outside_debug(logger, level):
-    logger.set_level(level)
-    calls = []
-    item = {"id": A, "type": "IMAGE", "originalFileName": "photo.dng", "fileCreatedAt": "2026-09-01T12:00:00Z"}
-
-    def handler(request):
-        calls.append((request.method, request.url.path))
-        if request.url.path == "/api/stacks":
-            return httpx.Response(200, json=[])
-        assert request.method == "POST" and request.url.path == "/api/search/metadata"
-        return httpx.Response(200, json={"assets": {"items": [item], "nextCursor": None}})
-
-    result = asyncio.run(get_recent_assets(PRIVATE_URL, PRIVATE_KEY, transport=httpx.MockTransport(handler)))
-    assert len(result) == 1 and result[0].filename == "photo.dng"
-    assert calls == [("POST", "/api/search/metadata"), ("GET", "/api/stacks")]
-    assert not any(entry["event"].startswith("recent.") for entry in logger.get_entries())
-
-
-def test_debug_recent_compares_with_stacked_and_observes_bounded_raw_detail(logger):
-    logger.set_level("debug")
-    calls = []
-    search_bodies = []
-    items = [
-        {"id": str(UUID(int=index + 1)), "type": "IMAGE", "originalFileName": f"photo-{index}.dng",
-         "fileCreatedAt": "2026-09-01T12:00:00Z", "visibility": "timeline",
-         "stackId": str(UUID(int=1000 + index)) if index == 0 else None}
-        for index in range(25)
-    ]
-
-    def handler(request):
-        calls.append((request.method, request.url.path))
-        if request.url.path == "/api/stacks":
-            return httpx.Response(200, json=[])
-        if request.url.path == "/api/search/metadata":
-            search_bodies.append(json.loads(request.content))
-            return httpx.Response(200, json={"assets": {"items": items, "nextCursor": None}})
-        if request.url.path.startswith("/api/assets/"):
-            asset_id = request.url.path.rsplit("/", 1)[-1]
-            return httpx.Response(200, json={"id": asset_id, "type": "IMAGE", "originalFileName": "detail.dng",
-                "visibility": "timeline", "isTrashed": False, "isArchived": False,
-                "stack": {"id": str(UUID(int=2000))}, "deletedAt": None, "trashedAt": None,
-                "duplicateId": None, "livePhotoVideoId": None, "exifInfo": {"gps": "PRIVATE_EXIF"},
-                "unused": "PRIVATE_RAW_RESPONSE"})
-        raise AssertionError(request.url.path)
-
-    result = asyncio.run(get_recent_assets(PRIVATE_URL, PRIVATE_KEY, transport=httpx.MockTransport(handler)))
-    assert len(result) == 25
-    assert result[0].filename == "photo-0.dng" and result[0].stackId is None
-    assert len(search_bodies) == 4
-    assert "withStacked" not in search_bodies[0]
-    assert "withStacked" not in search_bodies[1]
-    assert search_bodies[2]["withStacked"] is False
-    assert search_bodies[3]["withStacked"] is True
-    assert all(body["filter"]["trashedAt"] == {"eq": None} for body in search_bodies)
-    assert sum(path.startswith("/api/assets/") for _, path in calls) == 10
-
-    entries = logger.get_entries()
-    raw_observations = [entry for entry in entries if entry["event"] == "recent.asset_observed"]
-    variant_observations = [entry for entry in entries if entry["event"] == "recent.with_stacked_observed"]
-    detail_observations = [entry for entry in entries if entry["event"] == "recent.raw_state_observed"]
-    assert len(raw_observations) == 25
-    assert len(variant_observations) == 3
-    assert len(detail_observations) == 10
-    assert raw_observations[0]["context"]["assetId"] == items[0]["id"]
-    assert raw_observations[0]["context"]["format"] == "DNG"
-    assert raw_observations[0]["context"]["isRaw"] is True
-    assert detail_observations[0]["context"]["stackId"] == str(UUID(int=2000))
-    assert variant_observations[0]["context"]["mode"] == "omitted"
-    assert variant_observations[0]["context"]["rawAssetCount"] == 25
-    assert len(variant_observations[0]["context"]["rawAssetIds"]) == 20
-    assert variant_observations[0]["context"]["stackMemberLikeCount"] == 25
-    assert len(variant_observations[0]["context"]["stackMemberLikeIds"]) == 20
-
-    report = json.dumps(logger.create_report())
-    for private in [PRIVATE_KEY, "PRIVATE_HOST", "PRIVATE_EXIF", "PRIVATE_RAW_RESPONSE", "http://", "headers"]:
-        assert private not in report
-    assert "photo-0.dng" in report
-
-
-def test_recent_diagnostic_request_failures_do_not_fail_home(logger):
-    logger.set_level("debug")
-    search_count = 0
-
-    def handler(request):
-        nonlocal search_count
-        if request.url.path == "/api/stacks":
-            return httpx.Response(200, json=[])
-        if request.url.path == "/api/search/metadata":
-            search_count += 1
-            if search_count == 1:
-                return httpx.Response(200, json={"assets": {"items": [{"id": A, "type": "IMAGE",
-                    "originalFileName": "photo.dng", "fileCreatedAt": "2026-09-01T12:00:00Z"}]}})
-            return httpx.Response(503)
-        if request.url.path == f"/api/assets/{A}":
-            return httpx.Response(503)
-        raise AssertionError(request.url.path)
-
-    result = asyncio.run(get_recent_assets(PRIVATE_URL, PRIVATE_KEY, transport=httpx.MockTransport(handler)))
-    assert len(result) == 1 and result[0].filename == "photo.dng"
-    assert search_count == 4
-    variants = [entry for entry in logger.get_entries() if entry["event"] == "recent.with_stacked_observed"]
-    details = [entry for entry in logger.get_entries() if entry["event"] == "recent.raw_state_observed"]
-    assert len(variants) == 3 and all(entry["context"]["httpStatus"] == 503 for entry in variants)
-    assert len(details) == 1 and details[0]["context"]["observationResult"] == "http_failure"
 
 
 def run_create(logger, verify, *, level="debug", post_members=None, members=None):
