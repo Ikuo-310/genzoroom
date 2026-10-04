@@ -75,6 +75,14 @@ export async function setBackendLogLevel(level: LogLevel, signal: AbortSignal): 
   if (result !== level) throw new DeveloperLogsError('unexpected_response');
   return result;
 }
+export function disableBackendLoggingOnExit(): void {
+  try {
+    void fetch(`${root}/level`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: 'off' }),
+      cache: 'no-store', keepalive: true,
+    }).catch(() => { /* Leaving the page must never surface or propagate a best-effort failure. */ });
+  } catch { /* A synchronous fetch failure must not block navigation or page teardown. */ }
+}
 export async function getBackendLogsReport(signal: AbortSignal): Promise<BackendLogsReport> {
   return validatedJson(await request(root, { signal }), parseBackendLogsReport);
 }

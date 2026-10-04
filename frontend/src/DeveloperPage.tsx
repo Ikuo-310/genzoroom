@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
 import { DeveloperLogs } from './DeveloperLogsPanel';
+import { frontendLogger } from './frontendLogging';
+import { disableBackendLoggingOnExit } from './developerLogs';
 import { emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 import { collectDiagnosticsEnvironment, createDiagnosticsReport, createJpegDiagnosticsReport, createWebGpuDiagnosticsReport,
   createWebGpuReport, exportDiagnosticsReport, exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
@@ -19,6 +21,7 @@ export function DeveloperPage() {
   const [jpeg, setJpeg] = useState(emptyJpegReport);
   const [selectedTab, setSelectedTab] = useState<DiagnosticTab>('logs');
   const tabButtons = useRef<Partial<Record<DiagnosticTab, HTMLButtonElement | null>>>({});
+  const loggingExitHandled = useRef(false);
   const acceptJpegReport = useCallback((report: JpegReport) => setJpeg(report), []);
   const acceptReport = useCallback((report: WebGpuReport) => setWebgpu(report), []);
   const selectTab = (tab: DiagnosticTab, focus = false) => {
@@ -45,6 +48,20 @@ export function DeveloperPage() {
     document.title = `${t('developer.title')} — GenzoRoom`;
     return () => { document.title = original; };
   }, [t]);
+  useEffect(() => {
+    loggingExitHandled.current = false;
+    const disableLogging = () => {
+      if (loggingExitHandled.current) return;
+      loggingExitHandled.current = true;
+      frontendLogger.setLevel('off');
+      disableBackendLoggingOnExit();
+    };
+    window.addEventListener('pagehide', disableLogging);
+    return () => {
+      window.removeEventListener('pagehide', disableLogging);
+      disableLogging();
+    };
+  }, []);
   const environmentValues = {
     secureContext: environment.secureContext, crossOriginIsolated: environment.crossOriginIsolated,
     gpuApiAvailable: environment.gpuApiAvailable, hardwareConcurrency: environment.hardwareConcurrency,

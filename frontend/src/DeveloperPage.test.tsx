@@ -8,6 +8,7 @@ import { App } from './App';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { SMOKE_CASES, type SmokeFactory } from './webgpuSmoke';
 import type { DiagnosticsReport } from './developerDiagnostics';
+import { frontendLogger } from './frontendLogging';
 vi.mock('./GalleryPage', () => ({ GalleryPage: () => <p>Gallery route</p> }));
 vi.mock('./AnshitsuPage', () => ({ AnshitsuPage: () => <p>Anshitsu route</p> }));
 let host: HTMLDivElement, root: Root;
@@ -91,6 +92,56 @@ it.each(['en', 'ja'])('translates successful execution and safely shows optional
   expect(renderer.render).toHaveBeenCalledTimes(SMOKE_CASES.length);
   expect(host.querySelector('tbody tr')!.textContent).toMatch(/\d+\.\d{2} ms/);
 });
+it('keeps both logging levels enabled while switching Developer Diagnostics tabs', async () => {
+  const fetchMock = vi.fn(async (url: string, _options?: RequestInit) => url.endsWith('/level')
+    ? { ok: true, json: async () => ({ level: 'debug' }) }
+    : logsResponse(url));
+  vi.stubGlobal('fetch', fetchMock);
+  frontendLogger.clear(); frontendLogger.setLevel('debug');
+  frontendLogger.add({ level: 'debug', component: 'test', event: 'retained' });
+  const { DeveloperPage } = await import('./DeveloperPage');
+  await act(async () => root.render(<DeveloperPage />));
+  await act(async () => host.querySelector<HTMLButtonElement>('#jpeg-tab')!.click());
+  expect(frontendLogger.getLevel()).toBe('debug');
+  await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
+  expect(frontendLogger.getLevel()).toBe('debug');
+  expect(fetchMock.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(0);
+  act(() => root.unmount()); root = createRoot(host);
+  expect(frontendLogger.getLevel()).toBe('off');
+});
+
+it.each(['unmount', 'pagehide'] as const)('turns both loggers off on DeveloperPage %s without clearing entries', async departure => {
+  const fetchMock = vi.fn(async (url: string, _options?: RequestInit) => url.endsWith('/level')
+    ? { ok: true, json: async () => ({ level: 'debug' }) }
+    : logsResponse(url));
+  vi.stubGlobal('fetch', fetchMock);
+  frontendLogger.clear(); frontendLogger.setLevel('debug');
+  frontendLogger.add({ level: 'debug', component: 'test', event: 'keep-buffer' });
+  const { DeveloperPage } = await import('./DeveloperPage');
+  await act(async () => root.render(<DeveloperPage />));
+  if (departure === 'pagehide') await act(async () => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  else act(() => root.unmount());
+  expect(frontendLogger.getLevel()).toBe('off');
+  expect(frontendLogger.getEntries().some(entry => entry.event === 'keep-buffer')).toBe(true);
+  const offRequests = fetchMock.mock.calls.filter(([url, options]) => url.endsWith('/level') && options?.method === 'PUT');
+  expect(offRequests).toHaveLength(1);
+  expect(offRequests[0][1]).toMatchObject({ keepalive: true, cache: 'no-store', body: '{"level":"off"}' });
+  if (departure === 'pagehide') {
+    act(() => root.unmount()); root = createRoot(host);
+    expect(fetchMock.mock.calls.filter(([url, options]) => url.endsWith('/level') && options?.method === 'PUT')).toHaveLength(1);
+  } else root = createRoot(host);
+});
+
+it('does not disable logging when the page only becomes hidden', async () => {
+  frontendLogger.setLevel('debug');
+  const fetchMock = vi.fn(async (url: string, _options?: RequestInit) => logsResponse(url)); vi.stubGlobal('fetch', fetchMock);
+  const { DeveloperPage } = await import('./DeveloperPage');
+  await act(async () => root.render(<DeveloperPage />));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(frontendLogger.getLevel()).toBe('debug');
+  expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false);
+});
+
 it.each(['unmount', 'pagehide'])('releases a pending diagnostic on %s and ignores its late result', async departure => {
   let resolve!: (value: never) => void;
   const pending = new Promise<never>(done => { resolve = done; });

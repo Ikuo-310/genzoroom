@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { clearBackendLogs, createAllLogsReport, formatLogTimestamp, getBackendLogLevel, getBackendLogsReport,
-  mergeLogEntries, parseBackendLevel, parseBackendLogsReport, setBackendLogLevel, type BackendLogEntry } from './developerLogs';
+  disableBackendLoggingOnExit, mergeLogEntries, parseBackendLevel, parseBackendLogsReport, setBackendLogLevel, type BackendLogEntry } from './developerLogs';
 import type { FrontendLogEntry } from './frontendLogging';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -83,4 +83,20 @@ it('uses the four narrow API operations with no-store, abort signals and level v
   await expect(setBackendLogLevel('debug', signal)).rejects.toThrow();
   fetch.mockImplementation(async () => ({ ok: false, json: async () => ({ secret: 'PRIVATE' }) }));
   await expect(getBackendLogsReport(signal)).rejects.toThrow('Developer logs request failed');
+});
+it('sends best-effort backend OFF with keepalive and absorbs fetch failures', async () => {
+  const fetch = vi.fn(async (_url: string, _options?: RequestInit) => ({ ok: true }));
+  vi.stubGlobal('fetch', fetch);
+  expect(() => disableBackendLoggingOnExit()).not.toThrow();
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toBe('/api/developer/logs/backend/level');
+  expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: '{"level":"off"}', cache: 'no-store', keepalive: true });
+  expect(fetch.mock.calls[0][1]).not.toHaveProperty('signal');
+
+  vi.stubGlobal('fetch', vi.fn((_url: string, _options?: RequestInit) => Promise.reject(new Error('offline'))));
+  expect(() => disableBackendLoggingOnExit()).not.toThrow();
+  await Promise.resolve();
+  vi.stubGlobal('fetch', vi.fn((_url: string, _options?: RequestInit) => { throw new Error('unavailable'); }));
+  expect(() => disableBackendLoggingOnExit()).not.toThrow();
 });
