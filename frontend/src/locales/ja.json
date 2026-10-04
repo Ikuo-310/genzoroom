@@ -113,6 +113,7 @@
     "unstackedOnly": "STACKなし",
     "edited": "GenzoRoomで編集済み",
     "stackAssets": "Stack、{{count}}枚",
+    "invalidStack": "異常STACK、{{count}}枚",
     "workspaceUnsupported": "暗室を開けません。取得済みのStack内に、対応するNon-RAW写真がありません。",
     "workspaceAmbiguous": "暗室を開けません。Stack内に複数のNon-RAW写真があり、primaryが取得済みのNon-RAW写真ではないため対象を決められません。",
     "recent": "最近の写真",

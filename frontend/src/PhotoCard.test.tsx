@@ -46,16 +46,22 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('class="format-badge raw">DNG</span>');
     expect(markup).toContain(`class="stack-asset-count">${count}</span>`);
     expect(markup).toContain(`aria-label="Stack, ${count} assets"`);
+    expect(markup).not.toContain('stack-asset-count-error');
     expect(markup).toContain('class="edited-badge"');
     expect(markup).not.toContain('thumbnail stacked');
   });
 
+  it('shows the singleton Stack as an invalid Stack warning without changing its badge structure', () => {
+    const markup = renderBadge('JPEG', false, 'photo.jpg', undefined, 'stack-id', 1);
+    expect(markup).toContain('<div class="stack-assets" role="img" aria-label="Invalid Stack, 1 asset"><span class="stack-asset-count stack-asset-count-error">1</span></div>');
+  });
+
   it('shows no Stack labels for unstacked photos or missing and malformed counts', () => {
     for (const [stackId, count] of [[undefined, 2], ['stack-id', undefined], ['stack-id', null],
-      ['stack-id', 1], ['stack-id', 2.5]] as const) {
+      ['stack-id', 0], ['stack-id', -1], ['stack-id', 2.5], ['stack-id', Number.NaN]] as const) {
       const markup = renderBadge('JPEG', false, 'photo.jpg', undefined, stackId, count);
       expect(markup).toContain('class="format-badge">JPEG</span>');
-      expect(markup).not.toContain('STACK');
+      expect(markup).not.toContain('stack-asset-count');
     }
   });
 
@@ -63,6 +69,12 @@ describe('PhotoCard format badge', () => {
     await i18n.changeLanguage('ja');
     expect(renderBadge('PNG', false, 'photo.png', undefined, 'stack-id', 3))
       .toContain('aria-label="Stack、3枚"');
+  });
+
+  it('localizes the invalid singleton Stack description in Japanese', async () => {
+    await i18n.changeLanguage('ja');
+    expect(renderBadge('JPEG', false, 'photo.jpg', undefined, 'stack-id', 1))
+      .toContain('aria-label="異常STACK、1枚"');
   });
 
   it('keeps a long filename in the separate metadata area', () => {

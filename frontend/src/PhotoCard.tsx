@@ -81,9 +81,9 @@ export function PhotoCard({
         <div className="thumbnail">
           <img src={asset.thumbnail_url} alt="" loading="lazy" />
           <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 2 && (
-            <div className="stack-assets" role="img" aria-label={t('photos.stackAssets', { count: asset.stackAssetCount })}>
-              <span className="stack-asset-count">{asset.stackAssetCount}</span>
+          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1 && (
+            <div className="stack-assets" role="img" aria-label={t(asset.stackAssetCount === 1 ? 'photos.invalidStack' : 'photos.stackAssets', { count: asset.stackAssetCount })}>
+              <span className={`stack-asset-count${asset.stackAssetCount === 1 ? ' stack-asset-count-error' : ''}`}>{asset.stackAssetCount}</span>
             </div>
           )}
           <EditedBadge edited={edited} />

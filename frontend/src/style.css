@@ -157,6 +157,7 @@ button.photo-card-button:hover:not(:disabled) { background: #1d2b26; }
 .format-badge.raw { background: rgb(73 52 20 / 88%); border-width: 2px; }
 .stack-assets { position: absolute; top: 32px; right: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; max-width: calc(100% - 16px); pointer-events: none; }
 .stack-asset-count { overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); padding: 2px 6px; font-size: 0.68rem; font-weight: 750; line-height: 1.35; white-space: nowrap; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.stack-asset-count-error { background: #a51d2d; border-color: #fff; }
 .edited-badge { position: absolute; right: 6px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid rgb(255 255 255 / 60%); border-radius: 4px; color: #fff; background: rgb(15 20 18 / 82%); pointer-events: none; }
 .photo-info { padding: 10px 12px 12px; color: #e6eee9; background: #17221f; }
 .photo-info p { margin: 0; overflow: hidden; color: #e6eee9; font-size: 0.9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
