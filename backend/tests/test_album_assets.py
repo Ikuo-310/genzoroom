@@ -45,7 +45,6 @@ class AlbumAssetTests(unittest.TestCase):
                            "trashedAt": {"eq": None}},
                 "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                 "size": 1000,
-                "withStacked": False,
             })
             return search_response([asset(0) | {"visibility": "archive"}, asset(1, kind="VIDEO")])
 
@@ -64,7 +63,6 @@ class AlbumAssetTests(unittest.TestCase):
             body = json.loads(request.content)
             requests.append(body)
             if len(requests) == 1:
-                self.assertIs(body["withStacked"], False)
                 return search_response([asset(index) for index in range(1000)], "page-two")
             self.assertEqual(body["cursor"], "page-two")
             return search_response([asset(index) for index in range(1000, 1558)])

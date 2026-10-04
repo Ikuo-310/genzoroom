@@ -27,8 +27,7 @@ def test_favorites_conditions_and_cursor_use_shared_search():
         assert request.url.path == "/api/search/metadata"
         expected = {"filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"},
                                "isFavorite": {"eq": True}, "trashedAt": {"eq": None}},
-                    "orderBy": {"field": "fileCreatedAt", "direction": "desc"}, "size": 1000,
-                    "withStacked": False}
+                    "orderBy": {"field": "fileCreatedAt", "direction": "desc"}, "size": 1000}
         if len(bodies) == 2:
             expected["cursor"] = "next"
         assert bodies[-1] == expected

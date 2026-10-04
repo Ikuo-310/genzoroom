@@ -172,7 +172,6 @@ class ImmichAssetTests(unittest.TestCase):
                                "trashedAt": {"eq": None}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                     "size": 100,
-                    "withStacked": False,
                 },
             )
             return httpx.Response(
