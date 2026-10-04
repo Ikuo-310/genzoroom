@@ -168,7 +168,8 @@ class ImmichAssetTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(request.content),
                 {
-                    "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}},
+                    "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"},
+                               "trashedAt": {"eq": None}},
                     "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                     "size": 100,
                 },
@@ -211,7 +212,8 @@ class ImmichAssetTests(unittest.TestCase):
                  for index, visibility in enumerate(("timeline", "archive", "hidden", "locked"))]
         def handler(request):
             search_filter = json.loads(request.content)["filter"]
-            self.assertEqual(search_filter, {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}})
+            self.assertEqual(search_filter, {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"},
+                                             "trashedAt": {"eq": None}})
             return httpx.Response(200, json={"assets": {"items": [item for item in items
                 if item["visibility"] == search_filter["visibility"]["eq"]]}})
         self.assertEqual([str(photo.id) for photo in self.run_recent(handler)], [items[0]["id"]])

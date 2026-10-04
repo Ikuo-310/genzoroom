@@ -348,7 +348,8 @@ class CalendarTests(unittest.TestCase):
             self.assertEqual(request.headers["x-api-key"], "secret")
             self.assertEqual(json.loads(request.content), {
                 "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "takenAt": {
-                    "gte": "2026-09-30T00:00:00.000Z", "lt": "2026-10-01T00:00:00.000Z"}},
+                    "gte": "2026-09-30T00:00:00.000Z", "lt": "2026-10-01T00:00:00.000Z"},
+                    "trashedAt": {"eq": None}},
                 "orderBy": {"field": "localDateTime", "direction": "desc"}, "size": 1000,
             })
             return page([asset(0), asset(1, "VIDEO")])

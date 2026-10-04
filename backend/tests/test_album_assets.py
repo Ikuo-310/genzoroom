@@ -41,7 +41,8 @@ class AlbumAssetTests(unittest.TestCase):
             self.assertEqual(request.url.path, "/api/search/metadata")
             self.assertEqual(request.headers["x-api-key"], "secret-key")
             self.assertEqual(json.loads(request.content), {
-                "filter": {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(ALBUM_ID)]}},
+                "filter": {"type": {"eq": "IMAGE"}, "albumIds": {"any": [str(ALBUM_ID)]},
+                           "trashedAt": {"eq": None}},
                 "orderBy": {"field": "fileCreatedAt", "direction": "desc"},
                 "size": 1000,
             })
