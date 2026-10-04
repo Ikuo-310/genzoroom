@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added Structured Logs to Developer Diagnostics, with separate Frontend and Backend level controls, combined or source-specific views, clear, refresh, and JSON export.
 - Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit, and the empty unmatched drop target is larger for easier Purge. Confirmed drafts can be written back to Immich.
 
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
@@ -65,7 +66,8 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
-- Home photo views can filter stacked assets and collapse Immich Stack members with a count badge; type filters can show the individual assets. STACK management uses the same Immich API key and requires Stack read/write permissions.
+- Home photo lists exclude Immich trash assets and show only the primary photo for each valid Immich Stack. Incomplete or ambiguous Stack metadata is quarantined from Home without relaxing strict Stack management validation. Singleton Stacks are visibly abnormal and can only be removed through the normal confirmed delete workflow.
+- Home photo views can filter stacked versus unstacked cards; valid Stack cards carry member-count metadata. STACK management uses the same Immich API key and requires Stack read/write permissions.
 - Recent photo count can be selected from 50 to 500 in steps of 50, with 100 as the default. Japanese Album periods use compact `YYYY/MM` labels.
 - Extended the desktop right panel to the bottom edge while placing the Filmstrip below only the left panel and Viewer. The Scope selector now sits in its heading, and its height can be resized from 15% to 40% (30% by default) and remembered by the browser; the mobile stacked layout is retained.
 - Advanced the flat recipe to version 18 with `adjustmentEnabled` flags for all sixteen numeric adjustments; Recipe v17 remains readable and migrates to v18. The recipe version is independent of edit-state snapshot format v2 and SQLite schema v1.
@@ -85,6 +87,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Prevented incomplete Immich Stack snapshots from failing Home photo lists or exposing surviving Stack children as ordinary photos; Recent continues paging as needed after excluded entries.
 - Long-running Stack sends use a dedicated proxy timeout; a response from a previous Stack selection cannot change a new draft; long filename candidates remain writable; and re-detection supports selections over 1,000 assets.
 - Prevent Undo/Redo shortcuts from changing the background edit session while save-failure dialogs are open.
 - Keep NumLock-off Histogram keypad shortcuts from being consumed as adjustment-slider arrow controls while preserving native numeric input.

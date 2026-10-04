@@ -14,12 +14,13 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 
 - Authenticated Immich photo access through the backend, with confirmed STACK management writes described below.
 - Home has four browsing tabs: Recent, Albums, Calendar, and Favorites.
+- Home photo lists exclude Immich trash assets. For Recent, Favorites, Albums, and Calendar date results, an Immich Stack is represented by its primary/Cover photo; child assets are not shown as separate cards. Invalid or ambiguous Stack metadata is quarantined from Home rather than turning one bad Stack snapshot into a failed photo list. Albums retain Immich's existing album visibility behavior, including Archive assets.
 - Recent shows Immich Timeline images in descending order. Choose 50–500 photos in steps of 50 (100 by default); Archive assets are excluded.
 - Albums lists Immich albums and opens each album in the shared photo grid. Album visibility follows the existing Immich album behavior.
 - Calendar provides year, month, and date-detail views. Month cells show representative thumbnails; dates are active only when a Timeline image exists. Archive-only and video-only dates are not treated as photo days.
 - Favorites shows favorited Timeline images and reuses a successfully loaded list while Home remains mounted.
 - Photo grids support RAW / Non-RAW and edited / unedited filters. Each filter is independent per Home tab, and the two filters combine.
-- Recent, Album, and Calendar photo views can filter stacked versus unstacked assets. With both RAW and Non-RAW types visible, Immich Stack members collapse to one representative card with a member-count badge; choosing one type shows individual assets. Favorites keeps its existing individual-asset view.
+- Recent, Album, and Calendar photo views can filter stacked versus unstacked assets. Stack cards retain member-count metadata and aggregate edit status across known members. Favorites uses the same primary-only Home data boundary while retaining its existing filter behavior.
 - Choose the thumbnail size used by the Home grids.
 - Home supports ordered multi-photo selection and Shift+click range selection. Press `S` or use the selection action to open the selected concrete assets in STACK management; press `D` to open the current selection in Anshitsu, or, with no selection, resume the last Anshitsu workspace from the current SPA session.
 - Home restores the browsing tab, detail view, and scroll position after returning from Anshitsu, and remembers scroll position for each Home view while navigating between tabs.
@@ -59,6 +60,12 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Use `Primary+Z` to undo the last local Stack-structure edit once, including D&D-created manual Stacks. Undo does not rewind Immich source data or send results; Redo and an Undo button are not provided.
 - On confirmed send, the final draft is classified as unchanged, create, update, or delete. Unchanged Stacks do not issue a write; Cover-only changes update the primary. Immich v3.2.4 membership changes release the old Stack and create its replacement. Partial outcomes are shown; uncertain outcomes block blind retry and require re-detection.
 - The workspace is desktop-browser oriented. Touch Drag & Drop, Stack/group reordering, and external file drop are not supported.
+- A one-member Immich Stack is shown as an abnormal Stack, including a red `1` badge in Home and a warning in STACK management. It cannot be edited as a normal Stack; only purging the group is allowed, which follows the existing confirmed delete plan. An untouched singleton creates no write operation.
+- The toolbar shows pending create / update / delete counts only when there are operations to send. A send with no operations reports that there are no changes.
+
+### Developer Diagnostics
+
+- The opt-in Developer Diagnostics Logs tab provides separate Frontend and Backend levels, clear and JSON export controls, refresh, and combined / source-specific views. Frontend logging is synchronized across same-origin tabs. Both collectors are turned off when Developer Diagnostics is closed; logging is off by default. Diagnostic events follow the privacy boundaries documented in [`AGENTS.md`](AGENTS.md).
 
 ### JPEG edit state and saving
 

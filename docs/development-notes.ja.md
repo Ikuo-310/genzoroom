@@ -2,9 +2,51 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 2026-10-04: Structured Logging、Home / Stack境界、D&Dの記録
+
+この節は2026-10-04のGit履歴と現行コード、および利用者から報告された最新Firefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
+
+### Structured LoggingとLogs UI
+
+Frontend / Backendに独立したstructured loggerとDEBUG限定のImmich通信・Stack write診断を追加し、Developer DiagnosticsへLogs tabを統合した。Logs tabはFrontend / Backend別level設定、ALL / Frontend / Backend切替、clear、Backend refresh、個別・統合JSON exportを備える。Frontend bufferは1,000件、Backendは5,000件で、満杯時は古いentryをdropし`droppedEntryCount`を報告する。Frontend loggerのlevel・entry・clearはBroadcastChannelで同一originのtab間同期する。Developer Diagnosticsのpagehideまたはroute teardownでは、Frontend levelをOFFにし、Backendにもkeepalive付きでOFF設定を送る。bufferの内容はこの終了処理ではclearしない。
+
+BackendのImmich request start / response / failureとStack write operation / batchのstructured eventを記録する。level semanticsとprivacy boundaryは`AGENTS.md`およびarchitecture.mdに記載した。ログ項目・context制限を変えず、API key、raw request/response body、画像データ等を通常loggerで収集しない。
+
+不明DNGや削除済みStack childの調査ではDNG専用AssetDetail probeとRecentの`withStacked`比較probeを一時追加した履歴があるが、関連commitは後続でRevertされ、専用Recent観測コードもcleanupされた。Home用の`withStacked:false`も試行後にRevertされている。いずれも現行機能ではないため、Current featureとして扱わない。
+
+### Singleton Immich Stack
+
+Homeで`stackAssetCount === 1`を有効値として保持し、PhotoCardに赤い`1`と異常状態のaccessible labelを表示する対応を加えた。Stack管理は1 memberのImmich sourceをsingleton異常として表示するが、正常Stackとして編集させない。Add、member move、D&D、COVER変更を抑止し、group Purgeだけを許可する。Purgeは既存write planのDELETEへつながり、特別なAPI経路は作らない。未変更singletonはoperationにも`unchanged`完了にも入らず、送信後も候補に残る。operation 0件時は成功文言でなく「変更はありません。」を表示する。
+
+singletonが生じた根本原因は確定していない。大量連続Stack作成等を原因とする証拠はないため、そのような説明は採用していない。
+
+### Home写真一覧とStack境界
+
+Immichで日付単位の削除後にStack childのDNGだけがRecentに残り、Calendarからは消える現象の調査を経て、Home metadata searchへ`trashedAt: {eq: null}`を適用した。さらにHomeの`/stacks` joinを非fatal化し、正常なStack metadataだけを採用、malformed・duplicate・ambiguousなentryのmemberと可能なprimaryをquarantineする処理を追加した。Homeは有効Stackのprimaryだけを返し、Stack childを裸の通常写真として再表示しない。primaryがsnapshotから欠落して残存memberだけが返るケースもHomeでは候補memberとして隔離する。
+
+Recentはprimary-only / quarantine後に表示数が不足する場合、cursorを検証しながら必要なpageだけを追加取得する。cover assetには全Stack member IDを保持し、edit-status lookupとedited / unedited filterはStack全体の状態を集約する。Albumsは従来どおりArchive assetを含み得る検索条件を維持し、Timeline visibility条件を追加しない。Favoritesもprimary-only backend resultを使うが、現行Galleryではstacked/unstacked filterとcollapseを適用しない。一覧取得結果がprimary-onlyである点とFrontend filter差は区別する。
+
+Home用の非fatal解析とStack管理用strict resolve/write validationを分離した。Homeは閲覧継続のため曖昧なownershipをquarantineする一方、Stack管理は曖昧・不完全なsnapshotをeditable sourceとして受理しない。Backend writeの最終member数下限（2件）も維持する。
+
+### STACK管理 UIと操作
+
+toolbarはwrite planからcreate / update / delete件数を表示し、operationがある場合だけsummaryを出す。個別delete-pending行は表示せず、send result statusはSTACK候補見出し行に置く。送信確認dialogとtoolbarは同じplan countsを使う。singleton warningとPurgingだけを許す制約は上記のとおり。normal StackのAdd、D&D、COVER、Purge、Undo、partial / unknown outcomeとcorrelated write semanticsは既存経路を維持した。
+
+### Chrome / Firefox D&D対応と未解決のinvalid drop
+
+Chromeでimg自身のnative image dragが内部dragより先に始まり、transferに`Files`が入りcustom MIMEがないため拒否される診断結果を受け、STACK管理内thumbnail imgを`draggable=false`にした。内部drag sourceは親photo buttonとし、custom MIME `application/x-genzoroom-stack-photo+json`を使う。active payloadはReact stateに加えてrefにも同期保持し、custom MIME typeは存在するがgetDataが空で、file transferでない内部dragの場合に限ってref fallbackを使う。
+
+Firefoxでブラウザー標準ghostが薄く暗くなる問題に対してdrag previewを複数回調整した。現行コードは透明native helperを`setDragImage()`へ渡してnative ghostを抑え、写真imgだけの別DOM previewを表示する。previewはrendered thumbnail寸法、opacity 0.88で、grab offsetをdrag開始時に記録してpointer追従する。以前のphoto-only `setDragImage` 案やopacity調整だけの案は最終方式ではない。
+
+さらにFirefoxでは内部dragを無効領域へdropするとブラウザー既定動作でGoogle等の新規tabが開く問題が報告された。STACK管理表示中だけwindow / document capture listenerを付け、active internal Stack dragの`dragover` / `drop`を`stack.dnd` DEBUGで観測する仕組みを追加した。window captureは認識済み内部dragのcancelable eventに`preventDefault()`を行うがstopPropagationはせず、有効targetの既存bubble handlerを維持する。document listenerは後段のevent state観測に使う。
+
+**最新の利用者実機確認では、この問題は未解決である。** `4e06b12`適用後、Firefoxログでwindow captureの`preventedByGlobalHandler=true`、document側の`defaultPrevented=true`、custom MIME payload保持、global drop観測が確認されたにもかかわらず、invalid drop後にGoogle等の新規tabが開いたとの報告があった。したがって単純にdropの`preventDefault()`が欠けていたとは結論できない。次回はdrop後からdragend、navigationまでのイベントと遷移を追加観測する予定であり、まだ実装も解決もされていない。今回の文書更新ではブラウザー操作を行っていない。
+
+Git履歴上、調査途中のDNG / Recent probe、`withStacked:false`、Firefox ghost途中案はRevertまたはcleanupされている。現行実装の記述には含めず、必要な設計判断だけを上記の経緯として記録した。2026-10-04の各suiteの正確な実行件数はこの履歴とコードだけでは一括して再構成できないため、この記録では成功件数を補っていない。
+
 ## STACK管理 完成記録（2026-10-03・現行仕様）
 
-HomeのRecent／Album／CalendarではImmich Stackのfilterとcollapseを利用できる。Immich Stackのmember metadataを使って、Stack badgeとmember数を表示し、Type filterに応じてStack単位または個別asset表示へ切り替える。Favoritesを含むHomeの順序付きselectionは、concrete assetのままSTACK管理へ渡す。
+当時のRecent／Album／CalendarはImmich Stackのfilterとcollapseを利用し、Type filterに応じてStack単位または個別asset表示へ切り替えていた。これは2026-10-04のHome primary-only変更より前の履歴である。現行HomeはStack primaryだけを返し、childを個別表示する設計ではない。Homeの順序付きselectionは、Favoritesを含めconcrete assetのままSTACK管理へ渡す。
 
 STACK管理ページでは、選択assetからlocal draft Stackを生成し、既存Immich Stackもfull memberで取り込む。basename完全一致、Pixel RAW／Motion Photo命名normalizeで自動候補を作る。filenameが一致しない場合は、TIME／CAM／GPSが一致する一意な1 RAW + 1 Non-RAWだけをEXIF fallback候補にする。Coverを自動選択し、NAME／TIME／CAM／GPS evidence、既存StackのIMMICH、ローカル変更のMANUAL indicatorを表示する。
 
