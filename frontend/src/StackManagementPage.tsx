@@ -484,7 +484,7 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
     onDragStart={event => { suppressClick.current = onDragStart(event); }}
     onDragEnd={() => { onDragEnd(); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}>
-    <div className="stack-thumbnail"><img src={asset.thumbnail_url} alt="" loading="lazy" /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
+    <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={asset.thumbnail_url} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>
     <span className="stack-filename" title={asset.filename}>{asset.filename}</span>

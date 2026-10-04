@@ -311,6 +311,8 @@ it('disables singleton Add and COVER, rejects drops, and permits Purge followed 
  const group=host.querySelector<HTMLElement>('.stack-singleton-warning')!;
  expect(group.querySelector('.stack-set-target')).toBeNull();
  expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.disabled).toBe(true);
+ expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.draggable).toBe(false);
+ expect(group.querySelector<HTMLImageElement>('.stack-photo img')!.draggable).toBe(false);
  expect(group.querySelector('.stack-purge-member')).toBeNull();
  await click('.stack-unmatched-grid .stack-photo');
  expect(button(i18n.t('stackManagement.add')).disabled).toBe(true);expect(group.classList.contains('stack-add-target')).toBe(false);
@@ -857,12 +859,15 @@ it('moves unmatched by internal native drop, highlights valid targets and preser
  const group=host.querySelector<HTMLElement>('.stack-candidate-group')!;
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo-wrapper:first-child .stack-photo')!;
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ expect(source.draggable).toBe(true);expect(source.querySelector('img')?.draggable).toBe(false);
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  expect(source.draggable).toBe(true);expect(source.classList.contains('stack-photo-dragging')).toBe(true);
  await act(async()=>group.dispatchEvent(dragEvent('dragover',transfer)));
  expect(group.classList.contains('stack-drop-target')).toBe(true);
  const drop=dragEvent('drop',transfer);await act(async()=>group.dispatchEvent(drop));
  expect(drop.defaultPrevented).toBe(true);expect(group.querySelectorAll('.stack-photo')).toHaveLength(3);
+ expect(group.querySelector<HTMLButtonElement>('.stack-photo')?.draggable).toBe(true);
+ expect(Array.from(group.querySelectorAll<HTMLImageElement>('.stack-photo img')).every(image=>image.draggable===false)).toBe(true);
  expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
  expect(unmatched()).toEqual(['y.jpg']);expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
  await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
