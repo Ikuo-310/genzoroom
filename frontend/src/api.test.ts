@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchAssetDetail, fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets } from './api';
+import { fetchAssetDetail, fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets, isRecentAsset } from './api';
 
 describe('Home asset stack metadata', () => {
   const asset = { id: 'asset-1', filename: 'member.dng', date: '2026-09-01',
@@ -17,6 +17,40 @@ describe('Home asset stack metadata', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
     try {
       expect(await read(new AbortController().signal)).toEqual(data);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([1, 2, 12])('accepts safe Stack counts in Home asset validation: %s', count => {
+    expect(isRecentAsset({ ...asset, ...stack, stackAssetCount: count })).toBe(true);
+  });
+  it.each([null, undefined])('accepts an absent optional Stack count: %s', count => {
+    expect(isRecentAsset({ ...asset, ...stack, stackAssetCount: count })).toBe(true);
+  });
+  it.each([0, -1, 2.5, Number.NaN, '1'])('rejects invalid Stack counts before Home sanitization: %s', count => {
+    expect(isRecentAsset({ ...asset, ...stack, stackAssetCount: count })).toBe(false);
+  });
+  it('preserves singleton Stack count 1 in the Home recent assets response', async () => {
+    const singleton = { ...asset, ...stack, stackAssetCount: 1 };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [singleton] })));
+    try {
+      const result = await fetchRecentAssets(100, new AbortController().signal);
+      expect(result[0].stackAssetCount).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([null, undefined])('preserves a nullish optional count in the Home response: %s', async count => {
+    const value = { ...asset, ...stack, stackAssetCount: count };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [value] })));
+    try {
+      const result = await fetchRecentAssets(100, new AbortController().signal);
+      expect(result[0].stackAssetCount).toBe(count);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([0, -1, 2.5, Number.NaN, 'bad'])('nulls invalid optional Stack count %s without dropping the Home photo', async count => {
+    const invalid = { ...asset, ...stack, stackAssetCount: count };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [invalid] })));
+    try {
+      const result = await fetchRecentAssets(100, new AbortController().signal);
+      expect(result).toHaveLength(1);
+      expect(result[0].stackAssetCount).toBeNull();
     } finally { vi.unstubAllGlobals(); }
   });
   it.each(readers)('keeps photos when optional stack counts are missing or malformed (%#)', async read => {

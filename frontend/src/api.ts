@@ -38,13 +38,13 @@ export function isRecentAsset(value: unknown): value is RecentAsset {
     ((value.stackId == null && value.primaryAssetId == null) ||
       (isUuid(value.stackId) && isUuid(value.primaryAssetId))) &&
     (value.stackAssetCount == null ||
-      (typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 2));
+      (typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 1));
 }
 
 function withSafeStackCounts(data: unknown[]): unknown[] {
   return data.map(value => {
     if (!isRecord(value) || value.stackAssetCount == null ||
-      typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 2) {
+      typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 1) {
       return value;
     }
     // A bad optional count should hide only the Stack label, never the photo itself.
