@@ -66,12 +66,15 @@ export function StackManagementPage() {
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
+  const draggingStateRef = useRef(dragging);
+  draggingStateRef.current = dragging;
   const draggingRef = useRef<StackDragPayload | null>(null);
   const dragPayloadForEndLog = useRef<StackDragPayload | null>(null);
   const dragPreviewRef = useRef<HTMLImageElement | null>(null);
   const nativeDragImageRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewGrabOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const dragoverLogged = useRef(new Map<string, string>());
+  const globalDragoverLogged = useRef(new Set<string>());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
@@ -106,9 +109,11 @@ export function StackManagementPage() {
       refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
     });
     clearDragVisuals();
-    draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear();
+    draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null);
+    dragoverLogged.current.clear(); globalDragoverLogged.current.clear();
   }, [sourceGeneration, dispatch, dragging]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
+    dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -170,6 +175,61 @@ export function StackManagementPage() {
     } else if (typesReadable) customDataState = 'empty';
     return { dataTransferTypes, filesLength, hasCustomMime, customDataState, payloadSource, observedPayload };
   };
+  const nativeTargetKind = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return 'other';
+    if (target.closest('.stack-photo')) return 'stack-photo';
+    if (target.closest('.stack-candidate-group')) return 'stack-group';
+    if (target.closest('.stack-unmatched-grid, .stack-unmatched-empty, #stack-unmatched-heading')) return 'unmatched-area';
+    if (target.closest('.stack-control-bar')) return 'control-bar';
+    if (target.closest('.stack-management-header')) return 'header';
+    if (target.closest('.stack-content')) return 'content';
+    if (target.closest('.stack-management-page')) return 'page-background';
+    return 'other';
+  };
+  useEffect(() => {
+    const observe = (listenerScope: 'window' | 'document') => (event: Event) => {
+      const dragEvent = event as DragEvent;
+      const activePayload = draggingRef.current;
+      if (frontendLogger.getLevel() !== 'debug' || !activePayload || !dragEvent.dataTransfer) return;
+      const observed = observeTransfer(dragEvent.dataTransfer);
+      // The active source ref identifies this in-page session when Firefox restricts drag data reads.
+      if (observed.filesLength > 0) return;
+      const payload = observed.observedPayload ?? activePayload;
+      const targetKind = nativeTargetKind(dragEvent.target);
+      const targetTagName = dragEvent.target instanceof Element ? dragEvent.target.tagName.toLowerCase() : 'other';
+      const context = {
+        assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, listenerScope,
+        eventPhase: dragEvent.eventPhase, defaultPrevented: dragEvent.defaultPrevented, cancelable: dragEvent.cancelable,
+        dataTransferTypes: observed.dataTransferTypes, filesLength: observed.filesLength,
+        hasCustomMime: observed.hasCustomMime, refPayloadPresent: true,
+        statePayloadPresent: draggingStateRef.current !== null, payloadSource: observed.payloadSource, targetKind, targetTagName,
+      };
+      if (event.type === 'dragover') {
+        const key = JSON.stringify([listenerScope, targetKind, targetTagName, context.defaultPrevented,
+          context.hasCustomMime, context.payloadSource, context.refPayloadPresent, context.statePayloadPresent, context.eventPhase]);
+        if (globalDragoverLogged.current.has(key) || globalDragoverLogged.current.size >= 100) return;
+        globalDragoverLogged.current.add(key);
+        logStackDnd('global.dragover.observed', context);
+      } else {
+        logStackDnd('global.drop.observed', context);
+      }
+    };
+    const windowDragover = observe('window');
+    const documentDragover = observe('document');
+    const windowDrop = observe('window');
+    const documentDrop = observe('document');
+    window.addEventListener('dragover', windowDragover, true);
+    document.addEventListener('dragover', documentDragover, true);
+    window.addEventListener('drop', windowDrop, true);
+    document.addEventListener('drop', documentDrop, true);
+    return () => {
+      window.removeEventListener('dragover', windowDragover, true);
+      document.removeEventListener('dragover', documentDragover, true);
+      window.removeEventListener('drop', windowDrop, true);
+      document.removeEventListener('drop', documentDrop, true);
+      globalDragoverLogged.current.clear();
+    };
+  }, []);
   const logDragover = (event: React.DragEvent, target: DndTarget, accepted: boolean, rejectionReason: string | null,
     payload: StackDragPayload | null = null) => {
     if (frontendLogger.getLevel() !== 'debug') return;
@@ -315,6 +375,7 @@ export function StackManagementPage() {
       refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null });
     clearDrag();
     dragPayloadForEndLog.current = null;
+    globalDragoverLogged.current.clear();
   };
   const canAcceptDrop = (event: React.DragEvent, targetId: string | null) => {
     if (!canEdit || !isStackDrag(event.dataTransfer)) return false;

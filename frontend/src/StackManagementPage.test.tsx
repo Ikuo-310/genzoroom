@@ -830,6 +830,65 @@ it('does not cancel page-level drops for external files or non-Stack transfers',
  expect(textDrop.defaultPrevented).toBe(false);
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
 });
+it('observes native window and document drag events without changing their defaults',async()=>{
+ frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ for(let index=0;index<5;index++){
+  const repeated=dragEvent('dragover',transfer);document.body.dispatchEvent(repeated);expect(repeated.defaultPrevented).toBe(false);
+ }
+ const changedTarget=dragEvent('dragover',transfer);host.querySelector('.stack-management-header')!.dispatchEvent(changedTarget);
+ expect(changedTarget.defaultPrevented).toBe(true); // Existing page capture owns this behavior.
+ const drop=dragEvent('drop',transfer);document.body.dispatchEvent(drop);expect(drop.defaultPrevented).toBe(false);
+ const entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
+ const observedOver=entries.filter(entry=>entry.event==='global.dragover.observed');
+ expect(observedOver).toHaveLength(4); // One record per scope and target category; repeats are suppressed.
+ expect(observedOver.map(entry=>entry.context?.listenerScope)).toEqual(['window','document','window','document']);
+ expect(observedOver[0].context).toMatchObject({assetId:'x',sourceGroupId:null,targetKind:'other',
+  eventPhase:Event.CAPTURING_PHASE,defaultPrevented:false,cancelable:true,hasCustomMime:true,
+  refPayloadPresent:true,payloadSource:'data-transfer'});
+ expect(observedOver[2].context).toMatchObject({targetKind:'header',defaultPrevented:false});
+ const observedDrops=entries.filter(entry=>entry.event==='global.drop.observed');
+ expect(observedDrops).toHaveLength(2);
+ expect(observedDrops.map(entry=>entry.context?.listenerScope)).toEqual(['window','document']);
+ expect(observedDrops.every(entry=>entry.context?.defaultPrevented===false)).toBe(true);
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ const nextTransfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',nextTransfer)));
+ document.body.dispatchEvent(dragEvent('dragover',nextTransfer));
+ expect(frontendLogger.getEntries().filter(entry=>entry.event==='global.dragover.observed')).toHaveLength(6);
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',nextTransfer)));
+});
+it('does not observe external file or text drags and removes native listeners on unmount',async()=>{
+ frontendLogger.setLevel('debug');
+ const windowAdd=vi.spyOn(window,'addEventListener'),documentAdd=vi.spyOn(document,'addEventListener');
+ const windowRemove=vi.spyOn(window,'removeEventListener'),documentRemove=vi.spyOn(document,'removeEventListener');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const file=dragEvent('dragover',dragTransfer(undefined,['Files'],[new File(['x'],'external.jpg')]));
+ const text=dragEvent('drop',dragTransfer(undefined,['text/plain']));
+ document.body.dispatchEvent(file);document.body.dispatchEvent(text);
+ expect(frontendLogger.getEntries().filter(entry=>entry.event==='global.dragover.observed'||entry.event==='global.drop.observed')).toHaveLength(0);
+ const listeners=(calls:readonly (readonly unknown[])[],type:string)=>calls
+  .filter(call=>call[0]===type&&call[2]===true).map(call=>call[1]);
+ const windowCalls=windowAdd.mock.calls as readonly (readonly unknown[])[];
+ const documentCalls=documentAdd.mock.calls as readonly (readonly unknown[])[];
+ const windowDragover=listeners(windowCalls,'dragover'),windowDrop=listeners(windowCalls,'drop');
+ const documentDragover=listeners(documentCalls,'dragover'),documentDrop=listeners(documentCalls,'drop');
+ const windowRemoved=windowRemove.mock.calls as readonly (readonly unknown[])[];
+ const documentRemoved=documentRemove.mock.calls as readonly (readonly unknown[])[];
+ const hasRemoval=(calls:readonly (readonly unknown[])[],type:string,listener:unknown)=>
+  calls.some(call=>call[0]===type&&call[1]===listener&&call[2]===true);
+ expect(windowDragover).toHaveLength(1);expect(windowDrop).toHaveLength(1);
+ expect(documentDragover).toHaveLength(1);expect(documentDrop).toHaveLength(1);
+ await act(async()=>root.unmount());
+ expect(windowDragover.every(listener=>hasRemoval(windowRemoved,'dragover',listener))).toBe(true);
+ expect(windowDrop.every(listener=>hasRemoval(windowRemoved,'drop',listener))).toBe(true);
+ expect(documentDragover.every(listener=>hasRemoval(documentRemoved,'dragover',listener))).toBe(true);
+ expect(documentDrop.every(listener=>hasRemoval(documentRemoved,'drop',listener))).toBe(true);
+ root=createRoot(host);
+ windowAdd.mockRestore();documentAdd.mockRestore();windowRemove.mockRestore();documentRemove.mockRestore();
+});
 it('suppresses native drag ghost and follows the pointer with a thumbnail-sized photo-only preview',async()=>{
  frontendLogger.setLevel('debug');
  await mount('/stack',{selectedAssets:[...photos,...singles]});
