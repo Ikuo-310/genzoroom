@@ -190,23 +190,31 @@ export function StackManagementPage() {
     const observe = (listenerScope: 'window' | 'document') => (event: Event) => {
       const dragEvent = event as DragEvent;
       const activePayload = draggingRef.current;
-      if (frontendLogger.getLevel() !== 'debug' || !activePayload || !dragEvent.dataTransfer) return;
+      if (!activePayload || !dragEvent.dataTransfer || !isActiveStackDrag(dragEvent.dataTransfer)) return;
+      const defaultPreventedBefore = dragEvent.defaultPrevented;
+      let preventedByGlobalHandler = false;
+      if (listenerScope === 'window' && dragEvent.cancelable && !defaultPreventedBefore) {
+        dragEvent.preventDefault();
+        preventedByGlobalHandler = dragEvent.defaultPrevented;
+      }
+      if (frontendLogger.getLevel() !== 'debug') return;
       const observed = observeTransfer(dragEvent.dataTransfer);
-      // The active source ref identifies this in-page session when Firefox restricts drag data reads.
       if (observed.filesLength > 0) return;
       const payload = observed.observedPayload ?? activePayload;
       const targetKind = nativeTargetKind(dragEvent.target);
       const targetTagName = dragEvent.target instanceof Element ? dragEvent.target.tagName.toLowerCase() : 'other';
       const context = {
         assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, listenerScope,
-        eventPhase: dragEvent.eventPhase, defaultPrevented: dragEvent.defaultPrevented, cancelable: dragEvent.cancelable,
+        eventPhase: dragEvent.eventPhase, defaultPrevented: dragEvent.defaultPrevented, defaultPreventedBefore, cancelable: dragEvent.cancelable,
+        preventedByGlobalHandler,
         dataTransferTypes: observed.dataTransferTypes, filesLength: observed.filesLength,
         hasCustomMime: observed.hasCustomMime, refPayloadPresent: true,
         statePayloadPresent: draggingStateRef.current !== null, payloadSource: observed.payloadSource, targetKind, targetTagName,
       };
       if (event.type === 'dragover') {
-        const key = JSON.stringify([listenerScope, targetKind, targetTagName, context.defaultPrevented,
-          context.hasCustomMime, context.payloadSource, context.refPayloadPresent, context.statePayloadPresent, context.eventPhase]);
+        const key = JSON.stringify([listenerScope, targetKind, targetTagName, context.defaultPreventedBefore,
+          context.defaultPrevented, preventedByGlobalHandler, context.hasCustomMime, context.payloadSource,
+          context.refPayloadPresent, context.statePayloadPresent, context.eventPhase]);
         if (globalDragoverLogged.current.has(key) || globalDragoverLogged.current.size >= 100) return;
         globalDragoverLogged.current.add(key);
         logStackDnd('global.dragover.observed', context);
@@ -460,17 +468,7 @@ export function StackManagementPage() {
   }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
 
   return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
-    onDragOverCapture={event => {
-      moveDragPreview(event.clientX, event.clientY);
-      if (isActiveStackDrag(event.dataTransfer)) {
-        // Cancel the browser's page-level drop navigation while allowing valid target handlers to run.
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'none';
-      }
-    }}
-    onDropCapture={event => {
-      if (isActiveStackDrag(event.dataTransfer)) event.preventDefault();
-    }}>
+    onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
     <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
       <h1>{t('stackManagement.title')}</h1>

@@ -804,12 +804,13 @@ it('cancels browser defaults for internal drops on the page while leaving state 
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
  const pageTarget=host.querySelector<HTMLElement>('.stack-management-header')!;
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ transfer.dropEffect='copy';
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  const initialGroups=host.querySelectorAll('.stack-candidate-group').length;
  const initialUnmatched=unmatched();
  const over=dragEvent('dragover',transfer);await act(async()=>pageTarget.dispatchEvent(over));
  expect(over.defaultPrevented).toBe(true);
- expect(transfer.dropEffect).toBe('none');
+ expect(transfer.dropEffect).toBe('copy');
  const drop=dragEvent('drop',transfer);await act(async()=>pageTarget.dispatchEvent(drop));
  expect(drop.defaultPrevented).toBe(true);
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(initialGroups);
@@ -830,29 +831,34 @@ it('does not cancel page-level drops for external files or non-Stack transfers',
  expect(textDrop.defaultPrevented).toBe(false);
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
 });
-it('observes native window and document drag events without changing their defaults',async()=>{
+it('prevents native defaults at window and records the resulting state at document',async()=>{
  frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  for(let index=0;index<5;index++){
-  const repeated=dragEvent('dragover',transfer);document.body.dispatchEvent(repeated);expect(repeated.defaultPrevented).toBe(false);
+  const repeated=dragEvent('dragover',transfer);document.body.dispatchEvent(repeated);expect(repeated.defaultPrevented).toBe(true);
  }
  const changedTarget=dragEvent('dragover',transfer);host.querySelector('.stack-management-header')!.dispatchEvent(changedTarget);
- expect(changedTarget.defaultPrevented).toBe(true); // Existing page capture owns this behavior.
- const drop=dragEvent('drop',transfer);document.body.dispatchEvent(drop);expect(drop.defaultPrevented).toBe(false);
+ expect(changedTarget.defaultPrevented).toBe(true);
+ const drop=dragEvent('drop',transfer);document.body.dispatchEvent(drop);expect(drop.defaultPrevented).toBe(true);
  const entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
  const observedOver=entries.filter(entry=>entry.event==='global.dragover.observed');
  expect(observedOver).toHaveLength(4); // One record per scope and target category; repeats are suppressed.
  expect(observedOver.map(entry=>entry.context?.listenerScope)).toEqual(['window','document','window','document']);
  expect(observedOver[0].context).toMatchObject({assetId:'x',sourceGroupId:null,targetKind:'other',
-  eventPhase:Event.CAPTURING_PHASE,defaultPrevented:false,cancelable:true,hasCustomMime:true,
-  refPayloadPresent:true,payloadSource:'data-transfer'});
- expect(observedOver[2].context).toMatchObject({targetKind:'header',defaultPrevented:false});
+  eventPhase:Event.CAPTURING_PHASE,defaultPrevented:true,defaultPreventedBefore:false,cancelable:true,
+  preventedByGlobalHandler:true,hasCustomMime:true,refPayloadPresent:true,payloadSource:'data-transfer'});
+ expect(observedOver[1].context).toMatchObject({listenerScope:'document',defaultPrevented:true,
+  defaultPreventedBefore:true,preventedByGlobalHandler:false});
+ expect(observedOver[2].context).toMatchObject({targetKind:'header',defaultPrevented:true,defaultPreventedBefore:false,
+  preventedByGlobalHandler:true});
  const observedDrops=entries.filter(entry=>entry.event==='global.drop.observed');
  expect(observedDrops).toHaveLength(2);
  expect(observedDrops.map(entry=>entry.context?.listenerScope)).toEqual(['window','document']);
- expect(observedDrops.every(entry=>entry.context?.defaultPrevented===false)).toBe(true);
+ expect(observedDrops.every(entry=>entry.context?.defaultPrevented===true)).toBe(true);
+ expect(observedDrops[0].context).toMatchObject({listenerScope:'window',defaultPreventedBefore:false,preventedByGlobalHandler:true});
+ expect(observedDrops[1].context).toMatchObject({listenerScope:'document',defaultPreventedBefore:true,preventedByGlobalHandler:false});
  await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
  const nextTransfer=dragTransfer({assetId:'x',sourceGroupId:null});
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',nextTransfer)));
@@ -867,8 +873,12 @@ it('does not observe external file or text drags and removes native listeners on
  await mount('/stack',{selectedAssets:[...photos,...singles]});
  const file=dragEvent('dragover',dragTransfer(undefined,['Files'],[new File(['x'],'external.jpg')]));
  const text=dragEvent('drop',dragTransfer(undefined,['text/plain']));
- document.body.dispatchEvent(file);document.body.dispatchEvent(text);
+ const url=dragEvent('dragover',dragTransfer(undefined,['text/uri-list']));
+ const inactiveInternal=dragEvent('drop',dragTransfer({assetId:'x',sourceGroupId:null}));
+ document.body.dispatchEvent(file);document.body.dispatchEvent(text);document.body.dispatchEvent(url);document.body.dispatchEvent(inactiveInternal);
  expect(frontendLogger.getEntries().filter(entry=>entry.event==='global.dragover.observed'||entry.event==='global.drop.observed')).toHaveLength(0);
+ expect(file.defaultPrevented).toBe(false);expect(text.defaultPrevented).toBe(false);expect(url.defaultPrevented).toBe(false);
+ expect(inactiveInternal.defaultPrevented).toBe(false);
  const listeners=(calls:readonly (readonly unknown[])[],type:string)=>calls
   .filter(call=>call[0]===type&&call[2]===true).map(call=>call[1]);
  const windowCalls=windowAdd.mock.calls as readonly (readonly unknown[])[];
