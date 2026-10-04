@@ -23,6 +23,14 @@ def logger(monkeypatch):
     return logger
 
 
+def context_node_count(value):
+    if isinstance(value, dict):
+        return 1 + sum(context_node_count(item) for item in value.values())
+    if isinstance(value, list):
+        return 1 + sum(context_node_count(item) for item in value)
+    return 1
+
+
 def test_off_and_debug_communication_privacy_and_correlation(logger):
     def handler(request):
         assert request.headers["x-api-key"] == PRIVATE_KEY
@@ -79,7 +87,7 @@ def test_image_contents_not_logged(logger, fetch):
     assert "PRIVATE" not in json.dumps(logger.create_report())
 
 
-def test_asset_detail_observation_logs_sorted_schema_and_presence_only(logger):
+def test_asset_detail_observation_splits_small_presence_and_sorted_key_chunks(logger):
     logger.set_level("debug")
     body = {
         "id": A, "type": "IMAGE", "originalFileName": "PRIVATE_FILENAME.DNG",
@@ -91,21 +99,58 @@ def test_asset_detail_observation_logs_sorted_schema_and_presence_only(logger):
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json=body))))
     assert detail.format == "DNG" and detail.is_raw is True
-    observations = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
-    assert len(observations) == 1 and observations[0]["event"] == "detail.observed"
-    context = observations[0]["context"]
+    assert any(entry["event"] == "request.start" for entry in logger.get_entries())
+    assert any(entry["event"] == "request.response" and entry["context"]["httpStatus"] == 200
+               for entry in logger.get_entries())
+    entries = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
+    observed = [entry for entry in entries if entry["event"] == "detail.observed"]
+    assert len(observed) == 1 and "context" in observed[0]
+    context = observed[0]["context"]
     assert context["assetId"] == A and context["type"] == "IMAGE" and context["visibility"] == "archive"
-    assert context["hasExifInfo"] is True and context["exifInfoPresent"] is True
+    assert context["exifInfoPresent"] is True
     assert context["exifInfoFieldCount"] == 3
-    assert context["exifInfoKeys"] == ["dateTimeOriginal", "iso", "model"]
-    assert context["topLevelKeys"] == sorted(body)
-    assert context["deletedAtPresent"] is True and context["trashedAtPresent"] is False
-    assert context["stackIdPresent"] is True and context["thumbhashPresent"] is True
+    assert context["topLevelFieldCount"] == len(body)
     assert context["format"] == "DNG" and context["isRaw"] is True
-    assert len(json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
+    presence = next(entry["context"] for entry in entries if entry["event"] == "detail.presence")
+    assert presence["assetId"] == A
+    assert presence["deletedAtPresent"] is True and presence["trashedAtPresent"] is False
+    assert presence["stackIdPresent"] is True and presence["thumbhashPresent"] is True
+    top_chunks = [entry["context"] for entry in entries if entry["event"] == "detail.keys"]
+    assert [key for chunk in top_chunks for key in chunk["keys"]] == sorted(body)
+    assert all(chunk["assetId"] == A for chunk in top_chunks)
+    exif_chunks = [entry["context"] for entry in entries if entry["event"] == "detail.exif-keys"]
+    assert [key for chunk in exif_chunks for key in chunk["keys"]] == ["dateTimeOriginal", "iso", "model"]
+    assert all(chunk["assetId"] == A for chunk in exif_chunks)
+    for entry in entries:
+        logged_context = entry["context"]
+        assert context_node_count(logged_context) <= 64
+        assert len(json.dumps(logged_context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
     report = json.dumps(logger.create_report())
     for private_value in ["PRIVATE_FILENAME", "PRIVATE_PATH", "PRIVATE_MODEL", "PRIVATE_DATE", "PRIVATE_RAW_BODY", PRIVATE_KEY, "PRIVATE_HOST"]:
         assert private_value not in report
+
+
+def test_asset_detail_key_lists_chunk_at_safe_context_sizes(logger):
+    logger.set_level("debug")
+    body = {"id": A, "type": "IMAGE", "originalFileName": "sample.dng", "fileCreatedAt": "2026-09-01T12:00:00Z"}
+    body.update({f"field_{index:02d}": index for index in range(45)})
+    body["exifInfo"] = {f"exif_{index:02d}": index for index in range(47)}
+    asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body))))
+    entries = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
+    for event, expected_keys, total_count in [
+        ("detail.keys", sorted(body), len(body)),
+        ("detail.exif-keys", sorted(body["exifInfo"]), len(body["exifInfo"])),
+    ]:
+        chunks = [entry["context"] for entry in entries if entry["event"] == event]
+        assert len(chunks) > 1
+        assert [key for chunk in chunks for key in chunk["keys"]] == expected_keys
+        assert [chunk["chunkIndex"] for chunk in chunks] == list(range(len(chunks)))
+        assert all(chunk["chunkCount"] == len(chunks) and chunk["keyCount"] == total_count for chunk in chunks)
+        assert all(chunk["assetId"] == A and len(chunk["keys"]) <= 20 for chunk in chunks)
+        for chunk in chunks:
+            assert context_node_count(chunk) <= 64
+            assert len(json.dumps(chunk, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
 
 
 @pytest.mark.parametrize("level", ["off", "error", "warn", "info"])
@@ -115,7 +160,7 @@ def test_asset_detail_observation_is_debug_only(logger, level):
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json=body))))
     assert detail.format == "DNG" and detail.is_raw is True
-    assert not any(entry["event"] == "detail.observed" for entry in logger.get_entries())
+    assert not any(entry["component"] == "immich.asset" for entry in logger.get_entries())
 
 
 def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_detail(logger, monkeypatch):
@@ -125,8 +170,10 @@ def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json={key: value for key, value in body.items() if key != "deletedAt"}))))
     assert detail.format == "DNG" and detail.exif.model_dump(exclude_none=True) == {}
-    observation = next(entry for entry in logger.get_entries() if entry["event"] == "detail.observed")
-    assert observation["context"]["hasExifInfo"] is False and observation["context"]["visibility"] is None
+    observations = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
+    observation = next(entry for entry in observations if entry["event"] == "detail.observed")
+    assert observation["context"]["exifInfoPresent"] is True and observation["context"]["visibility"] is None
+    assert not any(entry["event"] == "detail.exif-keys" for entry in observations)
     original_add = logger.add
     def failing_observation(*, level, component, event, message=None, context=None):
         if component == "immich.asset": raise RuntimeError("diagnostics unavailable")
@@ -135,6 +182,13 @@ def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json={key: value for key, value in body.items() if key != "deletedAt"}))))
     assert detail.format == "DNG"
+    monkeypatch.setattr(logger, "add", original_add)
+    logger.clear()
+    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"id": A, "type": "IMAGE", "originalFileName": "sample.dng",
+            "fileCreatedAt": "2026-09-01T12:00:00Z"}))))
+    assert detail.format == "DNG"
+    assert not any(entry["event"] == "detail.exif-keys" for entry in logger.get_entries())
 
 
 def test_status_malformed_json_is_classified(logger):
