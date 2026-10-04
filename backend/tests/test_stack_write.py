@@ -62,6 +62,38 @@ def test_cover_update_and_delete():
     assert results[0].status=='success' and calls==[('PUT',f'/api/stacks/{STACK_ID}',{'primaryAssetId':B})]
     results,calls=execute([op('delete')],[stack(member_ids=[A,B])],[httpx.Response(204)])
     assert results[0].status=='success' and str(results[0].releasedStackId)==STACK_ID
+
+@pytest.mark.parametrize('unrelated', [None, stack(SECOND_STACK_ID,C,[D]),
+    stack(SECOND_STACK_ID,C,[C,'bad'])])
+def test_healthy_cover_update_ignores_unrelated_invalid_stack(unrelated):
+    results,calls=execute([op('update',primaryAssetId=B)],
+        [stack(member_ids=[A,B]),unrelated],[written(primary=B,stack_id=STACK_ID,code=200)])
+    assert results[0].status=='success'
+    assert calls==[('PUT',f'/api/stacks/{STACK_ID}',{'primaryAssetId':B})]
+
+@pytest.mark.parametrize('invalid', [stack(member_ids=[A,B]) | {'primaryAssetId':C},
+    stack(member_ids=[A,B,A]), stack(member_ids=[A,'bad']),
+    stack() | {'id':'bad'}, stack(SECOND_STACK_ID,C,[A,C])])
+def test_related_invalid_ownership_never_writes(invalid):
+    snapshots=[invalid] if invalid['id'] == STACK_ID else [stack(member_ids=[A,B]),invalid]
+    results,calls=execute([op('update')],snapshots,[])
+    assert results[0].status=='failed' and results[0].errorCode=='unexpected_response'
+    assert calls==[]
+
+def test_invalid_operation_does_not_block_independent_update_or_create():
+    invalid=stack(SECOND_STACK_ID,C,[D])
+    operations=[op('update',primaryAssetId=B),op(name='unsafe',memberIds=[D,IDS[4]],primaryAssetId=D),
+        op(name='independent',memberIds=[IDS[4],IDS[6]],primaryAssetId=IDS[4])]
+    # Distinct final members remain a batch invariant, even for operations that will fail preflight.
+    operations[1]['memberIds']=[D,str(UUID(int=200))]
+    results,calls=execute(operations,[stack(member_ids=[A,B]),invalid],
+        [written(primary=B,stack_id=STACK_ID,code=200),written(ids=[IDS[4],IDS[6]],primary=IDS[4])])
+    assert [r.status for r in results]==['success','failed','success']
+    assert [c[0] for c in calls]==['PUT','POST']
+
+def test_duplicate_stack_id_fails_only_related_delete():
+    results,calls=execute([op('delete')],[stack(member_ids=[A,B]),stack(member_ids=[C,D])],[])
+    assert results[0].status=='failed' and calls==[]
 def test_partial_replacement_reports_committed_delete():
     results,calls=execute([op('update',memberIds=[A,C])],[stack(member_ids=[A,B])],[httpx.Response(204),httpx.Response(500)])
     assert [c[0] for c in calls]==['DELETE','POST']

@@ -12,6 +12,17 @@ describe('Home asset stack metadata', () => {
     (signal: AbortSignal) => fetchCalendarDayAssets('2026-09-01', signal),
     fetchFavoriteAssets,
   ];
+  it.each(readers)('preserves separate full member IDs without adding child assets (%#)', async read => {
+    const primary = { ...asset, ...stack, id: stack.primaryAssetId,
+      stackMemberIds: [stack.primaryAssetId, '42345678-1234-4234-9234-123456789abc'] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([primary]))));
+    try { expect(await read(new AbortController().signal)).toEqual([primary]); }
+    finally { vi.unstubAllGlobals(); }
+  });
+  it.each([[], ['bad'], [stack.primaryAssetId, stack.primaryAssetId],
+    ['42345678-1234-4234-9234-123456789abc'], 'bad'])('rejects malformed member-ID metadata (%#)', stackMemberIds => {
+    expect(isRecentAsset({ ...asset, ...stack, id: stack.primaryAssetId, stackMemberIds })).toBe(false);
+  });
   it.each(readers)('preserves stack metadata and accepts older non-stack responses (%#)', async read => {
     const data = [asset, { ...asset, stackId: null, primaryAssetId: null }, { ...asset, ...stack }];
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend_logging import backend_logger
 from immich import (
-    IMMICH_TIMEOUT, ImmichRequestError, _get_asset_stacks, _immich_request,
+    IMMICH_TIMEOUT, ImmichRequestError, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
     _log_response_failure, _request_error, _require_configuration,
 )
 
@@ -168,12 +168,20 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                        context={"batchId": batch_id, "operationCount": len(ops)})
     try:
         url, key = _require_configuration(immich_url, api_key)
-        stacks = await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id)
+        snapshot = _parse_stack_snapshot(
+            await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id), require_primary=True,
+        )
     except ImmichRequestError as error:
         return _operation_results(ops, [StackWriteResult(operationId=op.operationId, status="failed", errorCode=error.error_code) for op in ops], batch_id)
+    stacks = snapshot.stacks
     lookup = {UUID(stack["id"]): stack for stack in stacks}
     owners = {UUID(asset["id"]): UUID(stack["id"]) for stack in stacks for asset in stack["assets"]}
-    results = {}
+    # Quarantined ownership can fail one operation without authorizing a steal or blocking unrelated work.
+    results = {
+        op.operationId: StackWriteResult(operationId=op.operationId, status="failed", errorCode="unexpected_response")
+        for op in ops if op.stackId in snapshot.invalid_stack_ids
+        or any(member in snapshot.quarantined_member_ids for member in op.memberIds or [])
+    }
     released = set()
     replacements = set()
     headers = {"x-api-key": key, "Accept": "application/json"}
@@ -210,6 +218,8 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
         # Release all changing memberships first, including cycles between two updated Stacks.
         # v3.2.4 PUT changes only primary; membership updates require delete then create.
         for op in ops:
+            if op.operationId in results:
+                continue
             if op.type == "create":
                 continue
             old = lookup.get(op.stackId)

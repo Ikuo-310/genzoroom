@@ -64,6 +64,41 @@ def test_stack_management_keeps_rejecting_missing_primary_member():
     assert error.value.error_code == "unexpected_response"
 
 
+@pytest.mark.parametrize("unrelated", [
+    None,
+    stack(SECOND_STACK_ID, IDS[4], [IDS[3]]),
+    stack(SECOND_STACK_ID, IDS[3], [IDS[3], "bad"]),
+])
+def test_targeted_resolve_ignores_unrelated_invalid_snapshot(unrelated):
+    healthy = full_stack()
+    assert resolve([healthy, unrelated])[0].id == UUID(STACK_ID)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=[healthy, unrelated]))
+    refreshed = asyncio.run(resolve_stacks("http://immich.example", "key", [],
+        asset_ids=[UUID(IDS[0])], transport=transport))
+    assert refreshed[0].id == UUID(STACK_ID)
+
+
+@pytest.mark.parametrize("invalid", [
+    full_stack() | {"primaryAssetId": IDS[4]},
+    full_stack() | {"assets": [asset(IDS[0]), {"id": "bad"}]},
+    stack(SECOND_STACK_ID, IDS[3], [IDS[0], IDS[3]]),
+])
+def test_requested_or_selected_ambiguous_ownership_is_rejected(invalid):
+    snapshots = [full_stack(), invalid]
+    with pytest.raises(ImmichRequestError):
+        resolve(snapshots)
+    with pytest.raises(ImmichRequestError):
+        asyncio.run(resolve_stacks("http://immich.example", "key", [], asset_ids=[UUID(IDS[0])],
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=snapshots))))
+
+
+def test_asset_refresh_rejects_primary_missing_owner_but_not_unrelated_owner():
+    invalid = stack(SECOND_STACK_ID, IDS[4], [IDS[3]])
+    with pytest.raises(ImmichRequestError):
+        asyncio.run(resolve_stacks("http://immich.example", "key", [], asset_ids=[UUID(IDS[3])],
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[full_stack(), invalid]))))
+
+
 @pytest.mark.parametrize("mutation", ["unknown", "video", "missing_filename", "bad_date", "empty"])
 def test_rejects_unknown_or_partial_editable_stacks(mutation):
     item = deepcopy(full_stack())

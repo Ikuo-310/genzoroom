@@ -75,6 +75,7 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
     assert result[0]["stackId"] == STACK_ID
     assert result[0]["primaryAssetId"] == IDS[0]
     assert result[0]["stackAssetCount"] == 3
+    assert result[0]["stackMemberIds"] == IDS[:3]
     assert result[1]["stackId"] == SECOND_STACK_ID
     assert result[1]["primaryAssetId"] == IDS[3]
     assert result[1]["stackAssetCount"] == 1
@@ -122,11 +123,12 @@ def test_malformed_stack_entries_are_skipped_for_home(kind, body):
         assert error.value.error_code == "unexpected_response"
         return
 
-    result = fetch(kind, [asset(IDS[0])], body)
-    assert len(result) == 1
-    assert result[0]["stackId"] is None
-    assert result[0]["primaryAssetId"] is None
-    assert result[0]["stackAssetCount"] is None
+    unrelated = str(UUID(int=1000))
+    result = fetch(kind, [asset(IDS[0]), asset(unrelated)], body)
+    # Entries without any readable identity cannot quarantine unrelated photos.
+    expected_ids = [IDS[0], unrelated] if body in ([None], [{}]) else [unrelated]
+    assert [item["id"] for item in result] == expected_ids
+    assert all(item["stackId"] is None for item in result)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -159,21 +161,40 @@ def test_home_skips_all_stacks_with_ambiguous_member_and_keeps_unrelated_stack(k
     unrelated = stack(unrelated_id, IDS[4], [IDS[4], IDS[5]])
     result = fetch(kind, [asset(i) for i in IDS[:6]], [stack(), overlapping, unrelated])
 
-    assert all(result[index]["stackId"] is None for index in (0, 1, 2, 3))
-    assert len(result) == 5
-    assert result[4]["id"] == IDS[4]
-    assert result[4]["stackId"] == unrelated_id
-    assert result[4]["primaryAssetId"] == IDS[4]
-    assert result[4]["stackAssetCount"] == 2
+    assert len(result) == 1
+    assert result[0]["id"] == IDS[4]
+    assert result[0]["stackId"] == unrelated_id
+    assert result[0]["primaryAssetId"] == IDS[4]
+    assert result[0]["stackAssetCount"] == 2
 
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_home_skips_stack_with_duplicate_member_inside_entry(kind):
     duplicate_member = stack(member_ids=[IDS[0], IDS[0]])
     result = fetch(kind, [asset(IDS[0])], [duplicate_member])
-    assert result[0]["stackId"] is None
-    assert result[0]["primaryAssetId"] is None
-    assert result[0]["stackAssetCount"] is None
+    assert result == []
+
+
+@pytest.mark.parametrize("invalid", [
+    lambda: stack() | {"id": "bad"},
+    lambda: stack() | {"primaryAssetId": "bad"},
+    lambda: stack() | {"assets": [{"id": IDS[0]}, {"id": "bad"}]},
+])
+def test_unrelated_invalid_entry_preserves_healthy_primary_and_nonstack_dng(invalid):
+    healthy = stack(SECOND_STACK_ID, IDS[3], IDS[3:5])
+    independent = str(UUID(int=1000))
+    result = fetch("recent", [asset(i) for i in [IDS[0], IDS[3], IDS[4], independent]], [invalid(), healthy])
+    assert [item["id"] for item in result] == [IDS[3], independent]
+    assert result[0]["stackMemberIds"] == IDS[3:5]
+    assert result[1]["is_raw"] and result[1]["stackId"] is None
+
+
+def test_duplicate_id_with_malformed_copy_and_valid_invalid_overlap_are_quarantined():
+    healthy = stack(member_ids=IDS[:2])
+    for invalid in [healthy | {"primaryAssetId": "bad"},
+                    stack(SECOND_STACK_ID, IDS[2], [IDS[1], "bad"])]:
+        result = fetch("recent", [asset(i) for i in IDS[:2]], [healthy, invalid])
+        assert result == []
 
 
 @pytest.mark.parametrize("kind", KINDS)

@@ -1,6 +1,6 @@
 import { StackFilterControls } from './StackFilterControls';
 import { readStackFilterMode, writeStackFilterMode, type StackFilterMode, type StackFilterTab } from './photoFilters';
-import { collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus } from './immichStacks';
+import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -132,7 +132,7 @@ export function GalleryPage() {
           ? { kind: 'calendar', assets: calendarAssets, state: calendarAssetState, selection: calendarSelection }
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
-  const editStatuses = useEditStatuses(editStatusAssets.map(asset => asset.id));
+  const editStatuses = useEditStatuses(stackEditStatusIds(editStatusAssets));
   const photoFilters = photoFiltersForMode(photoFilterModes[activeTab]);
   const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
@@ -345,7 +345,7 @@ export function GalleryPage() {
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
   const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, stackFilterModes[activeTab]);
   const editFilteredAssets = activeTab === 'favorites'
-    ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses)
+    ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], aggregateStackEditStatuses(stackAssets, editStatuses))
     : filterImmichStacksByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses);
   const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
   const visibleAssets = activeTab !== 'favorites' && photoFilterModes[activeTab] === 'both'

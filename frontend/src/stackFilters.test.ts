@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
-import { collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus } from './immichStacks';
+import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
 import { filterPhotos, photoFiltersForMode, readStackFilterMode, writeStackFilterMode, STACK_FILTER_SESSION_KEYS,
   type PhotoFilterMode, type StackFilterMode, type StackFilterTab } from './photoFilters';
 
@@ -59,6 +59,17 @@ describe('Stack filter storage', () => {
 });
 
 describe('Stack / edit / type display', () => {
+  it.each([
+    [{ b: false, c: false }, false], [{ b: true, c: false }, true],
+    [{ b: false, c: true }, true], [{ b: false }, undefined],
+  ] as const)('uses full member statuses with primary-only display (%#)', (statuses, edited) => {
+    const primary = { ...b, stackMemberIds: ['b', 'c'], stackAssetCount: 99 };
+    const displayed = [primary, a];
+    expect(stackEditStatusIds([primary, a, primary])).toEqual(['b', 'c', 'a']);
+    expect(aggregateStackEditStatuses(displayed, statuses).b).toBe(edited);
+    expect(filterImmichStacksByEditStatus([primary], 'edited', statuses)).toEqual(edited === false ? [] : [primary]);
+    expect(filterImmichStacksByEditStatus([primary], 'unedited', statuses)).toEqual(edited === true ? [] : [primary]);
+  });
   it.each([
     ['both', 'both', ['a', 'b', 'd']], ['stacked', 'both', ['b']], ['unstacked', 'both', ['a', 'd']],
     ['stacked', 'raw', ['c']], ['stacked', 'nonRaw', ['b']], ['both', 'raw', ['c', 'd']],

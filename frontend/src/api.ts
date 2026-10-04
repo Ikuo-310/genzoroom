@@ -38,7 +38,12 @@ export function isRecentAsset(value: unknown): value is RecentAsset {
     ((value.stackId == null && value.primaryAssetId == null) ||
       (isUuid(value.stackId) && isUuid(value.primaryAssetId))) &&
     (value.stackAssetCount == null ||
-      (typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 1));
+      (typeof value.stackAssetCount === 'number' && Number.isSafeInteger(value.stackAssetCount) && value.stackAssetCount >= 1)) &&
+    (value.stackMemberIds == null || (Array.isArray(value.stackMemberIds) && value.stackMemberIds.length > 0
+      && value.stackMemberIds.every(isUuid) && isUuid(value.stackId) && isUuid(value.primaryAssetId)
+      && new Set(value.stackMemberIds.map(id => id.toLowerCase())).size === value.stackMemberIds.length
+      && value.stackMemberIds.some(id => id.toLowerCase() === (value.primaryAssetId as string).toLowerCase())
+      && value.stackMemberIds.some(id => id.toLowerCase() === (value.id as string).toLowerCase())));
 }
 
 function withSafeStackCounts(data: unknown[]): unknown[] {

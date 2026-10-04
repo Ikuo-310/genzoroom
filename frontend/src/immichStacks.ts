@@ -45,10 +45,28 @@ export function filterImmichStacks(assets: RecentAsset[], mode: StackFilterMode)
   return assets.filter(asset => mode === 'stacked' ? !!asset.stackId : !asset.stackId);
 }
 
+export function stackEditStatusIds(assets: readonly RecentAsset[]): string[] {
+  return [...new Set(assets.flatMap(asset => asset.stackId && asset.stackMemberIds?.length
+    ? asset.stackMemberIds : [asset.id]))];
+}
+
+export function aggregateStackEditStatuses(assets: readonly RecentAsset[], statuses: AssetEditStatuses): AssetEditStatuses {
+  const aggregated = { ...statuses };
+  for (const asset of assets) {
+    if (!asset.stackId || !asset.stackMemberIds?.length) continue;
+    const values = asset.stackMemberIds.map(id => statuses[id]);
+    // Home cards omit children; full snapshot IDs, rather than badge counts, establish edit completeness.
+    aggregated[asset.id] = values.some(value => value === true) ? true
+      : values.some(value => value === undefined) ? undefined : false;
+  }
+  return aggregated;
+}
+
 export function filterImmichStacksByEditStatus(
   assets: RecentAsset[], mode: EditStatusFilterMode, statuses: AssetEditStatuses,
 ): RecentAsset[] {
   if (mode === 'both') return assets;
+  const aggregated = aggregateStackEditStatuses(assets, statuses);
   const groups = new Map<string, { edited: boolean; unknown: boolean; ids: Set<string>; total: number }>();
   for (const asset of assets) {
     if (!asset.stackId) continue;
@@ -61,7 +79,9 @@ export function filterImmichStacksByEditStatus(
   }
   return assets.filter(asset => {
     let status = statuses[asset.id];
-    if (asset.stackId) {
+    if (asset.stackId && asset.stackMemberIds?.length) {
+      status = aggregated[asset.id];
+    } else if (asset.stackId) {
       const group = groups.get(asset.stackId)!;
       // Album/day results may omit members; absence cannot establish that the whole stack is unedited.
       status = group.edited ? true : group.unknown || group.total > group.ids.size ? undefined : false;

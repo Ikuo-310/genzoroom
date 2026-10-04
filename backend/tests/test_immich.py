@@ -239,7 +239,7 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(result[0].filename, "photo-1.jpg")
         self.assertEqual(result[-1].filename, "photo-250.jpg")
 
-    def test_recent_paginates_after_removing_stack_children_until_limit_is_filled(self):
+    def test_recent_paginates_after_removing_children_and_quarantine_until_limit_is_filled(self):
         primary_id = str(UUID(int=900))
         child_ids = [str(UUID(int=index)) for index in range(1, 51)]
         visible_ids = [str(UUID(int=index)) for index in range(100, 150)]
@@ -253,7 +253,10 @@ class ImmichAssetTests(unittest.TestCase):
             if request.url.path == "/api/stacks":
                 return httpx.Response(200, json=[{
                     "id": str(UUID(int=901)), "primaryAssetId": primary_id,
-                    "assets": [{"id": primary_id}, *[{"id": asset_id} for asset_id in child_ids]],
+                    "assets": [{"id": primary_id}, *[{"id": asset_id} for asset_id in child_ids[:25]]],
+                }, {
+                    "id": str(UUID(int=902)), "primaryAssetId": child_ids[25],
+                    "assets": [*[{"id": asset_id} for asset_id in child_ids[25:]], {"id": child_ids[-1]}],
                 }])
             body = json.loads(request.content)
             search_requests.append(body)

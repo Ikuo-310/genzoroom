@@ -8,6 +8,7 @@ export type RecentAsset = {
   stackId?: string | null;
   primaryAssetId?: string | null;
   stackAssetCount?: number | null;
+  stackMemberIds?: string[] | null;
 };
 
 export type ImmichStack = { id: string; primaryAssetId: string; assets: RecentAsset[] };

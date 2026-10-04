@@ -11,7 +11,7 @@ from time import monotonic
 
 import anyio
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend_logging import backend_logger
 
@@ -124,6 +124,8 @@ class RecentAsset(BaseModel):
     stackId: UUID | None = None
     primaryAssetId: UUID | None = None
     stackAssetCount: int | None = None
+    # Only Home Stack covers expose membership; unrelated asset APIs retain their response shape.
+    stackMemberIds: list[UUID] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ImmichStack(BaseModel):
@@ -506,7 +508,7 @@ async def get_recent_assets(
             "Immich returned an unexpected response.",
         ) from None
 
-    stacks = await _get_asset_stacks(url, key, transport=transport, strict=False)
+    stacks = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport), require_primary=False)
     result = _attach_home_stack_metadata(assets, stacks)[:limit]
     if next_cursor is not None and len(result) < limit:
         seen_cursors = {next_cursor}
@@ -596,8 +598,7 @@ def _recent_next_cursor(body: object) -> str | None:
 async def _get_asset_stacks(
     url: str, key: str,
     *, transport: httpx.AsyncBaseTransport | None = None, batch_id: str | None = None,
-    strict: bool = True,
-) -> list[Mapping]:
+) -> list[object]:
     try:
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
@@ -614,75 +615,66 @@ async def _get_asset_stacks(
         body = response.json()
         if not isinstance(body, list):
             raise TypeError
-        if not strict:
-            return _valid_home_stack_entries(body)
-        seen_stacks: set[UUID] = set()
-        seen_members: set[UUID] = set()
-        for stack in body:
-            if not isinstance(stack, Mapping) or not isinstance(stack.get("id"), str) \
-                    or not isinstance(stack.get("primaryAssetId"), str) \
-                    or not isinstance(stack.get("assets"), list):
-                raise TypeError
-            stack_id = UUID(stack["id"])
-            primary_id = UUID(stack["primaryAssetId"])
-            if stack_id in seen_stacks:
-                raise ValueError
-            seen_stacks.add(stack_id)
-            members: set[UUID] = set()
-            for member in stack["assets"]:
-                if not isinstance(member, Mapping) or not isinstance(member.get("id"), str):
-                    raise TypeError
-                member_id = UUID(member["id"])
-                # Ambiguous membership must not silently select whichever stack appeared last.
-                if member_id in seen_members:
-                    raise ValueError
-                seen_members.add(member_id)
-                members.add(member_id)
-            if primary_id not in members:
-                raise ValueError
     except (KeyError, TypeError, ValueError):
         _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
     return body
 
 
-def _valid_home_stack_entries(body: list[object]) -> list[Mapping]:
-    candidates: list[tuple[Mapping, UUID, set[UUID]]] = []
-    for stack in body:
-        try:
-            if not isinstance(stack, Mapping) or not isinstance(stack.get("id"), str) \
-                    or not isinstance(stack.get("primaryAssetId"), str) \
-                    or not isinstance(stack.get("assets"), list):
-                continue
-            stack_id = UUID(stack["id"])
-            primary_id = UUID(stack["primaryAssetId"])
-            members: set[UUID] = set()
-            for member in stack["assets"]:
-                if not isinstance(member, Mapping) or not isinstance(member.get("id"), str):
-                    raise ValueError
-                member_id = UUID(member["id"])
-                if member_id in members:
-                    raise ValueError
-                members.add(member_id)
-            if not members:
-                raise ValueError
-            candidates.append((stack, stack_id, members))
-        except (KeyError, TypeError, ValueError):
-            continue
+@dataclass
+class StackSnapshot:
+    stacks: list[Mapping]
+    invalid_stack_ids: set[UUID]
+    quarantined_member_ids: set[UUID]
 
+
+def _stack_uuid(value: object) -> UUID | None:
+    try:
+        return UUID(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> StackSnapshot:
+    entries = []
     stack_id_counts: dict[UUID, int] = {}
     member_owners: dict[UUID, set[int]] = {}
-    for index, (_, stack_id, members) in enumerate(candidates):
-        stack_id_counts[stack_id] = stack_id_counts.get(stack_id, 0) + 1
-        for member_id in members:
+    for index, raw in enumerate(body):
+        stack = raw if isinstance(raw, Mapping) else {}
+        stack_id = _stack_uuid(stack.get("id"))
+        primary_id = _stack_uuid(stack.get("primaryAssetId"))
+        raw_members = stack.get("assets")
+        members: set[UUID] = set()
+        valid = stack_id is not None and primary_id is not None and isinstance(raw_members, list) and bool(raw_members)
+        for member in raw_members if isinstance(raw_members, list) else []:
+            member_id = _stack_uuid(member.get("id")) if isinstance(member, Mapping) else None
+            if member_id is None or member_id in members:
+                valid = False
+            if member_id is not None:
+                members.add(member_id)
+        # Home must recognize surviving children even when a deleted primary is absent; edits cannot trust that snapshot.
+        if require_primary and primary_id not in members:
+            valid = False
+        entries.append((stack, stack_id, primary_id, members, valid))
+        if stack_id is not None:
+            stack_id_counts[stack_id] = stack_id_counts.get(stack_id, 0) + 1
+        for member_id in members | ({primary_id} if not valid and primary_id is not None else set()):
             member_owners.setdefault(member_id, set()).add(index)
     ambiguous_entries = {
         index for owners in member_owners.values() if len(owners) > 1 for index in owners
     }
-    return [
-        stack for index, (stack, stack_id, _) in enumerate(candidates)
-        if stack_id_counts[stack_id] == 1 and index not in ambiguous_entries
-    ]
+    snapshot = StackSnapshot([], set(), set())
+    for index, (stack, stack_id, primary_id, members, valid) in enumerate(entries):
+        if valid and stack_id_counts[stack_id] == 1 and index not in ambiguous_entries:
+            snapshot.stacks.append(stack)
+        else:
+            # Invalid entries still establish possible ownership; never reclassify their assets as unstacked.
+            if stack_id is not None:
+                snapshot.invalid_stack_ids.add(stack_id)
+            snapshot.quarantined_member_ids.update(members)
+            if primary_id is not None:
+                snapshot.quarantined_member_ids.add(primary_id)
+    return snapshot
 
 
 async def _with_asset_stacks(
@@ -690,24 +682,27 @@ async def _with_asset_stacks(
     *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
     # Home remains available when Immich exposes an incomplete Stack snapshot; editing keeps strict validation.
-    stacks = await _get_asset_stacks(url, key, transport=transport, strict=False)
+    stacks = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport), require_primary=False)
     return _attach_home_stack_metadata(assets, stacks)
 
 
-def _attach_home_stack_metadata(assets: list[RecentAsset], stacks: list[Mapping]) -> list[RecentAsset]:
-    lookup = {
-        UUID(member["id"]): (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(stack["assets"]))
-        for stack in stacks for member in stack["assets"]
-    }
+def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapshot) -> list[RecentAsset]:
+    lookup = {}
+    for stack in snapshot.stacks:
+        member_ids = [UUID(member["id"]) for member in stack["assets"]]
+        for member_id in member_ids:
+            lookup[member_id] = (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(member_ids), member_ids)
     # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
     for asset in assets:
         stack_info = lookup.get(asset.id)
         if stack_info is None:
             asset.stackId = asset.primaryAssetId = asset.stackAssetCount = None
+            asset.stackMemberIds = None
         else:
-            asset.stackId, asset.primaryAssetId, asset.stackAssetCount = stack_info
+            asset.stackId, asset.primaryAssetId, asset.stackAssetCount, asset.stackMemberIds = stack_info
     # A missing primary can leave only Stack children in search results; those are never Home cards.
-    return [asset for asset in assets if asset.stackId is None or asset.id == asset.primaryAssetId]
+    return [asset for asset in assets if asset.id not in snapshot.quarantined_member_ids
+            and (asset.stackId is None or asset.id == asset.primaryAssetId)]
 
 
 async def resolve_stacks(
@@ -720,10 +715,19 @@ async def resolve_stacks(
     if not requested and not asset_ids:
         return []
     url, key = _require_configuration(immich_url, api_key)
-    stacks = await _get_asset_stacks(url, key, transport=transport)
+    snapshot = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport), require_primary=True)
+    stacks = snapshot.stacks
     if asset_ids is not None:
         selected = set(asset_ids)
+        if selected & snapshot.quarantined_member_ids:
+            raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
         requested = [UUID(stack['id']) for stack in stacks if any(UUID(member['id']) in selected for member in stack['assets'])]
+    if set(requested) & snapshot.invalid_stack_ids or any(
+        UUID(stack["id"]) in requested and any(_stack_uuid(member["id"]) in snapshot.quarantined_member_ids
+                                              for member in stack["assets"])
+        for stack in stacks
+    ):
+        raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
     lookup = {UUID(stack["id"]): stack for stack in stacks}
     try:
         result = []

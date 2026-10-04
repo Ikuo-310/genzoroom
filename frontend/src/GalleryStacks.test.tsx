@@ -94,6 +94,23 @@ function change(selector: string, value: string) {
 }
 
 describe('Home stack display', () => {
+  it.each(tabs.flatMap(tab => ['none', 'child', 'primary', 'unknown'].map(state => [tab, state] as const)))
+    ('filters primary-only %s cards using full Stack member statuses: %s', async (tab, state) => {
+      const primary = { ...asset('primary'), stackId: 'stack-s', primaryAssetId: 'primary',
+        stackAssetCount: 2, stackMemberIds: ['primary', 'member'] };
+      for (const reader of [api.recent, api.album, api.day, api.favorites]) reader.mockResolvedValue([primary, asset('x')]);
+      api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids
+        .filter(id => state !== 'unknown' || id !== 'member')
+        .map(id => [id, state === 'child' ? id === 'member' : id === state])));
+      await mount(tab);
+      expect(api.statuses).toHaveBeenCalledWith(['primary', 'member', 'x'], expect.any(AbortSignal));
+      expect(filenames()).toEqual(['primary.jpg', 'x.jpg']);
+      change('.edit-status-filter-control select', 'edited');
+      expect(filenames()).toEqual(state === 'none' ? [] : ['primary.jpg']);
+      change('.edit-status-filter-control select', 'unedited');
+      expect(filenames()).toEqual(state === 'child' || state === 'primary' ? ['x.jpg'] : ['primary.jpg', 'x.jpg']);
+      expect(host.querySelector('img[src="/thumb/member"]')).toBeNull();
+    });
   it.each(['recent', 'albums', 'calendar'] as const)('opens non-RAW from a RAW primary on %s', async tab => {
     const members = photos.map(photo => photo.stackId ? { ...photo, primaryAssetId: 'member' } : photo);
     api.recent.mockResolvedValue(members); api.album.mockResolvedValue(members); api.day.mockResolvedValue(members);
