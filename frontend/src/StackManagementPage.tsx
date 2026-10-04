@@ -145,6 +145,10 @@ export function StackManagementPage() {
     try { return isStackDrag(transfer) && transfer.getData(STACK_DRAG_TYPE) === '' ? draggingRef.current : null; }
     catch { return null; }
   };
+  const isActiveStackDrag = (transfer: DataTransfer) => {
+    if (!draggingRef.current || !isStackDrag(transfer)) return false;
+    return payloadFrom(transfer) !== null;
+  };
   const observeTransfer = (transfer: DataTransfer) => {
     let dataTransferTypes: string[] = [];
     let filesLength = 0;
@@ -395,7 +399,17 @@ export function StackManagementPage() {
   }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
 
   return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
-    onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
+    onDragOverCapture={event => {
+      moveDragPreview(event.clientX, event.clientY);
+      if (isActiveStackDrag(event.dataTransfer)) {
+        // Cancel the browser's page-level drop navigation while allowing valid target handlers to run.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'none';
+      }
+    }}
+    onDropCapture={event => {
+      if (isActiveStackDrag(event.dataTransfer)) event.preventDefault();
+    }}>
     <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
       <h1>{t('stackManagement.title')}</h1>

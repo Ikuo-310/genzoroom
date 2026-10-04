@@ -799,6 +799,37 @@ it('records safe D&D diagnostics with Chrome dragover deduplication and preserve
  expect(entries.some(entry=>entry.event==='dragend')).toBe(true);
  expect(JSON.stringify(entries)).not.toContain('selected.jpg');
 });
+it('cancels browser defaults for internal drops on the page while leaving state unchanged',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const pageTarget=host.querySelector<HTMLElement>('.stack-management-header')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ const initialGroups=host.querySelectorAll('.stack-candidate-group').length;
+ const initialUnmatched=unmatched();
+ const over=dragEvent('dragover',transfer);await act(async()=>pageTarget.dispatchEvent(over));
+ expect(over.defaultPrevented).toBe(true);
+ expect(transfer.dropEffect).toBe('none');
+ const drop=dragEvent('drop',transfer);await act(async()=>pageTarget.dispatchEvent(drop));
+ expect(drop.defaultPrevented).toBe(true);
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(initialGroups);
+ expect(unmatched()).toEqual(initialUnmatched);
+ expect(document.body.querySelector('.stack-drag-preview')).not.toBeNull();
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ expect(document.body.querySelector('.stack-drag-preview')).toBeNull();
+});
+it('does not cancel page-level drops for external files or non-Stack transfers',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const pageTarget=host.querySelector<HTMLElement>('.stack-management-header')!;
+ const external=dragTransfer(undefined,['Files'],[new File(['image'],'outside.jpg')]);
+ const externalOver=dragEvent('dragover',external);await act(async()=>pageTarget.dispatchEvent(externalOver));
+ const externalDrop=dragEvent('drop',external);await act(async()=>pageTarget.dispatchEvent(externalDrop));
+ expect(externalOver.defaultPrevented).toBe(false);expect(externalDrop.defaultPrevented).toBe(false);
+ const text=dragTransfer(undefined,['text/plain']);
+ const textDrop=dragEvent('drop',text);await act(async()=>pageTarget.dispatchEvent(textDrop));
+ expect(textDrop.defaultPrevented).toBe(false);
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+});
 it('suppresses native drag ghost and follows the pointer with a thumbnail-sized photo-only preview',async()=>{
  frontendLogger.setLevel('debug');
  await mount('/stack',{selectedAssets:[...photos,...singles]});
@@ -1008,8 +1039,8 @@ it('does not consume invalid, external or malformed unmatched-photo drops',async
  const source=wrappers[0].querySelector<HTMLButtonElement>('.stack-photo')!,self=wrappers[0],other=wrappers[1];
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  const selfOver=dragEvent('dragover',transfer);await act(async()=>self.dispatchEvent(selfOver));
- expect(selfOver.defaultPrevented).toBe(false);expect(self.querySelector('.stack-drop-target')).toBeNull();
- const selfDrop=dragEvent('drop',transfer);await act(async()=>self.dispatchEvent(selfDrop));expect(selfDrop.defaultPrevented).toBe(false);
+ expect(selfOver.defaultPrevented).toBe(true);expect(self.querySelector('.stack-drop-target')).toBeNull();
+ const selfDrop=dragEvent('drop',transfer);await act(async()=>self.dispatchEvent(selfDrop));expect(selfDrop.defaultPrevented).toBe(true);
  const malformed=dragTransfer(undefined,['application/x-genzoroom-stack-photo+json'],[],'{');
  const malformedDrop=dragEvent('drop',malformed);await act(async()=>other.dispatchEvent(malformedDrop));expect(malformedDrop.defaultPrevented).toBe(false);
  const noMime=dragTransfer();
@@ -1049,14 +1080,14 @@ it('purgess a member dropped into unmatched, ignores external/malformed/same-gro
  const source=group.querySelector<HTMLButtonElement>('.stack-photo')!;
  const payload={assetId:'hidden-first',sourceGroupId:`draft:immich:${existingStackId}`};
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',dragTransfer(payload))));
- const malformed=dragEvent('dragover',dragTransfer(undefined,['application/x-genzoroom-stack-photo+json']));
+ const malformed=dragEvent('dragover',dragTransfer(undefined,['application/x-genzoroom-stack-photo+json'],[],'{'));
  await act(async()=>group.dispatchEvent(malformed));expect(malformed.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
  const external=dragEvent('drop',dragTransfer(undefined,['Files']));await act(async()=>target.dispatchEvent(external));
  expect(external.defaultPrevented).toBe(false);expect(unmatched()).toEqual(['x.jpg']);
  const indicator=group.querySelector('.stack-group-indicators')!;
  const overIndicator=dragEvent('dragover',dragTransfer(payload));await act(async()=>indicator.dispatchEvent(overIndicator));
- expect(overIndicator.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
- const same=dragEvent('dragover',dragTransfer(payload));await act(async()=>group.dispatchEvent(same));expect(same.defaultPrevented).toBe(false);
+ expect(overIndicator.defaultPrevented).toBe(true);expect(group.classList.contains('stack-drop-target')).toBe(false);
+ const same=dragEvent('dragover',dragTransfer(payload));await act(async()=>group.dispatchEvent(same));expect(same.defaultPrevented).toBe(true);
  await act(async()=>source.dispatchEvent(dragEvent('dragend',dragTransfer(payload))));
 });
 it('purges a Stack member dropped onto an unmatched photo instead of creating a manual Stack',async()=>{
