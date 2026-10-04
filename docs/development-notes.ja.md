@@ -2,9 +2,9 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
-## 2026-10-04: Structured Logging、Home / Stack境界、D&Dの記録
+## 2026-10-04〜10-05: Structured Logging、Home / Stack境界、D&Dの記録
 
-この節は2026-10-04のGit履歴と現行コード、および利用者から報告された最新Firefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
+この節は2026-10-04〜10-05のGit履歴と現行コード、および利用者から報告されたFirefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
 
 ### Structured LoggingとLogs UI
 
@@ -32,15 +32,17 @@ Home用の非fatal解析とStack管理用strict resolve/write validationを分�
 
 toolbarはwrite planからcreate / update / delete件数を表示し、operationがある場合だけsummaryを出す。個別delete-pending行は表示せず、send result statusはSTACK候補見出し行に置く。送信確認dialogとtoolbarは同じplan countsを使う。singleton warningとPurgingだけを許す制約は上記のとおり。normal StackのAdd、D&D、COVER、Purge、Undo、partial / unknown outcomeとcorrelated write semanticsは既存経路を維持した。
 
-### Chrome / Firefox D&D対応と未解決のinvalid drop
+### Chrome / Firefox D&D対応とfire-drag原因特定
 
 Chromeでimg自身のnative image dragが内部dragより先に始まり、transferに`Files`が入りcustom MIMEがないため拒否される診断結果を受け、STACK管理内thumbnail imgを`draggable=false`にした。内部drag sourceは親photo buttonとし、custom MIME `application/x-genzoroom-stack-photo+json`を使う。active payloadはReact stateに加えてrefにも同期保持し、custom MIME typeは存在するがgetDataが空で、file transferでない内部dragの場合に限ってref fallbackを使う。
 
 Firefoxでブラウザー標準ghostが薄く暗くなる問題に対してdrag previewを複数回調整した。現行コードは透明native helperを`setDragImage()`へ渡してnative ghostを抑え、写真imgだけの別DOM previewを表示する。previewはrendered thumbnail寸法、opacity 0.88で、grab offsetをdrag開始時に記録してpointer追従する。以前のphoto-only `setDragImage` 案やopacity調整だけの案は最終方式ではない。
 
-さらにFirefoxでは内部dragを無効領域へdropするとブラウザー既定動作でGoogle等の新規tabが開く問題が報告された。STACK管理表示中だけwindow / document capture listenerを付け、active internal Stack dragの`dragover` / `drop`を`stack.dnd` DEBUGで観測する仕組みを追加した。window captureは認識済み内部dragのcancelable eventに`preventDefault()`を行うがstopPropagationはせず、有効targetの既存bubble handlerを維持する。document listenerは後段のevent state観測に使う。
+Firefoxのinvalid drop後にGoogle等の新規tabが開くという報告を受け、window / document capture observerを追加した。調査中はactive internal dragのwindow capture `dragover` / `drop`へ一時的に`preventDefault()`する対策も試したが、新規tab問題は続いたためpost-drag観測を追加した。利用者のログではdragend直後にblur、その後visibilitychangeが観測され、GenzoRoom内click / auxclick / navigationではない可能性が高まった。
 
-**最新の利用者実機確認では、この問題は未解決である。** `4e06b12`適用後、Firefoxログでwindow captureの`preventedByGlobalHandler=true`、document側の`defaultPrevented=true`、custom MIME payload保持、global drop観測が確認されたにもかかわらず、invalid drop後にGoogle等の新規tabが開いたとの報告があった。したがって単純にdropの`preventDefault()`が欠けていたとは結論できない。次回はdrop後からdragend、navigationまでのイベントと遷移を追加観測する予定であり、まだ実装も解決もされていない。今回の文書更新ではブラウザー操作を行っていない。
+その後の利用者実機確認では、Firefoxトラブルシューティングモードで問題が再現せず、通常モードでも`fire-drag`だけを無効にすると再現しなかった。この切り分けから、原因はGenzoRoomやFirefox標準D&DではなくFirefox拡張機能`fire-drag`と特定された。window capture suppressionは不要と判断して削除し、その後も`fire-drag`無効状態でvalid / invalid D&Dが正常に動き、新規tabが開かないことを利用者が確認した。
+
+原因特定後、incident専用の750ms post-drag observer、timer、pointer / mouse / lifecycle listenerとlocation比較をcleanupした。現行コードにはdragstartからdragendまでの`dragSessionId`相関、dragover / dropのglobal観測、drop結果、DataTransferとdragend情報を記録する一般的な`stack.dnd` diagnosticsだけを残している。window / document capture observerは観測専用で、`preventDefault()`や伝播制御を行わない。今回の実機確認は利用者報告であり、この文書更新時にブラウザー操作を行ったものではない。
 
 Git履歴上、調査途中のDNG / Recent probe、`withStacked:false`、Firefox ghost途中案はRevertまたはcleanupされている。現行実装の記述には含めず、必要な設計判断だけを上記の経緯として記録した。2026-10-04の各suiteの正確な実行件数はこの履歴とコードだけでは一括して再構成できないため、この記録では成功件数を補っていない。
 

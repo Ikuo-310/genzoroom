@@ -819,6 +819,8 @@ it('records dragend transfer, target, coordinates, buttons, and modifiers',async
   filesLength:0,hasCustomMime:true,customDataState:'nonempty',payloadSource:'data-transfer',effectAllowed:'move',dropEffect:'copy',
   targetKind:'stack-photo',targetTagName:'button',clientX:41,clientY:52,screenX:801,screenY:602,button:1,buttons:0,
   ctrlKey:true,metaKey:false,altKey:true,shiftKey:true,defaultPrevented:false,cancelable:true});
+ expect(entry?.context && 'accepted' in entry.context).toBe(false);
+ expect(entry?.context && 'rejectionReason' in entry.context).toBe(false);
 });
 it('does not install incident-specific post-drag listeners or emit postdrag events',async()=>{
  frontendLogger.setLevel('debug');
@@ -1182,11 +1184,11 @@ it('moves an Immich member to another group and back without changing Cover or s
  expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe(cover);
 });
 it('purgess a member dropped into unmatched, ignores external/malformed/same-group drops, and keeps indicators out of hit targets',async()=>{
- api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1],singles[0]]});
+ frontendLogger.setLevel('debug');api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1],singles[0]]});
  const group=host.querySelector<HTMLElement>('.stack-candidate-group')!,target=host.querySelector<HTMLElement>('#stack-unmatched-heading')!.parentElement!;
  const source=group.querySelector<HTMLButtonElement>('.stack-photo')!;
  const payload={assetId:'hidden-first',sourceGroupId:`draft:immich:${existingStackId}`};
- await act(async()=>source.dispatchEvent(dragEvent('dragstart',dragTransfer(payload))));
+ const transfer=dragTransfer(payload);await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  const malformed=dragEvent('dragover',dragTransfer(undefined,['application/x-genzoroom-stack-photo+json'],[],'{'));
  await act(async()=>group.dispatchEvent(malformed));expect(malformed.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
  const external=dragEvent('drop',dragTransfer(undefined,['Files']));await act(async()=>target.dispatchEvent(external));
@@ -1194,8 +1196,16 @@ it('purgess a member dropped into unmatched, ignores external/malformed/same-gro
  const indicator=group.querySelector('.stack-group-indicators')!;
  const overIndicator=dragEvent('dragover',dragTransfer(payload));await act(async()=>indicator.dispatchEvent(overIndicator));
  expect(overIndicator.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
- const same=dragEvent('dragover',dragTransfer(payload));await act(async()=>group.dispatchEvent(same));expect(same.defaultPrevented).toBe(false);
- await act(async()=>source.dispatchEvent(dragEvent('dragend',dragTransfer(payload))));
+ const same=dragEvent('dragover',transfer);await act(async()=>group.dispatchEvent(same));expect(same.defaultPrevented).toBe(false);
+ const sameDrop=dragEvent('drop',transfer);await act(async()=>group.dispatchEvent(sameDrop));expect(sameDrop.defaultPrevented).toBe(false);
+ const rejected=frontendLogger.getEntries().find(entry=>entry.component==='stack.dnd'&&entry.event==='drop.rejected'
+  &&entry.context?.rejectionReason==='invalid-target');
+ expect(rejected?.context).toMatchObject({accepted:false,rejectionReason:'invalid-target'});
+ const dragend=dragEvent('dragend',transfer);await act(async()=>source.dispatchEvent(dragend));
+ const ended=frontendLogger.getEntries().find(entry=>entry.component==='stack.dnd'&&entry.event==='dragend');
+ expect(ended?.context).toMatchObject({assetId:rejected?.context?.assetId,dropEffect:'none',dragSessionId:rejected?.context?.dragSessionId});
+ expect(ended?.context && 'accepted' in ended.context).toBe(false);
+ expect(ended?.context && 'rejectionReason' in ended.context).toBe(false);
 });
 it('purges a Stack member dropped onto an unmatched photo instead of creating a manual Stack',async()=>{
  api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1],...singles]});

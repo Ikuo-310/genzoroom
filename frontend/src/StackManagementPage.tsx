@@ -407,7 +407,7 @@ export function StackManagementPage() {
         button: event.button, buttons: event.buttons, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
         altKey: event.altKey, shiftKey: event.shiftKey, defaultPrevented: event.defaultPrevented,
         cancelable: event.cancelable, eventPhase: event.eventPhase,
-        refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null });
+        refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit });
     }
     clearDrag();
     dragPayloadForEndLog.current = null;
