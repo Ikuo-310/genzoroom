@@ -25,6 +25,12 @@ import { frontendLogger } from './frontendLogging';
 const EMPTY_ASSETS: RecentAsset[] = [];
 
 type DndTarget = { targetKind: 'stack' | 'unmatched-area' | 'unmatched-photo'; targetGroupId: string | null; targetAssetId?: string };
+type DragDiagnosticSession = {
+  dragSessionId: string; assetId: string; sourceGroupId: string | null; startedAt: number;
+  droppedAt: number | null; endedAt: number | null; postDragUntil: number;
+  timer: number | null; location: { pathname: string; search: string; hash: string };
+};
+const POST_DRAG_DIAGNOSTIC_MS = 750;
 function logStackDnd(event: string, context: Record<string, string | number | boolean | null | string[]>) {
   if (frontendLogger.getLevel() !== 'debug') return;
   try { frontendLogger.add({ level: 'debug', component: 'stack.dnd', event, context }); }
@@ -75,6 +81,7 @@ export function StackManagementPage() {
   const dragPreviewGrabOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const dragoverLogged = useRef(new Map<string, string>());
   const globalDragoverLogged = useRef(new Set<string>());
+  const dragDiagnosticSession = useRef<DragDiagnosticSession | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
@@ -86,6 +93,37 @@ export function StackManagementPage() {
     removeDragElement(nativeDragImageRef.current);
     dragPreviewRef.current = null; nativeDragImageRef.current = null;
     dragPreviewGrabOffsetRef.current = null;
+  };
+  const closeDragDiagnosticSession = () => {
+    const session = dragDiagnosticSession.current;
+    if (session?.timer !== null && session?.timer !== undefined) window.clearTimeout(session.timer);
+    dragDiagnosticSession.current = null;
+  };
+  const openPostDragWindow = (session: DragDiagnosticSession, now = Date.now()) => {
+    session.postDragUntil = now + POST_DRAG_DIAGNOSTIC_MS;
+    if (session.timer !== null) window.clearTimeout(session.timer);
+    session.timer = window.setTimeout(() => {
+      // A queued timer from an ended drag must never expire a newer diagnostic session.
+      if (dragDiagnosticSession.current === session) closeDragDiagnosticSession();
+    }, POST_DRAG_DIAGNOSTIC_MS);
+  };
+  const createDragDiagnosticSession = (payload: StackDragPayload): DragDiagnosticSession => {
+    const randomId = globalThis.crypto?.randomUUID?.();
+    return {
+      dragSessionId: randomId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, startedAt: Date.now(),
+      droppedAt: null, endedAt: null, postDragUntil: 0, timer: null,
+      location: { pathname: location.pathname, search: location.search, hash: location.hash },
+    };
+  };
+  const locationChangeContext = (session: DragDiagnosticSession) => {
+    try {
+      return {
+        pathnameChanged: window.location.pathname !== session.location.pathname,
+        searchChanged: window.location.search !== session.location.search,
+        hashChanged: window.location.hash !== session.location.hash,
+      };
+    } catch { return { pathnameChanged: false, searchChanged: false, hashChanged: false }; }
   };
   const moveDragPreview = (clientX: number, clientY: number) => {
     const preview = dragPreviewRef.current;
@@ -104,6 +142,7 @@ export function StackManagementPage() {
     sendRequest.current = null;
     setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
     setRedetecting(false);
+    closeDragDiagnosticSession();
     if (draggingRef.current) logStackDnd('drag.cancelled-generation-change', {
       assetId: draggingRef.current.assetId, sourceGroupId: draggingRef.current.sourceGroupId,
       refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
@@ -112,7 +151,7 @@ export function StackManagementPage() {
     draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null);
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear();
   }, [sourceGeneration, dispatch, dragging]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
+  useEffect(() => () => { sendRequest.current?.controller.abort(); closeDragDiagnosticSession(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
@@ -191,6 +230,11 @@ export function StackManagementPage() {
       const dragEvent = event as DragEvent;
       const activePayload = draggingRef.current;
       if (!activePayload || !dragEvent.dataTransfer || !isActiveStackDrag(dragEvent.dataTransfer)) return;
+      const session = dragDiagnosticSession.current;
+      if (event.type === 'drop' && session) {
+        session.droppedAt ??= Date.now();
+        openPostDragWindow(session, session.droppedAt);
+      }
       const defaultPreventedBefore = dragEvent.defaultPrevented;
       let preventedByGlobalHandler = false;
       if (listenerScope === 'window' && dragEvent.cancelable && !defaultPreventedBefore) {
@@ -205,6 +249,7 @@ export function StackManagementPage() {
       const targetTagName = dragEvent.target instanceof Element ? dragEvent.target.tagName.toLowerCase() : 'other';
       const context = {
         assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, listenerScope,
+        dragSessionId: session?.dragSessionId ?? null,
         eventPhase: dragEvent.eventPhase, defaultPrevented: dragEvent.defaultPrevented, defaultPreventedBefore, cancelable: dragEvent.cancelable,
         preventedByGlobalHandler,
         dataTransferTypes: observed.dataTransferTypes, filesLength: observed.filesLength,
@@ -238,6 +283,47 @@ export function StackManagementPage() {
       globalDragoverLogged.current.clear();
     };
   }, []);
+  useEffect(() => {
+    // Compare both capture boundaries without consuming activation or navigation events.
+    const eventTypes = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'auxclick', 'blur', 'focus',
+      'visibilitychange', 'pagehide', 'beforeunload', 'popstate'] as const;
+    const observers = eventTypes.flatMap(eventType => (['window', 'document'] as const).map(listenerScope => {
+      const target = listenerScope === 'window' ? window : document;
+      const observer = (event: Event) => {
+        const session = dragDiagnosticSession.current;
+        const now = Date.now();
+        if (!session || (!draggingRef.current && now > session.postDragUntil) || frontendLogger.getLevel() !== 'debug') return;
+        const eventTarget = event.target;
+        const element = eventTarget instanceof Element ? eventTarget : null;
+        const anchor = element?.closest('a') ?? null;
+        const context: Record<string, string | number | boolean | null> = {
+          assetId: session.assetId, sourceGroupId: session.sourceGroupId, dragSessionId: session.dragSessionId,
+          eventType, listenerScope, eventPhase: event.eventPhase, defaultPrevented: event.defaultPrevented,
+          cancelable: event.cancelable, targetKind: nativeTargetKind(eventTarget),
+          targetTagName: element?.tagName.toLowerCase() ?? 'other', timeSinceDragEndMs: session.endedAt === null ? null : Math.max(0, now - session.endedAt),
+          timeSinceDropMs: session.droppedAt === null ? null : Math.max(0, now - session.droppedAt),
+          timeSinceSessionStartMs: Math.max(0, now - session.startedAt), dragActive: draggingRef.current !== null,
+          postDragWindowActive: now <= session.postDragUntil, hasClosestAnchor: anchor !== null,
+          closestAnchorHasHref: anchor?.hasAttribute('href') ?? false, ...locationChangeContext(session),
+        };
+        if ('button' in event && typeof (event as MouseEvent).button === 'number') {
+          const mouse = event as MouseEvent;
+          Object.assign(context, {
+            button: mouse.button, buttons: mouse.buttons, clientX: mouse.clientX, clientY: mouse.clientY,
+            screenX: mouse.screenX, screenY: mouse.screenY, ctrlKey: mouse.ctrlKey, metaKey: mouse.metaKey,
+            altKey: mouse.altKey, shiftKey: mouse.shiftKey,
+          });
+        }
+        logStackDnd('postdrag.event', context);
+      };
+      target.addEventListener(eventType, observer, true);
+      return { target, eventType, observer };
+    }));
+    return () => {
+      observers.forEach(({ target, eventType, observer }) => target.removeEventListener(eventType, observer, true));
+      closeDragDiagnosticSession();
+    };
+  }, []);
   const logDragover = (event: React.DragEvent, target: DndTarget, accepted: boolean, rejectionReason: string | null,
     payload: StackDragPayload | null = null) => {
     if (frontendLogger.getLevel() !== 'debug') return;
@@ -245,6 +331,7 @@ export function StackManagementPage() {
     const actualPayload = payload ?? observed.observedPayload;
     const context = {
       assetId: actualPayload?.assetId ?? null, sourceGroupId: actualPayload?.sourceGroupId ?? null,
+      dragSessionId: dragDiagnosticSession.current?.dragSessionId ?? null,
       targetGroupId: target.targetGroupId, ...(target.targetAssetId ? { targetAssetId: target.targetAssetId } : {}),
       targetKind: target.targetKind, ...observed, observedPayload: undefined,
       refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null,
@@ -288,6 +375,7 @@ export function StackManagementPage() {
     const { observedPayload: _ignored, ...safeObserved } = observed;
     logStackDnd(accepted ? 'drop.accepted' : 'drop.rejected', {
       assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
+      dragSessionId: dragDiagnosticSession.current?.dragSessionId ?? null,
       targetGroupId: target.targetGroupId, ...(target.targetAssetId ? { targetAssetId: target.targetAssetId } : {}),
       targetKind: target.targetKind, ...safeObserved, refPayloadPresent: draggingRef.current !== null,
       statePayloadPresent: dragging !== null, canEdit, accepted, rejectionReason: reason,
@@ -295,6 +383,7 @@ export function StackManagementPage() {
     });
   };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
+    closeDragDiagnosticSession();
     if (!canEdit || event.dataTransfer.files.length) {
       event.preventDefault();
       clearDragVisuals();
@@ -321,6 +410,7 @@ export function StackManagementPage() {
       }
       return false;
     }
+    if (frontendLogger.getLevel() === 'debug') dragDiagnosticSession.current = createDragDiagnosticSession(payload);
     let nativeGhostSuppressed = false;
     try {
       // Keep browser-owned drag feedback transparent; the photo preview is rendered separately as normal DOM.
@@ -371,16 +461,39 @@ export function StackManagementPage() {
     if (frontendLogger.getLevel() === 'debug') {
       const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
       logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+        dragSessionId: dragDiagnosticSession.current?.dragSessionId ?? null,
         ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
         canEdit, accepted: true, rejectionReason: null, customPreviewCreated, nativeGhostSuppressed });
     }
     return true;
   };
   const clearDrag = () => { clearDragVisuals(); draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
-  const handleDragEnd = () => {
+  const handleDragEnd = (event: React.DragEvent<HTMLButtonElement>) => {
     const payload = draggingRef.current ?? dragPayloadForEndLog.current;
-    if (frontendLogger.getLevel() === 'debug') logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
-      refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null });
+    const session = dragDiagnosticSession.current;
+    if (session) {
+      session.endedAt = Date.now();
+      openPostDragWindow(session, session.endedAt);
+    }
+    if (frontendLogger.getLevel() === 'debug') {
+      let transferContext: Record<string, string | number | boolean | null | string[]> = {};
+      try {
+        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+        transferContext = { ...observed, effectAllowed: event.dataTransfer.effectAllowed, dropEffect: event.dataTransfer.dropEffect };
+      } catch { transferContext = { customDataState: 'unreadable', dataTransferTypes: [], filesLength: 0, hasCustomMime: false, payloadSource: 'none' }; }
+      const target = event.target instanceof Element ? event.target : null;
+      const anchor = target?.closest('a') ?? null;
+      logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
+        dragSessionId: session?.dragSessionId ?? null, ...transferContext,
+        targetKind: nativeTargetKind(event.target), targetTagName: target?.tagName.toLowerCase() ?? 'other',
+        hasClosestAnchor: anchor !== null, closestAnchorHasHref: anchor?.hasAttribute('href') ?? false,
+        clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        button: event.button, buttons: event.buttons, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+        altKey: event.altKey, shiftKey: event.shiftKey, defaultPrevented: event.defaultPrevented,
+        cancelable: event.cancelable, eventPhase: event.eventPhase,
+        refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null,
+        ...(session ? locationChangeContext(session) : { pathnameChanged: false, searchChanged: false, hashChanged: false }) });
+    }
     clearDrag();
     dragPayloadForEndLog.current = null;
     globalDragoverLogged.current.clear();
@@ -611,7 +724,8 @@ function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: St
 function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, dragging = false, dropTarget = false,
   onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
   asset: RecentAsset; selected: boolean; cover?: boolean; member?: boolean; disabled?: boolean;
-  dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean; onDragEnd: () => void;
+  dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean;
+  onDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
   onToggle: () => void; onPurge?: () => void;
   onDropTargetDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
   onDropTargetDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -623,7 +737,7 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
     aria-description={cover ? t('stackManagement.cover') : undefined}
     onDragStart={event => { suppressClick.current = onDragStart(event); }}
-    onDragEnd={() => { onDragEnd(); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
+    onDragEnd={event => { onDragEnd(event); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}>
     <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={asset.thumbnail_url} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}

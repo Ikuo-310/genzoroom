@@ -37,7 +37,7 @@ beforeEach(async () => {
   api.recent.mockResolvedValue(photos); api.favorites.mockResolvedValue(photos); api.statuses.mockResolvedValue({});
   document.title = 'GenzoRoom'; host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); await i18n.changeLanguage('en'); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en'); });
 it('preserves D and adds the Stack selection callback', async () => {
   const open = vi.fn(), stacks = vi.fn();
   await act(async () => root.render(<PhotoSelectionBar active count={2} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
@@ -769,10 +769,13 @@ function dragTransfer(payload?: {assetId:string;sourceGroupId:string|null}, extr
  else if(rawData!==undefined)transfer.setData('application/x-genzoroom-stack-photo+json',rawData);
  return transfer as unknown as DataTransfer;
 }
-function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|null,coordinates:{clientX:number;clientY:number}={clientX:0,clientY:0}):DragEvent {
+function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|null,coordinates:{clientX:number;clientY:number;screenX?:number;screenY?:number;button?:number;buttons?:number;ctrlKey?:boolean;metaKey?:boolean;altKey?:boolean;shiftKey?:boolean}={clientX:0,clientY:0}):DragEvent {
  const event=new Event(type,{bubbles:true,cancelable:true}) as DragEvent;
  Object.defineProperty(event,'dataTransfer',{value:transfer});
  Object.defineProperty(event,'clientX',{value:coordinates.clientX});Object.defineProperty(event,'clientY',{value:coordinates.clientY});
+ Object.defineProperty(event,'screenX',{value:coordinates.screenX??0});Object.defineProperty(event,'screenY',{value:coordinates.screenY??0});
+ Object.defineProperty(event,'button',{value:coordinates.button??0});Object.defineProperty(event,'buttons',{value:coordinates.buttons??0});
+ for(const key of ['ctrlKey','metaKey','altKey','shiftKey'] as const)Object.defineProperty(event,key,{value:coordinates[key]??false});
  if(type==='dragleave')Object.defineProperty(event,'relatedTarget',{value:relatedTarget??null});
  return event;
 }
@@ -798,6 +801,75 @@ it('records safe D&D diagnostics with Chrome dragover deduplication and preserve
  expect(entries.find(entry=>entry.event==='drop.accepted')?.context).toMatchObject({operationKind:'unmatched-to-stack',assetId:'x',accepted:true});
  expect(entries.some(entry=>entry.event==='dragend')).toBe(true);
  expect(JSON.stringify(entries)).not.toContain('selected.jpg');
+});
+it('records dragend transfer, target, coordinates, buttons, and modifiers',async()=>{
+ frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});transfer.effectAllowed='move';transfer.dropEffect='copy';
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ const dragend=dragEvent('dragend',transfer,undefined,{clientX:41,clientY:52,screenX:801,screenY:602,button:1,buttons:0,ctrlKey:true,metaKey:false,altKey:true,shiftKey:true});
+ await act(async()=>source.dispatchEvent(dragend));
+ const entry=frontendLogger.getEntries().find(item=>item.component==='stack.dnd'&&item.event==='dragend');
+ expect(entry?.context).toMatchObject({assetId:'x',sourceGroupId:null,dragSessionId:expect.any(String),dataTransferTypes:['application/x-genzoroom-stack-photo+json'],
+  filesLength:0,hasCustomMime:true,customDataState:'nonempty',payloadSource:'data-transfer',effectAllowed:'move',dropEffect:'copy',
+  targetKind:'stack-photo',targetTagName:'button',clientX:41,clientY:52,screenX:801,screenY:602,button:1,buttons:0,
+  ctrlKey:true,metaKey:false,altKey:true,shiftKey:true,defaultPrevented:false,cancelable:true});
+});
+it('observes click and lifecycle events only in the short post-drag window without cancelling them or logging hrefs',async()=>{
+ vi.useFakeTimers();frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ const anchor=document.createElement('a');anchor.setAttribute('href','https://example.invalid/private?token=do-not-log');document.body.append(anchor);
+ let observerSawPrevented:boolean|null=null;anchor.addEventListener('click',event=>{observerSawPrevented=event.defaultPrevented;event.preventDefault();});
+ const clickEvent=new MouseEvent('click',{bubbles:true,cancelable:true,clientX:20,clientY:30,screenX:120,screenY:130,button:0,buttons:0,ctrlKey:true});
+ anchor.dispatchEvent(clickEvent);expect(observerSawPrevented).toBe(false);expect(clickEvent.defaultPrevented).toBe(true);
+ const blurEvent=new Event('blur',{bubbles:false,cancelable:false});window.dispatchEvent(blurEvent);
+ const events=frontendLogger.getEntries().filter(item=>item.component==='stack.dnd'&&item.event==='postdrag.event');
+ const clickEntries=events.filter(item=>item.context?.eventType==='click');
+ expect(clickEntries).toHaveLength(2);
+ expect(clickEntries[0].context).toMatchObject({dragSessionId:expect.any(String),listenerScope:'window',eventPhase:Event.CAPTURING_PHASE,
+  targetKind:'other',targetTagName:'a',timeSinceDragEndMs:expect.any(Number),dragActive:false,postDragWindowActive:true,
+  defaultPrevented:false,hasClosestAnchor:true,closestAnchorHasHref:true,button:0,buttons:0,clientX:20,clientY:30,screenX:120,screenY:130,ctrlKey:true});
+ expect(events.some(item=>item.context?.eventType==='blur'&&item.context.listenerScope==='window')).toBe(true);
+ expect(JSON.stringify(events)).not.toContain('example.invalid');expect(JSON.stringify(events)).not.toContain('do-not-log');
+ await act(async()=>{await vi.advanceTimersByTimeAsync(751);});
+ const lateClick=new MouseEvent('click',{bubbles:true,cancelable:true});document.body.dispatchEvent(lateClick);
+ expect(frontendLogger.getEntries().filter(item=>item.component==='stack.dnd'&&item.event==='postdrag.event')).toHaveLength(events.length);
+ expect(lateClick.defaultPrevented).toBe(false);anchor.remove();
+});
+it('does not emit post-drag observations when DEBUG is off',async()=>{
+ frontendLogger.setLevel('info');await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ document.body.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+ expect(frontendLogger.getEntries().filter(item=>item.component==='stack.dnd')).toHaveLength(0);
+});
+it('clears an old post-drag timer on new drag, source generation change, and unmount',async()=>{
+ vi.useFakeTimers();frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=()=>host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const clearTimeoutSpy=vi.spyOn(window,'clearTimeout');
+ const first=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source().dispatchEvent(dragEvent('dragstart',first)));
+ await act(async()=>source().dispatchEvent(dragEvent('dragend',first)));
+ const clearsAfterEnd=clearTimeoutSpy.mock.calls.length;
+ const second=dragTransfer({assetId:'y',sourceGroupId:null});
+ await act(async()=>source().dispatchEvent(dragEvent('dragstart',second)));
+ expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsAfterEnd);
+ await act(async()=>source().dispatchEvent(dragEvent('dragend',second)));
+ const clearsBeforeGeneration=clearTimeoutSpy.mock.calls.length;
+ await act(async()=>navigateTest('/stack',{selectedAssets:[...photos,...singles]}));
+ expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsBeforeGeneration);
+ const third=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source().dispatchEvent(dragEvent('dragstart',third)));
+ await act(async()=>source().dispatchEvent(dragEvent('dragend',third)));
+ const clearsBeforeUnmount=clearTimeoutSpy.mock.calls.length;
+ await act(async()=>root.unmount());
+ expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsBeforeUnmount);
+ root=createRoot(host);clearTimeoutSpy.mockRestore();
 });
 it('cancels browser defaults for internal drops on the page while leaving state unchanged',async()=>{
  await mount('/stack',{selectedAssets:[...photos,...singles]});
