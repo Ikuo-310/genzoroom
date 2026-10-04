@@ -64,7 +64,7 @@ it('renders compact header, isolated scroll sections and enables sending complet
   expect(host.querySelector('[aria-label="Settings"]')).not.toBeNull(); expect(host.querySelector('#stack-candidates-heading')).not.toBeNull();
   expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(0);
   expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.classList.contains('stack-unmatched-empty')).toBe(true);
-  expect(host.querySelector('#stack-candidates-heading')?.parentElement?.querySelectorAll('.stack-photo')).toHaveLength(2);
+  expect(host.querySelector('.stack-candidate-grid')?.querySelectorAll('.stack-photo')).toHaveLength(2);
   expect(host.querySelectorAll('.stack-control-bar button:disabled')).toHaveLength(3);
   await click('.stack-photo'); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
   await click('.stack-control-bar button'); expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected');
@@ -283,18 +283,20 @@ it.each(['en','ja'])('keeps the singleton warning and its localized description 
  await act(async()=>button(i18n.t('stackManagement.send')).click());
  await act(async()=>button(i18n.t('workspace.historyContinue')).click());
  expect(fetch).not.toHaveBeenCalled();expect(host.querySelector('.stack-singleton-warning')).not.toBeNull();
- expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(language==='ja'?'変更はありません。':'No changes to apply.');
- expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe(language==='ja'?'変更はありません。':'No changes to apply.');
+ expect(host.querySelector('.stack-control-bar .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-candidate-grid .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-section-heading')?.contains(host.querySelector('#stack-candidates-heading'))).toBe(true);
  expect(host.querySelector('.stack-content > [role="status"]')).toBeNull();
 });
 it('disables singleton Add and COVER, rejects drops, and permits Purge followed by DELETE',async()=>{
  api.resolve.mockResolvedValue([singletonStack]);
  await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
  const group=host.querySelector<HTMLElement>('.stack-singleton-warning')!;
- expect(group.querySelector<HTMLButtonElement>('.stack-set-target')!.disabled).toBe(true);
+ expect(group.querySelector('.stack-set-target')).toBeNull();
  expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.disabled).toBe(true);
  expect(group.querySelector('.stack-purge-member')).toBeNull();
- await click('.stack-unmatched-grid .stack-photo');await click('.stack-set-target');
+ await click('.stack-unmatched-grid .stack-photo');
  expect(button(i18n.t('stackManagement.add')).disabled).toBe(true);expect(group.classList.contains('stack-add-target')).toBe(false);
  const transfer={types:['application/x-genzoroom-stack-photo+json'],files:[],getData:()=>JSON.stringify({assetId:'x',sourceGroupId:null})};
  const over=new Event('dragover',{bubbles:true,cancelable:true});Object.defineProperty(over,'dataTransfer',{value:transfer});
@@ -312,8 +314,10 @@ it('disables singleton Add and COVER, rejects drops, and permits Purge followed 
  });
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelector('.stack-singleton-warning')).toBeNull();expect(fetch).toHaveBeenCalledOnce();
- expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe('Applied to Immich.');
- expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe('Applied to Immich.');
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.classList.contains('stack-send-status-error')).toBe(false);
+ expect(host.querySelector('.stack-control-bar .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-candidate-grid .stack-send-status')).toBeNull();
 });
 it('shows a failed singleton DELETE result in the toolbar',async()=>{
  api.resolve.mockResolvedValue([singletonStack]);
@@ -324,8 +328,9 @@ it('shows a failed singleton DELETE result in the toolbar',async()=>{
   return new Response(JSON.stringify({results:[{operationId:op.operationId,status:'failed'}]}));
  });
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailure'));
- expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailure'));
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.classList.contains('stack-send-status-error')).toBe(true);
+ expect(host.querySelector('.stack-candidate-grid .stack-send-status')).toBeNull();
 });
 const secondStackId='92345678-1234-4234-9234-123456789abc';
 const secondPrimary='a2345678-1234-4234-9234-123456789abc';
@@ -344,6 +349,7 @@ it('shows full Immich membership beside auto candidates and keeps the Immich pri
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(2);expect(host.querySelectorAll('.stack-photo')).toHaveLength(6);
  expect(unmatched()).toEqual(['x.jpg']);
  const immich=host.querySelector('.stack-candidate-group')!;
+ expect(immich.querySelector('.stack-set-target')).not.toBeNull();
  expect(Array.from(immich.querySelectorAll('.stack-filename')).map(e=>e.textContent)).toEqual(['hidden.jpg','primary.dng','hidden.png']);
  expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe('primary.dng');
  expect(immich.querySelector('.stack-evidence.matched [aria-hidden]')?.textContent).toBe('IMMICH');
@@ -645,8 +651,9 @@ it('retains unknown work, labels outcome uncertainty and requires redetection be
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
  expect(host.querySelector('.stack-evidence.error')?.getAttribute('title')).toContain('outcomes could not be confirmed');
- expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendUnknown'));
- expect(host.querySelector('.stack-content .stack-send-status')).toBeNull();
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendUnknown'));
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.classList.contains('stack-send-status-error')).toBe(true);
+ expect(host.querySelector('.stack-candidate-grid .stack-send-status')).toBeNull();
  expect(button('Send to Immich').disabled).toBe(true);expect(fetch).toHaveBeenCalledOnce();
  await act(async()=>button('Detect again').click());
  if(button('Continue')) await act(async()=>button('Continue').click());
@@ -671,7 +678,7 @@ it('applies a partial batch by removing only successes and marking failed work',
  });vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
- expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-control-bar .stack-send-status')?.textContent).toContain('could not be applied');
+ expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toContain('could not be applied');
 });
 it('aborts the frontend wait on Home navigation without resending the write',async()=>{
  let signal:AbortSignal|undefined;

@@ -206,7 +206,6 @@ export function StackManagementPage() {
       {plan.operations.length > 0 && <span className="stack-pending-summary" role="status">
         {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}
       </span>}
-      {sendStatus && <span className="stack-send-status" role="status">{t(`stackManagement.${sendStatus}`)}</span>}
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
@@ -220,7 +219,10 @@ export function StackManagementPage() {
       {detection.loading && <p className="stack-status" role="status">{t('stackManagement.detecting')}</p>}
       {detection.failureCount > 0 && <p className="stack-status" role="status">{t(detection.failureCount === detection.detailCount ? 'stackManagement.allFailure' : 'stackManagement.partialFailure')}</p>}
       <section aria-labelledby="stack-candidates-heading">
-        <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
+        <div className="stack-section-heading">
+          <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
+          {sendStatus && <span className={`stack-send-status${sendStatus === 'sendFailure' || sendStatus === 'sendUnknown' ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
+        </div>
         <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
           key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
@@ -238,11 +240,11 @@ export function StackManagementPage() {
               title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
               onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
             <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} />
-            <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit || isSingletonImmichStack(group)} aria-pressed={addTargetStackId === group.id}
+            {!isSingletonImmichStack(group) && <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
               onClick={() => selectedUnmatched.length
                 ? addSelected(group.id)
-                : dispatch({ type: 'target', groupId: group.id })}>+</button>
+                : dispatch({ type: 'target', groupId: group.id })}>+</button>}
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
