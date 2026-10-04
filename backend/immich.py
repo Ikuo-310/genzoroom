@@ -260,28 +260,6 @@ def _observation_key_chunks(values: Mapping) -> list[list[str]]:
     return chunks
 
 
-def _safe_observation_string(value: object, *, limit: int = 128) -> str | None:
-    return value if type(value) is str and len(value) <= limit and value.isprintable() else None
-
-
-def _safe_observation_number(value: object) -> int | float | None:
-    if type(value) not in (int, float):
-        return None
-    try:
-        return value if isfinite(value) and abs(value) <= 10_000_000_000 else None
-    except (OverflowError, TypeError):
-        return None
-
-
-def _safe_observation_id(value: object) -> str | None:
-    if type(value) is not str or len(value) > 64:
-        return None
-    try:
-        return str(UUID(value))
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
 def _log_asset_detail_observed(body: Mapping, asset_id: UUID, image_format: str, is_raw: bool) -> None:
     try:
         if backend_logger.get_level() != "debug":
@@ -319,39 +297,6 @@ def _log_asset_detail_observed(body: Mapping, asset_id: UUID, image_format: str,
                     "assetId": asset_id_text, "keyCount": len(exif_value), "chunkIndex": index,
                     "chunkCount": len(exif_chunks), "keys": keys,
                 })
-        backend_logger.add(level="debug", component="immich.asset", event="detail.values", context={
-            "assetId": asset_id_text,
-            "visibility": _safe_observation_string(visibility_value, limit=64),
-            "isArchived": body.get("isArchived") if type(body.get("isArchived")) is bool else None,
-            "isTrashed": body.get("isTrashed") if type(body.get("isTrashed")) is bool else None,
-            "isFavorite": body.get("isFavorite") if type(body.get("isFavorite")) is bool else None,
-            "isOffline": body.get("isOffline") if type(body.get("isOffline")) is bool else None,
-            "hasMetadata": body.get("hasMetadata") if type(body.get("hasMetadata")) is bool else None,
-            "isEdited": body.get("isEdited") if type(body.get("isEdited")) is bool else None,
-            "resized": body.get("resized") if type(body.get("resized")) is bool else None,
-            "originalMimeType": _safe_observation_string(body.get("originalMimeType")),
-            "width": _safe_observation_number(body.get("width")),
-            "height": _safe_observation_number(body.get("height")),
-            "duplicateId": _safe_observation_id(body.get("duplicateId")),
-            "livePhotoVideoId": _safe_observation_id(body.get("livePhotoVideoId")),
-            "libraryId": _safe_observation_id(body.get("libraryId")),
-            "exifWidth": _safe_observation_number(exif.get("exifImageWidth")),
-            "exifHeight": _safe_observation_number(exif.get("exifImageHeight")),
-            "iso": _safe_observation_number(exif.get("iso")),
-            "make": _safe_observation_string(exif.get("make")),
-            "model": _safe_observation_string(exif.get("model")),
-            "dateTimeOriginalPresent": "dateTimeOriginal" in exif,
-            **({"thumbhashIsNull": body.get("thumbhash") is None} if "thumbhash" in body else {}),
-        })
-        stack_value = body.get("stack")
-        stack = stack_value if isinstance(stack_value, Mapping) else {}
-        backend_logger.add(level="debug", component="immich.asset", event="detail.stack", context={
-            "assetId": asset_id_text,
-            "stackIsNull": stack_value is None,
-            "stackIsObject": isinstance(stack_value, Mapping),
-            "stackId": _safe_observation_id(stack.get("id")),
-            "stackPrimaryAssetId": _safe_observation_id(stack.get("primaryAssetId")),
-        })
     except Exception:
         # Diagnostic metadata must not change whether an otherwise valid asset can be opened.
         pass

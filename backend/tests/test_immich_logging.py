@@ -93,13 +93,7 @@ def test_asset_detail_observation_splits_small_presence_and_sorted_key_chunks(lo
         "id": A, "type": "IMAGE", "originalFileName": "PRIVATE_FILENAME.DNG",
         "originalPath": "PRIVATE_PATH", "fileCreatedAt": "2026-09-01T12:00:00Z",
         "visibility": "archive", "deletedAt": None, "stackId": None, "thumbhash": None,
-        "isArchived": False, "isTrashed": True, "isFavorite": True, "isOffline": False,
-        "hasMetadata": True, "isEdited": True, "resized": False,
-        "originalMimeType": "image/x-adobe-dng", "width": 6000, "height": 4000,
-        "duplicateId": None, "livePhotoVideoId": B, "libraryId": NEW, "stack": None,
-        "exifInfo": {"model": "Camera Model 1", "iso": 200, "dateTimeOriginal": "PRIVATE_DATE",
-                     "make": "Example Camera", "exifImageWidth": 6000, "exifImageHeight": 4000,
-                     "latitude": 35.0, "longitude": 139.0, "description": "PRIVATE_DESCRIPTION"},
+        "exifInfo": {"model": "PRIVATE_MODEL", "iso": 200, "dateTimeOriginal": "PRIVATE_DATE"},
         "unneeded": "PRIVATE_RAW_BODY",
     }
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
@@ -114,37 +108,25 @@ def test_asset_detail_observation_splits_small_presence_and_sorted_key_chunks(lo
     context = observed[0]["context"]
     assert context["assetId"] == A and context["type"] == "IMAGE" and context["visibility"] == "archive"
     assert context["exifInfoPresent"] is True
-    assert context["exifInfoFieldCount"] == len(body["exifInfo"])
+    assert context["exifInfoFieldCount"] == 3
     assert context["topLevelFieldCount"] == len(body)
     assert context["format"] == "DNG" and context["isRaw"] is True
     presence = next(entry["context"] for entry in entries if entry["event"] == "detail.presence")
     assert presence["assetId"] == A
     assert presence["deletedAtPresent"] is True and presence["trashedAtPresent"] is False
     assert presence["stackIdPresent"] is True and presence["thumbhashPresent"] is True
-    values = next(entry["context"] for entry in entries if entry["event"] == "detail.values")
-    assert values["assetId"] == A and values["visibility"] == "archive"
-    assert values["isArchived"] is False and values["isTrashed"] is True and values["isFavorite"] is True
-    assert values["isOffline"] is False and values["hasMetadata"] is True
-    assert values["isEdited"] is True and values["resized"] is False
-    assert values["originalMimeType"] == "image/x-adobe-dng" and values["width"] == 6000 and values["height"] == 4000
-    assert values["duplicateId"] is None and values["livePhotoVideoId"] == B and values["libraryId"] == NEW
-    assert values["exifWidth"] == 6000 and values["exifHeight"] == 4000 and values["iso"] == 200
-    assert values["make"] == "Example Camera" and values["model"] == "Camera Model 1"
-    assert values["dateTimeOriginalPresent"] is True and values["thumbhashIsNull"] is True
-    stack = next(entry["context"] for entry in entries if entry["event"] == "detail.stack")
-    assert stack == {"assetId": A, "stackIsNull": True, "stackIsObject": False, "stackId": None, "stackPrimaryAssetId": None}
     top_chunks = [entry["context"] for entry in entries if entry["event"] == "detail.keys"]
     assert [key for chunk in top_chunks for key in chunk["keys"]] == sorted(body)
     assert all(chunk["assetId"] == A for chunk in top_chunks)
     exif_chunks = [entry["context"] for entry in entries if entry["event"] == "detail.exif-keys"]
-    assert [key for chunk in exif_chunks for key in chunk["keys"]] == sorted(body["exifInfo"])
+    assert [key for chunk in exif_chunks for key in chunk["keys"]] == ["dateTimeOriginal", "iso", "model"]
     assert all(chunk["assetId"] == A for chunk in exif_chunks)
     for entry in entries:
         logged_context = entry["context"]
         assert context_node_count(logged_context) <= 64
         assert len(json.dumps(logged_context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
     report = json.dumps(logger.create_report())
-    for private_value in ["PRIVATE_FILENAME", "PRIVATE_PATH", "PRIVATE_DATE", "PRIVATE_DESCRIPTION", "PRIVATE_RAW_BODY", PRIVATE_KEY, "PRIVATE_HOST", "35.0", "139.0"]:
+    for private_value in ["PRIVATE_FILENAME", "PRIVATE_PATH", "PRIVATE_MODEL", "PRIVATE_DATE", "PRIVATE_RAW_BODY", PRIVATE_KEY, "PRIVATE_HOST"]:
         assert private_value not in report
 
 
@@ -171,25 +153,6 @@ def test_asset_detail_key_lists_chunk_at_safe_context_sizes(logger):
             assert len(json.dumps(chunk, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
 
 
-def test_asset_detail_values_distinguish_nullable_ids_and_project_stack_ids(logger):
-    logger.set_level("debug")
-    body = {"id": A, "type": "IMAGE", "originalFileName": "sample.dng", "fileCreatedAt": "2026-09-01T12:00:00Z",
-            "duplicateId": B, "livePhotoVideoId": None, "libraryId": NEW,
-            "stack": {"id": NEW, "primaryAssetId": A, "assets": [{"id": A, "filename": "PRIVATE_STACK_FILENAME"}]}}
-    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json=body))))
-    assert detail.format == "DNG"
-    entries = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
-    values = next(entry["context"] for entry in entries if entry["event"] == "detail.values")
-    stack = next(entry["context"] for entry in entries if entry["event"] == "detail.stack")
-    assert values["duplicateId"] == B and values["livePhotoVideoId"] is None and values["libraryId"] == NEW
-    assert stack["stackIsNull"] is False and stack["stackIsObject"] is True
-    assert stack["stackId"] == NEW and stack["stackPrimaryAssetId"] == A
-    assert "assets" not in stack and "PRIVATE_STACK_FILENAME" not in json.dumps(logger.create_report())
-    assert all("context" in entry and context_node_count(entry["context"]) <= 64
-               and len(json.dumps(entry["context"], ensure_ascii=False).encode("utf-8")) <= 4096 for entry in entries)
-
-
 @pytest.mark.parametrize("level", ["off", "error", "warn", "info"])
 def test_asset_detail_observation_is_debug_only(logger, level):
     logger.set_level(level)
@@ -203,9 +166,7 @@ def test_asset_detail_observation_is_debug_only(logger, level):
 def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_detail(logger, monkeypatch):
     logger.set_level("debug")
     body = {"id": A, "type": "IMAGE", "originalFileName": "sample.dng", "fileCreatedAt": "2026-09-01T12:00:00Z",
-            "visibility": {"unexpected": True}, "exifInfo": ["malformed"], "deletedAt": object(),
-            "isFavorite": "yes", "width": [], "originalMimeType": {"unexpected": True}, "duplicateId": [],
-            "stack": ["malformed"]}
+            "visibility": {"unexpected": True}, "exifInfo": ["malformed"], "deletedAt": object()}
     detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json={key: value for key, value in body.items() if key != "deletedAt"}))))
     assert detail.format == "DNG" and detail.exif.model_dump(exclude_none=True) == {}
@@ -213,10 +174,6 @@ def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_
     observation = next(entry for entry in observations if entry["event"] == "detail.observed")
     assert observation["context"]["exifInfoPresent"] is True and observation["context"]["visibility"] is None
     assert not any(entry["event"] == "detail.exif-keys" for entry in observations)
-    values = next(entry["context"] for entry in observations if entry["event"] == "detail.values")
-    stack = next(entry["context"] for entry in observations if entry["event"] == "detail.stack")
-    assert values["isFavorite"] is None and values["width"] is None and values["originalMimeType"] is None
-    assert values["duplicateId"] is None and stack["stackIsNull"] is False and stack["stackIsObject"] is False
     original_add = logger.add
     def failing_observation(*, level, component, event, message=None, context=None):
         if component == "immich.asset": raise RuntimeError("diagnostics unavailable")
