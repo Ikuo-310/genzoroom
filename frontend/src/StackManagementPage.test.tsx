@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
+import { frontendLogger } from './frontendLogging';
 import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn(), resolve: vi.fn(), refresh: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail, fetchSelectedImmichStacks: api.resolve, refreshSelectedImmichStacks: api.refresh }));
@@ -23,6 +24,7 @@ async function press(key: string, options: KeyboardEventInit = {}, target: Event
   await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options })); });
 }
 beforeEach(async () => {
+  frontendLogger.setLevel('off'); frontendLogger.clear();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -35,7 +37,7 @@ beforeEach(async () => {
   api.recent.mockResolvedValue(photos); api.favorites.mockResolvedValue(photos); api.statuses.mockResolvedValue({});
   document.title = 'GenzoRoom'; host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); await i18n.changeLanguage('en'); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); await i18n.changeLanguage('en'); });
 it('preserves D and adds the Stack selection callback', async () => {
   const open = vi.fn(), stacks = vi.fn();
   await act(async () => root.render(<PhotoSelectionBar active count={2} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
@@ -303,6 +305,7 @@ it.each(['en','ja'])('keeps the singleton warning and its localized description 
  expect(host.querySelector('.stack-content > [role="status"]')).toBeNull();
 });
 it('disables singleton Add and COVER, rejects drops, and permits Purge followed by DELETE',async()=>{
+ frontendLogger.setLevel('debug');
  api.resolve.mockResolvedValue([singletonStack]);
  await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
  const group=host.querySelector<HTMLElement>('.stack-singleton-warning')!;
@@ -314,6 +317,8 @@ it('disables singleton Add and COVER, rejects drops, and permits Purge followed 
  const transfer={types:['application/x-genzoroom-stack-photo+json'],files:[],getData:()=>JSON.stringify({assetId:'x',sourceGroupId:null})};
  const over=new Event('dragover',{bubbles:true,cancelable:true});Object.defineProperty(over,'dataTransfer',{value:transfer});
  await act(async()=>group.dispatchEvent(over));expect(over.defaultPrevented).toBe(false);expect(group.classList.contains('stack-drop-target')).toBe(false);
+ expect(frontendLogger.getEntries().some(entry=>entry.component==='stack.dnd'&&entry.event==='dragover.rejected'
+  &&entry.context?.rejectionReason==='singleton-target')).toBe(true);
  const drop=new Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});
  await act(async()=>group.dispatchEvent(drop));
  expect(host.querySelectorAll('.stack-singleton-warning .stack-photo')).toHaveLength(1);
@@ -763,6 +768,64 @@ function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|
  if(type==='dragleave')Object.defineProperty(event,'relatedTarget',{value:relatedTarget??null});
  return event;
 }
+it('records safe D&D diagnostics with Chrome dragover deduplication and preserves the drop result',async()=>{
+ frontendLogger.setLevel('debug');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ let over!:DragEvent;
+ await act(async()=>{over=dragEvent('dragover',transfer);target.dispatchEvent(over);target.dispatchEvent(dragEvent('dragover',transfer));});
+ expect(over.defaultPrevented).toBe(true);
+ let entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
+ expect(entries.find(entry=>entry.event==='dragstart')?.context).toMatchObject({assetId:'x',sourceGroupId:null,hasCustomMime:true,refPayloadPresent:true,statePayloadPresent:false});
+ expect(entries.filter(entry=>entry.event==='dragover.accepted')).toHaveLength(1);
+ expect(entries.find(entry=>entry.event==='dragover.accepted')?.context).toMatchObject({targetKind:'stack',targetGroupId:expect.any(String),payloadSource:'data-transfer',accepted:true});
+ const drop=dragEvent('drop',transfer);await act(async()=>target.dispatchEvent(drop));
+ expect(drop.defaultPrevented).toBe(true);expect(target.querySelectorAll('.stack-photo')).toHaveLength(3);
+ const moved=target.querySelector<HTMLButtonElement>('.stack-photo[aria-label*="x.jpg"]') ?? target.querySelector<HTMLButtonElement>('.stack-photo')!;
+ await act(async()=>moved.dispatchEvent(dragEvent('dragend',transfer)));
+ entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
+ expect(entries.find(entry=>entry.event==='drop.accepted')?.context).toMatchObject({operationKind:'unmatched-to-stack',assetId:'x',accepted:true});
+ expect(entries.some(entry=>entry.event==='dragend')).toBe(true);
+ expect(JSON.stringify(entries)).not.toContain('selected.jpg');
+});
+it('logs ref fallback and refuses malformed, missing-MIME and external-file drags',async()=>{
+ frontendLogger.setLevel('debug');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ const active=dragTransfer({assetId:'x',sourceGroupId:null},[],[],undefined,true);
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',active)));
+ const hidden=dragEvent('dragover',active);await act(async()=>target.dispatchEvent(hidden));
+ expect(hidden.defaultPrevented).toBe(true);
+ expect(frontendLogger.getEntries().find(entry=>entry.event==='dragover.accepted')?.context).toMatchObject({payloadSource:'active-ref',customDataState:'empty'});
+ const malformed=dragTransfer(undefined,['application/x-genzoroom-stack-photo+json'],[],'{bad');
+ const malformedOver=dragEvent('dragover',malformed);await act(async()=>target.dispatchEvent(malformedOver));expect(malformedOver.defaultPrevented).toBe(false);
+ const malformedDrop=dragEvent('drop',malformed);await act(async()=>target.dispatchEvent(malformedDrop));
+ const noMime=dragTransfer(undefined,[],[],undefined,true);
+ const noMimeOver=dragEvent('dragover',noMime);await act(async()=>target.dispatchEvent(noMimeOver));expect(noMimeOver.defaultPrevented).toBe(false);
+ const file=dragTransfer({assetId:'x',sourceGroupId:null},[],[new File(['x'],'private-name.jpg')]);
+ const fileOver=dragEvent('dragover',file);await act(async()=>target.dispatchEvent(fileOver));expect(fileOver.defaultPrevented).toBe(false);
+ const entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd'&&entry.event==='dragover.rejected');
+ expect(entries.some(entry=>entry.context?.rejectionReason==='malformed-payload'&&entry.context.payloadSource==='none')).toBe(true);
+ expect(entries.some(entry=>entry.context?.rejectionReason==='not-stack-drag'&&entry.context.refPayloadPresent===true)).toBe(true);
+ expect(entries.some(entry=>entry.context?.rejectionReason==='external-file')).toBe(true);
+ expect(frontendLogger.getEntries().some(entry=>entry.component==='stack.dnd'&&entry.event==='drop.rejected'
+  &&entry.context?.rejectionReason==='malformed-payload')).toBe(true);
+ expect(JSON.stringify(entries)).not.toContain('private-name.jpg');
+});
+it('logs rejected drag starts without recording external filenames',async()=>{
+ frontendLogger.setLevel('debug');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const external=dragTransfer(undefined,[],[new File(['x'],'must-not-log.jpg')]);
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',external)));
+ const entry=frontendLogger.getEntries().find(item=>item.component==='stack.dnd'&&item.event==='dragstart.rejected');
+ expect(entry?.context).toMatchObject({assetId:'x',canEdit:true,filesLength:1,accepted:false,rejectionReason:'external-file'});
+ expect(JSON.stringify(entry)).not.toContain('must-not-log.jpg');
+});
 it('uses the synchronous active payload when Chrome exposes the MIME type but hides its data',async()=>{
  await mount('/stack',{selectedAssets:[...photos,...singles]});
  const group=host.querySelector<HTMLElement>('.stack-candidate-group')!;

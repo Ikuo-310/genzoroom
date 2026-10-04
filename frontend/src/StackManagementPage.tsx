@@ -19,9 +19,17 @@ import { isSingletonImmichStack, mergeImmichStackSource } from './immichStackDra
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
-import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
+import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
+import { frontendLogger } from './frontendLogging';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
+
+type DndTarget = { targetKind: 'stack' | 'unmatched-area' | 'unmatched-photo'; targetGroupId: string | null; targetAssetId?: string };
+function logStackDnd(event: string, context: Record<string, string | number | boolean | null | string[]>) {
+  if (frontendLogger.getLevel() !== 'debug') return;
+  try { frontendLogger.add({ level: 'debug', component: 'stack.dnd', event, context }); }
+  catch { /* Diagnostics must never interfere with browser drag handling. */ }
+}
 
 export type StackNavigationState = { selectedAssets: RecentAsset[]; homeReturn?: HomeReturnContext };
 
@@ -59,6 +67,8 @@ export function StackManagementPage() {
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
   const draggingRef = useRef<StackDragPayload | null>(null);
+  const dragPayloadForEndLog = useRef<StackDragPayload | null>(null);
+  const dragoverLogged = useRef(new Map<string, string>());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
@@ -69,9 +79,14 @@ export function StackManagementPage() {
     sendRequest.current?.controller.abort();
     sendRequest.current = null;
     setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
-    setRedetecting(false); draggingRef.current = null; setDragging(null); setDropTarget(null);
-  }, [sourceGeneration, dispatch]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); draggingRef.current = null; }, []);
+    setRedetecting(false);
+    if (draggingRef.current) logStackDnd('drag.cancelled-generation-change', {
+      assetId: draggingRef.current.assetId, sourceGroupId: draggingRef.current.sourceGroupId,
+      refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
+    });
+    draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear();
+  }, [sourceGeneration, dispatch, dragging]);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -108,18 +123,128 @@ export function StackManagementPage() {
     try { return isStackDrag(transfer) && transfer.getData(STACK_DRAG_TYPE) === '' ? draggingRef.current : null; }
     catch { return null; }
   };
+  const observeTransfer = (transfer: DataTransfer) => {
+    let dataTransferTypes: string[] = [];
+    let filesLength = 0;
+    let typesReadable = true;
+    try { dataTransferTypes = Array.from(transfer.types).slice(0, 16).map(type => String(type).slice(0, 128)); }
+    catch { typesReadable = false; }
+    try { filesLength = transfer.files.length; } catch { /* Keep a safe unknown-like count when the browser denies access. */ }
+    const hasCustomMime = typesReadable && dataTransferTypes.some(type => type.toLowerCase() === STACK_DRAG_TYPE);
+    let customDataState: 'nonempty' | 'empty' | 'unreadable' = 'unreadable';
+    let observedPayload: StackDragPayload | null = null;
+    let payloadSource: 'data-transfer' | 'active-ref' | 'none' = 'none';
+    if (filesLength === 0 && hasCustomMime) {
+      try {
+        const raw = transfer.getData(STACK_DRAG_TYPE);
+        customDataState = raw ? 'nonempty' : 'empty';
+        if (raw) { observedPayload = parseStackDragPayload(raw); if (observedPayload) payloadSource = 'data-transfer'; }
+        else if (draggingRef.current) { observedPayload = draggingRef.current; payloadSource = 'active-ref'; }
+      } catch { customDataState = 'unreadable'; }
+    } else if (typesReadable) customDataState = 'empty';
+    return { dataTransferTypes, filesLength, hasCustomMime, customDataState, payloadSource, observedPayload };
+  };
+  const logDragover = (event: React.DragEvent, target: DndTarget, accepted: boolean, rejectionReason: string | null,
+    payload: StackDragPayload | null = null) => {
+    if (frontendLogger.getLevel() !== 'debug') return;
+    const observed = observeTransfer(event.dataTransfer);
+    const actualPayload = payload ?? observed.observedPayload;
+    const context = {
+      assetId: actualPayload?.assetId ?? null, sourceGroupId: actualPayload?.sourceGroupId ?? null,
+      targetGroupId: target.targetGroupId, ...(target.targetAssetId ? { targetAssetId: target.targetAssetId } : {}),
+      targetKind: target.targetKind, ...observed, observedPayload: undefined,
+      refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null,
+      canEdit, accepted, rejectionReason,
+    };
+    const { observedPayload: _ignored, ...safeContext } = context;
+    const targetKey = `${target.targetKind}:${target.targetGroupId ?? ''}:${target.targetAssetId ?? ''}`;
+    const stateKey = JSON.stringify([accepted, rejectionReason, observed.dataTransferTypes, observed.filesLength,
+      observed.hasCustomMime, observed.customDataState, observed.payloadSource, draggingRef.current !== null,
+      dragging !== null, canEdit]);
+    if (dragoverLogged.current.get(targetKey) === stateKey) return;
+    if (!dragoverLogged.current.has(targetKey) && dragoverLogged.current.size >= 100) return;
+    dragoverLogged.current.set(targetKey, stateKey);
+    logStackDnd(accepted ? 'dragover.accepted' : 'dragover.rejected', safeContext);
+  };
+  const rejectionReason = (transfer: DataTransfer, payload: StackDragPayload | null, validTarget: boolean, targetGroupId: string | null = null) => {
+    if (!canEdit) return 'not-editable';
+    if (transfer.files.length > 0) return 'external-file';
+    if (!isStackDrag(transfer)) return 'not-stack-drag';
+    if (!payload) {
+      try { return transfer.getData(STACK_DRAG_TYPE) ? 'malformed-payload' : 'no-payload'; }
+      catch { return 'getdata-unreadable'; }
+    }
+    if (payload.sourceGroupId && draft.groups.some(group => group.id === payload.sourceGroupId && isSingletonImmichStack(group))) return 'singleton-source';
+    if (targetGroupId && draft.groups.some(group => group.id === targetGroupId && isSingletonImmichStack(group))) return 'singleton-target';
+    return validTarget ? null : 'invalid-target';
+  };
+  const handleDragOver = (event: React.DragEvent, target: DndTarget, targetGroupId: string | null) => {
+    const accepted = target.targetKind === 'unmatched-photo'
+      ? canAcceptUnmatchedPhotoDrop(event, target.targetAssetId!)
+      : canAcceptDrop(event, targetGroupId);
+    if (frontendLogger.getLevel() === 'debug') {
+      const payload = payloadFrom(event.dataTransfer);
+      logDragover(event, target, accepted, rejectionReason(event.dataTransfer, payload, accepted, targetGroupId), payload);
+    }
+    return accepted;
+  };
+  const logDrop = (event: React.DragEvent, target: DndTarget, accepted: boolean, payload: StackDragPayload | null,
+    reason: string | null, operationKind?: string) => {
+    const observed = observeTransfer(event.dataTransfer);
+    const { observedPayload: _ignored, ...safeObserved } = observed;
+    logStackDnd(accepted ? 'drop.accepted' : 'drop.rejected', {
+      assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
+      targetGroupId: target.targetGroupId, ...(target.targetAssetId ? { targetAssetId: target.targetAssetId } : {}),
+      targetKind: target.targetKind, ...safeObserved, refPayloadPresent: draggingRef.current !== null,
+      statePayloadPresent: dragging !== null, canEdit, accepted, rejectionReason: reason,
+      ...(operationKind ? { operationKind } : {}),
+    });
+  };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
-    if (!canEdit || event.dataTransfer.files.length) { event.preventDefault(); return false; }
+    if (!canEdit || event.dataTransfer.files.length) {
+      event.preventDefault();
+      if (frontendLogger.getLevel() === 'debug') {
+        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+        logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+          ...observed, refPayloadPresent: draggingRef.current !== null,
+          statePayloadPresent: dragging !== null, canEdit,
+          accepted: false, rejectionReason: !canEdit ? 'not-editable' : 'external-file' });
+      }
+      return false;
+    }
     try {
       event.dataTransfer.setData(STACK_DRAG_TYPE, JSON.stringify(payload));
       event.dataTransfer.effectAllowed = 'move';
       draggingRef.current = payload;
+      dragPayloadForEndLog.current = payload;
       setDragging(payload);
+      dragoverLogged.current.clear();
+      if (frontendLogger.getLevel() === 'debug') {
+        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+        logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+          ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
+          canEdit, accepted: true, rejectionReason: null });
+      }
       return true;
-    } catch { event.preventDefault(); return false; }
+    } catch {
+      event.preventDefault();
+      if (frontendLogger.getLevel() === 'debug') {
+        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+        logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+          ...observed, refPayloadPresent: draggingRef.current !== null,
+          statePayloadPresent: dragging !== null, canEdit, accepted: false, rejectionReason: 'setdata-failed' });
+      }
+      return false;
+    }
   };
-  const clearDrag = () => { draggingRef.current = null; setDragging(null); setDropTarget(null); };
-  const handleDragEnd = () => clearDrag();
+  const clearDrag = () => { draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
+  const handleDragEnd = () => {
+    const payload = draggingRef.current ?? dragPayloadForEndLog.current;
+    if (frontendLogger.getLevel() === 'debug') logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
+      refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null });
+    clearDrag();
+    dragPayloadForEndLog.current = null;
+  };
   const canAcceptDrop = (event: React.DragEvent, targetId: string | null) => {
     if (!canEdit || !isStackDrag(event.dataTransfer)) return false;
     const payload = payloadFrom(event.dataTransfer);
@@ -131,12 +256,24 @@ export function StackManagementPage() {
     return payload !== null && canCreateStackFromUnmatchedDrop(payload, targetAssetId, draft.groups, draft.unmatched);
   };
   const acceptDrop = (event: React.DragEvent, targetId: string | null) => {
-    if (!canAcceptDrop(event, targetId)) return;
+    const accepted = canAcceptDrop(event, targetId);
+    const target: DndTarget = targetId === null
+      ? { targetKind: 'unmatched-area', targetGroupId: null }
+      : { targetKind: 'stack', targetGroupId: targetId };
+    if (!accepted) {
+      if (frontendLogger.getLevel() === 'debug') {
+        const payload = payloadFrom(event.dataTransfer);
+        logDrop(event, target, false, payload, rejectionReason(event.dataTransfer, payload, false, targetId));
+      }
+      return;
+    }
     event.preventDefault(); event.dataTransfer.dropEffect = 'move';
-    const payload = payloadFrom(event.dataTransfer)!;
-    if (targetId === null) dispatch({ type: 'purgeMember', groupId: payload.sourceGroupId!, assetId: payload.assetId });
-    else if (payload.sourceGroupId === null) dispatch({ type: 'dropUnmatched', assetId: payload.assetId, targetGroupId: targetId });
-    else dispatch({ type: 'moveMember', assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, targetGroupId: targetId });
+    const acceptedPayload = payloadFrom(event.dataTransfer)!;
+    if (frontendLogger.getLevel() === 'debug') logDrop(event, target, true, acceptedPayload, null,
+      acceptedPayload.sourceGroupId === null ? 'unmatched-to-stack' : targetId === null ? 'stack-to-unmatched' : 'stack-to-stack');
+    if (targetId === null) dispatch({ type: 'purgeMember', groupId: acceptedPayload.sourceGroupId!, assetId: acceptedPayload.assetId });
+    else if (acceptedPayload.sourceGroupId === null) dispatch({ type: 'dropUnmatched', assetId: acceptedPayload.assetId, targetGroupId: targetId });
+    else dispatch({ type: 'moveMember', assetId: acceptedPayload.assetId, sourceGroupId: acceptedPayload.sourceGroupId, targetGroupId: targetId });
     clearDrag();
   };
   const addSelected = useCallback((targetGroupId?: string) => {
@@ -229,12 +366,19 @@ export function StackManagementPage() {
         <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
           key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
-            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
-            if (canAcceptDrop(event, group.id)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(group.id); }
+            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) {
+              if (frontendLogger.getLevel() === 'debug') logDragover(event, { targetKind: 'stack', targetGroupId: group.id }, false, 'non-interactive-indicator');
+              return;
+            }
+            if (handleDragOver(event, { targetKind: 'stack', targetGroupId: group.id }, group.id)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(group.id); }
           }}
           onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === group.id) setDropTarget(null); }}
           onDrop={event => {
-            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) return;
+            if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) {
+              if (frontendLogger.getLevel() === 'debug') logDrop(event, { targetKind: 'stack', targetGroupId: group.id }, false,
+                payloadFrom(event.dataTransfer), 'non-interactive-indicator');
+              return;
+            }
             acceptDrop(event, group.id);
           }}
           style={{ '--stack-member-count': group.members.length } as CSSProperties}>
@@ -259,7 +403,7 @@ export function StackManagementPage() {
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
       </section>
       <section aria-labelledby="stack-unmatched-heading" className={`${displayed.unmatched.length ? '' : 'stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
-        onDragOver={event => { if (canAcceptDrop(event, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
+        onDragOver={event => { if (handleDragOver(event, { targetKind: 'unmatched-area', targetGroupId: null }, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === 'unmatched') setDropTarget(null); }}
         onDrop={event => acceptDrop(event, null)}>
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
@@ -267,15 +411,18 @@ export function StackManagementPage() {
           key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
           dropTarget={dropTarget === `unmatched:${asset.id}`}
           onDropTargetDragOver={event => {
-            if (!canAcceptUnmatchedPhotoDrop(event, asset.id)) return;
+            if (!handleDragOver(event, { targetKind: 'unmatched-photo', targetGroupId: null, targetAssetId: asset.id }, null)) return;
             event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDropTarget(`unmatched:${asset.id}`);
           }}
           onDropTargetDragLeave={event => {
             if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === `unmatched:${asset.id}`) setDropTarget(null);
           }}
           onDropTargetDrop={event => {
-            if (!canAcceptUnmatchedPhotoDrop(event, asset.id)) return;
+            const accepted = canAcceptUnmatchedPhotoDrop(event, asset.id);
+            if (!accepted) return;
             const payload = payloadFrom(event.dataTransfer)!;
+            if (frontendLogger.getLevel() === 'debug') logDrop(event,
+              { targetKind: 'unmatched-photo', targetGroupId: null, targetAssetId: asset.id }, true, payload, null, 'unmatched-to-unmatched');
             event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move';
             dispatch({ type: 'createFromUnmatchedDrop', draggedAssetId: payload.assetId, targetAssetId: asset.id });
             clearDrag();
