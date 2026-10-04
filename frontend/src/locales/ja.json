@@ -641,7 +641,7 @@
     "sendSuccess": "Immichへ反映しました。",
     "sendNoChanges": "変更はありません。",
     "sendConfirm": "STACKの変更をImmichへ反映しますか？ 新規 {{create}}、更新 {{update}}、解除 {{delete}}。",
-    "sendUnknown": "一部のSTACKの反映結果を確認できませんでした。再検出して確認してください。",
+    "sendUnknown": "一部STACKの反映結果を確認できませんでした。再検出して確認してください。",
     "sendFailure": "一部のSTACKをImmichへ反映できませんでした。再送できます。",
     "sendBlocked": "必要な所属変更が完了しなかったため、このSTACKは送信されませんでした。",
     "newStack": "新規STACK",

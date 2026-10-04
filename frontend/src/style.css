@@ -550,7 +550,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-section-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
 .stack-section-heading h2 { min-width: 0; margin-bottom: 12px; }
 .stack-send-status { min-width: 0; margin-bottom: 12px; color: var(--text-primary); font-size: 0.84rem; overflow-wrap: anywhere; }
-.stack-send-status-error { color: var(--status-warning-text); font-weight: 600; }
+.stack-send-status-error { color: var(--danger); font-weight: 600; }
 .stack-empty { color: var(--text-secondary); font-size: 0.85rem; }
 .stack-candidate-grid, .stack-unmatched-grid { display: grid; grid-template-columns: repeat(var(--stack-effective-columns), minmax(0, 1fr)); gap: 12px; }
 .stack-candidate-grid .stack-empty { grid-column: 1 / -1; }

@@ -341,6 +341,10 @@ const secondMembers=[
 const secondStack={id:secondStackId,primaryAssetId:secondPrimary,assets:secondMembers};
 const button = (text: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === text)!;
 const unmatched = () => Array.from(host.querySelectorAll('.stack-unmatched-grid .stack-filename')).map(e => e.textContent);
+it('uses the concise Japanese wording for unknown Stack outcomes',async()=>{
+ await i18n.changeLanguage('ja');
+ expect(i18n.t('stackManagement.sendUnknown')).toBe('一部STACKの反映結果を確認できませんでした。再検出して確認してください。');
+});
 
 it('shows full Immich membership beside auto candidates and keeps the Immich primary Cover',async()=>{
  api.resolve.mockResolvedValue([existingStack]);
