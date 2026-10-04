@@ -26,11 +26,8 @@ const EMPTY_ASSETS: RecentAsset[] = [];
 
 type DndTarget = { targetKind: 'stack' | 'unmatched-area' | 'unmatched-photo'; targetGroupId: string | null; targetAssetId?: string };
 type DragDiagnosticSession = {
-  dragSessionId: string; assetId: string; sourceGroupId: string | null; startedAt: number;
-  droppedAt: number | null; endedAt: number | null; postDragUntil: number;
-  timer: number | null; location: { pathname: string; search: string; hash: string };
+  dragSessionId: string; assetId: string; sourceGroupId: string | null;
 };
-const POST_DRAG_DIAGNOSTIC_MS = 750;
 function logStackDnd(event: string, context: Record<string, string | number | boolean | null | string[]>) {
   if (frontendLogger.getLevel() !== 'debug') return;
   try { frontendLogger.add({ level: 'debug', component: 'stack.dnd', event, context }); }
@@ -94,36 +91,12 @@ export function StackManagementPage() {
     dragPreviewRef.current = null; nativeDragImageRef.current = null;
     dragPreviewGrabOffsetRef.current = null;
   };
-  const closeDragDiagnosticSession = () => {
-    const session = dragDiagnosticSession.current;
-    if (session?.timer !== null && session?.timer !== undefined) window.clearTimeout(session.timer);
-    dragDiagnosticSession.current = null;
-  };
-  const openPostDragWindow = (session: DragDiagnosticSession, now = Date.now()) => {
-    session.postDragUntil = now + POST_DRAG_DIAGNOSTIC_MS;
-    if (session.timer !== null) window.clearTimeout(session.timer);
-    session.timer = window.setTimeout(() => {
-      // A queued timer from an ended drag must never expire a newer diagnostic session.
-      if (dragDiagnosticSession.current === session) closeDragDiagnosticSession();
-    }, POST_DRAG_DIAGNOSTIC_MS);
-  };
   const createDragDiagnosticSession = (payload: StackDragPayload): DragDiagnosticSession => {
     const randomId = globalThis.crypto?.randomUUID?.();
     return {
       dragSessionId: randomId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      assetId: payload.assetId, sourceGroupId: payload.sourceGroupId, startedAt: Date.now(),
-      droppedAt: null, endedAt: null, postDragUntil: 0, timer: null,
-      location: { pathname: location.pathname, search: location.search, hash: location.hash },
+      assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
     };
-  };
-  const locationChangeContext = (session: DragDiagnosticSession) => {
-    try {
-      return {
-        pathnameChanged: window.location.pathname !== session.location.pathname,
-        searchChanged: window.location.search !== session.location.search,
-        hashChanged: window.location.hash !== session.location.hash,
-      };
-    } catch { return { pathnameChanged: false, searchChanged: false, hashChanged: false }; }
   };
   const moveDragPreview = (clientX: number, clientY: number) => {
     const preview = dragPreviewRef.current;
@@ -142,7 +115,7 @@ export function StackManagementPage() {
     sendRequest.current = null;
     setSending(false); setSendStatus(null); setConfirmSend(false); setConfirmRedetect(false);
     setRedetecting(false);
-    closeDragDiagnosticSession();
+    dragDiagnosticSession.current = null;
     if (draggingRef.current) logStackDnd('drag.cancelled-generation-change', {
       assetId: draggingRef.current.assetId, sourceGroupId: draggingRef.current.sourceGroupId,
       refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
@@ -151,7 +124,7 @@ export function StackManagementPage() {
     draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null);
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear();
   }, [sourceGeneration, dispatch, dragging]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); closeDragDiagnosticSession(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
+  useEffect(() => () => { sendRequest.current?.controller.abort(); dragDiagnosticSession.current = null; clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
@@ -231,10 +204,6 @@ export function StackManagementPage() {
       const activePayload = draggingRef.current;
       if (!activePayload || !dragEvent.dataTransfer || !isActiveStackDrag(dragEvent.dataTransfer)) return;
       const session = dragDiagnosticSession.current;
-      if (event.type === 'drop' && session) {
-        session.droppedAt ??= Date.now();
-        openPostDragWindow(session, session.droppedAt);
-      }
       const defaultPreventedBefore = dragEvent.defaultPrevented;
       if (frontendLogger.getLevel() !== 'debug') return;
       const observed = observeTransfer(dragEvent.dataTransfer);
@@ -275,47 +244,6 @@ export function StackManagementPage() {
       window.removeEventListener('drop', windowDrop, true);
       document.removeEventListener('drop', documentDrop, true);
       globalDragoverLogged.current.clear();
-    };
-  }, []);
-  useEffect(() => {
-    // Compare both capture boundaries without consuming activation or navigation events.
-    const eventTypes = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'auxclick', 'blur', 'focus',
-      'visibilitychange', 'pagehide', 'beforeunload', 'popstate'] as const;
-    const observers = eventTypes.flatMap(eventType => (['window', 'document'] as const).map(listenerScope => {
-      const target = listenerScope === 'window' ? window : document;
-      const observer = (event: Event) => {
-        const session = dragDiagnosticSession.current;
-        const now = Date.now();
-        if (!session || (!draggingRef.current && now > session.postDragUntil) || frontendLogger.getLevel() !== 'debug') return;
-        const eventTarget = event.target;
-        const element = eventTarget instanceof Element ? eventTarget : null;
-        const anchor = element?.closest('a') ?? null;
-        const context: Record<string, string | number | boolean | null> = {
-          assetId: session.assetId, sourceGroupId: session.sourceGroupId, dragSessionId: session.dragSessionId,
-          eventType, listenerScope, eventPhase: event.eventPhase, defaultPrevented: event.defaultPrevented,
-          cancelable: event.cancelable, targetKind: nativeTargetKind(eventTarget),
-          targetTagName: element?.tagName.toLowerCase() ?? 'other', timeSinceDragEndMs: session.endedAt === null ? null : Math.max(0, now - session.endedAt),
-          timeSinceDropMs: session.droppedAt === null ? null : Math.max(0, now - session.droppedAt),
-          timeSinceSessionStartMs: Math.max(0, now - session.startedAt), dragActive: draggingRef.current !== null,
-          postDragWindowActive: now <= session.postDragUntil, hasClosestAnchor: anchor !== null,
-          closestAnchorHasHref: anchor?.hasAttribute('href') ?? false, ...locationChangeContext(session),
-        };
-        if ('button' in event && typeof (event as MouseEvent).button === 'number') {
-          const mouse = event as MouseEvent;
-          Object.assign(context, {
-            button: mouse.button, buttons: mouse.buttons, clientX: mouse.clientX, clientY: mouse.clientY,
-            screenX: mouse.screenX, screenY: mouse.screenY, ctrlKey: mouse.ctrlKey, metaKey: mouse.metaKey,
-            altKey: mouse.altKey, shiftKey: mouse.shiftKey,
-          });
-        }
-        logStackDnd('postdrag.event', context);
-      };
-      target.addEventListener(eventType, observer, true);
-      return { target, eventType, observer };
-    }));
-    return () => {
-      observers.forEach(({ target, eventType, observer }) => target.removeEventListener(eventType, observer, true));
-      closeDragDiagnosticSession();
     };
   }, []);
   const logDragover = (event: React.DragEvent, target: DndTarget, accepted: boolean, rejectionReason: string | null,
@@ -377,7 +305,7 @@ export function StackManagementPage() {
     });
   };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
-    closeDragDiagnosticSession();
+    dragDiagnosticSession.current = null;
     if (!canEdit || event.dataTransfer.files.length) {
       event.preventDefault();
       clearDragVisuals();
@@ -465,10 +393,6 @@ export function StackManagementPage() {
   const handleDragEnd = (event: React.DragEvent<HTMLButtonElement>) => {
     const payload = draggingRef.current ?? dragPayloadForEndLog.current;
     const session = dragDiagnosticSession.current;
-    if (session) {
-      session.endedAt = Date.now();
-      openPostDragWindow(session, session.endedAt);
-    }
     if (frontendLogger.getLevel() === 'debug') {
       let transferContext: Record<string, string | number | boolean | null | string[]> = {};
       try {
@@ -476,20 +400,18 @@ export function StackManagementPage() {
         transferContext = { ...observed, effectAllowed: event.dataTransfer.effectAllowed, dropEffect: event.dataTransfer.dropEffect };
       } catch { transferContext = { customDataState: 'unreadable', dataTransferTypes: [], filesLength: 0, hasCustomMime: false, payloadSource: 'none' }; }
       const target = event.target instanceof Element ? event.target : null;
-      const anchor = target?.closest('a') ?? null;
       logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
         dragSessionId: session?.dragSessionId ?? null, ...transferContext,
         targetKind: nativeTargetKind(event.target), targetTagName: target?.tagName.toLowerCase() ?? 'other',
-        hasClosestAnchor: anchor !== null, closestAnchorHasHref: anchor?.hasAttribute('href') ?? false,
         clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
         button: event.button, buttons: event.buttons, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
         altKey: event.altKey, shiftKey: event.shiftKey, defaultPrevented: event.defaultPrevented,
         cancelable: event.cancelable, eventPhase: event.eventPhase,
-        refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null,
-        ...(session ? locationChangeContext(session) : { pathnameChanged: false, searchChanged: false, hashChanged: false }) });
+        refPayloadPresent: draggingRef.current !== null, statePayloadPresent: dragging !== null, canEdit, accepted: true, rejectionReason: null });
     }
     clearDrag();
     dragPayloadForEndLog.current = null;
+    dragDiagnosticSession.current = null;
     globalDragoverLogged.current.clear();
   };
   const canAcceptDrop = (event: React.DragEvent, targetId: string | null) => {

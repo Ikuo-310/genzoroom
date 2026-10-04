@@ -790,16 +790,21 @@ it('records safe D&D diagnostics with Chrome dragover deduplication and preserve
  await act(async()=>{over=dragEvent('dragover',transfer);target.dispatchEvent(over);target.dispatchEvent(dragEvent('dragover',transfer));});
  expect(over.defaultPrevented).toBe(true);
  let entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
+ const dragSessionId=entries.find(entry=>entry.event==='dragstart')?.context?.dragSessionId;
+ expect(dragSessionId).toEqual(expect.any(String));
  expect(entries.find(entry=>entry.event==='dragstart')?.context).toMatchObject({assetId:'x',sourceGroupId:null,hasCustomMime:true,refPayloadPresent:true,statePayloadPresent:false});
  expect(entries.filter(entry=>entry.event==='dragover.accepted')).toHaveLength(1);
  expect(entries.find(entry=>entry.event==='dragover.accepted')?.context).toMatchObject({targetKind:'stack',targetGroupId:expect.any(String),payloadSource:'data-transfer',accepted:true});
+ expect(entries.filter(entry=>entry.event==='global.dragover.observed').every(entry=>entry.context?.dragSessionId===dragSessionId)).toBe(true);
  const drop=dragEvent('drop',transfer);await act(async()=>target.dispatchEvent(drop));
  expect(drop.defaultPrevented).toBe(true);expect(target.querySelectorAll('.stack-photo')).toHaveLength(3);
  const moved=target.querySelector<HTMLButtonElement>('.stack-photo[aria-label*="x.jpg"]') ?? target.querySelector<HTMLButtonElement>('.stack-photo')!;
  await act(async()=>moved.dispatchEvent(dragEvent('dragend',transfer)));
  entries=frontendLogger.getEntries().filter(entry=>entry.component==='stack.dnd');
  expect(entries.find(entry=>entry.event==='drop.accepted')?.context).toMatchObject({operationKind:'unmatched-to-stack',assetId:'x',accepted:true});
- expect(entries.some(entry=>entry.event==='dragend')).toBe(true);
+ expect(entries.filter(entry=>entry.event==='global.drop.observed').every(entry=>entry.context?.dragSessionId===dragSessionId)).toBe(true);
+ expect(entries.find(entry=>entry.event==='drop.accepted')?.context?.dragSessionId).toBe(dragSessionId);
+ expect(entries.find(entry=>entry.event==='dragend')?.context?.dragSessionId).toBe(dragSessionId);
  expect(JSON.stringify(entries)).not.toContain('selected.jpg');
 });
 it('records dragend transfer, target, coordinates, buttons, and modifiers',async()=>{
@@ -815,61 +820,23 @@ it('records dragend transfer, target, coordinates, buttons, and modifiers',async
   targetKind:'stack-photo',targetTagName:'button',clientX:41,clientY:52,screenX:801,screenY:602,button:1,buttons:0,
   ctrlKey:true,metaKey:false,altKey:true,shiftKey:true,defaultPrevented:false,cancelable:true});
 });
-it('observes click and lifecycle events only in the short post-drag window without cancelling them or logging hrefs',async()=>{
- vi.useFakeTimers();frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
- const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
- const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
- await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
- await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
- const anchor=document.createElement('a');anchor.setAttribute('href','https://example.invalid/private?token=do-not-log');document.body.append(anchor);
- let observerSawPrevented:boolean|null=null;anchor.addEventListener('click',event=>{observerSawPrevented=event.defaultPrevented;event.preventDefault();});
- const clickEvent=new MouseEvent('click',{bubbles:true,cancelable:true,clientX:20,clientY:30,screenX:120,screenY:130,button:0,buttons:0,ctrlKey:true});
- anchor.dispatchEvent(clickEvent);expect(observerSawPrevented).toBe(false);expect(clickEvent.defaultPrevented).toBe(true);
- const blurEvent=new Event('blur',{bubbles:false,cancelable:false});window.dispatchEvent(blurEvent);
- const events=frontendLogger.getEntries().filter(item=>item.component==='stack.dnd'&&item.event==='postdrag.event');
- const clickEntries=events.filter(item=>item.context?.eventType==='click');
- expect(clickEntries).toHaveLength(2);
- expect(clickEntries[0].context).toMatchObject({dragSessionId:expect.any(String),listenerScope:'window',eventPhase:Event.CAPTURING_PHASE,
-  targetKind:'other',targetTagName:'a',timeSinceDragEndMs:expect.any(Number),dragActive:false,postDragWindowActive:true,
-  defaultPrevented:false,hasClosestAnchor:true,closestAnchorHasHref:true,button:0,buttons:0,clientX:20,clientY:30,screenX:120,screenY:130,ctrlKey:true});
- expect(events.some(item=>item.context?.eventType==='blur'&&item.context.listenerScope==='window')).toBe(true);
- expect(JSON.stringify(events)).not.toContain('example.invalid');expect(JSON.stringify(events)).not.toContain('do-not-log');
- await act(async()=>{await vi.advanceTimersByTimeAsync(751);});
- const lateClick=new MouseEvent('click',{bubbles:true,cancelable:true});document.body.dispatchEvent(lateClick);
- expect(frontendLogger.getEntries().filter(item=>item.component==='stack.dnd'&&item.event==='postdrag.event')).toHaveLength(events.length);
- expect(lateClick.defaultPrevented).toBe(false);anchor.remove();
-});
-it('does not emit post-drag observations when DEBUG is off',async()=>{
- frontendLogger.setLevel('info');await mount('/stack',{selectedAssets:[...photos,...singles]});
+it('does not install incident-specific post-drag listeners or emit postdrag events',async()=>{
+ frontendLogger.setLevel('debug');
+ const postDragEvents=['pointerdown','pointerup','mousedown','mouseup','click','auxclick','blur','focus',
+  'visibilitychange','pagehide','beforeunload','popstate'];
+ const windowAdd=vi.spyOn(window,'addEventListener'),documentAdd=vi.spyOn(document,'addEventListener');
+ const windowCallsBefore=windowAdd.mock.calls.length,documentCallsBefore=documentAdd.mock.calls.length;
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const hasPostDragCapture=(calls:readonly (readonly unknown[])[])=>calls.some(call=>postDragEvents.includes(String(call[0]))&&call[2]===true);
+ expect(hasPostDragCapture(windowAdd.mock.calls.slice(windowCallsBefore) as readonly (readonly unknown[])[])).toBe(false);
+ expect(hasPostDragCapture(documentAdd.mock.calls.slice(documentCallsBefore) as readonly (readonly unknown[])[])).toBe(false);
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
  const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
  await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
  document.body.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
- expect(frontendLogger.getEntries().filter(item=>item.component==='stack.dnd')).toHaveLength(0);
-});
-it('clears an old post-drag timer on new drag, source generation change, and unmount',async()=>{
- vi.useFakeTimers();frontendLogger.setLevel('debug');await mount('/stack',{selectedAssets:[...photos,...singles]});
- const source=()=>host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
- const clearTimeoutSpy=vi.spyOn(window,'clearTimeout');
- const first=dragTransfer({assetId:'x',sourceGroupId:null});
- await act(async()=>source().dispatchEvent(dragEvent('dragstart',first)));
- await act(async()=>source().dispatchEvent(dragEvent('dragend',first)));
- const clearsAfterEnd=clearTimeoutSpy.mock.calls.length;
- const second=dragTransfer({assetId:'y',sourceGroupId:null});
- await act(async()=>source().dispatchEvent(dragEvent('dragstart',second)));
- expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsAfterEnd);
- await act(async()=>source().dispatchEvent(dragEvent('dragend',second)));
- const clearsBeforeGeneration=clearTimeoutSpy.mock.calls.length;
- await act(async()=>navigateTest('/stack',{selectedAssets:[...photos,...singles]}));
- expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsBeforeGeneration);
- const third=dragTransfer({assetId:'x',sourceGroupId:null});
- await act(async()=>source().dispatchEvent(dragEvent('dragstart',third)));
- await act(async()=>source().dispatchEvent(dragEvent('dragend',third)));
- const clearsBeforeUnmount=clearTimeoutSpy.mock.calls.length;
- await act(async()=>root.unmount());
- expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(clearsBeforeUnmount);
- root=createRoot(host);clearTimeoutSpy.mockRestore();
+ expect(frontendLogger.getEntries().some(item=>item.component==='stack.dnd'&&item.event==='postdrag.event')).toBe(false);
+ windowAdd.mockRestore();documentAdd.mockRestore();
 });
 it('keeps invalid internal page drops as no-ops without cancelling browser defaults',async()=>{
  await mount('/stack',{selectedAssets:[...photos,...singles]});
