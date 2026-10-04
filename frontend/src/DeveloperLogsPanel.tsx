@@ -139,6 +139,7 @@ export function DeveloperLogs() {
   const entries = scope === 'frontend' ? frontend : scope === 'backend' ? backend : mergeLogEntries(frontend, backend);
   const label = (value: Scope) => value === 'all' ? 'ALL' : value === 'frontend' ? 'Frontend' : 'Backend';
   return <section className="developer-logs" aria-label={t('developer.logsTab')}>
+    <p className="developer-log-note">{t('developer.logs.autoOffNote')}</p>
     <div className="developer-log-controls">
       {(['frontend', 'backend'] as const).map(source => <section key={source} className="developer-section developer-log-card" aria-labelledby={`${source}-logs-title`}>
         <h2 id={`${source}-logs-title`}>{label(source)}</h2>

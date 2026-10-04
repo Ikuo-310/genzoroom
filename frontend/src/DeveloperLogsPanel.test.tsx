@@ -62,6 +62,26 @@ it('controls levels independently and retains existing entries after level chang
   expect(host.textContent).toContain(i18n.t('developer.logs.levelUpdateFailed'));
   await select('frontend', 'off'); expect(frontendLogger.getEntries().some(entry => entry.event === 'apply.completed')).toBe(true);
 });
+it('shows the localized auto-off note above the log controls and preserves the existing controls', async () => {
+  const originalLanguage = i18n.language;
+  try {
+    for (const [language, expected] of [
+      ['ja', 'Developer Diagnosticsページを閉じると、ログ収集は自動的にOFFになります。'],
+      ['en', 'Logging is automatically turned off when you close Developer Diagnostics.'],
+    ] as const) {
+      await i18n.changeLanguage(language);
+      await mount();
+      const note = host.querySelector<HTMLElement>('.developer-log-note')!;
+      expect(note.textContent).toBe(expected);
+      expect(note.compareDocumentPosition(card('frontend')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(note.className).toBe('developer-log-note');
+      expect(card('frontend').querySelector('select')).not.toBeNull();
+      expect(card('backend').querySelector('select')).not.toBeNull();
+      for (const key of ['clear', 'export', 'clearAll', 'exportAll', 'refresh']) expect(button(key)).not.toBeNull();
+      act(() => root.unmount()); root = createRoot(host);
+    }
+  } finally { await i18n.changeLanguage(originalLanguage); }
+});
 it('shows the same diagnostic level order and labels for Frontend and Backend', async () => {
   await mount();
   const expected = [['off', 'OFF'], ['info', 'INFO'], ['warn', 'WARN'], ['error', 'ERROR'], ['debug', 'ALL (DEBUG)']];

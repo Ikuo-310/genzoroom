@@ -22,6 +22,7 @@
 .developer-tabs [role="tab"][aria-selected="false"] { color: #e6eee9; background: #43584d; }
 .developer-page [role="tabpanel"]:focus-visible { outline-offset: 5px; }
 .developer-log-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(160px, 0.65fr); gap: 16px; align-items: start; }
+.developer-log-note { margin: 0 0 16px; color: #b9c8bf; font-size: 0.9rem; text-align: left; }
 .developer-log-card { padding: 20px; }
 .developer-log-card h2 { margin-top: 0; }
 .developer-log-level { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }

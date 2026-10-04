@@ -487,6 +487,7 @@
     "diagnosticTabs": "Diagnostic sections",
     "logsTab": "Logs",
     "logs": {
+      "autoOffNote": "Logging is automatically turned off when you close Developer Diagnostics.",
       "level": "Log level",
       "clear": "Clear logs",
       "export": "Export logs JSON",

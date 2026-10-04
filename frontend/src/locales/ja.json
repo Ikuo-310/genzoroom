@@ -485,6 +485,7 @@
     "diagnosticTabs": "診断項目",
     "logsTab": "ログ",
     "logs": {
+      "autoOffNote": "Developer Diagnosticsページを閉じると、ログ収集は自動的にOFFになります。",
       "level": "Log level",
       "clear": "ログクリア",
       "export": "ログJSON出力",
