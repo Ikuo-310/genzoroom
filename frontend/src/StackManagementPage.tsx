@@ -68,10 +68,16 @@ export function StackManagementPage() {
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
   const draggingRef = useRef<StackDragPayload | null>(null);
   const dragPayloadForEndLog = useRef<StackDragPayload | null>(null);
+  const dragPreviewRef = useRef<HTMLImageElement | null>(null);
   const dragoverLogged = useRef(new Map<string, string>());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
+  const cleanupDragPreview = () => {
+    const preview = dragPreviewRef.current;
+    dragPreviewRef.current = null;
+    try { preview?.remove(); } catch { /* Preview cleanup is cosmetic and must not affect drag completion. */ }
+  };
   useLayoutEffect(() => {
     if (currentGeneration.current === sourceGeneration) return;
     currentGeneration.current = sourceGeneration;
@@ -84,9 +90,10 @@ export function StackManagementPage() {
       assetId: draggingRef.current.assetId, sourceGroupId: draggingRef.current.sourceGroupId,
       refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
     });
+    cleanupDragPreview();
     draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear();
   }, [sourceGeneration, dispatch, dragging]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); cleanupDragPreview(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -203,6 +210,7 @@ export function StackManagementPage() {
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
     if (!canEdit || event.dataTransfer.files.length) {
       event.preventDefault();
+      cleanupDragPreview();
       if (frontendLogger.getLevel() === 'debug') {
         const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
         logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
@@ -215,19 +223,9 @@ export function StackManagementPage() {
     try {
       event.dataTransfer.setData(STACK_DRAG_TYPE, JSON.stringify(payload));
       event.dataTransfer.effectAllowed = 'move';
-      draggingRef.current = payload;
-      dragPayloadForEndLog.current = payload;
-      setDragging(payload);
-      dragoverLogged.current.clear();
-      if (frontendLogger.getLevel() === 'debug') {
-        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
-        logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
-          ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
-          canEdit, accepted: true, rejectionReason: null });
-      }
-      return true;
     } catch {
       event.preventDefault();
+      cleanupDragPreview();
       if (frontendLogger.getLevel() === 'debug') {
         const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
         logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
@@ -236,8 +234,43 @@ export function StackManagementPage() {
       }
       return false;
     }
+    let dragPreviewApplied = false;
+    try {
+      const sourceImage = event.currentTarget.querySelector<HTMLImageElement>('.stack-thumbnail img');
+      if (!sourceImage) throw new Error('Stack thumbnail image unavailable');
+      const rect = sourceImage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width || event.currentTarget.clientWidth || 160));
+      const height = Math.max(1, Math.round(rect.height || width * 0.75));
+      const preview = sourceImage.cloneNode(false) as HTMLImageElement;
+      preview.removeAttribute('class');
+      preview.removeAttribute('style');
+      preview.draggable = false;
+      preview.loading = 'eager';
+      Object.assign(preview.style, {
+        position: 'fixed', left: '-10000px', top: '-10000px', display: 'block',
+        width: `${width}px`, height: `${height}px`, objectFit: 'contain', opacity: '1',
+        filter: 'none', boxShadow: 'none', border: '0', pointerEvents: 'none', userSelect: 'none',
+      });
+      document.body.appendChild(preview);
+      dragPreviewRef.current = preview;
+      event.dataTransfer.setDragImage(preview, Math.round(width / 2), Math.round(height / 2));
+      dragPreviewApplied = true;
+    } catch {
+      cleanupDragPreview();
+    }
+    draggingRef.current = payload;
+    dragPayloadForEndLog.current = payload;
+    setDragging(payload);
+    dragoverLogged.current.clear();
+    if (frontendLogger.getLevel() === 'debug') {
+      const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+      logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+        ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
+        canEdit, accepted: true, rejectionReason: null, dragPreviewApplied });
+    }
+    return true;
   };
-  const clearDrag = () => { draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
+  const clearDrag = () => { cleanupDragPreview(); draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
   const handleDragEnd = () => {
     const payload = draggingRef.current ?? dragPayloadForEndLog.current;
     if (frontendLogger.getLevel() === 'debug') logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
