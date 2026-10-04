@@ -117,10 +117,14 @@ it('discards the one-step Undo snapshot when /stack navigation gets a new source
 it('clears active drag state and ref when the source generation changes',async()=>{
  await mount('/stack',{selectedAssets:[...photos,...singles]});
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
- const transfer=dragTransfer({assetId:'x',sourceGroupId:null},[],[],undefined,true);
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null},[],[],undefined,true);const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ const nativeImage=setDragImage.mock.calls[0][0] as HTMLDivElement;
+ const preview=document.body.querySelector<HTMLImageElement>('.stack-drag-preview')!;
+ expect(nativeImage.isConnected).toBe(true);expect(preview.isConnected).toBe(true);
  expect(host.querySelector('.stack-photo-dragging')).not.toBeNull();
  await act(async()=>navigateTest('/stack',{selectedAssets:[...photos,...singles]}));
+ expect(nativeImage.isConnected).toBe(false);expect(preview.isConnected).toBe(false);
  expect(host.querySelector('.stack-photo-dragging')).toBeNull();
  const group=host.querySelector<HTMLElement>('.stack-candidate-group')!;
  const afterGeneration=dragTransfer(undefined,['application/x-genzoroom-stack-photo+json'],[],undefined,true);
@@ -758,15 +762,17 @@ function dragTransfer(payload?: {assetId:string;sourceGroupId:string|null}, extr
   files:files as unknown as FileList,types,
   setData:(type:string,value:string)=>{store.set(type,value);if(!types.includes(type))types.push(type);},
   getData:(type:string)=>hideCustomData&&type==='application/x-genzoroom-stack-photo+json'?'':store.get(type)??'',clearData:()=>{store.clear();types.splice(0);},
+  setDragImage:(_element:Element,_x:number,_y:number)=>{},
   effectAllowed:'all',dropEffect:'none',
  };
  if(payload)transfer.setData('application/x-genzoroom-stack-photo+json',JSON.stringify(payload));
  else if(rawData!==undefined)transfer.setData('application/x-genzoroom-stack-photo+json',rawData);
  return transfer as unknown as DataTransfer;
 }
-function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|null):DragEvent {
+function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|null,coordinates:{clientX:number;clientY:number}={clientX:0,clientY:0}):DragEvent {
  const event=new Event(type,{bubbles:true,cancelable:true}) as DragEvent;
  Object.defineProperty(event,'dataTransfer',{value:transfer});
+ Object.defineProperty(event,'clientX',{value:coordinates.clientX});Object.defineProperty(event,'clientY',{value:coordinates.clientY});
  if(type==='dragleave')Object.defineProperty(event,'relatedTarget',{value:relatedTarget??null});
  return event;
 }
@@ -792,6 +798,85 @@ it('records safe D&D diagnostics with Chrome dragover deduplication and preserve
  expect(entries.find(entry=>entry.event==='drop.accepted')?.context).toMatchObject({operationKind:'unmatched-to-stack',assetId:'x',accepted:true});
  expect(entries.some(entry=>entry.event==='dragend')).toBe(true);
  expect(JSON.stringify(entries)).not.toContain('selected.jpg');
+});
+it('suppresses native drag ghost and follows the pointer with a thumbnail-sized photo-only preview',async()=>{
+ frontendLogger.setLevel('debug');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const sourceImage=source.querySelector<HTMLImageElement>('.stack-thumbnail img')!;
+ vi.spyOn(sourceImage,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,180,120));
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer,undefined,{clientX:100,clientY:80})));
+ expect(setDragImage).toHaveBeenCalledOnce();
+ const [nativeImage,offsetX,offsetY]=setDragImage.mock.calls[0] as [HTMLDivElement,number,number];
+ expect(nativeImage.className).toBe('stack-native-drag-image');expect(nativeImage.isConnected).toBe(true);
+ expect(offsetX).toBe(0);expect(offsetY).toBe(0);
+ const preview=host.ownerDocument.body.querySelector<HTMLImageElement>('.stack-drag-preview')!;
+ expect(preview.tagName).toBe('IMG');expect(preview.isConnected).toBe(true);expect(preview.src).toBe(sourceImage.src);
+ expect(preview.textContent).toBe('');expect(preview.children).toHaveLength(0);
+ expect(preview.style.width).toBe('180px');expect(preview.style.height).toBe('120px');
+ expect(preview.style.objectFit).toBe('contain');expect(preview.style.opacity).toBe('1');expect(preview.style.filter).toBe('none');
+ expect(preview.style.boxShadow).toBe('none');expect(preview.style.border).toBe('0px');
+ expect(preview.style.left).toBe('112px');expect(preview.style.top).toBe('92px');
+ const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ await act(async()=>target.dispatchEvent(dragEvent('dragover',transfer,undefined,{clientX:200,clientY:150})));
+ expect(preview.style.left).toBe('212px');expect(preview.style.top).toBe('162px');
+ expect(document.body.querySelector('.stack-drag-preview')).toBe(preview);
+ expect(setDragImage).toHaveBeenCalledOnce();
+ expect(frontendLogger.getEntries().find(entry=>entry.event==='dragstart')?.context).toMatchObject({customPreviewCreated:true,nativeGhostSuppressed:true});
+ await act(async()=>source.dispatchEvent(dragEvent('dragend',transfer)));
+ expect(preview.isConnected).toBe(false);expect(nativeImage.isConnected).toBe(false);
+});
+it('continues internal D&D when native ghost suppression throws',async()=>{
+ frontendLogger.setLevel('debug');
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ const setDragImage=vi.fn((_element:Element,_x:number,_y:number)=>{throw new Error('native ghost unavailable');});Object.assign(transfer,{setDragImage});
+ const start=dragEvent('dragstart',transfer);await act(async()=>source.dispatchEvent(start));
+ expect(start.defaultPrevented).toBe(false);expect(source.classList.contains('stack-photo-dragging')).toBe(true);
+ expect(document.body.querySelector('.stack-native-drag-image')).toBeNull();expect(document.body.querySelector('.stack-drag-preview')).not.toBeNull();
+ expect(frontendLogger.getEntries().find(entry=>entry.event==='dragstart')?.context).toMatchObject({customPreviewCreated:true,nativeGhostSuppressed:false});
+ await act(async()=>target.dispatchEvent(dragEvent('dragover',transfer)));
+ const drop=dragEvent('drop',transfer);await act(async()=>target.dispatchEvent(drop));
+ expect(drop.defaultPrevented).toBe(true);expect(target.querySelectorAll('.stack-photo')).toHaveLength(3);
+ expect(document.body.querySelector('.stack-drag-preview')).toBeNull();
+});
+it('continues internal D&D if custom preview creation fails',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const image=source.querySelector<HTMLImageElement>('.stack-thumbnail img')!;
+ vi.spyOn(image,'getBoundingClientRect').mockImplementation(()=>{throw new Error('thumbnail bounds unavailable');});
+ const target=host.querySelector<HTMLElement>('.stack-candidate-group')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
+ const start=dragEvent('dragstart',transfer);await act(async()=>source.dispatchEvent(start));
+ expect(start.defaultPrevented).toBe(false);expect(document.body.querySelector('.stack-drag-preview')).toBeNull();
+ expect(document.body.querySelector('.stack-native-drag-image')).not.toBeNull();
+ await act(async()=>target.dispatchEvent(dragEvent('dragover',transfer)));
+ const drop=dragEvent('drop',transfer);await act(async()=>target.dispatchEvent(drop));
+ expect(drop.defaultPrevented).toBe(true);expect(document.body.querySelector('.stack-native-drag-image')).toBeNull();
+});
+it('cleans both drag visuals when Stack Management unmounts',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
+ await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ const nativeImage=setDragImage.mock.calls[0][0] as HTMLDivElement;const preview=document.body.querySelector<HTMLImageElement>('.stack-drag-preview')!;
+ expect(nativeImage.isConnected).toBe(true);expect(preview.isConnected).toBe(true);
+ await click('.stack-home-title');
+ expect(nativeImage.isConnected).toBe(false);expect(preview.isConnected).toBe(false);
+ expect(host.querySelector('.stack-management-page')).toBeNull();
+});
+it('does not create drag visuals when custom MIME setup fails',async()=>{
+ await mount('/stack',{selectedAssets:[...photos,...singles]});
+ const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')!;
+ const transfer=dragTransfer();const setDragImage=vi.fn();
+ Object.assign(transfer,{setData:vi.fn(()=>{throw new Error('custom MIME unavailable');}),setDragImage});
+ const start=dragEvent('dragstart',transfer);await act(async()=>source.dispatchEvent(start));
+ expect(start.defaultPrevented).toBe(true);expect(setDragImage).not.toHaveBeenCalled();
+ expect(document.body.querySelector('.stack-drag-preview')).toBeNull();expect(document.body.querySelector('.stack-native-drag-image')).toBeNull();
 });
 it('logs ref fallback and refuses malformed, missing-MIME and external-file drags',async()=>{
  frontendLogger.setLevel('debug');
@@ -858,13 +943,16 @@ it('moves unmatched by internal native drop, highlights valid targets and preser
  await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
  const group=host.querySelector<HTMLElement>('.stack-candidate-group')!;
  const source=host.querySelector<HTMLButtonElement>('.stack-unmatched-grid .stack-photo-wrapper:first-child .stack-photo')!;
- const transfer=dragTransfer({assetId:'x',sourceGroupId:null});
+ const transfer=dragTransfer({assetId:'x',sourceGroupId:null});const setDragImage=vi.fn();Object.assign(transfer,{setDragImage});
  expect(source.draggable).toBe(true);expect(source.querySelector('img')?.draggable).toBe(false);
  await act(async()=>source.dispatchEvent(dragEvent('dragstart',transfer)));
+ const nativeImage=setDragImage.mock.calls[0][0] as HTMLDivElement;const preview=document.body.querySelector<HTMLImageElement>('.stack-drag-preview')!;
+ expect(nativeImage.isConnected).toBe(true);expect(preview.isConnected).toBe(true);
  expect(source.draggable).toBe(true);expect(source.classList.contains('stack-photo-dragging')).toBe(true);
  await act(async()=>group.dispatchEvent(dragEvent('dragover',transfer)));
  expect(group.classList.contains('stack-drop-target')).toBe(true);
  const drop=dragEvent('drop',transfer);await act(async()=>group.dispatchEvent(drop));
+ expect(nativeImage.isConnected).toBe(false);expect(preview.isConnected).toBe(false);
  expect(drop.defaultPrevented).toBe(true);expect(group.querySelectorAll('.stack-photo')).toHaveLength(3);
  expect(group.querySelector<HTMLButtonElement>('.stack-photo')?.draggable).toBe(true);
  expect(Array.from(group.querySelectorAll<HTMLImageElement>('.stack-photo img')).every(image=>image.draggable===false)).toBe(true);

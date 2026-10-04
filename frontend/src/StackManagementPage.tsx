@@ -68,10 +68,28 @@ export function StackManagementPage() {
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
   const draggingRef = useRef<StackDragPayload | null>(null);
   const dragPayloadForEndLog = useRef<StackDragPayload | null>(null);
+  const dragPreviewRef = useRef<HTMLImageElement | null>(null);
+  const nativeDragImageRef = useRef<HTMLDivElement | null>(null);
   const dragoverLogged = useRef(new Map<string, string>());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const sendRequest = useRef<{ controller: AbortController; generation: string } | null>(null);
   const currentGeneration = useRef(sourceGeneration);
+  const removeDragElement = (element: HTMLElement | null) => {
+    try { element?.remove(); } catch { /* Visual cleanup must not affect drag completion. */ }
+  };
+  const clearDragVisuals = () => {
+    removeDragElement(dragPreviewRef.current);
+    removeDragElement(nativeDragImageRef.current);
+    dragPreviewRef.current = null; nativeDragImageRef.current = null;
+  };
+  const moveDragPreview = (clientX: number, clientY: number) => {
+    const preview = dragPreviewRef.current;
+    if (!preview) return;
+    const x = Number.isFinite(clientX) ? clientX : 0;
+    const y = Number.isFinite(clientY) ? clientY : 0;
+    preview.style.left = `${x + 12}px`;
+    preview.style.top = `${y + 12}px`;
+  };
   useLayoutEffect(() => {
     if (currentGeneration.current === sourceGeneration) return;
     currentGeneration.current = sourceGeneration;
@@ -84,9 +102,10 @@ export function StackManagementPage() {
       assetId: draggingRef.current.assetId, sourceGroupId: draggingRef.current.sourceGroupId,
       refPayloadPresent: true, statePayloadPresent: draggingRef.current !== null, canEdit: false,
     });
+    clearDragVisuals();
     draggingRef.current = null; dragPayloadForEndLog.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear();
   }, [sourceGeneration, dispatch, dragging]);
-  useEffect(() => () => { sendRequest.current?.controller.abort(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
+  useEffect(() => () => { sendRequest.current?.controller.abort(); clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null; dragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -203,6 +222,7 @@ export function StackManagementPage() {
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
     if (!canEdit || event.dataTransfer.files.length) {
       event.preventDefault();
+      clearDragVisuals();
       if (frontendLogger.getLevel() === 'debug') {
         const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
         logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
@@ -215,19 +235,9 @@ export function StackManagementPage() {
     try {
       event.dataTransfer.setData(STACK_DRAG_TYPE, JSON.stringify(payload));
       event.dataTransfer.effectAllowed = 'move';
-      draggingRef.current = payload;
-      dragPayloadForEndLog.current = payload;
-      setDragging(payload);
-      dragoverLogged.current.clear();
-      if (frontendLogger.getLevel() === 'debug') {
-        const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
-        logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
-          ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
-          canEdit, accepted: true, rejectionReason: null });
-      }
-      return true;
     } catch {
       event.preventDefault();
+      clearDragVisuals();
       if (frontendLogger.getLevel() === 'debug') {
         const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
         logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
@@ -236,8 +246,54 @@ export function StackManagementPage() {
       }
       return false;
     }
+    let nativeGhostSuppressed = false;
+    try {
+      // Keep browser-owned drag feedback transparent; the photo preview is rendered separately as normal DOM.
+      const nativeImage = document.createElement('div');
+      nativeImage.className = 'stack-native-drag-image';
+      document.body.appendChild(nativeImage);
+      nativeDragImageRef.current = nativeImage;
+      event.dataTransfer.setDragImage(nativeImage, 0, 0);
+      nativeGhostSuppressed = true;
+    } catch {
+      removeDragElement(nativeDragImageRef.current);
+      nativeDragImageRef.current = null;
+    }
+    let customPreviewCreated = false;
+    try {
+      const sourceImage = event.currentTarget.querySelector<HTMLImageElement>('.stack-thumbnail img');
+      if (!sourceImage) throw new Error('Stack thumbnail image unavailable');
+      const rect = sourceImage.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      const preview = sourceImage.cloneNode(false) as HTMLImageElement;
+      preview.removeAttribute('class');
+      preview.removeAttribute('style');
+      preview.draggable = false;
+      preview.loading = 'eager';
+      preview.className = 'stack-drag-preview';
+      Object.assign(preview.style, { width: `${width}px`, height: `${height}px`, objectFit: 'contain', opacity: '1', filter: 'none', boxShadow: 'none', border: '0' });
+      document.body.appendChild(preview);
+      dragPreviewRef.current = preview;
+      moveDragPreview(event.clientX, event.clientY);
+      customPreviewCreated = true;
+    } catch {
+      removeDragElement(dragPreviewRef.current);
+      dragPreviewRef.current = null;
+    }
+    draggingRef.current = payload;
+    dragPayloadForEndLog.current = payload;
+    setDragging(payload);
+    dragoverLogged.current.clear();
+    if (frontendLogger.getLevel() === 'debug') {
+      const { observedPayload: _ignored, ...observed } = observeTransfer(event.dataTransfer);
+      logStackDnd('dragstart', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
+        ...observed, refPayloadPresent: true, statePayloadPresent: dragging !== null,
+        canEdit, accepted: true, rejectionReason: null, customPreviewCreated, nativeGhostSuppressed });
+    }
+    return true;
   };
-  const clearDrag = () => { draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
+  const clearDrag = () => { clearDragVisuals(); draggingRef.current = null; setDragging(null); setDropTarget(null); dragoverLogged.current.clear(); };
   const handleDragEnd = () => {
     const payload = draggingRef.current ?? dragPayloadForEndLog.current;
     if (frontendLogger.getLevel() === 'debug') logStackDnd('dragend', { assetId: payload?.assetId ?? null, sourceGroupId: payload?.sourceGroupId ?? null,
@@ -327,7 +383,8 @@ export function StackManagementPage() {
     return () => window.removeEventListener('keydown', keydown);
   }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
 
-  return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}>
+  return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
+    onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
     <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
       <h1>{t('stackManagement.title')}</h1>
