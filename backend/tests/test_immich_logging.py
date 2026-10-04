@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from backend_logging import BackendLogger
-from immich import get_immich_about, get_asset_thumbnail, get_asset_preview, check_immich_status
+from immich import get_immich_about, get_asset_thumbnail, get_asset_preview, get_asset_detail, check_immich_status
 from stack_write import StackApplyRequest, apply_stacks
 
 A, B, NEW = [str(UUID(int=value)) for value in (1, 2, 100)]
@@ -77,6 +77,64 @@ def test_image_contents_not_logged(logger, fetch):
     assert result.content == b"PRIVATE_PIXELS"
     assert logger.get_entries()[0]["context"]["endpoint"] == f"/assets/{A}/thumbnail"
     assert "PRIVATE" not in json.dumps(logger.create_report())
+
+
+def test_asset_detail_observation_logs_sorted_schema_and_presence_only(logger):
+    logger.set_level("debug")
+    body = {
+        "id": A, "type": "IMAGE", "originalFileName": "PRIVATE_FILENAME.DNG",
+        "originalPath": "PRIVATE_PATH", "fileCreatedAt": "2026-09-01T12:00:00Z",
+        "visibility": "archive", "deletedAt": None, "stackId": None, "thumbhash": None,
+        "exifInfo": {"model": "PRIVATE_MODEL", "iso": 200, "dateTimeOriginal": "PRIVATE_DATE"},
+        "unneeded": "PRIVATE_RAW_BODY",
+    }
+    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body))))
+    assert detail.format == "DNG" and detail.is_raw is True
+    observations = [entry for entry in logger.get_entries() if entry["component"] == "immich.asset"]
+    assert len(observations) == 1 and observations[0]["event"] == "detail.observed"
+    context = observations[0]["context"]
+    assert context["assetId"] == A and context["type"] == "IMAGE" and context["visibility"] == "archive"
+    assert context["hasExifInfo"] is True and context["exifInfoPresent"] is True
+    assert context["exifInfoFieldCount"] == 3
+    assert context["exifInfoKeys"] == ["dateTimeOriginal", "iso", "model"]
+    assert context["topLevelKeys"] == sorted(body)
+    assert context["deletedAtPresent"] is True and context["trashedAtPresent"] is False
+    assert context["stackIdPresent"] is True and context["thumbhashPresent"] is True
+    assert context["format"] == "DNG" and context["isRaw"] is True
+    assert len(json.dumps(context, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 4096
+    report = json.dumps(logger.create_report())
+    for private_value in ["PRIVATE_FILENAME", "PRIVATE_PATH", "PRIVATE_MODEL", "PRIVATE_DATE", "PRIVATE_RAW_BODY", PRIVATE_KEY, "PRIVATE_HOST"]:
+        assert private_value not in report
+
+
+@pytest.mark.parametrize("level", ["off", "error", "warn", "info"])
+def test_asset_detail_observation_is_debug_only(logger, level):
+    logger.set_level(level)
+    body = {"id": A, "type": "IMAGE", "originalFileName": "sample.dng", "fileCreatedAt": "2026-09-01T12:00:00Z"}
+    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body))))
+    assert detail.format == "DNG" and detail.is_raw is True
+    assert not any(entry["event"] == "detail.observed" for entry in logger.get_entries())
+
+
+def test_malformed_optional_asset_metadata_and_observation_failure_do_not_break_detail(logger, monkeypatch):
+    logger.set_level("debug")
+    body = {"id": A, "type": "IMAGE", "originalFileName": "sample.dng", "fileCreatedAt": "2026-09-01T12:00:00Z",
+            "visibility": {"unexpected": True}, "exifInfo": ["malformed"], "deletedAt": object()}
+    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={key: value for key, value in body.items() if key != "deletedAt"}))))
+    assert detail.format == "DNG" and detail.exif.model_dump(exclude_none=True) == {}
+    observation = next(entry for entry in logger.get_entries() if entry["event"] == "detail.observed")
+    assert observation["context"]["hasExifInfo"] is False and observation["context"]["visibility"] is None
+    original_add = logger.add
+    def failing_observation(*, level, component, event, message=None, context=None):
+        if component == "immich.asset": raise RuntimeError("diagnostics unavailable")
+        return original_add(level=level, component=component, event=event, message=message, context=context)
+    monkeypatch.setattr(logger, "add", failing_observation)
+    detail = asyncio.run(get_asset_detail(PRIVATE_URL, PRIVATE_KEY, UUID(A), transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={key: value for key, value in body.items() if key != "deletedAt"}))))
+    assert detail.format == "DNG"
 
 
 def test_status_malformed_json_is_classified(logger):

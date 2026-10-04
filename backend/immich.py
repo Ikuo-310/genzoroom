@@ -232,6 +232,36 @@ def classify_image_format(filename: str) -> tuple[str, bool]:
     return image_format, image_format in RAW_FORMATS
 
 
+def _log_asset_detail_observed(body: Mapping, asset_id: UUID, image_format: str, is_raw: bool) -> None:
+    try:
+        if backend_logger.get_level() != "debug":
+            return
+        exif_value = body.get("exifInfo")
+        exif = exif_value if isinstance(exif_value, Mapping) else {}
+        visibility_value = body.get("visibility")
+        context = {
+            "assetId": str(asset_id),
+            "type": body.get("type") if body.get("type") == "IMAGE" else None,
+            "visibility": visibility_value if isinstance(visibility_value, str)
+            and visibility_value in {"timeline", "archive", "hidden", "locked"} else None,
+            "hasExifInfo": isinstance(exif_value, Mapping),
+            "exifInfoPresent": "exifInfo" in body,
+            "exifInfoFieldCount": len(exif),
+            "exifInfoKeys": sorted(key for key in exif if isinstance(key, str)),
+            "topLevelKeys": sorted(key for key in body if isinstance(key, str)),
+            "deletedAtPresent": "deletedAt" in body,
+            "trashedAtPresent": "trashedAt" in body,
+            "stackIdPresent": "stackId" in body,
+            "thumbhashPresent": "thumbhash" in body,
+            "format": image_format,
+            "isRaw": is_raw,
+        }
+        backend_logger.add(level="debug", component="immich.asset", event="detail.observed", context=context)
+    except Exception:
+        # Diagnostic metadata must not change whether an otherwise valid asset can be opened.
+        pass
+
+
 def _status_error(error_code: ErrorCode, error: str, *, configured: bool) -> ImmichStatus:
     return ImmichStatus(
         configured=configured,
@@ -999,6 +1029,8 @@ async def get_asset_detail(
             "unexpected_response",
             "Immich returned an unexpected response.",
         ) from None
+
+    _log_asset_detail_observed(body, asset_id, image_format, is_raw)
 
     return AssetDetail(
         id=asset_id,
