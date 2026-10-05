@@ -141,7 +141,10 @@
     "selectionCount": "{{count}} selected",
     "selectAll": "Select all",
     "clearSelection": "Clear selection",
-    "openSelected": "Open in Anshitsu"
+    "clearSelectionCompact": "Clear",
+    "openStacksCompact": "Stacks",
+    "openSelected": "Open in Anshitsu",
+    "openSelectedCompact": "Anshitsu"
   },
   "workspace": {
     "name": "Anshitsu",

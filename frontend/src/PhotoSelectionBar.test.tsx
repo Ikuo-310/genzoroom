@@ -8,10 +8,15 @@ beforeEach(async () => i18n.changeLanguage('en'));
 
 describe('PhotoSelectionBar', () => {
   it('shows the total selection count and English actions', () => {
-    const markup = renderToStaticMarkup(<PhotoSelectionBar count={3} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const markup = renderToStaticMarkup(<PhotoSelectionBar count={3} onClear={vi.fn()} onOpen={vi.fn()} onOpenStacks={vi.fn()} />);
     expect(markup).toContain('3 selected');
-    expect(markup).toContain('Clear selection');
-    expect(markup).toContain('Open in Anshitsu');
+    expect(markup).toContain('>Clear</button>');
+    expect(markup).toContain('>Stacks</button>');
+    expect(markup).toContain('>Anshitsu</button>');
+    expect(markup).toContain('aria-label="Clear selection"');
+    expect(markup).toContain('aria-label="Manage Stacks"');
+    expect(markup).toContain('aria-label="Open in Anshitsu"');
+    expect(markup).toContain('title="Clear selection"');
   });
 
   it('keeps zero-count controls visible and the workspace action enabled', () => {
@@ -35,5 +40,8 @@ describe('PhotoSelectionBar', () => {
     expect(markup).toContain('2枚選択中');
     expect(markup).toContain('選択解除');
     expect(markup).toContain('暗室へ');
+    expect(markup).not.toContain('>Clear</button>');
+    expect(markup).not.toContain('>Stacks</button>');
+    expect(markup).not.toContain('>Anshitsu</button>');
   });
 });

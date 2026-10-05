@@ -60,7 +60,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 :where(.home-page, .settings-dialog) button:focus-visible { outline-color: var(--accent); }
 .home-content { width: 100%; min-width: 0; min-height: 0; margin-top: 0; }
 .home-tabs-bar { padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
-.home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
+.home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .home-tabs { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 0 0 auto; }
 .home-tabs button { color: var(--text-secondary); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 5px 8px 8px; font-weight: 600; }
 .home-tabs button:hover { color: var(--text-primary); background: var(--bg-elevated); }
@@ -136,7 +136,7 @@ h2 { margin: 0; font-size: 1.35rem; }
 .selection-actions button:hover:not(:disabled) { background: #353539; }
 .selection-actions button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--text-primary); outline-offset: -3px; }
 .selection-actions button:disabled { opacity: 0.45; cursor: default; }
-.home-toolbar-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px 12px; min-width: 0; }
+.home-toolbar-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; align-self: center; justify-content: flex-end; gap: 8px 12px; min-width: 0; }
 .home-control { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .home-control-label { color: var(--text-secondary); font-size: 0.74rem; line-height: 1.2; white-space: nowrap; }
 .home-control select { max-width: 100%; padding: 4px 22px 4px 8px; color: var(--text-primary); background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: 6px; font: inherit; font-size: 0.82rem; }
@@ -441,7 +441,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 }
 
 @media (max-width: 760px) {
-  .home-toolbar { align-items: flex-start; }
+  .home-toolbar { align-items: center; }
   .home-toolbar-centered { grid-template-columns: minmax(0, 1fr); }
   .home-toolbar-centered .home-toolbar-center, .home-toolbar-centered .home-toolbar-controls { grid-column: 1; }
   .home-toolbar-title { max-width: 90vw; }

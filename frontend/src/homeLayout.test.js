@@ -39,6 +39,21 @@ describe('Home and thumbnail layout', () => {
     expect(selection.marginBottom).toBe('');
     expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).justifyContent).toBe('flex-end');
   });
+  it('centers toolbar regions vertically while keeping each control label above its input', () => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"></div><div class="home-toolbar-context"><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">Album</h2></div><div class="home-toolbar-controls"><label class="home-control"><span class="home-control-label">Type</span><select></select></label></div>';
+    expect(getComputedStyle(toolbar).alignItems).toBe('center');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-left')).alignItems).toBe('center');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-context')).alignItems).toBe('center');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-center')).gridColumn).toBe('');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).alignItems).toBe('center');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).alignSelf).toBe('center');
+    expect(getComputedStyle(toolbar.querySelector('.home-control')).flexDirection).toBe('column');
+    expect(getComputedStyle(toolbar.querySelector('.home-control')).alignItems).toBe('flex-start');
+    const calendarToolbar = document.createElement('div'); calendarToolbar.className = 'home-toolbar home-toolbar-calendar';
+    expect(getComputedStyle(calendarToolbar).alignItems).toBe('center');
+    expect(getComputedStyle(calendarToolbar).gridTemplateColumns).toBe('minmax(0, 1fr) auto minmax(0, 1fr)');
+  });
   it('uses equal Home and STACK brand sizes without changing darkroom typography', () => {
     const home = host.querySelector('.app-header');
     home.innerHTML = '<div class="home-title-row"><h1><button class="home-title-link">GenzoRoom</button></h1></div>';
