@@ -90,11 +90,11 @@ describe('album photo view', () => {
     expect(api.albumAssets).not.toHaveBeenCalled();
     click('.album-card'); await settle(); click('.photo-selection-input');
     click('#home-recent-tab'); click('#home-albums-tab'); await settle();
-    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(albumA.albumName);
+    expect(host.querySelector('.home-toolbar-context h2')?.textContent).toBe(albumA.albumName);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
     click('#home-albums-tab'); await settle();
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.album-detail-heading')).toBeNull();
+    expect(host.querySelector('.home-toolbar-context')).toBeNull();
     expect(host.querySelectorAll('.album-card')).toHaveLength(2);
     expect(api.albums).toHaveBeenCalledTimes(1);
     click('#home-recent-tab');
@@ -111,7 +111,7 @@ describe('album photo view', () => {
     expect(card.getAttribute('aria-label')).toContain(albumA.albumName);
     click('.album-card'); await settle();
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(albumA.albumName);
+    expect(host.querySelector('.home-toolbar-context h2')?.textContent).toBe(albumA.albumName);
     expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).not.toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
@@ -152,7 +152,7 @@ describe('album photo view', () => {
     const cards = [...host.querySelectorAll<HTMLButtonElement>('.album-card')];
     act(() => cards[1].click()); await settle();
     await act(async () => stale.resolve(albumPhotos));
-    expect(host.querySelector('.album-detail-heading h2')?.textContent).toBe(albumB.albumName);
+    expect(host.querySelector('.home-toolbar-context h2')?.textContent).toBe(albumB.albumName);
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     expect(host.querySelector('.photo-card .photo-info p')?.textContent).toBe('photo-1.dng');
   });
@@ -161,6 +161,11 @@ describe('album photo view', () => {
     api.albumAssets.mockImplementation(async (id: string) => id === albumA.id ? albumPhotos : [{ ...albumPhotos[0], id: 'other-photo' }]);
     await mount(); click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
     expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
+    const left = host.querySelector('.home-toolbar-left')!;
+    expect([...left.children].map(element => element.className)).toEqual(['selection-bar', 'home-toolbar-context']);
+    expect(left.querySelector('.home-toolbar-context')?.firstElementChild?.className).toBe('album-back');
+    expect(left.querySelector('h2')?.textContent).toBe(albumA.albumName);
+    expect(host.querySelector('.home-content .album-detail-heading')).toBeNull();
     click('.photo-selection-input');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     click('.album-back');

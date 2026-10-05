@@ -13,27 +13,49 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
-export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekStart, dateLocale, loading, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear, onMonthOpen, onDayOpen }: {
+export function HomeCalendar({ year, month, mode, days, weekStart, loading, onMonthOpen, onDayOpen }: {
+  year: number;
+  month: number;
+  mode: CalendarViewMode;
+  days: CalendarDay[];
+  weekStart: number;
+  loading: boolean;
+  onMonthOpen: (month: number) => void;
+  onDayOpen: (date: string) => void;
+}) {
+  const { t } = useTranslation();
+  const daysByDate = new Map(days.map(day => [day.date, day]));
+
+  return <div className={mode === 'year' ? 'calendar-year' : 'calendar-month'}>
+
+    {mode === 'year' ? <div className="calendar-year-grid">
+      {monthKeys.map((key, index) => <section className="calendar-mini-month" key={key} aria-label={t(`calendar.months.${key}`)}
+        onClick={event => { if (!(event.target as HTMLElement).closest('button')) onMonthOpen(index + 1); }}>
+        <h3><button type="button" className="calendar-mini-month-title" onClick={() => onMonthOpen(index + 1)}>
+          {t(`calendar.months.${key}`)}</button></h3>
+        <CalendarMonthGrid year={year} month={index + 1} daysByDate={daysByDate} weekStart={weekStart}
+          loading={loading} showThumbnails={false} onDayOpen={onDayOpen} />
+      </section>)}
+    </div> : <CalendarMonthGrid year={year} month={month} daysByDate={daysByDate} weekStart={weekStart}
+      loading={loading} showThumbnails onDayOpen={onDayOpen} />}
+  </div>;
+}
+
+export function HomeCalendarNavigation({ year, month, mode, minYear, maxYear, dateLocale, onYearChange, onMonthChange, onNavigate, onModeChange, onCurrentMonth, onCurrentYear }: {
   year: number;
   month: number;
   mode: CalendarViewMode;
   minYear: number;
   maxYear: number;
-  days: CalendarDay[];
-  weekStart: number;
   dateLocale: string;
-  loading: boolean;
   onYearChange: (year: number) => void;
   onMonthChange: (month: number) => void;
   onNavigate: (year: number, month: number) => void;
   onModeChange: (mode: CalendarViewMode) => void;
   onCurrentMonth: () => void;
   onCurrentYear: () => void;
-  onMonthOpen: (month: number) => void;
-  onDayOpen: (date: string) => void;
 }) {
   const { t } = useTranslation();
-  const daysByDate = new Map(days.map(day => [day.date, day]));
   const dateParts = new Intl.DateTimeFormat(dateLocale, { year: 'numeric', month: 'long' })
     .formatToParts(new Date(Date.UTC(year, 0, 1)));
   const yearFirst = dateParts.findIndex(part => part.type === 'year') < dateParts.findIndex(part => part.type === 'month');
@@ -43,8 +65,7 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
     onNavigate(target.year, target.month);
   }
 
-  return <div className={mode === 'year' ? 'calendar-year' : 'calendar-month'}>
-    <div className="calendar-navigation">
+  return <div className="calendar-navigation">
       <button type="button" className="calendar-arrow" aria-label={t(mode === 'year' ? 'calendar.previousYear' : 'calendar.previousMonth')}
         disabled={previous.year < minYear}
         onClick={() => move(previous)}>←</button>
@@ -62,18 +83,7 @@ export function HomeCalendar({ year, month, mode, minYear, maxYear, days, weekSt
       <button type="button" className="calendar-arrow" aria-label={t(mode === 'year' ? 'calendar.nextYear' : 'calendar.nextMonth')}
         disabled={next.year > maxYear}
         onClick={() => move(next)}>→</button>
-    </div>
-    {mode === 'year' ? <div className="calendar-year-grid">
-      {monthKeys.map((key, index) => <section className="calendar-mini-month" key={key} aria-label={t(`calendar.months.${key}`)}
-        onClick={event => { if (!(event.target as HTMLElement).closest('button')) onMonthOpen(index + 1); }}>
-        <h3><button type="button" className="calendar-mini-month-title" onClick={() => onMonthOpen(index + 1)}>
-          {t(`calendar.months.${key}`)}</button></h3>
-        <CalendarMonthGrid year={year} month={index + 1} daysByDate={daysByDate} weekStart={weekStart}
-          loading={loading} showThumbnails={false} onDayOpen={onDayOpen} />
-      </section>)}
-    </div> : <CalendarMonthGrid year={year} month={month} daysByDate={daysByDate} weekStart={weekStart}
-      loading={loading} showThumbnails onDayOpen={onDayOpen} />}
-  </div>;
+    </div>;
 }
 
 function YearSelect({ year, minYear, maxYear, onChange }: {

@@ -103,6 +103,9 @@ describe('Home calendar', () => {
     for (const mode of ['month', 'year']) {
       expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
       expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
+      expect(host.querySelector('.home-toolbar-center .calendar-navigation')).not.toBeNull();
+      expect(host.querySelector('.home-content .calendar-navigation')).toBeNull();
+      expect(host.querySelector('.home-toolbar-left')).toBeNull();
       if (mode === 'month') { click('.calendar-view-toggle'); await settle(); }
     }
   });
@@ -235,7 +238,7 @@ describe('Home calendar', () => {
     expect(api.day).toHaveBeenLastCalledWith('2026-08-01', expect.any(AbortSignal));
     expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls);
     expect(host.querySelector('.calendar-year')).toBeNull();
-    expect(host.querySelector('.album-detail-heading h2')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-context h2')).not.toBeNull();
     click('.album-back'); await settle();
     const december = host.querySelectorAll<HTMLElement>('.calendar-mini-month')[11]!;
     act(() => december.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -277,6 +280,12 @@ describe('Home calendar', () => {
     expect(api.heatmap).toHaveBeenCalledTimes(requestCount);
     click('.calendar-day.has-assets'); await settle(); click('.photo-selection-input');
     expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
+    const left = host.querySelector('.home-toolbar-left')!;
+    expect([...left.children].map(element => element.className)).toEqual(['selection-bar', 'home-toolbar-context']);
+    expect(left.querySelector('.home-toolbar-context')?.firstElementChild?.className).toBe('album-back');
+    expect(left.querySelector('.home-toolbar-context h2')).not.toBeNull();
+    expect(host.querySelector('.calendar-navigation')).toBeNull();
+    expect(host.querySelector('.home-content .album-detail-heading')).toBeNull();
     click('#home-albums-tab'); await settle(); click('#home-calendar-tab'); await settle();
     expect(api.day).toHaveBeenLastCalledWith('2024-08-01', expect.any(AbortSignal));
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();

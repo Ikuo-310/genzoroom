@@ -16,6 +16,18 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('centers Calendar navigation with equal side tracks and removes its sticky enclosure', () => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.classList.add('home-toolbar-calendar');
+    toolbar.innerHTML = '<div class="home-toolbar-center"><div class="calendar-navigation"></div></div><div class="home-toolbar-controls"></div>';
+    expect(getComputedStyle(toolbar).display).toBe('grid');
+    expect(getComputedStyle(toolbar).gridTemplateColumns).toBe('minmax(0, 1fr) auto minmax(0, 1fr)');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-center')).gridColumn).toBe('2');
+    const navigationRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.calendar-navigation');
+    for (const property of ['position', 'top', 'margin-bottom', 'background', 'box-shadow']) {
+      expect(navigationRule.style.getPropertyValue(property)).toBe('');
+    }
+  });
   it('places compact wrapping selection controls alongside the right toolbar controls', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.innerHTML = '<div class="selection-bar"><strong>0 selected</strong><div class="selection-actions"><button disabled>Select all</button></div></div><div class="home-toolbar-controls"></div>';

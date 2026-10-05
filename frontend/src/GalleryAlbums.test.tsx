@@ -83,6 +83,9 @@ describe('Home album tab', () => {
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar-left')).toBeNull();
+    expect(host.querySelector('.home-toolbar-center')).toBeNull();
+    expect(host.querySelector('.calendar-navigation')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .recent-count-control')).toBeNull();
     expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual(['home-control thumbnail-size-setting']);

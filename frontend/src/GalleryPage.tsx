@@ -22,7 +22,7 @@ import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
-import { HomeCalendar, type CalendarDay } from './HomeCalendar';
+import { HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, readPhotoFilterMode, writeEditStatusFilterMode, writePhotoFilterMode, type EditStatusFilterMode, type PhotoFilterMode } from './photoFilters';
 import {
@@ -620,11 +620,29 @@ export function GalleryPage() {
             onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
         </div>
       </div>
-      <div className="home-toolbar">
-        {photoView && <PhotoSelectionBar count={activeSelectedAssetIds.length}
+      <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}`}>
+        {photoView && <div className="home-toolbar-left">
+          <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
           onSelectAll={() => photoView?.selection.selectVisible(visibleAssets.map(asset => asset.id))}
-          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />}
+          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
+          {activeTab === 'albums' && selectedAlbum && <div className="home-toolbar-context">
+              <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
+              <h2>{selectedAlbum.albumName}</h2>
+            </div>}
+          {activeTab === 'calendar' && selectedCalendarDate && <div className="home-toolbar-context">
+              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}</button>
+              <h2>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
+                .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
+            </div>}
+        </div>}
+        {activeTab === 'calendar' && !selectedCalendarDate && <div className="home-toolbar-center">
+          <HomeCalendarNavigation year={calendarYear} month={calendarMonth} mode={calendarMode}
+            minYear={calendarMinYear} maxYear={currentYear} dateLocale={dateLocale}
+            onYearChange={changeCalendarYear} onMonthChange={changeCalendarMonth}
+            onCurrentMonth={goToCurrentCalendarMonth} onCurrentYear={goToCurrentCalendarYear}
+            onNavigate={changeCalendarPeriod} onModeChange={changeCalendarMode} />
+        </div>}
         <div className="home-toolbar-controls">
           {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
             setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
@@ -669,10 +687,6 @@ export function GalleryPage() {
                   : renderPhotoGrid()}
         </div> : activeTab === 'albums' ? <div id="home-albums-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-albums-tab">
           {selectedAlbum ? <>
-            <div className="album-detail-heading">
-              <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
-              <h2>{selectedAlbum.albumName}</h2>
-            </div>
             {albumAssetState === 'idle' || albumAssetState === 'loading'
               ? <p className="gallery-message" role="status">{t('albums.photosLoading')}</p>
               : albumAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.photosLoadFailed')}</p>
@@ -686,11 +700,6 @@ export function GalleryPage() {
                 : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} onOpen={() => openAlbum(album)} />)}</div>}
         </div> : <div id="home-calendar-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-calendar-tab">
           {selectedCalendarDate ? <>
-            <div className="album-detail-heading">
-              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}</button>
-              <h2>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
-                .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
-            </div>
             {calendarAssetState === 'idle' || calendarAssetState === 'loading'
               ? <p className="gallery-message" role="status">{t('calendar.photosLoading')}</p>
               : calendarAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('calendar.photosLoadFailed')}</p>
@@ -698,14 +707,9 @@ export function GalleryPage() {
                   : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                     : renderPhotoGrid()}
           </> : <>
-            <HomeCalendar year={calendarYear} month={calendarMonth} mode={calendarMode} minYear={calendarMinYear} maxYear={currentYear} days={calendarDays}
-              weekStart={resolveWeekStart(settings.weekStart, dateLocale)} dateLocale={dateLocale}
-              loading={calendarState !== 'ready'} onYearChange={changeCalendarYear}
-              onMonthChange={changeCalendarMonth} onCurrentMonth={goToCurrentCalendarMonth}
-              onNavigate={changeCalendarPeriod}
-              onMonthOpen={openCalendarMonth}
-              onModeChange={changeCalendarMode} onCurrentYear={goToCurrentCalendarYear}
-              onDayOpen={openCalendarDay} />
+            <HomeCalendar year={calendarYear} month={calendarMonth} mode={calendarMode} days={calendarDays}
+              weekStart={resolveWeekStart(settings.weekStart, dateLocale)} loading={calendarState !== 'ready'}
+              onMonthOpen={openCalendarMonth} onDayOpen={openCalendarDay} />
             {calendarState === 'loading' && <p className="gallery-message" role="status">{t('calendar.loading')}</p>}
             {calendarState === 'error' && <p className="gallery-message error-text" role="alert">{t('calendar.loadFailed')}</p>}
           </>}
