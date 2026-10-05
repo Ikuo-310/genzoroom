@@ -24,7 +24,7 @@ import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
-import { HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
+import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, readPhotoFilterMode, writeEditStatusFilterMode, writePhotoFilterMode, type EditStatusFilterMode, type PhotoFilterMode } from './photoFilters';
 import {
@@ -109,7 +109,7 @@ export function GalleryPage() {
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const homeTabClickRef = useRef<(tab: HomeTab) => void>(() => {});
   const selectAllVisibleRef = useRef<() => boolean>(() => false);
-  const moveCalendarDayRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
+  const navigateCalendarRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
   const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
     tab: 'recent', album: null, year: new Date().getFullYear(), month: new Date().getMonth() + 1,
     date: null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0,
@@ -377,11 +377,11 @@ export function GalleryPage() {
       if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
-      for (const [id, direction] of [['calendarPreviousPhotoDay', 'previous'], ['calendarNextPhotoDay', 'next']] as const) {
+      for (const [id, direction] of [['calendarNavigatePrevious', 'previous'], ['calendarNavigateNext', 'next']] as const) {
         if (matchesShortcut(event, id)) {
           // Sliders and checkboxes retain their native arrow behavior, unlike S/D commands.
           if (event.target instanceof Element && event.target.closest('input')) return;
-          if (moveCalendarDayRef.current(direction)) event.preventDefault();
+          if (navigateCalendarRef.current(direction)) event.preventDefault();
           return;
         }
       }
@@ -581,11 +581,21 @@ export function GalleryPage() {
     const day = adjacentCalendarDates[direction];
     if (!showingCalendarPhotos || !day) return false;
     // Prevent another event from using the old date's candidate before the navigation commit.
-    moveCalendarDayRef.current = () => false;
+    navigateCalendarRef.current = () => false;
     openCalendarDay(day);
     return true;
   }
-  moveCalendarDayRef.current = moveCalendarDay;
+  function navigateCalendar(direction: 'previous' | 'next'): boolean {
+    if (activeTab !== 'calendar' || !calendarMinYearReady) return false;
+    if (selectedCalendarDate !== null) return moveCalendarDay(direction);
+    const target = adjacentCalendarPeriod(calendarYear, calendarMonth, calendarMode, direction === 'previous' ? -1 : 1);
+    if (target.year < calendarMinYear || target.year > currentYear) return false;
+    // Period navigation uses the same pre-commit input lock as date-detail navigation.
+    navigateCalendarRef.current = () => false;
+    changeCalendarPeriod(target.year, target.month);
+    return true;
+  }
+  navigateCalendarRef.current = navigateCalendar;
 
   function closeCalendarDay() {
     prepareScrollTransition(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
@@ -669,12 +679,12 @@ export function GalleryPage() {
           {selectedCalendarDate && activeTab === 'calendar' && <div className="calendar-detail-navigation">
             <button type="button" className="calendar-detail-previous" disabled={!adjacentCalendarDates.previous}
               aria-label={t('calendar.previousPhotoDay')} title={t('calendar.previousPhotoDay')}
-              onClick={() => moveCalendarDayRef.current('previous')}>←</button>
+              onClick={() => navigateCalendarRef.current('previous')}>←</button>
             <h2 className="home-toolbar-title">{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
               .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
             <button type="button" className="calendar-detail-next" disabled={!adjacentCalendarDates.next}
               aria-label={t('calendar.nextPhotoDay')} title={t('calendar.nextPhotoDay')}
-              onClick={() => moveCalendarDayRef.current('next')}>→</button>
+              onClick={() => navigateCalendarRef.current('next')}>→</button>
           </div>}
         </div>}
         {activeTab === 'calendar' && !selectedCalendarDate && <div className="home-toolbar-center">

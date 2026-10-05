@@ -154,13 +154,13 @@ describe('command shortcut bindings', () => {
       }
     }
   });
-  it('matches Calendar photo-day arrows only without modifiers on either platform', () => {
+  it('matches Calendar navigation arrows only without modifiers on either platform', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
       const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };
-      expect(matchesShortcut(event('ArrowLeft', options), 'calendarPreviousPhotoDay', platform)).toBe(mask === 0);
-      expect(matchesShortcut(event('ArrowRight', options), 'calendarNextPhotoDay', platform)).toBe(mask === 0);
-      expect(matchesShortcut(event('ArrowRight', options), 'calendarPreviousPhotoDay', platform)).toBe(false);
-      expect(matchesShortcut(event('ArrowLeft', options), 'calendarNextPhotoDay', platform)).toBe(false);
+      expect(matchesShortcut(event('ArrowLeft', options), 'calendarNavigatePrevious', platform)).toBe(mask === 0);
+      expect(matchesShortcut(event('ArrowRight', options), 'calendarNavigateNext', platform)).toBe(mask === 0);
+      expect(matchesShortcut(event('ArrowRight', options), 'calendarNavigatePrevious', platform)).toBe(false);
+      expect(matchesShortcut(event('ArrowLeft', options), 'calendarNavigateNext', platform)).toBe(false);
     }
   });
 });

@@ -90,7 +90,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-detail-navigation button { flex: 0 0 28px; width: 28px; height: 34px; padding: 0; color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; }
 .calendar-detail-navigation button:hover:not(:disabled) { background: #36383d; border-color: #73767d; }
 .calendar-detail-navigation button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
-.calendar-detail-navigation button:disabled { color: var(--text-secondary); opacity: 0.5; }
+.calendar-detail-navigation button:disabled { color: var(--text-secondary); opacity: 0.5; cursor: default; }
 /* Equal side tracks keep Calendar centered independently of the side controls. */
 .home-toolbar-calendar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
 .home-toolbar-calendar .home-toolbar-center { grid-column: 2; min-width: 0; }

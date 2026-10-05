@@ -13,6 +13,10 @@ export function shiftCalendarMonth(year: number, month: number, step: -1 | 1): {
   return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
 }
 
+export function adjacentCalendarPeriod(year: number, month: number, mode: CalendarViewMode, step: -1 | 1) {
+  return mode === 'year' ? { year: year + step, month } : shiftCalendarMonth(year, month, step);
+}
+
 export function HomeCalendar({ year, month, mode, days, weekStart, loading, onMonthOpen, onDayOpen }: {
   year: number;
   month: number;
@@ -59,8 +63,8 @@ export function HomeCalendarNavigation({ year, month, mode, minYear, maxYear, da
   const dateParts = new Intl.DateTimeFormat(dateLocale, { year: 'numeric', month: 'long' })
     .formatToParts(new Date(Date.UTC(year, 0, 1)));
   const yearFirst = dateParts.findIndex(part => part.type === 'year') < dateParts.findIndex(part => part.type === 'month');
-  const previous = mode === 'year' ? { year: year - 1, month } : shiftCalendarMonth(year, month, -1);
-  const next = mode === 'year' ? { year: year + 1, month } : shiftCalendarMonth(year, month, 1);
+  const previous = adjacentCalendarPeriod(year, month, mode, -1);
+  const next = adjacentCalendarPeriod(year, month, mode, 1);
   function move(target: { year: number; month: number }) {
     onNavigate(target.year, target.month);
   }

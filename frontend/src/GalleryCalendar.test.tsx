@@ -119,6 +119,93 @@ describe('Home calendar', () => {
     await act(async () => target.dispatchEvent(event));
     return event;
   }
+  it('navigates months through the button period path, including year crossings', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-month', '8'); await settle();
+    expect((await arrow('ArrowLeft')).defaultPrevented).toBe(true);
+    expect(api.heatmap).toHaveBeenLastCalledWith(2026, 7, expect.any(AbortSignal));
+    await arrow('ArrowRight');
+    expect(api.heatmap).toHaveBeenLastCalledWith(2026, 8, expect.any(AbortSignal));
+    selectValue('#calendar-year', '2025'); selectValue('#calendar-month', '12'); await settle();
+    await arrow('ArrowRight');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2026');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('1');
+    expect(api.heatmap).toHaveBeenLastCalledWith(2026, 1, expect.any(AbortSignal));
+    await arrow('ArrowLeft');
+    expect(api.heatmap).toHaveBeenLastCalledWith(2025, 12, expect.any(AbortSignal));
+    click('[aria-label="Next month"]'); await settle();
+    expect(api.heatmap).toHaveBeenLastCalledWith(2026, 1, expect.any(AbortSignal));
+  });
+  it('navigates years without changing the retained month', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-year', '2025'); click('.calendar-view-toggle'); await settle();
+    expect((await arrow('ArrowLeft')).defaultPrevented).toBe(true);
+    expect(api.heatmap).toHaveBeenLastCalledWith(2024, null, expect.any(AbortSignal));
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('9');
+    await arrow('ArrowRight');
+    expect(api.heatmap).toHaveBeenLastCalledWith(2025, null, expect.any(AbortSignal));
+    click('[aria-label="Previous year"]'); await settle();
+    expect(api.heatmap).toHaveBeenLastCalledWith(2024, null, expect.any(AbortSignal));
+  });
+  it.each(['month', 'year'] as const)('leaves boundary arrows native in %s view without extra requests', async mode => {
+    api.minYear.mockResolvedValue(2025);
+    await mount(); click('#home-calendar-tab'); await settle();
+    if (mode === 'year') { click('.calendar-view-toggle'); await settle(); }
+    for (const [year, month, key, label] of [
+      ['2025', '1', 'ArrowLeft', mode === 'month' ? 'Previous month' : 'Previous year'],
+      ['2026', '12', 'ArrowRight', mode === 'month' ? 'Next month' : 'Next year'],
+    ]) {
+      selectValue('#calendar-year', year);
+      if (mode === 'month') selectValue('#calendar-month', month);
+      await settle();
+      const calls = api.heatmap.mock.calls.length;
+      expect(host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.disabled).toBe(true);
+      expect((await arrow(key)).defaultPrevented).toBe(false);
+      expect(api.heatmap).toHaveBeenCalledTimes(calls);
+      expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe(year);
+      expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe(mode === 'month' ? month : '9');
+    }
+  });
+  it.each(['month', 'year'] as const)('preserves native controls and global guards in %s view', async mode => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-year', '2025'); await settle();
+    if (mode === 'year') { click('.calendar-view-toggle'); await settle(); }
+    const calls = api.heatmap.mock.calls.length;
+    for (const selector of ['#calendar-year', '#calendar-month']) {
+      const input = host.querySelector<HTMLElement>(selector)!;
+      expect(input).not.toBeNull(); act(() => input.focus());
+      for (const key of ['ArrowLeft', 'ArrowRight']) expect((await arrow(key, {}, input)).defaultPrevented).toBe(false);
+    }
+    for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {
+      expect((await arrow('ArrowRight', options)).defaultPrevented).toBe(false);
+    }
+    for (const role of ['dialog', 'alertdialog', 'menu']) {
+      const blocker = document.createElement('div'); blocker.setAttribute('role', role); document.body.append(blocker);
+      expect((await arrow('ArrowRight')).defaultPrevented).toBe(false); blocker.remove();
+    }
+    const menu = document.createElement('details'); menu.className = 'edit-settings-menu'; menu.open = true; document.body.append(menu);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false); menu.remove();
+    const prevented = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }); prevented.preventDefault();
+    await act(async () => window.dispatchEvent(prevented));
+    expect(api.heatmap).toHaveBeenCalledTimes(calls);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(true);
+    expect(api.heatmap).toHaveBeenLastCalledWith(mode === 'month' ? 2025 : 2026, mode === 'month' ? 10 : null, expect.any(AbortSignal));
+  });
+  it('keeps arrows inactive in other tabs and retains ordinary tab stops', async () => {
+    await mount();
+    for (const selector of ['#home-recent-tab', '#home-albums-tab', '#home-favorites-tab']) {
+      click(selector); await settle();
+      const tab = host.querySelector<HTMLButtonElement>(selector)!; act(() => tab.focus());
+      const heatmaps = api.heatmap.mock.calls.length;
+      for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+        expect((await arrow(key, {}, tab)).defaultPrevented).toBe(false);
+        expect(tab.getAttribute('aria-selected')).toBe('true');
+        expect(document.activeElement).toBe(tab);
+      }
+      expect(api.heatmap).toHaveBeenCalledTimes(heatmaps);
+    }
+    for (const tab of host.querySelectorAll<HTMLButtonElement>('[role="tab"]')) expect(tab.tabIndex).toBe(0);
+  });
   it('shares annual candidates, skips count-only days, clears selection and reuses candidates', async () => {
     configurePhotoDays(['2026-09-01', '2026-09-03', '2026-09-15']);
     const annual = { year: 2026, month: null, days: [
@@ -191,13 +278,11 @@ describe('Home calendar', () => {
     expect(host.querySelector('.calendar-year')).not.toBeNull();
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('1');
   });
-  it('leaves arrows native outside detail and respects editing, modifier and availability guards', async () => {
+  it('respects editing, modifier and availability guards in date detail', async () => {
     configurePhotoDays(['2026-09-01', '2026-09-03']);
     await mount(); expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
     click('#home-calendar-tab'); await settle();
-    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
     click('.calendar-view-toggle'); await settle();
-    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
     click('[aria-label^="2026-09-01,"]'); await settle();
     const dayCalls = api.day.mock.calls.length;
     for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {

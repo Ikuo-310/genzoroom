@@ -343,7 +343,11 @@ describe('Home and thumbnail layout', () => {
     for (const button of navigation.querySelectorAll('button')) {
       expect(getComputedStyle(button).flexShrink).toBe('0');
       expect(getComputedStyle(button).width).toBe('28px');
+      button.disabled = true;
+      expect(getComputedStyle(button).cursor).toBe('default');
     }
+    const other = document.createElement('button'); other.disabled = true; host.append(other);
+    expect(getComputedStyle(other).cursor).toBe('wait');
   });
 
   it('has no bottom note or extra grid row', () => {
