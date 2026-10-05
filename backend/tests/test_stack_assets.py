@@ -35,6 +35,12 @@ def fetch(kind, items, stacks, *, pages=1):
         calls.append(request.url.path)
         assert request.headers["x-api-key"] == "key"
         assert request.headers["Accept"] == "application/json"
+        if request.url.path == "/api/timeline/bucket":
+            assert request.method == "GET"
+            return httpx.Response(200, json={
+                "id": [item["id"] for item in items], "isImage": [True] * len(items),
+                "fileCreatedAt": [item["fileCreatedAt"] for item in items], "localOffsetHours": [0] * len(items),
+            })
         if request.url.path == "/api/stacks":
             assert request.method == "GET"
             assert search_count == pages
@@ -60,7 +66,10 @@ def fetch(kind, items, stacks, *, pages=1):
     else:
         call = get_favorite_assets(*args, **options)
     result = asyncio.run(call)
-    assert calls == ["/api/search/metadata"] * pages + ["/api/stacks"]
+    if kind == "calendar" and not items:
+        assert calls == ["/api/timeline/bucket"]
+    else:
+        assert calls == (["/api/timeline/bucket"] if kind == "calendar" else []) + ["/api/search/metadata"] * pages + ["/api/stacks"]
     return [a.model_dump(mode="json") for a in result]
 
 
@@ -97,7 +106,7 @@ def test_successful_empty_stack_list_returns_null_metadata(kind, items):
 @pytest.mark.parametrize("kind", ["album", "calendar", "favorites"])
 def test_fetches_stacks_once_after_all_search_pages(kind):
     result = fetch(kind, [asset(IDS[0])], [stack()], pages=2)
-    assert len(result) == 2
+    assert len(result) == (1 if kind == "calendar" else 2)
     assert all(a["stackId"] == STACK_ID and a["stackAssetCount"] == 3 for a in result)
 
 

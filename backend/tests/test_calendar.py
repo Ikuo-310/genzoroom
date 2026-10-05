@@ -72,8 +72,15 @@ class CalendarTests(unittest.TestCase):
         items = [asset(0) | {"visibility": "archive", "localDateTime": "1999-01-01T00:00:00Z"},
                  asset(1) | {"visibility": "timeline", "localDateTime": "2002-01-01T00:00:00Z"}]
         def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                self.assertEqual(request.url.params["visibility"], "timeline")
+                self.assertEqual(request.url.params["isTrashed"], "false")
+                return bucket([items[1]["id"]], [True], ["2026-09-30T12:00:00Z"], [0])
             body = json.loads(request.content)
             self.assertEqual(body["filter"]["visibility"], {"eq": "timeline"})
+            if "or" in body["filter"]:
+                self.assertEqual(body["filter"]["trashedAt"], {"eq": None})
+                self.assertEqual(body["filter"]["or"], [{"id": {"eq": items[1]["id"]}}])
             return page([item for item in items if item["visibility"] == body["filter"]["visibility"]["eq"]])
         transport = httpx.MockTransport(with_empty_stacks(handler))
         photos = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY, transport=transport))
@@ -342,15 +349,21 @@ class CalendarTests(unittest.TestCase):
                 asyncio.run(get_calendar_heatmap("http://immich.example", "secret", 2026, 9,
                     transport=httpx.MockTransport(lambda request: response)))
 
-    def test_day_uses_half_open_image_search_and_photo_model(self):
+    def test_day_uses_timeline_ids_and_photo_model(self):
         def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                self.assertEqual(dict(request.url.params), {
+                    "timeBucket": "2026-09-01T00:00:00.000Z", "orderBy": "takenAt", "order": "desc",
+                    "visibility": "timeline", "isTrashed": "false", "withStacked": "true"})
+                return bucket([asset(0)["id"], asset(1)["id"]], [True, False],
+                              ["2026-09-30T12:00:00Z"] * 2, [0, 0])
             self.assertEqual(request.url.path, "/api/search/metadata")
             self.assertEqual(request.headers["x-api-key"], "secret")
             self.assertEqual(json.loads(request.content), {
-                "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "takenAt": {
-                    "gte": "2026-09-30T00:00:00.000Z", "lt": "2026-10-01T00:00:00.000Z"},
+                "filter": {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"},
+                    "or": [{"id": {"eq": asset(0)["id"]}}],
                     "trashedAt": {"eq": None}},
-                "orderBy": {"field": "localDateTime", "direction": "desc"}, "size": 1000,
+                "orderBy": {"field": "fileCreatedAt", "direction": "desc"}, "size": 1000,
             })
             return page([asset(0), asset(1, "VIDEO")])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
@@ -362,22 +375,43 @@ class CalendarTests(unittest.TestCase):
             "stackId": None, "primaryAssetId": None, "stackAssetCount": None,
         })
 
-    def test_day_follows_cursor_past_1000_and_rejects_partial_results(self):
+    def test_day_batches_ids_preserves_bucket_order_and_deduplicates(self):
         bodies = []
+        ids = [asset(index)["id"] for index in range(1558)]
         def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                return bucket(ids + [ids[0]], [True] * 1559, ["2026-09-30T12:00:00Z"] * 1559, [0] * 1559)
             body = json.loads(request.content)
             bodies.append(body)
-            return page([asset(index) for index in range(1000)], "page-2") if len(bodies) == 1 else page(
-                [asset(index) for index in range(1000, 1558)])
+            requested = [branch["id"]["eq"] for branch in body["filter"]["or"]]
+            return page([asset(ids.index(asset_id)) for asset_id in reversed(requested)])
         result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
             transport=httpx.MockTransport(with_empty_stacks(handler))))
-        self.assertEqual(len(result), 1558)
+        self.assertEqual([str(photo.id) for photo in result], ids)
+        self.assertEqual([len(body["filter"]["or"]) for body in bodies], [100] * 15 + [58])
+
+    def test_day_follows_metadata_cursor_and_rejects_partial_results(self):
+        bodies = []
+        def timeline(request):
+            return bucket([asset(0)["id"], asset(1)["id"]], [True, True],
+                          ["2026-09-30T12:00:00Z"] * 2, [0, 0])
+        def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                return timeline(request)
+            body = json.loads(request.content)
+            bodies.append(body)
+            return page([asset(0)], "page-2") if len(bodies) == 1 else page([asset(1)])
+        result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
+            transport=httpx.MockTransport(with_empty_stacks(handler))))
+        self.assertEqual([str(photo.id) for photo in result], [asset(0)["id"], asset(1)["id"]])
         self.assertEqual(bodies[1]["cursor"], "page-2")
         self.assertEqual({key: value for key, value in bodies[1].items() if key != "cursor"}, bodies[0])
 
         calls = 0
         def failed(request):
             nonlocal calls
+            if request.url.path == "/api/timeline/bucket":
+                return timeline(request)
             calls += 1
             return page([asset(0)], "next") if calls == 1 else httpx.Response(503)
         with self.assertRaises(ImmichRequestError):
@@ -385,8 +419,67 @@ class CalendarTests(unittest.TestCase):
                 transport=httpx.MockTransport(with_empty_stacks(failed))))
         with self.assertRaises(ImmichRequestError) as cycle:
             asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
-                transport=httpx.MockTransport(with_empty_stacks(lambda request: page([asset(0)], "same")))))
+                transport=httpx.MockTransport(with_empty_stacks(lambda request:
+                    timeline(request) if request.url.path == "/api/timeline/bucket" else page([asset(0)], "same")))))
         self.assertEqual(cycle.exception.error_code, "unexpected_response")
+
+    def test_day_uses_local_offsets_across_day_month_and_year_boundaries(self):
+        cases = (("2026-06-14T15:30:00Z", 9, date(2026, 6, 15)),
+                 ("2026-06-14T19:00:00Z", 5.5, date(2026, 6, 15)),
+                 ("2026-06-15T02:00:00Z", -3.5, date(2026, 6, 14)),
+                 ("2026-05-31T15:30:00Z", 9, date(2026, 6, 1)),
+                 ("2025-12-31T15:30:00Z", 9, date(2026, 1, 1)))
+        for timestamp, offset, local_day in cases:
+            for selected, expected in ((local_day, [asset(0)["id"]]),
+                                       (date.fromisoformat(timestamp[:10]), [])):
+                with self.subTest(timestamp=timestamp, offset=offset, selected=selected):
+                    searches = []
+                    def handler(request):
+                        if request.url.path == "/api/timeline/bucket":
+                            self.assertEqual(request.url.params["timeBucket"],
+                                             f"{selected.replace(day=1).isoformat()}T00:00:00.000Z")
+                            return bucket([asset(0)["id"]], [True], [timestamp], [offset])
+                        self.assertEqual(request.url.path, "/api/search/metadata")
+                        searches.append(json.loads(request.content)["filter"])
+                        return page([asset(0) | {"fileCreatedAt": timestamp}])
+                    result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", selected,
+                        transport=httpx.MockTransport(with_empty_stacks(handler))))
+                    self.assertEqual([str(photo.id) for photo in result], expected)
+                    self.assertEqual(len(searches), len(expected))
+
+    def test_day_only_queries_matching_day_ids(self):
+        def handler(request):
+            if request.url.path == "/api/timeline/bucket":
+                return bucket([asset(index)["id"] for index in range(3)], [True] * 3,
+                              ["2026-09-29T12:00:00Z", "2026-09-30T12:00:00Z", "2026-09-01T12:00:00Z"], [0] * 3)
+            self.assertEqual(json.loads(request.content)["filter"]["or"], [{"id": {"eq": asset(1)["id"]}}])
+            return page([asset(1)])
+        result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
+            transport=httpx.MockTransport(with_empty_stacks(handler))))
+        self.assertEqual([str(photo.id) for photo in result], [asset(1)["id"]])
+
+    def test_empty_day_skips_metadata_and_stacks(self):
+        calls = []
+        def handler(request):
+            calls.append(request.url.path)
+            return bucket()
+        result = asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
+            transport=httpx.MockTransport(handler)))
+        self.assertEqual(result, [])
+        self.assertEqual(calls, ["/api/timeline/bucket"])
+
+    def test_day_timeline_failure_never_falls_back_to_utc_search(self):
+        for response in (httpx.Response(403), httpx.Response(503), httpx.Response(200, content=b"{"),
+                         httpx.Response(200, json={}), bucket([asset(0)["id"]], [True], [], [])):
+            with self.subTest(response=response):
+                calls = []
+                def handler(request):
+                    calls.append(request.url.path)
+                    return response
+                with self.assertLogs("immich", level="WARNING"), self.assertRaises(ImmichRequestError):
+                    asyncio.run(get_calendar_day_assets("http://immich.example", "secret", DAY,
+                        transport=httpx.MockTransport(handler)))
+                self.assertEqual(calls, ["/api/timeline/bucket"])
 
     def test_routes_validate_inputs_and_map_upstream_errors(self):
         async def exercise():

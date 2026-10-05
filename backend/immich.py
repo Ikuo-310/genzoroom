@@ -793,14 +793,24 @@ async def get_calendar_day_assets(
 ) -> list[RecentAsset]:
     if selected_day == date.max:
         raise ValueError("The selected date is outside the supported range.")
-    next_day = selected_day + timedelta(days=1)
-    # Immich v3.2.4 applies takenAt to fileCreatedAt; use its half-open UTC range as requested.
-    bounds = {"gte": f"{selected_day.isoformat()}T00:00:00.000Z", "lt": f"{next_day.isoformat()}T00:00:00.000Z"}
-    return await _search_home_assets(
-        immich_url, api_key,
-        {"type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "takenAt": bounds},
-        "localDateTime", transport=transport,
-    )
+    url, key = _require_configuration(immich_url, api_key)
+    images = await _calendar_month_images(url, key, selected_day.replace(day=1), transport=transport)
+    # Share the heatmap's local-day boundary and preserve timeline order even across duplicate bucket IDs.
+    asset_ids = list(dict.fromkeys(asset_id for day, asset_id in images.candidates
+                                  if day == selected_day.isoformat()))
+    if not asset_ids:
+        return []
+    assets_by_id: dict[UUID, RecentAsset] = {}
+    for start in range(0, len(asset_ids), CALENDAR_FORMAT_BATCH_SIZE):
+        batch = asset_ids[start:start + CALENDAR_FORMAT_BATCH_SIZE]
+        assets = await _search_all_assets(url, key, {
+            "type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "trashedAt": {"eq": None},
+            "or": [{"id": {"eq": str(asset_id)}} for asset_id in batch],
+        }, "fileCreatedAt", transport=transport)
+        assets_by_id.update((asset.id, asset) for asset in assets)
+    # Metadata order is independent of timeline order; join stacks only after all batches succeed.
+    ordered_assets = [assets_by_id[asset_id] for asset_id in asset_ids if asset_id in assets_by_id]
+    return await _with_asset_stacks(url, key, ordered_assets, transport=transport)
 
 
 async def get_calendar_min_year(
