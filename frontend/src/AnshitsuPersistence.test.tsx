@@ -88,7 +88,7 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
-  it('shows H and Undo/Redo hints without adding H to HomeTitle, and still exits with H when OFF', async () => {
+  it('shows G and Undo/Redo hints without adding G to HomeTitle, and still exits with G when OFF', async () => {
     await mount();
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button')!;
     const historyButtons = [...container.querySelectorAll<HTMLButtonElement>('.edit-actions button')];
@@ -97,13 +97,13 @@ describe('Anshitsu Filmstrip persistence', () => {
       const button = historyButtons.find(item => item.textContent === i18n.t(`workspace.${id}`))!;
       expect(button.title).toContain(`(${formatShortcut(id)})`);
     }
-    expect(container.querySelector('.workspace-title-link')?.getAttribute('title') ?? '').not.toContain('(H)');
+    expect(container.querySelector('.workspace-title-link')?.getAttribute('title') ?? '').not.toContain('(G)');
     act(() => updateSetting('showKeyboardShortcuts', false));
     expect(home.title).toBe(i18n.t('workspace.backToPhotos'));
     for (const id of ['undo', 'redo'] as const) {
       expect(historyButtons.find(item => item.textContent === i18n.t(`workspace.${id}`))!.title).toBe(i18n.t(`workspace.${id}`));
     }
-    await filmstripKey('h');
+    await filmstripKey('g');
     expect(container.querySelector('.workspace-page')).toBeNull();
     act(() => updateSetting('showKeyboardShortcuts', true));
   });
@@ -227,7 +227,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(currentPhoto()).toBe('first.jpg');
     expect(mocked.put).toHaveBeenCalledTimes(1);
-    expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+    expect((await filmstripKey('g')).defaultPrevented).toBe(false);
     expect(container.querySelector('.workspace-page')).not.toBeNull();
     for (let index = 0; index < 4; index++) await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true, repeat: true });
     await filmstripKey('ArrowLeft', { ctrlKey: true, shiftKey: true });
@@ -249,7 +249,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(currentPhoto()).toBe('first.jpg');
-    expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+    expect((await filmstripKey('g')).defaultPrevented).toBe(false);
     expect(container.querySelector('.workspace-page')).not.toBeNull();
     await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
     expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
@@ -295,7 +295,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();
     await click('button[aria-label="Disable Basic"]');
-    await filmstripKey('h');
+    await filmstripKey('g');
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(document.activeElement?.textContent).toBe('Stay in Anshitsu');
     const before = currentHistoryEntry();
@@ -565,12 +565,12 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(mocked.put).toHaveBeenCalledTimes(1);
   });
 
-  it('saves through the existing exit flow when H is pressed from Viewer focus mode', async () => {
+  it('saves through the existing exit flow when G is pressed from Viewer focus mode', async () => {
     await mount();
     await click('button[aria-label="Disable Basic"]');
     await filmstripKey('f');
     expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(true);
-    expect((await filmstripKey('H')).defaultPrevented).toBe(true);
+    expect((await filmstripKey('G')).defaultPrevented).toBe(true);
     expect(mocked.put).toHaveBeenCalledTimes(1);
     expect(mocked.put.mock.calls[0][1].history).toHaveLength(1);
     expect(container.querySelector('.workspace-page')).toBeNull();
@@ -602,24 +602,26 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(mocked.put).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores modified, repeated, composing, native-editing, and dialog H events', async () => {
+  it('ignores H and modified, repeated, composing, native-editing, and dialog G events', async () => {
     await mount();
+    expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+    expect((await filmstripKey('H')).defaultPrevented).toBe(false);
     for (const options of [{ repeat: true }, { isComposing: true }, { ctrlKey: true }, { metaKey: true },
       { altKey: true }, { shiftKey: true }]) {
-      expect((await filmstripKey('h', options)).defaultPrevented).toBe(false);
+      expect((await filmstripKey('g', options)).defaultPrevented).toBe(false);
     }
-    const prevented = new KeyboardEvent('keydown', { key: 'h', bubbles: true, cancelable: true });
+    const prevented = new KeyboardEvent('keydown', { key: 'g', bubbles: true, cancelable: true });
     prevented.preventDefault(); await act(async () => { window.dispatchEvent(prevented); });
     for (const markup of ['<input type="text">', '<input type="number">', '<textarea></textarea>',
       '<select></select>', '<div contenteditable="true"></div>', '<div role="textbox"></div>']) {
       const wrapper = document.createElement('div'); wrapper.innerHTML = markup; container.append(wrapper);
-      expect((await filmstripKey('h', {}, wrapper.firstElementChild!)).defaultPrevented).toBe(false);
+      expect((await filmstripKey('g', {}, wrapper.firstElementChild!)).defaultPrevented).toBe(false);
       wrapper.remove();
     }
     for (const markup of ['<dialog open></dialog>', '<div role="dialog"></div>', '<div role="alertdialog"></div>',
       '<div role="menu"></div>', '<details class="edit-settings-menu" open></details>']) {
       const wrapper = document.createElement('div'); wrapper.innerHTML = markup; container.append(wrapper);
-      expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+      expect((await filmstripKey('g')).defaultPrevented).toBe(false);
       wrapper.remove();
     }
     expect(container.querySelector('.workspace-page')).not.toBeNull();
@@ -630,11 +632,11 @@ describe('Anshitsu Filmstrip persistence', () => {
     mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await mount();
     await click('button[aria-label="Disable Basic"]');
-    await filmstripKey('h');
+    await filmstripKey('g');
     expect(currentPhoto()).toBe('first.jpg');
     expect(container.querySelector('[role="alertdialog"]')?.textContent)
       .toContain('Some edits could not be saved.');
-    expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+    expect((await filmstripKey('g')).defaultPrevented).toBe(false);
 
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Stay in Anshitsu');
@@ -669,11 +671,11 @@ describe('Anshitsu Filmstrip persistence', () => {
     mocked.put.mockImplementationOnce(() => pending.promise);
     await mount();
     await click('button[aria-label="Disable Basic"]');
-    const homeEvent = await filmstripKey('h');
+    const homeEvent = await filmstripKey('g');
     expect(homeEvent.defaultPrevented).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('.workspace-actions button')!.disabled).toBe(true);
     expect(container.textContent).toContain('Saving edits before leaving Anshitsu');
-    expect((await filmstripKey('h')).defaultPrevented).toBe(false);
+    expect((await filmstripKey('g')).defaultPrevented).toBe(false);
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await act(async () => {
       pending.resolve({ state: mocked.put.mock.calls[0][1], revision: 1, updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] });
@@ -683,13 +685,13 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(container.querySelector('.workspace-page')).toBeNull();
   });
 
-  it('remembers the active Filmstrip photo when Home is reached through the normal H exit', async () => {
+  it('remembers the active Filmstrip photo when Home is reached through the normal G exit', async () => {
     await mount();
     const secondPhoto = container.querySelector<HTMLButtonElement>('.filmstrip-item[aria-label="second.jpg"]');
     if (!secondPhoto) throw new Error('Missing second Filmstrip photo');
     await act(async () => { secondPhoto.click(); }); await flush();
     expect(currentPhoto()).toBe('second.jpg');
-    await filmstripKey('h'); await flush();
+    await filmstripKey('g'); await flush();
     expect(readWorkspaceSession()).toMatchObject({
       selectedAssets: [{ id: first.id }, { id: second.id }], activeAssetId: second.id,
     });

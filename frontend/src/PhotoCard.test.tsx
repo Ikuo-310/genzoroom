@@ -1,9 +1,23 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import { PhotoCard, type RecentAsset } from './PhotoCard';
 
 beforeEach(async () => i18n.changeLanguage('en'));
+let host: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+});
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+
+const interactionAsset: RecentAsset = {
+  id: 'asset-id', filename: 'photo.jpg', date: '2026-09-08', thumbnail_url: '/thumbnail', format: 'JPEG', is_raw: false,
+};
 
 function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string, stackAssetCount?: number | null) {
   const asset: RecentAsset = {
@@ -20,6 +34,41 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
 }
 
 describe('PhotoCard format badge', () => {
+  it.each([
+    [false, false, false],
+    [false, true, true],
+    [true, false, false],
+    [true, true, true],
+  ])('routes card clicks by selection mode and Shift (%s, Shift %s)', async (selectionMode, shiftKey, extendRange) => {
+    const onOpen = vi.fn(), onToggleSelection = vi.fn();
+    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" selectionMode={selectionMode}
+      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey });
+    await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.dispatchEvent(event));
+    expect(onOpen).toHaveBeenCalledTimes(selectionMode || shiftKey ? 0 : 1);
+    if (shiftKey) expect(onToggleSelection).toHaveBeenCalledWith(true);
+    else if (selectionMode) expect(onToggleSelection).toHaveBeenCalledOnce();
+    else expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it('keeps checkbox normal toggles and Shift range clicks single-shot', async () => {
+    const onOpen = vi.fn(), onToggleSelection = vi.fn();
+    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" selectionMode
+      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
+    const checkbox = host.querySelector<HTMLInputElement>('.photo-selection-input')!;
+    await act(async () => checkbox.click());
+    expect(onToggleSelection).toHaveBeenCalledTimes(1);
+    expect(onToggleSelection).toHaveBeenCalledOnce();
+    onToggleSelection.mockClear();
+    const shiftClick = new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true });
+    await act(async () => checkbox.dispatchEvent(shiftClick));
+    expect(shiftClick.defaultPrevented).toBe(true);
+    expect(onToggleSelection).toHaveBeenCalledTimes(1);
+    expect(onToggleSelection).toHaveBeenCalledWith(true);
+    await act(async () => checkbox.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(onToggleSelection).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
   it.each([true, false, undefined])('shows a display-only GenzoRoom badge only for known edited status %s', edited => {
     const markup = renderBadge('JPEG', false, 'photo.jpg', edited);
     expect(markup.includes('class="edited-badge"')).toBe(edited === true);

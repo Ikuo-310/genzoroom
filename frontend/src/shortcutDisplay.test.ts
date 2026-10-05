@@ -11,7 +11,8 @@ describe('shortcut binding display', () => {
     }
   });
   it('formats plain keys and modifier commands', () => {
-    expect(formatShortcut('workspaceReturnHome', 'other')).toBe('H');
+    expect(formatShortcut('workspaceReturnHome', 'other')).toBe('G');
+    expect(formatShortcut('workspaceReturnHome', 'mac')).toBe('G');
     expect(formatShortcut('homeOpenSelected', 'other')).toBe('D');
     expect(formatShortcut('stackAddSelected', 'other')).toBe('A');
     expect(formatShortcut('stackAddSelected', 'mac')).toBe('A');

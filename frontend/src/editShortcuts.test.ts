@@ -113,12 +113,16 @@ describe('command shortcut bindings', () => {
     expect(Object.keys(shortcutBindings)).toHaveLength(26);
   });
 
-  it('matches workspace Home only for unmodified H', () => {
-    expect(matchesShortcut(event('H'), 'workspaceReturnHome', 'other')).toBe(true);
-    expect(matchesShortcut(event('h'), 'workspaceReturnHome', 'mac')).toBe(true);
-    for (const platform of ['other', 'mac'] as const) for (const options of [
-      { shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
-    ]) expect(matchesShortcut(event('h', options), 'workspaceReturnHome', platform)).toBe(false);
+  it('matches Gallery return only for unmodified G', () => {
+    for (const platform of ['other', 'mac'] as const) {
+      expect(matchesShortcut(event('G'), 'workspaceReturnHome', platform)).toBe(true);
+      expect(matchesShortcut(event('g'), 'workspaceReturnHome', platform)).toBe(true);
+      expect(matchesShortcut(event('H'), 'workspaceReturnHome', platform)).toBe(false);
+      expect(matchesShortcut(event('h'), 'workspaceReturnHome', platform)).toBe(false);
+      for (const options of [
+        { shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
+      ]) expect(matchesShortcut(event('g', options), 'workspaceReturnHome', platform)).toBe(false);
+    }
     expect(undoShortcut(event('z', { ctrlKey: true }), 'other')).toBe('undo');
   });
 

@@ -113,6 +113,19 @@ describe('Home favorites', () => {
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
   });
 
+  it('starts selection with a Shift card click and uses that photo as the next range anchor', async () => {
+    api.recent.mockResolvedValue(photos);
+    await mount();
+    const card = (index: number) => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[index];
+    await act(async () => card(2).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    expect(host.querySelectorAll('.photo-card.selected .photo-info p')[0].textContent).toBe('photo-2');
+    expect(navigation).toBeNull();
+    await act(async () => card(0).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
+    expect([...host.querySelectorAll('.photo-card.selected .photo-info p')].map(node => node.textContent))
+      .toEqual(['photo-0', 'photo-1', 'photo-2']);
+  });
+
   it('leaves Primary+A native while photos are loading or empty', async () => {
     let resolve!: (assets: RecentAsset[]) => void;
     api.favorites.mockReturnValue(new Promise<RecentAsset[]>(yes => { resolve = yes; }));

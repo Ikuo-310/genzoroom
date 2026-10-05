@@ -49,7 +49,7 @@ it('preserves D and adds the Stack selection callback', async () => {
 it('passes ordered concrete favorites with RAW via S and returns to the same Home tab', async () => {
   await mount(); await click('#home-favorites-tab'); await click('.photo-card:last-child input'); await click('.photo-card:first-child input'); await press('S');
   expect(Array.from(host.querySelectorAll('.stack-filename')).map(e => e.textContent)).toEqual(['selected.jpg', 'selected.dng']);
-  await press('H'); expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
+  await press('G'); expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
 });
 it('guards S and opens concrete RAW through the button', async () => {
   await mount(); await press('s'); expect(host.querySelector('.stack-management-page')).toBeNull(); await click('.photo-card input');
@@ -76,12 +76,12 @@ it.each([undefined, { selectedAssets: [{}] }])('handles missing or invalid route
   await mount('/stack', state); expect(host.querySelectorAll('.stack-photo')).toHaveLength(0); expect(host.textContent).toContain('Select photos on Home');
   await click('.stack-header-actions button'); expect(host.querySelector('.home-page')).not.toBeNull();
 });
-it('localizes and restores title, guards H, and ignores D/S', async () => {
+it('localizes and restores title, guards G, and ignores D/S', async () => {
   await mount('/stack'); expect(document.title).toBe('Stack Management - GenzoRoom'); await act(async () => i18n.changeLanguage('ja')); expect(document.title).toBe('STACK管理 - GenzoRoom');
-  const input = document.createElement('textarea'); host.append(input); await press('h', {}, input); input.remove();
-  for (const role of ['dialog', 'alertdialog', 'menu']) { const blocker = document.createElement('div'); blocker.setAttribute('role', role); host.append(blocker); await press('h'); blocker.remove(); }
-  for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { repeat: true }]) await press('h', options);
-  await press('d'); await press('s'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); await press('h'); expect(document.title).toBe('GenzoRoom');
+  const input = document.createElement('textarea'); host.append(input); await press('g', {}, input); input.remove();
+  for (const role of ['dialog', 'alertdialog', 'menu']) { const blocker = document.createElement('div'); blocker.setAttribute('role', role); host.append(blocker); await press('g'); blocker.remove(); }
+  for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { repeat: true }]) await press('g', options);
+  await press('d'); await press('s'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); await press('h'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); await press('g'); expect(document.title).toBe('GenzoRoom');
 });
 it('uses Primary+Z for one local Undo, preserves native/dialog/sending guards, and adds no Redo', async () => {
  await mount('/stack',{selectedAssets:photos});
@@ -131,7 +131,7 @@ it('clears active drag state and ref when the source generation changes',async()
  const over=dragEvent('dragover',afterGeneration);await act(async()=>group.dispatchEvent(over));
  expect(over.defaultPrevented).toBe(false);
 });
-it('retains shared Settings and Primary+Settings developer behavior and blocks H while Settings is open', async () => {
+it('retains shared Settings and Primary+Settings developer behavior and blocks G while Settings is open', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
   vi.stubGlobal('isSecureContext', false);
@@ -140,7 +140,7 @@ it('retains shared Settings and Primary+Settings developer behavior and blocks H
   await act(async () => { host.querySelector('.settings-button')!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); });
   expect(open).toHaveBeenCalledWith('/developer', '_blank', 'noopener,noreferrer'); expect(host.querySelector('dialog')).toBeNull();
   await click('.settings-button'); expect(host.querySelector('dialog[open]')).not.toBeNull();
-  await press('h'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); open.mockRestore();
+  await press('g'); expect(host.querySelector('.stack-management-page')).not.toBeNull(); open.mockRestore();
 });
 it('shows NAME/TIME/CAM/GPS and COVER and partitions NAME candidates without duplicates', async () => {
   api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id, exif: { date_time_original: '2026:10:01 08:25:49', make: 'Camera', model: 'Model', latitude: 35, longitude: 139 } }));
@@ -550,7 +550,7 @@ it('asks before discarding edits, focuses Cancel, retains state on Cancel and re
  const requests=api.detail.mock.calls.length;
  await act(async()=>button('Detect again').click());
  expect(document.activeElement?.textContent).toBe('Cancel'); expect(api.detail).toHaveBeenCalledTimes(requests);
- await press('h'); await press('a'); expect(host.querySelector('.stack-management-page')).not.toBeNull();
+ await press('g'); await press('a'); expect(host.querySelector('.stack-management-page')).not.toBeNull();
  await act(async()=>button('Cancel').click());
  expect(host.querySelector('.stack-add-target')).not.toBeNull(); expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
  expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('1 selected');
@@ -713,7 +713,7 @@ it('aborts the frontend wait on Home navigation without resending the write',asy
  const fetch=vi.fn((url:string,init:RequestInit)=>{if(url!=='/api/stacks/apply') return Promise.resolve(new Response('{}'));signal=init.signal as AbortSignal;return new Promise<Response>(()=>{});});vi.stubGlobal('fetch',fetch);
  await mount('/stack',{selectedAssets:photos});
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- expect(signal?.aborted).toBe(false);await press('H');expect(signal?.aborted).toBe(true);expect(fetch.mock.calls.filter(call=>call[0]==='/api/stacks/apply')).toHaveLength(1);
+ expect(signal?.aborted).toBe(false);await press('G');expect(signal?.aborted).toBe(true);expect(fetch.mock.calls.filter(call=>call[0]==='/api/stacks/apply')).toHaveLength(1);
 });
 it('aborts and ignores a successful send result after same-route navigation changes the selection',async()=>{
  api.resolve.mockResolvedValue([existingStack]);

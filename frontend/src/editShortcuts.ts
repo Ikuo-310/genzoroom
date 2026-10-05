@@ -45,7 +45,7 @@ export const shortcutBindings = {
   homeFavorites: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeSelectAll: [{ key: 'a', ignoreCase: true, ...clipboardModifiers }],
   stackAddSelected: [{ key: 'a', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
-  workspaceReturnHome: [{ key: 'h', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  workspaceReturnHome: [{ key: 'g', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   scopeRed: [{ code: 'Numpad1', ...commandModifiers, shift: false, alt: false }],
   scopeGreen: [{ code: 'Numpad2', ...commandModifiers, shift: false, alt: false }],
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false, alt: false }],
