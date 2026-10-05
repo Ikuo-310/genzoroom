@@ -98,6 +98,23 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('uses C to return date details to their month or year parent without stealing Select All there', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    for (const mode of ['month', 'year']) {
+      if (mode === 'year') { click('.calendar-view-toggle'); await settle(); }
+      const nativeAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+      act(() => window.dispatchEvent(nativeAll)); expect(nativeAll.defaultPrevented).toBe(false);
+      click('.calendar-day.has-assets'); await settle();
+      const selectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+      act(() => window.dispatchEvent(selectAll)); expect(selectAll.defaultPrevented).toBe(true);
+      expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(dayPhotos.length);
+      const back = new KeyboardEvent('keydown', { key: 'C', bubbles: true, cancelable: true });
+      act(() => window.dispatchEvent(back)); await settle();
+      expect(back.defaultPrevented).toBe(true);
+      expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
+      expect(host.querySelector('.home-toolbar-title')).toBeNull();
+    }
+  });
   it('keeps selection actions disabled in both month and year views', async () => {
     await mount(); click('#home-calendar-tab'); await settle();
     for (const mode of ['month', 'year']) {
@@ -368,7 +385,7 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('Mon');
     expect(host.querySelectorAll('.calendar-blank')).toHaveLength(0);
     await act(async () => { await i18n.changeLanguage('ja'); });
-    expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー');
+    expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー[C]');
     expect(host.querySelector('.calendar-current-month')?.textContent).toBe('今月へ');
     expect(host.querySelectorAll('.calendar-weekday')[0]?.textContent).toBe('月');
   });

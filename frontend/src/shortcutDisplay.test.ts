@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { formatShortcut } from './shortcutDisplay';
 
 describe('shortcut binding display', () => {
+  it('formats Home command labels from the registry on both platforms', () => {
+    for (const platform of ['other', 'mac'] as const) {
+      for (const [id, label] of [['homeRecent', 'R'], ['homeAlbums', 'A'], ['homeCalendar', 'C'],
+        ['homeFavorites', 'F'], ['homeOpenStackManager', 'S'], ['homeOpenSelected', 'D']] as const) {
+        expect(formatShortcut(id, platform)).toBe(label);
+      }
+    }
+  });
   it('formats plain keys and modifier commands', () => {
     expect(formatShortcut('workspaceReturnHome', 'other')).toBe('H');
     expect(formatShortcut('homeOpenSelected', 'other')).toBe('D');

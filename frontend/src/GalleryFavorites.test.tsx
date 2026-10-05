@@ -40,6 +40,11 @@ async function pressD(target: EventTarget = window, options: KeyboardEventInit =
   await act(async () => { target.dispatchEvent(event); });
   return event;
 }
+async function pressHome(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+  await act(async () => { target.dispatchEvent(event); });
+  return event;
+}
 async function change(selector: string, value: string) {
   await act(async () => {
     const select = host.querySelector<HTMLSelectElement>(selector)!;
@@ -71,6 +76,77 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); clearWorkspaceSession(); vi.unstubAllGlobals(); });
 
 describe('Home favorites', () => {
+  it('switches tabs with registry commands and keeps commands enabled when hints are hidden', async () => {
+    await mount();
+    for (const [key, tab, label] of [['f', 'favorites', 'Favorites[F]'], ['A', 'albums', 'Albums[A]'],
+      ['c', 'calendar', 'Calendar[C]'], ['R', 'recent', 'Recent[R]']]) {
+      expect((await pressHome(key)).defaultPrevented).toBe(true);
+      expect(host.querySelector(`#home-${tab}-tab`)?.getAttribute('aria-selected')).toBe('true');
+      expect(host.querySelector(`#home-${tab}-tab`)?.textContent).toBe(label);
+    }
+    act(() => updateSetting('showKeyboardShortcuts', false));
+    await pressHome('f');
+    expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('Favorites');
+    expect(host.querySelector('.selection-open-stacks')?.textContent).toBe('Stacks');
+    expect(host.querySelector('.selection-open-workspace')?.textContent).toBe('Anshitsu');
+    expect(host.querySelector('.selection-all')?.textContent).toBe('Select all');
+    expect(host.querySelector('.selection-all')?.getAttribute('title')).toBeNull();
+    await act(async () => i18n.changeLanguage('ja'));
+    expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('お気に入り');
+    act(() => updateSetting('showKeyboardShortcuts', true));
+    expect(host.querySelector('#home-recent-tab')?.textContent).toBe('最近の写真[R]');
+    expect(host.querySelector('#home-albums-tab')?.textContent).toBe('アルバム[A]');
+    expect(host.querySelector('#home-calendar-tab')?.textContent).toBe('カレンダー[C]');
+    expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('お気に入り[F]');
+    act(() => updateSetting('showKeyboardShortcuts', false));
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(4);
+  });
+
+  it('adds only visible selections with Primary+A, preserves hidden selections and consumes repeated all-selection', async () => {
+    await mount(); await pressHome('f'); await click('.photo-selection-input');
+    await change('.photo-filter-control select', 'raw');
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect((await pressHome('A', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(host.querySelector('.selection-count')?.textContent).toBe('3 selected');
+    await click('.selection-open-workspace');
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
+  });
+
+  it('leaves Primary+A native while photos are loading or empty', async () => {
+    let resolve!: (assets: RecentAsset[]) => void;
+    api.favorites.mockReturnValue(new Promise<RecentAsset[]>(yes => { resolve = yes; }));
+    await mount(); await pressHome('f');
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(false);
+    await act(async () => resolve([]));
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(false);
+  });
+
+  it('does not steal native editing, modal, modifier or unavailable-view shortcuts', async () => {
+    await mount();
+    for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {
+      expect((await pressHome('f', options)).defaultPrevented).toBe(false);
+      expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+    }
+    for (const tag of ['input', 'textarea', 'select', 'div']) {
+      const target = document.createElement(tag); if (tag === 'div') target.setAttribute('contenteditable', 'true'); host.append(target);
+      expect((await pressHome('a', { ctrlKey: true }, target)).defaultPrevented).toBe(false);
+      expect((await pressHome('f', {}, target)).defaultPrevented).toBe(false); target.remove();
+    }
+    for (const role of ['dialog', 'alertdialog', 'menu']) {
+      const modal = document.createElement('div'); modal.setAttribute('role', role); host.append(modal);
+      expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(false);
+      expect((await pressHome('f')).defaultPrevented).toBe(false); modal.remove();
+    }
+    for (const type of ['checkbox', 'range']) {
+      const target = document.createElement('input'); target.type = type; host.append(target);
+      expect((await pressHome('a', { ctrlKey: true }, target)).defaultPrevented).toBe(false); target.remove();
+    }
+    await pressHome('a');
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(false);
+    await pressHome('c');
+    expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(false);
+  });
   it('keeps toolbar actions visible at zero and safely ignores opening without a session', async () => {
     await mount();
     expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
@@ -152,7 +228,7 @@ describe('Home favorites', () => {
     await click('#home-recent-tab'); await click('#home-favorites-tab'); await click('#home-favorites-tab');
     expect(api.favorites).toHaveBeenCalledTimes(1);
     await act(async () => i18n.changeLanguage('ja'));
-    expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('お気に入り');
+    expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('お気に入り[F]');
   });
 
   it('shows loading and empty results', async () => {

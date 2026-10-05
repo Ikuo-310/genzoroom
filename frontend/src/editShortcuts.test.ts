@@ -10,6 +10,17 @@ function event(key: string, options: KeyboardEventInit = {}, altGraph = false) {
 }
 
 describe('command shortcut bindings', () => {
+  it.each(['other', 'mac'] as const)('separates Home tabs from Primary select all on %s', platform => {
+    for (let mask = 0; mask < 32; mask++) {
+      const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };
+      for (const [id, key] of [['homeRecent', 'R'], ['homeAlbums', 'A'], ['homeCalendar', 'C'], ['homeFavorites', 'F']] as const) {
+        expect(matchesShortcut(event(key, options), id, platform)).toBe((mask & 15) === 0);
+        expect(matchesShortcut(event(key.toLowerCase(), options), id, platform)).toBe((mask & 15) === 0);
+      }
+      const primaryMask = platform === 'mac' ? 2 : 1;
+      expect(matchesShortcut(event('A', options, !!(mask & 16)), 'homeSelectAll', platform)).toBe(mask === primaryMask);
+    }
+  });
   it.each(['other', 'mac'] as const)('matches Primary-based commands strictly on %s', (platform: ShortcutPlatform) => {
     for (let mask = 0; mask < 32; mask++) {
       const ctrlKey = !!(mask & 1), metaKey = !!(mask & 2), altKey = !!(mask & 4), shiftKey = !!(mask & 8), altGraph = !!(mask & 16);
@@ -99,7 +110,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(21);
+    expect(Object.keys(shortcutBindings)).toHaveLength(26);
   });
 
   it('matches workspace Home only for unmodified H', () => {
@@ -128,14 +139,14 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(21);
+    expect(Object.keys(shortcutBindings)).toHaveLength(26);
   });
   it('matches Stack Add only for unmodified A without matching other commands', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
       const value = event('A', { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) });
       expect(matchesShortcut(value, 'stackAddSelected', platform)).toBe(mask === 0);
       if (mask === 0) for (const id of Object.keys(shortcutBindings) as ShortcutId[]) {
-        if (id !== 'stackAddSelected') expect(matchesShortcut(value, id, platform)).toBe(false);
+        if (id !== 'stackAddSelected' && id !== 'homeAlbums') expect(matchesShortcut(value, id, platform)).toBe(false);
       }
     }
   });

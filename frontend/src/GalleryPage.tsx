@@ -20,6 +20,7 @@ import { PhotoFilterControls } from './PhotoFilterControls';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { useShortcutDisplay } from './useShortcutDisplay';
 import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
@@ -45,6 +46,7 @@ type PhotoView = {
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
+  const shortcut = useShortcutDisplay();
   const settings = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
@@ -104,6 +106,8 @@ export function GalleryPage() {
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const openStacksRef = useRef<() => void>(() => {});
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
+  const homeTabClickRef = useRef<(tab: HomeTab) => void>(() => {});
+  const selectAllVisibleRef = useRef<() => boolean>(() => false);
   const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
     tab: 'recent', album: null, year: new Date().getFullYear(), month: new Date().getMonth() + 1,
     date: null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0,
@@ -380,6 +384,20 @@ export function GalleryPage() {
         }
         return;
       }
+      if (matchesShortcut(event, 'homeSelectAll')) {
+        // Checkboxes and sliders allow S/D, but Primary+A must remain native for all inputs.
+        if (event.target instanceof Element && event.target.closest('input')) return;
+        if (selectAllVisibleRef.current()) event.preventDefault();
+        return;
+      }
+      for (const [id, tab] of [['homeRecent', 'recent'], ['homeAlbums', 'albums'],
+        ['homeCalendar', 'calendar'], ['homeFavorites', 'favorites']] as const) {
+        if (matchesShortcut(event, id)) {
+          event.preventDefault();
+          homeTabClickRef.current(tab);
+          return;
+        }
+      }
       if (!matchesShortcut(event, 'homeOpenSelected')) return;
       if (openHomeWorkspaceRef.current()) event.preventDefault();
     }
@@ -387,6 +405,15 @@ export function GalleryPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectionMode, photoView?.selection.clear, navigate]);
+
+  function selectAllVisible(): boolean {
+    if (!photoView || photoView.state !== 'ready' || visibleAssets.length === 0) return false;
+    photoView.selection.selectVisible(visibleAssets.map(asset => asset.id));
+    return true;
+  }
+  // Keyboard listeners must use the current view and filters without resetting their lifetime.
+  selectAllVisibleRef.current = selectAllVisible;
+  homeTabClickRef.current = handleTabClick;
 
   function openWorkspace(asset: RecentAsset) {
     openWorkspaceAssets([asset]);
@@ -608,23 +635,23 @@ export function GalleryPage() {
         <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
           <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
             aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
-            onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
+            onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
           <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
             aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
-            onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+            onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
           <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
             aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
-            onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
+            onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
           <button id="home-favorites-tab" ref={favoritesTab} type="button" role="tab" aria-controls="home-favorites-panel"
             aria-selected={activeTab === 'favorites'} tabIndex={activeTab === 'favorites' ? 0 : -1}
-            onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
+            onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
         </div>
       </div>
       <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
-          onSelectAll={() => photoView?.selection.selectVisible(visibleAssets.map(asset => asset.id))}
+          onSelectAll={selectAllVisible}
           onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
           {activeTab === 'albums' && selectedAlbum && <div className="home-toolbar-context">
               <button type="button" className="album-back" aria-label={t('albums.backToList')} title={t('albums.backToList')} onClick={closeAlbum}>←</button>

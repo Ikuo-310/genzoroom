@@ -11,8 +11,8 @@ describe('PhotoSelectionBar', () => {
     const markup = renderToStaticMarkup(<PhotoSelectionBar count={3} onClear={vi.fn()} onOpen={vi.fn()} onOpenStacks={vi.fn()} />);
     expect(markup).toContain('3 selected');
     expect(markup).toContain('>Clear</button>');
-    expect(markup).toContain('>Stacks</button>');
-    expect(markup).toContain('>Anshitsu</button>');
+    expect(markup).toContain('>Stacks[S]</button>');
+    expect(markup).toContain('>Anshitsu[D]</button>');
     expect(markup).toContain('aria-label="Clear selection"');
     expect(markup).toContain('aria-label="Manage Stacks"');
     expect(markup).toContain('aria-label="Open in Anshitsu"');
@@ -40,6 +40,8 @@ describe('PhotoSelectionBar', () => {
     expect(markup).toContain('2枚選択中');
     expect(markup).toContain('選択解除');
     expect(markup).toContain('暗室へ');
+    expect(markup).toContain('>STACK管理へ[S]</button>');
+    expect(markup).toContain('>暗室へ[D]</button>');
     expect(markup).not.toContain('>Clear</button>');
     expect(markup).not.toContain('>Stacks</button>');
     expect(markup).not.toContain('>Anshitsu</button>');

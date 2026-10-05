@@ -22,9 +22,9 @@ export function PhotoSelectionBar({ count, canSelectAll = false, onSelectAll, on
         disabled={count === 0} onClick={onClear}>{t(compactEnglish ? 'photos.clearSelectionCompact' : 'photos.clearSelection')}</button>
       <button type="button" className="selection-open-stacks" aria-label={t('photos.openStacks')}
         disabled={count === 0 || !onOpenStacks} title={shortcut.title(t('photos.openStacks'), 'homeOpenStackManager')}
-        onClick={onOpenStacks}>{t(compactEnglish ? 'photos.openStacksCompact' : 'photos.openStacks')}</button>
+        onClick={onOpenStacks}>{shortcut.inline(t(compactEnglish ? 'photos.openStacksCompact' : 'photos.openStacks'), 'homeOpenStackManager')}</button>
       <button type="button" className="selection-open-workspace" aria-label={t('photos.openSelected')}
-        title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')} onClick={onOpen}>{t(compactEnglish ? 'photos.openSelectedCompact' : 'photos.openSelected')}</button>
+        title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')} onClick={onOpen}>{shortcut.inline(t(compactEnglish ? 'photos.openSelectedCompact' : 'photos.openSelected'), 'homeOpenSelected')}</button>
     </div>
   </div>;
 }

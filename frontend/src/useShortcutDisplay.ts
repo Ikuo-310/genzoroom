@@ -7,6 +7,10 @@ export function useShortcutDisplay() {
   const label = (id: ShortcutId) => showKeyboardShortcuts ? formatShortcut(id) : undefined;
   return {
     label,
+    inline: (description: string, id: ShortcutId) => {
+      const shortcut = label(id);
+      return shortcut ? `${description}[${shortcut}]` : description;
+    },
     title: (description: string, id: ShortcutId) => {
       const shortcut = label(id);
       return shortcut ? `${description} (${shortcut})` : description;

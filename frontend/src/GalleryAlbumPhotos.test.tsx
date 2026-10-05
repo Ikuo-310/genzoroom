@@ -78,6 +78,19 @@ afterEach(() => {
 });
 
 describe('album photo view', () => {
+  it('uses A like an active Album tab click to return from detail to the list', async () => {
+    await mount(); click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
+    const selectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => window.dispatchEvent(selectAll));
+    expect(selectAll.defaultPrevented).toBe(true);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(albumPhotos.length);
+    const event = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+    act(() => window.dispatchEvent(event)); await settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(host.querySelector('.home-toolbar-title')).toBeNull();
+    expect(host.querySelectorAll('.album-card')).toHaveLength(2);
+    expect(api.albums).toHaveBeenCalledTimes(1);
+  });
   it('only returns to the album list when reactivating Albums, preserving ordinary tab switches', async () => {
     await mount();
     click('.photo-selection-input');
