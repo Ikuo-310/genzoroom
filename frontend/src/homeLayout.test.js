@@ -128,10 +128,13 @@ describe('Home and thumbnail layout', () => {
     const photoDay = document.createElement('button'); photoDay.className = 'calendar-day has-assets today';
     content.append(month, year, mini, weekday, ordinary, disabled, photoDay);
     const rule = selector => Array.from(stylesheet.sheet.cssRules).find(item => item.selectorText === selector)?.style;
-    for (const selector of ['.calendar-month', '.calendar-year', '.calendar-mini-month']) {
+    for (const selector of ['.calendar-month', '.calendar-mini-month']) {
       expect(rule(selector).getPropertyValue('background')).toBe('var(--bg-panel)');
       expect(rule(selector).getPropertyValue('border')).toContain('var(--border-subtle)');
     }
+    expect(rule('.calendar-year').getPropertyValue('background')).toBe('transparent');
+    expect(rule('.calendar-year').getPropertyValue('border')).toBe('0');
+    expect(rule('.calendar-year').getPropertyValue('border-radius')).toBe('0');
     expect(rule('.calendar-mini-month h3').getPropertyValue('color')).toBe('var(--text-primary)');
     expect(rule('.calendar-weekday').getPropertyValue('color')).toBe('var(--text-secondary)');
     expect(rule('.calendar-day').getPropertyValue('background')).toBe('var(--bg-elevated)');
@@ -139,8 +142,11 @@ describe('Home and thumbnail layout', () => {
     expect(rule('.calendar-day').getPropertyValue('color')).toBe('var(--text-primary)');
     expect(rule('.calendar-day:disabled').getPropertyValue('background')).toBe('var(--bg-app)');
     expect(rule('.calendar-day:disabled').getPropertyValue('color')).toBe('var(--text-secondary)');
-    expect(rule('.calendar-day.has-assets').getPropertyValue('border-color')).toBe('var(--accent)');
-    expect(rule('.calendar-day.today').getPropertyValue('box-shadow')).toContain('var(--accent)');
+    expect(rule('.calendar-day.has-assets').getPropertyValue('border-color')).toBe('#66696f');
+    expect(rule('.calendar-day.has-assets').getPropertyValue('background-color')).toBe('#36383c');
+    expect(rule('.calendar-day.has-assets:hover').getPropertyValue('border-color')).toBe('#85888f');
+    expect(rule('.calendar-day.today').getPropertyValue('box-shadow')).toContain('#ececee');
+    expect(rule('.calendar-month .has-thumbnail.today::after').getPropertyValue('box-shadow')).toContain('#ececee');
   });
   it('styles This month like the calendar selects while keeping the navigation responsive', () => {
     const navigation = document.createElement('div'); navigation.className = 'calendar-navigation';
