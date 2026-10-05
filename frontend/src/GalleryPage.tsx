@@ -588,64 +588,64 @@ export function GalleryPage() {
 
   return (
     <main className="home-page" ref={pageRef}>
-      <div className="home-intro">
-        <header className="app-header">
-          <div className="home-title-row">
-            <h1><HomeTitle className="home-title-link" onActivate={() => {}} /></h1>
-            <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
-              onCheckAgain={() => {
-                connectionRequestId.current += 1;
-                setConnection('checking');
-                setImmichConnection('checking');
-                setConnectionAttempt(value => value + 1);
-              }} />
-          </div>
-          <SettingsButton />
-        </header>
-      </div>
-      <section className="photos" aria-label={t('home.sections')}>
-        <div className="home-toolbar">
-          <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
-            <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
-              aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
-              onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
-            <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
-              aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
-              onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
-            <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
-              aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
-              onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
-            <button id="home-favorites-tab" ref={favoritesTab} type="button" role="tab" aria-controls="home-favorites-panel"
-              aria-selected={activeTab === 'favorites'} tabIndex={activeTab === 'favorites' ? 0 : -1}
-              onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
-          </div>
-          <div className="home-toolbar-controls">
-            {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
-              setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
-              writeStackFilterMode(mode, activeTab);
-            }} />}
-            {photoView && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
-              setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
-              writeEditStatusFilterMode(mode, activeTab);
-            }} />}
-            {photoView && <PhotoFilterControls filters={photoFilters} onChange={mode => {
-              setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
-              writePhotoFilterMode(mode, activeTab);
-            }} />}
-            {activeTab === 'recent' && <>
-              <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
-                <select value={settings.recentPhotoCount}
-                  onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
-                  {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
-                </select>
-              </label>
-            </>}
-            {(photoView || activeTab === 'albums') && <div className="home-control thumbnail-size-setting">
-              <span className="home-control-label">{t('photos.thumbnailSize')}</span>
-              <HomeThumbnailSizeControl />
-            </div>}
-          </div>
+      <header className="app-header">
+        <div className="home-title-row">
+          <h1><HomeTitle className="home-title-link" onActivate={() => {}} /></h1>
+          <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
+            onCheckAgain={() => {
+              connectionRequestId.current += 1;
+              setConnection('checking');
+              setImmichConnection('checking');
+              setConnectionAttempt(value => value + 1);
+            }} />
         </div>
+        <SettingsButton />
+      </header>
+      <div className="home-tabs-bar">
+        <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
+          <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
+            aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
+            onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{t('home.recentTab')}</button>
+          <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
+            aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
+            onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{t('home.albumsTab')}</button>
+          <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
+            aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
+            onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{t('home.calendarTab')}</button>
+          <button id="home-favorites-tab" ref={favoritesTab} type="button" role="tab" aria-controls="home-favorites-panel"
+            aria-selected={activeTab === 'favorites'} tabIndex={activeTab === 'favorites' ? 0 : -1}
+            onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
+        </div>
+      </div>
+      <div className="home-toolbar">
+        <div className="home-toolbar-controls">
+          {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
+            setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
+            writeStackFilterMode(mode, activeTab);
+          }} />}
+          {photoView && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
+            setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
+            writeEditStatusFilterMode(mode, activeTab);
+          }} />}
+          {photoView && <PhotoFilterControls filters={photoFilters} onChange={mode => {
+            setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
+            writePhotoFilterMode(mode, activeTab);
+          }} />}
+          {activeTab === 'recent' && <>
+            <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
+              <select value={settings.recentPhotoCount}
+                onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
+                {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
+              </select>
+            </label>
+          </>}
+          {(photoView || activeTab === 'albums') && <div className="home-control thumbnail-size-setting">
+            <span className="home-control-label">{t('photos.thumbnailSize')}</span>
+            <HomeThumbnailSizeControl />
+          </div>}
+        </div>
+      </div>
+      <section className="home-content" aria-label={t('home.sections')}>
         {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unsupported' ? 'photos.workspaceUnsupported' : 'photos.workspaceAmbiguous')}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {selectionMode && <PhotoSelectionBar

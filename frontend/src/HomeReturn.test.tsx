@@ -43,6 +43,11 @@ async function mount(state?: unknown) {
 it('keeps connection details and Settings in the compact Home title bar without introductory copy', async () => {
   await mount(); await settle();
   const header = host.querySelector('.app-header')!;
+  const page = host.querySelector('.home-page')!;
+  expect(Array.from(page.children).map(element => element.className))
+    .toEqual(['app-header', 'home-tabs-bar', 'home-toolbar', 'home-content']);
+  expect(page.querySelector('.home-toolbar .home-tabs')).toBeNull();
+  expect(homeScrollContent(page as HTMLElement)).toBe(page.querySelector('.home-content'));
   expect(header.querySelector('h1')?.textContent).toBe('GenzoRoom');
   expect(header.querySelector('.home-title-row .connection-control')).not.toBeNull();
   expect(header.querySelector('.connection-details')).not.toBeNull();
@@ -102,39 +107,52 @@ afterEach(() => { act(() => root.unmount()); host.remove();
   vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it('accepts legacy page offsets and restores only common content after data arrives', async () => {
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.recent.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    expect(readHomeReturn(context)).toMatchObject({ pageScrollTop: 32, contentScrollTop: 840 });
+    await mount({ homeReturn: context });
+    expectScroll(0, 0);
+    await act(async () => resolve([photo]));
+    expectScroll(0, 840);
+    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(0);
+    await click('.photo-selection-input');
+    expect(host.querySelector('.home-content .selection-bar')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
+  });
   it('returns from the darkroom to Favorites and restores its scroll after the list arrives', async () => {
-    await mount(); await click('#home-favorites-tab'); setScroll(22, 622);
+    await mount(); await click('#home-favorites-tab'); setScroll(0, 622);
     await click('.photo-card-button'); await click('.workspace-actions button');
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
-    expectScroll(22, 622);
+    expectScroll(0, 622);
     expect(readHomeReturn({ ...context, tab: 'favorites' })?.tab).toBe('favorites');
   });
   it('keeps Year view scroll separate from months and other years across tabs and date details', async () => {
     api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
       days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
     await mount(); await click('#home-calendar-tab'); change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle();
-    setScroll(8, 180);
-    await click('.calendar-view-toggle'); setScroll(26, 626);
-    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(26, 626);
-    await click('.calendar-view-toggle'); expectScroll(8, 180);
-    await click('.calendar-view-toggle'); expectScroll(26, 626);
-    change('#calendar-year', '2025'); await settle(); expectScroll(0, 0); setScroll(25, 525);
-    change('#calendar-year', '2026'); await settle(); expectScroll(26, 626);
-    await click('.calendar-day.has-assets'); setScroll(15, 415);
-    await click('#home-calendar-tab'); expectScroll(26, 626);
+    setScroll(0, 180);
+    await click('.calendar-view-toggle'); setScroll(0, 626);
+    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(0, 626);
+    await click('.calendar-view-toggle'); expectScroll(0, 180);
+    await click('.calendar-view-toggle'); expectScroll(0, 626);
+    change('#calendar-year', '2025'); await settle(); expectScroll(0, 0); setScroll(0, 525);
+    change('#calendar-year', '2026'); await settle(); expectScroll(0, 626);
+    await click('.calendar-day.has-assets'); setScroll(0, 415);
+    await click('#home-calendar-tab'); expectScroll(0, 626);
     expect(host.querySelector('.calendar-year')).not.toBeNull();
-    await click('.calendar-day.has-assets'); expectScroll(15, 415);
-    await click('.album-back'); expectScroll(26, 626);
-    change('#calendar-year', '2025'); await settle(); expectScroll(25, 525);
+    await click('.calendar-day.has-assets'); expectScroll(0, 415);
+    await click('.album-back'); expectScroll(0, 626);
+    change('#calendar-year', '2025'); await settle(); expectScroll(0, 525);
   });
 
   it('restores the annual parent mode after the darkroom and prioritizes the day scroll from navigation state', async () => {
     api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
       days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
     await mount(); await click('#home-calendar-tab'); change('#calendar-year', '2026'); await settle();
-    await click('.calendar-view-toggle'); await click('.calendar-day.has-assets'); setScroll(31, 931);
-    await click('.photo-card-button'); await click('.workspace-actions button'); expectScroll(31, 931);
-    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(31, 931);
+    await click('.calendar-view-toggle'); await click('.calendar-day.has-assets'); setScroll(0, 931);
+    await click('.photo-card-button'); await click('.workspace-actions button'); expectScroll(0, 931);
+    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(0, 931);
     await click('#home-calendar-tab');
     expect(host.querySelector('.calendar-year')).not.toBeNull();
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
@@ -143,13 +161,13 @@ describe('Home return context', () => {
   });
 
   it('keeps Recent and Album-list offsets separate across mouse and keyboard tab navigation', async () => {
-    await mount(); setScroll(12, 480);
-    await click('#home-albums-tab'); expectScroll(0, 0); setScroll(24, 260);
-    await click('#home-recent-tab'); expectScroll(12, 480);
-    await click('#home-recent-tab'); expectScroll(12, 480);
+    await mount(); setScroll(0, 480);
+    await click('#home-albums-tab'); expectScroll(0, 0); setScroll(0, 260);
+    await click('#home-recent-tab'); expectScroll(0, 480);
+    await click('#home-recent-tab'); expectScroll(0, 480);
     await act(async () => host.querySelector('#home-recent-tab')!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
-    expectScroll(24, 260);
+    expectScroll(0, 260);
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).toHaveBeenCalledTimes(1);
   });
@@ -157,17 +175,17 @@ describe('Home return context', () => {
   it('remembers each album and the list when returning with either the back button or active tab', async () => {
     const otherAlbum = { ...album, id: 'album-2', albumName: 'Other album' };
     api.albums.mockResolvedValue([album, otherAlbum]);
-    await mount(); await click('#home-albums-tab'); setScroll(10, 210);
-    await click('.album-card'); expectScroll(0, 0); setScroll(20, 520);
-    await click('#home-calendar-tab'); await click('#home-albums-tab'); expectScroll(20, 520);
-    await click('#home-albums-tab'); expectScroll(10, 210);
-    await click('.album-card:last-child'); expectScroll(0, 0); setScroll(30, 730);
-    await click('.album-back'); expectScroll(10, 210);
-    await click('.album-card'); expectScroll(20, 520);
-    await click('.album-back'); await click('.album-card:last-child'); expectScroll(30, 730);
+    await mount(); await click('#home-albums-tab'); setScroll(0, 210);
+    await click('.album-card'); expectScroll(0, 0); setScroll(0, 520);
+    await click('#home-calendar-tab'); await click('#home-albums-tab'); expectScroll(0, 520);
+    await click('#home-albums-tab'); expectScroll(0, 210);
+    await click('.album-card:last-child'); expectScroll(0, 0); setScroll(0, 730);
+    await click('.album-back'); expectScroll(0, 210);
+    await click('.album-card'); expectScroll(0, 520);
+    await click('.album-back'); await click('.album-card:last-child'); expectScroll(0, 730);
     await click('#home-albums-tab'); await click('#home-recent-tab'); await click('#home-albums-tab');
     expect(host.querySelector('.album-detail-heading')).toBeNull();
-    expectScroll(10, 210);
+    expectScroll(0, 210);
     expect(api.albums).toHaveBeenCalledTimes(1);
   });
 
@@ -176,53 +194,53 @@ describe('Home return context', () => {
       days: [1, 15].map(day => ({ date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
         hasAssets: true, count: 1 })) }));
     await mount(); await click('#home-calendar-tab');
-    change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle(); setScroll(10, 110);
-    await click('.calendar-day.has-assets'); expectScroll(0, 0); setScroll(20, 420);
-    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(20, 420);
-    await click('#home-calendar-tab'); expectScroll(10, 110);
-    await click('.calendar-day[aria-label*="2026-08-15"]'); expectScroll(0, 0); setScroll(30, 630);
-    await click('.album-back'); expectScroll(10, 110);
-    change('#calendar-month', '9'); await settle(); expectScroll(0, 0); setScroll(40, 140);
-    await click('.calendar-day.has-assets'); expectScroll(0, 0); setScroll(50, 850);
-    await click('.album-back'); expectScroll(40, 140);
-    change('#calendar-month', '8'); await settle(); expectScroll(10, 110);
-    await click('.calendar-day.has-assets'); expectScroll(20, 420);
-    await click('.album-back'); await click('.calendar-day[aria-label*="2026-08-15"]'); expectScroll(30, 630);
+    change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle(); setScroll(0, 110);
+    await click('.calendar-day.has-assets'); expectScroll(0, 0); setScroll(0, 420);
+    await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(0, 420);
+    await click('#home-calendar-tab'); expectScroll(0, 110);
+    await click('.calendar-day[aria-label*="2026-08-15"]'); expectScroll(0, 0); setScroll(0, 630);
+    await click('.album-back'); expectScroll(0, 110);
+    change('#calendar-month', '9'); await settle(); expectScroll(0, 0); setScroll(0, 140);
+    await click('.calendar-day.has-assets'); expectScroll(0, 0); setScroll(0, 850);
+    await click('.album-back'); expectScroll(0, 140);
+    change('#calendar-month', '8'); await settle(); expectScroll(0, 110);
+    await click('.calendar-day.has-assets'); expectScroll(0, 420);
+    await click('.album-back'); await click('.calendar-day[aria-label*="2026-08-15"]'); expectScroll(0, 630);
     await click('#home-calendar-tab'); await click('#home-recent-tab'); await click('#home-calendar-tab');
-    expect(host.querySelector('.album-detail-heading')).toBeNull(); expectScroll(10, 110);
-    change('#calendar-year', '2025'); await settle(); expectScroll(0, 0); setScroll(60, 160);
-    change('#calendar-year', '2026'); await settle(); expectScroll(10, 110);
+    expect(host.querySelector('.album-detail-heading')).toBeNull(); expectScroll(0, 110);
+    change('#calendar-year', '2025'); await settle(); expectScroll(0, 0); setScroll(0, 160);
+    change('#calendar-year', '2026'); await settle(); expectScroll(0, 110);
   });
 
   it.each(['albums', 'calendar'] as const)('waits for %s detail data and cancels stale restoration without losing its offset', async tab => {
-    await mount(); setScroll(10, 110);
+    await mount(); setScroll(0, 110);
     if (tab === 'albums') { await click('#home-albums-tab'); await click('.album-card'); }
     else await openCalendarDay();
-    setScroll(20, 520);
+    setScroll(0, 520);
     await click('#home-recent-tab');
     let resolve!: (assets: AssetDetail[]) => void;
     const request = tab === 'albums' ? api.albumAssets : api.day;
     request.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
     await click(`#home-${tab}-tab`);
-    // The retained grid must not receive the saved offset before its refetch completes.
-    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(0);
+    // The shared container retains the previous view's offset until the refetch completes.
+    expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(110);
     const signal = request.mock.calls.at(-1)![1] as AbortSignal;
     await click(tab === 'albums' ? '#home-calendar-tab' : '#home-albums-tab');
-    expect(signal.aborted).toBe(true); setScroll(30, 130);
-    await act(async () => resolve([photo, second])); expectScroll(30, 130);
-    await click(`#home-${tab}-tab`); expectScroll(20, 520);
-    await click('#home-recent-tab'); expectScroll(10, 110);
+    expect(signal.aborted).toBe(true); setScroll(0, 130);
+    await act(async () => resolve([photo, second])); expectScroll(0, 130);
+    await click(`#home-${tab}-tab`); expectScroll(0, 520);
+    await click('#home-recent-tab'); expectScroll(0, 110);
   });
 
   it('waits for new-month heatmap data before applying that month offset', async () => {
     await mount(); await click('#home-calendar-tab');
-    change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle(); setScroll(8, 180);
-    change('#calendar-month', '9'); await settle(); setScroll(9, 190);
+    change('#calendar-year', '2026'); change('#calendar-month', '8'); await settle(); setScroll(0, 180);
+    change('#calendar-month', '9'); await settle(); setScroll(0, 190);
     let resolve!: (value: { year: number; month: number; days: [] }) => void;
     api.heatmap.mockReturnValueOnce(new Promise<{ year: number; month: number; days: [] }>(yes => { resolve = yes; }));
     change('#calendar-month', '8'); await settle();
-    expect(host.querySelector<HTMLElement>('.calendar-month')!.scrollTop).toBe(190);
-    await act(async () => resolve({ year: 2026, month: 8, days: [] })); expectScroll(8, 180);
+    expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(190);
+    await act(async () => resolve({ year: 2026, month: 8, days: [] })); expectScroll(0, 180);
   });
 
   it.each(['albums', 'calendar'] as const)('restores %s detail after tab switches and darkroom exit, then allows reactivation to go up', async tab => {
@@ -271,8 +289,8 @@ describe('Home return context', () => {
 
   it('returns to the same album after multi-photo navigation and restores scroll only after assets render', async () => {
     await mount(); await click('#home-albums-tab'); await click('.album-card');
-    host.querySelector<HTMLElement>('.home-page')!.scrollTop = 32;
-    host.querySelector<HTMLElement>('.photo-grid')!.scrollTop = 840;
+    host.querySelector<HTMLElement>('.home-page')!.scrollTop = 0;
+    homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop = 840;
     for (const box of host.querySelectorAll<HTMLInputElement>('.photo-selection-input')) await act(async () => box.click());
     await click('.selection-open-workspace');
     await click('.filmstrip-item:last-child');
@@ -285,21 +303,21 @@ describe('Home return context', () => {
     expect(host.querySelector('.photo-grid')).toBeNull();
     expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
     await act(async () => resolve([photo, second]));
-    expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(32);
-    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(840);
+    expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
+    expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(840);
     expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
-    await click('#home-recent-tab'); await click('#home-albums-tab'); expectScroll(32, 840);
+    await click('#home-recent-tab'); await click('#home-albums-tab'); expectScroll(0, 840);
     await click('.album-back'); expect(host.querySelector('.album-card')).not.toBeNull();
     await click('#home-recent-tab'); expect(host.querySelector('.photo-card.selected')).toBeNull();
   });
 
   it('returns to the same Calendar day, keeps its month, and leaves other modes separate', async () => {
     await mount(); await openCalendarDay();
-    host.querySelector<HTMLElement>('.photo-grid')!.scrollTop = 520;
+    homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop = 520;
     await click('.photo-card-button'); await click('.workspace-actions button');
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
-    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(520);
+    expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(520);
     expect(host.querySelector('.recent-count-control')).toBeNull();
     await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(0, 520);
     await click('.album-back');
@@ -364,7 +382,7 @@ describe('Home return context', () => {
     api.day.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
     await mount({ homeReturn: { ...context, tab: 'calendar', date: '2026-09-01' } });
     await click('#home-recent-tab'); await act(async () => resolve([photo]));
-    expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(0);
+    expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(0);
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
   });
 

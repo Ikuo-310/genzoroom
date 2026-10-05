@@ -37,7 +37,7 @@ export function readHomeReturn(value: unknown): HomeReturnContext | null {
 }
 
 export function homeScrollContent(page: HTMLElement): HTMLElement | null {
-  return page.querySelector('.photo-grid, .album-grid, .calendar-month, .calendar-year');
+  return page.querySelector('.home-content');
 }
 
 export type HomeScrollPosition = Pick<HomeReturnContext, 'pageScrollTop' | 'contentScrollTop'>;
@@ -50,7 +50,8 @@ export function homeViewKey(tab: HomeTab, albumId: string | null, year: number, 
 }
 
 export function restoreHomeScroll(page: HTMLElement, context: HomeScrollPosition) {
-  page.scrollTop = context.pageScrollTop;
+  // Keep accepting legacy page offsets in route state; the fixed shell only scrolls its content.
+  page.scrollTop = 0;
   const content = homeScrollContent(page);
   if (content) content.scrollTop = context.contentScrollTop;
 }

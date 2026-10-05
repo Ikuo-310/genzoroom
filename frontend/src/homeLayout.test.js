@@ -10,12 +10,35 @@ beforeEach(() => {
   stylesheet.textContent = readFileSync('src/style.css', 'utf8');
   document.head.append(stylesheet);
   host = document.createElement('div');
-  host.innerHTML = '<main class="home-page"><div class="home-intro"><header class="app-header"></header><section></section></div><section class="photos"><div class="photos-heading"></div><div class="photo-grid"><article class="photo-card selected"><label class="photo-selection-control"><input type="checkbox"></label><button class="photo-card-button"><div class="thumbnail"><img></div><div class="photo-info"><p>Photo.jpg</p><time>2026/09/27</time></div></button></article></div></section></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
+  host.innerHTML = '<main class="home-page"><header class="app-header"></header><div class="home-tabs-bar"><div class="home-tabs"></div></div><div class="home-toolbar"></div><section class="home-content"><div class="photo-grid"><article class="photo-card selected"><label class="photo-selection-control"><input type="checkbox"></label><button class="photo-card-button"><div class="thumbnail"><img></div><div class="photo-info"><p>Photo.jpg</p><time>2026/09/27</time></div></button></article></div></section></main><div class="filmstrip"><button class="filmstrip-item"><img></button></div>';
   document.body.append(host);
 });
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('uses equal Home and STACK brand sizes without changing darkroom typography', () => {
+    const home = host.querySelector('.app-header');
+    home.innerHTML = '<div class="home-title-row"><h1><button class="home-title-link">GenzoRoom</button></h1></div>';
+    const stack = document.createElement('main'); stack.className = 'stack-management-page';
+    stack.innerHTML = '<header class="stack-management-header"><button class="stack-home-title">GenzoRoom</button><h1>STACK</h1></header>';
+    host.append(stack);
+    const homeBrand = getComputedStyle(home.querySelector('.home-title-row'));
+    const stackBrand = getComputedStyle(stack.querySelector('.stack-home-title'));
+    expect(homeBrand.fontSize).toBe('1.6rem');
+    expect(stackBrand.fontSize).toBe(homeBrand.fontSize);
+    expect(stackBrand.fontWeight).toBe(homeBrand.fontWeight);
+    expect(getComputedStyle(stack.querySelector('.stack-management-header')).gridTemplateColumns).toBe('minmax(0, 1fr) auto minmax(0, 1fr)');
+    expect(getComputedStyle(stack.querySelector('h1')).fontSize).toBe('1.2rem');
+  });
+  it('lets every content layout grow inside the common scroll region', () => {
+    const content = host.querySelector('.home-content');
+    for (const className of ['photo-grid', 'album-grid', 'calendar-month', 'calendar-year']) {
+      const element = document.createElement('div'); element.className = className; content.append(element);
+      expect(getComputedStyle(element).overflowY).toBe('visible');
+    }
+    expect(getComputedStyle(content).overflowY).toBe('auto');
+    expect(getComputedStyle(content).minHeight).toBe('0');
+  });
   it('shares only basic theme tokens and removes the gallery enclosure', () => {
     const stack = document.createElement('main'); stack.className = 'stack-management-page'; host.append(stack);
     const home = host.querySelector('.home-page');
@@ -25,7 +48,7 @@ describe('Home and thumbnail layout', () => {
     }
     expect(getComputedStyle(home).getPropertyValue('--status-match')).toBe('');
     expect(getComputedStyle(stack).getPropertyValue('--status-match')).toBe('#285b3b');
-    const photos = getComputedStyle(host.querySelector('.photos'));
+    const photos = getComputedStyle(host.querySelector('.home-content'));
     expect(photos.borderTopWidth).toBe('0px');
     expect(photos.borderRadius).toBe('0');
     expect(photos.marginTop).toBe('0px');
@@ -39,31 +62,29 @@ describe('Home and thumbnail layout', () => {
     // jsdom does not resolve inherited custom properties in border shorthand.
     const headerRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.app-header');
     expect(headerRule.style.getPropertyValue('border-bottom')).toBe('1px solid var(--border-subtle)');
-    expect(getComputedStyle(header.querySelector('h1')).fontSize).toBe('1.2rem');
+    expect(getComputedStyle(header.querySelector('.home-title-row')).fontSize).toBe('1.6rem');
     expect(getComputedStyle(header.querySelector('h1')).letterSpacing).toBe('normal');
     expect(getComputedStyle(header.querySelector('.home-title-row')).flexWrap).toBe('wrap');
     expect(getComputedStyle(header.querySelector('.settings-button')).fontSize).toBe('0.85rem');
   });
-  it('lets only the Home intro header use the available width while keeping the gallery full width', () => {
-    const intro = host.querySelector('.home-intro');
+  it('keeps the fixed header and content full width', () => {
     const header = host.querySelector('.app-header');
-    const photos = host.querySelector('.photos');
-    expect(getComputedStyle(intro).width).toBe('100%');
-    expect(getComputedStyle(intro).maxWidth).toBe('none');
-    expect(getComputedStyle(intro).marginLeft).toBe('0px');
-    expect(getComputedStyle(intro).marginRight).toBe('0px');
+    const photos = host.querySelector('.home-content');
+    expect(header.parentElement).toBe(host.querySelector('.home-page'));
+    expect(Array.from(header.parentElement.children).map(element => element.className))
+      .toEqual(['app-header', 'home-tabs-bar', 'home-toolbar', 'home-content']);
     expect(getComputedStyle(header).justifyContent).toBe('space-between');
     expect(getComputedStyle(photos).width).toBe('100%');
     expect(stylesheet.textContent).toContain('@media (max-width: 520px)');
     expect(stylesheet.textContent).toContain('.app-header { display: flex; flex-wrap: wrap; }');
   });
-  it('keeps annual calendars scrollable with a responsive grid and matching mode-control height', () => {
+  it('keeps annual calendars naturally sized with a responsive grid and matching mode-control height', () => {
     const year = document.createElement('div'); year.className = 'calendar-year';
     year.innerHTML = '<div class="calendar-year-grid"><section class="calendar-mini-month"><h3><button class="calendar-mini-month-title">January</button></h3><div class="calendar-days"></div></section></div><div class="calendar-navigation"><select></select><button class="calendar-view-toggle">Year view</button></div>';
-    host.querySelector('.photos').append(year);
+    host.querySelector('.home-content').append(year);
     expect(getComputedStyle(year).minWidth).toBe('0');
     expect(getComputedStyle(year).minHeight).toBe('0');
-    expect(getComputedStyle(year).overflowY).toBe('auto');
+    expect(getComputedStyle(year).overflowY).toBe('visible');
     expect(getComputedStyle(year).maxWidth).toBe('1700px');
     expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).toBe('repeat(auto-fit, minmax(min(100%, 260px), 1fr))');
     expect(getComputedStyle(year.querySelector('.calendar-year-grid')).gridTemplateColumns).not.toContain('scroll');
@@ -75,7 +96,7 @@ describe('Home and thumbnail layout', () => {
   it('keeps the Home tabs and panels flexible at narrow widths', () => {
     const tabs = document.createElement('div'); tabs.className = 'home-tabs';
     const panel = document.createElement('div'); panel.className = 'home-tab-panel';
-    host.querySelector('.photos').prepend(tabs, panel);
+    host.querySelector('.home-content').prepend(tabs, panel);
     expect(getComputedStyle(tabs).flexWrap).toBe('wrap');
     expect(getComputedStyle(panel).minWidth).toBe('0');
     expect(getComputedStyle(panel).minHeight).toBe('0');
@@ -83,7 +104,7 @@ describe('Home and thumbnail layout', () => {
   it('keeps the calendar in seven shrinkable columns at narrow widths', () => {
     const month = document.createElement('div'); month.className = 'calendar-month';
     const days = document.createElement('div'); days.className = 'calendar-days'; month.append(days);
-    host.querySelector('.photos').append(month);
+    host.querySelector('.home-content').append(month);
     expect(getComputedStyle(month).minWidth).toBe('0');
     expect(getComputedStyle(month).maxWidth).toBe('840px');
     expect(getComputedStyle(days).minWidth).toBe('0');
@@ -92,13 +113,13 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(cell).aspectRatio).toBe('4 / 5');
     const year = document.createElement('div'); year.className = 'calendar-year';
     year.innerHTML = '<section class="calendar-mini-month"><button class="calendar-day"></button></section>';
-    host.querySelector('.photos').append(year);
+    host.querySelector('.home-content').append(year);
     expect(getComputedStyle(year.querySelector('.calendar-day')).aspectRatio).toBe('1');
   });
   it('styles This month like the calendar selects while keeping the navigation responsive', () => {
     const navigation = document.createElement('div'); navigation.className = 'calendar-navigation';
     navigation.innerHTML = '<select><option>2026</option></select><button class="calendar-current-month">This month</button>';
-    host.querySelector('.photos').append(navigation);
+    host.querySelector('.home-content').append(navigation);
     const select = getComputedStyle(navigation.querySelector('select'));
     const button = getComputedStyle(navigation.querySelector('.calendar-current-month'));
     for (const property of ['height', 'fontSize', 'fontWeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
@@ -121,22 +142,20 @@ describe('Home and thumbnail layout', () => {
       expect(getComputedStyle(badge).backgroundColor).toBe('rgba(15, 20, 18, 0.82)');
     }
   });
-  it('caps card widths and gives the photo grid its own vertical scroll area', () => {
+  it('caps card widths and gives only Home content its vertical scroll area', () => {
     const page = host.querySelector('.home-page');
-    const intro = host.querySelector('.home-intro');
-    const photos = host.querySelector('.photos');
+    const photos = host.querySelector('.home-content');
     const heading = document.createElement('div'); heading.className = 'home-toolbar';
-    host.querySelector('.photos').prepend(heading);
+    host.querySelector('.home-content').prepend(heading);
     const grid = host.querySelector('.photo-grid');
     expect(getComputedStyle(page).height).toBe('100dvh');
     expect(getComputedStyle(page).maxWidth).toBe('none');
-    expect(getComputedStyle(page).overflowY).toBe('auto');
-    expect(getComputedStyle(intro).maxWidth).toBe('none');
-    expect(getComputedStyle(photos).display).toBe('flex');
+    expect(getComputedStyle(page).overflow).toBe('hidden');
+    expect(getComputedStyle(photos).overflowY).toBe('auto');
     expect(getComputedStyle(photos).width).toBe('100%');
     expect(getComputedStyle(photos).minHeight).toBe('0');
     expect(getComputedStyle(heading).flexShrink).toBe('0');
-    expect(getComputedStyle(grid).overflowY).toBe('auto');
+    expect(getComputedStyle(grid).overflowY).toBe('visible');
     expect(getComputedStyle(grid).minHeight).toBe('0');
     expect(getComputedStyle(grid).gridTemplateColumns).toContain('auto-fill');
     expect(getComputedStyle(grid).gridAutoRows).toBe('max-content');
@@ -145,7 +164,7 @@ describe('Home and thumbnail layout', () => {
   });
 
   it('adds spacing beside the photo grid scrollbar only in Firefox', () => {
-    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .photo-grid { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
+    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .home-content { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
     expect(getComputedStyle(host.querySelector('.photo-grid')).paddingRight).toBe('2px');
   });
 
@@ -155,7 +174,7 @@ describe('Home and thumbnail layout', () => {
     const controls = document.createElement('div');
     controls.className = 'home-toolbar-controls';
     controls.innerHTML = '<label class="home-control photo-filter-control"><span class="home-control-label">Type</span><select><option>All</option></select></label><label class="home-control edit-status-filter-control"><span class="home-control-label">Edit status</span><select><option>All</option><option>Edited</option><option>Not edited</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
-    toolbar.append(tabs, controls); host.querySelector('.photos').prepend(toolbar);
+    toolbar.append(tabs, controls); host.querySelector('.home-content').prepend(toolbar);
     expect(getComputedStyle(toolbar).display).toBe('flex');
     expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
     expect(getComputedStyle(controls).display).toBe('flex');
@@ -180,7 +199,7 @@ describe('Home and thumbnail layout', () => {
 
   it('has no bottom note or extra grid row', () => {
     expect(host.querySelector('.note')).toBeNull();
-    expect(getComputedStyle(host.querySelector('.home-page')).gridTemplateRows).toBe('auto minmax(120px, 1fr)');
+    expect(getComputedStyle(host.querySelector('.home-page')).gridTemplateRows).toBe('auto auto auto minmax(0, 1fr)');
     expect(stylesheet.textContent).not.toContain('.note');
   });
 

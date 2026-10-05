@@ -163,15 +163,15 @@ describe('Home favorites', () => {
       pageScrollTop: 1, contentScrollTop: 2,
     } });
     await mount(); await click('#home-favorites-tab');
-    setScroll(45, 120);
+    setScroll(0, 120);
     const event = await pressD();
     expect(event.defaultPrevented).toBe(true);
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
     expect(navigation?.activeAssetId).toBe('photo-2');
-    expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', pageScrollTop: 45, contentScrollTop: 120 });
+    expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', pageScrollTop: 0, contentScrollTop: 120 });
     await click('.return-home');
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
-    expectScroll(45, 120);
+    expectScroll(0, 120);
   });
 
   it('prefers the current selection over a remembered workspace', async () => {
@@ -244,14 +244,14 @@ describe('Home favorites', () => {
   });
 
   it('restores Favorite offsets across tabs and prioritizes the captured darkroom return position', async () => {
-    await mount(); setScroll(10, 120); await click('#home-favorites-tab'); setScroll(20, 420);
-    await click('#home-recent-tab'); expectScroll(10, 120);
-    await click('#home-favorites-tab'); expectScroll(20, 420);
-    setScroll(30, 640); await click('.photo-card-button');
+    await mount(); setScroll(0, 120); await click('#home-favorites-tab'); setScroll(0, 420);
+    await click('#home-recent-tab'); expectScroll(0, 120);
+    await click('#home-favorites-tab'); expectScroll(0, 420);
+    setScroll(0, 640); await click('.photo-card-button');
     expect(navigation?.homeReturn?.contentScrollTop).toBe(640);
-    await click('.return-home'); expectScroll(30, 640);
+    await click('.return-home'); expectScroll(0, 640);
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
-    await click('#home-recent-tab'); await click('#home-favorites-tab'); expectScroll(30, 640);
+    await click('#home-recent-tab'); await click('#home-favorites-tab'); expectScroll(0, 640);
   });
 
   it('supports keyboard End, wraparound, and Home over four tabs', async () => {
