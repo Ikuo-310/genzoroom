@@ -102,11 +102,7 @@ describe('Home calendar', () => {
     await mount(); click('#home-calendar-tab'); await settle();
     for (const mode of ['month', 'year']) {
       expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
-      expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
-      for (const action of ['all', 'clear', 'open-stacks']) {
-        expect(host.querySelector<HTMLButtonElement>(`.selection-${action}`)!.disabled).toBe(true);
-      }
-      expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+      expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
       if (mode === 'month') { click('.calendar-view-toggle'); await settle(); }
     }
   });
@@ -280,6 +276,7 @@ describe('Home calendar', () => {
     click('#home-calendar-tab'); await settle();
     expect(api.heatmap).toHaveBeenCalledTimes(requestCount);
     click('.calendar-day.has-assets'); await settle(); click('.photo-selection-input');
+    expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
     click('#home-albums-tab'); await settle(); click('#home-calendar-tab'); await settle();
     expect(api.day).toHaveBeenLastCalledWith('2024-08-01', expect.any(AbortSignal));
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
@@ -288,7 +285,7 @@ describe('Home calendar', () => {
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2024');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
-    expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
+    expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
     click('#home-recent-tab');
     expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('recent.jpg');
     click('#home-calendar-tab'); await settle();

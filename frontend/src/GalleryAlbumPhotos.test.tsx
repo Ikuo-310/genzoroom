@@ -160,6 +160,7 @@ describe('album photo view', () => {
   it('clears Album selection and its Shift anchor before opening another album', async () => {
     api.albumAssets.mockImplementation(async (id: string) => id === albumA.id ? albumPhotos : [{ ...albumPhotos[0], id: 'other-photo' }]);
     await mount(); click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
+    expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
     click('.photo-selection-input');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     click('.album-back');

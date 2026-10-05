@@ -74,6 +74,10 @@ describe('Home favorites', () => {
   it('keeps toolbar actions visible at zero and safely ignores opening without a session', async () => {
     await mount();
     expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
+    expect(host.querySelector('.home-toolbar .selection-bar')?.getAttribute('role')).toBe('group');
+    expect(host.querySelector('.selection-count')?.tagName).toBe('STRONG');
+    expect(host.querySelector('.selection-count')?.closest('button')).toBeNull();
+    expect(host.querySelectorAll('.selection-actions button')).toHaveLength(4);
     expect(host.querySelector('.home-content .selection-bar')).toBeNull();
     expect(host.querySelector<HTMLButtonElement>('.selection-open-stacks')!.disabled).toBe(true);
     expect(host.querySelector<HTMLButtonElement>('.selection-clear')!.disabled).toBe(true);
@@ -82,10 +86,7 @@ describe('Home favorites', () => {
     expect(navigation).toBeNull();
     for (const tab of ['albums', 'calendar']) {
       await click(`#home-${tab}-tab`);
-      for (const action of ['all', 'clear', 'open-stacks']) {
-        expect(host.querySelector<HTMLButtonElement>(`.selection-${action}`)!.disabled).toBe(true);
-      }
-      expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+      expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
     }
   });
 
@@ -111,6 +112,12 @@ describe('Home favorites', () => {
     expect(host.querySelector('.selection-bar')?.textContent).toContain('0 selected');
     await change('.photo-filter-control select', 'both');
     expect(host.querySelector('.photo-card.selected')).toBeNull();
+  });
+
+  it('shows the selection group on Favorites and keeps Anshitsu enabled', async () => {
+    await mount(); await click('#home-favorites-tab');
+    expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
   });
 
   it('resumes the previous workspace from the unselected toolbar button', async () => {

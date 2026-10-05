@@ -621,10 +621,10 @@ export function GalleryPage() {
         </div>
       </div>
       <div className="home-toolbar">
-        <PhotoSelectionBar count={activeSelectedAssetIds.length}
+        {photoView && <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
           onSelectAll={() => photoView?.selection.selectVisible(visibleAssets.map(asset => asset.id))}
-          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
+          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />}
         <div className="home-toolbar-controls">
           {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
             setStackFilterModes(current => ({ ...current, [activeTab]: mode }));

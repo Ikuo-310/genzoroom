@@ -120,12 +120,12 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-day:not(:disabled):hover { background: #44464b; border-color: #85888f; }
 .calendar-day.today { box-shadow: inset 0 0 0 2px #ececee; }
 h2 { margin: 0; font-size: 1.35rem; }
-.selection-bar { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; align-self: center; gap: 8px 12px; min-width: 0; }
-.selection-bar strong { font-size: 0.92rem; }
-.selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.selection-actions button { color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); padding: 5px 10px; font-size: 0.84rem; }
-.selection-actions button:hover:not(:disabled) { background: #353539; border-color: #626267; }
-.selection-actions button:focus-visible { outline-color: var(--text-primary); }
+.selection-bar { display: inline-flex; flex: 0 1 auto; align-items: center; align-self: center; min-width: 0; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); }
+.selection-count { padding: 5px 9px; color: var(--text-primary); background: var(--bg-app); font-size: 0.84rem; white-space: nowrap; }
+.selection-actions { display: flex; min-width: 0; }
+.selection-actions button { color: var(--text-primary); background: var(--bg-elevated); border: 0; border-left: 1px solid var(--border-subtle); border-radius: 0; padding: 5px 9px; font-size: 0.84rem; white-space: nowrap; }
+.selection-actions button:hover:not(:disabled) { background: #353539; }
+.selection-actions button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--text-primary); outline-offset: -3px; }
 .selection-actions button:disabled { opacity: 0.45; cursor: default; }
 .home-toolbar-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px 12px; min-width: 0; }
 .home-control { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }

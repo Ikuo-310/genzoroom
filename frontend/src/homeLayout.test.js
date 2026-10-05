@@ -22,7 +22,7 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(toolbar).justifyContent).toBe('space-between');
     expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
     const selection = getComputedStyle(toolbar.querySelector('.selection-bar'));
-    expect(selection.flexWrap).toBe('wrap');
+    expect(selection.display).toBe('inline-flex');
     expect(selection.visibility).toBe('visible');
     expect(selection.marginBottom).toBe('');
     expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).justifyContent).toBe('flex-end');
