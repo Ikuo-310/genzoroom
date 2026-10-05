@@ -14,9 +14,11 @@ Internal changes are omitted unless they affect users.
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
 - Home browsing tabs for Albums, Calendar, and Favorites alongside Recent. Calendar includes year, month, and date views; Favorites lists favorited Timeline images.
+- Home keyboard commands for `R` / `A` / `C` / `F` tab navigation, `S` for STACK management, `D` for Anshitsu, and `Primary+A` to select visible photos in photo views.
+- Shift+click to start selection with one photo, then extend an anchored range; Select All adds visible photos while preserving hidden selections and selection order.
 - Independent per-tab RAW / Non-RAW and edited / unedited photo filters, adjustable Home thumbnail sizing, and ordered multi-photo selection with Shift+click ranges.
-- Home browsing-state and per-view scroll restoration when switching tabs and returning from Anshitsu.
-- Keyboard navigation: Home `D` opens the current selection or resumes the last Anshitsu workspace in the same SPA session; Anshitsu `H` returns Home, `F` toggles Viewer-only focus mode, and `Shift+Z` (⇧+Z on macOS) switches between Fit and the previous zoom/pan. Filmstrip photos move with the platform's Primary+Shift+←/→ (Ctrl+Shift on Windows/Linux, ⌘+⇧ on macOS); relevant shortcuts remain available while focus mode hides their controls. Shortcut explanations appear in applicable Tooltips and Menus, with a Settings option to hide those explanations while keeping the shortcuts active. Platform labels use Ctrl / Alt / Shift on Windows/Linux and ⌘ / ⌥ / ⇧ on macOS.
+- Home browsing-state and per-view scroll restoration when switching tabs and returning from Anshitsu or STACK management.
+- Keyboard navigation: Home `D` opens the current selection or resumes the last Anshitsu workspace in the same SPA session; unmodified `G` returns from Anshitsu or STACK management to Gallery/Home; Anshitsu `F` toggles Viewer-only focus mode, and `Shift+Z` (⇧+Z on macOS) switches between Fit and the previous zoom/pan. Filmstrip photos move with the platform's Primary+Shift+←/→ (Ctrl+Shift on Windows/Linux, ⌘+⇧ on macOS); relevant shortcuts remain available while focus mode hides their controls. Shortcut explanations appear in applicable Tooltips and Menus, with a Settings option to hide those explanations while keeping the shortcuts active. Platform labels use Ctrl / Alt / Shift on Windows/Linux and ⌘ / ⌥ / ⇧ on macOS.
 - A shared Settings dialog from Home and Anshitsu for browser-saved display language, independent date and time locale, calendar week start, WebGPU preference, initial Preview / Original choice, and keyboard-shortcut explanation visibility. Auto language follows browser preference with English fallback; Auto image choice prefers the JPEG original when WebGPU is enabled and available, switching from Preview when the original finishes loading unless the user has chosen a source manually. Settings also displays Immich server version and available build information.
 - Optional WebGPU image processing for JPEG previews and originals in Anshitsu, with a remembered GPU ON/OFF preference and automatic CPU fallback when GPU processing is unavailable or fails.
 - Anshitsu can acquire the selected JPEG original through the backend and switch between Preview and Original. Home and Filmstrip retain thumbnail browsing; both viewer sources share the current edits, and Original Info reports embedded profile details.
@@ -24,6 +26,7 @@ Internal changes are omitted unless they affect users.
 - An RGB / Y′ Histogram Scope for JPEG previews, with per-channel visibility, Y Only, Normal shared-maximum and Expanded P99 scales, and synchronization with the Viewer’s persistent and temporary Before / After display. Numpad 0–3 and Numpad Decimal control the display.
 - Recipe v18 adds independent ON/OFF switches for all 16 numeric adjustments alongside the four category and three Color Grading range switches. Disabled values remain stored; reset, History, and processing respect each switch level.
 - Home Shift+click range selection, edited markers in Home and Filmstrip, connection details, and the shared GenzoRoom Home navigation are available. UI improvements add independent edit-panel scrolling and focus navigation, category/adjustment/3WAY range switches and context menus (including reset and numeric Copy/Paste), and Viewer Before / After operations.
+- A desktop-oriented neutral dark Home shell with fixed Header, Tabs, and Toolbar regions, a scrolling content region, compact selection controls on photo views, and responsive Album / Calendar detail controls.
 - `POST /assets/edit-status` returns persisted edit status for up to 100 asset IDs in one request, supporting distinct unknown, unedited, and edited UI states.
 - History rows jump directly to the selected edit state. Header and right-click row menus support compaction, clear, and deletion from the clicked row back through earlier entries; Shift+F10 is supported. Compaction, clear, and partial deletion support immediate Undo. Clear and edit initialization use localized Cancel / Continue confirmations, initially focused on Cancel, with keyboard controls; only edit initialization warns that it cannot be undone.
 - A shared tab-local clipboard for all 16 JPEG recipe values, with full, selected, and single-slider Copy; full and selected Paste; and all four actions in the Viewer menu. `Primary+C` follows the active slider operation target (hover or focus) or copies all values from the focused Viewer; `Primary+V` works without slider or Viewer focus. `Primary+Alternate+C` and `Primary+Alternate+V` open the selection dialog. Changed Paste creates one filename-labelled, undoable History operation, preserves enabled flags, and uses the existing save path.
@@ -66,6 +69,11 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Refreshed Home to a neutral dark four-region desktop layout, sharing the basic theme with STACK management while retaining green status colors and Developer Diagnostics' console theme.
+- Integrated photo selection and Album / Calendar view controls into the Home Toolbar; compact English action labels and optional shortcut suffixes keep the controls concise.
+- Changed Gallery return from `H` to unmodified `G` across Anshitsu and STACK management.
+- Home shortcut hints use compact `[X]` suffixes when enabled in Settings; hiding hints leaves the shortcuts active.
+
 - Home photo lists exclude Immich trash assets and show only the primary photo for each valid Immich Stack. Incomplete or ambiguous Stack metadata is quarantined from Home without relaxing strict Stack management validation. Singleton Stacks are visibly abnormal and can only be removed through the normal confirmed delete workflow.
 - Home photo views can filter stacked versus unstacked cards; valid Stack cards carry member-count metadata. STACK management uses the same Immich API key and requires Stack read/write permissions.
 - Recent photo count can be selected from 50 to 500 in steps of 50, with 100 as the default. Japanese Album periods use compact `YYYY/MM` labels.
@@ -87,6 +95,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Prevented the Home detail Toolbar from clipping selection controls at intermediate widths and preserved pending Home scroll restoration when leaving for Anshitsu or STACK management.
 - Prevented incomplete Immich Stack snapshots from failing Home photo lists or exposing surviving Stack children as ordinary photos; Recent continues paging as needed after excluded entries.
 - Long-running Stack sends use a dedicated proxy timeout; a response from a previous Stack selection cannot change a new draft; long filename candidates remain writable; and re-detection supports selections over 1,000 assets.
 - Prevent Undo/Redo shortcuts from changing the background edit session while save-failure dialogs are open.

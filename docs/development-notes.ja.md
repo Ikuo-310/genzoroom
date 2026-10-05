@@ -2,6 +2,22 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Home刷新フェーズ完了（2026-10-05・現行仕様）
+
+HomeをHeader / Tabs / Toolbar / Contentの4層へ整理した。Header、tab、toolbarは固定領域に置き、`.home-content`だけをscrollさせる。旧来のHome全体を囲う大きな写真panelをなくし、HomeとSTACK管理はneutral dark themeの基本tokenを共有する。通常UIはgray基調で、意味のあるstatus色は維持する。Developer Diagnosticsはgreen console identityを保ち、controlsのみneutral grayで視認性を高めた。Anshitsuのthemeはこの刷新では変更していない。
+
+Home headerはGenzoRoom、Immich接続状態、Settingsで構成し、旧`写真現像室`と開発statusを除いた。4 tabはRecent / Albums / Calendar / Favorites。写真viewのSelection groupはToolbar左端にまとめ、Recent、Favorites、Album詳細、Calendar日付詳細だけで表示する。Album一覧とCalendar月／年では表示しない。Toolbar右側はview既存のfilter／display controlsを維持する。Calendar month/year navigationはToolbar中央に置く。Album／日付詳細はwide desktopで左右対称3列の中央見出し、中間幅で見出しを別行、760px以下で各領域を別行にする。利用者から共有された実機確認では約1441px幅で1段、約1438px幅で見出しが折り返すことが確認され、旧`90rem` breakpointを`76rem`（標準16px基準で約1216px）へ下げた。共有情報には、この2つの画面幅に対するFirefox／Chrome別の内訳は含まれていない。
+
+Selection groupは選択数statusと4操作を一体のsegmented controlにする。写真viewごとに選択IDとrange anchorを独立して保持し、filter外のselectionも残す。Select Allは現在の`visibleAssets`を既存selectionへ追加して順序を保つ。選択0枚での通常写真clickはAnshitsuを開き、初回Shift+clickはその1枚を選択してrange anchorを作る。Selection中の通常clickはtoggle、Shift+clickはanchorからrangeを追加する。checkboxの個別／range選択も維持する。英語UIのcompact actionは`Clear`、`Stacks[S]`、`Anshitsu[D]`（shortcut表示OFF時は`Stacks`、`Anshitsu`）で、説明的なaria-label／titleを別に保つ。Settingsでshortcut表示をOFFにするとvisible suffixと説明表示だけを隠し、shortcutは有効なまま。
+
+Home commandsは`R` Recent、`A` Albums、`C` Calendar、`F` Favorites、`S` STACK管理、`D` Anshitsu、写真viewの`Primary+A` Select All。PrimaryはWindows／LinuxでCtrl、macOSでCommand。`D`は選択中ならそのasset群を開き、未選択なら同じSPA session内の直前のAnshitsu workspaceを再開し、sessionがなければno-op。`S`は選択時のみ有効。Anshitsu／STACK管理からGalleryへ戻るcommand IDは`workspaceReturnHome`のままbindingを`H`から単独`G`へ変更した。
+
+Home return stateはtab、Album／Calendar detail、Calendar表示mode、page／content scroll位置を保持する。scroll restoration中にAnshitsu／STACKへ退出する場合、current `viewKey`と一致するpending位置を優先し、loading DOM位置で元のscrollを上書きしない。HomeReturn shapeと旧`pageScrollTop`互換は維持する。
+
+focused audit初回結果はHigh 0／Medium 2／Low 1。見つかった3件（中央見出し付きToolbarの中間幅clip、scroll restoration pending中のroute exit、Album locale testの旧shortcut suffix）を修正した。後続確認で中間幅breakpointを`90rem`から`76rem`へ調整した。実機確認の記録は利用者共有の画面幅観測に基づき、今回の文書更新時にFirefox／Chromeの操作や再確認は行っていない。
+
+Home刷新完了時のFrontend full regressionはVitest 93 files・1935 tests success、2 skipped。Node標準testは既存文書に記載の`node --test`で7件成功し、Vitest discoveryから`frontend/scripts/**`を除外した。`npx tsc --noEmit`、Frontend production build、`git diff --check`も成功した。buildには500 kB超chunk warningが残る。記録されたaudit修正と回帰検証は別々の確認であり、過去フェーズのテスト件数は各時点の値として保持する。
+
 ## 2026-10-04〜10-05: Structured Logging、Home / Stack境界、D&Dの記録
 
 この節は2026-10-04〜10-05のGit履歴と現行コード、および利用者から報告されたFirefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
@@ -90,7 +106,7 @@ Asset detailはcandidate memberだけに要求し、最大4件のbounded concurr
 
 第2フェーズ時点では、Purge、Add、Add待ちStack、manual Stack作成、DnD、manual Cover変更、Immich送信、既存Immich Stack再編集を後続段階へ残していた。これらは後続フェーズで実装済み。
 
-## Home閲覧機能のまとまり（2026-10-02・現在仕様）
+## Home閲覧機能のまとまり（2026-10-02時点）
 
 HomeはRecent、Albums、Calendar、Favoritesの4タブを持つ。RecentはImmich TimelineのIMAGEを新しい順に表示し、件数を50〜500件・50件刻み（初期値100件）から選ぶ。Recent、Favorites、CalendarはArchiveを含まないTimelineのIMAGEを対象にする。AlbumsはImmichのAlbum検索を使い、Album一覧・詳細ではArchive除外を追加していない。
 
