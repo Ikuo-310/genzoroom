@@ -250,7 +250,7 @@ describe('Home return context', () => {
     await click('#home-recent-tab'); await click(`#home-${tab}-tab`);
     await click('.photo-card-button'); await click('.workspace-actions button');
     expect(host.querySelector(`#home-${tab}-tab`)?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.home-toolbar-context h2')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     if (tab === 'albums') expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
     else expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
     await click(`#home-${tab}-tab`);
@@ -299,7 +299,7 @@ describe('Home return context', () => {
     api.albumAssets.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
     await click('.workspace-title-link');
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.home-toolbar-context h2')?.textContent).toBe(album.albumName);
+    expect(host.querySelector('.home-toolbar-title')?.textContent).toBe(album.albumName);
     expect(host.querySelector('.photo-grid')).toBeNull();
     expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
     await act(async () => resolve([photo, second]));
@@ -349,7 +349,7 @@ describe('Home return context', () => {
     await click('.calendar-day.has-assets'); await settle();
     await click('.photo-card-button'); await click('.workspace-actions button');
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.home-toolbar-context h2')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     await click('.album-back');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe(String(currentYear));
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe(String(currentMonth));
@@ -364,7 +364,7 @@ describe('Home return context', () => {
     expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
     await click('[role="alertdialog"] button:last-child');
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector('.home-toolbar-context h2')?.textContent).toBe(album.albumName);
+    expect(host.querySelector('.home-toolbar-title')?.textContent).toBe(album.albumName);
     expect(api.put).toHaveBeenCalledTimes(1);
   });
 

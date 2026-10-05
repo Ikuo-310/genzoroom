@@ -620,21 +620,24 @@ export function GalleryPage() {
             onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{t('home.favoritesTab')}</button>
         </div>
       </div>
-      <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}`}>
+      <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
           onSelectAll={() => photoView?.selection.selectVisible(visibleAssets.map(asset => asset.id))}
           onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
           {activeTab === 'albums' && selectedAlbum && <div className="home-toolbar-context">
-              <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
-              <h2>{selectedAlbum.albumName}</h2>
+              <button type="button" className="album-back" aria-label={t('albums.backToList')} title={t('albums.backToList')} onClick={closeAlbum}>←</button>
             </div>}
           {activeTab === 'calendar' && selectedCalendarDate && <div className="home-toolbar-context">
-              <button type="button" className="album-back" onClick={closeCalendarDay}>← {t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}</button>
-              <h2>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
-                .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
+              <button type="button" className="album-back" aria-label={t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}
+                title={t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')} onClick={closeCalendarDay}>←</button>
             </div>}
+        </div>}
+        {(activeTab === 'albums' && selectedAlbum || activeTab === 'calendar' && selectedCalendarDate) && <div className="home-toolbar-center">
+          {selectedAlbum && activeTab === 'albums' && <h2 className="home-toolbar-title" title={selectedAlbum.albumName}>{selectedAlbum.albumName}</h2>}
+          {selectedCalendarDate && activeTab === 'calendar' && <h2 className="home-toolbar-title">{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
+            .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>}
         </div>}
         {activeTab === 'calendar' && !selectedCalendarDate && <div className="home-toolbar-center">
           <HomeCalendarNavigation year={calendarYear} month={calendarMonth} mode={calendarMode}

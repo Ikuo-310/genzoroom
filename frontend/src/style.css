@@ -79,14 +79,18 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .album-info .album-period, .album-info .album-count { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 0.8rem; }
 .album-info .album-count { color: var(--accent); }
 .home-toolbar-left { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
-.home-toolbar-context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.home-toolbar-context h2 { overflow-wrap: anywhere; font-size: 0.95rem; }
+.home-toolbar-context { display: flex; flex: 0 0 auto; align-items: center; min-width: 0; }
+.home-toolbar-centered { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
+.home-toolbar-centered .home-toolbar-center { grid-column: 2; min-width: 0; }
+.home-toolbar-centered .home-toolbar-controls { grid-column: 3; }
+.home-toolbar-title { max-width: min(42vw, 680px); overflow: hidden; margin: 0; color: var(--text-primary); font-size: 1.18rem; font-weight: 650; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 /* Equal side tracks keep Calendar centered independently of the side controls. */
 .home-toolbar-calendar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
-.home-toolbar-center { grid-column: 2; min-width: 0; }
+.home-toolbar-calendar .home-toolbar-center { grid-column: 2; min-width: 0; }
 .home-toolbar-calendar .home-toolbar-controls { grid-column: 3; }
-.album-back { padding: 3px 7px; color: var(--text-primary); background: transparent; font-size: 0.84rem; }
-.album-back:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-elevated); }
+.album-back { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 5px; font-size: 1.1rem; }
+.album-back:hover:not(:disabled) { color: var(--text-primary); background: #353539; border-color: #626267; }
+.album-back:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
 .calendar-month { width: 100%; max-width: 840px; margin-inline: auto; padding: 0 10px 10px; min-width: 0; min-height: 0; overflow-y: visible; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); }
 .calendar-navigation { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .calendar-navigation select, .calendar-navigation .calendar-current-month, .calendar-navigation .calendar-view-toggle { max-width: 100%; height: 42px; padding: 6px 24px 6px 10px; color: var(--text-primary); background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: 6px; font: inherit; font-size: 1.15rem; font-weight: 600; }
@@ -438,6 +442,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 
 @media (max-width: 760px) {
   .home-toolbar { align-items: flex-start; }
+  .home-toolbar-centered { grid-template-columns: minmax(0, 1fr); }
+  .home-toolbar-centered .home-toolbar-center, .home-toolbar-centered .home-toolbar-controls { grid-column: 1; }
+  .home-toolbar-title { max-width: 90vw; }
   .home-toolbar-calendar { grid-template-columns: minmax(0, 1fr); }
   .home-toolbar-calendar .home-toolbar-center { grid-column: 1; }
   .home-toolbar-calendar .home-toolbar-controls { grid-column: 1; }

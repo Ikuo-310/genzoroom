@@ -238,7 +238,7 @@ describe('Home calendar', () => {
     expect(api.day).toHaveBeenLastCalledWith('2026-08-01', expect.any(AbortSignal));
     expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls);
     expect(host.querySelector('.calendar-year')).toBeNull();
-    expect(host.querySelector('.home-toolbar-context h2')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     click('.album-back'); await settle();
     const december = host.querySelectorAll<HTMLElement>('.calendar-mini-month')[11]!;
     act(() => december.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -283,7 +283,9 @@ describe('Home calendar', () => {
     const left = host.querySelector('.home-toolbar-left')!;
     expect([...left.children].map(element => element.className)).toEqual(['selection-bar', 'home-toolbar-context']);
     expect(left.querySelector('.home-toolbar-context')?.firstElementChild?.className).toBe('album-back');
-    expect(left.querySelector('.home-toolbar-context h2')).not.toBeNull();
+    expect(left.querySelector<HTMLButtonElement>('.album-back')?.textContent).toBe('←');
+    expect(host.querySelector('.home-toolbar-center .home-toolbar-title')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-context h2')).toBeNull();
     expect(host.querySelector('.calendar-navigation')).toBeNull();
     expect(host.querySelector('.home-content .album-detail-heading')).toBeNull();
     click('#home-albums-tab'); await settle(); click('#home-calendar-tab'); await settle();
