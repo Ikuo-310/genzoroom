@@ -16,6 +16,34 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('shares only basic theme tokens and removes the gallery enclosure', () => {
+    const stack = document.createElement('main'); stack.className = 'stack-management-page'; host.append(stack);
+    const home = host.querySelector('.home-page');
+    for (const token of ['--bg-app', '--bg-panel', '--bg-elevated', '--border-subtle', '--text-primary', '--text-secondary', '--accent', '--accent-hover', '--selection', '--danger']) {
+      expect(getComputedStyle(home).getPropertyValue(token)).toBe(getComputedStyle(stack).getPropertyValue(token));
+      expect(getComputedStyle(home).getPropertyValue(token)).not.toBe('');
+    }
+    expect(getComputedStyle(home).getPropertyValue('--status-match')).toBe('');
+    expect(getComputedStyle(stack).getPropertyValue('--status-match')).toBe('#285b3b');
+    const photos = getComputedStyle(host.querySelector('.photos'));
+    expect(photos.borderTopWidth).toBe('0px');
+    expect(photos.borderRadius).toBe('0');
+    expect(photos.marginTop).toBe('0px');
+    expect(photos.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+  });
+  it('uses a compact two-sided title bar with wrapping connection controls', () => {
+    const header = host.querySelector('.app-header');
+    header.innerHTML = '<div class="home-title-row"><h1>GenzoRoom</h1><details class="connection-control"></details></div><button class="settings-button">Settings</button>';
+    expect(getComputedStyle(header).alignItems).toBe('center');
+    expect(getComputedStyle(header).paddingTop).toBe('10px');
+    // jsdom does not resolve inherited custom properties in border shorthand.
+    const headerRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.app-header');
+    expect(headerRule.style.getPropertyValue('border-bottom')).toBe('1px solid var(--border-subtle)');
+    expect(getComputedStyle(header.querySelector('h1')).fontSize).toBe('1.2rem');
+    expect(getComputedStyle(header.querySelector('h1')).letterSpacing).toBe('normal');
+    expect(getComputedStyle(header.querySelector('.home-title-row')).flexWrap).toBe('wrap');
+    expect(getComputedStyle(header.querySelector('.settings-button')).fontSize).toBe('0.85rem');
+  });
   it('lets only the Home intro header use the available width while keeping the gallery full width', () => {
     const intro = host.querySelector('.home-intro');
     const header = host.querySelector('.app-header');
@@ -117,7 +145,7 @@ describe('Home and thumbnail layout', () => {
   });
 
   it('adds spacing beside the photo grid scrollbar only in Firefox', () => {
-    expect(stylesheet.textContent).toContain('@-moz-document url-prefix() {\n  .photo-grid { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
+    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .photo-grid { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
     expect(getComputedStyle(host.querySelector('.photo-grid')).paddingRight).toBe('2px');
   });
 

@@ -40,6 +40,17 @@ async function click(selector: string) {
 async function mount(state?: unknown) {
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state }]}><App /></MemoryRouter>));
 }
+it('keeps connection details and Settings in the compact Home title bar without introductory copy', async () => {
+  await mount(); await settle();
+  const header = host.querySelector('.app-header')!;
+  expect(header.querySelector('h1')?.textContent).toBe('GenzoRoom');
+  expect(header.querySelector('.home-title-row .connection-control')).not.toBeNull();
+  expect(header.querySelector('.connection-details')).not.toBeNull();
+  expect(header.querySelector('.settings-button')).not.toBeNull();
+  expect(host.querySelector('.eyebrow, .stage')).toBeNull();
+  expect(header.textContent).not.toMatch(/写真現像室|開発初期段階|Photo development room|Early development/i);
+});
+
 function change(selector: string, value: string) {
   const select = host.querySelector<HTMLSelectElement>(selector)!;
   act(() => {

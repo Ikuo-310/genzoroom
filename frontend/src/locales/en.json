@@ -9,10 +9,7 @@
     "error": "GPU error · CPU"
   },
   "app": {
-    "title": "GenzoRoom",
-    "eyebrow": "A photo development room",
-    "statusLabel": "Status",
-    "earlyDevelopment": "Early Development"
+    "title": "GenzoRoom"
   },
   "connection": {
     "sectionLabel": "Service connections",

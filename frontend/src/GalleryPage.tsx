@@ -590,19 +590,15 @@ export function GalleryPage() {
     <main className="home-page" ref={pageRef}>
       <div className="home-intro">
         <header className="app-header">
-          <div>
-            <div className="home-title-row">
-              <h1><HomeTitle className="home-title-link" onActivate={() => {}} /></h1>
-              <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
-                onCheckAgain={() => {
-                  connectionRequestId.current += 1;
-                  setConnection('checking');
-                  setImmichConnection('checking');
-                  setConnectionAttempt(value => value + 1);
-                }} />
-            </div>
-            <p className="eyebrow">{t('app.eyebrow')}</p>
-            <p className="stage">{t('app.statusLabel')}: {t('app.earlyDevelopment')}</p>
+          <div className="home-title-row">
+            <h1><HomeTitle className="home-title-link" onActivate={() => {}} /></h1>
+            <ConnectionStatusControl connection={connection} immichConnection={immichConnection} disabled={assetState === 'loading'}
+              onCheckAgain={() => {
+                connectionRequestId.current += 1;
+                setConnection('checking');
+                setImmichConnection('checking');
+                setConnectionAttempt(value => value + 1);
+              }} />
           </div>
           <SettingsButton />
         </header>

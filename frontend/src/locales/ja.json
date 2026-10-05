@@ -8,11 +8,6 @@
     "unavailable": "利用不可 · CPU",
     "error": "GPUエラー · CPU"
   },
-  "app": {
-    "eyebrow": "写真現像室",
-    "statusLabel": "ステータス",
-    "earlyDevelopment": "開発初期段階"
-  },
   "connection": {
     "sectionLabel": "サービス接続状況",
     "backend": "Backend",
