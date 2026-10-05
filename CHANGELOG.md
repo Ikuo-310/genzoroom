@@ -14,6 +14,7 @@ Internal changes are omitted unless they affect users.
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
 - Home browsing tabs for Albums, Calendar, and Favorites alongside Recent. Calendar includes year, month, and date views; Favorites lists favorited Timeline images.
+- Calendar date details can move directly to the previous or next day containing photos with toolbar arrows or ArrowLeft / ArrowRight; days without photos are skipped.
 - Home keyboard commands for `R` / `A` / `C` / `F` tab navigation, `S` for STACK management, `D` for Anshitsu, and `Primary+A` to select visible photos in photo views.
 - Shift+click to start selection with one photo, then extend an anchored range; Select All adds visible photos while preserving hidden selections and selection order.
 - Independent per-tab RAW / Non-RAW and edited / unedited photo filters, adjustable Home thumbnail sizing, and ordered multi-photo selection with Shift+click ranges.
@@ -73,6 +74,7 @@ Internal changes are omitted unless they affect users.
 - Integrated photo selection and Album / Calendar view controls into the Home Toolbar; compact English action labels and optional shortcut suffixes keep the controls concise.
 - Changed Gallery return from `H` to unmodified `G` across Anshitsu and STACK management.
 - Home shortcut hints use compact `[X]` suffixes when enabled in Settings; hiding hints leaves the shortcuts active.
+- ArrowLeft / ArrowRight move backward / forward through Calendar months, years, and photo days. Home tabs no longer switch with ArrowLeft / ArrowRight / Home / End; click and the existing direct tab commands remain available.
 
 - Home photo lists exclude Immich trash assets and show only the primary photo for each valid Immich Stack. Incomplete or ambiguous Stack metadata is quarantined from Home without relaxing strict Stack management validation. Singleton Stacks are visibly abnormal and can only be removed through the normal confirmed delete workflow.
 - Home photo views can filter stacked versus unstacked cards; valid Stack cards carry member-count metadata. STACK management uses the same Immich API key and requires Stack read/write permissions.
@@ -96,6 +98,7 @@ Internal changes are omitted unless they affect users.
 ### Fixed
 
 - Prevented the Home detail Toolbar from clipping selection controls at intermediate widths and preserved pending Home scroll restoration when leaving for Anshitsu or STACK management.
+- Disabled Calendar date-detail arrows use a normal cursor when no adjacent photo day is available.
 - Prevented incomplete Immich Stack snapshots from failing Home photo lists or exposing surviving Stack children as ordinary photos; Recent continues paging as needed after excluded entries.
 - Long-running Stack sends use a dedicated proxy timeout; a response from a previous Stack selection cannot change a new draft; long filename candidates remain writable; and re-detection supports selections over 1,000 assets.
 - Prevent Undo/Redo shortcuts from changing the background edit session while save-failure dialogs are open.

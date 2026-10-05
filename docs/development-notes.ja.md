@@ -18,6 +18,20 @@ focused audit初回結果はHigh 0／Medium 2／Low 1。見つかった3件（�
 
 Home刷新完了時のFrontend full regressionはVitest 93 files・1935 tests success、2 skipped。Node標準testは既存文書に記載の`node --test`で7件成功し、Vitest discoveryから`frontend/scripts/**`を除外した。`npx tsc --noEmit`、Frontend production build、`git diff --check`も成功した。buildには500 kB超chunk warningが残る。記録されたaudit修正と回帰検証は別々の確認であり、過去フェーズのテスト件数は各時点の値として保持する。
 
+## Calendar左右navigation完了記録（2026-10-05・現行仕様）
+
+実装commit `2331d87` でCalendar date detailに前後の写真日buttonとArrowLeft／ArrowRight操作を追加した。`useAdjacentCalendarDates`はyear heatmapを使い、`hasAssets === true`の日だけを最古年からcurrent yearまで探索する。同一effect内のrequest共有とHome mounted session内の成功データcacheを用い、date／tab／routeの変更で旧探索をabortしてstale結果を無効化する。実際の日付遷移は既存`openCalendarDay()`を通り、selection、scroll、asset request、year／month、HomeReturnの既存責務を引き継ぐ。
+
+実装commit `15617fd` で左右ArrowをCalendar全体の時間軸操作へ統一した。Month viewは前月／次月、Year viewは前年／次年（選択monthを維持）、date detailは前後の写真日へ移動し、月・年境界も扱う。Month／Yearは既存buttonと同じ期間計算・`changeCalendarPeriod()`を共有する。最古／最新境界やnative controlではキーをconsumeしない。Calendar外のHome tabでは矢印操作を行わず、Home tabのArrowLeft／ArrowRight／Home／End切替を削除して全tabを通常のTab stopにした。Home tab間はclickまたはR／A／C／Fで移動する。
+
+設計判断として、Home tabの矢印移動は実際のUXで使いにくく、Calendarの時間軸に左右キーを割り当てる方が自然なため、tab切替をやめてCalendar内で一貫した前後操作とした。前後日command IDは`calendarNavigatePrevious`／`calendarNavigateNext`。shortcut説明表示には追加しない。
+
+Calendar date-detailのfocused static auditはHigh 0／Medium 0／Low 1。唯一の指摘は、写真日がない方向のdisabled矢印が共通`cursor: wait`を表示する点で、Calendar detail矢印だけ`cursor: default`へ修正した。Month／Year統合後の関連監査でも追加の実害は確認されなかった。
+
+date-detail実装の関連6 test filesは142 tests成功、Month／Year統合後の関連4 test filesは111 tests成功。各段階で`npx tsc --noEmit`、production build、`git diff --check`も成功した。buildには500 kB超chunk warningが残る。
+
+実装・監査後、利用者がNAS上のFirefoxとChromeでMonth／Year／Date detailの左右移動、月／年跨ぎ、native controls、境界、parent view復帰、disabled cursor、Toolbarを確認し、問題なしと報告した。これは実機確認の完了記録であり、この文書更新時にブラウザ操作を再実施した記録ではない。
+
 ## 2026-10-04〜10-05: Structured Logging、Home / Stack境界、D&Dの記録
 
 この節は2026-10-04〜10-05のGit履歴と現行コード、および利用者から報告されたFirefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
