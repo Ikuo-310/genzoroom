@@ -1,5 +1,7 @@
 .developer-page { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
 .developer-page h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); }
+.developer-page button { color: #ececee; background: #292b2e; }
+.developer-page button:hover:not(:disabled) { background: #36383e; }
 .developer-section { margin-top: 24px; padding: 24px; background: #203029; border: 1px solid #43584d; border-radius: 12px; min-width: 0; }
 .developer-diagnostics > div { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
 .developer-page dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -9,32 +11,34 @@
 .developer-page table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
 .developer-page th, .developer-page td { padding: 10px; border-bottom: 1px solid #43584d; vertical-align: top; }
 .developer-page td:last-child { min-width: 180px; max-width: 360px; overflow-wrap: anywhere; white-space: pre-wrap; }
-.developer-page :focus-visible { outline: 2px solid #e6eee9; outline-offset: 3px; }
+.developer-page :focus-visible { outline: 2px solid #ececee; outline-offset: 3px; }
 .developer-jpeg-target { overflow-wrap: anywhere; }
 .developer-jpeg-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 16px; }
-.developer-jpeg-candidates button { min-width: 0; padding: 8px; background: #293b32; color: inherit; border: 2px solid transparent; }
-.developer-jpeg-candidates button[aria-pressed="true"] { border-color: #d1e2bf; }
+.developer-jpeg-candidates button { min-width: 0; padding: 8px; background: #292b2e; color: inherit; border: 2px solid transparent; }
+.developer-jpeg-candidates button[aria-pressed="true"] { border-color: #b8bbc2; }
 .developer-jpeg-candidates img { display: block; width: 100%; height: 110px; object-fit: contain; }
 .developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }
-.developer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; border-bottom: 1px solid #43584d; }
+.developer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; border-bottom: 1px solid #404247; }
 .developer-tabs [role="tab"] { border-radius: 8px 8px 0 0; }
-.developer-tabs [role="tab"][aria-selected="true"] { color: #17221f; background: #d1e2bf; }
-.developer-tabs [role="tab"][aria-selected="false"] { color: #e6eee9; background: #43584d; }
+.developer-tabs [role="tab"][aria-selected="true"] { color: #18191b; background: #b8bbc2; }
+.developer-tabs [role="tab"][aria-selected="false"] { color: #ececee; background: #404247; }
 .developer-page [role="tabpanel"]:focus-visible { outline-offset: 5px; }
 .developer-log-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(160px, 0.65fr); gap: 16px; align-items: start; }
 .developer-log-note { margin: 0 0 16px; color: #b9c8bf; font-size: 0.9rem; text-align: left; }
 .developer-log-card { padding: 20px; }
 .developer-log-card h2 { margin-top: 0; }
 .developer-log-level { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
-.developer-log-level select { max-width: 100%; min-width: 100px; padding: 8px; background: #17221f; color: #e6eee9; border: 1px solid #43584d; border-radius: 6px; }
+.developer-log-level select { max-width: 100%; min-width: 100px; padding: 8px; background: #18191b; color: #ececee; border: 1px solid #404247; border-radius: 6px; }
 .developer-log-common { margin-top: 24px; align-items: stretch; flex-direction: column; }
 .developer-log-common button, .developer-log-card button { white-space: normal; overflow-wrap: anywhere; }
 .developer-log-toolbar { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; margin: 20px 0 12px; align-items: center; }
-.developer-log-sources { display: inline-flex; max-width: 100%; border: 1px solid #43584d; border-radius: 8px; overflow: hidden; }
+.developer-log-sources { display: inline-flex; max-width: 100%; border: 1px solid #404247; border-radius: 8px; overflow: hidden; }
 .developer-log-sources button { border-radius: 0; min-width: 0; padding: 10px 12px; }
-.developer-log-sources button + button { border-left: 1px solid #43584d; }
-.developer-log-sources button[aria-pressed="true"] { background: #d1e2bf; color: #17221f; border-color: #d1e2bf; }
-.developer-log-sources button[aria-pressed="false"] { background: #43584d; color: #e6eee9; }
+.developer-log-sources button + button { border-left: 1px solid #404247; }
+.developer-log-sources button[aria-pressed="true"] { background: #b8bbc2; color: #18191b; border-color: #b8bbc2; }
+.developer-log-sources button[aria-pressed="false"] { background: #404247; color: #ececee; }
+.developer-tabs [role="tab"][aria-selected="true"]:hover:not(:disabled),
+.developer-log-sources button[aria-pressed="true"]:hover:not(:disabled) { background: #dadce1; }
 .developer-log-console { background: #090e0b; color: #e6eee9; border: 1px solid #43584d; border-radius: 8px; padding: 16px; height: clamp(480px, 58vh, 820px); min-height: 480px; max-height: 820px; overflow: auto; font: 0.85rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .developer-log-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 3px 0; }
 /* Compact controls keep diagnostic data visible without shrinking the click target excessively. */

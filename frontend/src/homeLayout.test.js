@@ -155,9 +155,15 @@ describe('Home and thumbnail layout', () => {
     const select = getComputedStyle(navigation.querySelector('select'));
     const button = getComputedStyle(navigation.querySelector('.calendar-current-month'));
     for (const property of ['height', 'fontSize', 'fontWeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'color', 'backgroundColor', 'borderTopWidth', 'borderTopStyle', 'borderTopColor', 'borderRadius']) {
+      'borderRadius']) {
       expect(button[property]).toBe(select[property]);
     }
+    // jsdom cannot resolve inherited variables consistently for button and select defaults.
+    const sharedControl = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText?.startsWith('.calendar-navigation select,'));
+    expect(sharedControl.selectorText).toContain('.calendar-navigation .calendar-current-month');
+    expect(sharedControl.style.getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(sharedControl.style.getPropertyValue('background')).toBe('var(--bg-app)');
+    expect(sharedControl.style.getPropertyValue('border')).toBe('1px solid var(--border-subtle)');
     expect(button.height).toBe('42px');
     expect(button.whiteSpace).toBe('nowrap');
     expect(getComputedStyle(navigation).flexWrap).toBe('wrap');
@@ -171,7 +177,8 @@ describe('Home and thumbnail layout', () => {
       expect(getComputedStyle(badge).right).toBe('6px');
       expect(getComputedStyle(badge).bottom).toBe('6px');
       expect(getComputedStyle(badge).pointerEvents).toBe('none');
-      expect(getComputedStyle(badge).backgroundColor).toBe('rgba(15, 20, 18, 0.82)');
+      expect(getComputedStyle(badge).backgroundColor).toBe(frame.closest('.home-page')
+        ? 'rgba(18, 19, 21, 0.82)' : 'rgba(15, 20, 18, 0.82)');
     }
   });
   it('caps card widths and gives only Home content its vertical scroll area', () => {
@@ -196,7 +203,7 @@ describe('Home and thumbnail layout', () => {
   });
 
   it('adds spacing beside the photo grid scrollbar only in Firefox', () => {
-    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .home-content { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #718b7d #17221f; }');
+    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .home-content { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #73767d var(--bg-app); }');
     expect(getComputedStyle(host.querySelector('.photo-grid')).paddingRight).toBe('2px');
   });
 
@@ -263,28 +270,30 @@ describe('Home and thumbnail layout', () => {
     const homeImage = host.querySelector('.thumbnail img');
     const thumbnail = host.querySelector('.thumbnail');
     const filmstripImage = host.querySelector('.filmstrip-item img');
-    expect(getComputedStyle(card).backgroundColor).toBe('rgb(23, 34, 31)');
-    expect(getComputedStyle(selectedButton).color).toBe('rgb(230, 238, 233)');
-    expect(getComputedStyle(selectedButton).backgroundColor).toBe('rgb(23, 34, 31)');
+    const rule = selector => Array.from(stylesheet.sheet.cssRules).find(item => item.selectorText === selector).style;
+    expect(rule('.photo-card').getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(rule('.photo-card.selected .photo-card-button').getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(rule('.photo-card.selected .photo-card-button').getPropertyValue('background')).toBe('var(--bg-panel)');
     expect(getComputedStyle(selectedButton).userSelect).toBe('none');
     const photoInfo = host.querySelector('.photo-info');
-    expect(getComputedStyle(photoInfo).backgroundColor).toBe('rgb(23, 34, 31)');
-    expect(getComputedStyle(photoInfo).color).toBe('rgb(230, 238, 233)');
-    expect(getComputedStyle(photoInfo.querySelector('p')).color).toBe('rgb(230, 238, 233)');
-    expect(getComputedStyle(photoInfo.querySelector('time')).color).toBe('rgb(159, 178, 168)');
+    expect(rule('.photo-info').getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(rule('.photo-info').getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(rule('.photo-info p').getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(rule('.photo-info time').getPropertyValue('color')).toBe('var(--text-secondary)');
     const hoverRules = Array.from(stylesheet.sheet.cssRules).filter((rule) => rule.selectorText?.includes('photo-card-button:hover'));
     expect(hoverRules.some((rule) => rule.selectorText === 'button.photo-card-button:hover:not(:disabled)'
-      && rule.style.background === '#1d2b26')).toBe(true);
+      && rule.style.background === 'var(--bg-elevated)')).toBe(true);
     expect(hoverRules.some((rule) => rule.selectorText === '.photo-card.selected button.photo-card-button:hover:not(:disabled)'
-      && rule.style.background === '#1d2b26')).toBe(true);
+      && rule.style.background === 'var(--bg-elevated)')).toBe(true);
     expect(Array.from(stylesheet.sheet.cssRules).some((rule) => rule.selectorText === '.photo-card-button:focus-visible'
       && rule.style.outline.includes('3px'))).toBe(true);
     expect(getComputedStyle(homeImage).objectFit).toBe('contain');
     expect(getComputedStyle(thumbnail).aspectRatio).toBe('1');
     expect(getComputedStyle(homeImage).height).toBe('100%');
-    expect(getComputedStyle(thumbnail).backgroundColor).toBe('rgb(9, 14, 12)');
+    expect(getComputedStyle(thumbnail).backgroundColor).toBe('rgb(16, 17, 19)');
     expect(getComputedStyle(filmstripImage).objectFit).toBe('contain');
     expect(getComputedStyle(filmstripImage).backgroundColor).toBe('rgb(9, 14, 12)');
-    expect(getComputedStyle(host.querySelector('.photo-card.selected')).borderColor).toBe('rgb(199, 217, 174)');
+    expect(rule('.photo-card.selected').getPropertyValue('border-color')).toBe('var(--accent)');
+    expect(rule('.photo-card.selected').getPropertyValue('box-shadow')).toBe('0 0 0 2px var(--accent)');
   });
 });
