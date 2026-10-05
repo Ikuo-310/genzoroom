@@ -442,7 +442,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 }
 
 /* Move detail titles out of the side tracks before localized selection controls run out of room. */
-@media (max-width: 90rem) {
+@media (max-width: 76rem) {
   .home-toolbar-centered { grid-template-columns: minmax(max-content, 1fr) minmax(0, 1fr); }
   .home-toolbar-centered .home-toolbar-left { grid-column: 1; grid-row: 1; }
   .home-toolbar-centered .home-toolbar-controls { grid-column: 2; grid-row: 1; }

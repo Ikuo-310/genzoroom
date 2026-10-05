@@ -342,8 +342,7 @@ describe('Home bulk edit status', () => {
     ]);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('7 selected');
     await act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
-        .find((button) => button.textContent === 'Open in Anshitsu')!.click();
+      host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click();
       for (let index = 0; index < 5; index++) await Promise.resolve();
     });
     expect(host.querySelector('.selection-navigation-probe')?.textContent).toBe(
@@ -357,8 +356,7 @@ describe('Home bulk edit status', () => {
     act(() => visibleSelectionInputs()[9].click());
     shiftClick(visibleCardButtons()[3]);
     await act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
-        .find((button) => button.textContent === 'Open in Anshitsu')!.click();
+      host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click();
       for (let index = 0; index < 5; index++) await Promise.resolve();
     });
     const filmstripOrder = [...host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')]
@@ -390,8 +388,7 @@ describe('Home bulk edit status', () => {
   it('resets the range anchor when every photo is cleared', async () => {
     await mount();
     act(() => visibleSelectionInputs()[1].click());
-    act(() => [...host.querySelectorAll<HTMLButtonElement>('.selection-bar button')]
-      .find((button) => button.textContent === 'Clear selection')!.click());
+    act(() => host.querySelector<HTMLButtonElement>('.selection-clear')!.click());
     shiftClick(visibleCardButtons()[4]);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);

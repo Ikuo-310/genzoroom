@@ -43,8 +43,14 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(controls).gridColumn).toBe('3');
     expect(getComputedStyle(center.querySelector('h2')).textOverflow).toBe('ellipsis');
     assertOperableGroup();
-    const media = Array.from(stylesheet.sheet.cssRules).find(rule => rule.conditionText === '(max-width: 90rem)');
+    const media = Array.from(stylesheet.sheet.cssRules).find(rule => rule.conditionText?.startsWith('(max-width:')
+      && Array.from(rule.cssRules).some(nested => nested.selectorText === '.home-toolbar-centered'
+        && nested.style.getPropertyValue('grid-template-columns').includes('max-content')));
     expect(media).toBeDefined();
+    const breakpointRem = Number.parseFloat(media.conditionText.match(/[\d.]+/)[0]);
+    expect(breakpointRem).toBeGreaterThan(70);
+    expect(breakpointRem).toBeLessThan(80);
+    expect(breakpointRem * 16).toBeLessThan(1440);
     // jsdom has no media-query layout; activate the real rules to verify their resulting cascade.
     const responsive = document.createElement('style');
     responsive.textContent = Array.from(media.cssRules).map(rule => rule.cssText).join('\n');
