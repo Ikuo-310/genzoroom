@@ -153,11 +153,11 @@ describe('Home album tab', () => {
     expect(host.querySelector('.gallery-message')?.textContent).toBe('No albums');
   });
 
-  it('shows an initial album error and supports keyboard tab switching', async () => {
+  it('shows an initial album error and supports the Album command', async () => {
     api.albums.mockRejectedValue(new Error('Failed'));
     await mount();
     const recent = host.querySelector<HTMLButtonElement>('#home-recent-tab')!;
-    act(() => recent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    act(() => recent.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })));
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('Albums could not be loaded.');

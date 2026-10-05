@@ -15,6 +15,7 @@ import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
 import { usePhotoSelection } from './usePhotoSelection';
+import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
 import { PhotoFilterControls } from './PhotoFilterControls';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
@@ -108,6 +109,7 @@ export function GalleryPage() {
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const homeTabClickRef = useRef<(tab: HomeTab) => void>(() => {});
   const selectAllVisibleRef = useRef<() => boolean>(() => false);
+  const moveCalendarDayRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
   const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
     tab: 'recent', album: null, year: new Date().getFullYear(), month: new Date().getMonth() + 1,
     date: null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0,
@@ -120,12 +122,10 @@ export function GalleryPage() {
   const hasLoadedRecentAssets = useRef(false);
   const hasLoadedAlbums = useRef(false);
   const hasLoadedFavorites = useRef(false);
-  const recentTab = useRef<HTMLButtonElement>(null);
-  const albumsTab = useRef<HTMLButtonElement>(null);
-  const calendarTab = useRef<HTMLButtonElement>(null);
-  const favoritesTab = useRef<HTMLButtonElement>(null);
   const showingAlbumPhotos = activeTab === 'albums' && selectedAlbum !== null;
   const showingCalendarPhotos = activeTab === 'calendar' && selectedCalendarDate !== null;
+  const adjacentCalendarDates = useAdjacentCalendarDates(
+    showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear);
   const photoView: PhotoView | null = activeTab === 'recent'
     ? { kind: 'recent', assets, state: assetState, selection: recentSelection }
     : activeTab === 'favorites'
@@ -377,6 +377,14 @@ export function GalleryPage() {
       if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      for (const [id, direction] of [['calendarPreviousPhotoDay', 'previous'], ['calendarNextPhotoDay', 'next']] as const) {
+        if (matchesShortcut(event, id)) {
+          // Sliders and checkboxes retain their native arrow behavior, unlike S/D commands.
+          if (event.target instanceof Element && event.target.closest('input')) return;
+          if (moveCalendarDayRef.current(direction)) event.preventDefault();
+          return;
+        }
+      }
       if (matchesShortcut(event, 'homeOpenStackManager')) {
         if (selectionMode && selectedAssetsCountRef.current > 0) {
           event.preventDefault();
@@ -569,6 +577,16 @@ export function GalleryPage() {
     setSelectedCalendarDate(day);
   }
 
+  function moveCalendarDay(direction: 'previous' | 'next'): boolean {
+    const day = adjacentCalendarDates[direction];
+    if (!showingCalendarPhotos || !day) return false;
+    // Prevent another event from using the old date's candidate before the navigation commit.
+    moveCalendarDayRef.current = () => false;
+    openCalendarDay(day);
+    return true;
+  }
+  moveCalendarDayRef.current = moveCalendarDay;
+
   function closeCalendarDay() {
     prepareScrollTransition(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
     calendarAssetRequestId.current += 1;
@@ -588,20 +606,6 @@ export function GalleryPage() {
     // Switching tabs must leave the inactive tab's detail and selection intact.
     if (tab === 'albums' && selectedAlbum !== null) closeAlbum();
     else if (tab === 'calendar' && selectedCalendarDate !== null) closeCalendarDay();
-  }
-
-  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const tabs: HomeTab[] = ['recent', 'albums', 'calendar', 'favorites'];
-    const index = tabs.indexOf(activeTab);
-    const next: HomeTab = event.key === 'Home' ? 'recent' : event.key === 'End' ? 'favorites'
-      : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-    if (next !== activeTab) {
-      prepareScrollTransition(homeViewKey(next, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode));
-      setActiveTab(next);
-    }
-    (next === 'recent' ? recentTab : next === 'albums' ? albumsTab : next === 'calendar' ? calendarTab : favoritesTab).current?.focus();
   }
 
   function renderPhotoGrid() {
@@ -636,18 +640,14 @@ export function GalleryPage() {
       </header>
       <div className="home-tabs-bar">
         <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
-          <button id="home-recent-tab" ref={recentTab} type="button" role="tab" aria-controls="home-recent-panel"
-            aria-selected={activeTab === 'recent'} tabIndex={activeTab === 'recent' ? 0 : -1}
-            onClick={() => handleTabClick('recent')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
-          <button id="home-albums-tab" ref={albumsTab} type="button" role="tab" aria-controls="home-albums-panel"
-            aria-selected={activeTab === 'albums'} tabIndex={activeTab === 'albums' ? 0 : -1}
-            onClick={() => handleTabClick('albums')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
-          <button id="home-calendar-tab" ref={calendarTab} type="button" role="tab" aria-controls="home-calendar-panel"
-            aria-selected={activeTab === 'calendar'} tabIndex={activeTab === 'calendar' ? 0 : -1}
-            onClick={() => handleTabClick('calendar')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
-          <button id="home-favorites-tab" ref={favoritesTab} type="button" role="tab" aria-controls="home-favorites-panel"
-            aria-selected={activeTab === 'favorites'} tabIndex={activeTab === 'favorites' ? 0 : -1}
-            onClick={() => handleTabClick('favorites')} onKeyDown={handleTabKeyDown}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
+          <button id="home-recent-tab" type="button" role="tab" aria-controls="home-recent-panel"
+            aria-selected={activeTab === 'recent'} onClick={() => handleTabClick('recent')}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
+          <button id="home-albums-tab" type="button" role="tab" aria-controls="home-albums-panel"
+            aria-selected={activeTab === 'albums'} onClick={() => handleTabClick('albums')}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
+          <button id="home-calendar-tab" type="button" role="tab" aria-controls="home-calendar-panel"
+            aria-selected={activeTab === 'calendar'} onClick={() => handleTabClick('calendar')}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
+          <button id="home-favorites-tab" type="button" role="tab" aria-controls="home-favorites-panel"
+            aria-selected={activeTab === 'favorites'} onClick={() => handleTabClick('favorites')}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
         </div>
       </div>
       <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
@@ -666,8 +666,16 @@ export function GalleryPage() {
         </div>}
         {(activeTab === 'albums' && selectedAlbum || activeTab === 'calendar' && selectedCalendarDate) && <div className="home-toolbar-center">
           {selectedAlbum && activeTab === 'albums' && <h2 className="home-toolbar-title" title={selectedAlbum.albumName}>{selectedAlbum.albumName}</h2>}
-          {selectedCalendarDate && activeTab === 'calendar' && <h2 className="home-toolbar-title">{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
-            .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>}
+          {selectedCalendarDate && activeTab === 'calendar' && <div className="calendar-detail-navigation">
+            <button type="button" className="calendar-detail-previous" disabled={!adjacentCalendarDates.previous}
+              aria-label={t('calendar.previousPhotoDay')} title={t('calendar.previousPhotoDay')}
+              onClick={() => moveCalendarDayRef.current('previous')}>←</button>
+            <h2 className="home-toolbar-title">{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
+              .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
+            <button type="button" className="calendar-detail-next" disabled={!adjacentCalendarDates.next}
+              aria-label={t('calendar.nextPhotoDay')} title={t('calendar.nextPhotoDay')}
+              onClick={() => moveCalendarDayRef.current('next')}>→</button>
+          </div>}
         </div>}
         {activeTab === 'calendar' && !selectedCalendarDate && <div className="home-toolbar-center">
           <HomeCalendarNavigation year={calendarYear} month={calendarMonth} mode={calendarMode}

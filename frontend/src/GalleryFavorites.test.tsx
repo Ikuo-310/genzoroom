@@ -413,14 +413,18 @@ describe('Home favorites', () => {
     await click('#home-recent-tab'); await click('#home-favorites-tab'); expectScroll(0, 640);
   });
 
-  it('supports keyboard End, wraparound, and Home over four tabs', async () => {
+  it('keeps all four tabs reachable without Arrow/Home/End tab navigation', async () => {
     await mount(); expect(host.querySelectorAll('[role="tab"]')).toHaveLength(4);
-    async function key(tab: string, key: string) {
-      await act(async () => host.querySelector(tab)!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    for (const tab of host.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
+      expect(tab.tabIndex).toBe(0);
+      act(() => tab.focus());
+      for (const key of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) {
+        const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        await act(async () => tab.dispatchEvent(event));
+        expect(event.defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(tab);
+        expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+      }
     }
-    await key('#home-recent-tab', 'End'); expect(document.activeElement?.id).toBe('home-favorites-tab');
-    await key('#home-favorites-tab', 'ArrowRight'); expect(document.activeElement?.id).toBe('home-recent-tab');
-    await key('#home-recent-tab', 'ArrowLeft'); expect(document.activeElement?.id).toBe('home-favorites-tab');
-    await key('#home-favorites-tab', 'Home'); expect(document.activeElement?.id).toBe('home-recent-tab');
   });
 });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import { HOME_THUMBNAIL_COLUMNS_KEY, resolveDateLocale, updateSetting } from './appSettings';
@@ -9,6 +9,7 @@ import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+import type { HomeReturnContext } from './homeReturn';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
@@ -48,8 +49,10 @@ function deferred<T>() {
 }
 
 function NavigationProbe() {
-  const state = useLocation().state as { selectedAssets?: RecentAsset[] } | null;
-  return <output className="navigation-probe">{state?.selectedAssets?.map(asset => asset.id).join('|')}</output>;
+  const state = useLocation().state as { selectedAssets?: RecentAsset[]; homeReturn?: HomeReturnContext } | null;
+  const navigate = useNavigate();
+  return <><output className="navigation-probe" data-home-return={JSON.stringify(state?.homeReturn)}>{state?.selectedAssets?.map(asset => asset.id).join('|')}</output>
+    <button className="return-home" onClick={() => navigate('/', { state: { homeReturn: state?.homeReturn } })}>Return</button></>;
 }
 
 async function mount() {
@@ -98,6 +101,168 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  function configurePhotoDays(dates: string[], minYear = 2026) {
+    api.minYear.mockResolvedValue(minYear);
+    api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month,
+      days: dates.filter(date => Number(date.slice(0, 4)) === year && (month === null || Number(date.slice(5, 7)) === month))
+        .map(date => ({ date, hasAssets: true, count: 1, thumbnail_url: null })),
+    }));
+  }
+  async function openDate(date: string, mode: 'month' | 'year' = 'month') {
+    await mount(); click('#home-calendar-tab'); await settle();
+    selectValue('#calendar-year', date.slice(0, 4)); selectValue('#calendar-month', String(Number(date.slice(5, 7)))); await settle();
+    if (mode === 'year') { click('.calendar-view-toggle'); await settle(); }
+    click(`[aria-label^="${date},"]`); await settle();
+  }
+  async function arrow(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+    await act(async () => target.dispatchEvent(event));
+    return event;
+  }
+  it('shares annual candidates, skips count-only days, clears selection and reuses candidates', async () => {
+    configurePhotoDays(['2026-09-01', '2026-09-03', '2026-09-15']);
+    const annual = { year: 2026, month: null, days: [
+      ...['2026-09-15', '2026-09-03', '2026-09-01'].map(date => ({ date, hasAssets: true, count: 1, thumbnail_url: null })),
+      { date: '2026-09-02', hasAssets: false, count: 99, thumbnail_url: null },
+      { date: '2026-09-04', hasAssets: false, count: 99, thumbnail_url: null },
+    ] };
+    const original = api.heatmap.getMockImplementation()!;
+    api.heatmap.mockImplementation((year, month, signal) => month === null ? Promise.resolve(annual) : original(year, month, signal));
+    await openDate('2026-09-03');
+    expect(api.heatmap.mock.calls.filter(call => call[1] === null)).toHaveLength(1);
+    expect(host.querySelector('.home-toolbar-center .calendar-detail-navigation')?.children).toHaveLength(3);
+    const previous = host.querySelector<HTMLButtonElement>('.calendar-detail-previous')!;
+    expect(previous.getAttribute('aria-label')).toBe('Previous day with photos');
+    expect(previous.title).toBe('Previous day with photos');
+    click('.photo-selection-input'); click('.calendar-detail-previous'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
+    expect(host.querySelector('.photo-card.selected')).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-previous')!.disabled).toBe(true);
+    expect((await arrow('ArrowLeft')).defaultPrevented).toBe(false);
+    click('.calendar-detail-next'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-03', expect.any(AbortSignal));
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(true);
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-15', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')!.disabled).toBe(true);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
+    expect(api.heatmap.mock.calls.filter(call => call[1] === null)).toHaveLength(1);
+    await act(async () => i18n.changeLanguage('ja'));
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')!.title).toBe('次の写真がある日');
+    expect(host.querySelector('.calendar-detail-previous')?.getAttribute('aria-label')).toBe('前の写真がある日');
+  });
+  it.each(['month', 'year'] as const)('crosses months and captures/restores the destination with %s parent mode', async mode => {
+    configurePhotoDays(['2026-09-30', '2026-10-05']);
+    await openDate('2026-09-30', mode);
+    const filterValues = () => [...host.querySelectorAll<HTMLSelectElement>('.home-toolbar-controls select')].map(select => select.value);
+    const filters = filterValues();
+    click('.calendar-detail-next'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-10-05', expect.any(AbortSignal));
+    expect(filterValues()).toEqual(filters);
+    expect((await arrow('ArrowLeft')).defaultPrevented).toBe(true);
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-30', expect.any(AbortSignal));
+    await arrow('ArrowRight');
+    const content = host.querySelector<HTMLElement>('.home-content')!;
+    content.scrollTop = 345;
+    click('.photo-selection-input'); pressD(); await settle();
+    const homeReturn = JSON.parse(host.querySelector('.navigation-probe')!.getAttribute('data-home-return')!);
+    expect(homeReturn).toMatchObject({ tab: 'calendar', date: '2026-10-05', year: 2026, month: 10, calendarMode: mode, contentScrollTop: 345 });
+    click('.return-home'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-10-05', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLElement>('.home-content')!.scrollTop).toBe(345);
+    click('.album-back'); await settle();
+    expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('10');
+    expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2026');
+  });
+  it.each([2025, 2024])('crosses years in both directions, including an empty intervening year from %i', async oldestYear => {
+    const first = `${oldestYear}-12-31`;
+    configurePhotoDays([first, '2026-01-02'], oldestYear);
+    await openDate('2026-01-02', 'year');
+    await arrow('ArrowLeft');
+    expect(api.day).toHaveBeenLastCalledWith(first, expect.any(AbortSignal));
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-previous')!.disabled).toBe(true);
+    await arrow('ArrowRight');
+    expect(api.day).toHaveBeenLastCalledWith('2026-01-02', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')!.disabled).toBe(true);
+    const years = api.heatmap.mock.calls.filter(call => call[1] === null).map(call => call[0]);
+    for (let year = oldestYear; year <= 2026; year++) expect(years).toContain(year);
+    expect(years.every(year => year >= oldestYear && year <= 2026)).toBe(true);
+    click('.album-back'); await settle();
+    expect(host.querySelector('.calendar-year')).not.toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe('1');
+  });
+  it('leaves arrows native outside detail and respects editing, modifier and availability guards', async () => {
+    configurePhotoDays(['2026-09-01', '2026-09-03']);
+    await mount(); expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
+    click('#home-calendar-tab'); await settle();
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
+    click('.calendar-view-toggle'); await settle();
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
+    click('[aria-label^="2026-09-01,"]'); await settle();
+    const dayCalls = api.day.mock.calls.length;
+    for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {
+      expect((await arrow('ArrowRight', options)).defaultPrevented).toBe(false);
+    }
+    for (const markup of ['<input>', '<input type="range">', '<input type="checkbox">', '<select><option>A</option></select>', '<textarea></textarea>', '<div contenteditable="true"></div>']) {
+      const target = document.createElement('div'); target.innerHTML = markup; host.append(target);
+      (target.firstElementChild as HTMLElement).focus();
+      expect((await arrow('ArrowRight', {}, target.firstElementChild!)).defaultPrevented).toBe(false);
+      target.remove();
+    }
+    for (const role of ['dialog', 'alertdialog', 'menu']) {
+      const blocker = document.createElement('div'); blocker.setAttribute('role', role); document.body.append(blocker);
+      expect((await arrow('ArrowRight')).defaultPrevented).toBe(false); blocker.remove();
+    }
+    const menu = document.createElement('details'); menu.className = 'edit-settings-menu'; menu.open = true; document.body.append(menu);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false); menu.remove();
+    const prevented = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }); prevented.preventDefault();
+    await act(async () => window.dispatchEvent(prevented));
+    expect(api.day).toHaveBeenCalledTimes(dayCalls);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(true);
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-03', expect.any(AbortSignal));
+  });
+  it.each(['close', 'tab', 'route'])('aborts candidate lookup on %s, ignoring stale results', async exit => {
+    configurePhotoDays(['2026-09-01', '2026-09-03']);
+    await mount(); click('#home-calendar-tab'); await settle();
+    const original = api.heatmap.getMockImplementation()!;
+    const pending = deferred<CalendarHeatmap>();
+    api.heatmap.mockImplementation((year, month, signal) => month === null ? pending.promise : original(year, month, signal));
+    click('[aria-label^="2026-09-01,"]'); await settle();
+    const signal = api.heatmap.mock.calls.at(-1)![2] as AbortSignal;
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')!.disabled).toBe(true);
+    expect((await arrow('ArrowRight')).defaultPrevented).toBe(false);
+    if (exit === 'close') click('.album-back');
+    else if (exit === 'tab') click('#home-recent-tab');
+    else { click('.photo-selection-input'); pressD(); }
+    await settle(); expect(signal.aborted).toBe(true);
+    await act(async () => pending.resolve(yearData(2026)));
+    expect(host.querySelector('.calendar-detail-next')).toBeNull();
+  });
+  it('rejects old candidates and assets after rapidly advancing to another date', async () => {
+    configurePhotoDays(['2026-09-01', '2026-09-03'], 2025);
+    const oldYear = deferred<CalendarHeatmap>();
+    const oldAssets = deferred<RecentAsset[]>();
+    const original = api.heatmap.getMockImplementation()!;
+    api.heatmap.mockImplementation((year, month, signal) => year === 2025 && month === null ? oldYear.promise : original(year, month, signal));
+    api.day.mockReturnValueOnce(oldAssets.promise).mockResolvedValue(dayPhotos);
+    await openDate('2026-09-01');
+    const oldAssetSignal = api.day.mock.calls[0][1] as AbortSignal;
+    const oldSearchSignal = api.heatmap.mock.calls.find(call => call[0] === 2025)![2] as AbortSignal;
+    const before = api.day.mock.calls.length;
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    }); await settle();
+    expect(api.day).toHaveBeenCalledTimes(before + 1);
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-03', expect.any(AbortSignal));
+    expect(oldAssetSignal.aborted).toBe(true); expect(oldSearchSignal.aborted).toBe(true);
+    await act(async () => { oldAssets.resolve(recent); oldYear.resolve(yearData(2025)); });
+    expect(host.querySelector('.photo-card-button')?.textContent).toContain('day-0');
+    expect(host.querySelector('.home-toolbar-title')?.textContent).toContain('3');
+    click('.calendar-detail-previous'); await settle();
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
+    expect(api.heatmap.mock.calls.filter(call => call[0] === 2025)).toHaveLength(2);
+  });
   it('uses C to return date details to their month or year parent without stealing Select All there', async () => {
     await mount(); click('#home-calendar-tab'); await settle();
     for (const mode of ['month', 'year']) {
@@ -253,7 +418,8 @@ describe('Home calendar', () => {
     const photoDay = august.querySelector<HTMLButtonElement>('[aria-label^="2026-08-01,"]')!;
     act(() => photoDay.click()); await settle();
     expect(api.day).toHaveBeenLastCalledWith('2026-08-01', expect.any(AbortSignal));
-    expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls);
+    expect(api.heatmap).toHaveBeenCalledTimes(heatmapCalls + 1);
+    expect(api.heatmap).toHaveBeenCalledWith(2026, null, expect.any(AbortSignal));
     expect(host.querySelector('.calendar-year')).toBeNull();
     expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     click('.album-back'); await settle();

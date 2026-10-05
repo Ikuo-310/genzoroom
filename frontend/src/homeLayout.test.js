@@ -331,6 +331,20 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(grid).gridTemplateColumns).toContain('var(--album-column-width, 220px)');
     expect(getComputedStyle(grid).gap).toBe('16px');
   });
+  it('keeps date-detail arrows beside the shrinking centered title without shrinking the buttons', () => {
+    const navigation = document.createElement('div'); navigation.className = 'calendar-detail-navigation';
+    navigation.innerHTML = '<button class="calendar-detail-previous">←</button><h2 class="home-toolbar-title">September 30, 2026</h2><button class="calendar-detail-next">→</button>';
+    host.append(navigation);
+    expect(getComputedStyle(navigation).display).toBe('flex');
+    expect(getComputedStyle(navigation).alignItems).toBe('center');
+    expect(getComputedStyle(navigation).minWidth).toBe('0');
+    expect(getComputedStyle(navigation.querySelector('h2')).minWidth).toBe('0');
+    expect(getComputedStyle(navigation.querySelector('h2')).textOverflow).toBe('ellipsis');
+    for (const button of navigation.querySelectorAll('button')) {
+      expect(getComputedStyle(button).flexShrink).toBe('0');
+      expect(getComputedStyle(button).width).toBe('28px');
+    }
+  });
 
   it('has no bottom note or extra grid row', () => {
     expect(host.querySelector('.note')).toBeNull();

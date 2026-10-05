@@ -60,6 +60,8 @@
     "dayLabel": "{{date}}",
     "dayWithAssets": "{{date}}, assets available",
     "backToMonth": "Back to calendar",
+    "previousPhotoDay": "Previous day with photos",
+    "nextPhotoDay": "Next day with photos",
     "loading": "Loading calendar…",
     "loadFailed": "Calendar could not be loaded.",
     "photosLoading": "Loading photos for this day…",

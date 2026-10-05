@@ -222,7 +222,7 @@ describe('Home return context', () => {
     await click('#home-recent-tab'); expectScroll(0, 480);
     await click('#home-recent-tab'); expectScroll(0, 480);
     await act(async () => host.querySelector('#home-recent-tab')!.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+      new KeyboardEvent('keydown', { key: 'a', bubbles: true })));
     expectScroll(0, 260);
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).toHaveBeenCalledTimes(1);

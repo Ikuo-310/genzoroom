@@ -110,7 +110,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(26);
+    expect(Object.keys(shortcutBindings)).toHaveLength(28);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -143,7 +143,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(26);
+    expect(Object.keys(shortcutBindings)).toHaveLength(28);
   });
   it('matches Stack Add only for unmodified A without matching other commands', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
@@ -152,6 +152,15 @@ describe('command shortcut bindings', () => {
       if (mask === 0) for (const id of Object.keys(shortcutBindings) as ShortcutId[]) {
         if (id !== 'stackAddSelected' && id !== 'homeAlbums') expect(matchesShortcut(value, id, platform)).toBe(false);
       }
+    }
+  });
+  it('matches Calendar photo-day arrows only without modifiers on either platform', () => {
+    for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
+      const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };
+      expect(matchesShortcut(event('ArrowLeft', options), 'calendarPreviousPhotoDay', platform)).toBe(mask === 0);
+      expect(matchesShortcut(event('ArrowRight', options), 'calendarNextPhotoDay', platform)).toBe(mask === 0);
+      expect(matchesShortcut(event('ArrowRight', options), 'calendarPreviousPhotoDay', platform)).toBe(false);
+      expect(matchesShortcut(event('ArrowLeft', options), 'calendarNextPhotoDay', platform)).toBe(false);
     }
   });
 });

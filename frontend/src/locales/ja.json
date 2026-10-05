@@ -57,6 +57,8 @@
     "dayLabel": "{{date}}",
     "dayWithAssets": "{{date}}、写真あり",
     "backToMonth": "カレンダーへ戻る",
+    "previousPhotoDay": "前の写真がある日",
+    "nextPhotoDay": "次の写真がある日",
     "loading": "カレンダーを読み込んでいます…",
     "loadFailed": "カレンダーを読み込めませんでした。",
     "photosLoading": "この日の写真を読み込んでいます…",
