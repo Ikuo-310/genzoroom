@@ -97,6 +97,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Unified Calendar date-detail boundaries with the month view's Immich Timeline local-day rule, fixing photos with timezone offsets that cross UTC midnight appearing in the previous day's detail.
 - Prevented the Home detail Toolbar from clipping selection controls at intermediate widths and preserved pending Home scroll restoration when leaving for Anshitsu or STACK management.
 - Disabled Calendar date-detail arrows use a normal cursor when no adjacent photo day is available.
 - Prevented incomplete Immich Stack snapshots from failing Home photo lists or exposing surviving Stack children as ordinary photos; Recent continues paging as needed after excluded entries.

@@ -32,6 +32,18 @@ date-detail実装の関連6 test filesは142 tests成功、Month／Year統合後
 
 実装・監査後、利用者がNAS上のFirefoxとChromeでMonth／Year／Date detailの左右移動、月／年跨ぎ、native controls、境界、parent view復帰、disabled cursor、Toolbarを確認し、問題なしと報告した。これは実機確認の完了記録であり、この文書更新時にブラウザ操作を再実施した記録ではない。
 
+## Calendar local-day境界統一（2026-10-05・現行仕様）
+
+月表示はImmich timelineの`fileCreatedAt + localOffsetHours`でlocal dayを決めていた一方、date detailはUTC 00:00境界の`takenAt`検索を使っていた。この違いにより、UTC+地域の0時台などの写真が月表示の日付と異なるdetailへ入る場合があった。
+
+date detailも既存`_calendar_month_images()`のlocal-day判定を使い、選択日のcandidateだけを抽出する。asset IDは順序を保って重複除去し、100件単位でmetadataを取得した後、timeline bucket順へ戻す。対象がない日はmetadata検索を行わない。最後に`_with_asset_stacks()`を通し、valid Stackのprimary-only表示、quarantine、Stack metadataを維持する。timeline取得失敗時にUTC検索へfallbackしない。Frontend API契約と`get_calendar_min_year()`は変更していない。
+
+Calendar／Stack関連テストは162 passed、45 subtests passed。Backend全体は445 passed、191 subtests passed。`git diff --check`も成功した。テストではpositive／fractional offset、月／年跨ぎ、対象日だけの絞り込み、timeline順の維持、重複除去、empty day、timeline failure、Stack境界を確認した。
+
+利用者はNAS上の実環境で、月表示では15日に出る0時台の写真が以前は14日detailに入っていたところ、修正後は15日detailに表示されることを確認し、「直っている」と報告した。ブラウザー名は報告されていない。
+
+古い写真ではCalendarの日付と表示時刻が一致しない例が残るが、実際の撮影時刻とも一致しておらず、古いカメラのExifやtimezone metadataが不明確な可能性がある。これはmetadataが不明確なlegacy assetとして扱い、今回推測による補正は行っていない。
+
 ## 2026-10-04〜10-05: Structured Logging、Home / Stack境界、D&Dの記録
 
 この節は2026-10-04〜10-05のGit履歴と現行コード、および利用者から報告されたFirefox実機結果を照合した記録である。Gitで確認できる実装と実機報告を区別する。ここに記載のないブラウザー確認やtest実行結果は推定しない。
