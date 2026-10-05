@@ -103,7 +103,7 @@ export function GalleryPage() {
   const favoriteSelection = usePhotoSelection();
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const openStacksRef = useRef<() => void>(() => {});
-  const openSelectedAssetsRef = useRef<() => void>(() => {});
+  const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
     tab: 'recent', album: null, year: new Date().getFullYear(), month: new Date().getMonth() + 1,
     date: null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0,
@@ -381,18 +381,7 @@ export function GalleryPage() {
         return;
       }
       if (!matchesShortcut(event, 'homeOpenSelected')) return;
-      if (selectionMode && selectedAssetsCountRef.current > 0) {
-        event.preventDefault();
-        openSelectedAssetsRef.current();
-        return;
-      }
-      if (selectionMode) return;
-      const resume = readWorkspaceSession();
-      if (!resume) return;
-      event.preventDefault();
-      navigate(workspacePath(resume.activeAssetId), {
-        state: { ...resume, homeReturn: captureHomeReturnRef.current() },
-      });
+      if (openHomeWorkspaceRef.current()) event.preventDefault();
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -414,6 +403,20 @@ export function GalleryPage() {
     openWorkspaceAssets(selectedAssets);
   }
 
+  function openHomeWorkspace(): boolean {
+    if (activeSelectedAssetIds.length > 0) {
+      if (!selectedAssets.length) return false;
+      openSelectedAssets();
+      return true;
+    }
+    const resume = readWorkspaceSession();
+    if (!resume) return false;
+    navigate(workspacePath(resume.activeAssetId), {
+      state: { ...resume, homeReturn: captureHomeReturnRef.current() },
+    });
+    return true;
+  }
+
   function openWorkspaceAssets(assetsToOpen: RecentAsset[]) {
     const resolution = activeTab === 'favorites'
       ? { status: 'resolved' as const, assets: assetsToOpen }
@@ -427,7 +430,7 @@ export function GalleryPage() {
     if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
   }
   selectedAssetsCountRef.current = selectedAssets.length;
-  openSelectedAssetsRef.current = openSelectedAssets;
+  openHomeWorkspaceRef.current = openHomeWorkspace;
 
   function readScrollPosition(): HomeScrollPosition {
     const page = pageRef.current;
@@ -618,6 +621,10 @@ export function GalleryPage() {
         </div>
       </div>
       <div className="home-toolbar">
+        <PhotoSelectionBar count={activeSelectedAssetIds.length}
+          canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
+          onSelectAll={() => photoView?.selection.selectVisible(visibleAssets.map(asset => asset.id))}
+          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
         <div className="home-toolbar-controls">
           {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
             setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
@@ -648,20 +655,12 @@ export function GalleryPage() {
       <section className="home-content" aria-label={t('home.sections')}>
         {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unsupported' ? 'photos.workspaceUnsupported' : 'photos.workspaceAmbiguous')}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
-        {selectionMode && <PhotoSelectionBar
-          active={selectionMode}
-          count={activeSelectedAssetIds.length}
-          onClear={clearPhotoSelection}
-          onOpen={openSelectedAssets} onOpenStacks={openStacks}
-        />}
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>
             : assets.length === 0 ? <p className="gallery-message">{t('photos.empty')}</p>
               : visibleAssets.length === 0 ? <p className="gallery-message">{t('photos.noMatches')}</p>
                 : renderPhotoGrid()}
         </div> : activeTab === 'favorites' ? <div id="home-favorites-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-favorites-tab">
-          {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
-            onClear={clearPhotoSelection} onOpen={openSelectedAssets} onOpenStacks={openStacks} />}
           {favoriteState === 'idle' || favoriteState === 'loading'
             ? <p className="gallery-message" role="status">{t('favorites.loading')}</p>
             : favoriteState === 'error' ? <p className="gallery-message error-text" role="alert">{t('favorites.loadFailed')}</p>
@@ -674,8 +673,6 @@ export function GalleryPage() {
               <button type="button" className="album-back" onClick={closeAlbum}>← {t('albums.backToList')}</button>
               <h2>{selectedAlbum.albumName}</h2>
             </div>
-            {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
-              onClear={clearPhotoSelection} onOpen={openSelectedAssets} onOpenStacks={openStacks} />}
             {albumAssetState === 'idle' || albumAssetState === 'loading'
               ? <p className="gallery-message" role="status">{t('albums.photosLoading')}</p>
               : albumAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.photosLoadFailed')}</p>
@@ -694,8 +691,6 @@ export function GalleryPage() {
               <h2>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'long', timeZone: 'UTC' })
                 .format(new Date(`${selectedCalendarDate}T00:00:00Z`))}</h2>
             </div>
-            {selectionMode && <PhotoSelectionBar active count={activeSelectedAssetIds.length}
-              onClear={clearPhotoSelection} onOpen={openSelectedAssets} onOpenStacks={openStacks} />}
             {calendarAssetState === 'idle' || calendarAssetState === 'loading'
               ? <p className="gallery-message" role="status">{t('calendar.photosLoading')}</p>
               : calendarAssetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('calendar.photosLoadFailed')}</p>

@@ -16,6 +16,17 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('places compact wrapping selection controls alongside the right toolbar controls', () => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.innerHTML = '<div class="selection-bar"><strong>0 selected</strong><div class="selection-actions"><button disabled>Select all</button></div></div><div class="home-toolbar-controls"></div>';
+    expect(getComputedStyle(toolbar).justifyContent).toBe('space-between');
+    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    const selection = getComputedStyle(toolbar.querySelector('.selection-bar'));
+    expect(selection.flexWrap).toBe('wrap');
+    expect(selection.visibility).toBe('visible');
+    expect(selection.marginBottom).toBe('');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).justifyContent).toBe('flex-end');
+  });
   it('uses equal Home and STACK brand sizes without changing darkroom typography', () => {
     const home = host.querySelector('.app-header');
     home.innerHTML = '<div class="home-title-row"><h1><button class="home-title-link">GenzoRoom</button></h1></div>';

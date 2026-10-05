@@ -117,8 +117,8 @@ describe('Home return context', () => {
     expectScroll(0, 840);
     expect(host.querySelector<HTMLElement>('.photo-grid')!.scrollTop).toBe(0);
     await click('.photo-selection-input');
-    expect(host.querySelector('.home-content .selection-bar')).not.toBeNull();
-    expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
+    expect(host.querySelector('.home-content .selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
   });
   it('returns from the darkroom to Favorites and restores its scroll after the list arrives', async () => {
     await mount(); await click('#home-favorites-tab'); setScroll(0, 622);

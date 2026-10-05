@@ -166,7 +166,7 @@ describe('album photo view', () => {
     const cards = [...host.querySelectorAll<HTMLButtonElement>('.album-card')];
     act(() => cards[1].click()); await settle();
     expect(host.querySelector('.photo-card.selected')).toBeNull();
-    expect(host.querySelector('.selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);

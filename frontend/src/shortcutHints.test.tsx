@@ -25,7 +25,7 @@ describe('visual shortcut hints', () => {
       await i18n.changeLanguage(language);
       const originalToggle = vi.fn();
       await act(async () => root.render(<>
-        <PhotoSelectionBar active count={1} onClear={() => {}} onOpen={() => {}} />
+        <PhotoSelectionBar count={1} onClear={() => {}} onOpen={() => {}} />
         <ImageViewer src="/photo" alt="photo" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}}
           originalStatus="ready" editSource={{ kind: 'immich-preview', url: '/photo' }} onOriginalToggle={originalToggle} />
         <ScopePanel histogram={null} />

@@ -136,6 +136,7 @@
     "deselectPhoto": "{{filename}}の選択を解除",
     "selectionActions": "写真の選択操作",
     "selectionCount": "{{count}}枚選択中",
+    "selectAll": "すべて選択",
     "clearSelection": "選択解除",
     "openSelected": "暗室へ"
   },

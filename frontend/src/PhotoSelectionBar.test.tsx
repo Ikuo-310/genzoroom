@@ -8,26 +8,30 @@ beforeEach(async () => i18n.changeLanguage('en'));
 
 describe('PhotoSelectionBar', () => {
   it('shows the total selection count and English actions', () => {
-    const markup = renderToStaticMarkup(<PhotoSelectionBar active count={3} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const markup = renderToStaticMarkup(<PhotoSelectionBar count={3} onClear={vi.fn()} onOpen={vi.fn()} />);
     expect(markup).toContain('3 selected');
     expect(markup).toContain('Clear selection');
     expect(markup).toContain('Open in Anshitsu');
   });
 
-  it('keeps the same selection-bar region reserved while selection is inactive', () => {
-    const inactive = renderToStaticMarkup(<PhotoSelectionBar active={false} count={0} onClear={vi.fn()} onOpen={vi.fn()} />);
-    const active = renderToStaticMarkup(<PhotoSelectionBar active count={1} onClear={vi.fn()} onOpen={vi.fn()} />);
+  it('keeps zero-count controls visible and the workspace action enabled', () => {
+    const inactive = renderToStaticMarkup(<PhotoSelectionBar count={0} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const active = renderToStaticMarkup(<PhotoSelectionBar count={1} onClear={vi.fn()} onOpen={vi.fn()} />);
 
-    expect(inactive).toContain('selection-bar inactive');
-    expect(inactive).toContain('aria-hidden="true"');
+    expect(inactive).toContain('0 selected');
+    expect(inactive).not.toContain('aria-hidden');
     expect(inactive).toContain('disabled=""');
-    expect(active).toContain('selection-bar active');
+    expect(inactive.match(/<button[^>]*class="selection-open-workspace"[^>]*>/)?.[0]).not.toContain('disabled');
+    for (const name of ['all', 'clear', 'open-stacks']) {
+      expect(inactive.match(new RegExp(`<button[^>]*class="selection-${name}"[^>]*>`))?.[0]).toContain('disabled');
+    }
+    expect(active).toContain('1 selected');
     expect(active).not.toContain('aria-hidden="true"');
   });
 
   it('shows natural Japanese actions', async () => {
     await i18n.changeLanguage('ja');
-    const markup = renderToStaticMarkup(<PhotoSelectionBar active count={2} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const markup = renderToStaticMarkup(<PhotoSelectionBar count={2} onClear={vi.fn()} onOpen={vi.fn()} />);
     expect(markup).toContain('2枚選択中');
     expect(markup).toContain('選択解除');
     expect(markup).toContain('暗室へ');

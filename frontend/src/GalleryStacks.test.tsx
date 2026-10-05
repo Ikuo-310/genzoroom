@@ -137,7 +137,7 @@ describe('Home stack display', () => {
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[2].click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', 'primary', 'y']);
   });
 
@@ -151,7 +151,7 @@ describe('Home stack display', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Cannot open the selection');
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation).toBeNull();
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
   });
@@ -160,7 +160,7 @@ describe('Home stack display', () => {
     await mount('favorites');
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[3].click());
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('.selection-actions button')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['member', 'primary']);
   });
 
@@ -216,6 +216,20 @@ describe('Home stack display', () => {
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     change('.photo-filter-control select', 'raw');
     expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+  });
+
+  it('adds collapsed visible cards while retaining the hidden selected member', async () => {
+    await mount();
+    change('.photo-filter-control select', 'raw');
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    change('.photo-filter-control select', 'both');
+    act(() => host.querySelector<HTMLButtonElement>('.selection-all')!.click());
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
+    expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
+    change('.photo-filter-control select', 'raw');
+    expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
   });
 
   it('uses collapsed display order for Shift selection and excludes hidden members', async () => {

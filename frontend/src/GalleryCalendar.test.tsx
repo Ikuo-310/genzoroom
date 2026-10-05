@@ -98,6 +98,18 @@ afterEach(() => {
 });
 
 describe('Home calendar', () => {
+  it('keeps selection actions disabled in both month and year views', async () => {
+    await mount(); click('#home-calendar-tab'); await settle();
+    for (const mode of ['month', 'year']) {
+      expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
+      expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
+      for (const action of ['all', 'clear', 'open-stacks']) {
+        expect(host.querySelector<HTMLButtonElement>(`.selection-${action}`)!.disabled).toBe(true);
+      }
+      expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+      if (mode === 'month') { click('.calendar-view-toggle'); await settle(); }
+    }
+  });
   it('follows language for date order and Auto week start only in language-sync mode', async () => {
     vi.stubGlobal('navigator', { languages: ['en-GB'] });
     act(() => { updateSetting('dateLocale', 'auto-language'); updateSetting('weekStart', 'auto'); });
@@ -276,7 +288,7 @@ describe('Home calendar', () => {
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')?.value).toBe('2024');
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')?.value).toBe('8');
-    expect(host.querySelector('.selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
     click('#home-recent-tab');
     expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('recent.jpg');
     click('#home-calendar-tab'); await settle();

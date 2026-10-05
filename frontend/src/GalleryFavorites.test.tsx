@@ -71,6 +71,69 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); clearWorkspaceSession(); vi.unstubAllGlobals(); });
 
 describe('Home favorites', () => {
+  it('keeps toolbar actions visible at zero and safely ignores opening without a session', async () => {
+    await mount();
+    expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
+    expect(host.querySelector('.home-content .selection-bar')).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('.selection-open-stacks')!.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.selection-clear')!.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+    await click('.selection-open-workspace');
+    expect(navigation).toBeNull();
+    for (const tab of ['albums', 'calendar']) {
+      await click(`#home-${tab}-tab`);
+      for (const action of ['all', 'clear', 'open-stacks']) {
+        expect(host.querySelector<HTMLButtonElement>(`.selection-${action}`)!.disabled).toBe(true);
+      }
+      expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+    }
+  });
+
+  it('adds only visible IDs after hidden selections, without duplicates, and clears both', async () => {
+    await mount(); await click('#home-favorites-tab');
+    await click('.photo-selection-input');
+    await change('.photo-filter-control select', 'raw');
+    await change('.edit-status-filter-control select', 'edited');
+    await click('.selection-all');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+    expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
+    await change('.edit-status-filter-control select', 'both');
+    await click('.selection-all');
+    await change('.photo-filter-control select', 'both');
+    await click('.selection-all');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
+    await click('.selection-open-workspace');
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-2', 'photo-1', 'photo-3']);
+    await click('.return-home');
+    await change('.photo-filter-control select', 'raw');
+    await click('.selection-clear');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('0 selected');
+    await change('.photo-filter-control select', 'both');
+    expect(host.querySelector('.photo-card.selected')).toBeNull();
+  });
+
+  it('resumes the previous workspace from the unselected toolbar button', async () => {
+    rememberWorkspaceSession({ selectedAssets: photos.slice(0, 3), activeAssetId: 'photo-2' });
+    await mount(); await click('#home-favorites-tab');
+    setScroll(0, 120);
+    await click('.selection-open-workspace');
+    expect(navigation?.activeAssetId).toBe('photo-2');
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
+    expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', contentScrollTop: 120 });
+  });
+
+  it('preserves the existing range anchor when selecting a filtered set', async () => {
+    await mount(); await click('#home-favorites-tab');
+    await click('.photo-selection-input');
+    await change('.photo-filter-control select', 'raw'); await click('.selection-all');
+    await change('.photo-filter-control select', 'both');
+    await act(async () => host.querySelectorAll('.photo-card-button')[3].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(4);
+    await click('.selection-open-workspace');
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2', 'photo-3']);
+  });
+
   it('loads lazily, reuses the grid and avoids refetching the successful list on tab switches or reactivation', async () => {
     await mount(); expect(api.favorites).not.toHaveBeenCalled();
     await click('#home-favorites-tab');
@@ -137,7 +200,7 @@ describe('Home favorites', () => {
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
     await click('#home-recent-tab'); expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
     await click('#home-favorites-tab'); expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
-    await click('.selection-clear'); expect(host.querySelector('.selection-bar')).toBeNull();
+    await click('.selection-clear'); expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
     await click('.photo-selection-input');
     await pressD();
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);

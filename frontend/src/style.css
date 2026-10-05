@@ -60,7 +60,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 :where(.home-page, .settings-dialog) button:focus-visible { outline-color: var(--accent); }
 .home-content { width: 100%; min-width: 0; min-height: 0; margin-top: 0; }
 .home-tabs-bar { padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
-.home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-end; justify-content: flex-end; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
+.home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .home-tabs { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 0 0 auto; }
 .home-tabs button { color: var(--text-secondary); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 5px 8px 8px; font-weight: 600; }
 .home-tabs button:hover { color: var(--text-primary); background: var(--bg-elevated); }
@@ -120,13 +120,13 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .calendar-day:not(:disabled):hover { background: #44464b; border-color: #85888f; }
 .calendar-day.today { box-shadow: inset 0 0 0 2px #ececee; }
 h2 { margin: 0; font-size: 1.35rem; }
-.selection-bar { display: flex; align-items: center; align-self: center; gap: 8px 12px; min-height: 38px; margin-bottom: 16px; padding: 4px 6px 4px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg-app); }
-.selection-bar.inactive { visibility: hidden; pointer-events: none; }
+.selection-bar { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; align-self: center; gap: 8px 12px; min-width: 0; }
 .selection-bar strong { font-size: 0.92rem; }
 .selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.selection-actions button { padding-block: 6px; font-size: 0.84rem; }
-.selection-actions .selection-clear { color: var(--text-primary); background: transparent; border: 1px solid var(--border-subtle); }
-.selection-actions .selection-clear:hover { background: var(--bg-elevated); }
+.selection-actions button { color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--border-subtle); padding: 5px 10px; font-size: 0.84rem; }
+.selection-actions button:hover:not(:disabled) { background: #353539; border-color: #626267; }
+.selection-actions button:focus-visible { outline-color: var(--text-primary); }
+.selection-actions button:disabled { opacity: 0.45; cursor: default; }
 .home-toolbar-controls { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px 12px; min-width: 0; }
 .home-control { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .home-control-label { color: var(--text-secondary); font-size: 0.74rem; line-height: 1.2; white-space: nowrap; }
@@ -434,7 +434,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 @media (max-width: 760px) {
   .home-toolbar { align-items: flex-start; }
   .home-toolbar-controls { justify-content: flex-start; }
-  .selection-bar { align-self: stretch; justify-content: center; }
   .workspace-page { grid-template-rows: auto auto; height: auto; min-height: 100dvh; overflow: visible; }
   .workspace-header { grid-template-columns: 1fr auto; gap: 8px 12px; }
   .workspace-brand { grid-column: 1; }
@@ -486,8 +485,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .workspace-brand .workspace-title-link { font-size: 1.35rem; }
   .workspace-brand > span { font-size: 0.9rem; }
   .home-toolbar-controls { gap: 8px 10px; }
-  .selection-bar { align-items: stretch; align-self: stretch; justify-content: space-between; min-height: 40px; padding-block: 4px; }
-  .selection-actions { display: grid; grid-template-columns: 1fr 1fr; }
 }
 
 /* Keep these overrides after narrow layouts so focus mode always fills the workspace. */

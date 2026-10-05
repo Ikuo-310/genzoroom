@@ -23,10 +23,16 @@ export function usePhotoSelection() {
     setSelectedIds([]);
   }, []);
 
+  function selectVisible(visibleIds: string[]) {
+    // Keep the range anchor and hidden selections; bulk selection only appends new visible IDs.
+    if (!anchorId.current && visibleIds.length > 0) anchorId.current = visibleIds[0];
+    setSelectedIds(current => Array.from(new Set([...current, ...visibleIds])));
+  }
+
   const retainAvailable = useCallback((availableIds: Set<string>) => {
     setSelectedIds(current => current.filter(id => availableIds.has(id)));
     if (anchorId.current && !availableIds.has(anchorId.current)) anchorId.current = null;
   }, []);
 
-  return { selectedIds, toggle, clear, retainAvailable };
+  return { selectedIds, toggle, selectVisible, clear, retainAvailable };
 }

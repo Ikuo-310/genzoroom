@@ -82,7 +82,7 @@ describe('Home album tab', () => {
     expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
-    expect(host.querySelector('.selection-bar')).toBeNull();
+    expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
     expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .recent-count-control')).toBeNull();
     expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual(['home-control thumbnail-size-setting']);

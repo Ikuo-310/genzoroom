@@ -139,6 +139,7 @@
     "deselectPhoto": "Deselect {{filename}}",
     "selectionActions": "Photo selection actions",
     "selectionCount": "{{count}} selected",
+    "selectAll": "Select all",
     "clearSelection": "Clear selection",
     "openSelected": "Open in Anshitsu"
   },

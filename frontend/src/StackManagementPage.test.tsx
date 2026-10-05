@@ -40,10 +40,10 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en'); });
 it('preserves D and adds the Stack selection callback', async () => {
   const open = vi.fn(), stacks = vi.fn();
-  await act(async () => root.render(<PhotoSelectionBar active count={2} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
+  await act(async () => root.render(<PhotoSelectionBar count={2} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
   await click('button[title="Manage Stacks (S)"]'); expect(stacks).toHaveBeenCalledOnce(); expect(open).not.toHaveBeenCalled();
   await click('button[title="Open in Anshitsu (D)"]'); expect(open).toHaveBeenCalledOnce();
-  await act(async () => root.render(<PhotoSelectionBar active count={0} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
+  await act(async () => root.render(<PhotoSelectionBar count={0} onClear={vi.fn()} onOpen={open} onOpenStacks={stacks} />));
   expect(host.querySelector<HTMLButtonElement>('button[title="Manage Stacks (S)"]')!.disabled).toBe(true);
 });
 it('passes ordered concrete favorites with RAW via S and returns to the same Home tab', async () => {
