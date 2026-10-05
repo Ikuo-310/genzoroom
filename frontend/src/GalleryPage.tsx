@@ -466,8 +466,11 @@ export function GalleryPage() {
   }
 
   function captureHomeReturn(): HomeReturnContext {
+    // Route exits must preserve the intended offset while the current view is still restoring.
+    const pending = pendingScroll.current;
+    const position = pending?.key === viewKey ? pending.position : readScrollPosition();
     return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
-      date: selectedCalendarDate, calendarMode, ...readScrollPosition() };
+      date: selectedCalendarDate, calendarMode, ...position };
   }
   captureHomeReturnRef.current = captureHomeReturn;
 

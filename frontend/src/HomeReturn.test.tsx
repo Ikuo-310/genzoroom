@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import i18n from './i18n';
@@ -10,6 +10,7 @@ import { activateWorkspaceAsset } from './photoSelection';
 import type { AssetDetail } from './assets';
 import { writePhotoFilterMode } from './photoFilters';
 import { EditStateApiError } from './editStateApi';
+import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
   heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
@@ -31,6 +32,11 @@ const context: HomeReturnContext = { tab: 'recent', album: null, year: 2026, mon
   pageScrollTop: 32, contentScrollTop: 840 };
 let host: HTMLDivElement;
 let root: Root;
+let navigationState: { homeReturn?: HomeReturnContext } | null;
+function NavigationProbe() {
+  navigationState = useLocation().state;
+  return null;
+}
 async function settle() { await act(async () => { await Promise.resolve(); }); }
 async function click(selector: string) {
   const element = host.querySelector<HTMLButtonElement>(selector);
@@ -38,7 +44,7 @@ async function click(selector: string) {
   await act(async () => element.click());
 }
 async function mount(state?: unknown) {
-  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state }]}><App /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state }]}><App /><NavigationProbe /></MemoryRouter>));
 }
 it('keeps connection details and Settings in the compact Home title bar without introductory copy', async () => {
   await mount(); await settle();
@@ -79,6 +85,8 @@ function expectScroll(page: number, content: number) {
   expect(homeScrollContent(element)!.scrollTop).toBe(content);
 }
 beforeEach(async () => {
+  clearWorkspaceSession();
+  navigationState = null;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
@@ -103,10 +111,58 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => { act(() => root.unmount()); host.remove();
+  clearWorkspaceSession();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it.each(['shortcut', 'button'])('preserves pending Favorites restoration when resuming Anshitsu via %s', async method => {
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.favorites.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    rememberWorkspaceSession({ selectedAssets: [photo], activeAssetId: photo.id });
+    await mount({ homeReturn: { ...context, tab: 'favorites' } });
+    expectScroll(0, 0);
+    if (method === 'button') await click('.selection-open-workspace');
+    else await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(host.querySelector('.workspace-actions')).not.toBeNull();
+    expect(navigationState?.homeReturn).toMatchObject({ tab: 'favorites', pageScrollTop: 32, contentScrollTop: 840 });
+    await act(async () => resolve([photo, second]));
+    await click('.workspace-actions button');
+    expectScroll(0, 840);
+  });
+
+  it.each(['Anshitsu', 'STACK'])('preserves pending cached Album restoration when selected photos exit to %s', async destination => {
+    await mount(); await click('#home-albums-tab'); await click('.album-card');
+    await click('.photo-selection-input'); setScroll(0, 520);
+    await click('#home-recent-tab'); setScroll(0, 110);
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.albumAssets.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    await click('#home-albums-tab');
+    expectScroll(0, 110);
+    expect(host.querySelector('.photo-selection-input:checked')).not.toBeNull();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: destination === 'STACK' ? 's' : 'd', bubbles: true, cancelable: true,
+    })));
+    expect(host.querySelector(destination === 'STACK' ? '.stack-management-page' : '.workspace-actions')).not.toBeNull();
+    expect(navigationState?.homeReturn).toMatchObject({ tab: 'albums', album, contentScrollTop: 520 });
+    await act(async () => resolve([photo, second]));
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true, cancelable: true })));
+    expectScroll(0, 520);
+  });
+
+  it('does not reuse pending Favorites scroll after switching to Recent before a route exit', async () => {
+    let resolve!: (assets: AssetDetail[]) => void;
+    api.favorites.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    rememberWorkspaceSession({ selectedAssets: [photo], activeAssetId: photo.id });
+    await mount({ homeReturn: { ...context, tab: 'favorites' } });
+    expectScroll(0, 0);
+    await click('#home-recent-tab'); setScroll(0, 135);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(navigationState?.homeReturn).toMatchObject({ tab: 'recent', contentScrollTop: 135 });
+    await act(async () => resolve([photo, second]));
+    await click('.workspace-actions button'); expectScroll(0, 135);
+  });
+
   it('accepts legacy page offsets and restores only common content after data arrives', async () => {
     let resolve!: (assets: AssetDetail[]) => void;
     api.recent.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));

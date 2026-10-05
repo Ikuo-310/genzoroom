@@ -16,6 +16,58 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('protects selection segments and moves detail titles to a separate row at intermediate widths', () => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.classList.add('home-toolbar-centered');
+    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">0 selected</strong><div class="selection-actions"><button>Select all</button><button>Clear</button><button>Stacks[S]</button><button>Anshitsu[D]</button></div></div><div class="home-toolbar-context"><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">A long album name</h2></div><div class="home-toolbar-controls"><label class="home-control"><span>Type</span><select></select></label></div>';
+    const left = toolbar.querySelector('.home-toolbar-left');
+    const center = toolbar.querySelector('.home-toolbar-center');
+    const controls = toolbar.querySelector('.home-toolbar-controls');
+    const selection = toolbar.querySelector('.selection-bar');
+    const actions = toolbar.querySelector('.selection-actions');
+    const assertOperableGroup = () => {
+      expect(getComputedStyle(selection).flexShrink).toBe('0');
+      expect(getComputedStyle(selection).minWidth).toBe('max-content');
+      expect(getComputedStyle(selection).overflow).not.toMatch(/hidden|clip/);
+      expect(getComputedStyle(actions).flexShrink).toBe('0');
+      expect(getComputedStyle(left).flexWrap).toBe('wrap');
+      expect(getComputedStyle(toolbar).alignItems).toBe('center');
+      expect(getComputedStyle(controls).flexWrap).toBe('wrap');
+      for (const button of actions.querySelectorAll('button')) {
+        expect(getComputedStyle(button).whiteSpace).toBe('nowrap');
+      }
+    };
+    expect(getComputedStyle(toolbar).display).toBe('grid');
+    expect(getComputedStyle(toolbar).gridTemplateColumns).toBe('minmax(34rem, 1fr) minmax(0, auto) minmax(34rem, 1fr)');
+    expect(getComputedStyle(center).gridColumn).toBe('2');
+    expect(getComputedStyle(controls).gridColumn).toBe('3');
+    expect(getComputedStyle(center.querySelector('h2')).textOverflow).toBe('ellipsis');
+    assertOperableGroup();
+    const media = Array.from(stylesheet.sheet.cssRules).find(rule => rule.conditionText === '(max-width: 90rem)');
+    expect(media).toBeDefined();
+    // jsdom has no media-query layout; activate the real rules to verify their resulting cascade.
+    const responsive = document.createElement('style');
+    responsive.textContent = Array.from(media.cssRules).map(rule => rule.cssText).join('\n');
+    document.head.append(responsive);
+    try {
+      expect(getComputedStyle(toolbar).gridTemplateColumns).toBe('minmax(max-content, 1fr) minmax(0, 1fr)');
+      expect(getComputedStyle(left).gridColumn).toBe('1');
+      expect(getComputedStyle(left).gridRow).toBe('1');
+      expect(getComputedStyle(controls).gridColumn).toBe('2');
+      expect(getComputedStyle(controls).gridRow).toBe('1');
+      expect(getComputedStyle(center).gridColumn).toBe('1 / -1');
+      expect(getComputedStyle(center).gridRow).toBe('2');
+      assertOperableGroup();
+      const narrow = Array.from(stylesheet.sheet.cssRules).find(rule => rule.conditionText === '(max-width: 760px)');
+      responsive.textContent += '\n' + Array.from(narrow.cssRules).map(rule => rule.cssText).join('\n');
+      expect(getComputedStyle(toolbar).gridTemplateColumns).toBe('minmax(0, 1fr)');
+      expect(getComputedStyle(center).gridColumn).toBe('1');
+      expect(getComputedStyle(center).gridRow).toBe('2');
+      expect(getComputedStyle(controls).gridColumn).toBe('1');
+      expect(getComputedStyle(controls).gridRow).toBe('3');
+      assertOperableGroup();
+    } finally { responsive.remove(); }
+  });
   it('centers Calendar navigation with equal side tracks and removes its sticky enclosure', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-calendar');
