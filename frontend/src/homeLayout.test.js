@@ -116,6 +116,32 @@ describe('Home and thumbnail layout', () => {
     host.querySelector('.home-content').append(year);
     expect(getComputedStyle(year.querySelector('.calendar-day')).aspectRatio).toBe('1');
   });
+  it('uses neutral semantic colors for Calendar surfaces and cells, reserving green for states', () => {
+    const content = host.querySelector('.home-content');
+    const month = document.createElement('div'); month.className = 'calendar-month';
+    const year = document.createElement('div'); year.className = 'calendar-year';
+    const mini = document.createElement('section'); mini.className = 'calendar-mini-month';
+    mini.innerHTML = '<h3>January</h3><button class="calendar-mini-month-title">January</button>';
+    const weekday = document.createElement('div'); weekday.className = 'calendar-weekday';
+    const ordinary = document.createElement('button'); ordinary.className = 'calendar-day';
+    const disabled = document.createElement('button'); disabled.className = 'calendar-day'; disabled.disabled = true;
+    const photoDay = document.createElement('button'); photoDay.className = 'calendar-day has-assets today';
+    content.append(month, year, mini, weekday, ordinary, disabled, photoDay);
+    const rule = selector => Array.from(stylesheet.sheet.cssRules).find(item => item.selectorText === selector)?.style;
+    for (const selector of ['.calendar-month', '.calendar-year', '.calendar-mini-month']) {
+      expect(rule(selector).getPropertyValue('background')).toBe('var(--bg-panel)');
+      expect(rule(selector).getPropertyValue('border')).toContain('var(--border-subtle)');
+    }
+    expect(rule('.calendar-mini-month h3').getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(rule('.calendar-weekday').getPropertyValue('color')).toBe('var(--text-secondary)');
+    expect(rule('.calendar-day').getPropertyValue('background')).toBe('var(--bg-elevated)');
+    expect(rule('.calendar-day').getPropertyValue('border')).toContain('var(--border-subtle)');
+    expect(rule('.calendar-day').getPropertyValue('color')).toBe('var(--text-primary)');
+    expect(rule('.calendar-day:disabled').getPropertyValue('background')).toBe('var(--bg-app)');
+    expect(rule('.calendar-day:disabled').getPropertyValue('color')).toBe('var(--text-secondary)');
+    expect(rule('.calendar-day.has-assets').getPropertyValue('border-color')).toBe('var(--accent)');
+    expect(rule('.calendar-day.today').getPropertyValue('box-shadow')).toContain('var(--accent)');
+  });
   it('styles This month like the calendar selects while keeping the navigation responsive', () => {
     const navigation = document.createElement('div'); navigation.className = 'calendar-navigation';
     navigation.innerHTML = '<select><option>2026</option></select><button class="calendar-current-month">This month</button>';
