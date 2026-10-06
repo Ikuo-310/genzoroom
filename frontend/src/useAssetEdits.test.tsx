@@ -380,18 +380,23 @@ describe('useAssetEdits persistence', () => {
     await mount();
     expect(latest.editStatusFor(second)).toBeUndefined();
     expect(latest.editStatusFor(first)).toBe(false);
+    expect(latest.localStateFor(second).historyOnly).toBeUndefined();
+    expect(latest.localStateFor(first)).toMatchObject({ nonDefaultRecipe: false, historyOnly: false });
     editTemperature(12);
     expect(latest.editStatusFor(first)).toBe(true);
+    expect(latest.localStateFor(first)).toMatchObject({ nonDefaultRecipe: true, historyOnly: false });
     commitEdit();
     act(() => latest.dispatch({ type: 'undo' }));
     expect(latest.session.recipe.adjustments.temperature).toBe(0);
     expect(latest.editStatusFor(first)).toBe(true);
+    expect(latest.localStateFor(first)).toMatchObject({ nonDefaultRecipe: false, historyOnly: true });
     act(() => latest.dispatch({ type: 'redo' }));
     act(() => latest.organizeHistory('clearHistory'));
     expect(latest.session.history).toHaveLength(0);
     expect(latest.editStatusFor(first)).toBe(true);
     act(() => latest.organizeHistory('resetEdits'));
     expect(latest.editStatusFor(first)).toBe(false);
+    expect(latest.localStateFor(first)).toMatchObject({ nonDefaultRecipe: false, historyOnly: false });
   });
 
   it('retains edited status after save failure and while another photo loads', async () => {
@@ -734,6 +739,20 @@ describe('useAssetEdits persistence', () => {
     act(() => latest.discard(first));
     await mount(second);
     expect(latest.editStatusFor(first, !edited)).toBe(edited);
+    expect(latest.localStateFor(first, !edited)).toMatchObject({ nonDefaultRecipe: edited, historyOnly: false });
+  });
+
+  it('retains the confirmed History-only display after discarding a rejected later edit', async () => {
+    await mount(); editTemperature(12); commitEdit();
+    act(() => latest.dispatch({ type: 'undo' }));
+    await act(async () => { await latest.save(first); });
+    editTemperature(20); commitEdit();
+    api.put.mockRejectedValueOnce(new EditStateApiError('invalid_state', 422));
+    await act(async () => { await latest.save(first); });
+    act(() => latest.discard(first));
+    await mount(second);
+    expect(latest.editStatusFor(first, false)).toBe(true);
+    expect(latest.localStateFor(first, true)).toMatchObject({ nonDefaultRecipe: false, historyOnly: true });
   });
 
   it.each([
@@ -747,6 +766,8 @@ describe('useAssetEdits persistence', () => {
     await mount(second);
     expect(latest.editStatusFor(first, false)).toBeUndefined();
     expect(latest.editStatusFor(first, true)).toBeUndefined();
+    expect(latest.localStateFor(first, true).nonDefaultRecipe).toBeUndefined();
+    expect(latest.localStateFor(first).historyOnly).toBeUndefined();
     await mount(first);
     expect(latest.editStatusFor(first, true)).toBe(false);
   });

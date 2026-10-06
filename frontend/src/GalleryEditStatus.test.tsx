@@ -10,6 +10,7 @@ import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
 import { updateSetting } from './appSettings';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEY, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
+import editStatusCases from './test-fixtures/edit-status.json';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
@@ -94,6 +95,36 @@ afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear
   vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
+  it('does not badge or include standalone History-only assets in the edited filter', async () => {
+    const historyOnly = editStatusCases.find(test => test.name === 'redo-only')!;
+    api.recent.mockResolvedValue([assets[0]]);
+    api.statuses.mockResolvedValue({ [assets[0].id]: historyOnly.recipeEdited });
+    await mount();
+    expect(host.querySelector('.edited-badge, .filmstrip-history-badge')).toBeNull();
+    expect(host.querySelector('.photo-card-button')?.getAttribute('aria-description')).toBeNull();
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+    changeEditFilter('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(api.editState).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true, undefined])('aggregates History-only and non-default member status %s on the Stack representative', async memberStatus => {
+    const primary = { ...assets[0], stackId: 'stack', primaryAssetId: assets[0].id,
+      stackAssetCount: 2, stackMemberIds: [assets[0].id, assets[1].id] };
+    const historyOnly = editStatusCases.find(test => test.name === 'redo-only')!;
+    api.recent.mockResolvedValue([primary]);
+    api.statuses.mockResolvedValue({ [primary.id]: historyOnly.recipeEdited, [assets[1].id]: memberStatus });
+    await mount();
+    expect(api.statuses.mock.calls[0][0]).toEqual(primary.stackMemberIds);
+    expect(host.querySelectorAll('.edited-badge')).toHaveLength(memberStatus === true ? 1 : 0);
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(memberStatus === false ? 0 : 1);
+    changeEditFilter('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(memberStatus === true ? 0 : 1);
+    expect(api.editState).not.toHaveBeenCalled();
+  });
+
   it('re-fetches the selected count while preserving the current grid and ignores stale responses', async () => {
     const stale = deferred<RecentAsset[]>();
     const latest = deferred<RecentAsset[]>();

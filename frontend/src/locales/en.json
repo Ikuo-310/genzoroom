@@ -161,6 +161,7 @@
     "openSelectedCompact": "Develop"
   },
   "workspace": {
+    "historyRetained": "Edit history retained",
     "name": "Develop",
     "subtitle": "Photo development workspace",
     "backToPhotos": "Back to photos",

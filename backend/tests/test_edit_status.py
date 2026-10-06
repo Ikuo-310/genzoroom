@@ -74,7 +74,7 @@ class EditStatusTests(unittest.TestCase):
                 put_edit_state(ASSET, 0, uuid4(), state)
                 response = self.request({'assetIds': [str(ASSET)]})
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json(), {'edited': {str(ASSET): case['edited']}})
+                self.assertEqual(response.json(), {'edited': {str(ASSET): case.get('recipeEdited', case['edited'])}})
                 with self.database() as connection:
                     self.assertEqual(connection.execute('SELECT recipe_version FROM asset_edit_states').fetchone()[0], case.get('version', 18))
 
@@ -84,6 +84,20 @@ class EditStatusTests(unittest.TestCase):
             self.assertTrue(has_edits(validate_snapshot(snapshot({'adjustmentEnabled': {key: False}}))))
         for key in FLAGS:
             self.assertTrue(has_edits(validate_snapshot(snapshot({'flags': {key: False}}))))
+
+    def test_bulk_status_uses_current_recipe_independently_of_history(self):
+        for non_default, history in [(False, False), (False, True), (True, False), (True, True)]:
+            with self.subTest(non_default=non_default, history=history):
+                state = snapshot({'history': history, 'adjustments': {'temperature': 12} if non_default else {}})
+                if non_default and history:
+                    state['historyCursor'] = 1
+                if self.path.exists():
+                    with self.database() as connection:
+                        connection.execute('DELETE FROM asset_edit_states')
+                put_edit_state(ASSET, 0, uuid4(), state)
+                self.assertEqual(self.request({'assetIds': [str(ASSET)]}).json(),
+                                 {'edited': {str(ASSET): non_default}})
+                self.assertEqual(has_edits(validate_snapshot(state, ASSET)), non_default or history)
 
     def test_bulk_100_ids_missing_and_no_unrequested_results(self):
         put_edit_state(ASSET, 0, uuid4(), snapshot({'adjustments': {'temperature': 12}}))

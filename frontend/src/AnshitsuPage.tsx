@@ -102,7 +102,7 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
-    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor, localStateFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
+    saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
   const editable = canEdit && loadStatus === 'ready';
   const seenSaveRevisions = useRef(new Map<string, number>());
   useEffect(() => {
@@ -122,6 +122,8 @@ export function AnshitsuPage() {
   async function toggleQueue(id: string) {
     if (workspaceKeyboardBlocked || switchingRef.current || exitRef.current || !exportQueue.loaded
       || queueOperations.current.has(id) || exportQueue.mutationFor(id).operation) return;
+    // A default Recipe has no Queue control, even while saved cleanup membership is still refreshing.
+    if (localStateFor(id).nonDefaultRecipe === false) return;
     const status = exportQueue.getStatus(id);
     if (status === 'waiting' || status === 'encoding' || status === 'registering') return;
     const removing = status === 'queued' || status === 'failed';
@@ -633,7 +635,8 @@ export function AnshitsuPage() {
       </>}
       filmstrip={<Filmstrip
         assets={selectedAssets}
-        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, editStatusFor(asset.id, savedEditStatuses[asset.id])]))}
+        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
+        historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id).historyOnly]))}
         activeAssetId={assetId}
         disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         keyboardBlocked={workspaceKeyboardBlocked}

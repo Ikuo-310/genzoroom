@@ -8,9 +8,10 @@ import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, queueKnown, queueStatusFor, queueBusyFor, onQueueToggle }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
   editStatuses?: AssetEditStatuses;
+  historyOnlyStatuses?: AssetEditStatuses;
   queueKnown?: boolean;
   queueStatusFor?: (id: string) => ExportQueueStatus | undefined;
   queueBusyFor?: (id: string) => boolean;
@@ -54,15 +55,22 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
         onClick={() => onActivate(asset.id)}
         aria-current={asset.id === activeAssetId ? 'true' : undefined}
         aria-label={asset.filename}
-        aria-description={editStatuses[asset.id] ? t('photos.edited') : undefined}
+        aria-description={editStatuses[asset.id] ? t('photos.edited')
+          : historyOnlyStatuses[asset.id] ? t('workspace.historyRetained') : undefined}
       >
         <img src={asset.thumbnail_url} alt="" />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       </button>
-        <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown}
+        {editStatuses[asset.id] !== true && historyOnlyStatuses[asset.id] === true
+          ? <span className="filmstrip-history-badge" role="img" aria-label={t('workspace.historyRetained')} title={t('workspace.historyRetained')}>
+            <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path d="M3 9a7 7 0 1 1 2 6M3 4v5h5M10 6v4l3 2" />
+            </svg>
+          </span>
+          : <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown}
           queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}
           disabled={disabled || keyboardBlocked}
-          onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />
+          onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />}
       </div>)}
     </div>
   </section>;

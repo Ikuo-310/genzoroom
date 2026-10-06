@@ -9,7 +9,7 @@ from time import monotonic
 from uuid import UUID
 
 from backend_logging import backend_logger
-from edit_state import InvalidEditState, validate_snapshot, has_edits, has_non_default_recipe
+from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 
 DB_PATH = Path("/data/genzoroom.db")
 SCHEMA_VERSION = 2
@@ -183,7 +183,7 @@ def get_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool]:
         )
         for row in rows:
             asset_id = UUID(row["asset_id"])
-            result[str(asset_id)] = has_edits(_snapshot(row, asset_id))
+            result[str(asset_id)] = has_non_default_recipe(_snapshot(row, asset_id))
     return result
 
 

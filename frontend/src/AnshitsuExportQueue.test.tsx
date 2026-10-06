@@ -115,18 +115,26 @@ describe('Anshitsu Export Queue integration', () => {
     expect(api.enqueue).not.toHaveBeenCalled(); expect(host.querySelector('.workspace-queue-error')?.textContent).toContain('Could not add');
     expect(host.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
   });
-  it('keeps the History-only badge but rejects a default current Recipe locally', async () => {
+  it.each([undefined, 'queued', 'waiting', 'failed'] as const)('keeps History-only noninteractive despite Queue status %s', async status => {
     api.get.mockResolvedValue({ state: snapshot(true), revision: 1, updatedAt: '2026-10-06T00:00:00Z', lastSaveId: crypto.randomUUID() });
-    await mount(); expect(badge()).toBeDefined(); await q();
+    if (status) api.list.mockResolvedValue([queueItem(status)]);
+    await mount();
+    const entry = host.querySelector('.filmstrip-entry')!;
+    const history = entry.querySelector<HTMLElement>('.filmstrip-history-badge')!;
+    expect(history.getAttribute('aria-label')).toBe('Edit history retained');
+    expect(entry.querySelector('.edited-badge')).toBeNull();
+    expect(history.className).not.toContain('queue-');
+    await act(async () => history.click()); await q();
     expect(api.enqueue).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled();
-    expect(host.querySelector('.workspace-queue-error')?.textContent).toContain('current adjustments');
+    expect(api.dequeue).not.toHaveBeenCalled();
+    expect(host.querySelector('.workspace-queue-error')).toBeNull();
   });
-  it('saves dirty default Recipe without enqueueing', async () => {
+  it('excludes dirty History-only Recipe from Q without changing autosave', async () => {
     await mount();
     const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === i18n.t('workspace.allReset'))!;
     await act(async () => reset.click()); await q();
-    expect(api.put).toHaveBeenCalledTimes(1); expect(api.enqueue).not.toHaveBeenCalled();
-    expect(api.put.mock.calls[0][1].currentRecipe.adjustments.temperature).toBe(0);
+    expect(api.put).not.toHaveBeenCalled(); expect(api.enqueue).not.toHaveBeenCalled();
+    expect(host.querySelector('.filmstrip-history-badge')).not.toBeNull();
   });
   it('refreshes canonical membership after default Recipe autosave cleanup', async () => {
     vi.useFakeTimers();
@@ -134,9 +142,18 @@ describe('Anshitsu Export Queue integration', () => {
       api.list.mockResolvedValueOnce([queueItem('queued')]).mockResolvedValue([]); await mount();
       const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === i18n.t('workspace.allReset'))!;
       await act(async () => reset.click());
+      expect(host.querySelector('.filmstrip-entry:first-child .edited-badge')).toBeNull();
+      expect(host.querySelector('.filmstrip-history-badge')).not.toBeNull();
+      await q(); expect(api.dequeue).not.toHaveBeenCalled();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
       expect(api.put).toHaveBeenCalledTimes(1); expect(api.list).toHaveBeenCalledTimes(2);
-      expect(badge().classList.contains('queue-inactive')).toBe(true); expect(api.enqueue).not.toHaveBeenCalled();
+      expect(api.put.mock.calls[0][1].currentRecipe.adjustments.temperature).toBe(0);
+      expect(api.put.mock.calls[0][1].history.length).toBeGreaterThan(0);
+      expect(host.querySelector('.filmstrip-entry:first-child .edited-badge')).toBeNull();
+      expect(host.querySelector('.filmstrip-history-badge')).not.toBeNull();
+      expect(api.enqueue).not.toHaveBeenCalled();
+      await click('button[aria-label="Disable Basic"]');
+      expect(host.querySelector('.filmstrip-entry:first-child .edited-badge')?.classList.contains('queue-inactive')).toBe(true);
     } finally { vi.useRealTimers(); }
   });
   it('preserves membership and active photo when dequeue fails', async () => {

@@ -155,6 +155,7 @@
     "openSelected": "暗室へ"
   },
   "workspace": {
+    "historyRetained": "編集履歴あり",
     "name": "暗室",
     "backToPhotos": "写真一覧へ戻る",
     "loading": "写真を読み込んでいます…",

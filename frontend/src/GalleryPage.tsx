@@ -346,6 +346,7 @@ export function GalleryPage() {
 
   // The active view owns its selection; shared asset IDs never carry selection across views.
   const currentAssets = photoView?.assets ?? [];
+  const cardEditStatuses = aggregateStackEditStatuses(currentAssets, editStatuses);
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
   const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, stackFilterModes[activeTab]);
   const editFilteredAssets = activeTab === 'favorites'
@@ -626,7 +627,7 @@ export function GalleryPage() {
         key={asset.id}
         selected={activeSelectedAssetIds.includes(asset.id)}
         selectionMode={selectionMode}
-        edited={editStatuses[asset.id]}
+        edited={cardEditStatuses[asset.id]}
         onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
         onOpen={() => openWorkspace(asset)}
       />

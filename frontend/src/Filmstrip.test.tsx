@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Filmstrip } from './Filmstrip';
 import type { RecentAsset } from './assets';
+import i18n from './i18n';
 
 const assets: RecentAsset[] = ['a', 'b', 'c'].map((id) => ({ id, filename: `${id}.jpg`, date: '2026-09-25',
   thumbnail_url: `/${id}`, format: 'JPEG', is_raw: false }));
@@ -34,7 +35,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); activate = vi.fn();
   act(() => root.render(<Harness />));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(async () => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await i18n.changeLanguage('en'); });
 
 describe('Filmstrip keyboard navigation', () => {
   it('moves globally in both directions without hover or Filmstrip focus', () => {
@@ -132,6 +133,29 @@ describe('Filmstrip keyboard navigation', () => {
 });
 
 describe('Filmstrip Queue buttons', () => {
+  it.each(['en', 'ja'])('separates edited, History-only and untouched indicators (%s)', async language => {
+    await i18n.changeLanguage(language);
+    const toggle = vi.fn();
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate}
+      editStatuses={{ a: true, b: false, c: false }} historyOnlyStatuses={{ b: true, c: false }}
+      queueKnown queueStatusFor={() => 'queued'} onQueueToggle={toggle} />));
+    const entries = host.querySelectorAll('.filmstrip-entry');
+    expect(entries[0].querySelector('button.edited-badge.queue-queued')).not.toBeNull();
+    const history = entries[1].querySelector<HTMLElement>('.filmstrip-history-badge')!;
+    const description = language === 'en' ? 'Edit history retained' : '編集履歴あり';
+    expect(history.tagName).toBe('SPAN');
+    expect(history.getAttribute('role')).toBe('img');
+    expect(history.getAttribute('aria-label')).toBe(description);
+    expect(history.title).toBe(description);
+    expect(item(1).getAttribute('aria-description')).toBe(description);
+    expect(history.className).not.toContain('queue-');
+    expect(history.getAttribute('aria-pressed')).toBeNull();
+    expect(entries[1].querySelector('.edited-badge')).toBeNull();
+    act(() => history.click());
+    expect(toggle).not.toHaveBeenCalled();
+    expect(activate).not.toHaveBeenCalled();
+    expect(entries[2].querySelector('.edited-badge, .filmstrip-history-badge')).toBeNull();
+  });
   it.each([
     [false, undefined, '', true], [true, undefined, 'queue-inactive', false],
     [true, 'queued', 'queue-queued', false], [true, 'waiting', 'queue-waiting', true],

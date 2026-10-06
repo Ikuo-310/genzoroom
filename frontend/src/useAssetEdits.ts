@@ -64,7 +64,9 @@ function freshRecord(assetId: string): AssetEditRecord {
 export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked = false) {
   const records = useRef<Record<string, AssetEditRecord>>({});
   // Presence also represents unknown: discarded assets must not fall back to an old bulk result.
-  const discardedEditStatuses = useRef(new Map<string, boolean | undefined>());
+  const discardedEditStatuses = useRef(new Map<string, {
+    edited?: boolean; nonDefaultRecipe?: boolean; historyOnly?: boolean;
+  }>());
   // editSession and restoreEditSession replace the session rather than mutating
   // it. Keep one validated snapshot per session/source pair; status-only
   // rerenders and async save responses can reuse its fingerprint.
@@ -503,7 +505,14 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
       window.clearTimeout(loads.current[id].timeout);
       loads.current[id].generation += 1;
     }
-    discardedEditStatuses.current.set(id, records.current[id]?.savedEdited);
+    const record = records.current[id];
+    // Preserve both display meanings without certifying a save with an unknown outcome.
+    const known = record?.savedEdited !== undefined;
+    discardedEditStatuses.current.set(id, {
+      edited: record?.savedEdited,
+      nonDefaultRecipe: known ? record?.savedNonDefaultRecipe : undefined,
+      historyOnly: known ? record?.savedEdited === true && record.savedNonDefaultRecipe === false : undefined,
+    });
     delete records.current[id];
     changed();
   }, [cancelAutosave, changed]);
@@ -513,15 +522,20 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
     session: current.session, dispatch, organizeHistory,
-    localStateFor: (id: string) => {
+    localStateFor: (id: string, bulkStatus?: boolean) => {
       const record = records.current[id];
       // Unvisited or unvalidated sessions must not masquerade as known default Recipes.
       const known = !!record && record.savedFingerprint !== null;
+      const discarded = discardedEditStatuses.current.get(id);
       return {
         dirty: known && (!!record.retrySave || fingerprintFor(record) !== record.savedFingerprint),
         canSave: known && (record.loadStatus === 'ready' || record.loadStatus === 'unloaded'),
         saving: record?.saveStatus === 'saving',
-        nonDefaultRecipe: known ? !recipesEqual(record.session.recipe, defaultRecipe()) : undefined,
+        nonDefaultRecipe: known ? !recipesEqual(record.session.recipe, defaultRecipe())
+          : discarded ? discarded.nonDefaultRecipe : bulkStatus,
+        // Bulk status certifies only the Recipe; History-only requires a validated session or saved summary.
+        historyOnly: known ? recipesEqual(record.session.recipe, defaultRecipe()) && record.session.history.length > 0
+          : discarded?.historyOnly,
         savedNonDefaultRecipe: record?.savedNonDefaultRecipe,
         revision: record?.revision,
       };
@@ -531,7 +545,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
       // A validated retained session wins over a delayed bulk response, including failed saves.
       // Reset-to-initial is semantically unedited even before its reset snapshot is saved.
       if (record && record.savedFingerprint !== null) return hasEdits(record.session);
-      return discardedEditStatuses.current.has(id) ? discardedEditStatuses.current.get(id) : bulkStatus;
+      return discardedEditStatuses.current.has(id) ? discardedEditStatuses.current.get(id)?.edited : bulkStatus;
     },
     hasOrganizationUndo: !!current.organizationUndo,
     canUndo: !!current.organizationUndo || current.session.cursor > 0 || !!current.session.pending,
