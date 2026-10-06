@@ -24,6 +24,18 @@ Focused audit初回はCritical 0 / High 0 / Medium 2 / Low 0。Mediumは、defau
 
 Phase 2C実装時の関連Vitestは12 files / 405 tests passed。EditedBadge表示色修正後は15 tests passed。focused auditは11 files / 283 tests passed。Medium修正後とre-checkはそれぞれuseExportQueue / Anshitsu Queue 2 files / 35 tests passed。各段階で`npx tsc --noEmit`、`npm run build`、`git diff --check`は成功。buildの500 kB超chunk warningは継続。実機確認は上記のユーザー確認記録であり、この開発ノート更新時に再確認していない。Home Queue controls、Export page、runtime、encoder、Immich uploadは未実装。
 
+## Export Queue Home連携 Phase 3完了（2026-10-06）
+
+Phase 3AでHomeのEdited判定をcurrent Recipeがnon-defaultの場合だけtrueに整理した。`has_edits()`のHistory-inclusive semanticsは維持し、Backend bulk edit-statusは`has_non_default_recipe()`相当を使用する。Stack代表は全`stackMemberIds`のstatusを集約し、1枚でもnon-defaultならedited、全memberがknownかつdefaultならunedited、unknownがあれば既存のunknown扱いを維持する。Anshitsu Filmstripにはdefault Recipe + retained HistoryをHistory-onlyとして表示し、既存3本スライダーSVG、localized label、noninteractive表示を再利用した。Homeには表示せず、Queue対象にもしていない。NAS / FirefoxではHomeからHistory-onlyのEdited表示が消え、current Recipe基準になることを確認した。実機確認後、History-only iconはopacity 0.6へ調整した。
+
+Phase 3Bで`useExportQueue`をHomeへ接続し、PhotoCardの写真buttonとinteractive Queue badgeをsiblingsにした。standalone badgeはQueue状態に応じてenqueue / dequeueし、Stack代表は1 member以上がQueue中ならONとなる。StackをONにするとcurrent Recipeがnon-defaultのmemberだけを追加し、OFFにするとQueue中のmemberを全解除する。partial Stack専用表示は設けない。member IDを重複除去し、最大100件の順次enqueueへ分割する。途中failureは成功分を維持し、残りを止めてQueue refreshとlocalized error表示を行う。NAS / FirefoxではJPEG同士のStackでAnshitsuから片方をQueueへ追加し、Home代表badgeのON/OFFとStack解除後の両Asset Queue-outを確認した。standalone / Stack badge操作とselection維持も確認した。
+
+Phase 3CでRecent、Favorites、Album詳細、Calendar日付詳細の複数選択にQを追加した。eligible代表にOFFがあればON方向としてOFF代表だけを操作し、全代表がONならOFF方向としてQueue中memberを全解除する。unedited、History-only、unknownは方向判定から除外し、partial Stack ONはON方向で変更しない。enqueueは重複除去後100件単位で順次処理する。locked memberを含むbatch拒否、busy中の二重操作防止、途中failure後のrefreshとrollbackなし、selection維持を実装した。Home Q専用で全input由来イベントを拒否する。NAS / Firefoxで主要な複数選択Q動作を確認し、History-only表示もQueue対象外のまま許容できる明るさであることを確認した。
+
+Phase 3 focused auditではCritical 0 / High 0 / Medium 2。Home Qがcheckbox / range等で発火する問題はHome Q専用input guardで修正した。Stack badge clickが101件以上を単一POSTしてAPI上限を超える問題は、badge clickとQ batchでmember抽出、canonical ID重複除去、100件chunk、順次enqueue、failure後refreshを共通化して修正した。修正後focused re-checkでは両finding解消、新規Critical / High / Medium regressionなし、Phase 2のcleanup refresh再試行とstale enqueue response防止を維持し、Phase 3をclose可能と判断した。
+
+Phase 3Aの関連Vitestは17 files / 483 tests passed、Backendは64 tests passed。Phase 3Bは19 files / 503 tests passed。Phase 3Cは関連Vitest 56 tests passed。focused auditは12 files / 366 tests passed、Backendは36 tests passed。Medium修正後およびfocused re-checkは各12 files / 379 tests passed。各段階でtypecheck、build、`git diff --check`は成功し、buildには既知の500 kB超chunk warningがある。NAS / Firefox確認は上記のユーザー実機確認記録であり、この文書更新時には再確認していない。Export page、actual export execution、encoder、Immich uploadは未実装。
+
 ## Home刷新フェーズ完了（2026-10-05・現行仕様）
 
 HomeをHeader / Tabs / Toolbar / Contentの4層へ整理した。Header、tab、toolbarは固定領域に置き、`.home-content`だけをscrollさせる。旧来のHome全体を囲う大きな写真panelをなくし、HomeとSTACK管理はneutral dark themeの基本tokenを共有する。通常UIはgray基調で、意味のあるstatus色は維持する。Developer Diagnosticsはgreen console identityを保ち、controlsのみneutral grayで視認性を高めた。Anshitsuのthemeはこの刷新では変更していない。

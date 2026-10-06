@@ -75,16 +75,28 @@ const card = (index = 0) => [...host.querySelectorAll<HTMLElement>('.photo-card'
   .find(node => node.querySelector('.photo-info p')?.textContent === photos[index].filename)!;
 const badge = (index = 0) => card(index).querySelector<HTMLButtonElement>('.edited-badge')!;
 async function click(target: HTMLElement) { await act(async () => target.click()); }
-async function pressQ() {
-  const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
-  await act(async () => window.dispatchEvent(event));
+async function pressQ(target: EventTarget = window, modifiers: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true, ...modifiers });
+  await act(async () => target.dispatchEvent(event));
   return event;
+}
+async function flushQueueRefresh() {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 }
 function useStack(statuses: Record<string, boolean | undefined> = { [ids[0]]: true, [ids[1]]: true }) {
   const primary = { ...photos[0], stackId: 'stack', primaryAssetId: ids[0], stackAssetCount: 2,
     stackMemberIds: [ids[0], ids[1]] };
   api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
   api.statuses.mockResolvedValue({ ...statuses, [ids[2]]: true, [ids[3]]: false });
+}
+function useLargeStack(memberCount: number) {
+  const members = Array.from({ length: memberCount }, (_, index) => index === 0 ? ids[0]
+    : `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`);
+  const primary = { ...photos[0], stackId: 'large-stack', primaryAssetId: ids[0], stackAssetCount: members.length,
+    stackMemberIds: members };
+  api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
+  api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, true])));
+  return members;
 }
 
 describe('Home Export Queue', () => {
@@ -175,6 +187,9 @@ describe('Home Export Queue', () => {
     const event = await pressQ();
     expect(event.defaultPrevented).toBe(true);
     expect(api.enqueue).toHaveBeenCalledWith([ids[0], ids[2]], expect.any(AbortSignal));
+    expect(items.map(value => value.assetId)).toEqual([ids[0], ids[2]]);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(badge(2).classList.contains('queue-queued')).toBe(true);
     expect([...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')].map(input => input.checked)).toEqual([true, false, true, false]);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
   });
@@ -190,7 +205,11 @@ describe('Home Export Queue', () => {
     api.enqueue.mockClear(); items = [item(ids[0]), item(ids[2])];
     await pressQ();
     expect(api.dequeue.mock.calls.map(([id]) => id)).toEqual([ids[0], ids[2]]);
+    expect(items).toEqual([]);
+    expect(badge(0).classList.contains('queue-inactive')).toBe(true);
+    expect(badge(2).classList.contains('queue-inactive')).toBe(true);
     expect(api.enqueue).not.toHaveBeenCalled();
+    expect([...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')].map(input => input.checked)).toEqual([true, false, true, false]);
   });
 
   it('rejects the entire Q batch when any eligible selection has a locked Queue status', async () => {
@@ -209,19 +228,111 @@ describe('Home Export Queue', () => {
     await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
     await pressQ(); await pressQ();
     expect(api.enqueue).toHaveBeenCalledTimes(1);
+    items = [item(ids[0]), item(ids[2])];
     await act(async () => pending.resolve([item(ids[0]), item(ids[2])]));
+    expect(items.map(value => value.assetId)).toEqual([ids[0], ids[2]]);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(badge(2).classList.contains('queue-queued')).toBe(true);
+    expect([...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')].map(input => input.checked)).toEqual([true, false, true, false]);
   });
 
-  it('splits more than 100 selected Stack members into ordered Queue requests', async () => {
-    const members = Array.from({ length: 101 }, (_, index) => `00000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, '0')}`);
-    const primary = { ...photos[0], stackId: 'large-stack', primaryAssetId: ids[0], stackAssetCount: members.length,
-      stackMemberIds: members };
-    api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
-    api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, true])));
+  it.each([[100, [100]], [101, [100, 1]]] as const)('chunks a %s-member Q enqueue at the API limit', async (count, chunkSizes) => {
+    const members = useLargeStack(count);
     await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!); await pressQ();
     const requests = api.enqueue.mock.calls.map(([assetIds]) => assetIds as string[]);
-    expect(requests.map(request => request.length)).toEqual([100, 1]);
+    expect(requests.map(request => request.length)).toEqual(chunkSizes);
     expect(requests.flat()).toEqual(members);
+    expect(items.map(value => value.assetId)).toEqual(members);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+  });
+
+  it('keeps successful Q enqueue chunks, refreshes canonical membership, and retains selection after a later chunk fails', async () => {
+    const members = useLargeStack(101);
+    api.enqueue.mockImplementationOnce(async (requested: string[]) => {
+      for (const id of requested) items.push(item(id));
+      return [...items];
+    }).mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!); await pressQ();
+    await flushQueueRefresh();
+    expect(api.enqueue.mock.calls.map(([requested]) => (requested as string[]).length)).toEqual([100, 1]);
+    expect(items.map(value => value.assetId)).toEqual(members.slice(0, 100));
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(host.querySelector('.home-queue-error')?.textContent).toContain('Could not add');
+    expect(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+  });
+
+  it('keeps successful Q dequeues, refreshes canonical membership, and retains selection after a later member fails', async () => {
+    useStack(); items = [item(ids[0]), item(ids[1]), item(ids[2])];
+    api.dequeue.mockImplementation(async id => {
+      if (id === ids[1]) throw new ExportQueueApiError('network');
+      items = items.filter(value => value.assetId !== id);
+    });
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!); await pressQ();
+    await flushQueueRefresh();
+    expect(api.dequeue.mock.calls.map(([id]) => id)).toEqual([ids[0], ids[1]]);
+    expect(items.map(value => value.assetId)).toEqual([ids[1], ids[2]]);
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(badge(2).classList.contains('queue-queued')).toBe(true);
+    expect(host.querySelector('.home-queue-error')?.textContent).toContain('Could not remove');
+    expect(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+  });
+
+  it.each(['checkbox', 'range'] as const)('ignores Home Q while a %s input has focus', async type => {
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    const input = type === 'checkbox' ? card(2).querySelector<HTMLInputElement>('.photo-selection-input')!
+      : document.createElement('input');
+    if (type === 'range') { input.type = 'range'; host.append(input); }
+    input.focus();
+    const event = await pressQ(input);
+    expect(event.defaultPrevented).toBe(false);
+    expect(api.enqueue).not.toHaveBeenCalled();
+    expect(api.dequeue).not.toHaveBeenCalled();
+    expect(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+  });
+
+  it.each([{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }] as const)
+  ('keeps modified Q from toggling the selection batch (%j)', async modifiers => {
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    const event = await pressQ(window, modifiers);
+    expect(event.defaultPrevented).toBe(false);
+    expect(api.enqueue).not.toHaveBeenCalled(); expect(api.dequeue).not.toHaveBeenCalled();
+  });
+
+  it('runs Home Q from a focused non-input control', async () => {
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    const focusTarget = card(0).querySelector<HTMLButtonElement>('.photo-card-button')!;
+    focusTarget.focus();
+    const event = await pressQ(focusTarget);
+    expect(event.defaultPrevented).toBe(true);
+    expect(api.enqueue).toHaveBeenCalledWith([ids[0]], expect.any(AbortSignal));
+    expect(items.map(value => value.assetId)).toEqual([ids[0]]);
+  });
+
+  it.each([[100, [100]], [101, [100, 1]]] as const)('chunks a %s-member Stack badge enqueue at the API limit', async (count, chunkSizes) => {
+    const members = useLargeStack(count);
+    await mount(); await click(badge());
+    const requests = api.enqueue.mock.calls.map(([assetIds]) => assetIds as string[]);
+    expect(requests.map(request => request.length)).toEqual(chunkSizes);
+    expect(requests.flat()).toEqual(members);
+    expect(items.map(value => value.assetId)).toEqual(members);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+  });
+
+  it('keeps successful Stack badge chunks and refreshes canonical Queue state after a later chunk fails', async () => {
+    const members = useLargeStack(101);
+    api.enqueue.mockImplementationOnce(async (requested: string[]) => {
+      for (const id of requested) items.push(item(id));
+      return [...items];
+    }).mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await mount(); await click(badge()); await flushQueueRefresh();
+    expect(api.enqueue.mock.calls.map(([requested]) => (requested as string[]).length)).toEqual([100, 1]);
+    expect(items.map(value => value.assetId)).toEqual(members.slice(0, 100));
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(badge(0).classList.contains('queue-queued')).toBe(true);
+    expect(host.querySelector('.home-queue-error')?.textContent).toContain('Could not add');
   });
 
   it.each([

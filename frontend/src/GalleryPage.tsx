@@ -414,6 +414,7 @@ export function GalleryPage() {
         return;
       }
       if (matchesShortcut(event, 'exportQueueToggle')) {
+        if (event.target instanceof Element && event.target.closest('input')) return;
         if (selectionMode && selectedAssetsCountRef.current > 0 && queueSelectedRef.current()) event.preventDefault();
         return;
       }
@@ -644,6 +645,28 @@ export function GalleryPage() {
     return { memberIds, status, busy: queueBatchBusyState || memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!exportQueue.mutationFor(id).operation) };
   }
 
+  function uniqueQueueMemberIds(memberIds: readonly string[]): string[] {
+    const seen = new Set<string>();
+    return memberIds.filter(id => {
+      const key = id.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function editedQueueMemberIds(memberIds: readonly string[]): string[] {
+    return uniqueQueueMemberIds(memberIds).filter(id => editStatuses[id] === true);
+  }
+
+  async function enqueueQueueMembers(memberIds: readonly string[]): Promise<void> {
+    const uniqueIds = uniqueQueueMemberIds(memberIds);
+    for (let offset = 0; offset < uniqueIds.length; offset += 100) {
+      if (!queueMounted.current) return;
+      await exportQueue.enqueue(uniqueIds.slice(offset, offset + 100));
+    }
+  }
+
   function queueSelectedAssets(): boolean {
     if (!selectionMode || selectedAssets.length === 0) return false;
     if (queueBatchBusy.current) return true;
@@ -661,16 +684,10 @@ export function GalleryPage() {
       || cards.some(card => card.memberIds.some(id => !!exportQueue.mutationFor(id).operation))) return true;
 
     const enqueueing = cards.some(card => card.status === undefined);
-    const targets: string[] = [];
-    const seen = new Set<string>();
-    for (const card of cards) {
-      if (enqueueing ? card.status !== undefined : card.status === undefined) continue;
-      for (const id of card.memberIds) {
-        const included = enqueueing ? editStatuses[id] === true : exportQueue.hasAsset(id);
-        const key = id.toLowerCase();
-        if (included && !seen.has(key)) { seen.add(key); targets.push(id); }
-      }
-    }
+    const directionCards = cards.filter(card => enqueueing ? card.status === undefined : card.status !== undefined);
+    const directionMemberIds = directionCards.flatMap(card => card.memberIds);
+    const targets = enqueueing ? editedQueueMemberIds(directionMemberIds)
+      : uniqueQueueMemberIds(directionMemberIds).filter(id => exportQueue.hasAsset(id));
     if (targets.length === 0) return true;
 
     queueBatchBusy.current = true;
@@ -681,11 +698,8 @@ export function GalleryPage() {
     void (async () => {
       try {
         if (enqueueing) {
-          // Keep each full-snapshot enqueue response ordered while respecting the API's 100-asset limit.
-          for (let offset = 0; offset < targets.length; offset += 100) {
-            if (!queueMounted.current) return;
-            await exportQueue.enqueue(targets.slice(offset, offset + 100));
-          }
+          // Keep full-snapshot responses ordered while respecting the API's per-request limit.
+          await enqueueQueueMembers(targets);
         } else {
           for (const id of targets) {
             if (!queueMounted.current) return;
@@ -722,7 +736,8 @@ export function GalleryPage() {
       return;
     }
     const removing = status !== undefined;
-    const targets = memberIds.filter(id => removing ? exportQueue.hasAsset(id) : editStatuses[id] === true);
+    const targets = removing ? uniqueQueueMemberIds(memberIds).filter(id => exportQueue.hasAsset(id))
+      : editedQueueMemberIds(memberIds);
     if (targets.length === 0) return;
     // Reserve the whole card across sequential DELETEs, including overlapping member views.
     keys.forEach(key => queueOperations.current.add(key));
@@ -736,7 +751,7 @@ export function GalleryPage() {
           await exportQueue.dequeue(id);
         }
       } else {
-        await exportQueue.enqueue(targets);
+        await enqueueQueueMembers(targets);
       }
     } catch (cause) {
       if (queueMounted.current) {

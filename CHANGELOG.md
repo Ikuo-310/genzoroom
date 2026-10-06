@@ -8,7 +8,9 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Added a persistent Export Queue. In Anshitsu, the Filmstrip's edited-photo icon adds or removes an asset from the Queue, and `Q` toggles the active photo. Dirty edits are saved before enqueue, and saving a default Recipe automatically removes that asset from the Queue. Home Queue controls and export execution are not implemented yet.
+- Added persistent Export Queue controls to Home and Anshitsu. Edited photos can be queued from Home; a Stack badge is ON when any member is queued and can add edited members or remove all queued members. `Q` toggles Queue membership for eligible Home selections. Dirty Anshitsu edits are saved before enqueue, and saving a default Recipe removes that asset from the Queue.
+- Home marks a photo as edited only when its current Recipe is non-default. Retained History has a separate indicator in the Anshitsu Filmstrip.
+- The Export page, actual export execution, encoder, and Immich upload are not implemented yet.
 - Added Structured Logs to Developer Diagnostics, with separate Frontend and Backend level controls, combined or source-specific views, clear, refresh, and JSON export.
 - Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit, and the empty unmatched drop target is larger for easier Purge. Confirmed drafts can be written back to Immich.
 
