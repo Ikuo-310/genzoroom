@@ -130,3 +130,36 @@ describe('Filmstrip keyboard navigation', () => {
     expect(scroll().scrollLeft).toBe(52);
   });
 });
+
+describe('Filmstrip Queue buttons', () => {
+  it.each([
+    [false, undefined, '', true], [true, undefined, 'queue-inactive', false],
+    [true, 'queued', 'queue-queued', false], [true, 'waiting', 'queue-waiting', true],
+    [true, 'encoding', 'queue-processing', true], [true, 'registering', 'queue-processing', true],
+    [true, 'failed', 'queue-failed', false],
+  ] as const)('renders known=%s status=%s as a sibling control', (known, status, stateClass, locked) => {
+    const toggle = vi.fn();
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate}
+      editStatuses={{ a: true }} queueKnown={known} queueStatusFor={() => status} onQueueToggle={toggle} />));
+    const badge = host.querySelector<HTMLButtonElement>('.edited-badge')!;
+    expect(host.querySelectorAll('.filmstrip-entry')).toHaveLength(3);
+    expect(item(0).getAttribute('aria-current')).toBe('true');
+    expect(item(0).querySelector('.format-badge')).not.toBeNull();
+    expect(item(0).nextElementSibling).toBe(badge);
+    expect(host.querySelector('button button')).toBeNull();
+    expect(badge.disabled).toBe(locked);
+    if (stateClass) expect(badge.classList.contains(stateClass)).toBe(true);
+    act(() => badge.click());
+    expect(toggle.mock.calls).toEqual(locked ? [] : [['a']]);
+    expect(activate).not.toHaveBeenCalled();
+    act(() => item(1).click());
+    expect(activate).toHaveBeenCalledWith('b');
+  });
+  it('disables a busy target without blocking other photo controls', () => {
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate}
+      editStatuses={{ a: true }} queueKnown queueBusyFor={() => true} onQueueToggle={vi.fn()} />));
+    expect(host.querySelector<HTMLButtonElement>('.edited-badge')!.disabled).toBe(true);
+    expect(host.querySelector('.edited-badge')!.getAttribute('aria-busy')).toBe('true');
+    expect(item(0).disabled).toBe(false);
+  });
+});

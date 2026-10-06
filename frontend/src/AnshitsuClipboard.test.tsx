@@ -17,6 +17,9 @@ vi.mock('./api', async (original) => ({ ...await original<typeof import('./api')
 vi.mock('./editStateApi', async (original) => ({
   ...await original<typeof import('./editStateApi')>(), getAssetEditState: api.get, putAssetEditState: api.put,
 }));
+vi.mock('./exportQueueApi', async original => ({
+  ...await original<typeof import('./exportQueueApi')>(), listExportQueue: async () => [],
+}));
 const rendered = vi.hoisted(() => ({ recipe: undefined as EditRecipe | undefined }));
 vi.mock('./AdjustedImage', () => ({ AdjustedImage: ({ recipe, showBeforeAdjustments }: { recipe: EditRecipe; showBeforeAdjustments: boolean }) => {
   rendered.recipe = recipe;

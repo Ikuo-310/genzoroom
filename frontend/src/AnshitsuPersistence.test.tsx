@@ -21,6 +21,9 @@ vi.mock('./editStateApi', async (importOriginal) => ({
   getAssetEditState: mocked.get, putAssetEditState: mocked.put, getAssetEditStatuses: mocked.statuses,
 }));
 vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel">Viewer</div> }));
+vi.mock('./exportQueueApi', async importOriginal => ({
+  ...await importOriginal<typeof import('./exportQueueApi')>(), listExportQueue: async () => [],
+}));
 
 const first: AssetDetail = {
   id: '12345678-1234-4234-9234-123456789abc', filename: 'first.jpg', date: '2026-09-25T00:00:00Z',
@@ -150,9 +153,9 @@ describe('Anshitsu Filmstrip persistence', () => {
       .find(button => button.textContent === 'Move without saving')!;
     await act(async () => move.click()); await flush();
     expect(currentPhoto()).toBe('second.jpg');
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).not.toBeNull();
     await act(async () => bulk.resolve({ [first.id]: false, [second.id]: true }));
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).not.toBeNull();
     expect(mocked.statuses).toHaveBeenCalledTimes(1);
     expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
   });
@@ -169,15 +172,15 @@ describe('Anshitsu Filmstrip persistence', () => {
     await act(async () => move.click()); await flush();
     await act(async () => bulk.resolve({ [first.id]: true, [second.id]: true }));
     expect(currentPhoto()).toBe('second.jpg');
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).toBeNull();
     expect(mocked.statuses).toHaveBeenCalledTimes(1);
     const get = deferred<any>();
     mocked.get.mockReturnValueOnce(get.promise);
     await click('.filmstrip-item[aria-label="first.jpg"]');
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).toBeNull();
     await act(async () => get.resolve({ state: savedSnapshot, revision: 1,
       updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] }));
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);
   });
 
@@ -201,13 +204,13 @@ describe('Anshitsu Filmstrip persistence', () => {
     await mount();
     expect(container.querySelector('.edited-badge')).toBeNull();
     await click('button[aria-label="Disable Basic"]');
-    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] + .edited-badge')).not.toBeNull();
     await act(async () => waiting.resolve({ [first.id]: false, [second.id]: true }));
     expect(container.querySelectorAll('.filmstrip .edited-badge')).toHaveLength(2);
     await click('.filmstrip-item[aria-label="second.jpg"]');
     // The full GET validates this photo as initial, superseding the older summary.
-    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).toBeNull();
-    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] + .edited-badge')).toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-label="first.jpg"] + .edited-badge')).not.toBeNull();
     expect(mocked.statuses).toHaveBeenCalledTimes(1);
   });
   it('navigates globally in both directions without saving a clean photo', async () => {
@@ -252,7 +255,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect((await filmstripKey('g')).defaultPrevented).toBe(false);
     expect(container.querySelector('.workspace-page')).not.toBeNull();
     await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
-    expect(container.querySelector('.filmstrip-item[aria-current="true"] .edited-badge')).not.toBeNull();
+    expect(container.querySelector('.filmstrip-item[aria-current="true"] + .edited-badge')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
       .find((button) => button.textContent === 'Stay on this photo')!;

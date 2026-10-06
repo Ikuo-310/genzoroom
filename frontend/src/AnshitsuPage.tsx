@@ -8,6 +8,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
 import type { AssetDetail, AssetExif, RecentAsset, WorkspaceNavigationState } from './assets';
 import { useEditStatuses } from './useEditStatuses';
+import { useExportQueue } from './useExportQueue';
+import { ExportQueueApiError } from './exportQueueApi';
 import { HomeTitle } from './HomeTitle';
 import { ImageViewer } from './ImageViewer';
 import { EditHistory } from './EditHistory';
@@ -56,6 +58,16 @@ export function AnshitsuPage() {
   // Preserve selection order for the Filmstrip while the route identifies the active asset.
   const [selectedAssets, setSelectedAssets] = useState<RecentAsset[]>(initialNavigation?.selectedAssets ?? []);
   const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id));
+  const exportQueue = useExportQueue();
+  const queueToggleRef = useRef<(id: string) => Promise<void>>(async () => {});
+  const queueOperations = useRef(new Set<string>());
+  const [queueBusy, setQueueBusy] = useState<Set<string>>(() => new Set());
+  const [queueFailure, setQueueFailure] = useState<'addFailed' | 'removeFailed' | 'notEligible' | null>(null);
+  const queueMounted = useRef(true);
+  useEffect(() => {
+    queueMounted.current = true;
+    return () => { queueMounted.current = false; };
+  }, []);
   const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [detailState, setDetailState] = useState<DetailState>('loading');
   const [leftOpen, setLeftOpen] = useState(true);
@@ -90,8 +102,61 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
-    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
+    saveEditedAssetsForExit, resumeAfterExitFailure, editStatusFor, localStateFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
   const editable = canEdit && loadStatus === 'ready';
+  const seenSaveRevisions = useRef(new Map<string, number>());
+  useEffect(() => {
+    let cleanupMayHaveChangedQueue = false;
+    for (const asset of selectedAssets) {
+      const state = localStateFor(asset.id);
+      if (state.revision === undefined || state.savedNonDefaultRecipe === undefined) continue;
+      const previous = seenSaveRevisions.current.get(asset.id);
+      seenSaveRevisions.current.set(asset.id, state.revision);
+      // A confirmed default save also removes Queue membership in the Backend transaction.
+      if (previous !== undefined && state.revision > previous && !state.savedNonDefaultRecipe
+        && exportQueue.hasAsset(asset.id) !== false) cleanupMayHaveChangedQueue = true;
+    }
+    if (cleanupMayHaveChangedQueue) void exportQueue.refresh();
+  });
+
+  async function toggleQueue(id: string) {
+    if (workspaceKeyboardBlocked || switchingRef.current || exitRef.current || !exportQueue.loaded
+      || queueOperations.current.has(id) || exportQueue.mutationFor(id).operation) return;
+    const status = exportQueue.getStatus(id);
+    if (status === 'waiting' || status === 'encoding' || status === 'registering') return;
+    const removing = status === 'queued' || status === 'failed';
+    if (!removing && id === assetId && !editable) return;
+    queueOperations.current.add(id);
+    setQueueBusy(new Set(queueOperations.current));
+    setQueueFailure(null);
+    try {
+      if (removing) {
+        await exportQueue.dequeue(id);
+      } else {
+        const before = localStateFor(id);
+        if (before.dirty || before.saving) {
+          if (!before.canSave) throw new Error('Save unavailable');
+          const saved = await save(id);
+          if (!saved.ok || !saved.clean) throw new Error('Save not confirmed');
+        }
+        if (!queueMounted.current) return;
+        const after = localStateFor(id);
+        if (after.nonDefaultRecipe === false) {
+          setQueueFailure('notEligible');
+          return;
+        }
+        // Unvisited assets use persisted eligibility; no additional edit-state GET is needed.
+        await exportQueue.enqueue([id]);
+      }
+    } catch (cause) {
+      if (queueMounted.current) setQueueFailure(cause instanceof ExportQueueApiError && cause.kind === 'not_eligible'
+        ? 'notEligible' : removing ? 'removeFailed' : 'addFailed');
+    } finally {
+      queueOperations.current.delete(id);
+      if (queueMounted.current) setQueueBusy(new Set(queueOperations.current));
+    }
+  }
+  queueToggleRef.current = toggleQueue;
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
   const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`);
@@ -123,14 +188,16 @@ export function AnshitsuPage() {
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       const isFocusToggle = matchesShortcut(event, 'viewerFocusMode');
       const isHomeExit = matchesShortcut(event, 'workspaceReturnHome');
-      if (!isFocusToggle && !isHomeExit) return;
+      const isQueueToggle = matchesShortcut(event, 'exportQueueToggle');
+      if (!isFocusToggle && !isHomeExit && !isQueueToggle) return;
       event.preventDefault();
-      if (isHomeExit) void exitToHomeRef.current();
+      if (isQueueToggle) void queueToggleRef.current(assetId);
+      else if (isHomeExit) void exitToHomeRef.current();
       else setViewerFocusMode(current => !current);
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [workspaceKeyboardBlocked]);
+  }, [assetId, workspaceKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
@@ -438,6 +505,9 @@ export function AnshitsuPage() {
         <SettingsButton />
       </div>
     </header>
+    {(queueFailure || !!exportQueue.error) && <p className="workspace-queue-error error-text" role="alert">
+      {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
+    </p>}
 
     <WorkspaceLayout
       leftOpen={leftOpen}
@@ -567,6 +637,10 @@ export function AnshitsuPage() {
         activeAssetId={assetId}
         disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         keyboardBlocked={workspaceKeyboardBlocked}
+        queueKnown={exportQueue.loaded}
+        queueStatusFor={exportQueue.getStatus}
+        queueBusyFor={id => queueBusy.has(id) || !!exportQueue.mutationFor(id).operation || localStateFor(id).saving}
+        onQueueToggle={id => { void queueToggleRef.current(id); }}
         onActivate={(nextId) => { void activateAsset(nextId); }}
       />}
     />

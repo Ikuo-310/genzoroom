@@ -4,12 +4,17 @@ import type { RecentAsset } from './assets';
 import { EditedBadge } from './EditedBadge';
 import { FormatBadge } from './FormatBadge';
 import type { AssetEditStatuses } from './editStatus';
+import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {} }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, queueKnown, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
   editStatuses?: AssetEditStatuses;
+  queueKnown?: boolean;
+  queueStatusFor?: (id: string) => ExportQueueStatus | undefined;
+  queueBusyFor?: (id: string) => boolean;
+  onQueueToggle?: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const scroll = useRef<HTMLDivElement>(null);
@@ -42,8 +47,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
   }, [activeAssetId, assets, disabled, keyboardBlocked]);
   return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
     <div ref={scroll} className="filmstrip-scroll">
-      {assets.map((asset) => <button
-        key={asset.id}
+      {assets.map((asset) => <div key={asset.id} className="filmstrip-entry"><button
         type="button"
         disabled={disabled}
         className={`filmstrip-item${asset.id === activeAssetId ? ' active' : ''}`}
@@ -54,8 +58,12 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
       >
         <img src={asset.thumbnail_url} alt="" />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-        <EditedBadge edited={editStatuses[asset.id]} />
-      </button>)}
+      </button>
+        <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown}
+          queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}
+          disabled={disabled || keyboardBlocked}
+          onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />
+      </div>)}
     </div>
   </section>;
 }

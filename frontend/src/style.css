@@ -436,7 +436,10 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .viewer-message > p { align-self: center; justify-self: center; color: #aaa; }
 .filmstrip { min-width: 0; min-height: 0; padding: 10px 12px; border-top: 1px solid #353537; background: #151517; }
 .filmstrip-scroll { display: flex; height: 100%; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px; scrollbar-color: #555 #202023; }
-.filmstrip-item { position: relative; flex: 0 0 92px; height: 100%; overflow: hidden; color: inherit; background: #09090a; border: 1px solid #49494c; border-radius: 5px; padding: 0; }
+.filmstrip-entry { position: relative; flex: 0 0 92px; height: 100%; }
+.filmstrip-entry > .edited-badge { bottom: 10px; }
+.workspace-queue-error { position: absolute; top: 74px; left: 16px; right: 16px; z-index: 4; margin: 0; padding: 8px 12px; border: 1px solid #713b3b; border-radius: 5px; background: #281c1c; }
+.filmstrip-item { position: relative; width: 100%; height: 100%; overflow: hidden; color: inherit; background: #09090a; border: 1px solid #49494c; border-radius: 5px; padding: 0; }
 .filmstrip-item.active { border: 2px solid #f0f0f0; box-shadow: 0 0 0 1px #111; }
 .filmstrip-item.active::after { position: absolute; right: 6px; bottom: 5px; left: 6px; height: 3px; border-radius: 2px; background: #f0f0f0; content: ''; }
 .filmstrip-item img { display: block; width: 100%; height: 100%; object-fit: contain; background: #090e0c; }

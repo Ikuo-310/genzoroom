@@ -10,7 +10,7 @@ import {
   type EditStateSnapshot,
 } from './editState';
 import { createEditStateSaveId, EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
-import { editSession, newSession, type EditAction, type EditSession } from './editing';
+import { defaultRecipe, recipesEqual, editSession, newSession, type EditAction, type EditSession } from './editing';
 import { hasEdits } from './editStatus';
 import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
@@ -37,6 +37,7 @@ type AssetEditRecord = {
   sourceIdentity: EditSourceIdentity;
   savedFingerprint: string | null;
   savedEdited?: boolean;
+  savedNonDefaultRecipe?: boolean;
   retrySave?: RetrySave;
   autosaveError?: EditStateApiError['kind'] | null;
   autosaveErrorGeneration?: number;
@@ -153,7 +154,8 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
         sourceIdentity: response.state?.sourceIdentity ?? freshRecord(id).sourceIdentity,
       };
       discardedEditStatuses.current.delete(id);
-      setRecord(id, { ...next, savedFingerprint: fingerprintFor(next), savedEdited: hasEdits(restored.value) });
+      setRecord(id, { ...next, savedFingerprint: fingerprintFor(next), savedEdited: hasEdits(restored.value),
+        savedNonDefaultRecipe: !recipesEqual(restored.value.recipe, defaultRecipe()) });
     }).catch((cause) => {
       if (loads.current[id]?.generation === generation) {
         const error = cause instanceof EditStateApiError ? cause : new EditStateApiError('network');
@@ -287,6 +289,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
           revision: response.revision, updatedAt: response.updatedAt,
           lastSaveId: response.lastSaveId, savedFingerprint: request.fingerprint,
           savedEdited: hasEdits({ recipe: request.snapshot.currentRecipe, history: request.snapshot.history, pending: null }),
+          savedNonDefaultRecipe: !recipesEqual(request.snapshot.currentRecipe, defaultRecipe()),
           retrySave: undefined, saveStatus: 'idle' as const };
         if (canSyncSession && restored?.ok) next.needsCompaction = false;
         const clean = fingerprintFor(next) === request.fingerprint;
@@ -337,10 +340,12 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
   const save = useCallback((id: string): Promise<SaveResult> => {
     if (saves.current[id]) return saves.current[id];
     const current = getRecord(id);
-    if (current.loadStatus !== 'ready') return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
+    // Filmstrip actions can save a validated session retained after leaving its asset.
+    const retained = current.loadStatus === 'unloaded' && current.savedFingerprint !== null;
+    if (current.loadStatus !== 'ready' && !retained) return Promise.resolve({ ok: false, error: new EditStateApiError(current.loadError ?? 'invalid_state') });
     const snapshot = snapshotFor(current);
     if (!snapshot) return Promise.resolve({ ok: false, error: new EditStateApiError('invalid_state') });
-    return writeSnapshot(id, snapshot, { latestSession: true });
+    return writeSnapshot(id, snapshot, { latestSession: true, allowUnloaded: retained });
   }, [getRecord, snapshotFor, writeSnapshot]);
 
   const scheduleAutosave = useCallback((id: string) => {
@@ -508,6 +513,19 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
     session: current.session, dispatch, organizeHistory,
+    localStateFor: (id: string) => {
+      const record = records.current[id];
+      // Unvisited or unvalidated sessions must not masquerade as known default Recipes.
+      const known = !!record && record.savedFingerprint !== null;
+      return {
+        dirty: known && (!!record.retrySave || fingerprintFor(record) !== record.savedFingerprint),
+        canSave: known && (record.loadStatus === 'ready' || record.loadStatus === 'unloaded'),
+        saving: record?.saveStatus === 'saving',
+        nonDefaultRecipe: known ? !recipesEqual(record.session.recipe, defaultRecipe()) : undefined,
+        savedNonDefaultRecipe: record?.savedNonDefaultRecipe,
+        revision: record?.revision,
+      };
+    },
     editStatusFor: (id: string, bulkStatus?: boolean): boolean | undefined => {
       const record = records.current[id];
       // A validated retained session wins over a delayed bulk response, including failed saves.

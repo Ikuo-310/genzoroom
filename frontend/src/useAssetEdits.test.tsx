@@ -1456,3 +1456,18 @@ describe('useAssetEdits persistence', () => {
     expect((database.get(second)?.state as { history: unknown[] }).history).toHaveLength(1);
   });
 });
+
+describe('per-asset local save state', () => {
+  it('saves a retained dirty inactive session without exposing or loading records', async () => {
+    await mount(); await flush();
+    expect(latest.localStateFor(second).nonDefaultRecipe).toBeUndefined();
+    editTemperature(15); commitEdit();
+    await mount(second); await flush();
+    expect(latest.localStateFor(first)).toMatchObject({ dirty: true, canSave: true, nonDefaultRecipe: true });
+    const gets = api.get.mock.calls.length;
+    await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: true, clean: true }); });
+    expect(api.get).toHaveBeenCalledTimes(gets);
+    expect(api.put.mock.calls.at(-1)?.[0]).toBe(first);
+    expect(latest.localStateFor(first)).toMatchObject({ dirty: false, savedNonDefaultRecipe: true });
+  });
+});
