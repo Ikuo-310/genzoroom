@@ -187,16 +187,24 @@ export function validateImmichStacks(data: unknown, requestedIds?: readonly stri
 }
 
 export async function fetchSelectedImmichStacks(stackIds: readonly string[], signal: AbortSignal): Promise<ImmichStack[]> {
-  if (stackIds.length > 100 || stackIds.some(id => !isUuid(id))) throw new Error('Invalid stack IDs');
+  if (stackIds.some(id => !isUuid(id))) throw new Error('Invalid stack IDs');
   const ids = [...new Set(stackIds.map(id => id.toLowerCase()))];
   if (!ids.length) return [];
-  const response = await fetch('/api/stacks/resolve', { method: 'POST', signal, cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackIds: ids }) });
-  if (!response.ok) throw new ImmichStacksError('request_failed', { httpStatus: response.status }, 'Stacks request failed');
-  let data: unknown;
-  try { data = await response.json(); }
-  catch { throw new ImmichStacksError('unexpected_stack_response'); }
-  return validateImmichStacks(data, ids);
+  const byId = new Map<string, ImmichStack>();
+  for (let start = 0; start < ids.length; start += 100) {
+    if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+    const chunk = ids.slice(start, start + 100);
+    const response = await fetch('/api/stacks/resolve', { method: 'POST', signal, cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackIds: chunk }) });
+    if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+    if (!response.ok) throw new ImmichStacksError('request_failed', { httpStatus: response.status }, 'Stacks request failed');
+    let data: unknown;
+    try { data = await response.json(); }
+    catch { throw new ImmichStacksError('unexpected_stack_response'); }
+    for (const stack of validateImmichStacks(data, chunk)) byId.set(stack.id, stack);
+  }
+  // Backend response order is not contractual; callers rely on the Home-selected Stack order.
+  return ids.map(id => byId.get(id)!);
 }
 
 export async function refreshSelectedImmichStacks(assetIds: readonly string[], signal: AbortSignal): Promise<ImmichStack[]> {

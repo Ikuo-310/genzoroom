@@ -6,6 +6,13 @@ const other = '22345678-1234-4234-9234-123456789abc';
 const stackId = '32345678-1234-4234-9234-123456789abc';
 const asset = (assetId: string) => ({ id: assetId, filename:'photo.dng', date:'2026-10-01', thumbnail_url:'/thumb', format:'DNG', is_raw:true, stackId, primaryAssetId:id, stackAssetCount:2 });
 const stack = () => ({ id:stackId, primaryAssetId:id, assets:[asset(other), asset(id)] });
+const generatedStackIds=(count:number)=>Array.from({length:count},(_,index)=>`52345678-1234-4234-9234-${String(index+100).padStart(12,'0')}`);
+const resolvedStack=(requestedStackId:string,index:number)=>{
+ const primary=`62345678-1234-4234-9234-${String(index+500).padStart(12,'0')}`;
+ const member=`72345678-1234-4234-9234-${String(index+900).padStart(12,'0')}`;
+ const photo=(assetId:string)=>({id:assetId,filename:'photo.jpg',date:'2026-10-01',thumbnail_url:'/thumb',format:'JPEG',is_raw:false,stackId:requestedStackId,primaryAssetId:primary,stackAssetCount:2});
+ return {id:requestedStackId,primaryAssetId:primary,assets:[photo(member),photo(primary)]};
+};
 afterEach(() => vi.unstubAllGlobals());
 
 it('resolves duplicate selected Stack IDs in one read-only batch and preserves order', async () => {
@@ -15,11 +22,63 @@ it('resolves duplicate selected Stack IDs in one read-only batch and preserves o
  expect(fetch).toHaveBeenCalledOnce();
  expect(fetch.mock.calls[0]).toEqual(['/api/stacks/resolve', expect.objectContaining({method:'POST', signal, body:JSON.stringify({stackIds:[stackId]}), cache:'no-store'})]);
 });
-it('does not request empty input and rejects invalid or oversized input', async () => {
+it('does not request empty input and rejects invalid UUIDs before fetching', async () => {
  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
  expect(await fetchSelectedImmichStacks([], new AbortController().signal)).toEqual([]);
- for (const ids of [['bad'], Array(101).fill(stackId)]) await expect(fetchSelectedImmichStacks(ids, new AbortController().signal)).rejects.toThrow('Invalid');
+ for (const ids of [['bad'], [...generatedStackIds(101),'bad']]) await expect(fetchSelectedImmichStacks(ids, new AbortController().signal)).rejects.toThrow('Invalid');
  expect(fetch).not.toHaveBeenCalled();
+});
+it.each([1,100])('resolves %i requested Stacks in one request',async(count)=>{
+ const ids=generatedStackIds(count),signal=new AbortController().signal;
+ const fetch=vi.fn(async(_url:string,init:RequestInit)=>{
+  const requested=(JSON.parse(init.body as string) as {stackIds:string[]}).stackIds;
+  return new Response(JSON.stringify(requested.map(id=>resolvedStack(id,ids.indexOf(id)))));
+ });vi.stubGlobal('fetch',fetch);
+ expect((await fetchSelectedImmichStacks(ids,signal)).map(value=>value.id)).toEqual(ids);
+ expect(fetch).toHaveBeenCalledOnce();expect(JSON.parse(fetch.mock.calls[0][1].body as string).stackIds).toHaveLength(count);
+ expect(fetch.mock.calls[0][1].signal).toBe(signal);
+});
+it('resolves 101 unique Stack IDs as sequential 100 plus 1 requests',async()=>{
+ const ids=generatedStackIds(101),signal=new AbortController().signal;
+ const fetch=vi.fn(async(_url:string,init:RequestInit)=>{
+  const requested=(JSON.parse(init.body as string) as {stackIds:string[]}).stackIds;
+  return new Response(JSON.stringify(requested.map(id=>resolvedStack(id,ids.indexOf(id)))));
+ });vi.stubGlobal('fetch',fetch);
+ expect((await fetchSelectedImmichStacks(ids,signal)).map(value=>value.id)).toEqual(ids);
+ expect(fetch.mock.calls.map(call=>JSON.parse(call[1].body as string).stackIds.length)).toEqual([100,1]);
+ expect(fetch.mock.calls.every(call=>call[1].signal===signal)).toBe(true);
+});
+it('deduplicates before chunking, caps every resolve body at 100 IDs, and restores requested order',async()=>{
+ const ids=generatedStackIds(205),signal=new AbortController().signal;
+ const fetch=vi.fn(async(_url:string,init:RequestInit)=>{
+  const requested=(JSON.parse(init.body as string) as {stackIds:string[]}).stackIds;
+  return new Response(JSON.stringify([...requested].reverse().map(id=>resolvedStack(id,ids.indexOf(id)))));
+ });vi.stubGlobal('fetch',fetch);
+ const result=await fetchSelectedImmichStacks([...ids,ids[0].toUpperCase(),ids[80]],signal);
+ expect(fetch.mock.calls.map(call=>JSON.parse(call[1].body as string).stackIds.length)).toEqual([100,100,5]);
+ expect(fetch.mock.calls.every(call=>call[1].signal===signal)).toBe(true);
+ expect(fetch.mock.calls.every(call=>JSON.parse(call[1].body as string).stackIds.length<=100)).toBe(true);
+ expect(result.map(value=>value.id)).toEqual(ids);
+});
+it('fails the complete resolve when a later chunk has an HTTP, JSON, or validation error',async()=>{
+ const ids=generatedStackIds(101);
+ const firstChunk=ids.slice(0,100).map((id,index)=>resolvedStack(id,index));
+ const secondChunk=[resolvedStack(ids[100],100)];
+ const failedHttp=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(firstChunk))).mockResolvedValueOnce(new Response('',{status:502}));
+ vi.stubGlobal('fetch',failedHttp);
+ await expect(fetchSelectedImmichStacks(ids,new AbortController().signal)).rejects.toThrow('Stacks request failed');
+ expect(failedHttp).toHaveBeenCalledTimes(2);
+ for(const response of [new Response('{'),new Response(JSON.stringify([{...secondChunk[0],id:stackId}]))]){
+  const fetch=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(firstChunk))).mockResolvedValueOnce(response);vi.stubGlobal('fetch',fetch);
+  await expect(fetchSelectedImmichStacks(ids,new AbortController().signal)).rejects.toMatchObject({code:'unexpected_stack_response'});
+  expect(fetch).toHaveBeenCalledTimes(2);
+ }
+});
+it('stops after the active resolve is aborted and sends no later chunk',async()=>{
+ const ids=generatedStackIds(205),controller=new AbortController();
+ const fetch=vi.fn(async()=>{controller.abort();return new Response('[]');});vi.stubGlobal('fetch',fetch);
+ await expect(fetchSelectedImmichStacks(ids,controller.signal)).rejects.toMatchObject({name:'AbortError'});
+ expect(fetch).toHaveBeenCalledOnce();
 });
 it('rejects malformed, missing, duplicated or inconsistent full memberships', async () => {
  const bad = [null, {}, [], [stack(), stack()], [{...stack(), id:'bad'}], [{...stack(), primaryAssetId:'bad'}],
