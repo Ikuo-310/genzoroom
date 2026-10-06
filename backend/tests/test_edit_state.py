@@ -334,7 +334,7 @@ class EditStateApiTests(unittest.TestCase):
         self.assertEqual(self.request("GET").json()["state"], saved)
         self.assertEqual(self.request("PUT", request).json(), first.json())
         with self.database() as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             row = connection.execute("SELECT state_format_version, history_json, history_cursor FROM asset_edit_states").fetchone()
             self.assertEqual(row[0], 2)
             self.assertEqual(json.loads(row[1]), saved["history"])
@@ -422,7 +422,7 @@ class EditStateApiTests(unittest.TestCase):
         self.assertEqual(self.request("GET").json(), first)
         with self.database() as db:
             self.assertEqual(db.execute("SELECT * FROM asset_edit_states").fetchone(), before)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
         upgraded = self.v18_state()
         upgraded["historyCursor"] = 0
         upgraded["currentRecipe"] = copy.deepcopy(upgraded["history"][0]["before"])

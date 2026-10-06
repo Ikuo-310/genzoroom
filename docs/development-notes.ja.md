@@ -2,6 +2,14 @@
 
 Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Queue persistence / API Phase 1完了（2026-10-06）
+
+既存の`/data/genzoroom.db`へExport Queueを追加し、SQLite schema v2とv1→v2 migration、Asset単位Queue、`GET /export/queue`・`POST /export/queue`・`DELETE /export/queue/{asset_id}`を実装した。Queue順は内部連番で保持する。eligibilityはvalidated snapshotのcurrent Recipeで判定し、Historyだけが残るdefault Recipeは対象外。default Recipeの保存成功時はHistoryの有無に関係なく、edit-state保存と同じtransactionでQueueから自動削除する。
+
+enqueueは複数Assetをatomicに処理し、already queued itemのstatus・順序・timestampを維持する。`queued` / `failed`だけをDELETE可能とし、実行中statusはlocked、存在しないIDはidempotent successとする。Frontend専用API moduleはresponseをstrict validationする。Queue timestampsはcanonical UTC millisecond `...Z`に限定し、それ以外のoffsetはcorrupt persistenceとして拒否する。
+
+Export Phase 1 focused auditではCritical / High / Medium findingはなく、Low 1件（BackendがUTC以外のtimestamp offsetを許可）を確認して修正した。実装時のBackend関連テストは56 passed・52 subtests、Frontend APIは43 passedで、TypeScript check、build、`git diff --check`も成功。Eligibility修正後のBackend関連テストは61 passed・52 subtests、今回のtimestamp修正後は関連Backend suiteで63 passed・52 subtests。各修正時の`git diff --check`も成功。NAS / browser実機確認は未実施。Queue UI、Anshitsu / HomeのQueue操作、encoder、Immich uploadなどExport runtimeは後続Phase。
+
 ## Home刷新フェーズ完了（2026-10-05・現行仕様）
 
 HomeをHeader / Tabs / Toolbar / Contentの4層へ整理した。Header、tab、toolbarは固定領域に置き、`.home-content`だけをscrollさせる。旧来のHome全体を囲う大きな写真panelをなくし、HomeとSTACK管理はneutral dark themeの基本tokenを共有する。通常UIはgray基調で、意味のあるstatus色は維持する。Developer Diagnosticsはgreen console identityを保ち、controlsのみneutral grayで視認性を高めた。Anshitsuのthemeはこの刷新では変更していない。

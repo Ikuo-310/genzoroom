@@ -1,16 +1,18 @@
-"""Single-row SQLite persistence for one Immich asset's complete edit state."""
+"""SQLite persistence for asset edit states and the asset-level Export Queue."""
 
 import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from uuid import UUID
 
-from edit_state import InvalidEditState, validate_snapshot, has_edits
+from backend_logging import backend_logger
+from edit_state import InvalidEditState, validate_snapshot, has_edits, has_non_default_recipe
 
 DB_PATH = Path("/data/genzoroom.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -53,7 +55,38 @@ def _create_v1(connection: sqlite3.Connection) -> None:
     connection.execute(SCHEMA)
 
 
-MIGRATIONS = {0: _create_v1}
+QUEUE_STATUSES = frozenset(("queued", "waiting", "encoding", "registering", "failed"))
+
+
+class QueueRejected(Exception):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _create_v2(connection: sqlite3.Connection) -> None:
+    # Refuse a damaged v1 table rather than marking an unusable database as upgraded.
+    connection.execute("""SELECT asset_id, state_format_version, recipe_version, processing_version,
+        current_recipe_json, history_json, history_cursor, source_identity_json, revision,
+        updated_at, last_save_id FROM asset_edit_states LIMIT 0""")
+    connection.execute("""CREATE TABLE export_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'waiting', 'encoding', 'registering', 'failed')),
+        queued_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2}
+
+
+def _queue_log(event: str, *, level: str = "info", **context) -> None:
+    try:
+        backend_logger.add(level=level, component="exportQueue", event=event, context=context)
+    except Exception:
+        # Diagnostics must never turn a committed queue/save operation into a failure.
+        pass
 
 
 def _migrate(connection: sqlite3.Connection) -> None:
@@ -190,9 +223,104 @@ def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state:
                 ).rowcount
                 if changed != 1:
                     raise StoreConflict()
+            removed = 0
+            # Replay/conflict branches above must not mutate a queue changed since that save.
+            if not has_non_default_recipe(state):
+                removed = connection.execute("DELETE FROM export_queue WHERE asset_id=?", (str(asset_id),)).rowcount
             result = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
             connection.commit()
+            if removed:
+                _queue_log("removedNoEdits", assetId=str(asset_id), revision=result["revision"], count=removed)
             return _result(result, asset_id)
         except Exception:
             connection.rollback()
             raise
+
+
+def _queue_items(connection: sqlite3.Connection) -> list[dict]:
+    items = []
+    for row in connection.execute("SELECT asset_id, status, queued_at, updated_at FROM export_queue ORDER BY id"):
+        try:
+            asset_id = str(UUID(row["asset_id"]))
+            if asset_id != row["asset_id"] or row["status"] not in QUEUE_STATUSES:
+                raise ValueError()
+            for key in ("queued_at", "updated_at"):
+                timestamp = row[key]
+                parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if parsed.tzinfo is None or not timestamp.endswith("Z") \
+                    or parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z") != timestamp:
+                    raise ValueError()
+            items.append({"assetId": asset_id, "status": row["status"],
+                          "queuedAt": row["queued_at"], "updatedAt": row["updated_at"]})
+        except (ValueError, TypeError, AttributeError, KeyError, IndexError) as error:
+            raise StoreUnavailable() from error
+    return items
+
+
+def list_export_queue() -> list[dict]:
+    try:
+        with _connection() as connection:
+            return _queue_items(connection)
+    except StoreUnavailable as error:
+        _queue_log("listFailed", level="error", errorCode=error.code)
+        raise
+
+
+def enqueue_export_assets(asset_ids: list[UUID]) -> list[dict]:
+    started = monotonic()
+    try:
+        if len(set(asset_ids)) != len(asset_ids):
+            raise QueueRejected("duplicate_asset_ids")
+        if not 1 <= len(asset_ids) <= 100:
+            raise QueueRejected("invalid_asset_ids")
+        with _connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                placeholders = ",".join("?" for _ in asset_ids)
+                ids = [str(asset_id) for asset_id in asset_ids]
+                rows = {row["asset_id"]: row for row in connection.execute(
+                    f"SELECT * FROM asset_edit_states WHERE asset_id IN ({placeholders})", ids)}
+                # Validate the entire batch under the writer lock before inserting any item.
+                for asset_id in asset_ids:
+                    row = rows.get(str(asset_id))
+                    if row is None or not has_non_default_recipe(_snapshot(row, asset_id)):
+                        raise QueueRejected("asset_not_eligible")
+                now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                added = 0
+                for asset_id in ids:
+                    added += connection.execute("""INSERT INTO export_queue (asset_id, status, queued_at, updated_at)
+                        VALUES (?, 'queued', ?, ?) ON CONFLICT(asset_id) DO NOTHING""", (asset_id, now, now)).rowcount
+                items = _queue_items(connection)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        _queue_log("enqueued", count=len(asset_ids), addedCount=added, durationMs=round((monotonic() - started) * 1000))
+        return items
+    except (QueueRejected, StoreUnavailable) as error:
+        _queue_log("enqueueFailed", level="error" if isinstance(error, StoreUnavailable) else "warn",
+                   count=len(asset_ids), errorCode=error.code)
+        raise
+
+
+def dequeue_export_asset(asset_id: UUID) -> None:
+    try:
+        with _connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute("SELECT status FROM export_queue WHERE asset_id=?", (str(asset_id),)).fetchone()
+                if row is not None:
+                    if row["status"] not in QUEUE_STATUSES:
+                        raise StoreUnavailable()
+                    if row["status"] not in ("queued", "failed"):
+                        raise QueueRejected("queue_item_locked")
+                    connection.execute("DELETE FROM export_queue WHERE asset_id=?", (str(asset_id),))
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        _queue_log("dequeued", assetId=str(asset_id), count=int(row is not None))
+    except (QueueRejected, StoreUnavailable) as error:
+        _queue_log("dequeueFailed", level="error" if isinstance(error, StoreUnavailable) else "warn",
+                   assetId=str(asset_id), errorCode=error.code)
+        raise

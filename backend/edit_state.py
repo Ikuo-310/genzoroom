@@ -52,12 +52,17 @@ class InvalidEditState(ValueError):
         self.code = code
 
 
-def has_edits(state: dict) -> bool:
-    """Classify validated v17/v18 snapshots without bypassing disabled settings."""
+def has_non_default_recipe(state: dict) -> bool:
+    """Classify the validated current Recipe independently of retained History."""
     recipe = state["currentRecipe"]
-    return bool(state["history"]) or any(recipe["adjustments"][key] != 0 for key in BOUNDS) \
+    return any(recipe["adjustments"][key] != 0 for key in BOUNDS) \
         or any(not recipe[key] for key in FLAGS) \
         or any(not flag for flag in recipe.get("adjustmentEnabled", {}).values())
+
+
+def has_edits(state: dict) -> bool:
+    """Classify validated v17/v18 snapshots without bypassing disabled settings."""
+    return bool(state["history"]) or has_non_default_recipe(state)
 
 
 def _record(value: object, keys: frozenset[str], code: str) -> dict:

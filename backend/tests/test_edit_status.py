@@ -10,7 +10,7 @@ from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import httpx
-from edit_state import BOUNDS, FLAGS, has_edits, validate_snapshot
+from edit_state import BOUNDS, FLAGS, has_edits, has_non_default_recipe, validate_snapshot
 from edit_store import get_edit_statuses, put_edit_state
 from main import app
 
@@ -64,6 +64,9 @@ class EditStatusTests(unittest.TestCase):
             with self.subTest(case=case['name']):
                 state = validate_snapshot(snapshot(case), ASSET)
                 self.assertEqual(has_edits(state), case['edited'])
+                if case['name'] == 'redo-only':
+                    self.assertTrue(has_edits(state))
+                    self.assertFalse(has_non_default_recipe(state))
                 # Replace only the test database row; production read never rewrites v17.
                 if self.path.exists():
                     with self.database() as connection:

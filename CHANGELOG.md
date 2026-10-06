@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added the persistent Export Queue backend and API foundation. Eligible edited assets can be stored in SQLite across restarts and are removed when a successful save returns the current Recipe to its default state. Queue controls in Anshitsu / Home and export execution are planned for later phases.
 - Added Structured Logs to Developer Diagnostics, with separate Frontend and Backend level controls, combined or source-specific views, clear, refresh, and JSON export.
 - Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit, and the empty unmatched drop target is larger for easier Purge. Confirmed drafts can be written back to Immich.
 
@@ -80,7 +81,7 @@ Internal changes are omitted unless they affect users.
 - Home photo views can filter stacked versus unstacked cards; valid Stack cards carry member-count metadata. STACK management uses the same Immich API key and requires Stack read/write permissions.
 - Recent photo count can be selected from 50 to 500 in steps of 50, with 100 as the default. Japanese Album periods use compact `YYYY/MM` labels.
 - Extended the desktop right panel to the bottom edge while placing the Filmstrip below only the left panel and Viewer. The Scope selector now sits in its heading, and its height can be resized from 15% to 40% (30% by default) and remembered by the browser; the mobile stacked layout is retained.
-- Advanced the flat recipe to version 18 with `adjustmentEnabled` flags for all sixteen numeric adjustments; Recipe v17 remains readable and migrates to v18. The recipe version is independent of edit-state snapshot format v2 and SQLite schema v1.
+- Advanced the flat recipe to version 18 with `adjustmentEnabled` flags for all sixteen numeric adjustments; Recipe v17 remains readable and migrates to v18. The recipe version is independent of edit-state snapshot format v2 and SQLite schema v2.
 - Advanced the flat in-memory recipe to version 17 with `gradingShadowsEnabled`, `gradingMidtonesEnabled`, and `gradingHighlightsEnabled`. Color Grading Reset preserves these switches; All Reset enables all three.
 - Earlier recipe v15 added `highlightsTemperature`; at that stage, Color Grading Reset and All Reset included five grading values.
 - Earlier recipe v16 added `highlightsTint`, completing the six grading values included in Color Grading Reset and All Reset.

@@ -12,7 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
-from edit_store import StoreConflict, StoreUnavailable, get_edit_state, put_edit_state, get_edit_statuses
+from edit_store import (
+    StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
+    list_export_queue, enqueue_export_assets, dequeue_export_asset,
+)
 
 from immich import (
     ImmichAbout,
@@ -103,6 +106,40 @@ def _store_error(error: StoreUnavailable) -> HTTPException:
 class EditStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assetIds: list[UUID] = Field(max_length=100)
+
+
+class ExportQueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetIds: list[UUID] = Field(min_length=1, max_length=100)
+
+
+@app.get("/export/queue")
+def export_queue() -> dict:
+    try:
+        return {"items": list_export_queue()}
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.post("/export/queue")
+def enqueue_export_queue(payload: ExportQueueRequest) -> dict:
+    try:
+        return {"items": enqueue_export_assets(payload.assetIds)}
+    except QueueRejected as error:
+        raise _edit_error(422, error.code) from error
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.delete("/export/queue/{asset_id}", status_code=204)
+def dequeue_export_queue(asset_id: UUID) -> Response:
+    try:
+        dequeue_export_asset(asset_id)
+        return Response(status_code=204)
+    except QueueRejected as error:
+        raise _edit_error(409, error.code) from error
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
 
 
 @app.post("/assets/edit-status")
