@@ -2,12 +2,11 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import styleCss from './style.css?raw';
 import i18n from './i18n';
 import { updateSetting } from './appSettings';
 import { EditedBadge } from './EditedBadge';
-const styles = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8');
+const styles = styleCss;
 
 let root: Root;
 let host: HTMLDivElement;
