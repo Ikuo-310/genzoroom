@@ -6,6 +6,7 @@
   line-height: 1.6;
 }
 * { box-sizing: border-box; }
+:root { --export-waiting: #e58a4d; }
 body { margin: 0; min-width: 280px; }
 .home-page { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 0; width: 100%; max-width: none; height: 100dvh; min-height: 0; margin: 0; overflow: hidden; padding: 0; background: var(--bg-app); color: var(--text-primary); }
 
@@ -192,7 +193,18 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .stack-assets { position: absolute; top: 32px; right: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; max-width: calc(100% - 16px); pointer-events: none; }
 .stack-asset-count { overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); padding: 2px 6px; font-size: 0.68rem; font-weight: 750; line-height: 1.35; white-space: nowrap; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .stack-asset-count-error { background: #a51d2d; border-color: #fff; }
-.edited-badge { position: absolute; right: 6px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid rgb(255 255 255 / 60%); border-radius: 4px; color: #fff; background: rgb(15 20 18 / 82%); pointer-events: none; }
+.edited-badge { position: absolute; right: 6px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(255 255 255 / 60%); border-radius: 4px; color: #fff; background: rgb(15 20 18 / 82%); pointer-events: none; }
+.edited-badge.queue-inactive { color: #b4b7be; opacity: 0.62; }
+.edited-badge.queue-queued { color: #f0f1f3; }
+.edited-badge.queue-waiting { color: var(--export-waiting); }
+.edited-badge.queue-processing { color: #65d58d; }
+.edited-badge.queue-failed { color: #ff7777; }
+.edited-badge.queue-busy { opacity: 0.68; cursor: progress; }
+.edited-badge.queue-locked { cursor: not-allowed; }
+.edited-badge-interactive { pointer-events: auto; padding: 0; background: rgb(15 20 18 / 82%); }
+.edited-badge-interactive:hover:not(:disabled) { filter: brightness(1.2); }
+.edited-badge-interactive:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.edited-badge-interactive:disabled { opacity: 0.68; }
 .photo-info { padding: 10px 12px 12px; color: var(--text-primary); background: var(--bg-panel); }
 .photo-info p { margin: 0; overflow: hidden; color: var(--text-primary); font-size: 0.9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .photo-info time { color: var(--text-secondary); font-size: 0.78rem; }

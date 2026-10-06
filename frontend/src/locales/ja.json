@@ -109,6 +109,14 @@
     "stackedOnly": "STACKあり",
     "unstackedOnly": "STACKなし",
     "edited": "GenzoRoomで編集済み",
+    "exportQueue": {
+      "add": "補正済み — 出力キューに追加",
+      "remove": "補正済み — 出力キューから削除",
+      "waiting": "出力待機中",
+      "encoding": "JPEG出力中",
+      "registering": "Immichへ登録中",
+      "failed": "出力失敗 — 出力キューから削除"
+    },
     "stackAssets": "Stack、{{count}}枚",
     "invalidStack": "異常STACK、{{count}}枚",
     "workspaceUnsupported": "暗室を開けません。取得済みのStack内に、対応するNon-RAW写真がありません。",

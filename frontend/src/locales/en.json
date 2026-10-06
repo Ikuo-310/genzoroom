@@ -112,6 +112,14 @@
     "stackedOnly": "With STACK",
     "unstackedOnly": "Without STACK",
     "edited": "Edited in GenzoRoom",
+    "exportQueue": {
+      "add": "Edited — Add to Export Queue",
+      "remove": "Edited — Remove from Export Queue",
+      "waiting": "Waiting for export",
+      "encoding": "Encoding JPEG",
+      "registering": "Registering with Immich",
+      "failed": "Export failed — Remove from Export Queue"
+    },
     "stackAssets": "Stack, {{count}} assets",
     "invalidStack": "Invalid Stack, {{count}} asset",
     "workspaceUnsupported": "Cannot open the selection: a Stack has no supported non-RAW photo among the loaded assets.",

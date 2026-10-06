@@ -43,6 +43,7 @@ export const shortcutBindings = {
   homeAlbums: [{ key: 'a', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeCalendar: [{ key: 'c', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeFavorites: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  exportQueueToggle: [{ key: 'q', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeSelectAll: [{ key: 'a', ignoreCase: true, ...clipboardModifiers }],
   calendarNavigatePrevious: [{ key: 'ArrowLeft', ...commandModifiers, shift: false, alt: false }],
   calendarNavigateNext: [{ key: 'ArrowRight', ...commandModifiers, shift: false, alt: false }],
