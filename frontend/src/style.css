@@ -445,7 +445,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .filmstrip-scroll { display: flex; height: 100%; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px; scrollbar-color: #555 #202023; }
 .filmstrip-entry { position: relative; flex: 0 0 92px; height: 100%; }
 .filmstrip-entry > .edited-badge { bottom: 10px; }
-.filmstrip-history-badge { position: absolute; right: 6px; bottom: 10px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px dashed #8b8d94; border-radius: 4px; color: #c8c8ca; background: #151619; }
+.filmstrip-history-badge { position: absolute; right: 6px; bottom: 10px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px dashed #8b8d94; border-radius: 4px; color: #c8c8ca; background: #151619; opacity: .6; }
 .workspace-queue-error { position: absolute; top: 74px; left: 16px; right: 16px; z-index: 4; margin: 0; padding: 8px 12px; border: 1px solid #713b3b; border-radius: 5px; background: #281c1c; }
 .filmstrip-item { position: relative; width: 100%; height: 100%; overflow: hidden; color: inherit; background: #09090a; border: 1px solid #49494c; border-radius: 5px; padding: 0; }
 .filmstrip-item.active { border: 2px solid #f0f0f0; box-shadow: 0 0 0 1px #111; }

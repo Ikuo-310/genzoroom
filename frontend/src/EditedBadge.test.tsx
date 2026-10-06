@@ -60,6 +60,12 @@ describe('EditedBadge', () => {
     expect(styles).toMatch(/\.filmstrip-entry > \.edited-badge\s*\{[^}]*bottom:\s*10px/);
   });
 
+  it('dims only the Filmstrip History-only badge without changing Queue badge contrast', () => {
+    expect(styles).toMatch(/\.filmstrip-history-badge\s*\{[^}]*opacity:\s*\.6/);
+    expect(styles).not.toMatch(/\.filmstrip-history-badge:hover/);
+    expect(styles).toMatch(/\.edited-badge\.queue-aware\s*\{[^}]*opacity:\s*1/);
+  });
+
   it('omits the Queue shortcut for click-only surfaces without changing Filmstrip defaults', async () => {
     await render({ edited: true, queueKnown: true, showQueueShortcut: false });
     expect(host.querySelector('.edited-badge')?.getAttribute('aria-label')).toBe('Edited — Add to Export Queue');

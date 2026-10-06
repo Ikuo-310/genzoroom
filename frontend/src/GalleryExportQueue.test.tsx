@@ -75,6 +75,11 @@ const card = (index = 0) => [...host.querySelectorAll<HTMLElement>('.photo-card'
   .find(node => node.querySelector('.photo-info p')?.textContent === photos[index].filename)!;
 const badge = (index = 0) => card(index).querySelector<HTMLButtonElement>('.edited-badge')!;
 async function click(target: HTMLElement) { await act(async () => target.click()); }
+async function pressQ() {
+  const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
+  await act(async () => window.dispatchEvent(event));
+  return event;
+}
 function useStack(statuses: Record<string, boolean | undefined> = { [ids[0]]: true, [ids[1]]: true }) {
   const primary = { ...photos[0], stackId: 'stack', primaryAssetId: ids[0], stackAssetCount: 2,
     stackMemberIds: [ids[0], ids[1]] };
@@ -121,7 +126,7 @@ describe('Home Export Queue', () => {
     expect(api.editState).not.toHaveBeenCalled();
   });
 
-  it('isolates badge clicks from selection, its range anchor, navigation and Home Q', async () => {
+  it('isolates badge clicks from selection and lets Home Q operate the current selection', async () => {
     await mount();
     await click(card().querySelector<HTMLInputElement>('.photo-selection-input')!);
     await click(badge(2));
@@ -133,8 +138,10 @@ describe('Home Export Queue', () => {
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
     await act(async () => window.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-    expect(api.enqueue).toHaveBeenCalledTimes(1); expect(api.dequeue).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+    expect(api.enqueue).toHaveBeenCalledTimes(2);
+    expect(api.enqueue).toHaveBeenLastCalledWith([ids[0]], expect.any(AbortSignal));
+    expect(api.dequeue).not.toHaveBeenCalled();
     expect(host.querySelector('.workspace-probe')).toBeNull();
     await click(host.querySelector<HTMLButtonElement>('.selection-clear')!);
     await click(card().querySelector<HTMLButtonElement>('.photo-card-button')!);
@@ -159,6 +166,62 @@ describe('Home Export Queue', () => {
     expect(host.querySelector('.home-queue-error')?.textContent).toBe('出力キューを読み込めませんでした。');
     expect(badge().disabled).toBe(true);
     expect(badge().getAttribute('aria-pressed')).toBeNull();
+  });
+
+  it.each(tabs)('toggles eligible multi-selection with Q in the %s photo view', async tab => {
+    await mount(tab);
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    const event = await pressQ();
+    expect(event.defaultPrevented).toBe(true);
+    expect(api.enqueue).toHaveBeenCalledWith([ids[0], ids[2]], expect.any(AbortSignal));
+    expect([...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')].map(input => input.checked)).toEqual([true, false, true, false]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+  });
+
+  it('uses one batch direction, leaving queued selections alone when turning Queue on and removing all when off', async () => {
+    items = [item(ids[0])]; await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ();
+    expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
+    expect(api.dequeue).not.toHaveBeenCalled();
+
+    api.enqueue.mockClear(); items = [item(ids[0]), item(ids[2])];
+    await pressQ();
+    expect(api.dequeue.mock.calls.map(([id]) => id)).toEqual([ids[0], ids[2]]);
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejects the entire Q batch when any eligible selection has a locked Queue status', async () => {
+    items = [item(ids[0]), item(ids[2], 'waiting')]; await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ();
+    expect(api.dequeue).not.toHaveBeenCalled(); expect(api.enqueue).not.toHaveBeenCalled();
+    expect(host.querySelector('.home-queue-error')?.textContent).toContain('cannot be removed');
+  });
+
+  it('does not start a duplicate batch while the first Q enqueue is pending', async () => {
+    const pending = deferred<ExportQueueItem[]>(); api.enqueue.mockReturnValue(pending.promise);
+    await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ(); await pressQ();
+    expect(api.enqueue).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve([item(ids[0]), item(ids[2])]));
+  });
+
+  it('splits more than 100 selected Stack members into ordered Queue requests', async () => {
+    const members = Array.from({ length: 101 }, (_, index) => `00000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, '0')}`);
+    const primary = { ...photos[0], stackId: 'large-stack', primaryAssetId: ids[0], stackAssetCount: members.length,
+      stackMemberIds: members };
+    api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
+    api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, true])));
+    await mount(); await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!); await pressQ();
+    const requests = api.enqueue.mock.calls.map(([assetIds]) => assetIds as string[]);
+    expect(requests.map(request => request.length)).toEqual([100, 1]);
+    expect(requests.flat()).toEqual(members);
   });
 
   it.each([
@@ -212,6 +275,16 @@ describe('Home Stack Queue aggregation', () => {
     expect(badge().getAttribute('aria-pressed')).toBe('true');
     await click(badge());
     expect(api.dequeue).toHaveBeenCalledTimes(locked ? 0 : 2);
+  });
+
+  it('leaves a partially queued Stack untouched while turning Queue on for another selected card', async () => {
+    useStack(); items = [item(ids[1])]; await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ();
+    expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
+    expect(api.dequeue).not.toHaveBeenCalled();
+    expect(items.map(value => value.assetId)).toEqual([ids[1], ids[2]]);
   });
 
   it('retains successful removals and unrelated membership after a later member fails', async () => {
