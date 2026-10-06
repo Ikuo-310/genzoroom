@@ -41,7 +41,10 @@ export function useExportQueue(): ExportQueueState {
   const activeControllers = useRef(new Set<AbortController>());
   const loadController = useRef<AbortController | null>(null);
   const loadGeneration = useRef(0);
-  const mutationVersion = useRef(0);
+  const snapshotGeneration = useRef(0);
+  const mutationStartGeneration = useRef(0);
+  const refreshStartGeneration = useRef(0);
+  const refreshPending = useRef(false);
   const busyAssets = useRef(new Set<string>());
 
   useEffect(() => {
@@ -61,7 +64,9 @@ export function useExportQueue(): ExportQueueState {
     activeControllers.current.add(controller);
     loadController.current = controller;
     const generation = ++loadGeneration.current;
-    const versionAtStart = mutationVersion.current;
+    refreshStartGeneration.current++;
+    const snapshotAtStart = snapshotGeneration.current;
+    const mutationsAtStart = mutationStartGeneration.current;
     if (mounted.current) {
       setLoading(true);
       setError(null);
@@ -69,10 +74,16 @@ export function useExportQueue(): ExportQueueState {
     try {
       const result = await listExportQueue(controller.signal);
       if (!mounted.current || controller.signal.aborted || generation !== loadGeneration.current) return;
-      if (versionAtStart === mutationVersion.current) {
+      if (snapshotAtStart === snapshotGeneration.current
+        && mutationsAtStart === mutationStartGeneration.current && busyAssets.current.size === 0) {
         setItems(result);
         setLoaded(true);
         setError(null);
+        snapshotGeneration.current++;
+        refreshPending.current = false;
+      } else {
+        // A GET racing a mutation may predate its commit; retry after mutations settle.
+        refreshPending.current = true;
       }
     } catch (cause) {
       if (mounted.current && !controller.signal.aborted && generation === loadGeneration.current) {
@@ -82,6 +93,10 @@ export function useExportQueue(): ExportQueueState {
       activeControllers.current.delete(controller);
       if (loadController.current === controller) loadController.current = null;
       if (mounted.current && generation === loadGeneration.current) setLoading(false);
+      if (mounted.current && refreshPending.current && busyAssets.current.size === 0) {
+        refreshPending.current = false;
+        void refresh();
+      }
     }
   }, []);
 
@@ -91,6 +106,9 @@ export function useExportQueue(): ExportQueueState {
     const keys = [...new Set(assetIds.map(keyOf))];
     if (keys.some(key => busyAssets.current.has(key))) throw new ExportQueueMutationBusyError();
     keys.forEach(key => busyAssets.current.add(key));
+    const snapshotAtStart = snapshotGeneration.current;
+    const mutationsAtStart = mutationStartGeneration.current++;
+    const refreshesAtStart = refreshStartGeneration.current;
     setMutations(previous => {
       const next = new Map(previous);
       keys.forEach(key => next.set(key, { operation }));
@@ -98,12 +116,13 @@ export function useExportQueue(): ExportQueueState {
     });
     const controller = new AbortController();
     activeControllers.current.add(controller);
-    const versionAtStart = mutationVersion.current;
     try {
       const response = await run(controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
       const canonicalSnapshot = operation === 'enqueue' && response !== undefined
-        && versionAtStart === mutationVersion.current;
+        && snapshotAtStart === snapshotGeneration.current
+        && mutationsAtStart === mutationStartGeneration.current - 1
+        && refreshesAtStart === refreshStartGeneration.current;
       if (operation === 'enqueue' && response) {
         if (canonicalSnapshot) {
           setItems(response);
@@ -124,7 +143,7 @@ export function useExportQueue(): ExportQueueState {
       } else if (operation === 'dequeue') {
         setItems(previous => previous.filter(item => !keys.includes(keyOf(item.assetId))));
       }
-      mutationVersion.current++;
+      snapshotGeneration.current++;
       if (canonicalSnapshot) setLoaded(true);
       setError(null);
     } catch (cause) {
@@ -148,9 +167,13 @@ export function useExportQueue(): ExportQueueState {
           });
           return next;
         });
+        if (refreshPending.current && busyAssets.current.size === 0) {
+          refreshPending.current = false;
+          void refresh();
+        }
       }
     }
-  }, []);
+  }, [refresh]);
 
   const enqueue = useCallback((assetIds: readonly string[]) => runMutation(
     assetIds, 'enqueue', signal => enqueueExportAssets(assetIds, signal),

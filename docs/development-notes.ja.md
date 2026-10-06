@@ -10,6 +10,20 @@ enqueueは複数Assetをatomicに処理し、already queued itemのstatus・順�
 
 Export Phase 1 focused auditではCritical / High / Medium findingはなく、Low 1件（BackendがUTC以外のtimestamp offsetを許可）を確認して修正した。実装時のBackend関連テストは56 passed・52 subtests、Frontend APIは43 passedで、TypeScript check、build、`git diff --check`も成功。Eligibility修正後のBackend関連テストは61 passed・52 subtests、今回のtimestamp修正後は関連Backend suiteで63 passed・52 subtests。各修正時の`git diff --check`も成功。NAS / browser実機確認は未実施。Queue UI、Anshitsu / HomeのQueue操作、encoder、Immich uploadなどExport runtimeは後続Phase。
 
+## Export Queue Frontend / Anshitsu Phase 2完了（2026-10-06）
+
+Phase 2Aで`useExportQueue`とstrict validation済みFrontend APIを追加し、unknown / loaded membership、status、per-Asset mutation、Abort / unmount、failed load時の既存snapshot保持を実装した。Phase 2Bでは専用Queue badgeを増やさず、既存EditedBadgeをQueue state表示とtoggleへ拡張し、central shortcut registryにmodifierなしのQ/q commandを追加した。Phase 2CではAnshitsu / FilmstripへQueueを接続し、写真buttonとinteractive EditedBadgeをsiblingsにしてnested buttonを避けた。写真clickは従来どおりactive Assetを切り替え、badge clickはQueueだけを操作する。
+
+Anshitsuのenqueueは必要なedit-state save、save成功とclean確認、current Recipeのeligibility確認、Backend enqueueの順に行う。Historyだけが残るdefault RecipeはEditedBadgeを表示するがenqueueしない。unvisited inactive Assetのedit-stateはQueue操作のためだけにGETせず、Backendをeligibilityの最終authorityとする。default Recipe保存時のBackend transactional cleanupに対してFrontendは必要なQueue refreshを行う。Q shortcutはactive Assetに同じtoggle処理を実行し、既存のdialog、menu、Settings、native input、IME、repeat、遷移／保存中guardを維持する。`queued` / `failed`は削除可能、`waiting` / `encoding` / `registering`はlocked。
+
+Filmstrip badgeはQueue外を濃色背景＋白アイコン、`queued`を明色背景＋濃色アイコンで表示し、`waiting`はamber、処理中はgreen、`failed`はredとする。active枠との干渉を避けるFilmstrip専用位置は`bottom: 10px`。Home側の位置は変更していない。Queue load、追加／削除失敗、eligibility拒否は日英のlocalized alertで通知し、失敗時にQueue membershipを楽観更新しない。
+
+Focused audit初回はCritical 0 / High 0 / Medium 2 / Low 0。Mediumは、default Recipe cleanup refreshが別Asset mutationで破棄される問題と、新しいGET snapshot後に遅延enqueue responseが古いmembershipを復活させる問題だった。`useExportQueue`のsnapshot generationとmutation / refresh開始順を管理し、競合GETのrefreshを最後のmutation後に一度再実行、古いenqueue full responseを対象Assetだけのmergeへ切り替える修正を行った。focused re-checkでは両finding解消、新規Critical / High / Medium regressionなし。追加2回帰テストはいずれも最終Queue membershipを確認する。
+
+実機確認ではNAS / FirefoxでQueue外とqueuedの配色、active枠、Filmstrip badge操作と写真選択分離、Q、dirty save後enqueue、default Recipeのenqueue拒否、Tab focusを確認し、Portainer Docker buildも成功した。`waiting` / `encoding` / `registering`はExport runtime未実装のため実機対象外。CSS static testがNode APIを参照した一時的なDocker build失敗は`style.css?raw`へ切り替えて解消した。
+
+Phase 2C実装時の関連Vitestは12 files / 405 tests passed。EditedBadge表示色修正後は15 tests passed。focused auditは11 files / 283 tests passed。Medium修正後とre-checkはそれぞれuseExportQueue / Anshitsu Queue 2 files / 35 tests passed。各段階で`npx tsc --noEmit`、`npm run build`、`git diff --check`は成功。buildの500 kB超chunk warningは継続。実機確認は上記のユーザー確認記録であり、この開発ノート更新時に再確認していない。Home Queue controls、Export page、runtime、encoder、Immich uploadは未実装。
+
 ## Home刷新フェーズ完了（2026-10-05・現行仕様）
 
 HomeをHeader / Tabs / Toolbar / Contentの4層へ整理した。Header、tab、toolbarは固定領域に置き、`.home-content`だけをscrollさせる。旧来のHome全体を囲う大きな写真panelをなくし、HomeとSTACK管理はneutral dark themeの基本tokenを共有する。通常UIはgray基調で、意味のあるstatus色は維持する。Developer Diagnosticsはgreen console identityを保ち、controlsのみneutral grayで視認性を高めた。Anshitsuのthemeはこの刷新では変更していない。

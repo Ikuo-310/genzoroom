@@ -154,7 +154,7 @@ describe('useExportQueue', () => {
   });
 
   it('ignores a list response started before a successful mutation', async () => {
-    const oldList = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldList.promise).mockResolvedValueOnce([]);
+    const oldList = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldList.promise).mockResolvedValueOnce([item(A)]);
     await render();
     api.enqueue.mockResolvedValue([item(A)]);
     await act(async () => current.enqueue([A]));
@@ -164,13 +164,45 @@ describe('useExportQueue', () => {
 
   it('ignores an old refresh response that arrives after a mutation', async () => {
     api.list.mockResolvedValueOnce([]); await render();
-    const oldRefresh = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldRefresh.promise);
+    const oldRefresh = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldRefresh.promise).mockResolvedValueOnce([item(A)]);
     let refresh!: Promise<void>;
     act(() => { refresh = current.refresh(); });
     api.enqueue.mockResolvedValue([item(A)]);
     await act(async () => current.enqueue([A]));
     await act(async () => oldRefresh.resolve([item(B)])); await act(async () => refresh);
     expect(current.items).toEqual([item(A)]);
+  });
+
+  it('retries a cleanup refresh that overlaps an unrelated dequeue', async () => {
+    api.list.mockResolvedValueOnce([item(A), item(B)]);
+    await render();
+    const cleanupResponse = deferred<ExportQueueItem[]>();
+    api.list.mockReturnValueOnce(cleanupResponse.promise).mockResolvedValueOnce([]);
+    let refresh!: Promise<void>;
+    act(() => { refresh = current.refresh(); });
+    const dequeueResponse = deferred<void>();
+    api.dequeue.mockReturnValueOnce(dequeueResponse.promise);
+    let dequeue!: Promise<void>;
+    act(() => { dequeue = current.dequeue(B); });
+    await act(async () => { dequeueResponse.resolve(); await dequeue; });
+    await act(async () => { cleanupResponse.resolve([item(B)]); await refresh; await Promise.resolve(); });
+    expect(api.list).toHaveBeenCalledTimes(3);
+    expect(current.items).toEqual([]);
+  });
+
+  it('does not let a delayed enqueue snapshot undo a newer canonical refresh', async () => {
+    api.list.mockResolvedValueOnce([item(A)]);
+    await render();
+    const enqueueResponse = deferred<ExportQueueItem[]>();
+    api.enqueue.mockReturnValueOnce(enqueueResponse.promise);
+    let enqueue!: Promise<void>;
+    act(() => { enqueue = current.enqueue([B]); });
+    api.list.mockResolvedValueOnce([item(B)]).mockResolvedValueOnce([item(B)]);
+    await act(async () => current.refresh());
+    await act(async () => { enqueueResponse.resolve([item(A), item(B)]); await enqueue; });
+    expect(current.items).toEqual([item(B)]);
+    expect(current.hasAsset(A)).toBe(false);
+    expect(current.hasAsset(B)).toBe(true);
   });
 
   it('keeps mutation results scoped when unrelated mutations complete out of order', async () => {
