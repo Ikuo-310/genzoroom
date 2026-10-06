@@ -1,7 +1,7 @@
 import type { AssetExif, RecentAsset } from './assets';
 
 export type MatchState = 'matched' | 'mismatch' | 'unavailable' | 'error';
-export type NameReason = 'exact' | 'pixel-normalized' | 'exif-fallback';
+export type NameReason = 'filename-family' | 'exif-fallback';
 export type DraftStack = {
   id: string;
   members: RecentAsset[];
@@ -14,12 +14,11 @@ export type DraftStack = {
 export type StackDetection = { groups: DraftStack[]; unmatched: RecentAsset[] };
 
 export function filenameFamily(filename: string): { key: string; reason: NameReason } | null {
-  const pixel = /^(PXL_\d{8}_\d{9})\.RAW-\d+\.(?:MP\.)?(?:COVER|ORIGINAL)\.[A-Za-z0-9]+$/.exec(filename);
-  if (pixel) return { key: pixel[1], reason: 'pixel-normalized' };
-  const dot = filename.lastIndexOf('.');
-  if (dot <= 0 || dot === filename.length - 1) return null;
-  // Case-sensitive stems avoid merging distinct filenames on case-sensitive sources.
-  return { key: filename.slice(0, dot), reason: 'exact' };
+  const dot = filename.indexOf('.');
+  if (dot <= 0 || filename.endsWith('.')) return null;
+  // First-dot roots support camera variants; only GenzoRoom's terminal suffix is removed.
+  const key = filename.slice(0, dot).replace(/-Genzo[0-9]+$/, '');
+  return key.trim() ? { key, reason: 'filename-family' } : null;
 }
 
 // Zone-less EXIF is a wall clock. Use UTC consistently, never the client timezone,
@@ -58,7 +57,7 @@ export function chooseStackCover(members: readonly RecentAsset[]): string {
   }, null)?.id ?? '';
 }
 
-function evidenceFor(members: readonly RecentAsset[], details: ReadonlyMap<string, AssetExif>, failures: ReadonlySet<string>) {
+function evidenceFor(members: readonly RecentAsset[], details: ReadonlyMap<string, AssetExif>, failures: ReadonlySet<string>, compareAvailableGps = false) {
   // A failed member prevents safe group-level comparison, even if other members have EXIF.
   if (members.some(asset => failures.has(asset.id))) return { time: 'error', camera: 'error', gps: 'error' } as const;
   const exifs = members.map(asset => details.get(asset.id));
@@ -79,10 +78,10 @@ function evidenceFor(members: readonly RecentAsset[], details: ReadonlyMap<strin
     || (!missing(exif?.longitude) && !validCoordinate(exif?.longitude, 180)));
   const positions = exifs.map(exif => exif?.latitude != null && exif.longitude != null ? { latitude: exif.latitude, longitude: exif.longitude } : null);
   const spread = (key: 'latitude' | 'longitude') => {
-    const values = positions.map(position => position![key]);
+    const values = positions.filter(position => position != null).map(position => position[key]);
     return Math.max(...values) - Math.min(...values);
   };
-  const gps: MatchState = gpsError ? 'error' : positions.includes(null) ? 'unavailable'
+  const gps: MatchState = gpsError ? 'error' : (compareAvailableGps ? positions.filter(position => position != null).length < 2 : positions.includes(null)) ? 'unavailable'
     : spread('latitude') <= 1e-5 && spread('longitude') <= 1e-5 ? 'matched' : 'mismatch';
   return { time, camera, gps };
 }
@@ -96,50 +95,42 @@ export function detectStackCandidates(assets: readonly RecentAsset[], details: R
     if (!family) continue;
     const group = families.get(family.key) ?? { members: [], reason: family.reason };
     group.members.push(asset);
-    if (family.reason === 'pixel-normalized') group.reason = family.reason;
     families.set(family.key, group);
   }
   const groups: DraftStack[] = [];
   const grouped = new Set<string>();
   for (const [key, family] of families) {
     const { members } = family;
-    if (members.length < 2 || !members.some(asset => asset.is_raw) || !members.some(asset => !asset.is_raw)) continue;
+    if (members.length < 2) continue;
     members.forEach(asset => grouped.add(asset.id));
     groups.push({ id: `draft:auto:${key}`, members, coverAssetId: chooseStackCover(members), origin: 'auto',
       evidence: { name: 'matched', nameReason: family.reason, ...evidenceFor(members, details, failures) } });
   }
   const unmatched = uniqueAssets.filter(asset => !grouped.has(asset.id));
   const fallbackPool = unmatched.filter(asset => asset.stackId == null);
-  const raw = fallbackPool.filter(asset => asset.is_raw);
-  const nonRaw = fallbackPool.filter(asset => !asset.is_raw);
-  if (raw.length && nonRaw.length) {
-    const edges: Array<{ raw: RecentAsset; nonRaw: RecentAsset }> = [];
-    for (const rawAsset of raw) for (const nonRawAsset of nonRaw) {
-      const rawFamily = filenameFamily(rawAsset.filename)?.key;
-      const nonRawFamily = filenameFamily(nonRawAsset.filename)?.key;
-      if (rawFamily != null && rawFamily === nonRawFamily) continue;
-      if (!details.has(rawAsset.id) || !details.has(nonRawAsset.id)) continue;
-      const evidence = evidenceFor([rawAsset, nonRawAsset], details, failures);
-      if (evidence.time === 'matched' && evidence.camera === 'matched' && evidence.gps === 'matched') {
-        edges.push({ raw: rawAsset, nonRaw: nonRawAsset });
-      }
-    }
-    const rawDegree = new Map<string, number>();
-    const nonRawDegree = new Map<string, number>();
-    for (const edge of edges) {
-      rawDegree.set(edge.raw.id, (rawDegree.get(edge.raw.id) ?? 0) + 1);
-      nonRawDegree.set(edge.nonRaw.id, (nonRawDegree.get(edge.nonRaw.id) ?? 0) + 1);
-    }
-    const order = new Map(uniqueAssets.map((asset, index) => [asset.id, index]));
-    for (const edge of edges) {
-      if (rawDegree.get(edge.raw.id) !== 1 || nonRawDegree.get(edge.nonRaw.id) !== 1) continue;
-      const members = [edge.raw, edge.nonRaw].sort((a, b) => order.get(a.id)! - order.get(b.id)!);
-      members.forEach(asset => grouped.add(asset.id));
-      groups.push({ id: `draft:exif:${edge.raw.id}:${edge.nonRaw.id}`, members, coverAssetId: chooseStackCover(members), origin: 'auto',
-        evidence: { name: 'mismatch', nameReason: 'exif-fallback', time: 'matched', camera: 'matched', gps: 'matched' } });
-    }
-    groups.sort((a, b) => order.get(a.members[0].id)! - order.get(b.members[0].id)!);
+  const fallbackGroups: RecentAsset[][] = [];
+  const canFallback = (members: readonly RecentAsset[]) => {
+    const evidence = evidenceFor(members, details, failures, true);
+    return evidence.time === 'matched' && evidence.camera === 'matched'
+      && (evidence.gps === 'matched' || evidence.gps === 'unavailable');
+  };
+  for (const asset of fallbackPool) {
+    if (!canFallback([asset])) continue;
+    // Check the entire group to prevent tolerance chains and missing GPS from bridging mismatches.
+    // First compatible group wins so membership is disjoint and follows Home selection order.
+    const members = fallbackGroups.find(group => canFallback([...group, asset]));
+    if (members) members.push(asset);
+    else fallbackGroups.push([asset]);
   }
+  for (const members of fallbackGroups) {
+    if (members.length < 2) continue;
+    members.forEach(asset => grouped.add(asset.id));
+    groups.push({ id: 'draft:exif:' + members.map(asset => asset.id).join(':'), members,
+      coverAssetId: chooseStackCover(members), origin: 'auto',
+      evidence: { name: 'mismatch', nameReason: 'exif-fallback', ...evidenceFor(members, details, failures, true) } });
+  }
+  const order = new Map(uniqueAssets.map((asset, index) => [asset.id, index]));
+  groups.sort((a, b) => order.get(a.members[0].id)! - order.get(b.members[0].id)!);
   return { groups, unmatched: uniqueAssets.filter(asset => !grouped.has(asset.id)) };
 }
 
@@ -148,7 +139,6 @@ export function stackCandidateDetailTargets(assets: readonly RecentAsset[]): Rec
   const initial = detectStackCandidates(snapshot);
   const nameMembers = initial.groups.flatMap(group => group.members);
   const fallbackPool = initial.unmatched.filter(asset => asset.stackId == null);
-  const hasBothFormats = fallbackPool.some(asset => asset.is_raw) && fallbackPool.some(asset => !asset.is_raw);
-  const targets = hasBothFormats ? [...nameMembers, ...fallbackPool] : nameMembers;
+  const targets = fallbackPool.length >= 2 ? [...nameMembers, ...fallbackPool] : nameMembers;
   return [...new Map(targets.map(asset => [asset.id, asset])).values()];
 }

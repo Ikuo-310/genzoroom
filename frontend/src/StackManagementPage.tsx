@@ -630,8 +630,7 @@ function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: St
   if (group.origin === 'manual' || group.modified) return <div className="stack-group-indicators"><span className="stack-evidence mismatch" title={t('stackManagement.manual')}>MANUAL</span></div>;
   return <div className="stack-group-indicators">{labels.map(([key, label]) => {
     const state = group.evidence[key];
-    const nameReasonKey = group.evidence.nameReason === 'exact' ? 'nameExact'
-      : group.evidence.nameReason === 'pixel-normalized' ? 'namePixel' : 'nameMismatch';
+    const nameReasonKey = group.evidence.nameReason === 'filename-family' ? 'nameFamily' : 'nameMismatch';
     const detail = key === 'name' ? t(`stackManagement.${nameReasonKey}`) : t(`stackManagement.${state}`);
     return <span key={key} className={`stack-evidence ${state}`} title={`${label}: ${t(`stackManagement.${state}`)}${key === 'name' ? ` — ${detail}` : ''}`}><span aria-hidden="true">{label}</span><span className="visually-hidden">{label}: {t(`stackManagement.${state}`)}</span></span>;
   })}</div>;

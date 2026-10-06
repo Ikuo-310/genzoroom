@@ -235,7 +235,7 @@ it('keeps EXIF fallback groups editable, addable, purgeable and redetectable', a
   { ...photos[1], id:'fallback-jpeg', filename:'exported.jpg' },
   ...singles,
  ];
- api.detail.mockImplementation(async (id:string) => ({...photos[0], id, exif:{date_time_original:'2026:10:01 08:25:49', make:'Camera', model:id.startsWith('fallback-') ? 'Model' : 'Other', latitude:35, longitude:139}, preview_url:'/preview'}));
+ api.detail.mockImplementation(async (id:string) => ({...photos[0], id, exif:{date_time_original:'2026:10:01 08:25:49', make:'Camera', model:id.startsWith('fallback-') ? 'Model' : id, latitude:35, longitude:139}, preview_url:'/preview'}));
  await mount('/stack', {selectedAssets:fallback});
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
  await click('[aria-label="Set capture.dng as COVER"]');
@@ -555,7 +555,7 @@ it('asks before discarding edits, focuses Cancel, retains state on Cancel and re
  expect(host.querySelector('.stack-add-target')).not.toBeNull(); expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
  expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('1 selected');
  await act(async()=>button('Detect again').click()); await act(async()=>button('Continue').click());
- expect(api.detail).toHaveBeenCalledTimes(requests+2); expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+ expect(api.detail).toHaveBeenCalledTimes(requests+4); expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
  expect(host.querySelector('.stack-control-bar strong')?.textContent).toBe('0 selected'); expect(host.querySelector('.stack-add-target')).toBeNull();
  await act(async()=>button('Detect again').click()); expect(host.querySelector('dialog')).toBeNull();
 });

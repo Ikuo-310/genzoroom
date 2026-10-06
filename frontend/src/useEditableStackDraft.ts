@@ -121,7 +121,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
       || state.groups.some(group => group.members.some(member => ids.has(member.id)))) return state;
     const members = state.unmatched.filter(asset => ids.has(asset.id));
     const group: DraftStack = { id: `draft:manual:${state.manualCounter + 1}`, origin: 'manual', members,
-      coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
+      coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'filename-family', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
     return normalize({ ...state, modified: true, groups: [...state.groups, group], unmatched: state.unmatched.filter(asset => !ids.has(asset.id)),
       selectedIds: new Set([...state.selectedIds].filter(id => !ids.has(id))), addTargetStackId: null, manualCounter: state.manualCounter + 1 });
   }
@@ -150,7 +150,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
     if (action.type === 'create' ? members.length < 2 : !members.length || !state.groups.some(group => group.id === targetGroupId && !isSingletonImmichStack(group))) return state;
     const ids = new Set(members.map(asset => asset.id));
     const group: DraftStack = { id: `draft:manual:${state.manualCounter + 1}`, origin: 'manual', members,
-      coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
+      coverAssetId: chooseStackCover(members), evidence: { name: 'unavailable', nameReason: 'filename-family', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' } };
     return normalize({ ...state, modified: true, unmatched: state.unmatched.filter(asset => !ids.has(asset.id)), addTargetStackId: null,
       manualCounter: state.manualCounter + (action.type === 'create' ? 1 : 0),
       groups: action.type === 'create' ? [...state.groups, group] : state.groups.map(current => current.id === targetGroupId

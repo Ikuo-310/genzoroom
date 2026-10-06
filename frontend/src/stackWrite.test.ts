@@ -5,7 +5,7 @@ import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from '
 import { emptyStackDraft, stackDraftReducer as reduce } from './useEditableStackDraft';
 const asset=(id:string):RecentAsset=>({id,filename:id+'.jpg',format:'JPEG',is_raw:false,date:'2026-01-01',thumbnail_url:'/thumb'});
 const a=asset('a'),b=asset('b'),c=asset('c'),d=asset('d');
-const evidence={name:'unavailable',nameReason:'exact',time:'unavailable',camera:'unavailable',gps:'unavailable'} as const;
+const evidence={name:'unavailable',nameReason:'filename-family',time:'unavailable',camera:'unavailable',gps:'unavailable'} as const;
 const original:DraftStack={id:'old',origin:'immich',immichStackId:'stack',members:[a,b],coverAssetId:'a',originalMemberIds:['a','b'],originalPrimaryAssetId:'a',evidence};
 const singleton:DraftStack={...original,members:[a],originalMemberIds:['a']};
 const manual:DraftStack={id:'new',origin:'manual',members:[a,c],coverAssetId:'a',evidence};

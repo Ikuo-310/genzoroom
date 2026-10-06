@@ -53,7 +53,7 @@ export function mergeImmichStackSource(detection: StackDetection, stacks: readon
     id: `draft:immich:${stack.id}`, origin: 'immich', immichStackId: stack.id,
     originalPrimaryAssetId: stack.primaryAssetId, originalMemberIds: Object.freeze(stack.assets.map(asset => asset.id)),
     members: [...stack.assets], coverAssetId: stack.primaryAssetId, modified: false,
-    evidence: { name: 'unavailable', nameReason: 'exact', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' },
+    evidence: { name: 'unavailable', nameReason: 'filename-family', time: 'unavailable', camera: 'unavailable', gps: 'unavailable' },
   }));
   const memberIds = new Set(stacks.flatMap(stack => stack.assets.map(asset => asset.id.toLowerCase())));
   const overlapping = detection.groups.filter(group => group.members.some(asset => memberIds.has(asset.id.toLowerCase())));

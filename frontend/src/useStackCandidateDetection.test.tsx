@@ -43,15 +43,26 @@ it('survives StrictMode effect cleanup without stale results or duplicate active
   await finish(pending.splice(0)); expect(current.loading).toBe(false); expect(current.groups[0].evidence.time).toBe('matched');
 });
 
-it('requests only NAME members when the remaining pool has a single format and skips existing stacks', async () => {
- const excluded = [photos[8], ...photos.slice(2,4).map(a => ({...a, stackId: 'existing'})), ...photos.slice(4,6).map(a => ({...a, is_raw: true}))];
+it('requests NAME members and skips singleton fallback pools and existing stacks', async () => {
+ const excluded = [photos[8], ...photos.slice(2,4).map(a => ({...a, stackId: 'existing'}))];
  await render([...photos.slice(0,2), ...excluded]);
  expect(fetchDetail.mock.calls.map(call => call[0])).toEqual(['0','1']);
- await finish(pending.splice(0));
- expect(current.unmatched).toHaveLength(5);
+ await finish(pending.splice(0)); expect(current.unmatched).toHaveLength(3);
  await render(excluded); expect(fetchDetail).toHaveBeenCalledTimes(2); expect(current.loading).toBe(false);
 });
-it('requests NAME members and only the remaining RAW/Non-RAW fallback pool, never existing Stacks', async () => {
+it.each([true, false])('fetches same-format fallback details for raw=%s', async raw => {
+ const members = photos.slice(0,3).map((a, i) => ({ ...a, filename: 'unique-' + i + '.jpg', is_raw: raw }));
+ await render(members); expect(fetchDetail.mock.calls.map(call => call[0])).toEqual(['0', '1', '2']);
+ expect(current.detailCount).toBe(3); await finish(pending.splice(0));
+ expect(current.groups).toHaveLength(1); expect(current.groups[0].members).toEqual(members);
+ expect(current.groups[0].evidence.nameReason).toBe('exif-fallback');
+});
+it('does not form fallback groups from failed details', async () => {
+ fetchDetail.mockRejectedValue(new Error('offline'));
+ await render(photos.slice(0,2).map((a, i) => ({ ...a, filename: 'unique-' + i + '.jpg' })));
+ expect(current.groups).toEqual([]); expect(current.failureCount).toBe(2); expect(current.loading).toBe(false);
+});
+it('requests NAME members and only the remaining fallback pool, never existing Stacks', async () => {
  const namePair = photos.slice(0, 2);
  const raw = { ...photos[0], id: 'fallback-raw', filename: 'capture.dng' };
  const jpeg = { ...photos[1], id: 'fallback-jpeg', filename: 'export.jpg' };
@@ -60,7 +71,7 @@ it('requests NAME members and only the remaining RAW/Non-RAW fallback pool, neve
  await render([...namePair, raw, jpeg, stackedRaw, stackedJpeg]);
  expect(fetchDetail.mock.calls.map(call => call[0]).sort()).toEqual(['0', '1', 'fallback-jpeg', 'fallback-raw'].sort());
  await finish(pending.splice(0));
- expect(current.groups.map(group => group.evidence.nameReason)).toEqual(['exact', 'exif-fallback']);
+ expect(current.groups.map(group => group.evidence.nameReason)).toEqual(['filename-family', 'exif-fallback']);
 });
 it('keeps NAME groups and marks failed detail evidence as errors', async () => {
  fetchDetail.mockRejectedValue(new Error('offline'));
