@@ -2,9 +2,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import i18n from './i18n';
 import { updateSetting } from './appSettings';
 import { EditedBadge } from './EditedBadge';
+const styles = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8');
 
 let root: Root;
 let host: HTMLDivElement;
@@ -35,13 +38,22 @@ describe('EditedBadge', () => {
     expect(host.querySelector('.edited-badge')?.getAttribute('aria-label')).toBe('Edited in GenzoRoom');
   });
 
-  it('shows confirmed Queue-out as dim and exposes add action with the configured shortcut', async () => {
+  it('shows confirmed Queue-out at full contrast and exposes add action with the configured shortcut', async () => {
     await render({ edited: true, queueKnown: true });
     const badge = host.querySelector('.edited-badge')!;
     expect(badge.classList.contains('queue-inactive')).toBe(true);
     expect(badge.getAttribute('aria-label')).toBe('Edited — Add to Export Queue [Q]');
     act(() => updateSetting('showKeyboardShortcuts', false));
     expect(badge.getAttribute('aria-label')).toBe('Edited — Add to Export Queue');
+  });
+
+  it('keeps Queue-out opaque, inverts queued colors, and preserves both states on hover', () => {
+    expect(styles).toMatch(/\.edited-badge\.queue-aware\s*\{[^}]*opacity:\s*1/);
+    expect(styles).toMatch(/\.edited-badge\.queue-inactive\s*\{[^}]*color:\s*#fff/);
+    expect(styles).toMatch(/\.edited-badge\.queue-queued\s*\{[^}]*color:\s*#17181b[^}]*background:\s*#f0f1f3/);
+    expect(styles).toMatch(/\.edited-badge-interactive\.queue-inactive:hover:not\(:disabled\)\s*\{[^}]*background:\s*#292b2f/);
+    expect(styles).toMatch(/\.edited-badge-interactive\.queue-queued:hover:not\(:disabled\)\s*\{[^}]*color:\s*#17181b[^}]*background:\s*#dfe1e5/);
+    expect(styles).not.toMatch(/\.edited-badge-interactive:hover:not\(:disabled\)\s*\{[^}]*filter:\s*brightness/);
   });
 
   it.each([
