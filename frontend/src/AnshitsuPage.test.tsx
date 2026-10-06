@@ -47,7 +47,7 @@ function renderWorkspace(
 describe('Anshitsu workspace', () => {
   it('renders the English name, subtitle, selected filename, and localized date', () => {
     const markup = renderWorkspace('en');
-    expect(markup).toContain('Anshitsu');
+    expect(markup).toContain('Develop');
     expect(markup).toContain('Photo development workspace');
     expect(markup).toContain(`title="${asset.filename}"`);
     expect(markup).toContain(formatPhotoDate(asset.date));
@@ -110,7 +110,7 @@ describe('Anshitsu workspace', () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={[`/anshitsu/${asset.id}`]}><App /></MemoryRouter>,
     );
-    expect(markup).toContain('Anshitsu');
+    expect(markup).toContain('Develop');
     expect(markup).toContain('Loading photo');
   });
 

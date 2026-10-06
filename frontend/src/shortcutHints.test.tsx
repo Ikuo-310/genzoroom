@@ -38,7 +38,7 @@ describe('visual shortcut hints', () => {
       expect(stacks.textContent).toBe(language === 'en' ? 'Stacks[S]' : 'STACK管理へ[S]');
       expect(stacks.title).toContain(`(${formatShortcut('homeOpenStackManager')})`);
       expect(stacks.getAttribute('aria-label')).toBe(i18n.t('photos.openStacks'));
-      expect(open.textContent).toBe(language === 'en' ? 'Anshitsu[D]' : '暗室へ[D]');
+      expect(open.textContent).toBe(language === 'en' ? 'Develop[D]' : '暗室へ[D]');
       expect(open.getAttribute('aria-label')).toBe(i18n.t('photos.openSelected'));
       expect(open.title).toContain(`(${formatShortcut('homeOpenSelected')})`);
       expect(original.title).toContain(`(${formatShortcut('viewerOriginal')})`);
@@ -51,7 +51,7 @@ describe('visual shortcut hints', () => {
       act(() => updateSetting('showKeyboardShortcuts', false));
       expect(stacks.textContent).toBe(language === 'en' ? 'Stacks' : 'STACK管理へ');
       expect(stacks.title).toBe(i18n.t('photos.openStacks'));
-      expect(open.textContent).toBe(language === 'en' ? 'Anshitsu' : '暗室へ');
+      expect(open.textContent).toBe(language === 'en' ? 'Develop' : '暗室へ');
       expect(open.title).toBe(i18n.t('photos.openSelected'));
       expect(open.getAttribute('aria-label')).toBe(i18n.t('photos.openSelected'));
       expect(original.title).toBe(i18n.t('workspace.previewOriginal'));

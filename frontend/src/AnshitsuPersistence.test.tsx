@@ -300,7 +300,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     await click('button[aria-label="Disable Basic"]');
     await filmstripKey('g');
     expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
-    expect(document.activeElement?.textContent).toBe('Stay in Anshitsu');
+    expect(document.activeElement?.textContent).toBe('Stay in Develop');
     const before = currentHistoryEntry();
     await filmstripKey('z', { ctrlKey: true });
     expect(currentHistoryEntry()).toBe(before);
@@ -642,7 +642,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect((await filmstripKey('g')).defaultPrevented).toBe(false);
 
     const stay = [...container.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
-      .find((button) => button.textContent === 'Stay in Anshitsu');
+      .find((button) => button.textContent === 'Stay in Develop');
     if (!stay) throw new Error('Missing stay button');
     await act(async () => { stay.click(); });
     expect(currentPhoto()).toBe('first.jpg');
@@ -677,7 +677,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     const homeEvent = await filmstripKey('g');
     expect(homeEvent.defaultPrevented).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('.workspace-actions button')!.disabled).toBe(true);
-    expect(container.textContent).toContain('Saving edits before leaving Anshitsu');
+    expect(container.textContent).toContain('Saving edits before leaving Develop');
     expect((await filmstripKey('g')).defaultPrevented).toBe(false);
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await act(async () => {

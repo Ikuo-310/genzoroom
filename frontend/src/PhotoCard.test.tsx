@@ -140,7 +140,7 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain('class="photo-selection-input"');
     expect(markup).toContain('aria-label="Select photo.jpg"');
-    expect(markup).toContain('aria-label="Open photo.jpg in Anshitsu"');
+    expect(markup).toContain('aria-label="Open photo.jpg for development"');
   });
 
   it('marks a selected card and changes the card action while selection mode is active', () => {

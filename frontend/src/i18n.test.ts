@@ -82,8 +82,12 @@ describe('localized resources', () => {
     expect(i18n.t('photos.recent', { lng: 'ja' })).toBe('最近の写真');
     expect(i18n.t('photos.noMatches', { lng: 'en' })).toBe('No photos match this filter.');
     expect(i18n.t('photos.noMatches', { lng: 'ja' })).toBe('この条件に一致する写真はありません。');
-    expect(i18n.t('workspace.name', { lng: 'en' })).toBe('Anshitsu');
+    expect(i18n.t('workspace.name', { lng: 'en' })).toBe('Develop');
     expect(i18n.t('workspace.name', { lng: 'ja' })).toBe('暗室');
+    expect(i18n.t('photos.openSelected', { lng: 'en' })).toBe('Develop selected photos');
+    expect(i18n.t('photos.openSelected', { lng: 'ja' })).toBe('暗室へ');
+    expect(i18n.t('photos.openSelectedCompact', { lng: 'en' })).toBe('Develop');
+    expect(i18n.t('photos.openWorkspace', { lng: 'en', filename: 'photo.jpg' })).toBe('Open photo.jpg for development');
     expect(i18n.t('workspace.actualSize', { lng: 'en' })).toBe('1:1');
     expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍');
     expect(i18n.t('workspace.highlights', { lng: 'en' })).toBe('Highlights');

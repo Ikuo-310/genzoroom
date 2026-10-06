@@ -88,7 +88,7 @@ describe('Home favorites', () => {
     await pressHome('f');
     expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('Favorites');
     expect(host.querySelector('.selection-open-stacks')?.textContent).toBe('Stacks');
-    expect(host.querySelector('.selection-open-workspace')?.textContent).toBe('Anshitsu');
+    expect(host.querySelector('.selection-open-workspace')?.textContent).toBe('Develop');
     expect(host.querySelector('.selection-all')?.textContent).toBe('Select all');
     expect(host.querySelector('.selection-all')?.getAttribute('title')).toBeNull();
     await act(async () => i18n.changeLanguage('ja'));
