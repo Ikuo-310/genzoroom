@@ -9,9 +9,17 @@ type EditedBadgeProps = {
   busy?: boolean;
   disabled?: boolean;
   onQueueToggle?: () => void;
+  showQueueShortcut?: boolean;
 };
 
-export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, disabled = false, onQueueToggle }: EditedBadgeProps) {
+export function EditedBadgeIcon() {
+  return <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <path d="M3 5h14M3 10h14M3 15h14" />
+    <path d="M7 3v4M13 8v4M8 13v4" strokeWidth="3" />
+  </svg>;
+}
+
+export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, disabled = false, onQueueToggle, showQueueShortcut = true }: EditedBadgeProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   if (edited !== true) return null;
@@ -20,7 +28,7 @@ export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, dis
   const isQueued = known && queueStatus != null;
   const locked = queueStatus === 'waiting' || queueStatus === 'encoding' || queueStatus === 'registering';
   const canToggle = known && !!onQueueToggle && !busy && !disabled && !locked;
-  const withShortcut = (text: string) => shortcut.inline(`${text} `, 'exportQueueToggle').trimEnd();
+  const withShortcut = (text: string) => showQueueShortcut ? shortcut.inline(`${text} `, 'exportQueueToggle').trimEnd() : text;
   const description = !known ? t('photos.edited')
     : queueStatus === 'waiting' ? t('photos.exportQueue.waiting')
       : queueStatus === 'encoding' ? t('photos.exportQueue.encoding')
@@ -36,10 +44,7 @@ export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, dis
             : ' queue-failed'
     : '';
   const classes = `edited-badge${stateClass}${known ? ' queue-aware' : ''}${busy ? ' queue-busy' : ''}${locked || disabled ? ' queue-locked' : ''}${onQueueToggle ? ' edited-badge-interactive' : ''}`;
-  const icon = <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <path d="M3 5h14M3 10h14M3 15h14" />
-      <path d="M7 3v4M13 8v4M8 13v4" strokeWidth="3" />
-    </svg>;
+  const icon = <EditedBadgeIcon />;
 
   if (onQueueToggle) return <button
     type="button"

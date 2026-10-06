@@ -14,6 +14,8 @@ import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
+import { useExportQueue } from './useExportQueue';
+import { ExportQueueApiError } from './exportQueueApi';
 import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
@@ -51,6 +53,15 @@ export function GalleryPage() {
   const settings = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
+  const exportQueue = useExportQueue();
+  const [queueFailure, setQueueFailure] = useState<'addFailed' | 'removeFailed' | 'notEligible' | 'locked' | null>(null);
+  const queueOperations = useRef(new Set<string>());
+  const [queueBusy, setQueueBusy] = useState<Set<string>>(() => new Set());
+  const queueMounted = useRef(true);
+  useEffect(() => {
+    queueMounted.current = true;
+    return () => { queueMounted.current = false; };
+  }, []);
   const [homeReturn] = useState(() => readHomeReturn(location.state?.homeReturn));
   const pageRef = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, HomeScrollPosition>());
@@ -619,19 +630,73 @@ export function GalleryPage() {
     else if (tab === 'calendar' && selectedCalendarDate !== null) closeCalendarDay();
   }
 
+  function queueStateFor(asset: RecentAsset) {
+    const memberIds = stackEditStatusIds([asset]);
+    const status = (['encoding', 'registering', 'waiting', 'failed', 'queued'] as const)
+      .find(status => memberIds.some(id => exportQueue.getStatus(id) === status));
+    return { memberIds, status, busy: memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!exportQueue.mutationFor(id).operation) };
+  }
+
+  async function toggleQueue(asset: RecentAsset) {
+    if (!exportQueue.loaded || cardEditStatuses[asset.id] !== true) return;
+    const { memberIds, status } = queueStateFor(asset);
+    const keys = memberIds.map(id => id.toLowerCase());
+    if (memberIds.some((id, index) => queueOperations.current.has(keys[index]) || exportQueue.mutationFor(id).operation)) return;
+    if (status === 'waiting' || status === 'encoding' || status === 'registering') {
+      setQueueFailure('locked');
+      return;
+    }
+    const removing = status !== undefined;
+    const targets = memberIds.filter(id => removing ? exportQueue.hasAsset(id) : editStatuses[id] === true);
+    if (targets.length === 0) return;
+    // Reserve the whole card across sequential DELETEs, including overlapping member views.
+    keys.forEach(key => queueOperations.current.add(key));
+    setQueueBusy(new Set(queueOperations.current));
+    setQueueFailure(null);
+    try {
+      if (removing) {
+        for (const id of targets) {
+          if (!queueMounted.current) return;
+          // Successful removals remain committed if a later member fails.
+          await exportQueue.dequeue(id);
+        }
+      } else {
+        await exportQueue.enqueue(targets);
+      }
+    } catch (cause) {
+      if (queueMounted.current) {
+        setQueueFailure(cause instanceof ExportQueueApiError && cause.kind === 'not_eligible' ? 'notEligible'
+          : cause instanceof ExportQueueApiError && cause.kind === 'locked' ? 'locked'
+            : removing ? 'removeFailed' : 'addFailed');
+        // Reconcile uncertain or externally changed membership without undoing successful mutations.
+        void exportQueue.refresh();
+      }
+    } finally {
+      keys.forEach(key => queueOperations.current.delete(key));
+      if (queueMounted.current) setQueueBusy(new Set(queueOperations.current));
+    }
+  }
+
   function renderPhotoGrid() {
-    return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => (
-      <PhotoCard
-        asset={asset}
-        language={language}
-        key={asset.id}
-        selected={activeSelectedAssetIds.includes(asset.id)}
-        selectionMode={selectionMode}
-        edited={cardEditStatuses[asset.id]}
-        onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
-        onOpen={() => openWorkspace(asset)}
-      />
-    ))}</div>;
+    return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
+      const queue = queueStateFor(asset);
+      return (
+        <PhotoCard
+          asset={asset}
+          language={language}
+          key={asset.id}
+          selected={activeSelectedAssetIds.includes(asset.id)}
+          selectionMode={selectionMode}
+          edited={cardEditStatuses[asset.id]}
+          queueKnown={exportQueue.loaded}
+          queueStatus={queue.status}
+          queueBusy={queue.busy}
+          onQueueToggle={() => { void toggleQueue(asset); }}
+          onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
+          onOpen={() => openWorkspace(asset)}
+        />
+      );
+    })}</div>;
   }
 
   return (
@@ -723,6 +788,9 @@ export function GalleryPage() {
         </div>
       </div>
       <section className="home-content" aria-label={t('home.sections')}>
+        {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
+          {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
+        </p>}
         {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unsupported' ? 'photos.workspaceUnsupported' : 'photos.workspaceAmbiguous')}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>

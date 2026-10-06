@@ -5,6 +5,8 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 import { homeScrollContent, readHomeReturn, type HomeReturnContext } from './homeReturn';
 import { activateWorkspaceAsset } from './photoSelection';
 import type { AssetDetail } from './assets';
@@ -349,7 +351,7 @@ describe('Home return context', () => {
     homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop = 840;
     for (const box of host.querySelectorAll<HTMLInputElement>('.photo-selection-input')) await act(async () => box.click());
     await click('.selection-open-workspace');
-    await click('.filmstrip-item:last-child');
+    await click('.filmstrip-entry:last-child .filmstrip-item');
     expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe(second.filename);
     let resolve!: (assets: AssetDetail[]) => void;
     api.albumAssets.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));

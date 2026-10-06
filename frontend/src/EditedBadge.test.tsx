@@ -53,6 +53,17 @@ describe('EditedBadge', () => {
     expect(styles).toMatch(/\.edited-badge-interactive\.queue-inactive:hover:not\(:disabled\)\s*\{[^}]*background:\s*#292b2f/);
     expect(styles).toMatch(/\.edited-badge-interactive\.queue-queued:hover:not\(:disabled\)\s*\{[^}]*color:\s*#17181b[^}]*background:\s*#dfe1e5/);
     expect(styles).not.toMatch(/\.edited-badge-interactive:hover:not\(:disabled\)\s*\{[^}]*filter:\s*brightness/);
+    expect(styles).toMatch(/\.home-page \.edited-badge:not\(\.queue-aware\)\s*\{[^}]*background:/);
+    expect(styles).not.toMatch(/\.home-page \.edited-badge\s*\{[^}]*background:/);
+    expect(styles).toMatch(/\.photo-card-badges\s*\{[^}]*top:\s*0[^}]*aspect-ratio:\s*1[^}]*pointer-events:\s*none/);
+    expect(styles).toMatch(/\.edited-badge\s*\{[^}]*bottom:\s*6px/);
+    expect(styles).toMatch(/\.filmstrip-entry > \.edited-badge\s*\{[^}]*bottom:\s*10px/);
+  });
+
+  it('omits the Queue shortcut for click-only surfaces without changing Filmstrip defaults', async () => {
+    await render({ edited: true, queueKnown: true, showQueueShortcut: false });
+    expect(host.querySelector('.edited-badge')?.getAttribute('aria-label')).toBe('Edited — Add to Export Queue');
+    expect(host.querySelector('.edited-badge')?.getAttribute('title')).not.toContain('[Q]');
   });
 
   it.each([

@@ -8,6 +8,8 @@ import type { RecentAsset } from './assets';
 import { updateSetting } from './appSettings';
 import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),

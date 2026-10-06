@@ -116,6 +116,7 @@
       "addFailed": "Could not add the photo to Export Queue.",
       "removeFailed": "Could not remove the photo from Export Queue.",
       "notEligible": "The current adjustments cannot be added to Export Queue.",
+      "locked": "Photos being exported cannot be removed from Export Queue.",
       "loadFailed": "Export Queue could not be loaded.",
       "add": "Edited — Add to Export Queue",
       "remove": "Edited — Remove from Export Queue",

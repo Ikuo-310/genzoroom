@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
-import { EditedBadge } from './EditedBadge';
+import { EditedBadge, EditedBadgeIcon } from './EditedBadge';
 import { FormatBadge } from './FormatBadge';
 import type { AssetEditStatuses } from './editStatus';
 import type { ExportQueueStatus } from './exportQueueApi';
@@ -63,9 +63,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
       </button>
         {editStatuses[asset.id] !== true && historyOnlyStatuses[asset.id] === true
           ? <span className="filmstrip-history-badge" role="img" aria-label={t('workspace.historyRetained')} title={t('workspace.historyRetained')}>
-            <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <path d="M3 9a7 7 0 1 1 2 6M3 4v5h5M10 6v4l3 2" />
-            </svg>
+            <EditedBadgeIcon />
           </span>
           : <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown}
           queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}

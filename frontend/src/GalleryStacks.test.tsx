@@ -8,6 +8,8 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), album: vi.fn(), day: vi.fn(), favorites: vi.fn(),
   albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(), statuses: vi.fn() }));

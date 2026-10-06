@@ -149,6 +149,8 @@ describe('Filmstrip Queue buttons', () => {
     expect(history.title).toBe(description);
     expect(item(1).getAttribute('aria-description')).toBe(description);
     expect(history.className).not.toContain('queue-');
+    expect([...history.querySelectorAll('svg path')].map(path => path.getAttribute('d')))
+      .toEqual(['M3 5h14M3 10h14M3 15h14', 'M7 3v4M13 8v4M8 13v4']);
     expect(history.getAttribute('aria-pressed')).toBeNull();
     expect(entries[1].querySelector('.edited-badge')).toBeNull();
     act(() => history.click());

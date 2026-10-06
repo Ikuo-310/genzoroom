@@ -34,6 +34,24 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
 }
 
 describe('PhotoCard format badge', () => {
+  it.each([false, true])('isolates the sibling Queue button from navigation and selection (selection mode %s)', async selectionMode => {
+    const onOpen = vi.fn(), onToggleSelection = vi.fn(), onQueueToggle = vi.fn();
+    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" edited selected={selectionMode}
+      selectionMode={selectionMode} queueKnown onQueueToggle={onQueueToggle}
+      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
+    const photo = host.querySelector<HTMLButtonElement>('.photo-card-button')!;
+    const badge = host.querySelector<HTMLButtonElement>('.edited-badge')!;
+    expect(photo.contains(badge)).toBe(false);
+    expect(host.querySelector('button button')).toBeNull();
+    expect(badge.parentElement?.previousElementSibling).toBe(photo);
+    expect(badge.title).not.toContain('[Q]');
+    await act(async () => badge.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+    expect(onQueueToggle).toHaveBeenCalledOnce();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onToggleSelection).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(selectionMode);
+    expect(photo.getAttribute('aria-pressed')).toBe(selectionMode ? 'true' : null);
+  });
   it.each([
     [false, false, false],
     [false, true, true],

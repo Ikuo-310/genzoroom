@@ -8,6 +8,8 @@ import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
 import { useEditStatuses } from './useEditStatuses';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 import { updateSetting } from './appSettings';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEY, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import editStatusCases from './test-fixtures/edit-status.json';

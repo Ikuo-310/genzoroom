@@ -9,6 +9,8 @@ import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 import type { HomeReturnContext } from './homeReturn';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), statuses: vi.fn() }));

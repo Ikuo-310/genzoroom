@@ -10,6 +10,8 @@ import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResu
 import { updateSetting } from './appSettings';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
+  listExportQueue: async () => [] }));
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),

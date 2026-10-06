@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { FormatBadge } from './FormatBadge';
 import { EditedBadge } from './EditedBadge';
+import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 
 export type { RecentAsset } from './assets';
@@ -16,6 +17,10 @@ type PhotoCardProps = {
   selected?: boolean;
   selectionMode?: boolean;
   edited?: boolean;
+  queueKnown?: boolean;
+  queueStatus?: ExportQueueStatus;
+  queueBusy?: boolean;
+  onQueueToggle?: () => void;
 };
 
 export function PhotoCard({
@@ -26,6 +31,10 @@ export function PhotoCard({
   selected = false,
   selectionMode = false,
   edited,
+  queueKnown,
+  queueStatus,
+  queueBusy,
+  onQueueToggle,
 }: PhotoCardProps) {
   useAppSettings();
   const { t } = useTranslation();
@@ -86,13 +95,16 @@ export function PhotoCard({
               <span className={`stack-asset-count${asset.stackAssetCount === 1 ? ' stack-asset-count-error' : ''}`}>{asset.stackAssetCount}</span>
             </div>
           )}
-          <EditedBadge edited={edited} />
         </div>
         <div className="photo-info">
           <p title={asset.filename}>{asset.filename}</p>
           <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time>
         </div>
       </button>
+      <div className="photo-card-badges">
+        <EditedBadge edited={edited} queueKnown={queueKnown} queueStatus={queueStatus}
+          busy={queueBusy} onQueueToggle={onQueueToggle} showQueueShortcut={false} />
+      </div>
     </article>
   );
 }

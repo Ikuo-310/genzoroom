@@ -178,6 +178,8 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .photo-card.selected button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); }
 .photo-card-button:focus-visible { position: relative; z-index: 1; outline: 3px solid var(--text-primary); outline-offset: -3px; }
 .thumbnail { position: relative; aspect-ratio: 1; overflow: hidden; background: #101113; }
+/* Keep the sibling Queue control anchored to the thumbnail rather than the filename row. */
+.photo-card-badges { position: absolute; top: 0; right: 0; left: 0; aspect-ratio: 1; z-index: 1; pointer-events: none; }
 .photo-selection-control { position: absolute; top: 8px; left: 8px; z-index: 2; display: grid; width: 25px; height: 25px; place-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
 .photo-selection-control input { appearance: none; width: 21px; height: 21px; margin: 0; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 5px rgb(0 0 0 / 75%); background: rgb(18 19 21 / 62%); cursor: pointer; }
 .photo-selection-control input:checked { background: #ececee; }
@@ -215,7 +217,7 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .photo-info time { color: var(--text-secondary); font-size: 0.78rem; }
 .photo-card:hover { border-color: var(--accent-hover); }
 .photo-card:hover .photo-info { background: var(--bg-elevated); }
-.home-page .format-badge:not(.raw), .home-page .stack-asset-count:not(.stack-asset-count-error), .home-page .edited-badge { background: rgb(18 19 21 / 82%); }
+.home-page .format-badge:not(.raw), .home-page .stack-asset-count:not(.stack-asset-count-error), .home-page .edited-badge:not(.queue-aware) { background: rgb(18 19 21 / 82%); }
 
 /* The workspace uses neutral tones so surrounding UI does not bias photo evaluation. */
 .workspace-page { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100dvh; overflow: hidden; color: #e8e8e8; background: #0d0d0e; line-height: 1.35; }
