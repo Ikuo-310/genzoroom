@@ -92,7 +92,7 @@ Git履歴上、調査途中のDNG / Recent probe、`withStacked:false`、Firefox
 
 当時のRecent／Album／CalendarはImmich Stackのfilterとcollapseを利用し、Type filterに応じてStack単位または個別asset表示へ切り替えていた。これは2026-10-04のHome primary-only変更より前の履歴である。現行HomeはStack primaryだけを返し、childを個別表示する設計ではない。Homeの順序付きselectionは、Favoritesを含めconcrete assetのままSTACK管理へ渡す。
 
-STACK管理ページでは、選択assetからlocal draft Stackを生成し、既存Immich Stackもfull memberで取り込む。basename完全一致、Pixel RAW／Motion Photo命名normalizeで自動候補を作る。filenameが一致しない場合は、TIME／CAM／GPSが一致する一意な1 RAW + 1 Non-RAWだけをEXIF fallback候補にする。Coverを自動選択し、NAME／TIME／CAM／GPS evidence、既存StackのIMMICH、ローカル変更のMANUAL indicatorを表示する。
+STACK管理ページでは、選択assetからlocal draft Stackを生成し、既存Immich Stackもfull memberで取り込む。自動NAME候補はfilenameの最初の`.`より前をfamily rootとし、末尾のGenzo出力suffix `-Genzo` + 10進数字を除去して比較する。case-sensitiveで、RAW／Non-RAW構成を問わず同familyの2 asset以上を候補にする。NAME候補はEXIF情報の欠落・不一致・detail取得失敗があっても維持する。NAME familyに入らない非Stack assetは、TIMEとCAMがgroup全体で一致し、取得可能なGPS位置が既存許容差内なら、formatに関係なく2 asset以上のEXIF fallback候補にする。GPS欠落は許容し、malformed GPS、必須TIME／CAMの欠落、detail取得失敗があるassetはfallback対象外。候補への追加時はgroup全体を検証し、連鎖的な許容差超過を防ぐ。Homeの選択順と候補の一意所属を維持する。Coverを自動選択し、NAME／TIME／CAM／GPS evidence、既存StackのIMMICH、ローカル変更のMANUAL indicatorを表示する。
 
 draft編集はCover変更、unmatchedからのAdd、Purge、新規MANUAL Stack作成、desktop Drag & Drop（unmatched → Stack、Stack → Stack、Stack → unmatched、unmatched photo → unmatched photo）に対応する。unmatched photo同士のdropは2枚からmanual Stackをatomicに作り、member orderはHome/orderに従い、Coverは既存`chooseStackCover()`規則を使う。Stack memberをunmatched photoへ落とした場合は新規作成に解釈せず、既存Purgeを維持する。dropで作ったStackもPrimary+Zの1-step Undoで2枚を元位置へ戻せる。元Immich Stackのmember集合とCoverへ戻すとlineageを復元する。送信は最終draft状態からunchanged／create／update／deleteを分類し、unchangedではAPI writeを行わない。Cover-only変更はprimary更新。Immich v3.2.4ではmembership更新を直接行わず、旧Stackをreleaseしてreplacementをcreateする。
 
@@ -114,9 +114,9 @@ unmatchedが0件のときのSTACK候補外sectionは`min-height: 200px`とし、
 
 以下は第2フェーズ当時の実装記録であり、現在のSTACK管理仕様と未実装範囲は冒頭の「STACK管理 完成記録」を参照する。
 
-Homeで選択したassetを対象に、basename完全一致または既知Pixel naming patternのnormalizeによる自動STACK候補判定を追加した。候補はImmich Stack未所属で、同じfilename familyにRAWとNon-RAWを含む2 asset以上の組み合わせとし、Immichへ変更を送らずlocal draft Stack groupとして表示する。TIME／CAM／GPSは候補の補助evidenceとして表示する。
+Homeで選択したassetを対象に、first-dot filename family rootとGenzo出力suffix除去による自動STACK候補判定を追加した。候補はImmich Stack未所属で、同familyの2 asset以上なら形式を問わず、Immichへ変更を送らずlocal draft Stack groupとして表示する。NAME候補はEXIF evidenceに左右されない。残る非Stack assetはgroup全体でTIME／CAM一致を要求し、GPSは比較可能なmember同士だけ既存許容差で比較するEXIF fallbackを使う。2枚以上の候補groupを作成し、各assetは一つのgroupにだけ所属する。
 
-Asset detailはcandidate memberだけに要求し、最大4件のbounded concurrency、AbortController、世代管理、再検出時の旧request破棄を行う。一部取得失敗でもNAME candidateは維持する。GPS latitude／longitudeをAsset detail EXIFへoptional追加し、CoverはRecentAsset.dateを使って最新JPEG、最新Non-RAW、最新memberの順で自動選択する。Homeと共有するthumbnail size controlを利用し、狭い表示幅ではuser preferenceを変更せずeffective columnsを減らす。NAME／TIME／CAM／GPS indicatorはmatched／mismatch／unavailable／errorの4状態とし、色に加えてscreen reader向けの状態textを設けた。
+Asset detailはNAME candidate memberと、残りの非Stack assetが2件以上ある場合のfallback候補assetに要求し、既存Immich Stack memberは対象外とする。最大4件のbounded concurrency、AbortController、世代管理、再検出時の旧request破棄を行う。一部取得失敗でもNAME candidateは維持する。GPS latitude／longitudeをAsset detail EXIFへoptional追加し、CoverはRecentAsset.dateを使って最新JPEG、最新Non-RAW、最新memberの順で自動選択する。Homeと共有するthumbnail size controlを利用し、狭い表示幅ではuser preferenceを変更せずeffective columnsを減らす。NAME／TIME／CAM／GPS indicatorはmatched／mismatch／unavailable／errorの4状態とし、色に加えてscreen reader向けの状態textを設けた。
 
 ### 監査指摘と修正
 
