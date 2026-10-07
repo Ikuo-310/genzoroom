@@ -9,6 +9,16 @@ it('uses shared responsive columns for both grids and keeps excess group members
   expect(css).not.toContain('grid-auto-flow: dense');
 });
 
+it('uses the shared dark content surface while preserving Stack chrome and card panels', () => {
+  const css = readFileSync('src/style.css', 'utf8');
+  expect(css).toContain('.home-page, .stack-management-page { --bg-content: #111214; }');
+  expect(css).toContain('.stack-content { min-height: 0; min-width: 0; overflow-y: auto; padding: 16px; background: var(--bg-content);');
+  expect(css).toContain('.stack-management-header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg-panel);');
+  expect(css).toContain('.stack-control-bar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 16px; background: var(--bg-panel);');
+  expect(css).toContain('.stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); min-width: 0; background: var(--bg-panel);');
+  expect(css).toContain('.stack-content { min-height: 0; min-width: 0; overflow-y: auto; padding: 16px; background: var(--bg-content); scrollbar-color: var(--border-subtle) var(--bg-content);');
+});
+
 it('uses distinct semantic status colors', () => {
  const css = readFileSync('src/style.css', 'utf8');
  for (const [state, token] of [['matched','match'],['mismatch','mismatch'],['unavailable','unavailable'],['error','error']]) expect(css).toContain('.stack-evidence.' + state + ' { background: var(--status-' + token + ')');

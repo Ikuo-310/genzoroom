@@ -159,7 +159,7 @@ describe('Home and thumbnail layout', () => {
   it('shares only basic theme tokens and removes the gallery enclosure', () => {
     const stack = document.createElement('main'); stack.className = 'stack-management-page'; host.append(stack);
     const home = host.querySelector('.home-page');
-    for (const token of ['--bg-app', '--bg-panel', '--bg-elevated', '--border-subtle', '--text-primary', '--text-secondary', '--accent', '--accent-hover', '--selection', '--danger']) {
+    for (const token of ['--bg-content', '--bg-app', '--bg-panel', '--bg-elevated', '--border-subtle', '--text-primary', '--text-secondary', '--accent', '--accent-hover', '--selection', '--danger']) {
       expect(getComputedStyle(home).getPropertyValue(token)).toBe(getComputedStyle(stack).getPropertyValue(token));
       expect(getComputedStyle(home).getPropertyValue(token)).not.toBe('');
     }
@@ -169,7 +169,18 @@ describe('Home and thumbnail layout', () => {
     expect(photos.borderTopWidth).toBe('0px');
     expect(photos.borderRadius).toBe('0');
     expect(photos.marginTop).toBe('0px');
-    expect(photos.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    expect(getComputedStyle(home).getPropertyValue('--bg-content')).toBe('#111214');
+    expect(getComputedStyle(stack).getPropertyValue('--bg-content')).toBe('#111214');
+    const cssRule = selector => Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === selector);
+    expect(cssRule('.home-content').style.getPropertyValue('background')).toBe('var(--bg-content)');
+    expect(cssRule('.home-content').style.getPropertyValue('background')).not.toBe('transparent');
+    expect(cssRule('.photo-card').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(cssRule('.album-card').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(cssRule('.export-stack-group').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(cssRule('.app-header').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(cssRule('.home-tabs-bar').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(cssRule('.home-toolbar').style.getPropertyValue('background')).toBe('var(--bg-panel)');
+    expect(photos.overflowY).toBe('auto');
   });
   it('uses a compact two-sided title bar with wrapping connection controls', () => {
     const header = host.querySelector('.app-header');
@@ -320,7 +331,9 @@ describe('Home and thumbnail layout', () => {
   });
 
   it('adds spacing beside the photo grid scrollbar only in Firefox', () => {
-    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .home-content { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #73767d var(--bg-app); }');
+    expect(stylesheet.textContent.replace(/\r\n/g, '\n')).toContain('@-moz-document url-prefix() {\n  .home-content { padding-right: 15px; scrollbar-width: auto; scrollbar-color: #73767d var(--bg-content); }');
+    expect(stylesheet.textContent).toContain('.home-content:hover { scrollbar-color: #93969d var(--bg-content); }');
+    expect(stylesheet.textContent).toContain('.home-content:active { scrollbar-color: #c3c6cc var(--bg-content); }');
     expect(getComputedStyle(host.querySelector('.photo-grid')).paddingRight).toBe('2px');
   });
 
