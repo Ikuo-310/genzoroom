@@ -2,6 +2,26 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Phase 5A JPEG基盤完了・focused audit（2026-10-07）
+
+Phase 5AをBackend JPEG Decoder / Renderer / Encoder基盤と、その読み取り専用Developer Diagnosticsの完了として閉じる。Export QueueとHomeの出力管理は実装済みだが、Actual Export Runtime、Immich upload/registration、RAW現像は未実装。次はPhase 5Bのmetadata / filename処理で、Runtimeの接続はPhase 5C以降とする。以下のPhase 4以前の「encoder未実装」「次はRuntime」等は当時の記録として変更していない。
+
+Engine境界は将来のExport Orchestrator → Renderer → `RenderedImage` → Encoder。現在のRendererはNumPyでRecipe v18の全16 adjustment、category / individual enable flag、3WAY共通weight、stage順、clampとJS byte roundingをFrontend `adjustmentPipeline`へ合わせた。input非破壊、default fast path、full-resolution sRGB RGB8、16,384 pixel chunkによるfloat temporaryの抑制を維持する。Frontend / Backendの独立したfrozen compatibility hash、enable flag、chunk境界の回帰で互換性を検証し、既存fixtureは変更していない。
+
+Pillow / ImageCms DecoderはJPEG originalのembedded ICCをsRGBへ変換し、EXIF Orientation 1〜8を正規化する。ICCなしのRGB / grayscaleは対応し、malformed ICCやuntagged CMYKは色を推定せず安全にfailureとする。Pillowのdecompression-bomb warning / errorがfailureになることも回帰で確認した。Encoderはoriginal/full resolution、quality 95、4:4:4、sRGB ICCで、source EXIF / XMP等のmetadata preserve / regenerateは未実装。Pillowをpixel adjustment Rendererとして使っていない。Production DockerはPython 3.13、Pillow 12.3.0 / NumPy 2.5.3 pinで、対象コードのPython 3.13構文とdependencyのPython要件を静的確認した。
+
+Hidden Export Engine診断はrelease buildにも残し、保存済みRecipe revisionによる通常比較、original decode RGB8のDecode Compare、同じrunのpre-encode RGB8とBrowser decode JPEGを比較するEncode Round-trip Compareを備える。最終目視比較はFrontend Recipe resultとBackend generated JPEGの両方をexplicit sRGB Canvasへ描画し、Backend JPEGもproduction `decodeEditSource()`を通す。直接`img`表示には戻していない。Export Engineだけviewport幅へ広げ、左右1fr / 1fr、幅基準・aspect ratio維持の表示と狭幅1カラムfallbackを維持する。
+
+候補sourceはRecent / Export Queue。Recentの既存JPEG候補抽出を維持し、Queue側はlistとAsset detail取得だけを使う。Queue順で逐次detail解決し、非JPEG / RAW / 個別取得failureを飛ばしながらeligible候補を最大10件集め、10件で停止する。Queue statusやRuntimeは変更しない。候補/source切替のreset、AbortController owner、pagehide / unmount / BFCache / stale guard、Object URLのdecode後revoke、両Canvas backing storeの0×0解放を監査した。JSON / failure logはsafe technical metadataとbounded error codeへ限定し、Asset ID、filename、写真内容、URL、Recipe / History body、pixels、credentials、filesystem pathは診断reportへ含めない。
+
+利用者から共有された実機診断では、複数JPEGのFrontend / Backend original decodeがRGB8 byte単位で100%一致した。quality 95 / 4:4:4のJPEG round-tripはMAEが1未満程度、assessmentはminimalで、meanLumaDelta / greenBiasもほぼneutralだった。`greenBias = deltaG - (deltaR + deltaB) / 2`は傾向指標でありDelta Eや品質合否ではない。診断でgreen系統biasを裏付ける結果は得られておらず、Tint補正やgreen compensation、閾値調整は追加していない。これらは観測された画像についての利用者報告で、全JPEGへの保証や今回の自動テスト結果とは区別する。
+
+重いRecipeではBackendの正常処理中に通常nginx 10秒read timeoutで`backend_unavailable`となった。diagnostic base / decode / roundtripの3 exact locationだけconnect 3秒 / read 1時間へ分離し、通常API 10秒、Stack apply 90分、Backend→Immich network connect 3秒 / read 5秒を維持した。1時間はproxy waitの安全上限で通常処理時間ではない。Decode / Round-tripのmanual Cancelと既存Abort lifecycleを維持し、新しいFrontend固定timeoutは設けていない。Client Abortは既に動いている同期Backend workerの強制停止を保証しない。分離後に14秒級処理が完走したことが利用者から共有され、12MP級・重いRecipeのrender約12〜13秒が主要bottleneckと分かった。現時点ではCPU性能baselineとして記録し、Renderer高速化、GPU / process pool / cache追加は見送った。
+
+Focused static auditのfindingはHigh 0 / Medium 2 / Low 0。1件目は`exportEngineApi.ts`のRound-trip parserでRGB buffer確保がcleanupのtry外にあり、allocation failureでreader cancel / lock解放を逃す点。確保を既存finallyの管理範囲へ移し、JPEG + RGB合計byte countのsafe integer検証も追加した。修正前に2件の回帰で再現し、修正後はallocation failure、fragmented boundary、oversized stream、Abort時のcancel / unlockを確認した。2件目は`jpeg_renderer.py`で、保存データvalidatorが許可する小数Temperature / Tint（3WAYを含む）・Vibrance / SaturationをBackendが丸めず処理し、Frontendのscalar normalizationとpixel結果が異なる点。Frontendと同じJS Math.round semanticsを準備処理へ加え、正負のhalf tieとhalf直前を含む回帰で既存frozen mixed hashへ一致することを確認した。整数sliderの結果、既存fixture、保存形式、Decoder / Encoder / ICC、JSON schema、統計・閾値、Queue / Runtimeは変更していない。
+
+今回の検証はBackend関連7 filesで59 passed / 73 subtests passed、Frontend関連11 filesで202 tests passed。ローカルvenvはPython 3.14.5であり、DockerのPython 3.13で実行したという意味ではない。Backendのsandbox実行は診断routeで進捗停止したため当該プロセスだけを停止し、指定venvの通常環境で成功した。Frontendもsandboxの一時ファイルENOENTを避けて通常環境で成功した。`npm run typecheck` scriptは存在しないため`npx tsc --noEmit`を使い、型チェックと`npm run build`は成功した。Buildには既知の500 kB超chunk warningが残る。文書同期後の`git diff --check`も成功した。nginx実行ファイルと稼働Docker Engineがないため`nginx -t` / Docker buildは未実施で、NAS deploy・Firefox / Chrome実機確認も行っていない。
+
 ## Export実装 Phase 4 完了（2026-10-07）
 
 このフェーズを **Export management UI / selection / readiness / Queue management** の完了として閉じる。Export Runtimeには進めていない。HomeのHeader / Tabs / Toolbar / Content shellを維持し、Gallery系4タブと間隔を空けたmanagement groupへExportを追加した。英語ラベルは`Export`、日本語は`出力管理`、shortcutはE。専用routeは作らず、`showExport`で表示を切り替え、Galleryのtab・filter・selection・Album/Calendar詳細・scrollを保持する。STACK管理のHome tab化と暗室navigation追加は別フェーズ。

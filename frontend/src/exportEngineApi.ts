@@ -138,16 +138,20 @@ export async function fetchExportEngineRoundTrip(assetId: string, expectedRevisi
       || !['embedded', 'absent'].includes(value.sourceIcc) || value.outputColorSpace !== 'sRGB' || value.recipeVersion !== 18
       || value.quality !== 95 || value.subsampling !== '4:4:4' || value.pixelFormat !== 'rgb8'
       || value.outputWidth * value.outputHeight * 3 !== value.rgbBytes) throw new Error();
-    if (!Number.isSafeInteger(value.outputWidth * value.outputHeight * 3) || !response.body) throw new Error();
+    const expectedBytes = value.outputBytes + value.rgbBytes;
+    if (!Number.isSafeInteger(value.outputWidth * value.outputHeight * 3)
+      || !Number.isSafeInteger(expectedBytes) || !response.body) throw new Error();
     const reader = response.body.getReader(); const jpegParts: BlobPart[] = [];
-    const pixels = new Uint8Array(value.rgbBytes); let offset = 0;
+    let pixels: Uint8Array<ArrayBuffer>; let offset = 0;
     let streamEnded = false;
     try {
+      // Allocation can fail under memory pressure; the acquired reader still needs cleanup.
+      pixels = new Uint8Array(value.rgbBytes);
       while (true) {
         signal.throwIfAborted();
         const { done, value: chunk } = await reader.read();
         if (done) { streamEnded = true; break; }
-        if (chunk.length > value.outputBytes + value.rgbBytes - offset) throw new Error();
+        if (chunk.length > expectedBytes - offset) throw new Error();
         let local = 0;
         if (offset < value.outputBytes) {
           const jpegLength = Math.min(chunk.length, value.outputBytes - offset);
@@ -165,7 +169,7 @@ export async function fetchExportEngineRoundTrip(assetId: string, expectedRevisi
       reader.releaseLock();
     }
     signal.throwIfAborted();
-    if (offset !== value.outputBytes + value.rgbBytes || !jpegParts.length) throw new Error();
+    if (offset !== expectedBytes || !jpegParts.length) throw new Error();
     const metadata: EncodeRoundTripMetadata = {
       sourceWidth: value.sourceWidth, sourceHeight: value.sourceHeight, outputWidth: value.outputWidth, outputHeight: value.outputHeight,
       sourceIcc: value.sourceIcc, outputColorSpace: 'sRGB', recipeVersion: 18, outputBytes: value.outputBytes,

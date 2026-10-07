@@ -1,6 +1,6 @@
 # GenzoRoom
 
-GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and managing an Export Queue. Export management is available; actual export execution, encoding, and Immich upload are not implemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
+GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and managing an Export Queue. Export management and the Phase 5A backend JPEG decoder/renderer/encoder foundation are implemented; actual Export Runtime and Immich upload/registration are not implemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
@@ -123,7 +123,7 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 ## Not implemented
 
 - RAW development pipeline.
-- Export Runtime: execution, Recipe freeze, encoding, progress, and Immich upload/registration. Export Queue persistence and management UI are implemented.
+- Export Runtime: Queue execution, Recipe freeze, progress, and Immich upload/registration. Export Queue management and the full-resolution JPEG processing foundation are implemented; output metadata and filename handling remain Phase 5B work.
 - Automatic Immich Stack attachment for re-imported or exported assets.
 - Stack/group reordering through Drag & Drop.
 - Touch Drag & Drop in STACK management.

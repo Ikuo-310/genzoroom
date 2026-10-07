@@ -1,5 +1,7 @@
 """Recipe v18 byte stages, ported from frontend/src/adjustmentPipeline.ts."""
 
+import math
+
 import numpy as np
 
 from edit_state import RECIPE_VERSION, _recipe
@@ -114,6 +116,13 @@ class JpegRenderer:
         for key, enabled in validated["adjustmentEnabled"].items():
             if not enabled:
                 adjustments[key] = 0
+        # Frontend normalizes these valid fractional settings before gain math.
+        # Compare the fraction rather than adding 0.5, which can round early near a tie.
+        for key in ("temperature", "tint", "shadowsTemperature", "shadowsTint",
+                    "midtonesTemperature", "midtonesTint", "highlightsTemperature", "highlightsTint",
+                    "vibrance", "saturation"):
+            integer = math.floor(adjustments[key])
+            adjustments[key] = integer + (adjustments[key] - integer >= 0.5)
         if not any(adjustments.values()):
             return RenderedImage(source.width, source.height, source.pixels)
 

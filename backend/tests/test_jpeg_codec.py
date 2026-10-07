@@ -118,6 +118,15 @@ class JpegCodecTests(unittest.TestCase):
             decode_jpeg(jpeg(mode="CMYK"))
         self.assertEqual(raised.exception.code, "unsupported_jpeg_color_space")
 
+    def test_pillow_decompression_limits_remain_failures(self):
+        data = jpeg()
+        # Small limits exercise both Pillow warning and error paths without allocating a huge image.
+        for limit in (60, 30):
+            with self.subTest(limit=limit), patch.object(Image, "MAX_IMAGE_PIXELS", limit):
+                with self.assertRaises(JpegCodecError) as raised:
+                    decode_jpeg(data)
+                self.assertEqual(raised.exception.code, "invalid_jpeg")
+
     def test_encoder_fixed_settings_rgb_dimensions_and_icc(self):
         source = RenderedImage(11, 7, bytes([180, 40, 80]) * 77)
         original_save = Image.Image.save

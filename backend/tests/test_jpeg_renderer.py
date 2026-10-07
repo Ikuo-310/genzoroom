@@ -72,6 +72,22 @@ class JpegRendererTests(unittest.TestCase):
                 expected = recipe(**{**mixed, **dict.fromkeys(members, 0)})
                 self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, expected))
 
+    def test_fractional_gain_settings_match_frozen_frontend_rounding(self):
+        case = next(case for case in CASES if case["name"] == "all sixteen adjustments")
+        settings = recipe(**{**case["adjustments"], "temperature": -25.5, "tint": 14.5,
+            "shadowsTemperature": 60.4, "shadowsTint": -45.5,
+            "midtonesTemperature": -70.5, "midtonesTint": 64.5,
+            "highlightsTemperature": 80.4, "highlightsTint": -90.5,
+            "vibrance": 24.5, "saturation": 14.5})
+        original = copy.deepcopy(settings)
+        result = self.renderer.render(self.source, settings)
+        rgba = np.frombuffer(self.rgba, np.uint8).reshape(-1, 4).copy()
+        rgba[:, :3] = np.frombuffer(result.pixels, np.uint8).reshape(-1, 3)
+        self.assertEqual(hashlib.sha256(rgba.tobytes()).hexdigest(), case["hash"])
+        self.assertEqual(settings, original)
+        below_half = float(np.nextafter(0.5, 0))
+        self.assertEqual(self.renderer.render(self.source, recipe(temperature=below_half)), self.source)
+
     def test_each_individual_bypass_and_category_precedence(self):
         mixed = next(case["adjustments"] for case in CASES if case["name"] == "all sixteen adjustments")
         for key in BOUNDS:

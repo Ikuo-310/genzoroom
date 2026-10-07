@@ -45,6 +45,19 @@ const compatibilityCases: Array<{ name: string; adjustments: Partial<EditRecipe[
 ];
 
 describe('preview byte compatibility', () => {
+  it('normalizes fractional gain settings to the existing frozen mixed baseline', async () => {
+    const baseline = compatibilityCases.find(test => test.name === 'all sixteen adjustments')!;
+    const recipe = defaultRecipe();
+    Object.assign(recipe.adjustments, baseline.adjustments, { temperature: -25.5, tint: 14.5,
+      shadowsTemperature: 60.4, shadowsTint: -45.5, midtonesTemperature: -70.5, midtonesTint: 64.5,
+      highlightsTemperature: 80.4, highlightsTint: -90.5, vibrance: 24.5, saturation: 14.5 });
+    const original = structuredClone(recipe);
+    const result = renderAdjustments(compatibilityPixels(), recipe);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', result));
+    expect(Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')).toBe(baseline.hash);
+    expect(recipe).toEqual(original);
+  });
+
   it.each(compatibilityCases)('preserves baseline bytes: $name', async ({ adjustments, hash }) => {
     const source = compatibilityPixels();
     const original = source.slice();

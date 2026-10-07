@@ -49,6 +49,59 @@ describe('encode round-trip', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:roundtrip');
   });
 
+  it('cancels and unlocks the response if the RGB buffer cannot be allocated', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const oversized = { ...metadata, outputWidth: 2 ** 50, outputHeight: 1, rgbBytes: 3 * 2 ** 50 };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { headers: {
+      'Content-Type': 'application/octet-stream', 'X-GenzoRoom-Encode-Roundtrip': JSON.stringify(oversized),
+    } })));
+    await expect(fetchExportEngineRoundTrip('asset', 4, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'invalid_rgb_response' });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(body.locked).toBe(false);
+  });
+
+  it('rejects an unsafe combined byte count before acquiring a reader', async () => {
+    const body = new ReadableStream<Uint8Array>({ start: controller => controller.close() });
+    const reader = vi.spyOn(body, 'getReader');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-GenzoRoom-Encode-Roundtrip': JSON.stringify({ ...metadata, outputBytes: Number.MAX_SAFE_INTEGER }),
+    } })));
+    await expect(fetchExportEngineRoundTrip('asset', 4, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'invalid_rgb_response' });
+    expect(reader).not.toHaveBeenCalled();
+  });
+
+  it('preserves JPEG and RGB boundaries across fragmented stream chunks', async () => {
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const chunk of [[255], [216, 10, 20], [30, 100, 110, 120]]) controller.enqueue(new Uint8Array(chunk));
+      controller.close();
+    } });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { headers: {
+      'Content-Type': 'application/octet-stream', 'X-GenzoRoom-Encode-Roundtrip': JSON.stringify(metadata),
+    } })));
+    const result = await fetchExportEngineRoundTrip('asset', 4, new AbortController().signal);
+    expect(result.jpeg.size).toBe(2);
+    expect([...result.pixels]).toEqual([...source.pixels]);
+    expect(body.locked).toBe(false);
+  });
+
+  it.each(['oversized', 'aborted'] as const)('cancels and unlocks an unfinished %s stream', async mode => {
+    const controller = new AbortController(); const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull(stream) {
+      if (mode === 'aborted') controller.abort();
+      stream.enqueue(new Uint8Array(mode === 'oversized' ? 9 : 1));
+    }, cancel }, { highWaterMark: 0 });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { headers: {
+      'Content-Type': 'application/octet-stream', 'X-GenzoRoom-Encode-Roundtrip': JSON.stringify(metadata),
+    } })));
+    await expect(fetchExportEngineRoundTrip('asset', 4, controller.signal))
+      .rejects.toMatchObject(mode === 'aborted' ? { name: 'AbortError' } : { code: 'invalid_rgb_response' });
+    expect(cancel).toHaveBeenCalledOnce(); expect(body.locked).toBe(false);
+  });
+
   it('reports a dimension mismatch without calculating statistics', async () => {
     const dependencies: Partial<EncodeRoundTripDependencies> = { backend: vi.fn(async () => source),
       decode: vi.fn(async () => ({ width: 1, height: 2, data: new Uint8ClampedArray(8) } as ImageData)), yield: async () => {} };
