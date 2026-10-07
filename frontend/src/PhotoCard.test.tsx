@@ -201,6 +201,7 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('class="thumbnail"');
     expect(markup).toContain('class="photo-info"');
     expect(markup).toContain(`title="${filename}"`);
+    expect(markup).toContain('class="filename-middle-ellipsis"');
   });
 
   it('renders a keyboard-operable selection checkbox without changing normal card navigation', () => {

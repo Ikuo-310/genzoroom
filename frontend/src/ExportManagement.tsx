@@ -3,6 +3,7 @@ import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { useRef, type CSSProperties, type MouseEvent } from 'react';
 import { useAppSettings } from './appSettings';
 import { FormatBadge } from './FormatBadge';
+import { FilenameDisplay } from './FilenameDisplay';
 import { formatPhotoDate } from './i18n';
 import type { ExportQueueAsset } from './exportQueueDisplay';
 import { isMutableExportStatus, type ExportManagementState } from './useExportManagement';
@@ -93,7 +94,7 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
         role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>
         : armed && management.showArmedBadges && <span className="export-status-bar export-status-armed">{t('exportManagement.armed')}</span>}
     </div>
-    <div className="photo-info"><p title={asset.filename}>{asset.filename}</p>
+    <div className="photo-info"><p><FilenameDisplay filename={asset.filename} /></p>
       <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time></div>
     </button>
   </article>;

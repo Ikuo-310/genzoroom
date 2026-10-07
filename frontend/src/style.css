@@ -241,7 +241,11 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .edited-badge-interactive:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .edited-badge-interactive:disabled { opacity: 0.9; }
 .photo-info { padding: 10px 12px 12px; color: var(--text-primary); background: var(--bg-panel); }
-.photo-info p { margin: 0; overflow: hidden; color: var(--text-primary); font-size: 0.9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.photo-info p { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: 0.9rem; font-weight: 600; }
+.filename-middle-ellipsis, .filename-middle-ellipsis-visual { display: flex; min-width: 0; }
+.filename-middle-ellipsis { width: 100%; }
+.filename-prefix { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filename-suffix { flex: 0 0 auto; white-space: nowrap; }
 .photo-info time { color: var(--text-secondary); font-size: 0.78rem; }
 .photo-card:hover { border-color: var(--accent-hover); }
 .photo-card:hover .photo-info { background: var(--bg-elevated); }

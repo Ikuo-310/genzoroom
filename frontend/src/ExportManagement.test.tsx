@@ -106,6 +106,16 @@ it('renders all statuses, noninteractive Gallery cards, Stack groups and shared 
   expect(host.querySelectorAll('.export-queue-card')).toHaveLength(5); expect(api.fetchDetail).toHaveBeenCalledTimes(5);
   expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].every(card => card.dataset.queueStatus === 'failed')).toBe(true);
 });
+it('uses the shared middle-ellipsis filename display and keeps the full name in its title', async () => {
+  const filename = 'PXL_20260402_105016-Genzo01.jpg';
+  api.fetchDetail.mockResolvedValue({ id: 'long-name', filename, date: '2026-09-01', thumbnail_url: '/thumb/long-name',
+    format: 'JPEG', is_raw: false, preview_url: '', exif: {} });
+  await render([item('long-name')]);
+  const display = host.querySelector('.filename-middle-ellipsis')!;
+  expect(display.getAttribute('title')).toBe(filename);
+  expect(display.textContent).toBe(filename);
+  expect(display.querySelector('.filename-suffix')?.textContent).toBe('-Genzo01.jpg');
+});
 it('keeps a single queued Stack member standalone', async () => {
   api.refreshStacks.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a','outside'].map(id => ({
     id, filename: id, date: '', thumbnail_url: '', format: 'JPEG', is_raw: false, stackId: 'stack-x',

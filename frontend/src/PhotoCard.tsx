@@ -3,6 +3,7 @@ import { useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { FormatBadge } from './FormatBadge';
+import { FilenameDisplay } from './FilenameDisplay';
 import { EditedBadge } from './EditedBadge';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
@@ -113,7 +114,7 @@ export function PhotoCard({
           ) : <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>
         <div className="photo-info">
-          <p title={asset.filename}>{asset.filename}</p>
+          <p><FilenameDisplay filename={asset.filename} /></p>
           <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time>
         </div>
       </button>
