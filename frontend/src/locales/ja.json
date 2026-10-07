@@ -39,7 +39,11 @@
   "exportManagement": {
     "selectionCount": "{{count}}件選択",
     "exportToImmich": "Immichへ出力",
-    "empty": "出力待ちの写真はありません"
+    "empty": "出力待ちの写真はありません",
+    "queueLoading": "出力待ち一覧を読み込み中…",
+    "queueLoadFailed": "出力待ち一覧の読み込みに失敗しました",
+    "metadataLoading": "出力待ちの写真を読み込み中…",
+    "metadataLoadFailed": "出力待ちの写真の読み込みに失敗しました"
   },
   "favorites": {
     "loading": "お気に入りを読み込み中…",

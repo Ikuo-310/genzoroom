@@ -11,15 +11,15 @@ import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResu
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
-  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn() }));
+  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums,
   fetchAlbumAssets: api.album, fetchCalendarDayAssets: api.day, fetchCalendarHeatmap: api.heatmap,
-  fetchCalendarMinYear: api.minYear }));
+  fetchCalendarMinYear: api.minYear, fetchAssetDetail: api.detail }));
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
   getAssetEditStatuses: api.statuses }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
-  listExportQueue: async () => [] }));
+  listExportQueue: api.queue }));
 
 const photos = Array.from({ length: 3 }, (_, index) => ({ id: `photo-${index}`, filename: `photo-${index}.jpg`,
   date: '2026-09-01', thumbnail_url: `/thumb/${index}`, format: index === 1 ? 'DNG' : 'JPEG', is_raw: index === 1 }));
@@ -53,6 +53,8 @@ async function filter(value: string) {
   await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 beforeEach(async () => {
+  api.queue.mockReset().mockResolvedValue([]);
+  api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos[0], id, preview_url: '', exif: {} }));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -73,6 +75,15 @@ afterEach(() => {
 });
 
 describe('Home Export management', () => {
+  it('shares the Gallery Queue snapshot and fetches metadata only while Export is visible', async () => {
+    api.queue.mockResolvedValue([{ assetId: 'queued-a', status: 'queued', queuedAt: 'q', updatedAt: 'u' }]);
+    await mount(); expect(api.queue).toHaveBeenCalledTimes(1); expect(api.detail).not.toHaveBeenCalled();
+    await key('e'); expect(api.detail).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll('.export-queue-card')).toHaveLength(1);
+    expect(host.querySelector('.photo-grid')).toBeNull();
+    await key('r'); expect(host.querySelectorAll('.photo-grid .photo-card')).toHaveLength(3);
+    expect(host.querySelector('.export-queue-card')).toBeNull(); expect(api.queue).toHaveBeenCalledTimes(1);
+  });
   it.each(['en', 'ja'])('keeps the common shell and accessible tab/panel with the minimal toolbar in %s', async language => {
     await i18n.changeLanguage(language); await mount();
     expect(host.querySelectorAll('.home-tabs-gallery [role="tab"]')).toHaveLength(4);

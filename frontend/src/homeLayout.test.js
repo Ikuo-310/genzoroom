@@ -16,6 +16,27 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('uses a neutral Export group frame and shared column sizing without changing the Home scroll owner', () => {
+    const content = host.querySelector('.home-content');
+    content.innerHTML = '<div class="export-queue-grid" style="--export-columns: 5"><section class="export-stack-group" style="--export-member-count: 7"><div class="export-stack-members"><article class="photo-card export-queue-card"><div class="thumbnail"><img></div></article></div></section><article class="photo-card export-queue-card"></article></div>';
+    const grid = getComputedStyle(content.querySelector('.export-queue-grid'));
+    const group = getComputedStyle(content.querySelector('.export-stack-group'));
+    const members = getComputedStyle(content.querySelector('.export-stack-members'));
+    expect(grid.display).toBe('grid');
+    expect(grid.gridTemplateColumns).toContain('var(--export-columns)');
+    expect(grid.minWidth).toBe('0');
+    expect(group.gridColumn).toBe('span var(--export-group-columns)');
+    expect(group.getPropertyValue('--export-group-columns')).toBe('min(var(--export-member-count), var(--export-columns))');
+    const groupRule = [...stylesheet.sheet.cssRules].find(rule => rule.selectorText === '.export-stack-group');
+    // jsdom cannot resolve theme variables in border shorthands.
+    expect(groupRule.style.getPropertyValue('border')).toBe('1px solid var(--border-subtle)');
+    expect(group.borderRadius).toBe('6px');
+    expect(group.padding).toBe('6px'); expect(group.minWidth).toBe('0');
+    expect(members.gridTemplateColumns).toContain('var(--export-group-columns)');
+    expect(getComputedStyle(content.querySelector('img')).objectFit).toBe('contain');
+    expect(getComputedStyle(content.querySelector('.thumbnail')).aspectRatio).toBe('1');
+    expect(getComputedStyle(content).overflowY).toBe('auto');
+  });
   it('protects selection segments and moves detail titles to a separate row at intermediate widths', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');

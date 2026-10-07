@@ -65,6 +65,9 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .home-tabs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 40px; flex: 0 0 auto; }
 .home-tabs-gallery, .home-tabs-management { display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
 .export-toolbar { justify-content: flex-end; font-size: 0.85rem; }
+.export-queue-grid { display: grid; grid-template-columns: repeat(var(--export-columns), minmax(0, 1fr)); gap: 16px; align-items: start; min-width: 0; padding: 2px; }
+.export-stack-group { --export-group-columns: min(var(--export-member-count), var(--export-columns)); grid-column: span var(--export-group-columns); min-width: 0; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px; }
+.export-stack-members { display: grid; grid-template-columns: repeat(var(--export-group-columns), minmax(0, 1fr)); gap: 16px; min-width: 0; }
 .export-toolbar .export-selection { margin-right: auto; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
 /* Immich actions stay visually distinct from local operations and destructive controls. */

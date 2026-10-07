@@ -42,7 +42,11 @@
   "exportManagement": {
     "selectionCount": "{{count}} selected",
     "exportToImmich": "Export to Immich",
-    "empty": "No photos waiting for export"
+    "empty": "No photos waiting for export",
+    "queueLoading": "Loading export queue…",
+    "queueLoadFailed": "Failed to load export queue",
+    "metadataLoading": "Loading queued photos…",
+    "metadataLoadFailed": "Failed to load queued photos"
   },
   "favorites": {
     "loading": "Loading favorites…",

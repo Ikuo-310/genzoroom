@@ -902,7 +902,7 @@ export function GalleryPage() {
         </div>
       </div>}
       <section className="home-content" aria-label={t('home.sections')}>
-        {showExport ? <ExportManagementContent /> : <>
+        {showExport ? <ExportManagementContent queue={exportQueue} /> : <>
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}
