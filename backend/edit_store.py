@@ -12,7 +12,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 
 DB_PATH = Path("/data/genzoroom.db")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -78,7 +78,38 @@ def _create_v2(connection: sqlite3.Connection) -> None:
     )""")
 
 
-MIGRATIONS = {0: _create_v1, 1: _create_v2}
+def _create_v3(connection: sqlite3.Connection) -> None:
+    connection.execute("SELECT id, asset_id, status, queued_at, updated_at FROM export_queue LIMIT 0")
+    connection.execute("""CREATE TABLE export_runs (
+        run_id TEXT PRIMARY KEY NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed')),
+        worker_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
+    # A DB guard complements process ownership, including concurrent coordinator instances.
+    connection.execute("CREATE UNIQUE INDEX export_one_active_run ON export_runs(status) WHERE status='active'")
+    connection.execute("""CREATE TABLE export_run_items (
+        run_id TEXT NOT NULL REFERENCES export_runs(run_id),
+        position INTEGER NOT NULL CHECK (position >= 0),
+        asset_id TEXT NOT NULL,
+        queue_id INTEGER NOT NULL,
+        frozen_revision INTEGER NOT NULL CHECK (frozen_revision >= 1),
+        recipe_version INTEGER NOT NULL,
+        processing_version TEXT NOT NULL,
+        frozen_recipe_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('waiting', 'encoding', 'registering', 'succeeded', 'failed')),
+        error_code TEXT,
+        registered_asset_id TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, position),
+        UNIQUE (run_id, asset_id)
+    )""")
+    connection.execute("""CREATE UNIQUE INDEX export_one_active_asset ON export_run_items(asset_id)
+        WHERE status IN ('waiting', 'encoding', 'registering')""")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:
@@ -122,6 +153,7 @@ def _connection():
             if mode.lower() != "wal":
                 raise StoreUnavailable()
             connection.execute("PRAGMA synchronous=FULL")
+            connection.execute("PRAGMA foreign_keys=ON")
             if version < SCHEMA_VERSION:
                 _migrate(connection)
             yield connection
@@ -224,9 +256,11 @@ def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state:
                 if changed != 1:
                     raise StoreConflict()
             removed = 0
+            # Frozen active work survives later edits, even a default Recipe save.
             # Replay/conflict branches above must not mutate a queue changed since that save.
             if not has_non_default_recipe(state):
-                removed = connection.execute("DELETE FROM export_queue WHERE asset_id=?", (str(asset_id),)).rowcount
+                removed = connection.execute("""DELETE FROM export_queue WHERE asset_id=?
+                    AND status IN ('queued', 'failed')""", (str(asset_id),)).rowcount
             result = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
             connection.commit()
             if removed:

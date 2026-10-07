@@ -2,6 +2,18 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Phase 5C Backend Runtime基盤（2026-10-07）
+
+SQLite schema v3へtransactional migrationし、`export_runs` / `export_run_items`にtarget順・frozen Recipe/revision/version・lifecycle・worker UUID・固定failure codeを分離した。Queueと既存edit-stateの全column/保存形式を保持し、HistoryやJPEG/source binaryはrunへ保存しない。DB v2だけを読む旧Backendへ戻す場合はmigration前の整合したSQLite backupから復旧する必要があり、その後の書込みは失われる。自動downgradeは追加していない。
+
+run creationは1–100 ordered UUIDsの全対象を同一writer transactionで検証してから`waiting`へ移行し、そのcommit時点でRecipeと対象をfreezeする。DBのactive-run/active-asset unique index、worker UUIDと元Queue row ID/status/timestamp、serial順の検証をprocess内start lockと組み合わせた。後からdefault Recipeを保存してもactive Queue rowは消えず、queued/failedだけが従来どおりcleanupされる。通常DELETEのactive lockも維持する。current edit-stateが変更/削除されてもfrozen Recipeは保持する。
+
+requestから独立したserial workerを実装し、source original streamを閉じ、threadpoolで実Decoder/Renderer/Phase 5B artifactを生成してregistration boundaryへ渡す。全runのartifactを保持せず、source bufferはregistration前にclearし、各item終了時にartifact参照を解放する。fake registrarの明示的成功だけでowned registeringのQueue rowを削除できる。個別処理failureは固定codeでfailedに残し、残りtargetは継続する。DB/ownership/worker中断はactive stateを保持して停止し、restart inspectionで識別できる。
+
+既存APIには正しいfamily全件の限定取得helperがないため`FamilyFilenameProvider`を境界として設けた。production coordinatorはfamily/registrar未設定で、StartはDB更新前に拒否する。Start endpoint、production no-op registrar、Immich upload/tag/Stack/COVER操作は追加していない。Frontend変更はなく「Immichへ出力」はdisabledを維持する。Retry/Stop/restart自動replay/ownership takeoverは5D、実registrationと本番Start開放は5Eへ残す。現Rendererと同じRecipe v18がRuntime対象で、v17 saved-stateの読み取り互換性は維持する。
+
+Python 3.14.5の指定Windows venvでBackend full pytestは589 passed（新規Runtime回帰43件を含む）。migration rollback/idempotence/future refusal、all-or-nothing start、Recipe/default-save/dequeue race、serial order/duplicate coordinator、fake registrar success/failure、request cancellation、restart識別、実HTTPX stream/client closure、buffer clear/weakref解放を検証した。compileallと`git diff --check`も成功した。Frontendは未変更のためFrontend tests/buildは追加実行せず、NAS deploy/browser実機確認も行っていない。focused static auditはHigh 0 / Medium 3で、外部boundary例外とDB障害の混同、recovery読取りのQueue/serial整合性検証不足、0件DMLを成功扱いするpartial commitリスクを最小修正し、対応回帰が成功した。残存High/Mediumは0。
+
 ## Backend production Python 3.14移行（2026-10-07）
 
 Production Docker baseを`python:3.14-slim`へ更新し、Windows development `.venv`とPython major/minorを3.14で統一した。requirements pin（FastAPI 0.141.1、HTTPX 0.28.1、Uvicorn 0.52.4、Pillow 12.3.0、NumPy 2.5.3）は変更していない。Windows `.venv`はPython 3.14.5で5依存をimportでき、Backend full pytestは546 passed、Python compileallと`git diff --check`も成功した。Docker daemonへ接続できなかったためDocker image build / container smokeは未実施。PyPIでPillow / NumPyのCPython 3.14 manylinux wheelと、FastAPI / HTTPX / Uvicornのplatform-independent wheelsを確認した。venvにpipがなくDocker buildも未実施のため、依存installをこの環境で実行確認したわけではない。

@@ -55,11 +55,11 @@ def database(path):
         yield connection
 
 
-def test_fresh_db_v2_and_empty_list(db):
+def test_fresh_db_current_schema_and_empty_list(db):
     response = request()
     assert response.status_code == 200 and response.json() == {"items": []}
     with database(db) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION
         assert connection.execute("SELECT count(*) FROM asset_edit_states").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM export_queue").fetchone()[0] == 0
 
@@ -77,7 +77,7 @@ def test_v1_migration_preserves_every_edit_column_and_retry(db):
     assert enqueue(A).status_code == 200
     assert edit_store.put_edit_state(A, 6, save_id, state)["revision"] == 7
     with database(db) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION
         assert connection.execute("SELECT * FROM asset_edit_states").fetchone() == before
     with patch("edit_store._migrate", side_effect=AssertionError("must not migrate again")):
         assert request().status_code == 200

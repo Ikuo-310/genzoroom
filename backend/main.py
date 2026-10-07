@@ -1,6 +1,7 @@
 import os
 import json
 import copy
+from contextlib import asynccontextmanager
 from datetime import date
 from uuid import UUID
 
@@ -17,6 +18,8 @@ from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
+from export_runtime import ExportRuntime
+from export_runtime_store import runtime_log
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -49,7 +52,22 @@ from immich import (
     get_recent_assets,
 )
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    runtime = ExportRuntime()
+    app.state.export_runtime = runtime
+    try:
+        await runtime.inspect_recovery()
+    except StoreUnavailable as error:
+        # Persistence failure must not prevent unrelated read-only Immich routes from starting.
+        runtime_log("recovery.readFailed", level="error", errorCode=error.code)
+    try:
+        yield
+    finally:
+        await runtime.wait()
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
 
 
