@@ -67,7 +67,7 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
     <div className="thumbnail">
       <img src={asset.thumbnail_url} alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-      {armed && <span className="export-status-badge export-status-armed">{t('exportManagement.armed')}</span>}
+      {armed && <span className="export-status-bar export-status-armed">{t('exportManagement.armed')}</span>}
     </div>
     <div className="photo-info"><p title={asset.filename}>{asset.filename}</p>
       <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time></div>

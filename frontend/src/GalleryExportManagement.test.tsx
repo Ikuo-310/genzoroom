@@ -252,7 +252,9 @@ describe('Export selection, readiness and Queue removal', () => {
   it('keeps armed state independent from selection and across Gallery tab visits', async () => {
     await openQueue(); await cardClick('a'); await key('w');
     expect(exportArmed()).toEqual(['a']); expect(host.querySelector('.export-arm-toggle')?.textContent).toBe('Clear export readiness[W]');
-    expect(exportCard('a').querySelector('.thumbnail .export-status-badge')?.textContent).toBe('Ready to export');
+    const statusBar = exportCard('a').querySelector<HTMLElement>('.thumbnail .export-status-bar')!;
+    expect(statusBar.textContent).toBe('Ready to export');
+    expect(statusBar.classList.contains('export-status-armed')).toBe(true);
     const checkbox = exportCard('a').querySelector<HTMLInputElement>('input')!; checkbox.focus();
     await key('Escape', {}, checkbox); expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual(['a']);
     expect(document.activeElement).not.toBe(checkbox);

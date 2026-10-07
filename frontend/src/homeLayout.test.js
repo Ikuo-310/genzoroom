@@ -37,6 +37,22 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(content.querySelector('.thumbnail')).aspectRatio).toBe('1');
     expect(getComputedStyle(content).overflowY).toBe('auto');
   });
+  it('lays the Export armed status across the thumbnail as a fixed-height single line', () => {
+    const rule = Array.from(stylesheet.sheet.cssRules).find(item => item.selectorText === '.export-status-bar');
+    expect(rule.style.getPropertyValue('position')).toBe('absolute');
+    expect(rule.style.getPropertyValue('left')).toBe('0');
+    expect(rule.style.getPropertyValue('right')).toBe('0');
+    expect(rule.style.getPropertyValue('width')).toBe('100%');
+    expect(rule.style.getPropertyValue('height')).toBe('36px');
+    expect(rule.style.getPropertyValue('white-space')).toBe('nowrap');
+    expect(rule.style.getPropertyValue('overflow')).toBe('hidden');
+    expect(rule.style.getPropertyValue('text-align')).toBe('center');
+    expect(rule.style.getPropertyValue('background')).toBe('rgb(33 34 37 / 90%)');
+    expect(rule.style.getPropertyValue('opacity')).toBe('');
+    expect(rule.style.getPropertyValue('top')).toBe('50%');
+    expect(rule.style.getPropertyValue('transform')).toBe('translateY(-50%)');
+    expect(stylesheet.textContent).toContain('.thumbnail { position: relative; aspect-ratio: 1;');
+  });
   it('protects selection segments and moves detail titles to a separate row at intermediate widths', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');
