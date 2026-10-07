@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { fetchRecentAssets } from './api';
+import { fetchAssetDetail, fetchRecentAssets } from './api';
 import type { RecentAsset } from './assets';
 import { recentJpegCandidates } from './jpegDiagnostics';
+import { listExportQueue } from './exportQueueApi';
+import { resolveExportQueueCandidates } from './exportQueueCandidates';
 import { getAssetEditState, EditStateApiError } from './editStateApi';
 import { decodeEditSource } from './editImageSource';
 import { renderAdjustments } from './adjustmentPipeline';
@@ -16,6 +18,7 @@ type Phase = 'idle' | 'recipe' | 'original' | 'preview' | 'backend' | 'completed
 export interface ExportEngineDependencies {
   recent: typeof fetchRecentAssets; saved: typeof getAssetEditState; decode: typeof decodeEditSource;
   render: typeof renderAdjustments; backend: typeof fetchExportEngineJpeg;
+  queue?: typeof listExportQueue; detail?: typeof fetchAssetDetail;
 }
 
 export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roundTripDependencies }: {
@@ -26,6 +29,7 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
   const [candidates, setCandidates] = useState<RecentAsset[]>([]);
   const [selected, setSelected] = useState<RecentAsset | null>(null);
   const [candidateStatus, setCandidateStatus] = useState<'idle' | 'loading' | 'ready' | 'failed' | 'empty'>('idle');
+  const [candidateSource, setCandidateSource] = useState<'recent' | 'queue'>('recent');
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<ExportEngineErrorCode | null>(null);
   const [metadata, setMetadata] = useState<ExportEngineMetadata | null>(null);
@@ -55,6 +59,8 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
   const urls = useRef({ original: null as string | null, backend: null as string | null });
   const closed = useRef(false);
   const busy = ['recipe', 'original', 'preview', 'backend'].includes(phase) || candidateStatus === 'loading'
+    || decodeReport.status === 'running' || roundTripReport.status === 'running';
+  const diagnosticBusy = ['recipe', 'original', 'preview', 'backend'].includes(phase)
     || decodeReport.status === 'running' || roundTripReport.status === 'running';
   const release = () => {
     for (const key of ['original', 'backend'] as const) {
@@ -95,14 +101,29 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
   const loadCandidates = async () => {
     if (closed.current || request.current || candidateRequest.current) return;
     const controller = new AbortController(); candidateRequest.current = controller;
+    const source = candidateSource;
     setCandidateStatus('loading'); setCandidates([]); setSelected(null); reset(); setPhase('idle');
-    setDecodeReport(emptyDecodeComparison()); setJsonError(false);
+    setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
     try {
-      const assets = recentJpegCandidates(await (dependencies?.recent ?? fetchRecentAssets)(50, controller.signal));
-      if (controller.signal.aborted || closed.current || candidateRequest.current !== controller) return;
+      const assets = source === 'recent'
+        ? recentJpegCandidates(await (dependencies?.recent ?? fetchRecentAssets)(50, controller.signal))
+        : await resolveExportQueueCandidates(await (dependencies?.queue ?? listExportQueue)(controller.signal), controller.signal,
+          dependencies?.detail ?? fetchAssetDetail);
+      if (controller.signal.aborted || closed.current || candidateRequest.current !== controller || candidateSource !== source) return;
       setCandidates(assets); setCandidateStatus(assets.length ? 'ready' : 'empty');
-    } catch { if (!controller.signal.aborted && !closed.current) setCandidateStatus('failed'); }
+    } catch {
+      if (!controller.signal.aborted && !closed.current && candidateRequest.current === controller && candidateSource === source) {
+        setCandidateStatus('failed');
+      }
+    }
     finally { if (candidateRequest.current === controller) candidateRequest.current = null; }
+  };
+
+  const chooseCandidateSource = (source: 'recent' | 'queue') => {
+    if (closed.current || request.current || source === candidateSource) return;
+    candidateRequest.current?.abort(); candidateRequest.current = null;
+    setCandidateSource(source); setCandidateStatus('idle'); setCandidates([]); setSelected(null); reset(); setPhase('idle');
+    setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
   };
 
   const runDecode = async () => {
@@ -220,6 +241,12 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
   return <section className="developer-section" aria-labelledby="export-engine-title">
     <h2 id="export-engine-title">Export Engine</h2><p>{t('exportEngine.description')}</p>
     <p>{t('exportEngine.settings')}</p>
+    <div className="developer-actions" role="group" aria-label={t('exportEngine.candidateSource.label')}>
+      <label><input type="radio" name="export-engine-candidate-source" value="recent" checked={candidateSource === 'recent'}
+        disabled={diagnosticBusy} onChange={() => chooseCandidateSource('recent')} /> {t('exportEngine.candidateSource.recent')}</label>
+      <label><input type="radio" name="export-engine-candidate-source" value="queue" checked={candidateSource === 'queue'}
+        disabled={diagnosticBusy} onChange={() => chooseCandidateSource('queue')} /> {t('exportEngine.candidateSource.queue')}</label>
+    </div>
     <div className="developer-actions">
       <button type="button" disabled={busy} onClick={() => { void loadCandidates(); }}>{t('jpegDiagnostics.choose')}</button>
       <button type="button" disabled={busy || !selected} onClick={() => { void run(); }}>{t('exportEngine.run')}</button>

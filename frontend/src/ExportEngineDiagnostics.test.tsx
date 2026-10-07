@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExportEngineDiagnostics, type ExportEngineDependencies } from './ExportEngineDiagnostics';
 import { ExportEngineDiagnosticError } from './exportEngineApi';
 import type { BackendDecodedImage, EncodeRoundTripSource } from './exportEngineApi';
+import type { ExportQueueItem } from './exportQueueApi';
 import { defaultRecipe } from './editing';
 import { createEditStateSnapshot } from './editState';
 import { EditStateApiError } from './editStateApi';
@@ -50,6 +51,11 @@ const decoded = (): BackendDecodedImage => ({ pixels: new Uint8Array([1,2,3,4,5,
 } });
 const roundTripSource = (): EncodeRoundTripSource => ({ jpeg: new Blob(['jpeg'], { type: 'image/jpeg' }), pixels: new Uint8Array([1,2,3,4,5,6]),
   metadata: { ...metadata, pixelFormat: 'rgb8', rgbBytes: 6 } });
+const queueItem = (id: string, status: ExportQueueItem['status'] = 'queued'): ExportQueueItem => ({ assetId: id, status,
+  queuedAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' });
+const queueAsset = (id: string, filename = `queue-${id}.jpg`, format = 'JPEG', is_raw = false) => ({ ...asset(id), filename,
+  format, is_raw, preview_url: `/preview/${id}`, exif: {} });
+const sourceRadio = (source: 'recent' | 'queue') => host.querySelector<HTMLInputElement>(`input[name="export-engine-candidate-source"][value="${source}"]`)!;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); originalLanguage = i18n.language;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -101,6 +107,68 @@ it.each(['en', 'ja'])('compares the saved snapshot, shows safe values, and clean
   expect(host.querySelector('.developer-export-comparison img')).toBeNull();
   expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
   expect(host.textContent).toContain(i18n.t('exportEngine.status.idle'));
+});
+
+it('loads Export Queue candidates in Queue order, filters detail records, and resets all comparison state on source switch', async () => {
+  const { dependencies } = setup();
+  const ids = Array.from({ length: 13 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`);
+  const queue = [queueItem(ids[0], 'encoding'), queueItem(ids[1], 'failed'), queueItem(ids[2], 'waiting'),
+    ...ids.slice(3, 13).map(id => queueItem(id))];
+  dependencies.queue = vi.fn(async () => queue);
+  dependencies.detail = vi.fn(async id => {
+    if (id === ids[2]) throw new Error('PRIVATE_DETAIL_FAILURE');
+    if (id === ids[0]) return queueAsset(id, 'raw.jpg', 'JPEG', true);
+    if (id === ids[1]) return queueAsset(id, 'not-jpeg.heic', 'HEIC');
+    return queueAsset(id);
+  });
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies}
+    decodeDependencies={{ backend: async () => decoded() }} roundTripDependencies={{ backend: async () => roundTripSource() }} />));
+  await select(); await click(run()); await settle(); await click(decodeRun()); await settle(); await click(roundTripRun()); await settle();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.statistics'));
+  expect(host.textContent).toContain(i18n.t('encodeRoundTrip.statistics'));
+  await click(sourceRadio('queue'));
+  expect(choose().disabled).toBe(false); expect(host.querySelector('.developer-jpeg-target')).toBeNull();
+  expect(host.querySelectorAll('.developer-jpeg-candidates button')).toHaveLength(0);
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.not_run'));
+  expect(host.textContent).toContain(i18n.t('encodeRoundTrip.status.not_run'));
+  expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
+  await click(choose());
+  expect(dependencies.queue).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+  expect(dependencies.recent).toHaveBeenCalledOnce();
+  expect(dependencies.detail).toHaveBeenCalledTimes(13);
+  expect(dependencies.detail).toHaveBeenNthCalledWith(1, ids[0], expect.any(AbortSignal));
+  expect(dependencies.detail).toHaveBeenNthCalledWith(2, ids[1], expect.any(AbortSignal));
+  expect(dependencies.detail).toHaveBeenNthCalledWith(3, ids[2], expect.any(AbortSignal));
+  expect([...host.querySelectorAll('.developer-jpeg-candidates button span')].map(node => node.textContent))
+    .toEqual(ids.slice(3).map(id => `queue-${id}.jpg`));
+  expect(host.textContent).not.toContain('PRIVATE_DETAIL_FAILURE');
+  expect(host.querySelector('.developer-jpeg-target')).toBeNull();
+});
+
+it('aborts candidate loading on source switch and ignores the stale source response', async () => {
+  const { dependencies } = setup(); const pending = deferred<RecentAsset[]>(); dependencies.recent = vi.fn(() => pending.promise);
+  const id = '00000000-0000-4000-8000-000000000001';
+  dependencies.queue = vi.fn(async () => [queueItem(id)]);
+  dependencies.detail = vi.fn(async assetId => queueAsset(assetId));
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />));
+  await click(choose()); const signal = vi.mocked(dependencies.recent).mock.calls[0][1];
+  expect(sourceRadio('queue').disabled).toBe(false);
+  await click(sourceRadio('queue')); expect(signal.aborted).toBe(true);
+  await act(async () => pending.resolve([asset('STALE_RECENT')])); await settle();
+  expect(host.querySelectorAll('.developer-jpeg-candidates button')).toHaveLength(0);
+  expect(host.textContent).not.toContain(i18n.t('exportEngine.error.candidate_load_failed'));
+  await click(choose());
+  expect(host.querySelector('.developer-jpeg-candidates button span')?.textContent).toBe(`queue-${id}.jpg`);
+  expect(dependencies.recent).toHaveBeenCalledOnce(); expect(dependencies.queue).toHaveBeenCalledOnce();
+});
+
+it('shows candidate load failure without details for an unavailable Queue', async () => {
+  const { dependencies } = setup(); dependencies.queue = vi.fn(async () => { throw new Error('PRIVATE_QUEUE_ERROR'); });
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />));
+  await click(sourceRadio('queue')); await click(choose());
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportEngine.error.candidate_load_failed'));
+  expect(host.textContent).not.toContain('PRIVATE_QUEUE_ERROR');
+  expect(dependencies.recent).not.toHaveBeenCalled();
 });
 
 it('guards concurrent run and asset selection and detaches Recipe before later saved edits', async () => {

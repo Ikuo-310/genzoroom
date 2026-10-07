@@ -668,6 +668,7 @@
   "exportEngine": {
     "description": "Generate a JPEG with the Backend Export Engine using the saved Recipe. Nothing is written to Immich.",
     "settings": "JPEG / quality 95 / 4:4:4 / sRGB / original resolution",
+    "candidateSource": { "label": "Asset candidate source", "recent": "Recent", "queue": "Export Queue" },
     "run": "Run comparison",
     "frontend": "Frontend Preview",
     "backend": "Backend Export JPEG",

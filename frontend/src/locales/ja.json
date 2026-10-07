@@ -661,6 +661,7 @@
   "exportEngine": {
     "description": "保存済みRecipeを使用してBackend Export EngineでJPEGを生成します。Immichへの書き込みは行いません。",
     "settings": "JPEG / 品質95 / 4:4:4 / sRGB / 元解像度",
+    "candidateSource": { "label": "Asset候補の取得元", "recent": "最近の写真", "queue": "出力Queue" },
     "run": "比較を実行",
     "frontend": "Frontend Preview",
     "backend": "Backend Export JPEG",
