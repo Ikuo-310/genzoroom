@@ -559,6 +559,81 @@
       "platform": "プラットフォーム"
     }
   },
+  "decodeCompare": {
+    "title": "Decode比較",
+    "description": "選択した原版JPEGのFrontendとBackendのsRGBデコード結果を比較します。Recipe適用・再エンコードは行いません。",
+    "notes": "差はBackend − Frontend（byte値）です。輝度差が正なら明るい傾向、green biasが正なら相対的に緑側、負ならマゼンタ側です。輝度差とgreen biasは簡易指標で、ΔEではありません。要約は方向性を示す診断補助で、品質の合否判定ではありません。",
+    "run": "Decode比較を実行",
+    "cancel": "比較をキャンセル",
+    "exportJson": "診断JSONを出力",
+    "jsonFailed": "診断JSONを出力できませんでした。",
+    "statistics": "差分統計",
+    "frontendDimensions": "Frontend寸法",
+    "backendDimensions": "Backend寸法",
+    "sourceIcc": "元画像のICC",
+    "orientation": "Backend Orientation正規化済み",
+    "status": {
+      "not_run": "未実行",
+      "running": "実行中",
+      "completed": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル"
+    },
+    "phase": {
+      "idle": "開始中",
+      "original": "原版取得中",
+      "frontend": "Frontendデコード中",
+      "backend": "Backendデコード中",
+      "comparison": "pixel比較中"
+    },
+    "timing": {
+      "frontendDecodeMs": "Frontendデコード時間",
+      "backendDecodeMs": "Backendデコード時間",
+      "backendRequestMs": "Backendリクエスト時間（転送含む）",
+      "comparisonMs": "比較時間",
+      "totalMs": "診断合計時間"
+    },
+    "error": {
+      "no_asset_selected": "JPEGを選択してください。",
+      "original_fetch_failed": "JPEGオリジナルを取得できませんでした。",
+      "backend_unavailable": "Backend診断を利用できません。",
+      "backend_decode_failed": "BackendのJPEGデコードに失敗しました。",
+      "frontend_decode_failed": "FrontendのJPEGデコードに失敗しました。",
+      "dimension_mismatch": "寸法が一致しないためpixel比較を行いませんでした。Orientation処理をご確認ください。",
+      "invalid_binary_response": "BackendのRGB8応答が不正です。",
+      "cancelled": "Decode比較をキャンセルしました。"
+    },
+    "assessment": {
+      "brighter": "Backendが明るい傾向",
+      "darker": "Backendが暗い傾向",
+      "neutral": "明確な方向の偏りなし",
+      "green": "Backendが緑側に偏る傾向",
+      "magenta": "Backendがマゼンタ側に偏る傾向",
+      "minimal": "RGB差はごく小さい傾向",
+      "small": "RGB差は小さい傾向",
+      "noticeable": "RGB差が比較的大きい傾向"
+    },
+    "values": {
+      "meanDeltaR": "R 平均符号付き差",
+      "meanDeltaG": "G 平均符号付き差",
+      "meanDeltaB": "B 平均符号付き差",
+      "meanAbsoluteDeltaR": "R 平均絶対差",
+      "meanAbsoluteDeltaG": "G 平均絶対差",
+      "meanAbsoluteDeltaB": "B 平均絶対差",
+      "maxAbsoluteDeltaR": "R 最大絶対差",
+      "maxAbsoluteDeltaG": "G 最大絶対差",
+      "maxAbsoluteDeltaB": "B 最大絶対差",
+      "meanAbsoluteError": "RGB全体の平均絶対誤差（MAE）",
+      "rmse": "RGB全体の二乗平均平方根誤差（RMSE）",
+      "exactMatchPixelPercent": "RGB完全一致pixel割合",
+      "pixelsAtLeast1Percent": "いずれかのchannel差が1以上のpixel割合",
+      "pixelsAtLeast2Percent": "いずれかのchannel差が2以上のpixel割合",
+      "pixelsAtLeast4Percent": "いずれかのchannel差が4以上のpixel割合",
+      "pixelsAtLeast8Percent": "いずれかのchannel差が8以上のpixel割合",
+      "meanLumaDelta": "平均輝度差",
+      "greenBias": "Green bias（G − R/B平均）"
+    }
+  },
   "exportEngine": {
     "description": "保存済みRecipeを使用してBackend Export EngineでJPEGを生成します。Immichへの書き込みは行いません。",
     "settings": "JPEG / 品質95 / 4:4:4 / sRGB / 元解像度",

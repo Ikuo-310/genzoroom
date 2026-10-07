@@ -7,6 +7,8 @@ import { getAssetEditState, EditStateApiError } from './editStateApi';
 import { decodeEditSource } from './editImageSource';
 import { renderAdjustments } from './adjustmentPipeline';
 import { ExportEngineDiagnosticError, fetchExportEngineJpeg, type ExportEngineErrorCode, type ExportEngineMetadata } from './exportEngineApi';
+import { emptyDecodeComparison, runDecodeComparison, type DecodeComparisonDependencies, type DecodePhase } from './decodeComparison';
+import { createExportEngineReport, exportEngineReport, DECODE_STATISTIC_KEYS } from './exportEngineReport';
 
 type Phase = 'idle' | 'recipe' | 'original' | 'preview' | 'backend' | 'completed' | 'failed' | 'cancelled';
 export interface ExportEngineDependencies {
@@ -14,7 +16,9 @@ export interface ExportEngineDependencies {
   render: typeof renderAdjustments; backend: typeof fetchExportEngineJpeg;
 }
 
-export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Partial<ExportEngineDependencies> }) {
+export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
+  dependencies?: Partial<ExportEngineDependencies>; decodeDependencies?: Partial<DecodeComparisonDependencies>;
+}) {
   const { t } = useTranslation();
   const [candidates, setCandidates] = useState<RecentAsset[]>([]);
   const [selected, setSelected] = useState<RecentAsset | null>(null);
@@ -24,6 +28,9 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
   const [metadata, setMetadata] = useState<ExportEngineMetadata | null>(null);
   const [backendUrl, setBackendUrl] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
+  const [decodeReport, setDecodeReport] = useState(emptyDecodeComparison);
+  const [decodePhase, setDecodePhase] = useState<DecodePhase>('idle');
+  const [jsonError, setJsonError] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ownCanvas = useCallback((node: HTMLCanvasElement | null) => {
     // React detaches refs before passive unmount cleanup, so release the backing store here.
@@ -34,7 +41,7 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
   const candidateRequest = useRef<AbortController | null>(null);
   const urls = useRef({ original: null as string | null, backend: null as string | null });
   const closed = useRef(false);
-  const busy = ['recipe', 'original', 'preview', 'backend'].includes(phase) || candidateStatus === 'loading';
+  const busy = ['recipe', 'original', 'preview', 'backend'].includes(phase) || candidateStatus === 'loading' || decodeReport.status === 'running';
   const release = () => {
     for (const key of ['original', 'backend'] as const) {
       if (urls.current[key]) URL.revokeObjectURL(urls.current[key]!);
@@ -55,11 +62,14 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
       closeResources();
       setBackendUrl(null); setPreviewReady(false); setMetadata(null); setError(null); setPhase('cancelled');
       setCandidateStatus('idle');
+      setDecodeReport(value => value.status === 'running' ? { ...emptyDecodeComparison(), status: 'cancelled', error: 'cancelled' } : value);
+      setDecodePhase('idle');
     };
     const show = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
       closed.current = false;
       setCandidates([]); setSelected(null); setPhase('idle');
+      setDecodeReport(emptyDecodeComparison()); setJsonError(false);
     };
     window.addEventListener('pagehide', hide); window.addEventListener('pageshow', show);
     return () => { closeResources(); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); };
@@ -69,12 +79,27 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
     if (closed.current || request.current || candidateRequest.current) return;
     const controller = new AbortController(); candidateRequest.current = controller;
     setCandidateStatus('loading'); setCandidates([]); setSelected(null); reset(); setPhase('idle');
+    setDecodeReport(emptyDecodeComparison()); setJsonError(false);
     try {
       const assets = recentJpegCandidates(await (dependencies?.recent ?? fetchRecentAssets)(50, controller.signal));
       if (controller.signal.aborted || closed.current || candidateRequest.current !== controller) return;
       setCandidates(assets); setCandidateStatus(assets.length ? 'ready' : 'empty');
     } catch { if (!controller.signal.aborted && !closed.current) setCandidateStatus('failed'); }
     finally { if (candidateRequest.current === controller) candidateRequest.current = null; }
+  };
+
+  const runDecode = async () => {
+    if (closed.current || request.current || candidateRequest.current || !selected) return;
+    const controller = new AbortController(); request.current = controller;
+    setDecodeReport({ ...emptyDecodeComparison(), status: 'running' }); setJsonError(false);
+    try {
+      const report = await runDecodeComparison(selected.id, controller.signal, value => {
+        if (!closed.current && request.current === controller) setDecodePhase(value);
+      }, { decode: dependencies?.decode ?? decodeEditSource, ...decodeDependencies });
+      if (!closed.current && request.current === controller) setDecodeReport(report);
+    } finally {
+      if (request.current === controller) { request.current = null; setDecodePhase('idle'); }
+    }
   };
   const run = async () => {
     if (closed.current || request.current || candidateRequest.current || !selected) return;
@@ -139,16 +164,22 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
     <div className="developer-actions">
       <button type="button" disabled={busy} onClick={() => { void loadCandidates(); }}>{t('jpegDiagnostics.choose')}</button>
       <button type="button" disabled={busy || !selected} onClick={() => { void run(); }}>{t('exportEngine.run')}</button>
+      <button type="button" disabled={busy} onClick={() => {
+        setJsonError(false);
+        try { exportEngineReport(createExportEngineReport({ status: phase, error, metadata }, decodeReport)); }
+        catch { setJsonError(true); }
+      }}>{t('decodeCompare.exportJson')}</button>
     </div>
     {candidateStatus !== 'idle' && <p role="status">{t(`jpegDiagnostics.candidates.${candidateStatus}`)}</p>}
     {candidateStatus === 'failed' && <p role="alert">{t('exportEngine.error.candidate_load_failed')}</p>}
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
       {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={selected?.id === asset.id} onClick={() => {
         if (request.current || candidateRequest.current || closed.current) return;
-        reset(); setPhase('idle'); setSelected(asset);
+        reset(); setPhase('idle'); setSelected(asset); setDecodeReport(emptyDecodeComparison()); setJsonError(false);
       }}><img src={asset.thumbnail_url} alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" /><span>{asset.filename}</span></button>)}
     </div>}
     {selected && <p className="developer-jpeg-target">{selected.filename}</p>}
+    {jsonError && <p role="alert">{t('decodeCompare.jsonFailed')}</p>}
     <p role="status" aria-live="polite">{t(`exportEngine.status.${phase}`)}</p>
     {error && <p role="alert">{t(`exportEngine.error.${error}`)}</p>}
     <div className="developer-export-comparison">
@@ -158,5 +189,27 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
     {metadata && <dl className="developer-diagnostics">{Object.entries(metadata).map(([key, value]) =>
       <div key={key}><dt>{t(`exportEngine.values.${key}`)}</dt><dd>{key === 'sourceIcc' ? t(`jpegDiagnostics.profileStatus.${value === 'embedded' ? 'embedded' : 'none'}`)
         : key.endsWith('Ms') ? `${Number(value).toFixed(2)} ms` : value}</dd></div>)}</dl>}
+    <section aria-labelledby="decode-compare-title">
+      <h3 id="decode-compare-title">{t('decodeCompare.title')}</h3><p>{t('decodeCompare.description')}</p>
+      <p>{t('decodeCompare.notes')}</p>
+      <div className="developer-actions">
+        <button type="button" disabled={busy || !selected} onClick={() => { void runDecode(); }}>{t('decodeCompare.run')}</button>
+        <button type="button" disabled={decodeReport.status !== 'running'} onClick={() => request.current?.abort()}>{t('decodeCompare.cancel')}</button>
+      </div>
+      <p role="status" aria-live="polite">{t(`decodeCompare.status.${decodeReport.status}`)}
+        {decodeReport.status === 'running' && ` — ${t(`decodeCompare.phase.${decodePhase}`)}`}</p>
+      {decodeReport.error && <p role="alert">{t(`decodeCompare.error.${decodeReport.error}`)}</p>}
+      {decodeReport.assessment && <p>{t(`decodeCompare.assessment.${decodeReport.assessment.brightnessDirection}`)} · {t(`decodeCompare.assessment.${decodeReport.assessment.tintDirection}`)} · {t(`decodeCompare.assessment.${decodeReport.assessment.differenceLevel}`)}</p>}
+      <dl className="developer-diagnostics">
+        {(['frontend', 'backend'] as const).map(side => <div key={side}><dt>{t(`decodeCompare.${side}Dimensions`)}</dt>
+          <dd>{decodeReport.dimensions[side] ? `${decodeReport.dimensions[side]!.width} × ${decodeReport.dimensions[side]!.height}` : '—'}</dd></div>)}
+        <div><dt>{t('decodeCompare.sourceIcc')}</dt><dd>{decodeReport.sourceIcc ? t(`jpegDiagnostics.profileStatus.${decodeReport.sourceIcc === 'embedded' ? 'embedded' : 'none'}`) : '—'}</dd></div>
+        <div><dt>{t('decodeCompare.orientation')}</dt><dd>{decodeReport.orientationNormalized === null ? '—' : t(`webgpuSmoke.${decodeReport.orientationNormalized ? 'yes' : 'no'}`)}</dd></div>
+        {Object.entries(decodeReport.timing).map(([key, value]) => <div key={key}><dt>{t(`decodeCompare.timing.${key}`)}</dt><dd>{value === null ? '—' : `${value.toFixed(2)} ms`}</dd></div>)}
+      </dl>
+      {decodeReport.statistics && <><h4>{t('decodeCompare.statistics')}</h4><dl className="developer-diagnostics">
+        {DECODE_STATISTIC_KEYS.map(key => <div key={key}><dt>{t(`decodeCompare.values.${key}`)}</dt><dd>{decodeReport.statistics![key].toFixed(6)}{key.endsWith('Percent') ? ' %' : ''}</dd></div>)}
+      </dl></>}
+    </section>
   </section>;
 }

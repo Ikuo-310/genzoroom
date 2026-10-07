@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
-from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic
+from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, decode_diagnostic
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -55,7 +55,7 @@ MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
 
 @app.exception_handler(RequestValidationError)
 async def safe_diagnostic_validation(request: Request, error: RequestValidationError):
-    if request.url.path == "/developer/export-engine":
+    if request.url.path in ("/developer/export-engine", "/developer/export-engine/decode"):
         # Pydantic's default response reflects rejected inputs, including injected Recipe bodies.
         return JSONResponse(status_code=422, content={"detail": {"code": "invalid_diagnostic_request"}},
                             headers={"Cache-Control": "private, no-store"})
@@ -71,6 +71,38 @@ class ExportEngineDiagnosticRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assetId: UUID
     expectedRevision: int = Field(ge=1, strict=True)
+
+
+class DecodeDiagnosticRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetId: UUID
+
+
+@app.post("/developer/export-engine/decode")
+async def export_engine_decode_diagnostic(payload: DecodeDiagnosticRequest) -> Response:
+    headers = {"Cache-Control": "private, no-store"}
+    original = None
+    source = bytearray()
+    try:
+        try:
+            original = await get_asset_original(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), payload.assetId)
+            async for chunk in original.chunks():
+                source.extend(chunk)
+        finally:
+            if original is not None:
+                await original.close()
+    except Exception as error:
+        source.clear()
+        diagnostic_failure("original_fetch_failed", "original")
+        raise HTTPException(status_code=502, detail={"code": "original_fetch_failed"}, headers=headers) from error
+    try:
+        pixels, metadata = await run_in_threadpool(decode_diagnostic, source)
+    except ExportEngineError as error:
+        raise HTTPException(status_code=422, detail={"code": error.code}, headers=headers) from error
+    finally:
+        source.clear()
+    headers["X-GenzoRoom-Decode"] = json.dumps(metadata, separators=(",", ":"), allow_nan=False)
+    return Response(content=pixels, media_type="application/octet-stream", headers=headers)
 
 
 @app.post("/developer/export-engine")

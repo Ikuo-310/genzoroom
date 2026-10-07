@@ -52,3 +52,51 @@ export async function fetchExportEngineJpeg(assetId: string, expectedRevision: n
     return { blob, metadata };
   } catch { signal.throwIfAborted(); throw new ExportEngineDiagnosticError('backend_unavailable'); }
 }
+
+export const DECODE_COMPARE_ERRORS = ['no_asset_selected', 'original_fetch_failed', 'backend_unavailable',
+  'backend_decode_failed', 'frontend_decode_failed', 'dimension_mismatch', 'invalid_binary_response', 'cancelled'] as const;
+export type DecodeComparisonErrorCode = typeof DECODE_COMPARE_ERRORS[number];
+export class DecodeComparisonError extends Error {
+  constructor(readonly code: DecodeComparisonErrorCode) { super(code); }
+}
+export type BackendDecodeMetadata = {
+  width: number; height: number; sourceWidth: number; sourceHeight: number;
+  pixelFormat: 'rgb8'; sourceIcc: 'embedded' | 'absent'; orientationNormalized: true; backendDecodeMs: number;
+};
+export type BackendDecodedImage = { pixels: Uint8Array; metadata: BackendDecodeMetadata };
+
+export async function fetchBackendDecode(assetId: string, signal: AbortSignal): Promise<BackendDecodedImage> {
+  let response: Response;
+  try {
+    response = await fetch('/api/developer/export-engine/decode', {
+      method: 'POST', cache: 'no-store', signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetId }),
+    });
+  } catch { signal.throwIfAborted(); throw new DecodeComparisonError('backend_unavailable'); }
+  signal.throwIfAborted();
+  if (!response.ok) {
+    let code: DecodeComparisonErrorCode = 'backend_unavailable';
+    try {
+      const body = await response.json();
+      if (DECODE_COMPARE_ERRORS.includes(body?.detail?.code)) code = body.detail.code;
+    } catch { /* Proxy and backend exception text must never enter the report. */ }
+    signal.throwIfAborted();
+    throw new DecodeComparisonError(code);
+  }
+  try {
+    if (response.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/octet-stream') throw new Error();
+    const header = response.headers.get('X-GenzoRoom-Decode');
+    if (!header || header.length > 1024) throw new Error();
+    const value = JSON.parse(header);
+    if (!value || ['width', 'height', 'sourceWidth', 'sourceHeight'].some(key => !Number.isSafeInteger(value[key]) || value[key] < 1)
+      || !Number.isSafeInteger(value.width * value.height * 3) || value.pixelFormat !== 'rgb8'
+      || !['embedded', 'absent'].includes(value.sourceIcc) || value.orientationNormalized !== true
+      || typeof value.backendDecodeMs !== 'number' || !Number.isFinite(value.backendDecodeMs) || value.backendDecodeMs < 0) throw new Error();
+    const pixels = new Uint8Array(await response.arrayBuffer());
+    signal.throwIfAborted();
+    if (pixels.length !== value.width * value.height * 3) throw new Error();
+    return { pixels, metadata: { width: value.width, height: value.height,
+      sourceWidth: value.sourceWidth, sourceHeight: value.sourceHeight, pixelFormat: 'rgb8', sourceIcc: value.sourceIcc,
+      orientationNormalized: true, backendDecodeMs: value.backendDecodeMs } };
+  } catch { signal.throwIfAborted(); throw new DecodeComparisonError('invalid_binary_response'); }
+}

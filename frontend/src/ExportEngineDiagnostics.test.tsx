@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExportEngineDiagnostics, type ExportEngineDependencies } from './ExportEngineDiagnostics';
 import { ExportEngineDiagnosticError } from './exportEngineApi';
+import type { BackendDecodedImage } from './exportEngineApi';
 import { defaultRecipe } from './editing';
 import { createEditStateSnapshot } from './editState';
 import { EditStateApiError } from './editStateApi';
@@ -40,6 +41,11 @@ const choose = () => [...host.querySelectorAll<HTMLButtonElement>('button')].fin
 const run = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('exportEngine.run'))!;
 const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 15)); }); };
 const select = async () => { await click(choose()); await click(host.querySelector<HTMLButtonElement>('.developer-jpeg-candidates button')!); };
+const decodeRun = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.run'))!;
+const decodeCancel = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.cancel'))!;
+const decoded = (): BackendDecodedImage => ({ pixels: new Uint8Array([1,2,3,4,5,6]), metadata: {
+  width: 2, height: 1, sourceWidth: 2, sourceHeight: 1, pixelFormat: 'rgb8', sourceIcc: 'absent', orientationNormalized: true, backendDecodeMs: 1,
+} });
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); originalLanguage = i18n.language;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -173,4 +179,92 @@ it.each(['missing', 'legacy', 'original', 'decode', 'render', 'candidate'] as co
   if (failure === 'candidate') await click(choose()); else { await select(); await click(run()); await settle(); }
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t(`exportEngine.error.${expected}`));
   expect(host.textContent).not.toContain('PRIVATE_EXCEPTION'); expect(dependencies.backend).not.toHaveBeenCalled();
+});
+
+it.each(['en', 'ja'])('shares selected Asset for Decode Compare without saved Recipe or renderer, preserves full comparison in %s', async language => {
+  await i18n.changeLanguage(language); const { dependencies } = setup(); const backend = vi.fn(async () => decoded());
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend }} />));
+  expect(decodeRun().disabled).toBe(true); await select(); await click(decodeRun()); await settle();
+  expect(backend).toHaveBeenCalledExactlyOnceWith('first', expect.any(AbortSignal));
+  expect(dependencies.decode).toHaveBeenCalledWith({ kind: 'jpeg-original', url: 'blob:diagnostic-1' }, expect.any(AbortSignal));
+  expect(dependencies.saved).not.toHaveBeenCalled(); expect(dependencies.render).not.toHaveBeenCalled(); expect(dependencies.backend).not.toHaveBeenCalled();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.completed'));
+  expect(host.textContent).toContain(i18n.t('decodeCompare.statistics')); expect(host.textContent).not.toContain('decodeCompare.');
+  await click(run()); await settle(); expect(host.querySelector('.developer-export-comparison img')).not.toBeNull();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.statistics'));
+  await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.not_run'));
+  expect(host.textContent).not.toContain(i18n.t('decodeCompare.statistics'));
+});
+
+it('shows dimension mismatch and clears previous statistics on rerun', async () => {
+  const { dependencies } = setup(); const result = decoded(); const backend = vi.fn(async () => result);
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend }} />));
+  await select(); await click(decodeRun()); await settle();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.statistics'));
+  result.metadata.width = 1;
+  await click(decodeRun()); await settle();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('decodeCompare.error.dimension_mismatch'));
+  expect(host.textContent).not.toContain(i18n.t('decodeCompare.statistics'));
+});
+
+it('guards both run modes and cancels a pending backend without publishing late pixels', async () => {
+  const { dependencies } = setup(); const pending = deferred<BackendDecodedImage>(), backend = vi.fn((_assetId: string, _signal: AbortSignal) => pending.promise);
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend }} />));
+  await select(); await click(decodeRun()); await settle();
+  expect(run().disabled).toBe(true); expect(decodeRun().disabled).toBe(true); expect(choose().disabled).toBe(true);
+  await click(run()); expect(dependencies.saved).not.toHaveBeenCalled();
+  await click(decodeCancel()); expect(backend.mock.calls[0][1].aborted).toBe(true);
+  await act(async () => pending.resolve(decoded())); await settle();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.cancelled'));
+  expect(host.textContent).not.toContain(i18n.t('decodeCompare.statistics'));
+  expect(run().disabled).toBe(false);
+});
+
+it.each(['unmount', 'pagehide'] as const)('releases Decode Compare original and ignores late decode on %s', async departure => {
+  const { dependencies } = setup(); const pending = deferred<ImageData>(); dependencies.decode = vi.fn(() => pending.promise);
+  const backend = vi.fn(async () => decoded());
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend }} />));
+  await select(); await click(decodeRun());
+  const signal = vi.mocked(dependencies.decode).mock.calls[0][1];
+  if (departure === 'unmount') { act(() => root.unmount()); root = createRoot(host); }
+  else act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  expect(signal.aborted).toBe(true); expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-1');
+  await act(async () => pending.resolve(image())); await settle();
+  expect(backend).not.toHaveBeenCalled(); expect(host.textContent).not.toContain(i18n.t('decodeCompare.statistics'));
+});
+
+it('suppresses old Decode Compare results after BFCache restore and new Asset selection', async () => {
+  const { dependencies } = setup(); const pending = deferred<BackendDecodedImage>();
+  const backend = vi.fn().mockImplementationOnce(() => pending.promise).mockImplementationOnce(async () => decoded());
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend }} />));
+  await select(); await click(decodeRun()); await settle();
+  act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await click(choose()); await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
+  await click(decodeRun()); await settle();
+  const bad = decoded(); bad.metadata.width = 1;
+  await act(async () => pending.resolve(bad)); await settle();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.completed'));
+  expect(host.querySelector('[role="alert"]')).toBeNull(); expect(backend.mock.calls[1][0]).toBe('0');
+});
+
+it('exports Decode Compare results from this tab without private selection data or image buffers', async () => {
+  const { dependencies } = setup();
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} decodeDependencies={{ backend: async () => decoded() }} />));
+  await select(); await click(decodeRun()); await settle();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const anchor = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toMatch(/^genzoroom-export-engine-diagnostics-\d{8}T\d{6}Z\.json$/);
+    });
+    await click([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.exportJson'))!);
+    expect(anchor).toHaveBeenCalledOnce();
+    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)![0] as Blob;
+    const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
+    const json = JSON.parse(text); expect(json.schemaVersion).toBe(1); expect(json.decodeComparison.status).toBe('completed');
+    expect(json.decodeComparison.statistics.exactMatchPixelPercent).toBe(100);
+    expect(text).not.toMatch(/PRIVATE|assetId|filename|recipe"|pixels"|blob:/);
+    vi.runAllTimers();
+  } finally { vi.useRealTimers(); }
 });

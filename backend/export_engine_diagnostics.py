@@ -51,3 +51,18 @@ def generate_diagnostic(source: bytearray, recipe: dict) -> tuple[bytes, dict]:
             else f"{phase}_failed"
         diagnostic_failure(code, phase)
         raise ExportEngineError(code) from error
+
+
+def decode_diagnostic(source: bytearray) -> tuple[bytes, dict]:
+    """Return the decoder's RGB bytes directly, without any renderer or image encoder."""
+    started = perf_counter()
+    try:
+        metadata = inspect_jpeg_source(source)
+        image = decode_jpeg(source)
+        source.clear()
+        metadata.update(width=image.width, height=image.height, pixelFormat="rgb8",
+                        orientationNormalized=True, backendDecodeMs=(perf_counter() - started) * 1000)
+        return image.pixels, metadata
+    except Exception as error:
+        diagnostic_failure("backend_decode_failed", "decode")
+        raise ExportEngineError("backend_decode_failed") from error

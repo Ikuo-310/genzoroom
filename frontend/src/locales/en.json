@@ -566,6 +566,81 @@
       "platform": "Platform"
     }
   },
+  "decodeCompare": {
+    "title": "Decode Compare",
+    "description": "Compare the Frontend and Backend sRGB decode results of the selected original JPEG, without Recipe or encoding.",
+    "notes": "Delta = Backend − Frontend, in byte units. Positive luma delta means brighter; positive green bias means relatively greener, negative means magenta. Luma and green bias are simple diagnostic proxies, not Delta E. The summary describes tendencies, not a quality verdict.",
+    "run": "Run decode comparison",
+    "cancel": "Cancel comparison",
+    "exportJson": "Export diagnostic JSON",
+    "jsonFailed": "Could not export diagnostic JSON.",
+    "statistics": "Difference statistics",
+    "frontendDimensions": "Frontend dimensions",
+    "backendDimensions": "Backend dimensions",
+    "sourceIcc": "Source ICC",
+    "orientation": "Backend orientation normalized",
+    "status": {
+      "not_run": "Not run",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "phase": {
+      "idle": "Starting",
+      "original": "Fetching original",
+      "frontend": "Decoding Frontend",
+      "backend": "Decoding Backend",
+      "comparison": "Comparing pixels"
+    },
+    "timing": {
+      "frontendDecodeMs": "Frontend decode time",
+      "backendDecodeMs": "Backend decode time",
+      "backendRequestMs": "Backend request time (includes transfer)",
+      "comparisonMs": "Comparison time",
+      "totalMs": "Total diagnostic time"
+    },
+    "error": {
+      "no_asset_selected": "Select a JPEG first.",
+      "original_fetch_failed": "Could not fetch the JPEG original.",
+      "backend_unavailable": "Backend diagnostic unavailable.",
+      "backend_decode_failed": "Backend JPEG decoding failed.",
+      "frontend_decode_failed": "Frontend JPEG decoding failed.",
+      "dimension_mismatch": "Dimensions differ. Pixels were not compared; check orientation handling.",
+      "invalid_binary_response": "Invalid Backend RGB8 response.",
+      "cancelled": "Decode comparison cancelled."
+    },
+    "assessment": {
+      "brighter": "Backend tends brighter",
+      "darker": "Backend tends darker",
+      "neutral": "No clear directional bias",
+      "green": "Backend tends greener",
+      "magenta": "Backend tends more magenta",
+      "minimal": "Minimal RGB difference",
+      "small": "Small RGB difference",
+      "noticeable": "More noticeable RGB difference"
+    },
+    "values": {
+      "meanDeltaR": "Signed mean delta R",
+      "meanDeltaG": "Signed mean delta G",
+      "meanDeltaB": "Signed mean delta B",
+      "meanAbsoluteDeltaR": "Mean absolute delta R",
+      "meanAbsoluteDeltaG": "Mean absolute delta G",
+      "meanAbsoluteDeltaB": "Mean absolute delta B",
+      "maxAbsoluteDeltaR": "Maximum absolute delta R",
+      "maxAbsoluteDeltaG": "Maximum absolute delta G",
+      "maxAbsoluteDeltaB": "Maximum absolute delta B",
+      "meanAbsoluteError": "Overall RGB MAE",
+      "rmse": "Overall RGB RMSE",
+      "exactMatchPixelPercent": "Exact-match pixels",
+      "pixelsAtLeast1Percent": "Pixels with any channel delta ≥ 1",
+      "pixelsAtLeast2Percent": "Pixels with any channel delta ≥ 2",
+      "pixelsAtLeast4Percent": "Pixels with any channel delta ≥ 4",
+      "pixelsAtLeast8Percent": "Pixels with any channel delta ≥ 8",
+      "meanLumaDelta": "Mean luma delta",
+      "greenBias": "Green bias (G − mean R/B)"
+    }
+  },
   "exportEngine": {
     "description": "Generate a JPEG with the Backend Export Engine using the saved Recipe. Nothing is written to Immich.",
     "settings": "JPEG / quality 95 / 4:4:4 / sRGB / original resolution",
