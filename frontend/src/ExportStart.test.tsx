@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { ExportManagementToolbar, ExportManagementContent } from './ExportManagement';
+import { ExportManagementToolbar, ExportManagementContent, ExportRetryPriorityNotice } from './ExportManagement';
 import { useExportManagement, type ExportManagementQueue, type ExportManagementState } from './useExportManagement';
 import type { ExportQueueItem } from './exportQueueApi';
 import i18n from './i18n';
@@ -15,7 +15,8 @@ const show = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showM
 const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 function Probe({ active }: { active: boolean }) {
   current = useExportManagement(queue, active);
-  return active ? <><ExportManagementToolbar management={current} /><ExportManagementContent management={current} /></> : null;
+  return active ? <><div className="home-tabs-bar"><div className="home-tabs" role="tablist" />
+    <ExportRetryPriorityNotice management={current} /></div><ExportManagementToolbar management={current} /><ExportManagementContent management={current} /></> : null;
 }
 async function render(active = true) { await act(async () => root.render(<Probe active={active} />)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click()); }
@@ -64,14 +65,15 @@ it('retries failed Queue items through the primary action and starts only that f
   queue.retry = vi.fn().mockImplementation(async ids => { queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row); });
   await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
-  expect(host.querySelector('.export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
+  expect(host.querySelector('.export-toolbar .export-retry-notice')).toBeNull();
   await click('.immich-action-button');
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   expect(host.querySelector('dialog p')?.textContent).toBe('Retry export for 2 failed items?');
   await click('dialog button:last-child');
   expect(queue.retry).toHaveBeenCalledWith(['failed-a', 'failed-b']);
   expect(queue.startRuntime).toHaveBeenCalledWith(['failed-a', 'failed-b']);
-  expect(host.querySelector('.export-retry-notice')).toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
   expect([...current.armedIds]).toEqual(['armed']);
   expect(host.querySelector('.export-retry')).toBeNull();
 });
@@ -80,25 +82,26 @@ it('gives active runtime Stop priority over failed Retry', async () => {
   queue.runtime = { runId: 'run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'running' };
   await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Cancel export');
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
 });
 it('returns the primary action to ordinary Export when the last failed item leaves Queue', async () => {
   queue.items = [item('failed', 'failed'), item('queued')]; queue.runtime = idle;
   await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   queue.items = [item('queued')]; await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Export to Immich');
-  expect(host.querySelector('.export-retry-notice')).toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
 });
 it('keeps armed intent but limits selection, Q, and badges to failed items during Retry priority', async () => {
   queue.items = [item('queued')];
   await render(); await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
   queue.items = [item('failed', 'failed'), item('queued')]; await render();
-  expect(host.querySelector('.export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
   expect(current.armedIds.has('queued')).toBe(true);
   expect(current.selectedIds).toEqual([]);
   expect(host.querySelector('[data-asset-id="failed"] .export-status-failed')?.textContent).toBe('Export failed');
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   expect(host.querySelector<HTMLInputElement>('[data-asset-id="queued"] input')?.disabled).toBe(true);
   expect(host.querySelector<HTMLButtonElement>('[data-asset-id="queued"] .photo-card-button')?.disabled).toBe(true);
   await act(async () => current.selectAll());
@@ -127,20 +130,20 @@ it('suppresses unrelated armed badge through Retry transition and active run, th
   expect(queue.startRuntime).not.toHaveBeenCalled();
   await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
   await act(async () => { finishRetry(); await new Promise(resolve => setTimeout(resolve, 0)); });
   expect(queue.startRuntime).toHaveBeenCalledWith(['failed']);
   await render();
   expect(host.querySelector('[data-asset-id="failed"] .export-status-waiting')).not.toBeNull();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
   queue.runtime = null; await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
   queue.items = [item('queued')]; queue.runtime = idle; await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')?.textContent).toBe('Ready to export');
-  expect(host.querySelector('.export-retry-notice')).toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
 });
 it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent remains', async () => {
@@ -154,14 +157,14 @@ it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent 
   expect(current.removalError).toBe('retryFailed');
   expect(current.armedIds.has('queued')).toBe(true);
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
-  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
 });
 it.each(['ja', 'en'])('shows the Retry priority explanation in %s and hides it during ordinary export', async language => {
   await i18n.changeLanguage(language);
   await render();
-  expect(host.querySelector('.export-retry-notice')).toBeNull();
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
   queue.items = [item('failed', 'failed')]; await render();
-  expect(host.querySelector('.export-retry-notice')?.textContent).toBe(language === 'ja'
+  expect(host.querySelector('.home-tabs-bar .export-retry-notice')?.textContent).toBe(language === 'ja'
     ? '出力に失敗した写真があるので、失敗した写真のみ操作できます'
     : 'Some photos failed to export, so only failed photos can be managed.');
 });

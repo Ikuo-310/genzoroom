@@ -79,6 +79,15 @@ afterEach(() => {
 });
 
 describe('Home Export management', () => {
+  it('places the Retry priority explanation beside the tabs and keeps it out of the action toolbar', async () => {
+    api.queue.mockResolvedValue([{ assetId: 'failed-a', status: 'failed', queuedAt: 'q', updatedAt: 'u' }]);
+    await mount(); expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
+    await key('e');
+    expect(host.querySelector('.home-tabs-bar .export-retry-notice')?.textContent)
+      .toBe('Some photos failed to export, so only failed photos can be managed.');
+    expect(host.querySelector('.export-toolbar .export-retry-notice')).toBeNull();
+    expect(host.querySelector('.home-tabs-bar')?.lastElementChild?.classList.contains('export-retry-notice')).toBe(true);
+  });
   it('shares the Gallery Queue snapshot and fetches metadata only while Export is visible', async () => {
     api.queue.mockResolvedValue([{ assetId: 'queued-a', status: 'queued', queuedAt: 'q', updatedAt: 'u' }]);
     await mount(); expect(api.queue).toHaveBeenCalledTimes(1); expect(api.detail).not.toHaveBeenCalled();

@@ -10,6 +10,11 @@ import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
 
+export function ExportRetryPriorityNotice({ management }: { management: ExportManagementState }) {
+  const { t } = useTranslation();
+  return management.retryPriority ? <p className="export-retry-notice">{t('exportManagement.retryPriorityNotice')}</p> : null;
+}
+
 export function ExportManagementToolbar({ management }: { management: ExportManagementState }) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
@@ -28,17 +33,14 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
       </div>
     </div>
     <div className="export-thumbnail-control"><HomeThumbnailSizeControl /></div>
-    <div className="export-primary-actions">
-      {management.retryPriority && <p className="export-retry-notice">{t('exportManagement.retryPriorityNotice')}</p>}
-      <div className="export-action-group">
-        {management.queue.runtime?.status === 'active'
-          ? <button type="button" className={`immich-action-button${management.queue.runtime.stopRequested ? ' export-stop-requested' : ''}`}
-            disabled={busy || !!management.queue.cancelling || !management.queue.runtime.stopAllowed}
-            title={t('exportManagement.cancelExplanation')} onClick={management.cancelExport}>{t('exportManagement.cancel')}</button>
-          : management.failedIds.length
-            ? <button type="button" className="immich-action-button" disabled={!management.canRetryFailed} onClick={management.requestRetryFailed}>{t('exportManagement.retryExport')}</button>
-            : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
-      </div>
+    <div className="export-action-group">
+      {management.queue.runtime?.status === 'active'
+        ? <button type="button" className={`immich-action-button${management.queue.runtime.stopRequested ? ' export-stop-requested' : ''}`}
+          disabled={busy || !!management.queue.cancelling || !management.queue.runtime.stopAllowed}
+          title={t('exportManagement.cancelExplanation')} onClick={management.cancelExport}>{t('exportManagement.cancel')}</button>
+        : management.failedIds.length
+          ? <button type="button" className="immich-action-button" disabled={!management.canRetryFailed} onClick={management.requestRetryFailed}>{t('exportManagement.retryExport')}</button>
+          : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
     </div>
   </div>{management.confirmation && <StackRedetectDialog onConfirm={management.confirmExport} onCancel={management.cancelConfirmation}
     title={t(management.confirmation.kind === 'start' ? 'exportManagement.exportToImmich'

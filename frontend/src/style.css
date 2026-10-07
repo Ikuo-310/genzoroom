@@ -60,9 +60,9 @@ button:disabled { opacity: 0.6; cursor: wait; }
 :where(.home-page, .settings-dialog) button:hover:not(:disabled) { background: var(--selection); }
 :where(.home-page, .settings-dialog) button:focus-visible { outline-color: var(--accent); }
 .home-content { width: 100%; min-width: 0; min-height: 0; margin-top: 0; }
-.home-tabs-bar { padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
+.home-tabs-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-width: 0; padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
-.home-tabs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 40px; flex: 0 0 auto; }
+.home-tabs { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: flex-start; gap: 4px 40px; min-width: 0; max-width: 100%; }
 .home-tabs-gallery, .home-tabs-management { display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
 .export-toolbar { justify-content: flex-end; font-size: 0.85rem; }
 .export-queue-grid { display: grid; grid-template-columns: repeat(var(--export-columns), minmax(0, 1fr)); gap: 16px; align-items: start; min-width: 0; padding: 2px; }
@@ -82,8 +82,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .export-queue-card .photo-card-button:disabled { opacity: 1; cursor: default; }
 .export-queue-card .photo-selection-input:disabled { cursor: default; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
-.export-primary-actions { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; flex-direction: column; align-items: flex-end; }
-.export-retry-notice { max-width: min(30rem, 100%); margin: 0 0 4px; color: var(--export-waiting); font-size: 0.78rem; font-weight: 600; line-height: 1.35; text-align: right; }
+.export-retry-notice { flex: 0 1 auto; min-width: 0; max-width: min(36rem, 100%); margin: 0 0 0 auto; color: var(--export-waiting); font-size: 0.9rem; font-weight: 600; line-height: 1.35; text-align: right; }
 /* Immich actions stay visually distinct from local operations and destructive controls. */
 .immich-action-button { color: #fff; background: #a83f46; border: 1px solid #ce6068; }
 .immich-action-button:hover:not(:disabled) { background: #bf4c54; }
