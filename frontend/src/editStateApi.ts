@@ -35,12 +35,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function checkedResponse(value: unknown, assetId: string): EditStateResponse {
+function checkedResponse(value: unknown, assetId: string, requireRecipeVersion?: 18): EditStateResponse {
   if (!isRecord(value) || !('state' in value)) throw new EditStateApiError('invalid_state');
   if (value.state === null && Object.keys(value).length === 1) return { state: null };
   if (value.state === null || !Number.isSafeInteger(value.revision) || (value.revision as number) < 1
     || typeof value.updatedAt !== 'string' || typeof value.lastSaveId !== 'string'
     || Number.isNaN(Date.parse(value.updatedAt))) throw new EditStateApiError('invalid_state');
+  // Engine diagnostics must reject legacy data before the editor's in-memory migration.
+  if (requireRecipeVersion && isRecord(value.state) && value.state.recipeVersion !== requireRecipeVersion) {
+    throw new EditStateApiError('invalid_state', undefined, 'unsupported_recipe_version');
+  }
   const validated = validateEditStateSnapshot(value.state);
   if (!validated.ok || !isRecord(value.state) || !isRecord(value.state.sourceIdentity)
     || value.state.sourceIdentity.assetId !== assetId) throw new EditStateApiError('invalid_state');
@@ -71,9 +75,9 @@ async function request(url: string, init: RequestInit): Promise<Response> {
   throw new EditStateApiError(kind, response.status, code, uncertainSave ? 'unknown' : 'rejected');
 }
 
-export async function getAssetEditState(assetId: string, signal: AbortSignal): Promise<EditStateResponse> {
+export async function getAssetEditState(assetId: string, signal: AbortSignal, options?: { requireRecipeVersion: 18 }): Promise<EditStateResponse> {
   const response = await request(`/api/assets/${encodeURIComponent(assetId)}/edit-state`, { signal });
-  return checkedResponse(await readResponse(response), assetId);
+  return checkedResponse(await readResponse(response), assetId, options?.requireRecipeVersion);
 }
 
 export async function getAssetEditStatuses(assetIds: string[], signal: AbortSignal): Promise<AssetEditStatuses> {

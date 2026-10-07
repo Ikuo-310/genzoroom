@@ -552,6 +552,7 @@
     },
     "jpegTab": "Real JPEG",
     "webgpuTab": "WebGPU",
+    "exportEngineTab": "Export Engine",
     "environmentFields": {
       "secureContext": "Secure Context",
       "crossOriginIsolated": "Cross-origin isolated",
@@ -563,6 +564,51 @@
       "viewportHeight": "Viewport height (CSS px)",
       "userAgent": "User agent",
       "platform": "Platform"
+    }
+  },
+  "exportEngine": {
+    "description": "Generate a JPEG with the Backend Export Engine using the saved Recipe. Nothing is written to Immich.",
+    "settings": "JPEG / quality 95 / 4:4:4 / sRGB / original resolution",
+    "run": "Run comparison",
+    "frontend": "Frontend Preview",
+    "backend": "Backend Export JPEG",
+    "status": {
+      "idle": "Not run",
+      "recipe": "Loading saved Recipe",
+      "original": "Fetching original",
+      "preview": "Generating Frontend Preview",
+      "backend": "Running Backend Export Engine",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "error": {
+      "candidate_load_failed": "Could not load JPEG candidates.",
+      "saved_recipe_unavailable": "No usable saved Recipe is available.",
+      "unsupported_recipe_version": "The saved Recipe version is unsupported. Recipe v18 is required.",
+      "saved_recipe_changed": "The saved Recipe changed. Run again to compare the same revision.",
+      "original_fetch_failed": "Could not fetch the JPEG original.",
+      "decode_failed": "Could not decode the JPEG.",
+      "invalid_icc": "The embedded ICC profile could not be processed.",
+      "render_failed": "Recipe rendering failed.",
+      "encode_failed": "JPEG encoding failed.",
+      "backend_unavailable": "The backend diagnostic is unavailable or returned an invalid response."
+    },
+    "values": {
+      "sourceWidth": "Source width",
+      "sourceHeight": "Source height",
+      "outputWidth": "Output width",
+      "outputHeight": "Output height",
+      "sourceIcc": "Source ICC",
+      "outputColorSpace": "Output color space",
+      "recipeVersion": "Recipe version",
+      "outputBytes": "Output JPEG bytes",
+      "decodeMs": "Decode time",
+      "renderMs": "Render time",
+      "encodeMs": "Encode time",
+      "totalMs": "Total backend engine time",
+      "quality": "JPEG quality",
+      "subsampling": "Chroma subsampling"
     }
   },
   "jpegDiagnostics": {

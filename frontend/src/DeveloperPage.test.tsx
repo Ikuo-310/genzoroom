@@ -199,7 +199,7 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     const webgpuTab = host.querySelector<HTMLButtonElement>('#webgpu-tab')!;
     await act(async () => webgpuTab.focus());
     await act(async () => webgpuTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
-    expect(document.activeElement).toBe(host.querySelector('#logs-tab'));
+    expect(document.activeElement).toBe(host.querySelector('#exportEngine-tab'));
     await act(async () => webgpuTab.click());
     expect(jpegPanel.hidden).toBe(true); expect(webgpuPanel.hidden).toBe(false);
     expect(webgpuTab.getAttribute('aria-selected')).toBe('true');
@@ -275,13 +275,13 @@ it('keeps the manually selected JPEG, filename and candidate list while switchin
   expect(fetch.mock.calls.filter(([url]) => !url.startsWith('/api/developer/logs/'))).toHaveLength(1);
 });
 
-it('selects Logs initially and follows three-tab keyboard order while retaining every panel', async () => {
+it('selects Logs initially and follows four-tab keyboard order while retaining every panel', async () => {
   const { DeveloperPage } = await import('./DeveloperPage');
   await act(async () => root.render(<DeveloperPage />));
   const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const panels = [...host.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
-  expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab']);
-  expect(panels.map(panel => panel.hidden)).toEqual([false, true, true]);
+  expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab', 'exportEngine-tab']);
+  expect(panels.map(panel => panel.hidden)).toEqual([false, true, true, true]);
   const jpeg = host.querySelector('#jpeg-panel section'), webgpu = host.querySelector('#webgpu-panel section');
   const press = async (key: string, expected: number) => {
     const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true')!;
@@ -290,8 +290,8 @@ it('selects Logs initially and follows three-tab keyboard order while retaining 
     expect(tabs.map(tab => tab.tabIndex)).toEqual(tabs.map((_, index) => index === expected ? 0 : -1));
     expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(tabs.map((_, index) => String(index === expected)));
   };
-  await press('ArrowLeft', 2); await press('ArrowRight', 0); await press('ArrowRight', 1);
-  await press('ArrowRight', 2); await press('Home', 0); await press('End', 2);
+  await press('ArrowLeft', 3); await press('ArrowRight', 0); await press('ArrowRight', 1);
+  await press('ArrowRight', 2); await press('ArrowRight', 3); await press('Home', 0); await press('End', 3);
   expect(host.querySelector('#jpeg-panel section')).toBe(jpeg); expect(host.querySelector('#webgpu-panel section')).toBe(webgpu);
   expect(host.querySelector('#environment-title')?.closest('section')?.compareDocumentPosition(host.querySelector('[role="tablist"]')!)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

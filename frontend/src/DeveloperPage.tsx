@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
+import { ExportEngineDiagnostics } from './ExportEngineDiagnostics';
 import { DeveloperLogs } from './DeveloperLogsPanel';
 import { frontendLogger } from './frontendLogging';
 import { disableBackendLoggingOnExit } from './developerLogs';
@@ -10,7 +11,7 @@ import { collectDiagnosticsEnvironment, createDiagnosticsReport, createJpegDiagn
   createWebGpuReport, exportDiagnosticsReport, exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
 import './developer.css';
 
-const diagnosticTabs = ['logs', 'jpeg', 'webgpu'] as const;
+const diagnosticTabs = ['logs', 'jpeg', 'webgpu', 'exportEngine'] as const;
 type DiagnosticTab = typeof diagnosticTabs[number];
 
 export function DeveloperPage() {
@@ -99,6 +100,9 @@ export function DeveloperPage() {
     </div>
     <div id="webgpu-panel" role="tabpanel" aria-labelledby="webgpu-tab" tabIndex={0} hidden={selectedTab !== 'webgpu'}>
       <WebGpuDiagnostics onReport={acceptReport} onExport={exportWebGpu} exportError={exportFailed.webgpu} />
+    </div>
+    <div id="exportEngine-panel" role="tabpanel" aria-labelledby="exportEngine-tab" tabIndex={0} hidden={selectedTab !== 'exportEngine'}>
+      <ExportEngineDiagnostics />
     </div>
   </main>;
 }

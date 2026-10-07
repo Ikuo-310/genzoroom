@@ -545,6 +545,7 @@
     },
     "jpegTab": "実写JPEG",
     "webgpuTab": "WebGPU",
+    "exportEngineTab": "Export Engine",
     "environmentFields": {
       "secureContext": "Secure Context",
       "crossOriginIsolated": "クロスオリジン分離",
@@ -556,6 +557,51 @@
       "viewportHeight": "ビューポート高さ（CSS px）",
       "userAgent": "ユーザーエージェント",
       "platform": "プラットフォーム"
+    }
+  },
+  "exportEngine": {
+    "description": "保存済みRecipeを使用してBackend Export EngineでJPEGを生成します。Immichへの書き込みは行いません。",
+    "settings": "JPEG / 品質95 / 4:4:4 / sRGB / 元解像度",
+    "run": "比較を実行",
+    "frontend": "Frontend Preview",
+    "backend": "Backend Export JPEG",
+    "status": {
+      "idle": "未実行",
+      "recipe": "保存済みRecipe取得中",
+      "original": "Original取得中",
+      "preview": "Frontend Preview生成中",
+      "backend": "Backend Export Engine実行中",
+      "completed": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル"
+    },
+    "error": {
+      "candidate_load_failed": "JPEG候補を取得できませんでした。",
+      "saved_recipe_unavailable": "利用できる保存済みRecipeがありません。",
+      "unsupported_recipe_version": "保存済みRecipeのバージョンに対応していません。v18が必要です。",
+      "saved_recipe_changed": "保存済みRecipeが変更されました。同じ状態で比較するため、再実行してください。",
+      "original_fetch_failed": "JPEGオリジナルを取得できませんでした。",
+      "decode_failed": "JPEGをデコードできませんでした。",
+      "invalid_icc": "埋め込みICCプロファイルを処理できませんでした。",
+      "render_failed": "Recipeによる現像に失敗しました。",
+      "encode_failed": "JPEGのエンコードに失敗しました。",
+      "backend_unavailable": "Backend診断を利用できないか、応答が不正です。"
+    },
+    "values": {
+      "sourceWidth": "元画像の幅",
+      "sourceHeight": "元画像の高さ",
+      "outputWidth": "出力画像の幅",
+      "outputHeight": "出力画像の高さ",
+      "sourceIcc": "元画像のICC",
+      "outputColorSpace": "出力色空間",
+      "recipeVersion": "Recipeバージョン",
+      "outputBytes": "出力JPEGサイズ（bytes）",
+      "decodeMs": "デコード時間",
+      "renderMs": "現像時間",
+      "encodeMs": "エンコード時間",
+      "totalMs": "Backend Engine合計時間",
+      "quality": "JPEG品質",
+      "subsampling": "クロマサブサンプリング"
     }
   },
   "jpegDiagnostics": {

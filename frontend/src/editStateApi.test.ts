@@ -56,6 +56,9 @@ describe('edit-state API client', () => {
     expect(fetcher.mock.calls[0][1]).not.toHaveProperty('method', 'PUT');
     expect(old.state.currentRecipe.version).toBe(17);
     expect(old.state.currentRecipe).not.toHaveProperty('adjustmentEnabled');
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(old), { status: 200 }));
+    await expect(getAssetEditState(assetId, new AbortController().signal, { requireRecipeVersion: 18 }))
+      .rejects.toMatchObject({ code: 'unsupported_recipe_version' });
   });
 
   it.each([
