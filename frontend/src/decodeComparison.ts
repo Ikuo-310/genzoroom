@@ -49,14 +49,18 @@ export function assessDecodeDifference(stats: DecodeStatistics): DecodeAssessmen
 
 export async function compareDecodedPixels(frontend: Pick<ImageData, 'width' | 'height' | 'data'>,
   backend: BackendDecodedImage, signal: AbortSignal, yieldControl = yieldToUi): Promise<DecodeStatistics> {
+  return compareRgbPixels({ width: frontend.width, height: frontend.height, pixels: frontend.data, stride: 4 },
+    { width: backend.metadata.width, height: backend.metadata.height, pixels: backend.pixels, stride: 3 }, signal, yieldControl);
+}
+
+export type RgbPixelBuffer = { width: number; height: number; pixels: ArrayLike<number>; stride: 3 | 4 };
+export async function compareRgbPixels(reference: RgbPixelBuffer, comparison: RgbPixelBuffer,
+  signal: AbortSignal, yieldControl = yieldToUi): Promise<DecodeStatistics> {
   signal.throwIfAborted();
-  if (frontend.width !== backend.metadata.width || frontend.height !== backend.metadata.height) {
-    throw new DecodeComparisonError('dimension_mismatch');
-  }
-  const count = frontend.width * frontend.height;
-  if (!Number.isSafeInteger(count) || count < 1 || frontend.data.length !== count * 4 || backend.pixels.length !== count * 3) {
-    throw new DecodeComparisonError('invalid_binary_response');
-  }
+  if (reference.width !== comparison.width || reference.height !== comparison.height) throw new DecodeComparisonError('dimension_mismatch');
+  const count = reference.width * reference.height;
+  if (!Number.isSafeInteger(count) || count < 1 || reference.pixels.length !== count * reference.stride
+    || comparison.pixels.length !== count * comparison.stride) throw new DecodeComparisonError('invalid_binary_response');
   const signed = [0, 0, 0], absolute = [0, 0, 0], maxima = [0, 0, 0], thresholds = [0, 0, 0, 0];
   let squared = 0, exact = 0;
   // Accumulate directly from byte buffers: no full-image float or difference arrays.
@@ -66,7 +70,7 @@ export async function compareDecodedPixels(frontend: Pick<ImageData, 'width' | '
     for (let pixel = start; pixel < end; pixel++) {
       let max = 0;
       for (let channel = 0; channel < 3; channel++) {
-        const delta = backend.pixels[pixel * 3 + channel] - frontend.data[pixel * 4 + channel];
+        const delta = comparison.pixels[pixel * comparison.stride + channel] - reference.pixels[pixel * reference.stride + channel];
         const magnitude = Math.abs(delta);
         signed[channel] += delta; absolute[channel] += magnitude; squared += delta * delta;
         maxima[channel] = Math.max(maxima[channel], magnitude); max = Math.max(max, magnitude);

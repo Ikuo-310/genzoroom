@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
-from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, decode_diagnostic
+from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -55,7 +55,7 @@ MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
 
 @app.exception_handler(RequestValidationError)
 async def safe_diagnostic_validation(request: Request, error: RequestValidationError):
-    if request.url.path in ("/developer/export-engine", "/developer/export-engine/decode"):
+    if request.url.path in ("/developer/export-engine", "/developer/export-engine/decode", "/developer/export-engine/roundtrip"):
         # Pydantic's default response reflects rejected inputs, including injected Recipe bodies.
         return JSONResponse(status_code=422, content={"detail": {"code": "invalid_diagnostic_request"}},
                             headers={"Cache-Control": "private, no-store"})
@@ -153,6 +153,61 @@ async def export_engine_diagnostic(payload: ExportEngineDiagnosticRequest) -> Re
     # JSON header values are solely finite numbers and fixed enums from the engine.
     headers["X-GenzoRoom-Export-Engine"] = json.dumps(metadata, separators=(",", ":"), allow_nan=False)
     return Response(content=jpeg, media_type="image/jpeg", headers=headers)
+
+
+@app.post("/developer/export-engine/roundtrip")
+async def export_engine_roundtrip_diagnostic(payload: ExportEngineDiagnosticRequest) -> Response:
+    headers = {"Cache-Control": "private, no-store"}
+
+    def fail(code: str, status: int = 422, phase: str = "recipe") -> HTTPException:
+        diagnostic_failure(code, phase)
+        return HTTPException(status_code=status, detail={"code": code}, headers=headers)
+
+    try:
+        saved = await run_in_threadpool(get_edit_state, payload.assetId)
+    except StoreUnavailable as error:
+        raise fail("saved_recipe_unavailable", 503) from error
+    if saved["state"] is None:
+        raise fail("saved_recipe_unavailable", 404)
+    current = saved["state"]["currentRecipe"]
+    if current.get("version") != 18:
+        raise fail("unsupported_recipe_version")
+    if saved["revision"] != payload.expectedRevision:
+        raise fail("saved_recipe_changed", 409)
+    try:
+        recipe = copy.deepcopy(_recipe(current, 18))
+    except InvalidEditState as error:
+        raise fail("saved_recipe_unavailable") from error
+    saved = None
+    original = None
+    source = bytearray()
+    try:
+        try:
+            original = await get_asset_original(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), payload.assetId)
+            async for chunk in original.chunks():
+                source.extend(chunk)
+        finally:
+            if original is not None:
+                await original.close()
+    except Exception as error:
+        source.clear()
+        raise fail("original_fetch_failed", 502, "original") from error
+    try:
+        jpeg, metadata, rgb = await run_in_threadpool(generate_roundtrip_diagnostic, source, recipe)
+    except ExportEngineError as error:
+        raise HTTPException(status_code=422, detail={"code": error.code}, headers=headers) from error
+    finally:
+        source.clear()
+
+    metadata.update(pixelFormat="rgb8", rgbBytes=len(rgb))
+    headers["X-GenzoRoom-Encode-Roundtrip"] = json.dumps(metadata, separators=(",", ":"), allow_nan=False)
+
+    async def parts():
+        # Yield the original encoder output and its source separately to avoid one combined server-side copy.
+        yield jpeg
+        yield rgb
+
+    return StreamingResponse(parts(), media_type="application/octet-stream", headers=headers)
 
 
 @app.get("/developer/logs/backend")

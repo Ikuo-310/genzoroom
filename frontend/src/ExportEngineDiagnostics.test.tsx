@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExportEngineDiagnostics, type ExportEngineDependencies } from './ExportEngineDiagnostics';
 import { ExportEngineDiagnosticError } from './exportEngineApi';
-import type { BackendDecodedImage } from './exportEngineApi';
+import type { BackendDecodedImage, EncodeRoundTripSource } from './exportEngineApi';
 import { defaultRecipe } from './editing';
 import { createEditStateSnapshot } from './editState';
 import { EditStateApiError } from './editStateApi';
@@ -43,9 +43,13 @@ const settle = async () => { await act(async () => { await new Promise(resolve =
 const select = async () => { await click(choose()); await click(host.querySelector<HTMLButtonElement>('.developer-jpeg-candidates button')!); };
 const decodeRun = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.run'))!;
 const decodeCancel = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.cancel'))!;
+const roundTripRun = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('encodeRoundTrip.run'))!;
+const roundTripCancel = () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('encodeRoundTrip.cancel'))!;
 const decoded = (): BackendDecodedImage => ({ pixels: new Uint8Array([1,2,3,4,5,6]), metadata: {
   width: 2, height: 1, sourceWidth: 2, sourceHeight: 1, pixelFormat: 'rgb8', sourceIcc: 'absent', orientationNormalized: true, backendDecodeMs: 1,
 } });
+const roundTripSource = (): EncodeRoundTripSource => ({ jpeg: new Blob(['jpeg'], { type: 'image/jpeg' }), pixels: new Uint8Array([1,2,3,4,5,6]),
+  metadata: { ...metadata, pixelFormat: 'rgb8', rgbBytes: 6 } });
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); originalLanguage = i18n.language;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -265,6 +269,72 @@ it('exports Decode Compare results from this tab without private selection data 
     const json = JSON.parse(text); expect(json.schemaVersion).toBe(1); expect(json.decodeComparison.status).toBe('completed');
     expect(json.decodeComparison.statistics.exactMatchPixelPercent).toBe(100);
     expect(text).not.toMatch(/PRIVATE|assetId|filename|recipe"|pixels"|blob:/);
+    vi.runAllTimers();
+  } finally { vi.useRealTimers(); }
+});
+
+it.each(['en', 'ja'])('runs JPEG round-trip from the shared selected Asset in %s', async language => {
+  await i18n.changeLanguage(language); const { dependencies, saved } = setup();
+  const backend = vi.fn(async () => roundTripSource());
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} roundTripDependencies={{ backend }} />));
+  await select(); await click(roundTripRun()); await settle();
+  expect(dependencies.saved).toHaveBeenCalledExactlyOnceWith('first', expect.any(AbortSignal), { requireRecipeVersion: 18 });
+  expect(backend).toHaveBeenCalledExactlyOnceWith('first', saved.revision, expect.any(AbortSignal));
+  expect(dependencies.decode).toHaveBeenCalledWith({ kind: 'jpeg-original', url: 'blob:diagnostic-1' }, expect.any(AbortSignal));
+  expect(dependencies.render).not.toHaveBeenCalled(); expect(dependencies.backend).not.toHaveBeenCalled();
+  expect(host.textContent).toContain(i18n.t('encodeRoundTrip.status.completed'));
+  expect(host.textContent).toContain(i18n.t('encodeRoundTrip.statistics'));
+  await click(decodeRun()); await settle();
+  expect(host.textContent).toContain(i18n.t('decodeCompare.status.completed'));
+  await click(run()); await settle();
+  expect(host.querySelector('.developer-export-comparison img')).not.toBeNull();
+});
+
+it('guards other runs and suppresses late JPEG round-trip data after cancellation', async () => {
+  const { dependencies } = setup(); const pending = deferred<EncodeRoundTripSource>();
+  const backend = vi.fn((_assetId: string, _revision: number, _signal: AbortSignal) => pending.promise);
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} roundTripDependencies={{ backend }} />));
+  await select(); await click(roundTripRun()); await settle();
+  expect(roundTripRun().disabled).toBe(true); expect(decodeRun().disabled).toBe(true); expect(run().disabled).toBe(true); expect(choose().disabled).toBe(true);
+  const signal = backend.mock.calls[0][2]; await click(roundTripCancel()); expect(signal.aborted).toBe(true);
+  await act(async () => pending.resolve(roundTripSource())); await settle();
+  expect(host.textContent).toContain(i18n.t('encodeRoundTrip.status.cancelled'));
+  expect(host.textContent).not.toContain(i18n.t('encodeRoundTrip.statistics'));
+  expect(run().disabled).toBe(false);
+});
+
+it.each(['unmount', 'pagehide'] as const)('aborts JPEG round-trip and cleans the generated JPEG URL on %s', async departure => {
+  const { dependencies } = setup(); const pending = deferred<ImageData>();
+  dependencies.decode = vi.fn(() => pending.promise);
+  const backend = vi.fn(async () => roundTripSource());
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} roundTripDependencies={{ backend }} />));
+  await select(); await click(roundTripRun()); await settle();
+  const signal = vi.mocked(dependencies.decode).mock.calls[0][1];
+  if (departure === 'unmount') { act(() => root.unmount()); root = createRoot(host); }
+  else act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  expect(signal.aborted).toBe(true); expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-1');
+  await act(async () => pending.resolve(image())); await settle();
+  expect(host.textContent).not.toContain(i18n.t('encodeRoundTrip.statistics'));
+});
+
+it('includes safe Encode Round-trip values in the tab-specific JSON', async () => {
+  const { dependencies } = setup();
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} roundTripDependencies={{ backend: async () => roundTripSource() }} />));
+  await select(); await click(roundTripRun()); await settle();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const anchor = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toMatch(/^genzoroom-export-engine-diagnostics-\d{8}T\d{6}Z\.json$/);
+    });
+    await click([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('decodeCompare.exportJson'))!);
+    expect(anchor).toHaveBeenCalledOnce();
+    const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)![0] as Blob;
+    const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
+    const json = JSON.parse(text);
+    expect(json.encodeRoundTripComparison.status).toBe('completed');
+    expect(json.encodeRoundTripComparison.deltaDirection).toBe('decoded-jpeg-minus-pre-encode-rgb');
+    expect(json.encodeRoundTripComparison.encoder).toEqual({ format: 'JPEG', quality: 95, subsampling: '4:4:4', outputColorSpace: 'sRGB' });
+    expect(text).not.toMatch(/PRIVATE|assetId|filename|recipe"|jpeg"|pixels"|blob:/);
     vi.runAllTimers();
   } finally { vi.useRealTimers(); }
 });

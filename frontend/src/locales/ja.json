@@ -634,6 +634,30 @@
       "greenBias": "Green bias（G − R/B平均）"
     }
   },
+  "encodeRoundTrip": {
+    "title": "JPEG往復比較",
+    "description": "エンコード前のRGBと、生成JPEGをブラウザーで再デコードした結果を比較します。",
+    "deltaNote": "差分は「ブラウザーで再デコードしたJPEG − Backendのエンコード前RGB」です。判定は診断の目安で、品質の合否ではありません。",
+    "run": "JPEG往復比較を実行",
+    "cancel": "JPEG往復比較をキャンセル",
+    "statistics": "JPEG往復差分統計",
+    "preEncode": "エンコード前RGB",
+    "decodedJpeg": "ブラウザーで再デコードしたJPEG",
+    "status": { "not_run": "未実行", "running": "実行中", "completed": "完了", "failed": "失敗", "cancelled": "キャンセル" },
+    "phase": { "idle": "待機中", "backend": "Backendで現像・エンコード中", "jpeg_decode": "生成JPEGをブラウザーでデコード中", "comparison": "RGB pixelを比較中" },
+    "timing": { "renderMs": "Backend現像時間", "encodeMs": "Backendエンコード時間", "jpegDecodeMs": "JPEG再デコード時間", "backendRequestMs": "Backendリクエスト時間", "comparisonMs": "比較時間", "totalMs": "診断合計時間" },
+    "values": { "recipeVersion": "Recipeバージョン", "quality": "JPEG品質", "subsampling": "Subsampling", "outputColorSpace": "出力色空間", "sourceIcc": "元画像のICC" },
+    "assessment": { "brighter": "JPEG往復後は明るい傾向", "darker": "JPEG往復後は暗い傾向", "neutral": "明るさの明確な方向差なし", "green": "JPEG往復後はgreen側の傾向", "magenta": "JPEG往復後はmagenta側の傾向", "minimal": "平均RGB差はごく小さい", "small": "平均RGB差は小さい", "noticeable": "平均RGB差が比較的大きい" },
+    "error": {
+      "no_asset_selected": "先にAssetを選択してください。", "saved_recipe_unavailable": "利用できる保存済みRecipeがありません。",
+      "unsupported_recipe_version": "保存済みRecipeのバージョンに対応していません。", "saved_recipe_changed": "保存済みRecipeが変更されました。再実行してください。",
+      "original_fetch_failed": "JPEGオリジナルを取得できませんでした。", "decode_failed": "JPEGオリジナルをデコードできませんでした。",
+      "invalid_icc": "埋め込みICCプロファイルを処理できませんでした。", "render_failed": "Recipeによる現像に失敗しました。",
+      "encode_failed": "JPEGのエンコードに失敗しました。", "invalid_rgb_response": "Backend RGB応答が不正です。",
+      "jpeg_decode_failed": "生成JPEGをデコードできませんでした。", "dimension_mismatch": "エンコード前RGBと再デコードJPEGの寸法が異なります。",
+      "backend_unavailable": "Backend診断を利用できないか、応答が不正です。", "cancelled": "比較をキャンセルしました。"
+    }
+  },
   "exportEngine": {
     "description": "保存済みRecipeを使用してBackend Export EngineでJPEGを生成します。Immichへの書き込みは行いません。",
     "settings": "JPEG / 品質95 / 4:4:4 / sRGB / 元解像度",

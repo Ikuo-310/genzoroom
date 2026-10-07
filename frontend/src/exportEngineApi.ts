@@ -100,3 +100,78 @@ export async function fetchBackendDecode(assetId: string, signal: AbortSignal): 
       orientationNormalized: true, backendDecodeMs: value.backendDecodeMs } };
   } catch { signal.throwIfAborted(); throw new DecodeComparisonError('invalid_binary_response'); }
 }
+
+export const ENCODE_ROUNDTRIP_ERRORS = ['no_asset_selected', 'saved_recipe_unavailable', 'unsupported_recipe_version',
+  'saved_recipe_changed', 'original_fetch_failed', 'decode_failed', 'invalid_icc', 'render_failed', 'encode_failed',
+  'invalid_rgb_response', 'jpeg_decode_failed', 'dimension_mismatch', 'backend_unavailable', 'cancelled'] as const;
+export type EncodeRoundTripErrorCode = typeof ENCODE_ROUNDTRIP_ERRORS[number];
+export class EncodeRoundTripError extends Error {
+  constructor(readonly code: EncodeRoundTripErrorCode) { super(code); }
+}
+export type EncodeRoundTripMetadata = ExportEngineMetadata & { pixelFormat: 'rgb8'; rgbBytes: number };
+export type EncodeRoundTripSource = { jpeg: Blob; pixels: Uint8Array; metadata: EncodeRoundTripMetadata };
+
+export async function fetchExportEngineRoundTrip(assetId: string, expectedRevision: number, signal: AbortSignal): Promise<EncodeRoundTripSource> {
+  let response: Response;
+  try {
+    response = await fetch('/api/developer/export-engine/roundtrip', {
+      method: 'POST', cache: 'no-store', signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetId, expectedRevision }),
+    });
+  } catch { signal.throwIfAborted(); throw new EncodeRoundTripError('backend_unavailable'); }
+  signal.throwIfAborted();
+  if (!response.ok) {
+    let code: EncodeRoundTripErrorCode = 'backend_unavailable';
+    try { const body = await response.json(); if (ENCODE_ROUNDTRIP_ERRORS.includes(body?.detail?.code)) code = body.detail.code; }
+    catch { /* Only bounded diagnostic codes may enter the UI or report. */ }
+    signal.throwIfAborted(); throw new EncodeRoundTripError(code);
+  }
+  try {
+    if (response.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/octet-stream') throw new Error();
+    const header = response.headers.get('X-GenzoRoom-Encode-Roundtrip');
+    if (!header || header.length > 1024) throw new Error();
+    const value = JSON.parse(header);
+    const integers = ['sourceWidth', 'sourceHeight', 'outputWidth', 'outputHeight', 'outputBytes', 'rgbBytes'] as const;
+    const times = ['decodeMs', 'renderMs', 'encodeMs', 'totalMs'] as const;
+    if (!value || integers.some(key => !Number.isSafeInteger(value[key]) || value[key] < 1)
+      || times.some(key => typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < 0)
+      || !['embedded', 'absent'].includes(value.sourceIcc) || value.outputColorSpace !== 'sRGB' || value.recipeVersion !== 18
+      || value.quality !== 95 || value.subsampling !== '4:4:4' || value.pixelFormat !== 'rgb8'
+      || value.outputWidth * value.outputHeight * 3 !== value.rgbBytes) throw new Error();
+    if (!Number.isSafeInteger(value.outputWidth * value.outputHeight * 3) || !response.body) throw new Error();
+    const reader = response.body.getReader(); const jpegParts: BlobPart[] = [];
+    const pixels = new Uint8Array(value.rgbBytes); let offset = 0;
+    let streamEnded = false;
+    try {
+      while (true) {
+        signal.throwIfAborted();
+        const { done, value: chunk } = await reader.read();
+        if (done) { streamEnded = true; break; }
+        if (chunk.length > value.outputBytes + value.rgbBytes - offset) throw new Error();
+        let local = 0;
+        if (offset < value.outputBytes) {
+          const jpegLength = Math.min(chunk.length, value.outputBytes - offset);
+          if (jpegLength) jpegParts.push(chunk.slice(0, jpegLength).buffer as ArrayBuffer);
+          offset += jpegLength; local += jpegLength;
+        }
+        if (local < chunk.length) {
+          const rgbChunk = chunk.subarray(local);
+          pixels.set(rgbChunk, offset - value.outputBytes);
+          offset += rgbChunk.length;
+        }
+      }
+    } finally {
+      if (!streamEnded) { try { await reader.cancel(); } catch { /* The request may already be aborted. */ } }
+      reader.releaseLock();
+    }
+    signal.throwIfAborted();
+    if (offset !== value.outputBytes + value.rgbBytes || !jpegParts.length) throw new Error();
+    const metadata: EncodeRoundTripMetadata = {
+      sourceWidth: value.sourceWidth, sourceHeight: value.sourceHeight, outputWidth: value.outputWidth, outputHeight: value.outputHeight,
+      sourceIcc: value.sourceIcc, outputColorSpace: 'sRGB', recipeVersion: 18, outputBytes: value.outputBytes,
+      decodeMs: value.decodeMs, renderMs: value.renderMs, encodeMs: value.encodeMs, totalMs: value.totalMs,
+      quality: 95, subsampling: '4:4:4', pixelFormat: 'rgb8', rgbBytes: value.rgbBytes,
+    };
+    return { jpeg: new Blob(jpegParts, { type: 'image/jpeg' }), pixels, metadata };
+  } catch { signal.throwIfAborted(); throw new EncodeRoundTripError('invalid_rgb_response'); }
+}

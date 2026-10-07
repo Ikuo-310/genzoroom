@@ -9,6 +9,8 @@ import { renderAdjustments } from './adjustmentPipeline';
 import { ExportEngineDiagnosticError, fetchExportEngineJpeg, type ExportEngineErrorCode, type ExportEngineMetadata } from './exportEngineApi';
 import { emptyDecodeComparison, runDecodeComparison, type DecodeComparisonDependencies, type DecodePhase } from './decodeComparison';
 import { createExportEngineReport, exportEngineReport, DECODE_STATISTIC_KEYS } from './exportEngineReport';
+import { emptyEncodeRoundTrip, runEncodeRoundTrip, type EncodeRoundTripDependencies, type EncodeRoundTripPhase } from './encodeRoundTrip';
+import type { EncodeRoundTripErrorCode } from './exportEngineApi';
 
 type Phase = 'idle' | 'recipe' | 'original' | 'preview' | 'backend' | 'completed' | 'failed' | 'cancelled';
 export interface ExportEngineDependencies {
@@ -16,8 +18,9 @@ export interface ExportEngineDependencies {
   render: typeof renderAdjustments; backend: typeof fetchExportEngineJpeg;
 }
 
-export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
+export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roundTripDependencies }: {
   dependencies?: Partial<ExportEngineDependencies>; decodeDependencies?: Partial<DecodeComparisonDependencies>;
+  roundTripDependencies?: Partial<EncodeRoundTripDependencies>;
 }) {
   const { t } = useTranslation();
   const [candidates, setCandidates] = useState<RecentAsset[]>([]);
@@ -30,6 +33,8 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
   const [previewReady, setPreviewReady] = useState(false);
   const [decodeReport, setDecodeReport] = useState(emptyDecodeComparison);
   const [decodePhase, setDecodePhase] = useState<DecodePhase>('idle');
+  const [roundTripReport, setRoundTripReport] = useState(emptyEncodeRoundTrip);
+  const [roundTripPhase, setRoundTripPhase] = useState<EncodeRoundTripPhase>('idle');
   const [jsonError, setJsonError] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ownCanvas = useCallback((node: HTMLCanvasElement | null) => {
@@ -41,7 +46,8 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
   const candidateRequest = useRef<AbortController | null>(null);
   const urls = useRef({ original: null as string | null, backend: null as string | null });
   const closed = useRef(false);
-  const busy = ['recipe', 'original', 'preview', 'backend'].includes(phase) || candidateStatus === 'loading' || decodeReport.status === 'running';
+  const busy = ['recipe', 'original', 'preview', 'backend'].includes(phase) || candidateStatus === 'loading'
+    || decodeReport.status === 'running' || roundTripReport.status === 'running';
   const release = () => {
     for (const key of ['original', 'backend'] as const) {
       if (urls.current[key]) URL.revokeObjectURL(urls.current[key]!);
@@ -64,12 +70,14 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
       setCandidateStatus('idle');
       setDecodeReport(value => value.status === 'running' ? { ...emptyDecodeComparison(), status: 'cancelled', error: 'cancelled' } : value);
       setDecodePhase('idle');
+      setRoundTripReport(value => value.status === 'running' ? { ...emptyEncodeRoundTrip(), status: 'cancelled', error: 'cancelled' } : value);
+      setRoundTripPhase('idle');
     };
     const show = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
       closed.current = false;
       setCandidates([]); setSelected(null); setPhase('idle');
-      setDecodeReport(emptyDecodeComparison()); setJsonError(false);
+      setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
     };
     window.addEventListener('pagehide', hide); window.addEventListener('pageshow', show);
     return () => { closeResources(); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); };
@@ -99,6 +107,31 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
       if (!closed.current && request.current === controller) setDecodeReport(report);
     } finally {
       if (request.current === controller) { request.current = null; setDecodePhase('idle'); }
+    }
+  };
+  const runRoundTrip = async () => {
+    if (closed.current || request.current || candidateRequest.current || !selected) return;
+    const controller = new AbortController(); request.current = controller;
+    setRoundTripReport({ ...emptyEncodeRoundTrip(), status: 'running' }); setJsonError(false);
+    try {
+      let saved: Awaited<ReturnType<typeof getAssetEditState>> | null = await (dependencies?.saved ?? getAssetEditState)(selected.id, controller.signal, { requireRecipeVersion: 18 });
+      if (controller.signal.aborted || closed.current || request.current !== controller) return;
+      if (!saved.state || !saved.revision) throw new EncodeRoundTripSafeError('saved_recipe_unavailable');
+      if (saved.state.currentRecipe.version !== 18) throw new EncodeRoundTripSafeError('unsupported_recipe_version');
+      const revision = saved.revision;
+      saved = null;
+      const report = await runEncodeRoundTrip(selected.id, revision, controller.signal, value => {
+        if (!closed.current && request.current === controller) setRoundTripPhase(value);
+      }, { decode: dependencies?.decode ?? decodeEditSource, ...roundTripDependencies });
+      if (!closed.current && request.current === controller) setRoundTripReport(report);
+    } catch (failure) {
+      if (closed.current || request.current !== controller) return;
+      const code: EncodeRoundTripErrorCode = controller.signal.aborted ? 'cancelled'
+        : failure instanceof EncodeRoundTripSafeError ? failure.code
+        : failure instanceof EditStateApiError && failure.code === 'unsupported_recipe_version' ? 'unsupported_recipe_version' : 'saved_recipe_unavailable';
+      setRoundTripReport({ ...emptyEncodeRoundTrip(), status: controller.signal.aborted ? 'cancelled' : 'failed', error: code });
+    } finally {
+      if (request.current === controller) { request.current = null; setRoundTripPhase('idle'); }
     }
   };
   const run = async () => {
@@ -166,7 +199,7 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
       <button type="button" disabled={busy || !selected} onClick={() => { void run(); }}>{t('exportEngine.run')}</button>
       <button type="button" disabled={busy} onClick={() => {
         setJsonError(false);
-        try { exportEngineReport(createExportEngineReport({ status: phase, error, metadata }, decodeReport)); }
+        try { exportEngineReport(createExportEngineReport({ status: phase, error, metadata }, decodeReport, new Date(), roundTripReport)); }
         catch { setJsonError(true); }
       }}>{t('decodeCompare.exportJson')}</button>
     </div>
@@ -175,7 +208,7 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
       {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={selected?.id === asset.id} onClick={() => {
         if (request.current || candidateRequest.current || closed.current) return;
-        reset(); setPhase('idle'); setSelected(asset); setDecodeReport(emptyDecodeComparison()); setJsonError(false);
+        reset(); setPhase('idle'); setSelected(asset); setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
       }}><img src={asset.thumbnail_url} alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" /><span>{asset.filename}</span></button>)}
     </div>}
     {selected && <p className="developer-jpeg-target">{selected.filename}</p>}
@@ -211,5 +244,31 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies }: {
         {DECODE_STATISTIC_KEYS.map(key => <div key={key}><dt>{t(`decodeCompare.values.${key}`)}</dt><dd>{decodeReport.statistics![key].toFixed(6)}{key.endsWith('Percent') ? ' %' : ''}</dd></div>)}
       </dl></>}
     </section>
+    <section aria-labelledby="encode-roundtrip-title">
+      <h3 id="encode-roundtrip-title">{t('encodeRoundTrip.title')}</h3><p>{t('encodeRoundTrip.description')}</p>
+      <p>{t('encodeRoundTrip.deltaNote')}</p>
+      <div className="developer-actions">
+        <button type="button" disabled={busy || !selected} onClick={() => { void runRoundTrip(); }}>{t('encodeRoundTrip.run')}</button>
+        <button type="button" disabled={roundTripReport.status !== 'running'} onClick={() => request.current?.abort()}>{t('encodeRoundTrip.cancel')}</button>
+      </div>
+      <p role="status" aria-live="polite">{t(`encodeRoundTrip.status.${roundTripReport.status}`)}
+        {roundTripReport.status === 'running' && ` — ${t(`encodeRoundTrip.phase.${roundTripPhase}`)}`}</p>
+      {roundTripReport.error && <p role="alert">{t(`encodeRoundTrip.error.${roundTripReport.error}`)}</p>}
+      {roundTripReport.assessment && <p>{t(`encodeRoundTrip.assessment.${roundTripReport.assessment.brightnessDirection}`)} · {t(`encodeRoundTrip.assessment.${roundTripReport.assessment.tintDirection}`)} · {t(`encodeRoundTrip.assessment.${roundTripReport.assessment.differenceLevel}`)}</p>}
+      <dl className="developer-diagnostics">
+        {(['preEncode', 'decodedJpeg'] as const).map(side => <div key={side}><dt>{t(`encodeRoundTrip.${side}`)}</dt>
+          <dd>{roundTripReport.dimensions[side] ? `${roundTripReport.dimensions[side]!.width} × ${roundTripReport.dimensions[side]!.height}` : '—'}</dd></div>)}
+        {(['recipeVersion', 'quality', 'subsampling', 'outputColorSpace', 'sourceIcc'] as const).map(key => <div key={key}><dt>{t(`encodeRoundTrip.values.${key}`)}</dt>
+          <dd>{roundTripReport[key] === null ? '—' : key === 'sourceIcc' ? t(`jpegDiagnostics.profileStatus.${roundTripReport.sourceIcc === 'embedded' ? 'embedded' : 'none'}`) : roundTripReport[key]}</dd></div>)}
+        {Object.entries(roundTripReport.timing).map(([key, value]) => <div key={key}><dt>{t(`encodeRoundTrip.timing.${key}`)}</dt><dd>{value === null ? '—' : `${value.toFixed(2)} ms`}</dd></div>)}
+      </dl>
+      {roundTripReport.statistics && <><h4>{t('encodeRoundTrip.statistics')}</h4><dl className="developer-diagnostics">
+        {DECODE_STATISTIC_KEYS.map(key => <div key={key}><dt>{t(`decodeCompare.values.${key}`)}</dt><dd>{roundTripReport.statistics![key].toFixed(6)}{key.endsWith('Percent') ? ' %' : ''}</dd></div>)}
+      </dl></>}
+    </section>
   </section>;
+}
+
+class EncodeRoundTripSafeError extends Error {
+  constructor(readonly code: EncodeRoundTripErrorCode) { super(code); }
 }

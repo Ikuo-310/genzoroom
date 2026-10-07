@@ -24,6 +24,16 @@ def diagnostic_failure(code: str, phase: str) -> None:
 
 def generate_diagnostic(source: bytearray, recipe: dict) -> tuple[bytes, dict]:
     """Called as one threadpool operation so decode/render/encode cannot block ASGI."""
+    jpeg, metadata, _ = _generate_diagnostic(source, recipe)
+    return jpeg, metadata
+
+
+def generate_roundtrip_diagnostic(source: bytearray, recipe: dict) -> tuple[bytes, dict, bytes]:
+    """Return the same run's pre-encode pixels for a browser JPEG round-trip comparison."""
+    return _generate_diagnostic(source, recipe)
+
+
+def _generate_diagnostic(source: bytearray, recipe: dict) -> tuple[bytes, dict, bytes]:
     total_started = perf_counter()
     phase = "decode"
     try:
@@ -45,7 +55,7 @@ def generate_diagnostic(source: bytearray, recipe: dict) -> tuple[bytes, dict]:
         metadata.update(outputWidth=rendered.width, outputHeight=rendered.height,
                         outputColorSpace="sRGB", recipeVersion=recipe["version"], outputBytes=len(jpeg),
                         quality=95, subsampling="4:4:4", totalMs=(perf_counter() - total_started) * 1000)
-        return jpeg, metadata
+        return jpeg, metadata, rendered.pixels
     except Exception as error:
         code = "invalid_icc" if isinstance(error, JpegCodecError) and error.code == "invalid_icc_profile" \
             else f"{phase}_failed"

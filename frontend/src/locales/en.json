@@ -641,6 +641,30 @@
       "greenBias": "Green bias (G − mean R/B)"
     }
   },
+  "encodeRoundTrip": {
+    "title": "JPEG Round-trip Compare",
+    "description": "Compare pre-encode RGB with the generated JPEG after browser re-decode.",
+    "deltaNote": "Delta is browser-decoded JPEG minus pre-encode Backend RGB. The assessment is a diagnostic guide, not a quality verdict.",
+    "run": "Run JPEG round-trip comparison",
+    "cancel": "Cancel JPEG round-trip comparison",
+    "statistics": "JPEG round-trip difference statistics",
+    "preEncode": "Pre-encode RGB",
+    "decodedJpeg": "Browser-decoded JPEG",
+    "status": { "not_run": "Not run", "running": "Running", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled" },
+    "phase": { "idle": "Idle", "backend": "Rendering and encoding on Backend", "jpeg_decode": "Decoding generated JPEG in browser", "comparison": "Comparing RGB pixels" },
+    "timing": { "renderMs": "Backend render time", "encodeMs": "Backend encode time", "jpegDecodeMs": "JPEG re-decode time", "backendRequestMs": "Backend request time", "comparisonMs": "Comparison time", "totalMs": "Total diagnostic time" },
+    "values": { "recipeVersion": "Recipe version", "quality": "JPEG quality", "subsampling": "Subsampling", "outputColorSpace": "Output color space", "sourceIcc": "Source ICC" },
+    "assessment": { "brighter": "JPEG round-trip trends brighter", "darker": "JPEG round-trip trends darker", "neutral": "No clear brightness direction", "green": "JPEG round-trip trends greener", "magenta": "JPEG round-trip trends more magenta", "minimal": "Minimal average RGB difference", "small": "Small average RGB difference", "noticeable": "Larger average RGB difference" },
+    "error": {
+      "no_asset_selected": "Select an asset first.", "saved_recipe_unavailable": "No usable saved Recipe is available.",
+      "unsupported_recipe_version": "The saved Recipe version is unsupported.", "saved_recipe_changed": "The saved Recipe changed. Run the comparison again.",
+      "original_fetch_failed": "Could not fetch the JPEG original.", "decode_failed": "Could not decode the JPEG original.",
+      "invalid_icc": "The embedded ICC profile could not be processed.", "render_failed": "Recipe rendering failed.",
+      "encode_failed": "JPEG encoding failed.", "invalid_rgb_response": "The Backend RGB response is invalid.",
+      "jpeg_decode_failed": "Could not decode the generated JPEG.", "dimension_mismatch": "The pre-encode RGB and decoded JPEG dimensions differ.",
+      "backend_unavailable": "The Backend diagnostic is unavailable or returned an invalid response.", "cancelled": "Comparison cancelled."
+    }
+  },
   "exportEngine": {
     "description": "Generate a JPEG with the Backend Export Engine using the saved Recipe. Nothing is written to Immich.",
     "settings": "JPEG / quality 95 / 4:4:4 / sRGB / original resolution",
