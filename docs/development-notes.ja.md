@@ -2,6 +2,12 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Favorite継承追補（2026-10-07）
+
+お気に入り写真のExportで生成JPEGがFavoriteを継承せず、COVER化後にFavorites上の見え方が変わる問題を修正した。Immich v3.2.4 `POST /assets` multipartの`isFavorite`へsource値を渡す。Backend内部の`AssetDetail`に`isFavorite`を保持するが、既存Backend detail APIの公開レスポンスには含めない。Favorite値の欠落／boolean以外は`unexpected_response`とし、upload後の`PUT /assets/{id}`やAsset Copy APIは追加していない。Favorite ON/OFF両方のmultipartをテストした。
+
+Backend full suiteは**712 passed**、関連再実行は**154 passed、72 subtests passed**。`compileall`と`git diff --check`も成功した。full suite途中にWindows asyncioの一時的な`WinError 10055`が1件発生したが、単独再実行と最終full suiteは成功しており、変更起因の失敗とは扱わない。Commit／Push／NAS deployは未実施。
+
 ## Phase 5 Export横断監査（2026-10-07）
 
 Queue/Run transaction、worker ownership、Stop/reclaim、frozen Recipe/timestampとJPEG byte再現性、Immich upload/tag/Stack convergence、failure/privacy/resource境界、Frontend polling/Retry/armed/selection/Undoを横断確認した。High 0、Medium 3を再現して修正、Low 1（現行仕様の文書差分）を修正。残存High/Mediumは0。

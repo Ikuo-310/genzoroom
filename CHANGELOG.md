@@ -10,6 +10,8 @@ Internal changes are omitted unless they affect users.
 
 Earlier Phase 5 foundation entries below describe their completion state; production Export is enabled by the Phase 5E integration and current Retry UI described first.
 
+- Exported JPEGs now inherit the Immich Favorite state of their source photos.
+
 - Enabled confirmed Export to Immich for ready Queue items, with full-resolution JPEG upload, GenzoRoom tagging, source Stack membership preservation, and the generated output as Cover. Interrupted registration reuses duplicate uploads where possible; Cancel confirms stopping after the current export. Live NAS/Immich integration verification remains Phase 5F.
 
 - Export's primary action now retries all failed Queue items in order and starts them together after confirmation; ordinary ready items remain a separate confirmed Export flow. During Retry, unrelated queued items retain their readiness for later but are not shown, selectable, or removable as Retry targets. Stop-requested status appears only on later waiting items, while the current item keeps its active status.
