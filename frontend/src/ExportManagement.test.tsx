@@ -7,8 +7,8 @@ import type { ExportQueueState } from './useExportQueue';
 import type { ExportQueueItem, ExportQueueStatus } from './exportQueueApi';
 import { updateSetting } from './appSettings';
 import i18n from './i18n';
-const fetchDetail = vi.hoisted(() => vi.fn());
-vi.mock('./api', () => ({ fetchAssetDetail: fetchDetail }));
+const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), refreshStacks: vi.fn() }));
+vi.mock('./api', () => ({ fetchAssetDetail: api.fetchDetail, refreshSelectedImmichStacks: api.refreshStacks }));
 vi.mock('./frontendLogging', () => ({ frontendLogger: { add: vi.fn() } }));
 const item = (assetId: string, status: ExportQueueStatus = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: 'q', updatedAt: 'u' });
 type Queue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error'>;
@@ -19,9 +19,12 @@ async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {})
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en');
   updateSetting('homeThumbnailColumns', 5);
-  fetchDetail.mockReset().mockImplementation(async (id: string) => ({ id, filename: `${id}.dng`, date: '2026-09-01',
+  api.refreshStacks.mockReset().mockResolvedValue([{ id: 'stack-x', primaryAssetId: '0', assets: ['0','2','3','4'].map(id => ({
+    id, filename: id, date: '', thumbnail_url: '', format: 'DNG', is_raw: true, stackId: 'stack-x',
+    primaryAssetId: '0', stackAssetCount: 4 })) }]);
+  api.fetchDetail.mockReset().mockImplementation(async (id: string) => ({ id, filename: `${id}.dng`, date: '2026-09-01',
     thumbnail_url: `/thumb/${id}`, format: 'DNG', is_raw: true, preview_url: '', exif: {},
-    stackId: id === 'solo' ? null : 'stack-x', primaryAssetId: 'a', stackAssetCount: 10 }));
+  }));
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
@@ -29,9 +32,9 @@ it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata load
   await i18n.changeLanguage(language);
   await render([], { loaded: false, loading: true }); expect(host.textContent).toBe(i18n.t('exportManagement.queueLoading'));
   await render([], { error: new Error('queue') }); expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportManagement.queueLoadFailed'));
-  await render(); expect(host.textContent).toBe(i18n.t('exportManagement.empty')); expect(fetchDetail).not.toHaveBeenCalled();
+  await render(); expect(host.textContent).toBe(i18n.t('exportManagement.empty')); expect(api.fetchDetail).not.toHaveBeenCalled(); expect(api.refreshStacks).not.toHaveBeenCalled();
   let reject!: (error: Error) => void;
-  fetchDetail.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+  api.fetchDetail.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
   await render([item('a')]); expect(host.querySelector('[role="status"]')?.textContent).toBe(i18n.t('exportManagement.metadataLoading'));
   await act(async () => reject(new Error('detail')));
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportManagement.metadataLoadFailed'));
@@ -39,7 +42,7 @@ it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata load
 });
 it('renders all statuses, noninteractive Gallery cards, Stack groups and shared thumbnail sizing', async () => {
   const statuses: ExportQueueStatus[] = ['queued', 'waiting', 'encoding', 'registering', 'failed'];
-  const items = statuses.map((status, i) => item(i === 1 ? 'solo' : `${i}`, status));
+  const items = statuses.map((status, i) => item(['0','solo','2','3','4'][i], status));
   await render(items);
   expect(host.querySelectorAll('.export-stack-group')).toHaveLength(1);
   expect(host.querySelectorAll('.export-stack-members .export-queue-card')).toHaveLength(4);
@@ -55,10 +58,13 @@ it('renders all statuses, noninteractive Gallery cards, Stack groups and shared 
   await act(async () => updateSetting('homeThumbnailColumns', 3));
   expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('3');
   await render(items.map(row => ({ ...row, status: 'failed' })), { loading: true });
-  expect(host.querySelectorAll('.export-queue-card')).toHaveLength(5); expect(fetchDetail).toHaveBeenCalledTimes(5);
+  expect(host.querySelectorAll('.export-queue-card')).toHaveLength(5); expect(api.fetchDetail).toHaveBeenCalledTimes(5);
   expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].every(card => card.dataset.queueStatus === 'failed')).toBe(true);
 });
 it('keeps a single queued Stack member standalone', async () => {
+  api.refreshStacks.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a','outside'].map(id => ({
+    id, filename: id, date: '', thumbnail_url: '', format: 'JPEG', is_raw: false, stackId: 'stack-x',
+    primaryAssetId: 'a', stackAssetCount: 2 })) }]);
   await render([item('a')]); expect(host.querySelector('.export-stack-group')).toBeNull();
   expect(host.querySelectorAll('.export-queue-card')).toHaveLength(1);
 });

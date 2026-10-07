@@ -11,11 +11,11 @@ import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResu
 import i18n from './i18n';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
-  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn() }));
+  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums,
   fetchAlbumAssets: api.album, fetchCalendarDayAssets: api.day, fetchCalendarHeatmap: api.heatmap,
-  fetchCalendarMinYear: api.minYear, fetchAssetDetail: api.detail }));
+  fetchCalendarMinYear: api.minYear, fetchAssetDetail: api.detail, refreshSelectedImmichStacks: api.stackRefresh }));
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
   getAssetEditStatuses: api.statuses }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
@@ -55,6 +55,7 @@ async function filter(value: string) {
 beforeEach(async () => {
   api.queue.mockReset().mockResolvedValue([]);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos[0], id, preview_url: '', exif: {} }));
+  api.stackRefresh.mockReset().mockResolvedValue([]);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -83,6 +84,18 @@ describe('Home Export management', () => {
     expect(host.querySelector('.photo-grid')).toBeNull();
     await key('r'); expect(host.querySelectorAll('.photo-grid .photo-card')).toHaveLength(3);
     expect(host.querySelector('.export-queue-card')).toBeNull(); expect(api.queue).toHaveBeenCalledTimes(1);
+  });
+  it('renders only queued members from refreshed Immich Stack snapshots', async () => {
+    const queue = ['asset-a', 'asset-c'].map(assetId => ({ assetId, status: 'queued', queuedAt: 'q', updatedAt: 'u' }));
+    api.queue.mockResolvedValue(queue);
+    api.stackRefresh.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'asset-a', assets: ['asset-a', 'asset-b', 'asset-c'].map(id => ({
+      ...photos[0], id, stackId: 'stack-x', primaryAssetId: 'asset-a', stackAssetCount: 3,
+    })) }]);
+    await mount(); await key('e');
+    expect(api.stackRefresh).toHaveBeenCalledWith(['asset-a', 'asset-c'], expect.any(AbortSignal));
+    expect(host.querySelectorAll('.export-stack-group')).toHaveLength(1);
+    expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].map(card => card.dataset.assetId)).toEqual(['asset-a', 'asset-c']);
+    expect(host.textContent).not.toContain('asset-b');
   });
   it.each(['en', 'ja'])('keeps the common shell and accessible tab/panel with the minimal toolbar in %s', async language => {
     await i18n.changeLanguage(language); await mount();

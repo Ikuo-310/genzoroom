@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchAssetDetail } from './api';
+import { fetchAssetDetail, refreshSelectedImmichStacks } from './api';
 import type { RecentAsset } from './assets';
 import type { ExportQueueItem } from './exportQueueApi';
 import { uniqueExportQueueItems } from './exportQueueDisplay';
@@ -46,8 +46,7 @@ export function useExportQueueAssets(items: readonly ExportQueueItem[], loaded: 
           }
           // Keep only card metadata; preview and EXIF remain owned by the detail/workspace path.
           assets[index] = { id: detail.id, filename: detail.filename, date: detail.date,
-            thumbnail_url: detail.thumbnail_url, format: detail.format, is_raw: detail.is_raw,
-            stackId: detail.stackId, primaryAssetId: detail.primaryAssetId, stackAssetCount: detail.stackAssetCount };
+            thumbnail_url: detail.thumbnail_url, format: detail.format, is_raw: detail.is_raw };
         } catch {
           if (!isCurrent()) return;
           failureCount++;
@@ -55,12 +54,28 @@ export function useExportQueueAssets(items: readonly ExportQueueItem[], loaded: 
         }
       }
     };
-    void Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, ids.length) }, worker)).then(() => {
+    void Promise.all([
+      Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, ids.length) }, worker)),
+      refreshSelectedImmichStacks(ids, controller.signal),
+    ]).then(([, stacks]) => {
       // Abort is advisory: late transports must never publish an older Queue generation.
       if (!isCurrent()) return;
-      setSnapshot({ key: idsKey, status: failureCount ? 'error' : 'ready', assets: failureCount ? [] : assets });
+      const stackByMemberId = new Map(stacks.flatMap(stack => stack.assets.map(member => [member.id.toLowerCase(), {
+        stackId: stack.id, primaryAssetId: stack.primaryAssetId, stackAssetCount: stack.assets.length,
+      }] as const)));
+      const joinedAssets = assets.map(asset => {
+        const membership = stackByMemberId.get(asset.id.toLowerCase());
+        return membership ? { ...asset, ...membership } : asset;
+      });
+      setSnapshot({ key: idsKey, status: failureCount ? 'error' : 'ready', assets: failureCount ? [] : joinedAssets });
       log({ level: failureCount ? 'error' : 'info', event: failureCount ? 'resolve.failed' : 'resolve.completed',
         context: { generation, count: ids.length, failureCount } });
+    }).catch(error => {
+      if (!isCurrent()) return;
+      log({ level: 'error', event: 'stack_membership.failed', context: { generation, count: ids.length,
+        errorCode: error instanceof Error ? error.name : 'operation_failed' } });
+      setSnapshot({ key: idsKey, status: 'error', assets: [] });
+      controller.abort();
     });
     return () => {
       controller.abort();
