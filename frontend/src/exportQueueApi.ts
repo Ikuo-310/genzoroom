@@ -122,3 +122,14 @@ export async function stopExportRuntime(runId: string, signal: AbortSignal): Pro
   if (state.runId?.toLowerCase() !== id || !state.stopRequested) throw new ExportQueueApiError('invalid_response');
   return state;
 }
+
+export async function startExportRuntime(assetIds: readonly string[], signal: AbortSignal): Promise<ExportRuntimeState> {
+  if (!Array.isArray(assetIds) || assetIds.length < 1 || assetIds.length > 100) throw new ExportQueueApiError('invalid_request');
+  const ids = assetIds.map(checkedAssetId);
+  if (new Set(ids).size !== ids.length) throw new ExportQueueApiError('duplicate');
+  const state = await readRuntime(await request('/api/export/runtime/start', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds: ids }),
+  }));
+  if (!state.runId) throw new ExportQueueApiError('invalid_response');
+  return state;
+}

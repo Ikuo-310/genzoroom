@@ -3,12 +3,13 @@
 import asyncio
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, Sequence
 from uuid import UUID, uuid4
 
 from starlette.concurrency import run_in_threadpool
 
-from edit_store import StoreUnavailable
+from edit_store import StoreUnavailable, UnsupportedSchema
 from export_artifact import ExportArtifact, create_export_artifact
 from export_runtime_store import (
     ExportRunItem, FAILURE_CODES, RuntimeRejected, complete_export_item, create_export_run,
@@ -32,6 +33,7 @@ class RegistrationContext:
     frozen_revision: int
     recipe_version: int
     processing_version: str
+    export_timestamp: str
 
 
 @dataclass(frozen=True)
@@ -77,12 +79,13 @@ class ImmichExportSource:
         return await get_asset_original(self._url, self._api_key, asset_id, transport=self._transport)
 
 
-def _artifact(source: bytearray, filename: str, family: Sequence[str], recipe: dict) -> ExportArtifact:
+def _artifact(source: bytearray, filename: str, family: Sequence[str], recipe: dict, export_timestamp: str | None = None) -> ExportArtifact:
     try:
         image = decode_jpeg(source)
         rendered = JpegRenderer().render(image, recipe)
         image = None
-        return create_export_artifact(source, filename, family, rendered)
+        timestamp = datetime.fromisoformat(export_timestamp.replace("Z", "+00:00")) if export_timestamp else None
+        return create_export_artifact(source, filename, family, rendered, timestamp=timestamp)
     finally:
         # No source/render buffers survive the threadpool call or enter the registrar context.
         source.clear()
@@ -172,8 +175,12 @@ class ExportRuntime:
             # Store/ownership failures leave active work recoverable, rather than guessing a reset.
             code = error.code if isinstance(error, (StoreUnavailable, RuntimeRejected, _RuntimeStoreFailure)) else "worker_failed"
             if not ready.done():
-                ready.set_exception(error if isinstance(error, (StoreUnavailable, RuntimeRejected))
-                                    else RuntimeRejected("worker_failed"))
+                if isinstance(error, _RuntimeStoreFailure):
+                    failure = UnsupportedSchema() if error.code == 'unsupported_db_schema' else StoreUnavailable() \
+                        if error.code == 'persistence_unavailable' else RuntimeRejected(error.code)
+                else:
+                    failure = error if isinstance(error, (StoreUnavailable, RuntimeRejected)) else RuntimeRejected("worker_failed")
+                ready.set_exception(failure)
             runtime_log("run.workerFailed", level="error", runId=str(run.run_id) if run else None, errorCode=code)
             if recovery is not None:
                 runtime_log("recovery.failed", level="error", runId=str(recovery.run_id), errorCode=code)
@@ -183,7 +190,7 @@ class ExportRuntime:
 
     async def _process_item(self, run_id: UUID, worker_id: UUID, item: ExportRunItem):
         context = RegistrationContext(run_id, item.asset_id, item.position, item.frozen_revision,
-                                      item.recipe_version, item.processing_version)
+                                      item.recipe_version, item.processing_version, item.export_timestamp)
         source = bytearray()
         original = artifact = detail = family = None
         status, phase = "waiting", "source"
@@ -212,7 +219,7 @@ class ExportRuntime:
             await _persist(transition_export_item, run_id, item.asset_id, worker_id, "waiting", "encoding")
             status, phase = "encoding", "encoding"
             runtime_log("encoding.started", level="debug", runId=str(run_id), assetId=str(item.asset_id))
-            artifact = await run_in_threadpool(_artifact, source, detail.filename, family, item.recipe)
+            artifact = await run_in_threadpool(_artifact, source, detail.filename, family, item.recipe, item.export_timestamp)
             runtime_log("encoding.completed", runId=str(run_id), assetId=str(item.asset_id), artifactBytes=len(artifact.jpeg))
             await _persist(transition_export_item, run_id, item.asset_id, worker_id, "encoding", "registering")
             status, phase = "registering", "registration"

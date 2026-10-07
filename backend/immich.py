@@ -283,10 +283,18 @@ def _log_response_failure(response: httpx.Response, error_code: str) -> None:
     if trace is None or trace.get("failed"):
         return
     trace["failed"] = True
-    backend_logger.add(level="warn", component="immich", event="request.failed", context={
+    _immich_log(level="warn", component="immich", event="request.failed", context={
         **trace["context"], "httpStatus": response.status_code,
         "durationMs": max(0, round((monotonic() - trace["started"]) * 1000, 3)), "errorCode": error_code,
     })
+
+
+def _immich_log(**fields):
+    try:
+        backend_logger.add(**fields)
+    except Exception:
+        # A diagnostic sink must not interrupt a remote write or obscure its acknowledgement.
+        pass
 
 
 async def _immich_request(client, method: str, url: str, endpoint: str, *,
@@ -298,24 +306,25 @@ async def _immich_request(client, method: str, url: str, endpoint: str, *,
     if operation_id is not None:
         context["operationId"] = operation_id
     started = monotonic()
-    backend_logger.add(level="debug", component="immich", event="request.start", context=context)
+    _immich_log(level="debug", component="immich", event="request.start", context=context)
     try:
         if stream:
             response = await client.send(client.build_request(method, _api_url(url, endpoint), **kwargs), stream=True)
         else:
             response = await client.request(method, _api_url(url, endpoint), **kwargs)
     except (httpx.RequestError, httpx.InvalidURL):
-        backend_logger.add(level="warn", component="immich", event="request.failed", context={
+        _immich_log(level="warn", component="immich", event="request.failed", context={
             **context, "durationMs": max(0, round((monotonic() - started) * 1000, 3)), "errorCode": "unreachable",
         })
         raise
     response.extensions["genzoroom_diagnostics"] = {"context": context, "started": started}
     # Streaming duration ends at response headers; consuming pixels would change stream semantics.
-    backend_logger.add(level="debug", component="immich", event="request.response", context={
+    success = response.status_code in expected_status if isinstance(expected_status, tuple) else response.status_code == expected_status
+    _immich_log(level="debug", component="immich", event="request.response", context={
         **context, "httpStatus": response.status_code,
-        "durationMs": max(0, round((monotonic() - started) * 1000, 3)), "success": response.status_code == expected_status,
+        "durationMs": max(0, round((monotonic() - started) * 1000, 3)), "success": success,
     })
-    if response.status_code != expected_status:
+    if not success:
         _log_response_failure(response, _request_error(response).error_code)
     return response
 

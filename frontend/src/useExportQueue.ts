@@ -24,6 +24,8 @@ export type ExportQueueState = {
   runtime: ReturnType<typeof useExportRuntime>['runtime'];
   cancelRuntime: ReturnType<typeof useExportRuntime>['cancel'];
   cancelling: boolean;
+  starting: boolean;
+  startRuntime: ReturnType<typeof useExportRuntime>['start'];
   mutationFor: (assetId: string) => ExportQueueMutationState;
 };
 
@@ -190,7 +192,7 @@ export function useExportQueue(): ExportQueueState {
     try { await runMutation(assetIds, 'retry', signal => retryExportAssets(assetIds, signal)); }
     finally { await refresh(); }
   }, [runMutation, refresh]);
-  const { runtime, cancel: cancelRuntime, cancelling } = useExportRuntime(refresh);
+  const { runtime, cancel: cancelRuntime, cancelling, start: startRuntime, starting } = useExportRuntime(refresh);
 
   const itemsByAssetId = indexItems(items);
   const getItem = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId)), [itemsByAssetId]);
@@ -198,5 +200,5 @@ export function useExportQueue(): ExportQueueState {
   const getStatus = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId))?.status, [itemsByAssetId]);
   const mutationFor = useCallback((assetId: string) => mutations.get(keyOf(assetId)) ?? { operation: null }, [mutations]);
 
-  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, loading, error, refresh, enqueue, dequeue, retry, runtime, cancelRuntime, cancelling, mutationFor };
+  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, loading, error, refresh, enqueue, dequeue, retry, runtime, cancelRuntime, cancelling, startRuntime, starting, mutationFor };
 }

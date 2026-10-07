@@ -1,6 +1,7 @@
 """JPEG acquisition/color normalization and encoding, independent of Recipe math."""
 
 from io import BytesIO
+import struct
 import warnings
 
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
@@ -19,7 +20,11 @@ class JpegCodecError(ValueError):
 
 
 def _srgb_profile() -> ImageCms.ImageCmsProfile:
-    return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))
+    profile = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    # LittleCMS embeds wall-clock creation time; canonical header metadata keeps recovery checksums stable.
+    profile[24:36] = struct.pack('>6H', 2000, 1, 1, 0, 0, 0)
+    profile[84:100] = bytes(16)  # An unspecified ICC profile ID avoids retaining a stale header digest.
+    return ImageCms.ImageCmsProfile(BytesIO(profile))
 
 
 def inspect_jpeg_source(source: bytes) -> dict:

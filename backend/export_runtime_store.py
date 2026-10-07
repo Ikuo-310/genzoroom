@@ -1,7 +1,7 @@
 """Transactional run snapshots and owned Queue transitions; no image binaries."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 from uuid import UUID, uuid4
 
@@ -57,6 +57,7 @@ class ExportRunItem:
     error_code: str | None
     registered_asset_id: UUID | None
     updated_at: str
+    export_timestamp: str
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,7 @@ def _read_run(connection, run_id):
                                        item["frozen_revision"], item["recipe_version"], item["processing_version"],
                                        recipe, item["status"], item["error_code"],
                                        UUID(item["registered_asset_id"]) if item["registered_asset_id"] else None,
-                                       _timestamp(item["updated_at"])))
+                                       _timestamp(item["updated_at"]), _timestamp(row["created_at"])))
         if not 1 <= len(items) <= 100 or len({item.asset_id for item in items}) != len(items):
             raise ValueError()
         active = any(item.status in ACTIVE_ITEM_STATUSES for item in items)
@@ -179,6 +180,13 @@ def create_export_run(asset_ids: list[UUID], *, worker_id: UUID | None = None) -
                         raise StoreUnavailable()
                     snapshots.append((queue, saved, state))
                 run_id, now = uuid4(), _now()
+                last = connection.execute("SELECT MAX(created_at) FROM export_runs").fetchone()[0]
+                # A new run needs a distinct durable export time, even within one clock millisecond.
+                try:
+                    if last is not None and _timestamp(last) >= now:
+                        now = (datetime.fromisoformat(last.replace("Z", "+00:00")) + timedelta(milliseconds=1)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                except (ValueError, TypeError, AttributeError, OverflowError) as error:
+                    raise StoreUnavailable() from error
                 connection.execute("INSERT INTO export_runs (run_id,status,worker_id,created_at,updated_at) VALUES (?, 'active', ?, ?, ?)",
                                    (str(run_id), str(worker_id) if worker_id else None, now, now))
                 # Targets, frozen recipes and waiting locks become visible at one commit.

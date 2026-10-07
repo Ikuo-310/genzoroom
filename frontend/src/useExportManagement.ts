@@ -9,9 +9,10 @@ import { usePhotoSelection } from './usePhotoSelection';
 import { blurPhotoSelectionCheckboxWhenSelectionEnds } from './photoSelection';
 
 export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>
-  & Partial<Pick<ExportQueueState, 'retry' | 'runtime' | 'cancelRuntime' | 'cancelling'>>;
+  & Partial<Pick<ExportQueueState, 'retry' | 'runtime' | 'cancelRuntime' | 'cancelling' | 'startRuntime' | 'starting'>>;
 export const isMutableExportStatus = (status: ExportQueueStatus | undefined) => status === 'queued' || status === 'failed';
-type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed' | 'retryFailed' | 'cancelFailed';
+type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed' | 'retryFailed' | 'cancelFailed' | 'startFailed';
+type ExportConfirmation = { kind: 'start'; assetIds: string[] } | { kind: 'stop'; runId: string };
 type ArmedUndoRecord = { kind: 'armed'; changes: Array<{ assetId: string; wasArmed: boolean }> };
 type QueueRemovalUndoRecord = { kind: 'queueRemoval'; removed: Array<{ assetId: string; wasArmed: boolean }> };
 type ExportUndoRecord = ArmedUndoRecord | QueueRemovalUndoRecord;
@@ -26,6 +27,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const [armedIds, setArmedIds] = useState<Set<string>>(() => new Set());
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<ManagementError | null>(null);
+  const [confirmation, setConfirmation] = useState<ExportConfirmation | null>(null);
+  const confirmationRef = useRef<ExportConfirmation | null>(null);
   const operationRef = useRef(false);
   const undoRecord = useRef<ExportUndoRecord | null>(null);
   const [undoing, setUndoing] = useState(false);
@@ -33,6 +36,11 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const queueRef = useRef(queue);
   queueRef.current = queue;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (!active && confirmationRef.current) {
+      confirmationRef.current = null; setConfirmation(null); operationRef.current = false;
+    }
+  }, [active]);
 
   const items = uniqueExportQueueItems(queue.items);
   const metadata = useExportQueueAssets(items, active && queue.loaded);
@@ -106,12 +114,55 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     })();
     return true;
   };
+  const startTargets = items.filter(item => item.status === 'queued' && armedIds.has(item.assetId.toLowerCase())
+    && !queue.mutationFor(item.assetId).operation).map(item => item.assetId.toLowerCase());
+  const canStart = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
+    && !confirmation && !!queue.startRuntime && queue.runtime?.status === null && !queue.starting && !queue.cancelling
+    && startTargets.length >= 1 && startTargets.length <= 100;
+  const requestStart = () => {
+    if (operationRef.current || !canStart) return false;
+    operationRef.current = true;
+    confirmationRef.current = { kind: 'start', assetIds: [...startTargets] };
+    setConfirmation(confirmationRef.current); return true;
+  };
   const cancelExport = () => {
     if (operationRef.current || !queue.runtime?.stopAllowed || queue.cancelling || !queue.cancelRuntime) return false;
-    operationRef.current = true; setRemoving(true); setRemovalError(null);
+    operationRef.current = true;
+    confirmationRef.current = { kind: 'stop', runId: queue.runtime.runId! };
+    setConfirmation(confirmationRef.current); return true;
+  };
+  const cancelConfirmation = () => {
+    confirmationRef.current = null; setConfirmation(null); operationRef.current = false;
+  };
+  const confirmExport = () => {
+    const intent = confirmationRef.current;
+    if (!intent) return false;
+    // Consume synchronously so repeated activation cannot dispatch a second remote operation.
+    confirmationRef.current = null; setConfirmation(null); setRemoving(true); setRemovalError(null);
     void (async () => {
-      try { await queueRef.current.cancelRuntime!(); log('info', 'run.stopRequested', {}); }
-      catch { if (mounted.current) setRemovalError('cancelFailed'); log('error', 'run.stopRequestFailed', {}); }
+      try {
+        const latest = queueRef.current;
+        if (intent.kind === 'start') {
+          if (!latest.startRuntime || latest.runtime?.status !== null || latest.starting || latest.cancelling
+            || intent.assetIds.some(id => latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== 'queued'
+              || latest.mutationFor(id).operation)) throw new ExportQueueApiError('locked');
+          await latest.startRuntime(intent.assetIds);
+          if (mounted.current) {
+            // Fast terminal failures may finish between polls; accepted targets still leave armed state.
+            const started = new Set(intent.assetIds);
+            setArmedIds(previous => new Set([...previous].filter(id => !started.has(id))));
+          }
+          log('info', 'run.startRequested', { count: intent.assetIds.length });
+        } else {
+          if (!latest.cancelRuntime || latest.runtime?.runId !== intent.runId || !latest.runtime.stopAllowed || latest.cancelling)
+            throw new ExportQueueApiError('locked');
+          await latest.cancelRuntime(); log('info', 'run.stopRequested', {});
+        }
+      }
+      catch {
+        if (mounted.current) setRemovalError(intent.kind === 'start' ? 'startFailed' : 'cancelFailed');
+        log('error', intent.kind === 'start' ? 'run.startRequestFailed' : 'run.stopRequestFailed', {});
+      }
       finally { if (mounted.current) { operationRef.current = false; setRemoving(false); } }
     })();
     return true;
@@ -247,7 +298,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
-    undoing, canRetry, retrySelected, cancelExport, hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
+    undoing, canRetry, retrySelected, cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
+    hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
 }
 
 export type ExportManagementState = ReturnType<typeof useExportManagement>;

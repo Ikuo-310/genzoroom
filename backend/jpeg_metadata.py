@@ -302,7 +302,8 @@ def prepare_metadata(source: bytes, rendered: RenderedImage, timestamp: datetime
     meta = ET.Element("{adobe:ns:meta/}xmpmeta")
     rdf = ET.SubElement(meta, f"{{{RDF}}}RDF")
     description = ET.SubElement(rdf, f"{{{RDF}}}Description", {f"{{{RDF}}}about": ""})
-    date = timestamp.isoformat(timespec="seconds").replace("+00:00", "Z")
+    # Preserve subsecond run identity so consecutive exports do not share a checksum by truncation.
+    date = timestamp.isoformat(timespec="milliseconds" if timestamp.microsecond else "seconds").replace("+00:00", "Z")
     for name, value in (("CreatorTool", "GenzoRoom"), ("ModifyDate", date), ("MetadataDate", date)):
         ET.SubElement(description, f"{{{XMP}}}{name}").text = value
     for tag, value in sorted(user_xmp.items()):

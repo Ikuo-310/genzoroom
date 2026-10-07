@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, listExportQueue, retryExportAssets, listExportRuntime, stopExportRuntime } from './exportQueueApi';
+import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, listExportQueue, retryExportAssets, listExportRuntime, stopExportRuntime, startExportRuntime } from './exportQueueApi';
 
 const id = '12345678-1234-4234-9234-123456789abc';
 const secondId = '22345678-1234-4234-9234-123456789abc';
@@ -21,6 +21,17 @@ it('posts Retry intent and accepts only canonical Queue response', async () => {
   await expect(retryExportAssets([id, id.toUpperCase()], signal())).rejects.toMatchObject({ kind: 'duplicate' });
   await expect(retryExportAssets(Array(101).fill(id), signal())).rejects.toMatchObject({ kind: 'invalid_request' });
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('posts ordered Start targets and strictly validates its acknowledgement', async () => {
+  const fetcher = mockBody(runtime);
+  expect(await startExportRuntime([secondId, id], signal())).toEqual(runtime);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/export/runtime/start');
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ assetIds: [secondId, id] });
+  await expect(startExportRuntime([id, id], signal())).rejects.toMatchObject({ kind: 'duplicate' });
+  await expect(startExportRuntime([], signal())).rejects.toMatchObject({ kind: 'invalid_request' });
+  await expect(startExportRuntime(Array(101).fill(id), signal())).rejects.toMatchObject({ kind: 'invalid_request' });
+  mockBody({ runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null });
+  await expect(startExportRuntime([id], signal())).rejects.toMatchObject({ kind: 'invalid_response' });
 });
 it('reads active runtime and validates Stop acknowledgement', async () => {
   mockBody(runtime); expect(await listExportRuntime(signal())).toEqual(runtime);

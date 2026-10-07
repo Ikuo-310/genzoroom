@@ -255,7 +255,9 @@ def test_claim_and_queue_row_identity_block_stale_ownership(db):
 
 
 @pytest.mark.parametrize("status", ["waiting", "encoding", "registering"])
-def test_restart_inspection_keeps_status_owner_and_frozen_snapshot(db, status):
+def test_restart_inspection_keeps_status_owner_and_frozen_snapshot(db, status, monkeypatch):
+    monkeypatch.delenv('IMMICH_URL', raising=False)
+    monkeypatch.delenv('IMMICH_API_KEY', raising=False)
     queued(A, B)
     run, owner = owned_run(A, B)
     if status in ("encoding", "registering"):
@@ -273,7 +275,7 @@ def test_restart_inspection_keeps_status_owner_and_frozen_snapshot(db, status):
     assert persisted.run_id == run.run_id and persisted.worker_id == owner
     assert [item.status for item in persisted.items] == [status, "waiting"]
     assert persisted.items[0].recipe == snapshot()["currentRecipe"]
-    assert request("POST", "/export/runtime/start", {"assetIds": [str(A)]}).status_code == 404
+    assert request("POST", "/export/runtime/start", {"assetIds": [str(A)]}).status_code == 503
 
 
 def test_start_dequeue_and_default_save_races_are_atomic(db):

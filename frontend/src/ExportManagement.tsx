@@ -8,13 +8,14 @@ import type { ExportQueueAsset } from './exportQueueDisplay';
 import { isMutableExportStatus, type ExportManagementState } from './useExportManagement';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
+import { StackRedetectDialog } from './StackRedetectDialog';
 
 export function ExportManagementToolbar({ management }: { management: ExportManagementState }) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const noSelection = !management.selectedIds.length;
-  const busy = management.removing || management.undoing;
-  return <div className="home-toolbar export-toolbar">
+  const busy = management.removing || management.undoing || !!management.confirmation;
+  return <><div className="home-toolbar export-toolbar">
     <div className="selection-bar export-selection" role="group" aria-label={t('photos.selectionActions')}>
       <strong className="selection-count" aria-live="polite">{t('exportManagement.selectionCount', { count: management.selectedIds.length })}</strong>
       <div className="selection-actions">
@@ -33,9 +34,12 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
         ? <button type="button" className={`immich-action-button${management.queue.runtime.stopRequested ? ' export-stop-requested' : ''}`}
           disabled={busy || !!management.queue.cancelling || !management.queue.runtime.stopAllowed}
           title={t('exportManagement.cancelExplanation')} onClick={management.cancelExport}>{t('exportManagement.cancel')}</button>
-        : <button type="button" className="immich-action-button" disabled>{t('exportManagement.exportToImmich')}</button>}
+        : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
     </div>
-  </div>;
+  </div>{management.confirmation && <StackRedetectDialog onConfirm={management.confirmExport} onCancel={management.cancelConfirmation}
+    title={t(management.confirmation.kind === 'start' ? 'exportManagement.exportToImmich' : 'exportManagement.cancel')}
+    body={management.confirmation.kind === 'start' ? t('exportManagement.startConfirmation', { count: management.confirmation.assetIds.length })
+      : t('exportManagement.cancelExplanation')} />}</>;
 }
 
 function ExportQueueCard({ entry: { item, asset }, management }: { entry: ExportQueueAsset; management: ExportManagementState }) {

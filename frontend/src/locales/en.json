@@ -40,6 +40,10 @@
     "favoritesTab": "Favorites"
   },
   "exportManagement": {
+    "startConfirmation": "Export {{count}} photos to Immich?",
+    "startConfirmation_one": "Export {{count}} photo to Immich?",
+    "startConfirmation_other": "Export {{count}} photos to Immich?",
+    "startFailed": "Could not start export to Immich",
     "retry": "Retry",
     "retryFailed": "Could not prepare exports for retry",
     "cancel": "Cancel export",

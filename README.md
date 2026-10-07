@@ -1,6 +1,6 @@
 # GenzoRoom
 
-GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and managing an Export Queue. Export management and the Phase 5A backend JPEG decoder/renderer/encoder foundation are implemented; actual Export Runtime and Immich upload/registration are not implemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
+GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and exporting developed JPEGs to Immich. Confirmed Export uploads a new JPEG, adds the GenzoRoom tag, and makes it the source Stack's Cover while preserving its members. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
@@ -56,17 +56,18 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Browser-saved image preferences, including WebGPU enablement and Anshitsu's initial image choice (Auto, Original preferred, or Preview preferred). Auto prefers the original when WebGPU is enabled and available; otherwise it keeps the preview. The preview is shown while a selected JPEG original loads, then switches automatically when ready unless Preview is preferred or the user has manually chosen a source.
 - Settings shows Immich server version and available build information alongside GenzoRoom and backend connection status. Preferences are stored in the browser; the Immich API key stays on the backend.
 
-### Export management (Export implementation Phase 4)
+### Export management
 
 - Open Export / 出力管理 with its Home tab or `E`, keeping the Gallery view state while using the same Header / Tabs / Toolbar / Content shell.
 - The persistent Export Queue is displayed as individual photo cards. Two or more queued assets from the same Immich Stack share a group; only queued members appear. Groups start at their first Queue member, preserve member order, and become standalone cards when only one member remains. Thumbnail sizing is shared with Home.
-- Export cards currently show Immich source thumbnails to identify Queue assets; they are not previews rendered with the GenzoRoom Recipe. Actual export execution remains unimplemented.
+- Export cards currently show Immich source thumbnails to identify Queue assets; they are not previews rendered with the GenzoRoom Recipe.
 - Select cards with normal click, Primary+click, Shift+click, checkboxes, or Select All / `Primary+A`; Shift ranges follow the displayed group order. Clear and Escape clear selection.
 - `W` explicitly marks selected mutable cards ready to export. Mixed selections turn readiness ON; an entirely ready selection turns it OFF. Readiness survives clearing selection and switching Home tabs, but is temporary and is not saved across reloads. It is separate from persistent Queue membership and the runtime status `waiting`.
 - Ready cards show **Ready to export / 出力待機中** in a full-width, 28px-high status bar over the thumbnail's bottom edge.
 - `Q` or Remove from Queue removes selected `queued` / `failed` assets sequentially. Successful removals disappear immediately; failures retain successful work and trigger a refresh with a localized alert. `waiting`, `encoding`, and `registering` cards are locked against selection, readiness changes, and removal. Gallery and Anshitsu keep their own Queue-toggle behavior.
 - In Export, `Primary+Z` (Ctrl+Z / ⌘Z) undoes the latest W readiness or Q removal operation once. It does not restore selection; there is no Redo.
-- **Export to Immich / Immichへ出力** remains disabled. Phase 4 completes Export management UI / selection / readiness / Queue management; Phase 5 Export Runtime, including encoding and upload, remains planned.
+- **Export to Immich / Immichへ出力** confirms and starts ready `queued` assets in Queue order, using their saved Recipes. Output is a full-resolution JPEG with a family-based `GenzoNN` filename, the GenzoRoom tag, and the source Stack's Cover. Cancel export confirms stopping after the current photo; failed items can be prepared for Retry. Start, Cancel, Retry, and successful export are outside W/Q Undo.
+- Interrupted runs resume after Backend restart. Live NAS/Immich integration verification remains Phase 5F; partial registration can leave an uploaded asset, and rare duplicate output is possible.
 
 ### STACK management
 
@@ -123,8 +124,7 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 ## Not implemented
 
 - RAW development pipeline.
-- Export Runtime: Queue execution, Recipe freeze, progress, and Immich upload/registration. Export Queue management and the full-resolution JPEG processing foundation are implemented; output metadata and filename handling remain Phase 5B work.
-- Automatic Immich Stack attachment for re-imported or exported assets.
+- Automatic Immich Stack attachment for assets re-imported outside GenzoRoom Export.
 - Stack/group reordering through Drag & Drop.
 - Touch Drag & Drop in STACK management.
 - Color Grading Point / Width controls; the three tone ranges currently use fixed weights.

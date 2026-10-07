@@ -163,7 +163,7 @@ class MetadataTests(unittest.TestCase):
             self.assertNotEqual(output, packet)
             self.assertEqual(tree.find(f'.//{{{XMP}}}CreatorTool').text, "GenzoRoom")
             for name in ("ModifyDate", "MetadataDate"):
-                self.assertEqual(tree.find(f'.//{{{XMP}}}{name}').text, "2026-10-07T14:59:59Z")
+                self.assertEqual(tree.find(f'.//{{{XMP}}}{name}').text, "2026-10-07T14:59:59.900Z")
             self.assertEqual(image.getexif()[B.DateTime], "2026:10:07 14:59:59")
             self.assertEqual(image.getexif().get_ifd(ExifTags.IFD.Exif)[B.DateTimeOriginal], "2020:02:29 12:34:56")
             for name in ("title", "description", "rights", "creator", "subject"):

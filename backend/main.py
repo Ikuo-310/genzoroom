@@ -19,8 +19,9 @@ from backend_logging import LogLevel, backend_logger
 from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
-from export_runtime import ExportRuntime
-from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets
+from export_runtime import ExportRuntime, ImmichExportSource
+from immich_export import ImmichFamilyFilenameProvider, ImmichExportRegistrar
+from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets, get_export_run
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -55,7 +56,9 @@ from immich import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    runtime = ExportRuntime()
+    url, key = os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY")
+    runtime = ExportRuntime(source=ImmichExportSource(url, key), family=ImmichFamilyFilenameProvider(url, key),
+                            registrar=ImmichExportRegistrar(url, key)) if (url or '').strip() and (key or '').strip() else ExportRuntime()
     app.state.export_runtime = runtime
     try:
         await runtime.recover()
@@ -313,6 +316,22 @@ def _runtime_response(run):
 def export_runtime_status():
     try:
         return _runtime_response(recoverable_export_run())
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.post("/export/runtime/start", response_model=ExportRuntimeResponse)
+async def start_export_run(payload: ExportQueueRequest, request: Request):
+    try:
+        runtime = getattr(request.app.state, "export_runtime", None)
+        if runtime is None:
+            raise RuntimeRejected("runtime_not_configured")
+        run_id = await runtime.start(payload.assetIds)
+        return _runtime_response(await run_in_threadpool(get_export_run, run_id))
+    except RuntimeRejected as error:
+        status = 503 if error.code == 'runtime_not_configured' else 422 if error.code in (
+            'invalid_asset_ids', 'duplicate_asset_ids', 'asset_not_eligible', 'saved_recipe_missing', 'unsupported_recipe_version') else 409
+        raise _edit_error(status, error.code) from error
     except StoreUnavailable as error:
         raise _store_error(error) from error
 

@@ -60,6 +60,8 @@ it('allows Cancel only for recognized active runtime and does not create Undo', 
   queue.runtime = { runId: 'run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'a' };
   await render([item('a', 'encoding')]);
   await settle(() => current.cancelExport());
+  expect(queue.cancelRuntime).not.toHaveBeenCalled();
+  await settle(() => current.confirmExport());
   expect(queue.cancelRuntime).toHaveBeenCalledTimes(1); expect(current.undo()).toBe(false);
   queue.runtime = { ...queue.runtime, stopRequested: true, stopAllowed: false };
   await render(); expect(current.cancelExport()).toBe(false);

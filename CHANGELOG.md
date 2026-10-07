@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Enabled confirmed Export to Immich for ready Queue items, with full-resolution JPEG upload, GenzoRoom tagging, source Stack membership preservation, and the generated output as Cover. Interrupted registration reuses duplicate uploads where possible; Cancel confirms stopping after the current export. Live NAS/Immich integration verification remains Phase 5F.
+
 - Added Export Runtime Stop-after-current, atomic failed-item Retry preparation and restart recovery, with waiting/activity/failure status bars and Retry/Cancel UI foundations. Production Export to Immich remains disabled until actual family lookup and upload/registration/tag/Stack/COVER integration are connected.
 
 - Added the internal backend Export Runtime foundation with persistent ordered runs, frozen Recipe snapshots, serial processing and owned Queue transitions. Actual Immich registration and the production Export start action remain unavailable.

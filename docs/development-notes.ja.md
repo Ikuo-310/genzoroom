@@ -2,6 +2,34 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Phase 5E Actual Immich Export Registration / Production Start（2026-10-07）
+
+productionの`Immichへ出力`を接続した。armedな`queued`だけをQueue順に確認してStartし、保存済みRecipe/revisionをtransaction内で再検証・freezeする。`IMMICH_URL` / `IMMICH_API_KEY`から実Source／family provider／registrarをlifespanで構成し、active runはrequestから独立してstartup recoveryする。設定不足でもBackend全体は起動し、Startだけ503になる。Startは`POST /export/runtime/start`、1〜100 unique UUID、既存runtime projectionを返す。
+
+family searchはImmich v3.2.4のstructured filterでIMAGE／非trash／family root prefix、stackedとTimeline外も含め、1000件cursor paginationを最後まで処理する。候補は既存`filename_family()`のfirst-dot／Genzo suffix／case-sensitive完全一致で再判定し、重複を除く。malformed/cyclic cursorや有限page上限に達した場合は不完全な一覧を使わず`family_context_failed`。filename/cursorはlogへ出さない。
+
+JPEGを`POST /assets`へmultipart uploadし、sourceのImmich dateを`fileCreatedAt`、永続Export時刻を`fileModifiedAt`へ渡す。upload timeoutはconnect/pool 10秒、read/write 120秒で、redirectは追跡しない。201 created／200 duplicateとvalid UUIDだけを成功扱いし、source UUIDへの衝突は拒否する。`PUT /tags`でGenzoRoomをupsertし、generated Assetだけへ`PUT /tags/assets`で付与する。v3.2.4のcountは新規関連行の件数なので再付与は0になり得る。count 0はpermission filteringとも区別が必要なため、1回だけAsset detailでTag存在を確認する。
+
+upload/tag後の最新Stack snapshotを既存strict parserで読む。A: source/outputがStack外ならPOST `[output,source]`。B: sourceが既存Stack内ならPOST `[output,current primary]`で全memberを取り込み、旧Stackの事前DELETEはしない。child sourceにも対応する。C: 同じStackならoutput primaryはno-op、別primaryはPUTのみ。D/E: outputが別Stackなら自動merge/moveせずfailure。POST/PUT応答のStack UUID、output primary、source/outputと全旧memberの完全一致を確認する。既存`stack_write.py`／STACK管理write algorithmは変更していない。Asset/Tag削除は行わない。
+
+SQLite schemaはv4のまま。既存runの不変`created_at`をExport timestampに使うためmigrationは不要で、既存v4 runも利用できる。同一clock millisecondでもnew runに新しいtimestampを確定する。artifact再生成に同時刻を渡し、XMPのmillisecondsを保持、LittleCMS sRGB ICC headerのcreation dateを固定してprofile IDを未指定0へ正規化した。これにより同じsource／frozen Recipe／codec toolchainの同run recoveryはJPEG bytesが一致し、duplicate uploadで同じoutput UUIDを回収できる。TagとStackは再適用・最新snapshotにより収束し、全登録成功後だけQueueから削除する。JPEG DB保存／binary cache／細かいremote checkpoint／distributed transactionは追加していない。
+
+Start/Stop confirmationは既存dialogを再利用し、Cancelをinitial focusにした。二重confirmを同期guardで防ぎ、Start直前に最新Queue/statusを再確認する。Start受理で対象armedを解除し、高速終了でも取り残さない。Stopは指定JA/EN文言を表示し、現在item終了後に残りを解放する5D semanticsを維持する。既存polling／Queue reconciliation／status bars／failed RetryとW/Q one-shot Undoは維持し、Start/Cancel/Retry/successはUndo対象にしない。tab離脱は未確認intentだけを閉じ、workerを止めない。
+
+必要なAPI key scopeはasset.read/view/download/upload、tag.create/asset、stack.read/create/update。ユーザー側で許可済みのasset.updateやtag.read/update、stack.deleteは既存管理機能の権限として維持する。Immich内部のAssetUpdate access checkとAPI key asset.update scopeは別概念。Frontendへ返す登録failureは固定`registration_failed`とし、Developer Logsにupload/tag/stack_context/stack phaseを安全なID/countとともに記録する。raw body／exception text／filename／credentials／URL／Recipe／JPEG bytesは出さない。
+
+Focused auditで修正した点は、実際にrecovery bytes不一致を生んだICC headerのwall-clock時刻、XMP秒切捨てと同時刻new run、Tag再付与count 0の検証、Start最初のcheckpoint永続化failureの503保持、高速terminal Startのarmed整合、tab離脱時のconfirmation guard解放。修正後の再確認で残存High / Medium findingは0。
+
+指定Windows `.venv`の実Pythonは3.14.5。Backend full pytestは**696 passed**、Frontend full suiteは**113 files / 2349 passed / 2 skipped**。Backend compileall、`npx tsc --noEmit`、`npm run build`、`git diff --check`は成功。buildの既存500 kB超chunk警告は残る。dependency pin／Docker／Recipe/History形式は変更していない。
+
+partial remote成功は削除rollbackしない。active run再起動とterminal failedのRetryは区別し、後者の新Startは最新Recipe／新時刻で別outputになり得る。family番号は分散予約せずrare duplicateを許容し、Stack read/write間のmanual concurrent changeは応答検証で検出しても自動rollbackできない。single Backend processを前提とし、sourceやPillow/LittleCMS等が変わればrecoveryのbyte一致は保証しない。**Phase 5F**では実API permissions、JPEG upload/duplicate、archive/stacked family、GenzoRoom tag再付与、child sourceと旧member保持／COVER、撮影時刻/Timeline/metadata、登録途中restart／Stopを実機確認する。NAS deploy／live Immich／browser実機確認／Commit／Pushは行っていない。Phase 5Eは完了し、5Fへ進める状態。
+
+変更ファイル:
+
+- Backend: `backend/immich_export.py`, `backend/export_runtime.py`, `backend/export_runtime_store.py`, `backend/immich.py`, `backend/jpeg_codec.py`, `backend/jpeg_metadata.py`, `backend/main.py`, `backend/tests/test_immich_export.py`, `backend/tests/test_export_artifact.py`, `backend/tests/test_export_runtime.py`。
+- Frontend: `frontend/src/ExportManagement.tsx`, `frontend/src/useExportManagement.ts`, `frontend/src/useExportQueue.ts`, `frontend/src/useExportRuntime.ts`, `frontend/src/exportQueueApi.ts`, `frontend/src/locales/ja.json`, `frontend/src/locales/en.json`, `frontend/src/ExportStart.test.tsx`, `frontend/src/useExportManagement.test.tsx`, `frontend/src/useExportRuntime.test.tsx`, `frontend/src/exportQueueApi.test.ts`。
+- Docs: `docs/architecture.md`, `docs/development-notes.ja.md`, `CHANGELOG.md`, `README.md`。以下のPhase 5D以前は当時の記録を維持する。
+
 ## Export Phase 5D Stop / Retry / Restart Recovery（2026-10-07）
 
 SQLite schema v4へtransactional migrationし、runに永続`stop_requested`と`current_position`、terminal `stopped`、itemにterminal `released`を追加した。v3のedit-state/Queue/run/item全column・順序・frozen Recipeを維持し、既存encoding/registeringをcurrentとして移行する。Recipe/History保存形式は変更しない。v3専用Backendへ戻す場合はmigration前の整合したDB backupが必要で、復元により以後の書込みは失われる。自動downgradeは実装していない。
