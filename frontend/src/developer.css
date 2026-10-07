@@ -24,9 +24,9 @@
 .developer-jpeg-candidates img { display: block; width: 100%; height: 110px; object-fit: contain; }
 .developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }
 .developer-export-comparison { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
-.developer-export-comparison figure { margin: 0; min-width: 0; background: #18191b; padding: 12px; }
+.developer-export-comparison figure { margin: 0; min-width: 0; background: #18191b; }
 .developer-export-comparison figcaption { margin-bottom: 12px; }
-.developer-export-comparison canvas, .developer-export-comparison img { display: block; width: 100%; height: 60vh; min-height: 320px; object-fit: contain; }
+.developer-export-comparison .developer-export-image { display: block; width: 100%; height: auto; object-fit: contain; }
 .developer-export-comparison canvas[hidden] { display: none; }
 @media (max-width: 800px) { .developer-export-comparison { grid-template-columns: minmax(0, 1fr); } }
 .developer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; border-bottom: 1px solid #404247; }

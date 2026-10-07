@@ -70,6 +70,8 @@ it.each(['en', 'ja'])('compares the saved snapshot, shows safe values, and clean
   expect(dependencies.backend).toHaveBeenCalledExactlyOnceWith('first', 3, expect.any(AbortSignal));
   expect(host.querySelector('.developer-export-comparison img')?.getAttribute('src')).toBe('blob:diagnostic-2');
   expect(host.querySelector('canvas')?.width).toBe(2);
+  expect(host.querySelector('canvas')?.classList.contains('developer-export-image')).toBe(true);
+  expect(host.querySelector('.developer-export-comparison img')?.classList.contains('developer-export-image')).toBe(true);
   expect(host.textContent).toContain(i18n.t('exportEngine.status.completed'));
   expect(host.textContent).not.toContain('exportEngine.');
   const diagnostic = host.querySelector('.developer-diagnostics')!.textContent;

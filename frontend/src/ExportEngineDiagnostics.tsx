@@ -152,8 +152,8 @@ export function ExportEngineDiagnostics({ dependencies }: { dependencies?: Parti
     <p role="status" aria-live="polite">{t(`exportEngine.status.${phase}`)}</p>
     {error && <p role="alert">{t(`exportEngine.error.${error}`)}</p>}
     <div className="developer-export-comparison">
-      <figure><figcaption>{t('exportEngine.frontend')}</figcaption><canvas ref={ownCanvas} hidden={!previewReady} aria-label={t('exportEngine.frontend')} /></figure>
-      <figure><figcaption>{t('exportEngine.backend')}</figcaption>{backendUrl && <img src={backendUrl} alt={t('exportEngine.backend')} />}</figure>
+      <figure><figcaption>{t('exportEngine.frontend')}</figcaption><canvas className="developer-export-image" ref={ownCanvas} hidden={!previewReady} aria-label={t('exportEngine.frontend')} /></figure>
+      <figure><figcaption>{t('exportEngine.backend')}</figcaption>{backendUrl && <img className="developer-export-image" src={backendUrl} alt={t('exportEngine.backend')} />}</figure>
     </div>
     {metadata && <dl className="developer-diagnostics">{Object.entries(metadata).map(([key, value]) =>
       <div key={key}><dt>{t(`exportEngine.values.${key}`)}</dt><dd>{key === 'sourceIcc' ? t(`jpegDiagnostics.profileStatus.${value === 'embedded' ? 'embedded' : 'none'}`)
