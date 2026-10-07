@@ -1,4 +1,5 @@
 .developer-page { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+.developer-page.developer-page-export-engine { max-width: none; }
 .developer-page h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); }
 .developer-page button, .developer-page select { min-height: 36px; color: #ececee; background: #383a3f; border: 1px solid #696b72; border-radius: 6px; }
 .developer-page button:hover:not(:disabled) { background: #494b51; border-color: #85878e; }
@@ -22,7 +23,7 @@
 .developer-jpeg-candidates button[aria-pressed="true"] { border-color: #b8bbc2; }
 .developer-jpeg-candidates img { display: block; width: 100%; height: 110px; object-fit: contain; }
 .developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }
-.developer-export-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.developer-export-comparison { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .developer-export-comparison figure { margin: 0; min-width: 0; background: #18191b; padding: 12px; }
 .developer-export-comparison figcaption { margin-bottom: 12px; }
 .developer-export-comparison canvas, .developer-export-comparison img { display: block; width: 100%; height: 60vh; min-height: 320px; object-fit: contain; }

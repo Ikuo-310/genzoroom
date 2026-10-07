@@ -282,6 +282,7 @@ it('selects Logs initially and follows four-tab keyboard order while retaining e
   const panels = [...host.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
   expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab', 'exportEngine-tab']);
   expect(panels.map(panel => panel.hidden)).toEqual([false, true, true, true]);
+  expect(host.querySelector('main')?.classList.contains('developer-page-export-engine')).toBe(false);
   const jpeg = host.querySelector('#jpeg-panel section'), webgpu = host.querySelector('#webgpu-panel section');
   const press = async (key: string, expected: number) => {
     const selected = tabs.find(tab => tab.getAttribute('aria-selected') === 'true')!;
@@ -291,7 +292,9 @@ it('selects Logs initially and follows four-tab keyboard order while retaining e
     expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(tabs.map((_, index) => String(index === expected)));
   };
   await press('ArrowLeft', 3); await press('ArrowRight', 0); await press('ArrowRight', 1);
-  await press('ArrowRight', 2); await press('ArrowRight', 3); await press('Home', 0); await press('End', 3);
+  await press('ArrowRight', 2); await press('ArrowRight', 3);
+  expect(host.querySelector('main')?.classList.contains('developer-page-export-engine')).toBe(true);
+  await press('Home', 0); await press('End', 3);
   expect(host.querySelector('#jpeg-panel section')).toBe(jpeg); expect(host.querySelector('#webgpu-panel section')).toBe(webgpu);
   expect(host.querySelector('#environment-title')?.closest('section')?.compareDocumentPosition(host.querySelector('[role="tablist"]')!)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

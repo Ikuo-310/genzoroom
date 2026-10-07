@@ -70,7 +70,7 @@ export function DeveloperPage() {
     viewportWidth: environment.viewport.width, viewportHeight: environment.viewport.height,
     userAgent: environment.userAgent, platform: environment.platform,
   };
-  return <main className="developer-page">
+  return <main className={`developer-page${selectedTab === 'exportEngine' ? ' developer-page-export-engine' : ''}`}>
     <header><p className="eyebrow">GenzoRoom</p><h1>{t('developer.title')}</h1><p>{t('developer.description')}</p></header>
     <section className="developer-section" aria-labelledby="environment-title">
       <h2 id="environment-title">{t('developer.environmentTitle')}</h2>
