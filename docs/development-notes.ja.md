@@ -1,6 +1,35 @@
 # GenzoRoom 開発ノート
 
-Homeの現行仕様は4タブ（Recent / Albums / Calendar / Favorites）で、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+
+## Export実装 Phase 4 完了（2026-10-07）
+
+このフェーズを **Export management UI / selection / readiness / Queue management** の完了として閉じる。Export Runtimeには進めていない。HomeのHeader / Tabs / Toolbar / Content shellを維持し、Gallery系4タブと間隔を空けたmanagement groupへExportを追加した。英語ラベルは`Export`、日本語は`出力管理`、shortcutはE。専用routeは作らず、`showExport`で表示を切り替え、Galleryのtab・filter・selection・Album/Calendar詳細・scrollを保持する。STACK管理のHome tab化と暗室navigation追加は別フェーズ。
+
+Persistent Queueをmembership・順序・statusの正とし、`useExportManagement`がExport固有のselectionとfrontend-only `armedIds`を管理する。selectionは操作対象指定だけであり、armedとは分離した。将来Previewなどでselectionを外しても出力予定を失わないための境界で、Preview自体は未実装。armedは初期0、storage保存なし、同じHome mount内のtab往復とselection clearで維持する。DB status `waiting`とは別で、`queued` ↔ `failed`変化では保持し、Queue消失またはlocked statusへ変わるとselection・anchor・armedをreconcileする。
+
+カードはQueue IDだけのAsset detailをconcurrency 4で取得し、既存Immich Stack refreshのvalidated membershipをjoinする。Queue外memberは表示しない。同じStackのQueue memberが2件以上なら、非連続でも最初のmember位置に1groupへまとめ、内部はQueue順を保持する。1件ならstandalone。DB順は変更せず、Shift rangeはgrouping後の画面順を使う。normal clickは単一選択、Primary clickはtoggle、Shiftはinclusive range add、anchorなしの初回Shiftはno-op。checkbox、Select All / Primary+A、Clear / Escも共通selection semanticsに揃えた。
+
+Toolbar左はcount / Select All / Clear / W出力待機toggle / Q Queue除外のselection group、右は共有thumbnail sizeと赤系Immich action group。Gallery固有のSTACK / 暗室遷移をExportへコピーしていない。Wはselected mutable itemsにunarmedがあれば全件ON、全件armedならOFF。Qは開始時の対象IDをQueue順にsnapshotして既存dequeueを順次実行し、二重実行を防ぐ。途中failureでも残りを処理し、成功分をrollbackせず、最後にrefreshとlocalized partial failure alertを行う。成功itemは即表示から消え、Stack groupが2件→1件ならsurvivor metadata再取得中も即standaloneへ戻る。`queued` / `failed`だけがmutableで、`waiting` / `encoding` / `registering`はselection・W・Q不可。unmountとstale async、既存Queue snapshot / mutation race対策も維持した。
+
+Armed表示は当初の中央小型badgeから、狭幅英語ラベルの縦折り返しを避ける全幅status barへ変更し、中央36px→30px→28px固定・thumbnail下端へ調整した。確定仕様はthumbnail内absolute overlay、`bottom: 0`、width 100%、左右marginなし、height 28px、中央揃えの1行、nowrap / overflow hidden、背景90% alpha、文字opacity維持。画像領域は縮めない。日英文言は`出力待機中` / `Ready to export`のまま。将来同じ位置・高さをruntime status / progress barへ拡張する予定だが、今回progressやruntime表示は実装していない。Home / Export / STACK管理のカード背面は共有`--bg-content: #111214`で、card/panelとHeader/Tabs/Toolbarの色は維持した。
+
+完了前focused static auditは指定25項目を横断確認し、初回Critical 0 / High 0 / Medium 0 / Low 0。責務分離、reconciliation、W方向、Q部分成功と競合、stale/unmount、groupingとrange順、2→1 collapse、shortcut guards、locked accessibility、checkbox focus、status bar、narrow toolbar、日英locale、disabled実行button、Runtime境界について実害のあるfindingはなかった。finding修正とその再監査は対象なしとし、監査目的だけのコード変更は行っていない。
+
+検証は関連Vitest 20 files / 411 tests passed、Frontend全test 104 files / 2207 passed / 2 skipped。`npx tsc --noEmit`、`npm run build`、文書更新前の`git diff --check`は成功した。buildには既知の500 kB超chunk warningが残る。Backend変更はなくBackend全testは追加実行していない。完了文書更新後の関連Vitestも20 files / 411 tests passed、diff-checkも成功した。
+
+今回の利用者実機確認として共有された事実は以下。ブラウザー名は指定されていない。この完了作業ではNAS / ブラウザー操作や再確認を行っていない。
+
+- Export card selectionが動作する。
+- Selectionを外しても`出力待機中` armed表示が維持される。
+- QによるQueue除外が正常動作する。
+- Armed status barがthumbnail下端・28px高・全幅で表示される。
+- Stack groupingが表示される。
+- Queueから外したitemがExport表示から消える。
+
+次フェーズは **Phase 5: Export Runtime**。`armed → waiting → Recipe freeze → encoding → registering → success/remove`の実行、JPEG encode、metadata処理、Immich upload、Stack/COVER更新とruntime progressは未実装。`Immichへ出力`はdisabledのままで、空dropdown/menuも表示しない。deployment手順変更はなく、`docs/deployment.md`は変更していない。
+
+Export管理thumbnailは現在Immich由来のsource thumbnailであり、Queue内Assetを識別・管理するための表示とした。現行がJPEGのみのv0.1.0では暫定仕様とし、Recipe適用済みthumbnailは実装していない。RAWでは現像前後の見た目の差が大きくなるため、将来はRecipe適用済みpreviewが望ましい。RAW engineはLightCraftを候補調査中だが採用は未決定。engine選定後、RAW decode / demosaicを含むdeveloping pipelineでpreview-sizeとfull-size renderを生成し、同じdeveloping / Recipe interpretation / renderer pathを共有してresolutionだけ切り替える方向を検討する。preview cacheやdemosaic cacheも将来の検討項目で、いずれも未実装。
 
 ## Export Queue persistence / API Phase 1完了（2026-10-06）
 

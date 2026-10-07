@@ -1,6 +1,6 @@
 # GenzoRoom
 
-GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, and developing JPEGs; Export remains unimplemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
+GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and managing an Export Queue. Export management is available; actual export execution, encoding, and Immich upload are not implemented. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
@@ -13,7 +13,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 ### Immich browsing and Anshitsu
 
 - Authenticated Immich photo access through the backend, with confirmed STACK management writes described below.
-- Home has four browsing tabs: Recent, Albums, Calendar, and Favorites.
+- Home has four browsing tabs: Recent, Albums, Calendar, and Favorites, plus an Export management tab in a separate work group.
 - Home uses a compact dark header, tabs, toolbar, and content area; the header, tabs, and toolbar stay fixed while the content scrolls. Its neutral dark theme is shared with STACK management. The desktop-oriented layout adapts at narrower widths.
 - Home photo lists exclude Immich trash assets. For Recent, Favorites, Albums, and Calendar date results, an Immich Stack is represented by its primary/Cover photo; child assets are not shown as separate cards. Invalid or ambiguous Stack metadata is quarantined from Home rather than turning one bad Stack snapshot into a failed photo list. Albums retain Immich's existing album visibility behavior, including Archive assets.
 - Recent shows Immich Timeline images in descending order. Choose 50–500 photos in steps of 50 (100 by default); Archive assets are excluded.
@@ -25,8 +25,8 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Recent, Album, and Calendar photo views can filter stacked versus unstacked assets. Stack cards retain member-count metadata and aggregate edit status across known members. Favorites uses the same primary-only Home data boundary while retaining its existing filter behavior.
 - Choose the thumbnail size used by the Home grids.
 - Recent, Favorites, Album details, and Calendar date details have an ordered selection toolbar. Album lists and Calendar month/year views do not show photo selection controls. Select All adds currently visible photos and preserves hidden selections; the selection order is retained.
-- In a photo view with no selection, a normal photo-card click opens Anshitsu and `Shift`+click selects that photo to start selection mode. While selection mode is active, normal clicks toggle a photo and `Shift`+click selects the range from the anchor. Checkbox selection remains available.
-- Home shortcuts are `R` Recent, `A` Albums, `C` Calendar, `F` Favorites, `S` STACK management, and `D` Anshitsu. Home tabs use click or these direct commands; Left / Right / Home / End do not switch tabs. Their optional visible suffixes are `[R]`, `[A]`, `[C]`, `[F]`, `[S]`, and `[D]`; `Primary+A` is not shown as a suffix. Settings can hide suffixes and shortcut explanations without disabling commands. `Primary+A` selects all visible photos in photo views (Ctrl+A on Windows/Linux, ⌘A on macOS); native editing and non-photo views keep their normal behavior.
+- A normal photo-card click selects only that photo; `Primary`+click toggles it, and `Shift`+click adds the inclusive range from the anchor. A first Shift+click without an anchor does nothing. Checkboxes toggle selection, with Shift+click adding a range. Clear or Escape clears selection; opening Anshitsu uses `D` or the selection toolbar.
+- Home shortcuts are `R` Recent, `A` Albums, `C` Calendar, `F` Favorites, `E` Export, `S` STACK management, and `D` Anshitsu. Home tabs use click or these direct commands; Left / Right / Home / End do not switch tabs. Their optional visible suffixes are `[R]`, `[A]`, `[C]`, `[F]`, `[E]`, `[S]`, and `[D]`; `Primary+A` is not shown as a suffix. Settings can hide suffixes and shortcut explanations without disabling commands. `Primary+A` selects all visible photos in photo views and mutable Queue cards in Export (Ctrl+A on Windows/Linux, ⌘A on macOS); native editing, Album lists, and Calendar year/month views keep their normal behavior.
 - With a selection, `S` opens STACK management with the selected photos. `D` opens Anshitsu with the selection; with no selection, it resumes the last Anshitsu workspace from the current SPA session, or does nothing when no session exists.
 - Home restores the browsing tab, detail view, and scroll position after returning from Anshitsu or STACK management, and remembers scroll position for each Home view while navigating between tabs.
 - Active-photo switching through the Filmstrip, with EXIF details for the current photo.
@@ -55,6 +55,17 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - A shared Settings dialog available from Home and Anshitsu. It offers Auto, Japanese, and English display language; Auto follows the browser's preferred languages and falls back to English. Date and time locale is independent of display language, with Auto using the browser's regional settings and choices including Japan, the US, the UK, and other supported regions. Calendar week start can be Auto, Sunday, or Monday. A keyboard-shortcut display setting controls shortcut explanations in Tooltips and Menus; turning explanations off leaves the shortcuts active.
 - Browser-saved image preferences, including WebGPU enablement and Anshitsu's initial image choice (Auto, Original preferred, or Preview preferred). Auto prefers the original when WebGPU is enabled and available; otherwise it keeps the preview. The preview is shown while a selected JPEG original loads, then switches automatically when ready unless Preview is preferred or the user has manually chosen a source.
 - Settings shows Immich server version and available build information alongside GenzoRoom and backend connection status. Preferences are stored in the browser; the Immich API key stays on the backend.
+
+### Export management (Export implementation Phase 4)
+
+- Open Export / 出力管理 with its Home tab or `E`, keeping the Gallery view state while using the same Header / Tabs / Toolbar / Content shell.
+- The persistent Export Queue is displayed as individual photo cards. Two or more queued assets from the same Immich Stack share a group; only queued members appear. Groups start at their first Queue member, preserve member order, and become standalone cards when only one member remains. Thumbnail sizing is shared with Home.
+- Export cards currently show Immich source thumbnails to identify Queue assets; they are not previews rendered with the GenzoRoom Recipe. Actual export execution remains unimplemented.
+- Select cards with normal click, Primary+click, Shift+click, checkboxes, or Select All / `Primary+A`; Shift ranges follow the displayed group order. Clear and Escape clear selection.
+- `W` explicitly marks selected mutable cards ready to export. Mixed selections turn readiness ON; an entirely ready selection turns it OFF. Readiness survives clearing selection and switching Home tabs, but is temporary and is not saved across reloads. It is separate from persistent Queue membership and the runtime status `waiting`.
+- Ready cards show **Ready to export / 出力待機中** in a full-width, 28px-high status bar over the thumbnail's bottom edge.
+- `Q` or Remove from Queue removes selected `queued` / `failed` assets sequentially. Successful removals disappear immediately; failures retain successful work and trigger a refresh with a localized alert. `waiting`, `encoding`, and `registering` cards are locked against selection, readiness changes, and removal. Gallery and Anshitsu keep their own Queue-toggle behavior.
+- **Export to Immich / Immichへ出力** remains disabled. Phase 4 completes Export management UI / selection / readiness / Queue management; Phase 5 Export Runtime, including encoding and upload, remains planned.
 
 ### STACK management
 
@@ -111,7 +122,7 @@ Copy / Paste transfers saved numeric values, including values in disabled catego
 ## Not implemented
 
 - RAW development pipeline.
-- Export and Export Queue.
+- Export Runtime: execution, Recipe freeze, encoding, progress, and Immich upload/registration. Export Queue persistence and management UI are implemented.
 - Automatic Immich Stack attachment for re-imported or exported assets.
 - Stack/group reordering through Drag & Drop.
 - Touch Drag & Drop in STACK management.
