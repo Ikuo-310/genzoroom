@@ -78,10 +78,16 @@ it.each(['en', 'ja'])('compares the saved snapshot, shows safe values, and clean
   expect(dependencies.saved).toHaveBeenCalledExactlyOnceWith('first', expect.any(AbortSignal), { requireRecipeVersion: 18 });
   expect(dependencies.render).toHaveBeenCalledWith(image().data, saved.state.currentRecipe);
   expect(dependencies.backend).toHaveBeenCalledExactlyOnceWith('first', 3, expect.any(AbortSignal));
-  expect(host.querySelector('.developer-export-comparison img')?.getAttribute('src')).toBe('blob:diagnostic-2');
-  expect(host.querySelector('canvas')?.width).toBe(2);
-  expect(host.querySelector('canvas')?.classList.contains('developer-export-image')).toBe(true);
-  expect(host.querySelector('.developer-export-comparison img')?.classList.contains('developer-export-image')).toBe(true);
+  const comparisonCanvases = [...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')];
+  expect(comparisonCanvases).toHaveLength(2);
+  expect(comparisonCanvases.every(canvas => canvas.classList.contains('developer-export-image') && canvas.width === 2 && canvas.height === 1)).toBe(true);
+  expect(comparisonCanvases.every(canvas => !canvas.hidden)).toBe(true);
+  expect(dependencies.decode).toHaveBeenNthCalledWith(2, { kind: 'jpeg-original', url: 'blob:diagnostic-2' }, expect.any(AbortSignal));
+  expect(HTMLCanvasElement.prototype.getContext).toHaveBeenCalledTimes(2);
+  expect(HTMLCanvasElement.prototype.getContext).toHaveBeenNthCalledWith(1, '2d', { colorSpace: 'srgb' });
+  expect(HTMLCanvasElement.prototype.getContext).toHaveBeenNthCalledWith(2, '2d', { colorSpace: 'srgb' });
+  expect(vi.mocked(HTMLCanvasElement.prototype.getContext).mock.results[0].value.putImageData).toHaveBeenCalledTimes(2);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
   expect(host.textContent).toContain(i18n.t('exportEngine.status.completed'));
   expect(host.textContent).not.toContain('exportEngine.');
   const diagnostic = host.querySelector('.developer-diagnostics')!.textContent;
@@ -93,7 +99,7 @@ it.each(['en', 'ja'])('compares the saved snapshot, shows safe values, and clean
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
   await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
   expect(host.querySelector('.developer-export-comparison img')).toBeNull();
-  expect(host.querySelector('canvas')?.width).toBe(0);
+  expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
   expect(host.textContent).toContain(i18n.t('exportEngine.status.idle'));
 });
 
@@ -120,6 +126,7 @@ it.each(['unmount', 'pagehide'] as const)('aborts pending backend on %s, drops l
   if (departure === 'unmount') { act(() => root.unmount()); root = createRoot(host); }
   else act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
   expect(signal.aborted).toBe(true); expect(backing.width).toBe(0); expect(backing.height).toBe(0);
+  expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
   await act(async () => waiting.resolve({ blob: new Blob(['jpeg']), metadata }));
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   expect(host.querySelector('.developer-export-comparison img')).toBeNull();
@@ -128,11 +135,30 @@ it.each(['unmount', 'pagehide'] as const)('aborts pending backend on %s, drops l
 it('releases displayed backend Blob URL on pagehide and resets on BFCache restoration', async () => {
   const { dependencies } = setup();
   await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />)); await select(); await click(run()); await settle();
-  act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
+  act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
   expect(host.querySelector('canvas')?.width).toBe(0);
   act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
   expect(host.textContent).toContain(i18n.t('exportEngine.status.idle')); expect(run().disabled).toBe(true);
+});
+
+it('does not paint a stale Backend decode after BFCache restore and a new Asset run', async () => {
+  const { dependencies } = setup(); const late = deferred<ImageData>();
+  dependencies.decode = vi.fn(({ url }) => url === 'blob:diagnostic-2' ? late.promise : Promise.resolve(image()));
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />));
+  await select(); await click(run()); await settle();
+  const oldSignal = vi.mocked(dependencies.decode).mock.calls[1][1];
+  act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+  act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await click(choose()); await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
+  await click(run()); await settle();
+  expect(oldSignal.aborted).toBe(true);
+  expect(host.querySelectorAll('.developer-export-comparison canvas')[1]).toMatchObject({ width: 2, height: 1, hidden: false });
+  const draw = vi.mocked(HTMLCanvasElement.prototype.getContext).mock.results[0].value.putImageData;
+  const callsAfterCurrentRun = draw.mock.calls.length;
+  await act(async () => late.resolve(image())); await settle();
+  expect(draw).toHaveBeenCalledTimes(callsAfterCurrentRun);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
 });
 
 it('rejects late candidate results after unmount', async () => {
@@ -146,7 +172,7 @@ it('rejects late candidate results after unmount', async () => {
 
 it('ignores the old asset decoder after BFCache restoration without revoking the new run URL', async () => {
   const { dependencies } = setup(); const old = deferred<ImageData>(), next = deferred<ImageData>();
-  dependencies.decode = vi.fn().mockImplementationOnce(() => old.promise).mockImplementationOnce(() => next.promise);
+  dependencies.decode = vi.fn().mockImplementationOnce(() => old.promise).mockImplementationOnce(() => next.promise).mockImplementation(async () => image());
   await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />)); await select(); await click(run());
   const oldSignal = vi.mocked(dependencies.decode).mock.calls[0][1];
   act(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
@@ -168,7 +194,7 @@ it.each(['saved_recipe_unavailable', 'unsupported_recipe_version', 'saved_recipe
   const { dependencies } = setup(); dependencies.backend = vi.fn(async () => { throw new ExportEngineDiagnosticError(code); });
   await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />)); await select(); await click(run()); await settle();
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t(`exportEngine.error.${code}`));
-  expect(host.querySelector('canvas')?.width).toBe(0); expect(host.querySelector('.developer-export-comparison img')).toBeNull();
+  expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
 });
 
 it.each(['missing', 'legacy', 'original', 'decode', 'render', 'candidate'] as const)('maps %s failure and does not expose exception text', async failure => {
@@ -194,7 +220,7 @@ it.each(['en', 'ja'])('shares selected Asset for Decode Compare without saved Re
   expect(dependencies.saved).not.toHaveBeenCalled(); expect(dependencies.render).not.toHaveBeenCalled(); expect(dependencies.backend).not.toHaveBeenCalled();
   expect(host.textContent).toContain(i18n.t('decodeCompare.status.completed'));
   expect(host.textContent).toContain(i18n.t('decodeCompare.statistics')); expect(host.textContent).not.toContain('decodeCompare.');
-  await click(run()); await settle(); expect(host.querySelector('.developer-export-comparison img')).not.toBeNull();
+  await click(run()); await settle(); expect(host.querySelectorAll('.developer-export-comparison canvas')).toHaveLength(2);
   expect(host.textContent).toContain(i18n.t('decodeCompare.statistics'));
   await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
   expect(host.textContent).toContain(i18n.t('decodeCompare.status.not_run'));
@@ -210,6 +236,16 @@ it('shows dimension mismatch and clears previous statistics on rerun', async () 
   await click(decodeRun()); await settle();
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('decodeCompare.error.dimension_mismatch'));
   expect(host.textContent).not.toContain(i18n.t('decodeCompare.statistics'));
+});
+
+it('revokes the Backend JPEG URL and clears both canvases after Backend JPEG decode failure', async () => {
+  const { dependencies } = setup();
+  dependencies.decode = vi.fn().mockResolvedValueOnce(image()).mockRejectedValueOnce(new Error('PRIVATE_DECODE_ERROR'));
+  await act(async () => root.render(<ExportEngineDiagnostics dependencies={dependencies} />)); await select(); await click(run()); await settle();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportEngine.error.decode_failed'));
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
+  expect([...host.querySelectorAll<HTMLCanvasElement>('.developer-export-comparison canvas')].every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
+  expect(host.textContent).not.toContain('PRIVATE_DECODE_ERROR');
 });
 
 it('guards both run modes and cancels a pending backend without publishing late pixels', async () => {
@@ -287,7 +323,7 @@ it.each(['en', 'ja'])('runs JPEG round-trip from the shared selected Asset in %s
   await click(decodeRun()); await settle();
   expect(host.textContent).toContain(i18n.t('decodeCompare.status.completed'));
   await click(run()); await settle();
-  expect(host.querySelector('.developer-export-comparison img')).not.toBeNull();
+  expect(host.querySelectorAll('.developer-export-comparison canvas')).toHaveLength(2);
 });
 
 it('guards other runs and suppresses late JPEG round-trip data after cancellation', async () => {

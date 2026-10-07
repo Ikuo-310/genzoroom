@@ -29,18 +29,26 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<ExportEngineErrorCode | null>(null);
   const [metadata, setMetadata] = useState<ExportEngineMetadata | null>(null);
-  const [backendUrl, setBackendUrl] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
+  const [backendPreviewReady, setBackendPreviewReady] = useState(false);
   const [decodeReport, setDecodeReport] = useState(emptyDecodeComparison);
   const [decodePhase, setDecodePhase] = useState<DecodePhase>('idle');
   const [roundTripReport, setRoundTripReport] = useState(emptyEncodeRoundTrip);
   const [roundTripPhase, setRoundTripPhase] = useState<EncodeRoundTripPhase>('idle');
   const [jsonError, setJsonError] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const backendCanvas = useRef<HTMLCanvasElement>(null);
   const ownCanvas = useCallback((node: HTMLCanvasElement | null) => {
     // React detaches refs before passive unmount cleanup, so release the backing store here.
     if (canvas.current && canvas.current !== node) { canvas.current.width = 0; canvas.current.height = 0; }
     canvas.current = node;
+  }, []);
+  const ownBackendCanvas = useCallback((node: HTMLCanvasElement | null) => {
+    // Keep the second full-resolution backing store bounded across detach and rerender.
+    if (backendCanvas.current && backendCanvas.current !== node) {
+      backendCanvas.current.width = 0; backendCanvas.current.height = 0;
+    }
+    backendCanvas.current = node;
   }, []);
   const request = useRef<AbortController | null>(null);
   const candidateRequest = useRef<AbortController | null>(null);
@@ -54,8 +62,9 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
       urls.current[key] = null;
     }
     if (canvas.current) { canvas.current.width = 0; canvas.current.height = 0; }
+    if (backendCanvas.current) { backendCanvas.current.width = 0; backendCanvas.current.height = 0; }
   };
-  const reset = () => { release(); setBackendUrl(null); setPreviewReady(false); setMetadata(null); setError(null); };
+  const reset = () => { release(); setPreviewReady(false); setBackendPreviewReady(false); setMetadata(null); setError(null); };
   useEffect(() => {
     closed.current = false;
     const closeResources = () => {
@@ -66,7 +75,7 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
     };
     const hide = () => {
       closeResources();
-      setBackendUrl(null); setPreviewReady(false); setMetadata(null); setError(null); setPhase('cancelled');
+      setPreviewReady(false); setBackendPreviewReady(false); setMetadata(null); setError(null); setPhase('cancelled');
       setCandidateStatus('idle');
       setDecodeReport(value => value.status === 'running' ? { ...emptyDecodeComparison(), status: 'cancelled', error: 'cancelled' } : value);
       setDecodePhase('idle');
@@ -76,7 +85,7 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
     const show = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
       closed.current = false;
-      setCandidates([]); setSelected(null); setPhase('idle');
+      setCandidates([]); setSelected(null); setPhase('idle'); setPreviewReady(false); setBackendPreviewReady(false);
       setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
     };
     window.addEventListener('pagehide', hide); window.addEventListener('pageshow', show);
@@ -176,9 +185,26 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
       };
       draw(); source = null; setPreviewReady(true);
       stage('backend', 'backend_unavailable');
-      const result = await (dependencies?.backend ?? fetchExportEngineJpeg)(selected.id, revision, signal); check();
-      urls.current.backend = URL.createObjectURL(result.blob);
-      setBackendUrl(urls.current.backend); setMetadata(result.metadata); setPhase('completed');
+      let result: Awaited<ReturnType<ExportEngineDependencies['backend']>> | null =
+        await (dependencies?.backend ?? fetchExportEngineJpeg)(selected.id, revision, signal);
+      check();
+      const backendMetadata = result.metadata;
+      const backendUrl = URL.createObjectURL(result.blob); urls.current.backend = backendUrl; result = null;
+      failureCode = 'decode_failed';
+      let backendImage: ImageData | null = null;
+      try {
+        backendImage = await (dependencies?.decode ?? decodeEditSource)({ kind: 'jpeg-original', url: backendUrl }, signal);
+        check();
+        const target = backendCanvas.current; if (!target) throw new Error();
+        target.width = backendImage.width; target.height = backendImage.height;
+        const context = target.getContext('2d', { colorSpace: 'srgb' }); if (!context) throw new Error();
+        context.putImageData(backendImage, 0, 0);
+        backendImage = null; setBackendPreviewReady(true);
+      } finally {
+        // The URL is needed only until production JPEG decoding finishes.
+        if (urls.current.backend === backendUrl) { URL.revokeObjectURL(backendUrl); urls.current.backend = null; }
+      }
+      setMetadata(backendMetadata); setPhase('completed');
     } catch (failure) {
       if (closed.current || request.current !== controller) return;
       reset();
@@ -217,7 +243,8 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
     {error && <p role="alert">{t(`exportEngine.error.${error}`)}</p>}
     <div className="developer-export-comparison">
       <figure><figcaption>{t('exportEngine.frontend')}</figcaption><canvas className="developer-export-image" ref={ownCanvas} hidden={!previewReady} aria-label={t('exportEngine.frontend')} /></figure>
-      <figure><figcaption>{t('exportEngine.backend')}</figcaption>{backendUrl && <img className="developer-export-image" src={backendUrl} alt={t('exportEngine.backend')} />}</figure>
+      <figure><figcaption>{t('exportEngine.backend')}</figcaption><canvas className="developer-export-image" ref={ownBackendCanvas}
+        hidden={!backendPreviewReady} aria-label={t('exportEngine.backend')} /> </figure>
     </div>
     {metadata && <dl className="developer-diagnostics">{Object.entries(metadata).map(([key, value]) =>
       <div key={key}><dt>{t(`exportEngine.values.${key}`)}</dt><dd>{key === 'sourceIcc' ? t(`jpegDiagnostics.profileStatus.${value === 'embedded' ? 'embedded' : 'none'}`)
