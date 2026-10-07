@@ -12,7 +12,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 
 DB_PATH = Path("/data/genzoroom.db")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -109,7 +109,32 @@ def _create_v3(connection: sqlite3.Connection) -> None:
         WHERE status IN ('waiting', 'encoding', 'registering')""")
 
 
-MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3}
+def _create_v4(connection: sqlite3.Connection) -> None:
+    # Rebuild CHECK constraints in the existing migration transaction; never disable foreign keys.
+    connection.execute("SELECT run_id, position, asset_id, queue_id, frozen_revision, recipe_version, processing_version, frozen_recipe_json, status, error_code, registered_asset_id, updated_at FROM export_run_items LIMIT 0")
+    for table in ("export_runs", "export_run_items"):
+        sql = connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
+        sql = sql.replace(table, table + "_v4", 1)
+        if table == "export_runs":
+            sql = sql.replace("'completed', 'failed'", "'completed', 'failed', 'stopped'")
+            sql = sql[:-1] + ", stop_requested INTEGER NOT NULL DEFAULT 0 CHECK (stop_requested IN (0,1)), current_position INTEGER)"
+        else:
+            sql = sql.replace("REFERENCES export_runs(", "REFERENCES export_runs_v4(")
+            sql = sql.replace("'succeeded', 'failed'", "'succeeded', 'failed', 'released'")
+        connection.execute(sql)
+    connection.execute("INSERT INTO export_runs_v4 SELECT *, 0, NULL FROM export_runs")
+    connection.execute("INSERT INTO export_run_items_v4 SELECT * FROM export_run_items")
+    connection.execute("""UPDATE export_runs_v4 SET current_position=(SELECT position FROM export_run_items
+        WHERE export_run_items.run_id=export_runs_v4.run_id AND status IN ('encoding','registering'))""")
+    connection.execute("DROP TABLE export_run_items")
+    connection.execute("DROP TABLE export_runs")
+    connection.execute("ALTER TABLE export_runs_v4 RENAME TO export_runs")
+    connection.execute("ALTER TABLE export_run_items_v4 RENAME TO export_run_items")
+    connection.execute("CREATE UNIQUE INDEX export_one_active_run ON export_runs(status) WHERE status='active'")
+    connection.execute("CREATE UNIQUE INDEX export_one_active_asset ON export_run_items(asset_id) WHERE status IN ('waiting','encoding','registering')")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:

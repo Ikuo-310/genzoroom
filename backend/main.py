@@ -4,6 +4,7 @@ import copy
 from contextlib import asynccontextmanager
 from datetime import date
 from uuid import UUID
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -19,7 +20,7 @@ from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
 from export_runtime import ExportRuntime
-from export_runtime_store import runtime_log
+from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -57,7 +58,7 @@ async def lifespan(app: FastAPI):
     runtime = ExportRuntime()
     app.state.export_runtime = runtime
     try:
-        await runtime.inspect_recovery()
+        await runtime.recover()
     except StoreUnavailable as error:
         # Persistence failure must not prevent unrelated read-only Immich routes from starting.
         runtime_log("recovery.readFailed", level="error", errorCode=error.code)
@@ -73,6 +74,9 @@ MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
 
 @app.exception_handler(RequestValidationError)
 async def safe_diagnostic_validation(request: Request, error: RequestValidationError):
+    if request.url.path.startswith("/export/"):
+        return JSONResponse(status_code=422, content={"detail": {"code": "invalid_export_request"}},
+                            headers={"Cache-Control": "private, no-store"})
     if request.url.path in ("/developer/export-engine", "/developer/export-engine/decode", "/developer/export-engine/roundtrip"):
         # Pydantic's default response reflects rejected inputs, including injected Recipe bodies.
         return JSONResponse(status_code=422, content={"detail": {"code": "invalid_diagnostic_request"}},
@@ -287,6 +291,64 @@ class EditStatusRequest(BaseModel):
 class ExportQueueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assetIds: list[UUID] = Field(min_length=1, max_length=100)
+
+
+class ExportRuntimeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    runId: UUID | None
+    status: Literal['active', 'completed', 'failed', 'stopped'] | None
+    stopRequested: bool
+    stopAllowed: bool
+    currentAssetId: UUID | None
+
+
+def _runtime_response(run):
+    return {"runId": run.run_id if run else None, "status": run.status if run else None,
+            "stopRequested": run.stop_requested if run else False,
+            "stopAllowed": bool(run and run.status == "active" and not run.stop_requested),
+            "currentAssetId": run.items[run.current_position].asset_id if run and run.current_position is not None else None}
+
+
+@app.get("/export/runtime", response_model=ExportRuntimeResponse)
+def export_runtime_status():
+    try:
+        return _runtime_response(recoverable_export_run())
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.post("/export/runs/{run_id}/stop", response_model=ExportRuntimeResponse)
+def stop_export_run(run_id: UUID):
+    try:
+        return _runtime_response(request_export_stop(run_id))
+    except RuntimeRejected as error:
+        raise _edit_error(409, error.code) from error
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+class ExportQueueItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetId: UUID
+    status: Literal['queued', 'waiting', 'encoding', 'registering', 'failed']
+    queuedAt: str
+    updatedAt: str
+
+
+class ExportQueueResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[ExportQueueItemResponse]
+
+
+@app.post("/export/queue/retry", response_model=ExportQueueResponse)
+def retry_export_queue(payload: ExportQueueRequest):
+    try:
+        return {"items": retry_export_assets(payload.assetIds)}
+    except RuntimeRejected as error:
+        status = 409 if error.code == "queue_item_not_failed" else 422
+        raise _edit_error(status, error.code) from error
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
 
 
 @app.get("/export/queue")

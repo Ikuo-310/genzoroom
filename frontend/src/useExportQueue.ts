@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  dequeueExportAsset, enqueueExportAssets, listExportQueue,
+  dequeueExportAsset, enqueueExportAssets, listExportQueue, retryExportAssets,
   type ExportQueueApiError, type ExportQueueItem, type ExportQueueStatus,
 } from './exportQueueApi';
+import { useExportRuntime } from './useExportRuntime';
 
-export type ExportQueueMutation = 'enqueue' | 'dequeue';
+export type ExportQueueMutation = 'enqueue' | 'dequeue' | 'retry';
 export type ExportQueueMutationState = { operation: ExportQueueMutation | null; error?: unknown };
 
 export type ExportQueueState = {
@@ -19,6 +20,10 @@ export type ExportQueueState = {
   refresh: () => Promise<void>;
   enqueue: (assetIds: readonly string[]) => Promise<void>;
   dequeue: (assetId: string) => Promise<void>;
+  retry: (assetIds: readonly string[]) => Promise<void>;
+  runtime: ReturnType<typeof useExportRuntime>['runtime'];
+  cancelRuntime: ReturnType<typeof useExportRuntime>['cancel'];
+  cancelling: boolean;
   mutationFor: (assetId: string) => ExportQueueMutationState;
 };
 
@@ -119,11 +124,11 @@ export function useExportQueue(): ExportQueueState {
     try {
       const response = await run(controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
-      const canonicalSnapshot = operation === 'enqueue' && response !== undefined
+      const canonicalSnapshot = operation !== 'dequeue' && response !== undefined
         && snapshotAtStart === snapshotGeneration.current
         && mutationsAtStart === mutationStartGeneration.current - 1
         && refreshesAtStart === refreshStartGeneration.current;
-      if (operation === 'enqueue' && response) {
+      if (operation !== 'dequeue' && response) {
         if (canonicalSnapshot) {
           setItems(response);
         } else {
@@ -181,6 +186,11 @@ export function useExportQueue(): ExportQueueState {
   const dequeue = useCallback((assetId: string) => runMutation(
     [assetId], 'dequeue', async signal => { await dequeueExportAsset(assetId, signal); },
   ), [runMutation]);
+  const retry = useCallback(async (assetIds: readonly string[]) => {
+    try { await runMutation(assetIds, 'retry', signal => retryExportAssets(assetIds, signal)); }
+    finally { await refresh(); }
+  }, [runMutation, refresh]);
+  const { runtime, cancel: cancelRuntime, cancelling } = useExportRuntime(refresh);
 
   const itemsByAssetId = indexItems(items);
   const getItem = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId)), [itemsByAssetId]);
@@ -188,5 +198,5 @@ export function useExportQueue(): ExportQueueState {
   const getStatus = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId))?.status, [itemsByAssetId]);
   const mutationFor = useCallback((assetId: string) => mutations.get(keyOf(assetId)) ?? { operation: null }, [mutations]);
 
-  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, loading, error, refresh, enqueue, dequeue, mutationFor };
+  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, loading, error, refresh, enqueue, dequeue, retry, runtime, cancelRuntime, cancelling, mutationFor };
 }

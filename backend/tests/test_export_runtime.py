@@ -48,7 +48,7 @@ def test_v2_to_v3_preserves_all_edit_and_queue_columns_and_reopen_is_idempotent(
         queue_before = connection.execute("SELECT * FROM export_queue").fetchall()
     assert recoverable_export_run() is None
     with database(db) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION
         assert connection.execute("SELECT * FROM asset_edit_states").fetchall() == edit_before
         assert connection.execute("SELECT * FROM export_queue").fetchall() == queue_before
     with patch("edit_store._migrate", side_effect=AssertionError("must not migrate again")):

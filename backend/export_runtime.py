@@ -1,6 +1,7 @@
 """Request-independent serial worker; production Start awaits Phase 5E boundaries."""
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 from uuid import UUID, uuid4
@@ -12,10 +13,15 @@ from export_artifact import ExportArtifact, create_export_artifact
 from export_runtime_store import (
     ExportRunItem, FAILURE_CODES, RuntimeRejected, complete_export_item, create_export_run,
     fail_export_item, recoverable_export_run, runtime_log, transition_export_item,
+    begin_export_item, reclaim_export_run, request_export_stop,
 )
 from immich import AssetDetail, ImmichOriginal, get_asset_detail, get_asset_original
 from jpeg_codec import JpegCodecError, decode_jpeg
 from jpeg_renderer import JpegRenderer
+
+
+# One coordinator may execute in this process, even across different event loops/instances.
+_process_worker_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -99,7 +105,7 @@ class ExportRuntime:
 
     async def start(self, asset_ids: Sequence[UUID]) -> UUID:
         if self._source is None or self._family is None or self._registrar is None:
-            # Reject before any DB mutation: Phase 5C has no production family/registration adapter.
+            # Production family/registration adapters remain unavailable until Phase 5E.
             raise RuntimeRejected("runtime_not_configured")
         ids = list(asset_ids)
         async with self._start_lock:
@@ -112,17 +118,50 @@ class ExportRuntime:
         # Creation + dispatch are owned by the coordinator, including cancellation at commit.
         return await asyncio.shield(ready)
 
+    async def recover(self) -> UUID | None:
+        run = await self.inspect_recovery()
+        if run is None:
+            return None
+        if self._source is None or self._family is None or self._registrar is None:
+            runtime_log("recovery.deferred", runId=str(run.run_id), errorCode="runtime_not_configured")
+            return None
+        async with self._start_lock:
+            if self._task is not None and not self._task.done():
+                raise RuntimeRejected("run_active")
+            ready = asyncio.get_running_loop().create_future()
+            ready.add_done_callback(lambda result: None if result.cancelled() else result.exception())
+            self._task = asyncio.create_task(self._serve(None, ready, recovery=run))
+        return await asyncio.shield(ready)
+
+    async def stop(self, run_id: UUID):
+        # Stop is a durable intent; it never cancels the asyncio worker or a JPEG thread.
+        return await run_in_threadpool(request_export_stop, run_id)
+
     async def wait(self):
         if self._task is not None:
             await asyncio.shield(self._task)
 
-    async def _serve(self, ids, ready):
+    async def _serve(self, ids, ready, recovery=None):
         run = None
+        acquired = False
         try:
-            run = await run_in_threadpool(create_export_run, ids, worker_id=uuid4())
+            acquired = _process_worker_lock.acquire(blocking=False)
+            if not acquired:
+                raise RuntimeRejected("run_active")
+            if recovery is None:
+                run = await run_in_threadpool(create_export_run, ids, worker_id=uuid4())
+            else:
+                runtime_log("recovery.started", runId=str(recovery.run_id))
+                run = await run_in_threadpool(reclaim_export_run, recovery.run_id, recovery.worker_id, uuid4())
+            item = await _persist(begin_export_item, run.run_id, run.worker_id)
             ready.set_result(run.run_id)
-            for item in run.items:
+            while True:
+                if item is None:
+                    break
                 await self._process_item(run.run_id, run.worker_id, item)
+                item = await _persist(begin_export_item, run.run_id, run.worker_id)
+            if recovery is not None:
+                runtime_log("recovery.completed", runId=str(run.run_id))
         except asyncio.CancelledError:
             # Process shutdown preserves checkpoints; browser cancellation never reaches this task.
             if not ready.done():
@@ -136,6 +175,11 @@ class ExportRuntime:
                 ready.set_exception(error if isinstance(error, (StoreUnavailable, RuntimeRejected))
                                     else RuntimeRejected("worker_failed"))
             runtime_log("run.workerFailed", level="error", runId=str(run.run_id) if run else None, errorCode=code)
+            if recovery is not None:
+                runtime_log("recovery.failed", level="error", runId=str(recovery.run_id), errorCode=code)
+        finally:
+            if acquired:
+                _process_worker_lock.release()
 
     async def _process_item(self, run_id: UUID, worker_id: UUID, item: ExportRunItem):
         context = RegistrationContext(run_id, item.asset_id, item.position, item.frozen_revision,
@@ -186,7 +230,7 @@ class ExportRuntime:
                     "encoding": "encoding_failed", "registration": "registration_failed"}[phase]
             if isinstance(error, JpegCodecError) and error.code in FAILURE_CODES:
                 code = error.code
-            # A terminal item failure does not stop the remaining frozen targets; there is no retry.
+            # An item failure continues the run; explicit Retry creates fresh Queue intent later.
             await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, code)
         finally:
             source.clear()

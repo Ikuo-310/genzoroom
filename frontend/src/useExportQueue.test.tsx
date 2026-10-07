@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
 import { ExportQueueMutationBusyError, useExportQueue } from './useExportQueue';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), retry: vi.fn(), runtime: vi.fn() }));
 vi.mock('./exportQueueApi', async importOriginal => ({
   ...await importOriginal<typeof import('./exportQueueApi')>(),
   listExportQueue: api.list,
   enqueueExportAssets: api.enqueue,
   dequeueExportAsset: api.dequeue,
+  retryExportAssets: api.retry,
+  listExportRuntime: api.runtime,
 }));
 
 const A = '12345678-1234-4234-9234-123456789abc';
@@ -37,10 +39,23 @@ beforeEach(() => {
   api.list.mockReset().mockResolvedValue([]);
   api.enqueue.mockReset().mockImplementation(async (ids: string[]) => ids.map(id => item(id)));
   api.dequeue.mockReset().mockResolvedValue(undefined);
+  api.runtime.mockReset().mockResolvedValue({ runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null });
+  api.retry.mockReset();
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe('useExportQueue', () => {
+  it('refreshes canonical Queue after successful and failed atomic Retry', async () => {
+    api.list.mockResolvedValue([item(A, 'failed')]);
+    await render();
+    api.retry.mockImplementation(async () => { api.list.mockResolvedValue([item(A)]); return [item(A)]; });
+    await act(async () => current.retry([A]));
+    expect(current.getStatus(A)).toBe('queued'); expect(api.list).toHaveBeenCalledTimes(2);
+    api.retry.mockRejectedValue(new ExportQueueApiError('locked'));
+    api.list.mockResolvedValue([item(A, 'registering')]);
+    await act(async () => { await expect(current.retry([A])).rejects.toMatchObject({ kind: 'locked' }); });
+    expect(current.getStatus(A)).toBe('registering'); expect(api.list).toHaveBeenCalledTimes(3);
+  });
   it('loads all statuses and provides efficient asset lookups', async () => {
     api.list.mockResolvedValue(['queued', 'waiting', 'encoding', 'registering', 'failed'].map((status, index) => item(`${index}${A.slice(1)}`, status as ExportQueueItem['status'])));
     await render();

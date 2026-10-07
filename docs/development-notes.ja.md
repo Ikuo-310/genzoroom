@@ -2,6 +2,30 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Phase 5D Stop / Retry / Restart Recovery（2026-10-07）
+
+SQLite schema v4へtransactional migrationし、runに永続`stop_requested`と`current_position`、terminal `stopped`、itemにterminal `released`を追加した。v3のedit-state/Queue/run/item全column・順序・frozen Recipeを維持し、既存encoding/registeringをcurrentとして移行する。Recipe/History保存形式は変更しない。v3専用Backendへ戻す場合はmigration前の整合したDB backupが必要で、復元により以後の書込みは失われる。自動downgradeは実装していない。
+
+source取得前にcurrentをDBで確定する。Stopと次item開始を同じwriter transactionで排他し、currentは強制停止せず成功/失敗まで継続する。そのterminal transactionで未開始waitingだけをQueue `queued` / run item `released`へ戻す。currentなしなら直ちに解放し、重複Stopはterminal後もidempotent。releasedがあればrun `stopped`、なければ全成功`completed`／失敗あり`failed`とする。Stop自体はinfoで記録する。
+
+Retryは1–100 unique IDsの全対象をfailedかつ現在のsaved Recipeがnon-default/valid/supportedと検証してからQueueだけをqueuedへ戻す。queued/active/missingは409、duplicates/入力/eligibilityは422、DB/corruptionは503。部分commitせず、過去failed記録・error・frozen Recipeを保持する。次runはその時点のsaved Recipe/revisionを新たにfreezeする。Retry自体はworkerを開始しない。
+
+Recoveryはprocess-wide lockと既存start lock、DBのactive unique indexと旧worker UUIDのcompare-and-swapで直列化し、新worker UUIDをclaimする。current encoding/registeringとQueueをwaitingへ戻し、current/Stopを保持してsourceからJPEGを再生成しregistrarを最初から呼ぶ。未開始waitingは順次再開する。shutdown checkpoint／browser離脱とworker lifetimeの分離を維持する。単一Backend processの再起動を対象とし、分散worker leaseは導入していない。lifespanは`recover()`へ接続したが、production dependencies未設定ならclaim/変更せず保留する。fake successやhidden Startは追加していない。
+
+APIは`GET /export/runtime`、`POST /export/runs/{runId}/stop`、`POST /export/queue/retry`を追加した。Recipe/worker token/raw exceptionを返さず、response shapeと固定codeを検証する。Frontendは2秒pollとactive/終了時のcanonical Queue refresh、light amber waiting／green activity／yellow Stop／red `出力失敗`、failedだけのsingle/bulk Retry、active認識時だけのCancelを追加した。混在Retryを拒否し、Retry/CancelはW/Q one-shot Undoへ入れない。failedカードのstatus表示を優先してもarmed stateは従来どおり保持し、activeではarmed/selectionを除外する。
+
+Python 3.14.5の指定Windows `.venv`でBackend full pytestは**641 passed（Phase 5D新規52件）、317 subtests passed**。Frontend full Vitestは**112 files / 2340 passed / 2 skipped**、Phase 5D実装中の関連6 filesは130 passed。BackendとFrontendの並行full run時は既存AlbumテストでWindows socket buffer不足（WinError 10055）が発生したが、Backend単独再実行は全成功した。通常sandboxではpytest/Vitestの一時ファイル制約が出たため、同じ環境/コマンドを権限付きで実行した。compileall、`npx tsc --noEmit`、`npm run build`、`git diff --check`は成功。buildの500 kB超chunk警告は残る。NAS deploy／browser実機確認／Commit／Pushは行っていない。
+
+Focused static auditはHigh 0 / Medium 3を修正し再確認した。active Stopでcurrentが欠落する矛盾とreleased suffixの検証を追加し、古いruntime pollがStop acknowledgementを上書きしないgeneration guard／Cancel中poll保留を追加、unmount後に旧pollがtimerを再作成しないeffect lifetime guardを追加した。Stop/開始・完了のrace、0件DML rollback、Retry全体rollback、stale ownership、registration実試行中断後のreplay、shutdown、logger故障、UI canonical refreshと既存W/Q Undoを回帰確認した。残存High/Mediumは0。
+
+Production `Immichへ出力` Startはdisabledのまま。actual family lookup／Immich upload-registrationとidempotency・duplicate tolerance／GenzoRoom tag／Stack／COVERは**Phase 5E**、real NAS/Immich integration testは**Phase 5F**。5Eへ進める状態。
+
+変更ファイル（23件）：
+
+- Backend: `backend/edit_store.py`, `backend/export_runtime_store.py`, `backend/export_runtime.py`, `backend/main.py`, `backend/tests/test_export_runtime.py`, `backend/tests/test_export_recovery.py`。
+- Frontend: `frontend/src/exportQueueApi.ts`, `frontend/src/useExportQueue.ts`, `frontend/src/useExportRuntime.ts`, `frontend/src/useExportManagement.ts`, `frontend/src/ExportManagement.tsx`, `frontend/src/style.css`, `frontend/src/locales/ja.json`, `frontend/src/locales/en.json`, `frontend/src/exportQueueApi.test.ts`, `frontend/src/useExportQueue.test.tsx`, `frontend/src/useExportRuntime.test.tsx`, `frontend/src/useExportManagement.test.tsx`, `frontend/src/ExportManagement.test.tsx`, `frontend/src/GalleryExportManagement.test.tsx`。
+- Documentation: `docs/architecture.md`, `docs/development-notes.ja.md`, `CHANGELOG.md`。
+
 ## Export Phase 5C Backend Runtime基盤（2026-10-07）
 
 SQLite schema v3へtransactional migrationし、`export_runs` / `export_run_items`にtarget順・frozen Recipe/revision/version・lifecycle・worker UUID・固定failure codeを分離した。Queueと既存edit-stateの全column/保存形式を保持し、HistoryやJPEG/source binaryはrunへ保存しない。DB v2だけを読む旧Backendへ戻す場合はmigration前の整合したSQLite backupから復旧する必要があり、その後の書込みは失われる。自動downgradeは追加していない。

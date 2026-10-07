@@ -51,7 +51,7 @@ async function request(path: string, init: RequestInit): Promise<Response> {
   const kind: ExportQueueApiErrorKind = response.status === 503 ? 'unavailable'
     : response.status === 422 && code === 'duplicate_asset_ids' ? 'duplicate'
     : response.status === 422 && code === 'asset_not_eligible' ? 'not_eligible'
-    : response.status === 409 && code === 'queue_item_locked' ? 'locked'
+    : response.status === 409 ? 'locked'
     : response.status === 422 ? 'invalid_request' : 'unexpected';
   throw new ExportQueueApiError(kind, response.status, code);
 }
@@ -81,4 +81,44 @@ export async function dequeueExportAsset(assetId: string, signal: AbortSignal): 
   const id = checkedAssetId(assetId);
   const response = await request(`/api/export/queue/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
   if (response.status !== 204) throw new ExportQueueApiError('invalid_response');
+}
+
+export async function retryExportAssets(assetIds: readonly string[], signal: AbortSignal): Promise<ExportQueueItem[]> {
+  if (!Array.isArray(assetIds) || assetIds.length < 1 || assetIds.length > 100) throw new ExportQueueApiError('invalid_request');
+  const ids = assetIds.map(checkedAssetId);
+  if (new Set(ids).size !== ids.length) throw new ExportQueueApiError('duplicate');
+  return readItems(await request('/api/export/queue/retry', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetIds: ids }),
+  }));
+}
+
+export type ExportRuntimeState = {
+  runId: string | null; status: 'active' | 'completed' | 'failed' | 'stopped' | null;
+  stopRequested: boolean; stopAllowed: boolean; currentAssetId: string | null;
+};
+async function readRuntime(response: Response): Promise<ExportRuntimeState> {
+  let value: unknown;
+  try { value = await response.json(); } catch { throw new ExportQueueApiError('invalid_response'); }
+  if (!isRecord(value) || !hasKeys(value, ['runId', 'status', 'stopRequested', 'stopAllowed', 'currentAssetId'])
+    || value.runId !== null && (typeof value.runId !== 'string' || !UUID_PATTERN.test(value.runId))
+    || value.currentAssetId !== null && (typeof value.currentAssetId !== 'string' || !UUID_PATTERN.test(value.currentAssetId))
+    || ![null, 'active', 'completed', 'failed', 'stopped'].includes(value.status as null | string)
+    || typeof value.stopRequested !== 'boolean' || typeof value.stopAllowed !== 'boolean'
+    || (value.runId === null) !== (value.status === null)
+    || value.stopAllowed !== (value.status === 'active' && !value.stopRequested)
+    || value.status !== 'active' && value.currentAssetId !== null
+    || value.runId === null && value.stopRequested
+    || value.status === 'stopped' && !value.stopRequested) throw new ExportQueueApiError('invalid_response');
+  return value as ExportRuntimeState;
+}
+export async function listExportRuntime(signal: AbortSignal): Promise<ExportRuntimeState> {
+  const state = await readRuntime(await request('/api/export/runtime', { signal }));
+  if (state.status !== null && state.status !== 'active') throw new ExportQueueApiError('invalid_response');
+  return state;
+}
+export async function stopExportRuntime(runId: string, signal: AbortSignal): Promise<ExportRuntimeState> {
+  const id = checkedAssetId(runId);
+  const state = await readRuntime(await request(`/api/export/runs/${id}/stop`, { method: 'POST', signal }));
+  if (state.runId?.toLowerCase() !== id || !state.stopRequested) throw new ExportQueueApiError('invalid_response');
+  return state;
 }

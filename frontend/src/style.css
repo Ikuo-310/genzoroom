@@ -72,6 +72,13 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .export-toolbar .export-selection { min-width: 0; max-width: 100%; flex-wrap: wrap; }
 .export-selection .selection-actions { flex: 0 1 auto; flex-wrap: wrap; }
 .export-status-bar { position: absolute; z-index: 2; bottom: 0; left: 0; right: 0; display: flex; width: 100%; height: 28px; align-items: center; justify-content: center; overflow: hidden; padding: 0 6px; border-block: 1px solid var(--border-subtle); background: rgb(33 34 37 / 90%); color: var(--text-primary); font-size: 0.85rem; text-align: center; white-space: nowrap; pointer-events: none; }
+.export-status-waiting { background: #f0dba0; color: #352d16; }
+.export-status-encoding, .export-status-registering { background: #347548; color: white; }
+.export-status-encoding::before, .export-status-registering::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 22%), transparent); animation: export-activity 1.8s linear infinite; }
+.export-status-failed { background: #9d3131; color: white; }
+.export-status-stop, .immich-action-button.export-stop-requested { background: #e6c449; color: #352d16; opacity: 1; }
+@keyframes export-activity { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .export-status-encoding::before, .export-status-registering::before { animation: none; } }
 .export-queue-card .photo-card-button:disabled { opacity: 1; cursor: default; }
 .export-queue-card .photo-selection-input:disabled { cursor: default; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }

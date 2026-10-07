@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added Export Runtime Stop-after-current, atomic failed-item Retry preparation and restart recovery, with waiting/activity/failure status bars and Retry/Cancel UI foundations. Production Export to Immich remains disabled until actual family lookup and upload/registration/tag/Stack/COVER integration are connected.
+
 - Added the internal backend Export Runtime foundation with persistent ordered runs, frozen Recipe snapshots, serial processing and owned Queue transitions. Actual Immich registration and the production Export start action remain unavailable.
 - Added the Home Export management tab (`E`) with Queue photo cards, grouping of queued members from the same Immich Stack, shared thumbnail sizing, and card selection. Cards show Immich source thumbnails, not Recipe-rendered export previews. `W` marks selected photos ready to export independently of selection; `Q` removes them from Queue, retaining successful removals after partial failures. `Primary+Z` undoes the latest W or Q operation once. Ready cards show a full-width, 28px status bar at the thumbnail's bottom edge.
 - Added persistent Export Queue controls to Home and Anshitsu. Edited photos can be queued from Home; a Stack badge is ON when any member is queued and can add edited members or remove all queued members. `Q` toggles Queue membership for eligible Home selections. Dirty Anshitsu edits are saved before enqueue, and saving a default Recipe removes that asset's queued/failed intent while preserving active work.

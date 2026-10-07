@@ -40,6 +40,16 @@
     "favoritesTab": "Favorites"
   },
   "exportManagement": {
+    "retry": "Retry",
+    "retryFailed": "Could not prepare exports for retry",
+    "cancel": "Cancel export",
+    "cancelExplanation": "Cancel remaining exports after the current export finishes.",
+    "cancelFailed": "Could not request export cancellation",
+    "waiting": "Waiting",
+    "encoding": "Encoding JPEG",
+    "registering": "Registering",
+    "failed": "Export failed",
+    "stopping": "Cancellation requested",
     "selectionCount": "{{count}} selected",
     "exportToImmich": "Export to Immich",
     "arm": "Ready for export",

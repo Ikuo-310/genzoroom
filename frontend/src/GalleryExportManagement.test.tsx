@@ -123,9 +123,9 @@ describe('Home Export management', () => {
     expect(selection.classList.contains('selection-bar')).toBe(true);
     expect(selection.querySelector('.selection-count')?.textContent).toBe(language === 'ja' ? '0件選択' : '0 selected');
     const selectionButtons = [...selection.querySelectorAll<HTMLButtonElement>('.selection-actions button')];
-    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear', 'export-arm-toggle', 'export-queue-remove']);
+    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear', 'export-arm-toggle', 'export-queue-remove', 'export-retry']);
     expect(selectionButtons.map(button => button.textContent)).toEqual(language === 'ja'
-      ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]']);
+      ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]', '再試行'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]', 'Retry']);
     expect(selectionButtons.every(button => button.disabled)).toBe(true);
     expect(selection.querySelector('.selection-open-stacks, .selection-open-workspace')).toBeNull();
     expect(toolbar.querySelector('.thumbnail-size-control')).not.toBeNull();
@@ -224,7 +224,7 @@ async function cardClick(id: string, options: MouseEventInit = {}, checkbox = fa
 }
 const exportSelected = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card.selected')].map(card => card.dataset.assetId);
 const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card')]
-  .filter(card => card.querySelector('.export-status-armed')).map(card => card.dataset.assetId);
+  .filter(card => card.querySelector('.photo-card-button')?.getAttribute('aria-description') === i18n.t('exportManagement.armed')).map(card => card.dataset.assetId);
 
 describe('Export selection, readiness and Queue removal', () => {
   it('shares Gallery selection semantics in grouped visual order and excludes every locked status', async () => {

@@ -8,9 +8,10 @@ import { useExportQueueAssets } from './useExportQueueAssets';
 import { usePhotoSelection } from './usePhotoSelection';
 import { blurPhotoSelectionCheckboxWhenSelectionEnds } from './photoSelection';
 
-export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>;
+export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>
+  & Partial<Pick<ExportQueueState, 'retry' | 'runtime' | 'cancelRuntime' | 'cancelling'>>;
 export const isMutableExportStatus = (status: ExportQueueStatus | undefined) => status === 'queued' || status === 'failed';
-type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed';
+type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed' | 'retryFailed' | 'cancelFailed';
 type ArmedUndoRecord = { kind: 'armed'; changes: Array<{ assetId: string; wasArmed: boolean }> };
 type QueueRemovalUndoRecord = { kind: 'queueRemoval'; removed: Array<{ assetId: string; wasArmed: boolean }> };
 type ExportUndoRecord = ArmedUndoRecord | QueueRemovalUndoRecord;
@@ -84,6 +85,37 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const visualIds = message ? [] : flattenExportQueueDisplay(rows)
     .filter(entry => isMutableExportStatus(entry.item.status)).map(entry => entry.item.assetId.toLowerCase());
   const allSelectedArmed = selectedIds.length > 0 && selectedIds.every(id => armedIds.has(id));
+  const canRetry = !!queue.retry && selectedIds.length > 0 && selectedIds.length <= 100 && !message
+    && selectedIds.every(id => items.find(item => item.assetId.toLowerCase() === id)?.status === 'failed'
+      && !queue.mutationFor(id).operation);
+  const retrySelected = () => {
+    if (operationRef.current || !canRetry) return false;
+    operationRef.current = true; setRemoving(true); setRemovalError(null);
+    const targets = [...selectedIds];
+    // Retry is new Queue intent, never an inverse operation in W/Q Undo.
+    void (async () => {
+      try {
+        await queueRef.current.retry!(targets);
+        log('info', 'retry.completed', { count: targets.length });
+      } catch {
+        if (mounted.current) setRemovalError('retryFailed');
+        log('error', 'retry.failed', { count: targets.length });
+      } finally {
+        if (mounted.current) { operationRef.current = false; setRemoving(false); }
+      }
+    })();
+    return true;
+  };
+  const cancelExport = () => {
+    if (operationRef.current || !queue.runtime?.stopAllowed || queue.cancelling || !queue.cancelRuntime) return false;
+    operationRef.current = true; setRemoving(true); setRemovalError(null);
+    void (async () => {
+      try { await queueRef.current.cancelRuntime!(); log('info', 'run.stopRequested', {}); }
+      catch { if (mounted.current) setRemovalError('cancelFailed'); log('error', 'run.stopRequestFailed', {}); }
+      finally { if (mounted.current) { operationRef.current = false; setRemoving(false); } }
+    })();
+    return true;
+  };
   const canOperate = (id: string) => !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };
@@ -215,7 +247,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
-    undoing, hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
+    undoing, canRetry, retrySelected, cancelExport, hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
 }
 
 export type ExportManagementState = ReturnType<typeof useExportManagement>;

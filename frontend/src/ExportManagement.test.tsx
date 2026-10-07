@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { ExportManagementContent } from './ExportManagement';
+import { ExportManagementContent, ExportManagementToolbar } from './ExportManagement';
 import { useExportManagement, type ExportManagementQueue } from './useExportManagement';
 import type { ExportQueueState } from './useExportQueue';
 import type { ExportQueueItem, ExportQueueStatus } from './exportQueueApi';
@@ -15,7 +15,7 @@ const item = (assetId: string, status: ExportQueueStatus = 'queued'): ExportQueu
 type Queue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error'>;
 function Probe({ queue }: { queue: ExportManagementQueue }) {
   const management = useExportManagement(queue, true);
-  return <ExportManagementContent management={management} />;
+  return <><ExportManagementContent management={management} /></>;
 }
 let root: Root, host: HTMLDivElement;
 async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {}) {
@@ -34,6 +34,30 @@ beforeEach(async () => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+it('shows waiting/activity/failed bars while runtime cards remain locked', async () => {
+  await render([item('a', 'waiting'), item('b', 'encoding'), item('c', 'registering'), item('d', 'failed')]);
+  expect(host.querySelector('.export-status-waiting')?.textContent).toBe('Waiting');
+  expect(host.querySelector('.export-status-encoding')?.textContent).toBe('Encoding JPEG');
+  expect(host.querySelector('.export-status-registering')?.textContent).toBe('Registering');
+  expect(host.querySelector('.export-status-failed')?.textContent).toBe('Export failed');
+  expect(host.querySelectorAll('input:disabled')).toHaveLength(3);
+});
+it.each(['en', 'ja'])('shows persistent Stop state and exact Cancel explanation in %s', async language => {
+  await i18n.changeLanguage(language);
+  const queue: ExportManagementQueue = { items: [item('a', 'encoding')], loaded: true, loading: false, error: null,
+    enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), cancelRuntime: vi.fn(),
+    runtime: { runId: 'run', status: 'active', stopRequested: true, stopAllowed: false, currentAssetId: 'a' } };
+  function RuntimeProbe() {
+    const management = useExportManagement(queue, true);
+    return <><ExportManagementToolbar management={management} /><ExportManagementContent management={management} /></>;
+  }
+  await act(async () => root.render(<RuntimeProbe />));
+  const button = host.querySelector<HTMLButtonElement>('.immich-action-button')!;
+  expect(button.disabled).toBe(true); expect(button.classList.contains('export-stop-requested')).toBe(true);
+  expect(button.textContent).toBe(language === 'ja' ? '出力キャンセル' : 'Cancel export');
+  expect(button.title).toBe(language === 'ja' ? '現在の出力処理を終了後、以降の出力をキャンセルします。' : 'Cancel remaining exports after the current export finishes.');
+  expect(host.querySelector('.export-status-stop')).not.toBeNull();
+});
 it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata loading/error in %s', async language => {
   await i18n.changeLanguage(language);
   await render([], { loaded: false, loading: true }); expect(host.textContent).toBe(i18n.t('exportManagement.queueLoading'));

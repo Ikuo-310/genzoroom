@@ -1,16 +1,48 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, listExportQueue } from './exportQueueApi';
+import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, listExportQueue, retryExportAssets, listExportRuntime, stopExportRuntime } from './exportQueueApi';
 
 const id = '12345678-1234-4234-9234-123456789abc';
 const secondId = '22345678-1234-4234-9234-123456789abc';
 const item = { assetId: id, status: 'queued', queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' };
 const signal = () => new AbortController().signal;
+const runtime = { runId: id, status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: secondId };
 function mockBody(body: unknown) {
   const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(body)));
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it('posts Retry intent and accepts only canonical Queue response', async () => {
+  const fetcher = mockBody({ items: [item] });
+  expect(await retryExportAssets([id.toUpperCase()], signal())).toEqual([item]);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/export/queue/retry');
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ assetIds: [id] });
+  await expect(retryExportAssets([id, id.toUpperCase()], signal())).rejects.toMatchObject({ kind: 'duplicate' });
+  await expect(retryExportAssets(Array(101).fill(id), signal())).rejects.toMatchObject({ kind: 'invalid_request' });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('reads active runtime and validates Stop acknowledgement', async () => {
+  mockBody(runtime); expect(await listExportRuntime(signal())).toEqual(runtime);
+  const stopped = { ...runtime, stopRequested: true, stopAllowed: false };
+  const fetcher = mockBody(stopped);
+  expect(await stopExportRuntime(id, signal())).toEqual(stopped);
+  expect(fetcher.mock.calls[0][0]).toBe(`/api/export/runs/${id}/stop`);
+});
+it.each([
+  { ...runtime, extra: 'private' }, { ...runtime, stopAllowed: false }, { ...runtime, stopRequested: true },
+  { ...runtime, runId: 'invalid' }, { ...runtime, currentAssetId: 'invalid' }, { ...runtime, status: 'completed' },
+  { runId: null, status: null, stopRequested: true, stopAllowed: false, currentAssetId: null },
+])('rejects invalid runtime shape %j', async value => {
+  mockBody(value);
+  await expect(listExportRuntime(signal())).rejects.toMatchObject({ kind: 'invalid_response' });
+});
+it('rejects Stop acknowledgement for another run or without persistent intent', async () => {
+  mockBody({ ...runtime, runId: secondId, stopRequested: true, stopAllowed: false });
+  await expect(stopExportRuntime(id, signal())).rejects.toMatchObject({ kind: 'invalid_response' });
+  mockBody(runtime);
+  await expect(stopExportRuntime(id, signal())).rejects.toMatchObject({ kind: 'invalid_response' });
+});
 
 describe('Export Queue API contract', () => {
   it.each(['queued', 'waiting', 'encoding', 'registering', 'failed'])('accepts status %s', async status => {

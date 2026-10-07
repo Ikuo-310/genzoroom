@@ -67,6 +67,8 @@ class ExportRun:
     created_at: str
     updated_at: str
     items: tuple[ExportRunItem, ...]
+    stop_requested: bool
+    current_position: int | None
 
 
 def _read_run(connection, run_id):
@@ -74,14 +76,14 @@ def _read_run(connection, run_id):
     if row is None:
         raise RuntimeRejected("run_not_found")
     try:
-        if row["status"] not in ("active", "completed", "failed"):
+        if row["status"] not in ("active", "completed", "failed", "stopped") or row["stop_requested"] not in (0, 1):
             raise ValueError()
         items = []
         for item in connection.execute("SELECT * FROM export_run_items WHERE run_id=? ORDER BY position", (str(run_id),)):
             recipe = _recipe(json.loads(item["frozen_recipe_json"]), RECIPE_VERSION)
             if item["position"] != len(items) or item["frozen_revision"] < 1 or item["queue_id"] < 1 \
                     or item["recipe_version"] != RECIPE_VERSION or item["processing_version"] != PROCESSING_VERSION \
-                    or item["status"] not in (*ACTIVE_ITEM_STATUSES, "succeeded", "failed") \
+                    or item["status"] not in (*ACTIVE_ITEM_STATUSES, "succeeded", "failed", "released") \
                     or (item["status"] == "failed") != (item["error_code"] in FAILURE_CODES) \
                     or (item["status"] != "failed" and item["error_code"] is not None) \
                     or (item["status"] == "succeeded") != (item["registered_asset_id"] is not None):
@@ -96,10 +98,25 @@ def _read_run(connection, run_id):
         active = any(item.status in ACTIVE_ITEM_STATUSES for item in items)
         if (row["status"] == "active") != active \
                 or (row["status"] == "completed" and any(item.status != "succeeded" for item in items)) \
-                or (row["status"] == "failed" and not any(item.status == "failed" for item in items)):
+                or (row["status"] == "failed" and (not any(item.status == "failed" for item in items) or any(item.status == "released" for item in items))) \
+                or (row["status"] == "stopped" and (not row["stop_requested"] or not any(item.status == "released" for item in items))) \
+                or (any(item.status == "released" for item in items) and row["status"] != "stopped"):
+            raise ValueError()
+        current = row["current_position"]
+        if current is not None and (type(current) is not int or not 0 <= current < len(items)
+                                    or items[current].status not in ACTIVE_ITEM_STATUSES):
+            raise ValueError()
+        if not active and current is not None:
+            raise ValueError()
+        if active and row["stop_requested"] and current is None:
+            raise ValueError()
+        released = next((item.position for item in items if item.status == "released"), None)
+        if released is not None and any(item.status != "released" for item in items[released:]):
             raise ValueError()
         if active:
             first = next(item.position for item in items if item.status in ACTIVE_ITEM_STATUSES)
+            if current is not None and current != first or items[first].status != "waiting" and current != first:
+                raise ValueError()
             if any(item.status != "waiting" for item in items[first + 1:]):
                 raise ValueError()
             for item in items[first:]:
@@ -108,7 +125,7 @@ def _read_run(connection, run_id):
                         or queue["updated_at"] != item.updated_at:
                     raise ValueError()
         return ExportRun(UUID(row["run_id"]), row["status"], UUID(row["worker_id"]) if row["worker_id"] else None,
-                         _timestamp(row["created_at"]), _timestamp(row["updated_at"]), tuple(items))
+                         _timestamp(row["created_at"]), _timestamp(row["updated_at"]), tuple(items), bool(row["stop_requested"]), current)
     except (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError, InvalidEditState) as error:
         raise StoreUnavailable() from error
 
@@ -121,7 +138,7 @@ def get_export_run(run_id: UUID) -> ExportRun:
 
 
 def recoverable_export_run() -> ExportRun | None:
-    """Inspect on startup; do not reset statuses, steal ownership or replay registration."""
+    """Read a consistent checkpoint without claiming or replaying it."""
     with _connection() as connection:
         connection.execute("BEGIN")
         row = connection.execute("SELECT run_id FROM export_runs WHERE status='active'").fetchone()
@@ -162,7 +179,7 @@ def create_export_run(asset_ids: list[UUID], *, worker_id: UUID | None = None) -
                         raise StoreUnavailable()
                     snapshots.append((queue, saved, state))
                 run_id, now = uuid4(), _now()
-                connection.execute("INSERT INTO export_runs VALUES (?, 'active', ?, ?, ?)",
+                connection.execute("INSERT INTO export_runs (run_id,status,worker_id,created_at,updated_at) VALUES (?, 'active', ?, ?, ?)",
                                    (str(run_id), str(worker_id) if worker_id else None, now, now))
                 # Targets, frozen recipes and waiting locks become visible at one commit.
                 for position, (queue, saved, state) in enumerate(snapshots):
@@ -233,6 +250,13 @@ def _change_item(run_id, asset_id, worker_id, expected, target, *, error_code=No
         try:
             item = _owned_item(connection, run_id, asset_id, worker_id, expected)
             now = _now()
+            run = _read_run(connection, run_id)
+            if run.current_position is None:
+                if run.stop_requested:
+                    raise RuntimeRejected("stale_runtime_ownership")
+                _write(connection, "UPDATE export_runs SET current_position=? WHERE run_id=?", (item.position, str(run_id)))
+            elif run.current_position != item.position:
+                raise RuntimeRejected("stale_runtime_ownership")
             if target == "succeeded":
                 changed_queue = connection.execute("DELETE FROM export_queue WHERE id=? AND status='registering'", (item.queue_id,)).rowcount
             else:
@@ -245,12 +269,18 @@ def _change_item(run_id, asset_id, worker_id, expected, target, *, error_code=No
             # Zero-row writes must not certify a partial start/transition as committed work.
             if changed_queue != 1 or changed_item != 1:
                 raise StoreUnavailable()
+            terminal = target in ("succeeded", "failed")
+            if terminal:
+                _write(connection, "UPDATE export_runs SET current_position=NULL WHERE run_id=?", (str(run_id),))
+                if run.stop_requested:
+                    _release_waiting(connection, run_id, now)
             states = [row[0] for row in connection.execute("SELECT status FROM export_run_items WHERE run_id=?", (str(run_id),))]
             run_status = "active" if any(status in ACTIVE_ITEM_STATUSES for status in states) \
-                else "failed" if "failed" in states else "completed"
+                else "stopped" if "released" in states else "failed" if "failed" in states else "completed"
             if connection.execute("UPDATE export_runs SET status=?, updated_at=? WHERE run_id=? AND status='active'",
                                   (run_status, now, str(run_id))).rowcount != 1:
                 raise StoreUnavailable()
+            _read_run(connection, run_id)
             connection.commit()
         except Exception:
             connection.rollback()
@@ -259,6 +289,8 @@ def _change_item(run_id, asset_id, worker_id, expected, target, *, error_code=No
     if target == "failed":
         runtime_log("item.failed", level="error", runId=str(run_id), assetId=str(asset_id), errorCode=error_code)
     if run_status != "active":
+        if run.stop_requested:
+            runtime_log("run.stopCompleted", runId=str(run_id), status=run_status)
         runtime_log("run.terminal", level="error" if run_status == "failed" else "info", runId=str(run_id), status=run_status)
 
 
@@ -274,3 +306,137 @@ def fail_export_item(run_id: UUID, asset_id: UUID, worker_id: UUID, expected: st
 
 def complete_export_item(run_id: UUID, asset_id: UUID, worker_id: UUID, registered_asset_id: UUID):
     _change_item(run_id, asset_id, worker_id, "registering", "succeeded", registered_asset_id=registered_asset_id)
+
+
+def _write(connection, sql, parameters):
+    if connection.execute(sql, parameters).rowcount != 1:
+        raise StoreUnavailable()
+
+
+def _release_waiting(connection, run_id, now):
+    # Called only with no current item, under the same write lock as Stop/completion.
+    for item in connection.execute("SELECT * FROM export_run_items WHERE run_id=? AND status='waiting'", (str(run_id),)).fetchall():
+        _write(connection, "UPDATE export_queue SET status='queued', updated_at=? WHERE id=? AND status='waiting'",
+               (now, item["queue_id"]))
+        _write(connection, "UPDATE export_run_items SET status='released', updated_at=? WHERE run_id=? AND position=? AND status='waiting'",
+               (now, str(run_id), item["position"]))
+
+
+def request_export_stop(run_id: UUID) -> ExportRun:
+    if type(run_id) is not UUID:
+        raise RuntimeRejected("invalid_run_id")
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            run = _read_run(connection, run_id)
+            if run.stop_requested:
+                return run
+            if run.status != "active":
+                raise RuntimeRejected("run_not_active")
+            now = _now()
+            _write(connection, "UPDATE export_runs SET stop_requested=1, updated_at=? WHERE run_id=? AND status='active'",
+                   (now, str(run_id)))
+            if run.current_position is None:
+                _release_waiting(connection, run_id, now)
+                _write(connection, "UPDATE export_runs SET status='stopped' WHERE run_id=?", (str(run_id),))
+            result = _read_run(connection, run_id)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    runtime_log("run.stopRequested", runId=str(run_id))
+    if result.status == "stopped":
+        runtime_log("run.stopCompleted", runId=str(run_id), status=result.status)
+    return result
+
+
+def begin_export_item(run_id: UUID, worker_id: UUID) -> ExportRunItem | None:
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            run = _read_run(connection, run_id)
+            if run.worker_id != worker_id:
+                raise RuntimeRejected("stale_runtime_ownership")
+            if run.status != "active":
+                return None
+            if run.current_position is not None:
+                return run.items[run.current_position]
+            if run.stop_requested:
+                raise StoreUnavailable()
+            item = next(item for item in run.items if item.status in ACTIVE_ITEM_STATUSES)
+            _write(connection, "UPDATE export_runs SET current_position=?, updated_at=? WHERE run_id=? AND current_position IS NULL",
+                   (item.position, _now(), str(run_id)))
+            _read_run(connection, run_id)
+            connection.commit()
+            return item
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def reclaim_export_run(run_id: UUID, previous_worker: UUID | None, worker_id: UUID) -> ExportRun:
+    if type(run_id) is not UUID or type(worker_id) is not UUID or previous_worker is not None and type(previous_worker) is not UUID:
+        raise RuntimeRejected("invalid_runtime_ownership")
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            run = _read_run(connection, run_id)
+            if run.status != "active" or run.worker_id != previous_worker or worker_id == previous_worker:
+                raise RuntimeRejected("run_owned")
+            now = _now()
+            _write(connection, "UPDATE export_runs SET worker_id=?, updated_at=? WHERE run_id=? AND status='active' AND worker_id IS ?",
+                   (str(worker_id), now, str(run_id), str(previous_worker) if previous_worker else None))
+            # Artifacts are never persisted: regenerate even before replaying registration.
+            if run.current_position is not None:
+                item = run.items[run.current_position]
+                if item.status != "waiting":
+                    _write(connection, "UPDATE export_queue SET status='waiting', updated_at=? WHERE id=? AND status=?",
+                           (now, item.queue_id, item.status))
+                    _write(connection, "UPDATE export_run_items SET status='waiting', updated_at=? WHERE run_id=? AND position=? AND status=?",
+                           (now, str(run_id), item.position, item.status))
+            result = _read_run(connection, run_id)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    runtime_log("recovery.claimed", runId=str(run_id), workerId=str(worker_id))
+    return result
+
+
+def retry_export_assets(asset_ids: list[UUID]) -> list[dict]:
+    if not 1 <= len(asset_ids) <= 100 or any(type(asset_id) is not UUID for asset_id in asset_ids):
+        raise RuntimeRejected("invalid_asset_ids")
+    if len(set(asset_ids)) != len(asset_ids):
+        raise RuntimeRejected("duplicate_asset_ids")
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            _queue_items(connection)
+            targets = []
+            for asset_id in asset_ids:
+                queue = connection.execute("SELECT * FROM export_queue WHERE asset_id=?", (str(asset_id),)).fetchone()
+                if queue is None or queue["status"] != "failed":
+                    raise RuntimeRejected("queue_item_not_failed")
+                saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
+                if saved is None:
+                    raise RuntimeRejected("saved_recipe_missing")
+                state = _snapshot(saved, asset_id)
+                if not has_non_default_recipe(state):
+                    raise RuntimeRejected("asset_not_eligible")
+                if state["recipeVersion"] != RECIPE_VERSION:
+                    raise RuntimeRejected("unsupported_recipe_version")
+                if connection.execute("SELECT 1 FROM export_run_items WHERE asset_id=? AND status IN ('waiting','encoding','registering')", (str(asset_id),)).fetchone():
+                    raise StoreUnavailable()
+                targets.append(queue["id"])
+            now = _now()
+            for queue_id in targets:
+                _write(connection, "UPDATE export_queue SET status='queued', updated_at=? WHERE id=? AND status='failed'", (now, queue_id))
+            result = _queue_items(connection)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    for asset_id in asset_ids:
+        runtime_log("item.retryQueued", assetId=str(asset_id))
+    runtime_log("retry.batchCompleted", targetCount=len(asset_ids))
+    return result

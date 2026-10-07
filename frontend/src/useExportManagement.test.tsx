@@ -26,6 +26,44 @@ beforeEach(() => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+it('retries single or selected failed items atomically without replacing W Undo', async () => {
+  queue.retry = vi.fn(async ids => {
+    queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row);
+  });
+  await render([item('a', 'failed'), item('b', 'failed')]);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  expect(current.canRetry).toBe(true);
+  await settle(() => current.retrySelected());
+  expect(queue.retry).toHaveBeenCalledWith(['a']);
+  await render();
+  await act(async () => current.undo());
+  expect([...current.armedIds]).toEqual([]);
+  await render([item('a', 'failed'), item('b', 'failed')]);
+  await act(async () => current.selectAll());
+  await settle(() => current.retrySelected());
+  expect(queue.retry).toHaveBeenLastCalledWith(['a', 'b']);
+});
+it('rejects mixed Retry selection and preserves failed state on atomic failure', async () => {
+  queue.retry = vi.fn().mockRejectedValue(new Error('private upstream'));
+  await render([item('a', 'failed'), item('b')]);
+  await act(async () => current.selectAll());
+  expect(current.canRetry).toBe(false); expect(current.retrySelected()).toBe(false);
+  expect(queue.retry).not.toHaveBeenCalled();
+  await act(async () => current.selectOnly('a'));
+  await settle(() => current.retrySelected());
+  expect(current.removalError).toBe('retryFailed'); expect(queue.items[0].status).toBe('failed');
+});
+it('allows Cancel only for recognized active runtime and does not create Undo', async () => {
+  queue.cancelRuntime = vi.fn().mockResolvedValue(undefined);
+  await render(); expect(current.cancelExport()).toBe(false);
+  queue.runtime = { runId: 'run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'a' };
+  await render([item('a', 'encoding')]);
+  await settle(() => current.cancelExport());
+  expect(queue.cancelRuntime).toHaveBeenCalledTimes(1); expect(current.undo()).toBe(false);
+  queue.runtime = { ...queue.runtime, stopRequested: true, stopAllowed: false };
+  await render(); expect(current.cancelExport()).toBe(false);
+});
 it('preserves selection and armed across status-only refresh and tab changes, but prunes deleted IDs and range anchors', async () => {
   await render([item('A'), item('b')]);
   await act(async () => { current.selectOnly('A'); });

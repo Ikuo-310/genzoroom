@@ -37,6 +37,16 @@
     "favoritesTab": "お気に入り"
   },
   "exportManagement": {
+    "retry": "再試行",
+    "retryFailed": "出力の再試行を準備できませんでした",
+    "cancel": "出力キャンセル",
+    "cancelExplanation": "現在の出力処理を終了後、以降の出力をキャンセルします。",
+    "cancelFailed": "出力キャンセルを要求できませんでした",
+    "waiting": "出力待ち",
+    "encoding": "JPEG生成中",
+    "registering": "登録中",
+    "failed": "出力失敗",
+    "stopping": "キャンセル要求済み",
     "selectionCount": "{{count}}件選択",
     "exportToImmich": "Immichへ出力",
     "arm": "出力待機",
