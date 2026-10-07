@@ -6,6 +6,7 @@ from uuid import UUID
 
 import httpx
 
+from immich_tags import assign_genzoroom_tag
 from export_artifact import filename_family
 from export_runtime import RegistrationResult
 from export_runtime_store import runtime_log
@@ -112,26 +113,7 @@ class ImmichExportRegistrar:
                     raise ValueError("registration_conflict")
                 runtime_log("registration.uploadCompleted", **trace, registeredAssetId=str(output), result=body["status"])
                 phase = "tag"
-                response = await _immich_request(client, "PUT", url, "/tags", headers=headers, json={"tags": ["GenzoRoom"]})
-                tags = response.json()
-                if response.status_code != 200 or not isinstance(tags, list) or len(tags) != 1 \
-                        or not isinstance(tags[0], Mapping) or tags[0].get("name") != "GenzoRoom" or tags[0].get("value") != "GenzoRoom":
-                    raise ValueError("invalid_tag_response")
-                tag = _uuid(tags[0]["id"])
-                response = await _immich_request(client, "PUT", url, "/tags/assets", headers=headers,
-                    json={"tagIds": [str(tag)], "assetIds": [str(output)]})
-                tagged = response.json()
-                if response.status_code != 200 or not isinstance(tagged, Mapping) or set(tagged) != {"count"} \
-                        or type(tagged["count"]) is not int or tagged["count"] not in (0, 1):
-                    raise ValueError("invalid_asset_tag_response")
-                if tagged["count"] == 0:
-                    # v3.2.4 counts inserted associations; zero also needs permission-safe verification.
-                    response = await _immich_request(client, "GET", url, f"/assets/{output}", headers=headers)
-                    asset = response.json()
-                    if response.status_code != 200 or not isinstance(asset, Mapping) or _uuid(asset.get("id")) != output \
-                            or not isinstance(asset.get("tags"), list) \
-                            or not any(isinstance(entry, Mapping) and entry.get("id") == str(tag) and entry.get("value") == "GenzoRoom" for entry in asset["tags"]):
-                        raise ValueError("tag_not_confirmed")
+                tag = await assign_genzoroom_tag(client, url, headers, output)
                 runtime_log("registration.tagCompleted", **trace, registeredAssetId=str(output), tagId=str(tag))
                 phase = "stack_context"
                 raw = await _get_asset_stacks(url, key, transport=self._transport)

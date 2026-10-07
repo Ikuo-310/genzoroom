@@ -21,6 +21,26 @@ MAX_XML_DEPTH = 12
 MAX_XML_ELEMENTS = 1024
 MAX_ARRAY_ITEMS = 128
 B, G = ExifTags.Base, ExifTags.GPS
+
+
+def has_genzoroom_export_marker(jpeg: bytes) -> bool:
+    """Inspect container metadata without decoding pixels; malformed data is a controlled failure."""
+    # Image.open only reads headers, so require the end marker before trusting a complete download.
+    if not jpeg.endswith(b"\xff\xd9"):
+        raise ValueError("invalid_jpeg_metadata")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with Image.open(BytesIO(jpeg)) as image:
+                if image.format != "JPEG":
+                    raise ValueError("invalid_jpeg_metadata")
+                software = image.getexif().get(B.Software)
+                return type(software) is str and software == "GenzoRoom"
+    except (OSError, ValueError, TypeError, SyntaxError, EOFError, Warning,
+            Image.DecompressionBombError) as error:
+        raise ValueError("invalid_jpeg_metadata") from error
+
+
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 DC = "http://purl.org/dc/elements/1.1/"
 XMP = "http://ns.adobe.com/xap/1.0/"

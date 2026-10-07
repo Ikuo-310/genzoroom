@@ -6,7 +6,7 @@ from datetime import date
 from uuid import UUID
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.concurrency import run_in_threadpool
@@ -21,6 +21,7 @@ from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
 from export_runtime import ExportRuntime, ImmichExportSource
 from immich_export import ImmichFamilyFilenameProvider, ImmichExportRegistrar
+from genzoroom_tag_repair import GenzoRoomTagRepair
 from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets, get_export_run
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     runtime = ExportRuntime(source=ImmichExportSource(url, key), family=ImmichFamilyFilenameProvider(url, key),
                             registrar=ImmichExportRegistrar(url, key)) if (url or '').strip() and (key or '').strip() else ExportRuntime()
     app.state.export_runtime = runtime
+    app.state.tag_repair = GenzoRoomTagRepair(url, key)
     try:
         await runtime.recover()
     except StoreUnavailable as error:
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await app.state.tag_repair.close()
         await runtime.wait()
 
 
@@ -509,22 +512,32 @@ async def selected_stacks(payload: StackResolveRequest) -> list[ImmichStack]:
         raise _upstream_error(error) from error
 
 
+def _home_with_tag_repair(assets, background_tasks):
+    repair = getattr(app.state, "tag_repair", None)
+    if repair is not None:
+        # Submission runs after response delivery; the worker is owned and cancelled by app lifespan.
+        background_tasks.add_task(repair.submit, assets)
+    return assets
+
+
 @app.get("/assets/recent", response_model=list[RecentAsset])
-async def recent_assets(limit: int = Query(default=100, ge=50, le=500, multiple_of=50)) -> list[RecentAsset]:
+async def recent_assets(background_tasks: BackgroundTasks, limit: int = Query(default=100, ge=50, le=500, multiple_of=50)) -> list[RecentAsset]:
     try:
-        return await get_recent_assets(
+        assets = await get_recent_assets(
             os.getenv("IMMICH_URL"),
             os.getenv("IMMICH_API_KEY"),
             limit=limit,
         )
+        return _home_with_tag_repair(assets, background_tasks)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 
 
 @app.get("/assets/favorites", response_model=list[RecentAsset])
-async def favorite_assets() -> list[RecentAsset]:
+async def favorite_assets(background_tasks: BackgroundTasks) -> list[RecentAsset]:
     try:
-        return await get_favorite_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+        assets = await get_favorite_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+        return _home_with_tag_repair(assets, background_tasks)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 
@@ -538,9 +551,10 @@ async def albums() -> list[AlbumSummary]:
 
 
 @app.get("/albums/{album_id}/assets", response_model=list[RecentAsset])
-async def album_assets(album_id: UUID) -> list[RecentAsset]:
+async def album_assets(album_id: UUID, background_tasks: BackgroundTasks) -> list[RecentAsset]:
     try:
-        return await get_album_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), album_id)
+        assets = await get_album_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), album_id)
+        return _home_with_tag_repair(assets, background_tasks)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 
@@ -566,11 +580,12 @@ async def calendar_min_year() -> CalendarMinimumYear:
 
 
 @app.get("/calendar/{selected_day}/assets", response_model=list[RecentAsset])
-async def calendar_day_assets(selected_day: date) -> list[RecentAsset]:
+async def calendar_day_assets(selected_day: date, background_tasks: BackgroundTasks) -> list[RecentAsset]:
     if selected_day == date.max:
         raise HTTPException(status_code=422, detail="Date is outside the supported range")
     try:
-        return await get_calendar_day_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), selected_day)
+        assets = await get_calendar_day_assets(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), selected_day)
+        return _home_with_tag_repair(assets, background_tasks)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
 

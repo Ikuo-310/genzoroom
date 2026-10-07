@@ -16,6 +16,19 @@ _SUFFIX = re.compile(r"-Genzo([0-9]+)$")
 _JS_WHITESPACE = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
 
+def is_genzoroom_export_filename(filename: str) -> bool:
+    if not isinstance(filename, str) or not filename.endswith(".jpg"):
+        return False
+    stem = filename[:-4]
+    match = _SUFFIX.search(stem)
+    if match is None or match.end() != len(stem) or len(match[1]) < 2:
+        return False
+    base = stem[:match.start()]
+    # Export strips at the first dot and never emits zero; compare decimals without int conversion.
+    return bool(base.strip(_JS_WHITESPACE)) and "." not in base and bool(match[1].strip("0")) \
+        and re.search(r'[\x00-\x1f\x7f/\\:*?"<>|]', base) is None
+
+
 def filename_family(filename: str) -> str | None:
     """Mirror frontend stackCandidateDetection.filenameFamily (Phase 0)."""
     if not isinstance(filename, str):
