@@ -92,8 +92,15 @@ describe('Home Export management', () => {
     expect(host.querySelectorAll('.home-content [role="tabpanel"]')).toHaveLength(1);
     expect(host.querySelector('.photo-grid, .home-toolbar-title')).toBeNull();
     const toolbar = host.querySelector('.export-toolbar')!;
-    expect(toolbar.querySelector('.export-selection strong')?.textContent).toBe(language === 'ja' ? '0件選択' : '0 selected');
-    expect(toolbar.querySelector<HTMLButtonElement>('.export-selection button')!.disabled).toBe(true);
+    const selection = toolbar.querySelector<HTMLElement>('.export-selection')!;
+    expect(selection.classList.contains('selection-bar')).toBe(true);
+    expect(selection.querySelector('.selection-count')?.textContent).toBe(language === 'ja' ? '0件選択' : '0 selected');
+    const selectionButtons = [...selection.querySelectorAll<HTMLButtonElement>('.selection-actions button')];
+    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear']);
+    expect(selectionButtons.map(button => button.textContent)).toEqual(language === 'ja'
+      ? ['すべて選択', '選択解除'] : ['Select all', 'Clear selection']);
+    expect(selectionButtons.every(button => button.disabled)).toBe(true);
+    expect(selection.querySelector('.selection-open-stacks, .selection-open-workspace')).toBeNull();
     expect(toolbar.querySelector('.thumbnail-size-control')).not.toBeNull();
     const action = toolbar.querySelector<HTMLButtonElement>('.export-action-group .immich-action-button')!;
     expect(action.textContent).toBe(language === 'ja' ? 'Immichへ出力' : 'Export to Immich');

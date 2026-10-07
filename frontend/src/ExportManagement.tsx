@@ -4,9 +4,12 @@ import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 export function ExportManagementToolbar() {
   const { t } = useTranslation();
   return <div className="home-toolbar export-toolbar">
-    <div className="export-selection" role="group" aria-label={t('photos.selectionActions')}>
-      <strong aria-live="polite">{t('exportManagement.selectionCount', { count: 0 })}</strong>
-      <button type="button" disabled>{t('photos.clearSelection')}</button>
+    <div className="selection-bar export-selection" role="group" aria-label={t('photos.selectionActions')}>
+      <strong className="selection-count" aria-live="polite">{t('exportManagement.selectionCount', { count: 0 })}</strong>
+      <div className="selection-actions">
+        <button type="button" className="selection-all" disabled>{t('photos.selectAll')}</button>
+        <button type="button" className="selection-clear" disabled>{t('photos.clearSelection')}</button>
+      </div>
     </div>
     <div className="export-thumbnail-control"><HomeThumbnailSizeControl /></div>
     <div className="export-action-group">
