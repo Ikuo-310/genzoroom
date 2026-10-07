@@ -224,7 +224,7 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .stack-asset-count { overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); padding: 2px 6px; font-size: 0.68rem; font-weight: 750; line-height: 1.35; white-space: nowrap; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .stack-asset-count-error { background: #a51d2d; border-color: #fff; }
 .edited-badge { position: absolute; right: 6px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(255 255 255 / 60%); border-radius: 4px; color: #fff; background: rgb(15 20 18 / 82%); pointer-events: none; }
-.genzoroom-export-badge { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #a5a8a7; border-radius: 4px; color: #202223; background: #858988; pointer-events: none; }
+.genzoroom-export-badge { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #c8cbca; border-radius: 4px; color: #111312; background: #a0a4a2; pointer-events: none; }
 /* Three bottom positions must stay separate even when the gallery makes a thumbnail unusually narrow. */
 .photo-card-badges.with-export-badge .edited-badge, .photo-card-badges .genzoroom-export-badge { width: min(28px, calc((100% - 18px) / 3)); height: min(28px, calc((100% - 18px) / 3)); }
 .photo-card-badges.with-export-badge .edited-badge svg, .photo-card-badges .genzoroom-export-badge svg { max-width: calc(100% - 4px); max-height: calc(100% - 4px); }
