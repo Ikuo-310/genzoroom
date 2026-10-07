@@ -6,6 +6,10 @@ export type ExportQueueDisplayItem =
   | { kind: 'asset'; entry: ExportQueueAsset }
   | { kind: 'stack'; stackId: string; members: ExportQueueAsset[] };
 
+export function flattenExportQueueDisplay(rows: readonly ExportQueueDisplayItem[]): ExportQueueAsset[] {
+  return rows.flatMap(row => row.kind === 'asset' ? [row.entry] : row.members);
+}
+
 export function uniqueExportQueueItems(items: readonly ExportQueueItem[]): ExportQueueItem[] {
   const seen = new Set<string>();
   return items.filter(item => {

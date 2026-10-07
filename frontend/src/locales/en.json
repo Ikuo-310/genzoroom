@@ -42,6 +42,13 @@
   "exportManagement": {
     "selectionCount": "{{count}} selected",
     "exportToImmich": "Export to Immich",
+    "arm": "Ready for export",
+    "disarm": "Clear export readiness",
+    "armed": "Ready to export",
+    "remove": "Remove from Queue",
+    "locked": "This Queue item is locked by export processing",
+    "removeFailed": "Failed to remove photos from Queue",
+    "removePartialFailed": "Some photos could not be removed from Queue",
     "empty": "No photos waiting for export",
     "queueLoading": "Loading export queue…",
     "queueLoadFailed": "Failed to load export queue",

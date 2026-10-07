@@ -69,6 +69,11 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .export-stack-group { --export-group-columns: min(var(--export-member-count), var(--export-columns)); grid-column: span var(--export-group-columns); min-width: 0; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px; }
 .export-stack-members { display: grid; grid-template-columns: repeat(var(--export-group-columns), minmax(0, 1fr)); gap: 16px; min-width: 0; }
 .export-toolbar .export-selection { margin-right: auto; }
+.export-toolbar .export-selection { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.export-selection .selection-actions { flex: 0 1 auto; flex-wrap: wrap; }
+.export-status-badge { position: absolute; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 12px); padding: 5px 12px; border: 1px solid var(--border-subtle); border-radius: 5px; background: rgb(33 34 37 / 90%); color: var(--text-primary); font-size: 0.85rem; text-align: center; pointer-events: none; }
+.export-queue-card .photo-card-button:disabled { opacity: 1; cursor: default; }
+.export-queue-card .photo-selection-input:disabled { cursor: default; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
 /* Immich actions stay visually distinct from local operations and destructive controls. */
 .immich-action-button { color: #fff; background: #a83f46; border: 1px solid #ce6068; }

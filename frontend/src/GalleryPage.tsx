@@ -15,6 +15,7 @@ import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { useEditStatuses } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
+import { useExportManagement } from './useExportManagement';
 import { ExportQueueApiError } from './exportQueueApi';
 import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
@@ -86,6 +87,9 @@ export function GalleryPage() {
   const [activeTab, setActiveTab] = useState<HomeTab>(homeReturn?.tab ?? 'recent');
   // Management navigation preserves the browsing tab without entering photo filters or route state.
   const [showExport, setShowExport] = useState(false);
+  const exportManagement = useExportManagement(exportQueue, showExport);
+  const exportManagementRef = useRef({ active: showExport, state: exportManagement });
+  exportManagementRef.current = { active: showExport, state: exportManagement };
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(homeReturn?.album ?? null);
@@ -389,6 +393,13 @@ export function GalleryPage() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      const exportView = exportManagementRef.current;
+      if (exportView.active && !event.isComposing && !event.repeat
+        && !document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
+        && shouldClearSelectionOnEscape(event, exportView.state.selectedIds.length > 0)) {
+        exportView.state.clear();
+        return;
+      }
       if (shouldClearSelectionOnEscape(event, selectionMode)) {
         if (selectionMode) photoView?.selection.clear();
         return;
@@ -396,6 +407,16 @@ export function GalleryPage() {
       if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      if (exportView.active) {
+        // Export commands share Home guards, but own separate selection and session-only armed state.
+        if (matchesShortcut(event, 'homeSelectAll') || matchesShortcut(event, 'exportArmToggle') || matchesShortcut(event, 'exportQueueToggle')) {
+          if (event.target instanceof Element && event.target.closest('input')) return;
+          const handled = matchesShortcut(event, 'homeSelectAll') ? exportView.state.selectAll()
+            : matchesShortcut(event, 'exportArmToggle') ? exportView.state.toggleArmed() : exportView.state.removeSelected();
+          if (handled) event.preventDefault();
+          return;
+        }
+      }
       for (const [id, direction] of [['calendarNavigatePrevious', 'previous'], ['calendarNavigateNext', 'next']] as const) {
         if (matchesShortcut(event, id)) {
           // Sliders and checkboxes retain their native arrow behavior, unlike S/D commands.
@@ -840,7 +861,7 @@ export function GalleryPage() {
           </div>
         </div>
       </div>
-      {showExport ? <ExportManagementToolbar /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
+      {showExport ? <ExportManagementToolbar management={exportManagement} /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
@@ -902,7 +923,7 @@ export function GalleryPage() {
         </div>
       </div>}
       <section className="home-content" aria-label={t('home.sections')}>
-        {showExport ? <ExportManagementContent queue={exportQueue} /> : <>
+        {showExport ? <ExportManagementContent management={exportManagement} /> : <>
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}

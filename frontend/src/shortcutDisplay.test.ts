@@ -13,6 +13,8 @@ describe('shortcut binding display', () => {
   it('formats plain keys and modifier commands', () => {
     expect(formatShortcut('exportQueueToggle', 'other')).toBe('Q');
     expect(formatShortcut('exportQueueToggle', 'mac')).toBe('Q');
+    expect(formatShortcut('exportArmToggle', 'other')).toBe('W');
+    expect(formatShortcut('exportArmToggle', 'mac')).toBe('W');
     expect(formatShortcut('workspaceReturnHome', 'other')).toBe('G');
     expect(formatShortcut('workspaceReturnHome', 'mac')).toBe('G');
     expect(formatShortcut('homeOpenSelected', 'other')).toBe('D');

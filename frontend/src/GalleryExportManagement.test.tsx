@@ -9,9 +9,10 @@ import { homeScrollContent, type HomeTab } from './homeReturn';
 import { updateSetting, useAppSettings } from './appSettings';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import i18n from './i18n';
+import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
-  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn() }));
+  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums,
   fetchAlbumAssets: api.album, fetchCalendarDayAssets: api.day, fetchCalendarHeatmap: api.heatmap,
@@ -19,7 +20,7 @@ vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
   getAssetEditStatuses: api.statuses }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
-  listExportQueue: api.queue }));
+  listExportQueue: api.queue, dequeueExportAsset: api.remove }));
 
 const photos = Array.from({ length: 3 }, (_, index) => ({ id: `photo-${index}`, filename: `photo-${index}.jpg`,
   date: '2026-09-01', thumbnail_url: `/thumb/${index}`, format: index === 1 ? 'DNG' : 'JPEG', is_raw: index === 1 }));
@@ -56,6 +57,7 @@ beforeEach(async () => {
   api.queue.mockReset().mockResolvedValue([]);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos[0], id, preview_url: '', exif: {} }));
   api.stackRefresh.mockReset().mockResolvedValue([]);
+  api.remove.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -120,9 +122,9 @@ describe('Home Export management', () => {
     expect(selection.classList.contains('selection-bar')).toBe(true);
     expect(selection.querySelector('.selection-count')?.textContent).toBe(language === 'ja' ? '0件選択' : '0 selected');
     const selectionButtons = [...selection.querySelectorAll<HTMLButtonElement>('.selection-actions button')];
-    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear']);
+    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear', 'export-arm-toggle', 'export-queue-remove']);
     expect(selectionButtons.map(button => button.textContent)).toEqual(language === 'ja'
-      ? ['すべて選択', '選択解除'] : ['Select all', 'Clear selection']);
+      ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]']);
     expect(selectionButtons.every(button => button.disabled)).toBe(true);
     expect(selection.querySelector('.selection-open-stacks, .selection-open-workspace')).toBeNull();
     expect(toolbar.querySelector('.thumbnail-size-control')).not.toBeNull();
@@ -201,5 +203,141 @@ describe('Home Export management', () => {
     expect(host.querySelector('.home-toolbar-title')?.textContent).toBe('Album A');
     expect(homeScrollContent(host.querySelector('.home-page')!)!.scrollTop).toBe(840);
     expect(api.album).toHaveBeenCalledTimes(1);
+  });
+});
+
+const queued = (assetId: string, status: ExportQueueItem['status'] = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: 'q', updatedAt: 'u' });
+async function openQueue(items = [queued('a'), queued('b', 'failed'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')]) {
+  let backendItems = items;
+  api.queue.mockImplementation(async () => backendItems);
+  api.remove.mockImplementation(async (assetId: string) => { backendItems = backendItems.filter(item => item.assetId !== assetId); });
+  api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id, filename: `${id}.jpg`, preview_url: '', exif: {} }));
+  api.stackRefresh.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a', 'c', 'outside'].map(id => ({ ...photos[0], id })) }]);
+  await mount(); await key('e');
+  return { setItems: (next: ExportQueueItem[]) => { backendItems = next; }, getItems: () => backendItems };
+}
+const exportCard = (id: string) => host.querySelector<HTMLElement>(`.export-queue-card[data-asset-id="${id}"]`)!;
+async function cardClick(id: string, options: MouseEventInit = {}, checkbox = false) {
+  await act(async () => exportCard(id).querySelector(checkbox ? 'input' : 'button')!
+    .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...options })));
+}
+const exportSelected = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card.selected')].map(card => card.dataset.assetId);
+const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card')]
+  .filter(card => card.querySelector('.export-status-armed')).map(card => card.dataset.assetId);
+
+describe('Export selection, readiness and Queue removal', () => {
+  it('shares Gallery selection semantics in grouped visual order and excludes every locked status', async () => {
+    await openQueue();
+    expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual([]);
+    expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].map(card => card.dataset.assetId))
+      .toEqual(['a', 'c', 'b', 'waiting', 'encoding', 'registering']);
+    await cardClick('b', { shiftKey: true }); expect(exportSelected()).toEqual([]);
+    await cardClick('b', { shiftKey: true }, true); expect(exportSelected()).toEqual([]);
+    await cardClick('a'); await cardClick('c', { ctrlKey: true }); expect(exportSelected()).toEqual(['a', 'c']);
+    await cardClick('b'); expect(exportSelected()).toEqual(['b']);
+    await cardClick('a'); await cardClick('b', { shiftKey: true }); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await cardClick('c', {}, true); expect(exportSelected()).toEqual(['a', 'b']);
+    await cardClick('b', { shiftKey: true }, true); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await click('.export-selection .selection-clear'); expect(exportSelected()).toEqual([]);
+    expect((await key('a', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await key('Escape'); expect(exportSelected()).toEqual([]);
+    await click('.export-selection .selection-all'); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    for (const id of ['waiting', 'encoding', 'registering']) {
+      expect(exportCard(id).getAttribute('aria-disabled')).toBe('true');
+      expect(exportCard(id).querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
+      await cardClick(id); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    }
+  });
+  it('keeps armed state independent from selection and across Gallery tab visits', async () => {
+    await openQueue(); await cardClick('a'); await key('w');
+    expect(exportArmed()).toEqual(['a']); expect(host.querySelector('.export-arm-toggle')?.textContent).toBe('Clear export readiness[W]');
+    expect(exportCard('a').querySelector('.thumbnail .export-status-badge')?.textContent).toBe('Ready to export');
+    const checkbox = exportCard('a').querySelector<HTMLInputElement>('input')!; checkbox.focus();
+    await key('Escape', {}, checkbox); expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual(['a']);
+    expect(document.activeElement).not.toBe(checkbox);
+    await cardClick('b'); expect(exportArmed()).toEqual(['a']);
+    await cardClick('a', { ctrlKey: true }); await key('w'); expect(exportArmed()).toEqual(['a', 'b']);
+    await click('.export-arm-toggle'); expect(exportArmed()).toEqual([]);
+    await key('w'); await key('r'); expect(host.querySelector('#home-export-panel')).toBeNull();
+    await key('e'); expect(exportArmed()).toEqual(['a', 'b']);
+    expect(host.querySelector<HTMLButtonElement>('.immich-action-button')!.disabled).toBe(true);
+  });
+  it.each(['Win32', 'MacIntel'])('uses the OS Primary for card toggle on %s', async platform => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+    try {
+      await openQueue([queued('a'), queued('b')]); await cardClick('a');
+      await cardClick('b', platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true });
+      expect(exportSelected()).toEqual(['a', 'b']);
+      await cardClick('a', platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true });
+      expect(exportSelected()).toEqual(['b']);
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'platform', descriptor); else Reflect.deleteProperty(navigator, 'platform');
+    }
+  });
+  it('applies native editing, modifier, composition, repeat and dialog guards to Export commands', async () => {
+    await openQueue(); await cardClick('a');
+    for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {
+      await key('w', options); await key('q', options);
+    }
+    expect(exportArmed()).toEqual([]); expect(api.remove).not.toHaveBeenCalled();
+    for (const element of [document.createElement('input'), document.createElement('textarea'), document.createElement('select'), document.createElement('div')]) {
+      if (element.tagName === 'DIV') { element.setAttribute('contenteditable', 'true'); Object.defineProperty(element, 'isContentEditable', { value: true }); }
+      host.append(element);
+      await key('w', {}, element); await key('q', {}, element); await key('Escape', {}, element); await key('a', { ctrlKey: true }, element);
+      element.remove();
+    }
+    const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); host.append(menu);
+    await key('w'); await key('q'); await key('Escape'); menu.remove();
+    expect(exportSelected()).toEqual(['a']); expect(exportArmed()).toEqual([]); expect(api.remove).not.toHaveBeenCalled();
+    await key('Escape'); await key('w'); await key('q'); expect(api.remove).not.toHaveBeenCalled();
+  });
+  it('removes an armed card immediately and collapses a two-member group while survivor metadata reloads', async () => {
+    await openQueue([queued('a'), queued('c')]);
+    await cardClick('a'); await key('w');
+    api.detail.mockImplementation(() => new Promise(() => {}));
+    await key('q');
+    expect(api.remove).toHaveBeenCalledWith('a', expect.any(AbortSignal));
+    expect(exportCard('a')).toBeNull(); expect(exportCard('c')).not.toBeNull();
+    expect(host.querySelector('.export-stack-group')).toBeNull(); expect(exportArmed()).toEqual([]); expect(exportSelected()).toEqual([]);
+    expect(host.querySelector('[data-asset-id="outside"]')).toBeNull(); expect(api.queue).toHaveBeenCalledTimes(1);
+  });
+  it('continues sequential removal after a middle failure and refreshes without rolling back successes', async () => {
+    const backend = await openQueue([queued('a'), queued('b', 'failed'), queued('c')]);
+    api.remove.mockImplementation(async (id: string) => {
+      if (id === 'b') throw new ExportQueueApiError('unavailable');
+      backend.setItems(backend.getItems().filter(item => item.assetId !== id));
+    });
+    await click('.export-selection .selection-all'); await key('w'); await click('.export-queue-remove');
+    expect(api.remove.mock.calls.map(call => call[0])).toEqual(['a', 'b', 'c']); expect(api.queue).toHaveBeenCalledTimes(2);
+    expect(exportSelected()).toEqual(['b']); expect(exportArmed()).toEqual(['b']);
+    expect(host.querySelector('.export-removal-error[role="alert"]')?.textContent).toBe('Some photos could not be removed from Queue');
+    expect(exportCard('a')).toBeNull(); expect(exportCard('c')).toBeNull(); expect(exportCard('b')).not.toBeNull();
+  });
+  it('prevents duplicate execution and disables actions for the duration of removal', async () => {
+    await openQueue([queued('a')]); await cardClick('a');
+    let finish!: () => void;
+    api.remove.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    await key('q'); await key('q'); await click('.export-queue-remove');
+    expect(api.remove).toHaveBeenCalledTimes(1);
+    expect([...host.querySelectorAll<HTMLButtonElement>('.export-selection button')].every(button => button.disabled)).toBe(true);
+    await act(async () => finish()); expect(exportCard('a')).toBeNull();
+  });
+  it.each(['en', 'ja'])('reports locked removal failures in %s and refreshes the authoritative status', async language => {
+    await i18n.changeLanguage(language);
+    const backend = await openQueue([queued('a')]); await cardClick('a'); await key('w');
+    api.remove.mockImplementation(async () => { backend.setItems([queued('a', 'waiting')]); throw new ExportQueueApiError('locked'); });
+    await key('q');
+    expect(host.querySelector('.export-removal-error')?.textContent).toBe(i18n.t('exportManagement.locked'));
+    expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual([]);
+    expect(exportCard('a').querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
+  });
+  it.each(['en', 'ja'])('reports general removal failure in %s while retaining the card and readiness', async language => {
+    await i18n.changeLanguage(language); await openQueue([queued('a')]); await cardClick('a'); await key('w');
+    api.remove.mockRejectedValue(new ExportQueueApiError('unavailable'));
+    await key('q');
+    expect(host.querySelector('.export-removal-error')?.textContent).toBe(i18n.t('exportManagement.removeFailed'));
+    expect(exportArmed()).toEqual(['a']); expect(exportSelected()).toEqual(['a']); expect(api.queue).toHaveBeenCalledTimes(2);
   });
 });

@@ -39,6 +39,13 @@
   "exportManagement": {
     "selectionCount": "{{count}}件選択",
     "exportToImmich": "Immichへ出力",
+    "arm": "出力待機",
+    "disarm": "待機解除",
+    "armed": "出力待機中",
+    "remove": "Queueから外す",
+    "locked": "このQueue itemは出力処理中のため操作できません",
+    "removeFailed": "Queueから写真を外せませんでした",
+    "removePartialFailed": "一部の写真をQueueから外せませんでした",
     "empty": "出力待ちの写真はありません",
     "queueLoading": "出力待ち一覧を読み込み中…",
     "queueLoadFailed": "出力待ち一覧の読み込みに失敗しました",

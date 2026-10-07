@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupExportQueueAssets, uniqueExportQueueItems, type ExportQueueAsset } from './exportQueueDisplay';
+import { flattenExportQueueDisplay, groupExportQueueAssets, uniqueExportQueueItems, type ExportQueueAsset } from './exportQueueDisplay';
 
 const entry = (id: string, stackId?: string): ExportQueueAsset => ({
   item: { assetId: id, status: 'failed', queuedAt: 'q', updatedAt: 'u' },
@@ -21,6 +21,7 @@ describe('Export presentation grouping', () => {
       { kind: 'stack', stackId: 'y', members: [entries[2], entries[4]] }, { kind: 'asset', entry: entries[5] },
     ]);
     expect(entries).toEqual(original);
+    expect(flattenExportQueueDisplay(groupExportQueueAssets(entries)).map(row => row.item.assetId)).toEqual(['a', 'd', 'b', 'c', 'e', 'f']);
   });
   it('deduplicates normalized IDs before counting Stack membership and preserves original statuses', () => {
     const entries = [entry('A', 'X'), entry('a', 'x'), entry('b', 'x')];

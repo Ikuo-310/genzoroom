@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ExportManagementContent } from './ExportManagement';
+import { useExportManagement, type ExportManagementQueue } from './useExportManagement';
 import type { ExportQueueState } from './useExportQueue';
 import type { ExportQueueItem, ExportQueueStatus } from './exportQueueApi';
 import { updateSetting } from './appSettings';
@@ -12,9 +13,14 @@ vi.mock('./api', () => ({ fetchAssetDetail: api.fetchDetail, refreshSelectedImmi
 vi.mock('./frontendLogging', () => ({ frontendLogger: { add: vi.fn() } }));
 const item = (assetId: string, status: ExportQueueStatus = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: 'q', updatedAt: 'u' });
 type Queue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error'>;
+function Probe({ queue }: { queue: ExportManagementQueue }) {
+  const management = useExportManagement(queue, true);
+  return <ExportManagementContent management={management} />;
+}
 let root: Root, host: HTMLDivElement;
 async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {}) {
-  await act(async () => root.render(<ExportManagementContent queue={{ items, loaded: true, loading: false, error: null, ...extra }} />));
+  await act(async () => root.render(<Probe queue={{ items, loaded: true, loading: false, error: null,
+    dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), ...extra }} />));
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en');
@@ -53,7 +59,8 @@ it('renders all statuses, noninteractive Gallery cards, Stack groups and shared 
   expect(host.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-01');
   expect(host.querySelector('img')?.getAttribute('src')).toBe('/thumb/0');
   expect(host.querySelector('.format-badge.raw')?.textContent).toBe('DNG');
-  expect(host.querySelector('button, input, [role="checkbox"], [draggable="true"], .cover-badge, .stack-candidate-lights')).toBeNull();
+  expect(host.querySelectorAll('.photo-selection-input')).toHaveLength(5);
+  expect(host.querySelector('[draggable="true"], .cover-badge, .stack-candidate-lights, .photo-card-badges')).toBeNull();
   expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('5');
   await act(async () => updateSetting('homeThumbnailColumns', 3));
   expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('3');
