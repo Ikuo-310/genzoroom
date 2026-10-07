@@ -10,7 +10,7 @@ from backend_logging import backend_logger
 from export_artifact import is_genzoroom_export_filename
 from immich import IMMICH_TIMEOUT, get_asset_original, _require_configuration
 from immich_tags import assign_genzoroom_tag
-from jpeg_metadata import has_genzoroom_export_marker
+from jpeg_metadata import GenzoRoomMarker, inspect_genzoroom_export_marker
 
 
 MAX_PENDING_REPAIRS = 128
@@ -73,11 +73,15 @@ class GenzoRoomTagRepair:
             started = perf_counter()
             phase = "original"
             try:
-                matched = await self._marker(asset_id)
-                if not matched:
+                marker = await self._marker(asset_id)
+                if marker is GenzoRoomMarker.NO_MATCH:
                     self._negative[asset_id] = None
                     if len(self._negative) > MAX_NEGATIVE_CACHE:
                         self._negative.popitem(last=False)
+                    continue
+                if marker is not GenzoRoomMarker.MATCH:
+                    _log("tagRepair.failed", level="warn", assetId=str(asset_id), phase="metadata",
+                         errorCode="invalid_jpeg_metadata", durationMs=round((perf_counter() - started) * 1000))
                     continue
                 phase = "tag"
                 url, key = _require_configuration(self._url, self._key)
@@ -108,7 +112,7 @@ class GenzoRoomTagRepair:
                 data.extend(chunk)
             if expected is not None and len(data) != expected:
                 raise ValueError("incomplete_original")
-            return has_genzoroom_export_marker(bytes(data))
+            return inspect_genzoroom_export_marker(bytes(data))
         finally:
             # Release buffers and upstream streams on success, failure, size rejection, and cancellation.
             data.clear()

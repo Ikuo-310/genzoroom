@@ -13,25 +13,26 @@ from export_artifact import is_genzoroom_export_filename
 from genzoroom_tag_repair import GenzoRoomTagRepair
 from immich import RecentAsset
 from immich_tags import assign_genzoroom_tag
-from jpeg_metadata import has_genzoroom_export_marker
+from jpeg_metadata import GenzoRoomMarker, inspect_genzoroom_export_marker
+from tests.test_export_artifact import artifact, jpeg as artifact_jpeg
 
 
 ASSET, TAG = UUID(int=71), UUID(int=72)
 
 
-def jpeg(software=None, *, xmp=b""):
+def jpeg(software=None, *, xmp=b"", progressive=False):
     exif = Image.Exif()
     if software is not None:
         exif[ExifTags.Base.Software] = software
-        if type(software) is bytes:
-            # Store an actual UNDEFINED field rather than letting Pillow encode bytes as ASCII.
+        if type(software) in (bytes, int):
+            # Force the TIFF type; Pillow's Software writer otherwise coerces integers to ASCII.
             directory = TiffImagePlugin.ImageFileDirectory_v2()
             directory[ExifTags.Base.Software] = software
-            directory.tagtype[ExifTags.Base.Software] = 7
+            directory.tagtype[ExifTags.Base.Software] = 7 if type(software) is bytes else 3
             exif = b"Exif\0\0II\x2a\x00\x08\x00\x00\x00" + directory.tobytes(8)
     buffer = BytesIO()
     with Image.new("RGB", (2, 2)) as image:
-        image.save(buffer, "JPEG", exif=exif, xmp=xmp)
+        image.save(buffer, "JPEG", exif=exif, xmp=xmp, progressive=progressive)
     return buffer.getvalue()
 
 
@@ -53,8 +54,11 @@ def test_filename_uses_export_suffix_without_decimal_conversion(filename, expect
 
 
 @pytest.mark.parametrize("software,expected", [
-    ("GenzoRoom", True), (None, False), ("genzoroom", False), ("GenzoRoom 1.0", False),
-    (" GenzoRoom", False), ("GenzoRoom\0", False), (123, False), (b"GenzoRoom", False),
+    ("GenzoRoom", GenzoRoomMarker.MATCH), (None, GenzoRoomMarker.NO_MATCH),
+    ("genzoroom", GenzoRoomMarker.NO_MATCH), ("GenzoRoom 1.0", GenzoRoomMarker.NO_MATCH),
+    (" GenzoRoom", GenzoRoomMarker.NO_MATCH), ("GenzoRoom\0", GenzoRoomMarker.NO_MATCH),
+    ("123", GenzoRoomMarker.NO_MATCH),
+    (123, GenzoRoomMarker.INVALID), (b"GenzoRoom", GenzoRoomMarker.INVALID),
 ])
 def test_marker_is_exact_and_does_not_decode_pixels(software, expected, monkeypatch):
     data = jpeg(software)
@@ -62,25 +66,122 @@ def test_marker_is_exact_and_does_not_decode_pixels(software, expected, monkeypa
         raise AssertionError("Pixel decode is forbidden")
     monkeypatch.setattr(Image.Image, "load", forbidden)
     monkeypatch.setattr(ImageFile.ImageFile, "load", forbidden)
-    assert has_genzoroom_export_marker(data) is expected
+    assert inspect_genzoroom_export_marker(data) is expected
 
 
 def test_xmp_alone_is_not_a_marker():
-    assert not has_genzoroom_export_marker(jpeg(xmp=b'<xmp CreatorTool="GenzoRoom"/>'))
+    assert inspect_genzoroom_export_marker(jpeg(xmp=b'<xmp CreatorTool="GenzoRoom"/>')) is GenzoRoomMarker.NO_MATCH
+
+
+@pytest.mark.parametrize("progressive", [False, True])
+def test_normal_jpeg_without_exif_is_no_match(progressive):
+    buffer = BytesIO()
+    with Image.new("RGB", (5, 7)) as image:
+        image.save(buffer, "JPEG", progressive=progressive)
+    assert inspect_genzoroom_export_marker(buffer.getvalue()) is GenzoRoomMarker.NO_MATCH
+
+
+def test_progressive_jpeg_with_exact_marker_matches():
+    assert inspect_genzoroom_export_marker(jpeg("GenzoRoom", progressive=True)) is GenzoRoomMarker.MATCH
 
 
 @pytest.mark.parametrize("data", [b"bad", jpeg("GenzoRoom")[:-2]], ids=["not_jpeg", "truncated"])
 def test_corrupt_container_or_exif_is_controlled(data):
-    with pytest.raises(ValueError, match="invalid_jpeg_metadata"):
-        has_genzoroom_export_marker(data)
+    assert inspect_genzoroom_export_marker(data) is GenzoRoomMarker.INVALID
 
 
 def test_malformed_exif_never_matches():
     data = jpeg("GenzoRoom").replace(b"MM\x00\x2a", b"bad!", 1)
-    try:
-        assert not has_genzoroom_export_marker(data)
-    except ValueError as error:
-        assert str(error) == "invalid_jpeg_metadata"
+    assert inspect_genzoroom_export_marker(data) is GenzoRoomMarker.INVALID
+
+
+def test_real_export_artifact_matches_without_pixel_decode(monkeypatch):
+    exif = Image.Exif()
+    exif[ExifTags.Base.Make] = "Camera"
+    exif[ExifTags.Base.ExifOffset] = {ExifTags.Base.ExposureTime: TiffImagePlugin.IFDRational(1, 125)}
+    exif[ExifTags.Base.GPSInfo] = {ExifTags.GPS.GPSLatitudeRef: "N",
+        ExifTags.GPS.GPSLatitude: (TiffImagePlugin.IFDRational(35), TiffImagePlugin.IFDRational(1), TiffImagePlugin.IFDRational(2))}
+    data = artifact(artifact_jpeg(exif)).jpeg
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Pixel decode is forbidden")
+    monkeypatch.setattr(Image.Image, "load", forbidden)
+    monkeypatch.setattr(ImageFile.ImageFile, "load", forbidden)
+    assert inspect_genzoroom_export_marker(data) is GenzoRoomMarker.MATCH
+
+
+def without_marker(data, marker):
+    while marker in data:
+        start = data.index(marker)
+        length = int.from_bytes(data[start + 2:start + 4], "big")
+        data = data[:start] + data[start + 2 + length:]
+    return data
+
+
+def test_missing_quantization_tables_is_invalid_even_with_readable_marker():
+    data = without_marker(jpeg("GenzoRoom"), b"\xff\xdb")
+    with Image.open(BytesIO(data)) as image:
+        assert image.getexif()[ExifTags.Base.Software] == "GenzoRoom"
+        with pytest.raises(OSError):
+            image.load()
+    assert data.endswith(b"\xff\xd9")
+    assert inspect_genzoroom_export_marker(data) is GenzoRoomMarker.INVALID
+
+
+@pytest.mark.parametrize("mode", ["missing_dqt", "missing_dht", "short_length", "overrun_length",
+    "truncated_segment", "no_sos", "no_scan_data", "early_eoi", "bad_exif_offset"])
+def test_repair_rejects_structural_damage(mode, monkeypatch):
+    data = jpeg("GenzoRoom")
+    if mode in ("missing_dqt", "missing_dht"):
+        data = without_marker(data, b"\xff\xdb" if mode == "missing_dqt" else b"\xff\xc4")
+    elif mode in ("short_length", "overrun_length", "truncated_segment"):
+        start = data.index(b"\xff\xdb")
+        if mode == "truncated_segment":
+            data = data[:start + 10] + b"\xff\xd9"
+        else:
+            data = data[:start + 2] + (b"\x00\x01" if mode == "short_length" else b"\xff\xff") + data[start + 4:]
+    elif mode in ("no_sos", "no_scan_data", "early_eoi"):
+        start = data.index(b"\xff\xda")
+        end = start + 2 + int.from_bytes(data[start + 2:start + 4], "big")
+        data = data[:end if mode == "no_scan_data" else start] + b"\xff\xd9"
+        if mode == "early_eoi":
+            data += b"unexpected trailing bytes"
+    else:
+        data = data.replace(b"MM\x00\x2a\x00\x00\x00\x08", b"MM\x00\x2a\xff\xff\xff\xff", 1)
+    assert inspect_genzoroom_export_marker(data) is GenzoRoomMarker.INVALID
+    reads, writes = [], []
+    original = Original(data)
+    mock_original(monkeypatch, [original], reads)
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+    async def run():
+        await service.submit([asset()])
+        await service._task
+        assert not service._negative and not service._in_flight
+        await service.close()
+    asyncio.run(run())
+    assert original.closed and not writes
+
+
+def test_broken_exif_is_retryable_and_restores_tag_on_next_home_load(monkeypatch):
+    reads, writes, logs = [], [], []
+    broken = Original(jpeg("GenzoRoom").replace(b"MM\x00\x2a", b"bad!", 1))
+    fixed = Original(artifact().jpeg)
+    mock_original(monkeypatch, [broken, fixed], reads)
+    monkeypatch.setattr(repair_module, "_log", lambda *args, **kwargs: logs.append((args, kwargs)))
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+    async def run():
+        await service.submit([asset()])
+        await service._task
+        assert not writes and not service._negative and not service._in_flight
+        assert logs[-1][0] == ("tagRepair.failed",)
+        assert logs[-1][1]["level"] == "warn"
+        assert logs[-1][1]["errorCode"] == "invalid_jpeg_metadata"
+        await service.submit([asset()])
+        await service._task
+        assert len(reads) == 2 and len(writes) == 2
+        assert logs[-1][0] == ("tagRepair.completed",)
+        await service.close()
+    asyncio.run(run())
+    assert broken.closed and fixed.closed
 
 
 class Original:
@@ -176,6 +277,7 @@ def test_failures_are_warning_only_and_release_streams(monkeypatch, failure):
         await service.submit([asset()])
         await service._task
         assert not service._in_flight
+        assert not service._negative
         await service.close()
     asyncio.run(run())
     assert original.closed is (failure != "fetch")
@@ -200,6 +302,7 @@ def test_one_worker_deduplicates_across_views_and_cancellation_closes_stream(mon
         await service.close()
         assert original.closed and not writes
         assert not service._in_flight and not service._pending
+        assert not service._negative
     asyncio.run(run())
 
 

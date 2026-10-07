@@ -1,6 +1,7 @@
 """Bounded semantic metadata reconstruction; source containers are never serialized."""
 
 from datetime import datetime
+from enum import Enum
 from io import BytesIO
 import math
 import re
@@ -23,22 +24,201 @@ MAX_ARRAY_ITEMS = 128
 B, G = ExifTags.Base, ExifTags.GPS
 
 
-def has_genzoroom_export_marker(jpeg: bytes) -> bool:
-    """Inspect container metadata without decoding pixels; malformed data is a controlled failure."""
-    # Image.open only reads headers, so require the end marker before trusting a complete download.
-    if not jpeg.endswith(b"\xff\xd9"):
-        raise ValueError("invalid_jpeg_metadata")
+class GenzoRoomMarker(Enum):
+    MATCH = "match"
+    NO_MATCH = "no_match"
+    INVALID = "invalid"
+
+
+def _repair_jpeg_exif(jpeg: bytes) -> bytes | None:
+    """Check marker boundaries and referenced tables without interpreting entropy-coded pixels."""
+    if not jpeg.startswith(b"\xff\xd8"):
+        raise ValueError
+    position, frame, exif = 2, None, None
+    quantization, huffman, scanned = {}, set(), set()
+    restart_interval = 0
+    while position < len(jpeg):
+        if jpeg[position] != 0xFF:
+            raise ValueError
+        while position < len(jpeg) and jpeg[position] == 0xFF:
+            position += 1
+        if position >= len(jpeg):
+            raise ValueError
+        marker = jpeg[position]
+        position += 1
+        if marker == 0xD9:
+            if frame is None or scanned != set(frame[1]) or position != len(jpeg):
+                raise ValueError
+            return exif
+        if position + 2 > len(jpeg):
+            raise ValueError
+        length = int.from_bytes(jpeg[position:position + 2], "big")
+        end = position + length
+        if length < 2 or end > len(jpeg):
+            raise ValueError
+        payload = jpeg[position + 2:end]
+        position = end
+        if marker == 0xDB:
+            if not payload:
+                raise ValueError
+            offset = 0
+            while offset < len(payload):
+                precision, table = payload[offset] >> 4, payload[offset] & 15
+                size = 64 * (precision + 1)
+                if precision > 1 or table > 3 or offset + 1 + size > len(payload):
+                    raise ValueError
+                values = payload[offset + 1:offset + 1 + size]
+                if any(int.from_bytes(values[i:i + precision + 1], "big") == 0
+                       for i in range(0, size, precision + 1)):
+                    raise ValueError
+                quantization[table] = precision
+                offset += 1 + size
+        elif marker == 0xC4:
+            if not payload:
+                raise ValueError
+            offset = 0
+            while offset < len(payload):
+                if offset + 17 > len(payload):
+                    raise ValueError
+                kind, table = payload[offset] >> 4, payload[offset] & 15
+                counts = payload[offset + 1:offset + 17]
+                symbols, available = sum(counts), 1
+                for count in counts:
+                    available = available * 2 - count
+                    if available < 0:
+                        raise ValueError
+                if kind > 1 or table > 3 or not 0 < symbols <= 256 or offset + 17 + symbols > len(payload):
+                    raise ValueError
+                huffman.add((kind, table))
+                offset += 17 + symbols
+        elif marker in (0xC0, 0xC1, 0xC2):
+            if frame is not None or len(payload) < 6 or payload[0] != 8 \
+                    or not int.from_bytes(payload[1:3], "big") or not int.from_bytes(payload[3:5], "big") \
+                    or not 1 <= payload[5] <= 4 or len(payload) != 6 + 3 * payload[5]:
+                raise ValueError
+            components = {}
+            for offset in range(6, len(payload), 3):
+                component, sampling, table = payload[offset:offset + 3]
+                if component in components or not 1 <= sampling >> 4 <= 4 or not 1 <= sampling & 15 <= 4 or table > 3:
+                    raise ValueError
+                components[component] = table
+            frame = marker, components
+        elif marker == 0xDA:
+            if frame is None or not payload or not 1 <= payload[0] <= len(frame[1]) \
+                    or len(payload) != 1 + 2 * payload[0] + 3:
+                raise ValueError
+            start, stop, approximation = payload[-3:]
+            if frame[0] != 0xC2 and (start, stop, approximation) != (0, 63, 0):
+                raise ValueError
+            if frame[0] == 0xC2 and (not 0 <= start <= stop <= 63 or (start == 0 and stop != 0)
+                    or (start > 0 and payload[0] != 1) or approximation >> 4 > 13
+                    or approximation & 15 > 13 or (approximation >> 4 and approximation >> 4 != (approximation & 15) + 1)):
+                raise ValueError
+            scan_components = set()
+            for offset in range(1, 1 + 2 * payload[0], 2):
+                component, tables = payload[offset:offset + 2]
+                if component not in frame[1] or component in scan_components or frame[1][component] not in quantization \
+                        or tables >> 4 > 3 or tables & 15 > 3:
+                    raise ValueError
+                if frame[0] == 0xC0 and quantization[frame[1][component]] != 0:
+                    raise ValueError
+                if (start == 0 and approximation >> 4 == 0 and (0, tables >> 4) not in huffman) \
+                        or (stop > 0 and (1, tables & 15) not in huffman):
+                    raise ValueError
+                scan_components.add(component)
+            scanned.update(scan_components)
+            # Skip stuffed bytes/restarts in one pass; do not allocate a decoded image or scan buffer.
+            entropy, restart = False, 0
+            while position < len(jpeg):
+                next_marker = jpeg.find(b"\xff", position)
+                if next_marker < 0 or next_marker + 1 >= len(jpeg):
+                    raise ValueError
+                entropy |= next_marker > position
+                following = jpeg[next_marker + 1]
+                if following == 0:
+                    entropy = True
+                    position = next_marker + 2
+                elif 0xD0 <= following <= 0xD7:
+                    if not restart_interval or following != 0xD0 + restart % 8:
+                        raise ValueError
+                    restart += 1
+                    position = next_marker + 2
+                else:
+                    position = next_marker
+                    break
+            if not entropy:
+                raise ValueError
+        elif marker == 0xDD:
+            if len(payload) != 2:
+                raise ValueError
+            restart_interval = int.from_bytes(payload, "big")
+        elif marker == 0xE1 and payload.startswith(b"Exif"):
+            if exif is not None or not payload.startswith(b"Exif\0\0"):
+                raise ValueError
+            exif = payload
+        elif not (0xE0 <= marker <= 0xEF or marker == 0xFE):
+            # Unsupported coding modes cannot establish repair identity; conservative skips are retryable.
+            raise ValueError
+    raise ValueError
+
+
+def _validate_repair_exif(exif: bytes) -> None:
+    tiff = exif[6:]
+    if len(tiff) < 8 or tiff[:4] not in (b"II\x2a\0", b"MM\0\x2a"):
+        raise ValueError
+    order = "little" if tiff[:2] == b"II" else "big"
+    sizes = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
+    pending, visited = [int.from_bytes(tiff[4:8], order)], set()
+    while pending:
+        offset = pending.pop()
+        # Check linked directories too: a soft-failed EXIF/GPS/thumbnail IFD is not a normal absence.
+        if offset in visited or offset < 8 or offset + 2 > len(tiff):
+            raise ValueError
+        visited.add(offset)
+        count = int.from_bytes(tiff[offset:offset + 2], order)
+        end = offset + 2 + 12 * count
+        if end + 4 > len(tiff):
+            raise ValueError
+        seen = set()
+        for position in range(offset + 2, end, 12):
+            tag = int.from_bytes(tiff[position:position + 2], order)
+            kind = int.from_bytes(tiff[position + 2:position + 4], order)
+            length = int.from_bytes(tiff[position + 4:position + 8], order)
+            if tag in seen or kind not in sizes or not length or (tag == B.Software and kind != 2):
+                raise ValueError
+            seen.add(tag)
+            size = length * sizes[kind]
+            value_offset = int.from_bytes(tiff[position + 8:position + 12], order)
+            if size > 4 and (value_offset < 8 or value_offset + size > len(tiff)):
+                raise ValueError
+            if tag in (B.ExifOffset, B.GPSInfo, ExifTags.IFD.Interop):
+                if kind != 4 or length != 1:
+                    raise ValueError
+                pending.append(value_offset)
+        following = int.from_bytes(tiff[end:end + 4], order)
+        if following:
+            pending.append(following)
+
+
+def inspect_genzoroom_export_marker(jpeg: bytes) -> GenzoRoomMarker:
+    """Keep malformed metadata distinct from normal non-matches so retries remain possible."""
     try:
+        exif = _repair_jpeg_exif(jpeg)
+        if exif is not None:
+            # Pillow can silently treat a broken TIFF header as empty EXIF, without emitting a warning.
+            _validate_repair_exif(exif)
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             with Image.open(BytesIO(jpeg)) as image:
                 if image.format != "JPEG":
-                    raise ValueError("invalid_jpeg_metadata")
+                    return GenzoRoomMarker.INVALID
                 software = image.getexif().get(B.Software)
-                return type(software) is str and software == "GenzoRoom"
+                if software is not None and type(software) is not str:
+                    return GenzoRoomMarker.INVALID
+                return GenzoRoomMarker.MATCH if software == "GenzoRoom" else GenzoRoomMarker.NO_MATCH
     except (OSError, ValueError, TypeError, SyntaxError, EOFError, Warning,
-            Image.DecompressionBombError) as error:
-        raise ValueError("invalid_jpeg_metadata") from error
+            Image.DecompressionBombError):
+        return GenzoRoomMarker.INVALID
 
 
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"

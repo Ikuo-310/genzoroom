@@ -2,6 +2,22 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Home Stack / filename / GenzoRoom tag改善とfocused audit（2026-10-08）
+
+HomeのStackカードへ、full Stack snapshotから得たunique format badgeを追加した。Cover/primaryのformatを先頭にし、JPEG / DNG / HEIC等と既存member countを表示する。素材の選択・filterではない。optional metadataが欠損・不正でもAsset本体を落とさず、Frontendでもformat metadataをsanitizationする。実機で表示を確認済み。
+
+長いfilenameは共通`FilenameDisplay`をPhotoCardとExportManagementで使い、prefix側を中央省略しながら拡張子と末尾の識別部分を優先表示する。完全なfilenameと処理上の値は維持する。実機で表示を確認済み。
+
+Homeの「現」badgeはImmich `GenzoRoom` tagを根拠に表示する。Home asset取得時にtag状態をenrichmentし、`isGenzoRoomExport`をAPI responseへ含める。tag lookupは一括処理でN+1にせず、Stack childrenのtagは集約しない。badgeはcustom SVGで、配色をneutral grayへ調整した。実機で表示を確認済み。
+
+Recent / Favorites / Album detail / Calendar day detailでは、Home response後にsilent background maintenanceとしてtag repairを実行し、Home表示を待たせない。tag absent、厳密なGenzoRoom export filename、JPEG EXIF Softwareのexact `GenzoRoom`がすべて成立するcandidateだけを対象とする。unknownはrepairせず、originalもcandidateだけ逐次取得する。pendingは128、originalは64 MiB、valid `NO_MATCH` negative cacheは512件までで、同一Assetのin-flight処理をdedupeする。Exportとrepairは共通tag assignment helperでupsert、asset assignment、応答検証、count=0時のAsset detail確認を行う。repairはbest-effortで、失敗してもHome閲覧を止めない。`tagRepair.completed`をinfo記録し、NAS / Immich実機でsilentなtag復旧成功を確認した。現行Exportでtag欠落Assetが見つかったが、原因は確定していない。Immich metadata extractionとのraceは到達可能な競合として監査で確認したもので、今回の欠落原因とは断定しない。
+
+focused structural auditはHigh 0、Medium 1、Low 3だった。Mediumはmalformed EXIFがsoft-failしてNO_MATCHとなりnegative cacheされ得る点、LowはEXIFだけ読める構造破損JPEGがMATCHし得る点、極端に長い拡張子で中央省略表示を保証できない点、非常に小さいStack cardでformat群とcountが収まらない可能性だった。前二件を修正し、filenameの極端な拡張子は追加対応せず、Stack表示は実機で縮小してもJPEG + DNG + count等が読めることを確認して追加修正しなかった。
+
+修正後のmarker判定は`MATCH` / `NO_MATCH` / `INVALID`の三状態。malformed EXIFやinvalid JPEGはwriteにもnegative cacheにも進まず、後続Home閲覧で再試行できる。marker/segment境界、必須table、SOF / SOS / EOI、EXIF TIFF header / IFD境界、Software field typeを検証し、pixel decodeは追加していない。XMP-onlyはrepair対象にしない。破損EXIF後に正常originalを再取得してrepairする回帰と、構造破損JPEGへtagを書かない回帰を追加した。
+
+監査時の検証は関連Backend 341 passed + 121 subtests、関連Frontend 154 passed、Backend full 791 passed + 322 subtests、Frontend full 2394 passed / 2 skipped、`git diff --check`成功。監査修正後はFocused 163 passed + 49 subtests、Backend full 807 passed + 322 subtests、`git diff --check`成功。修正後はFrontendを変更していないためFrontend suiteを再実行していない。browser実機確認はユーザー側のNAS / Firefoxで行う。
+
 ## Export Favorite継承追補（2026-10-07）
 
 お気に入り写真のExportで生成JPEGがFavoriteを継承せず、COVER化後にFavorites上の見え方が変わる問題を修正した。Immich v3.2.4 `POST /assets` multipartの`isFavorite`へsource値を渡す。Backend内部の`AssetDetail`に`isFavorite`を保持するが、既存Backend detail APIの公開レスポンスには含めない。Favorite値の欠落／boolean以外は`unexpected_response`とし、upload後の`PUT /assets/{id}`やAsset Copy APIは追加していない。Favorite ON/OFF両方のmultipartをテストした。
