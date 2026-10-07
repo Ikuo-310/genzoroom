@@ -82,6 +82,8 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .export-queue-card .photo-card-button:disabled { opacity: 1; cursor: default; }
 .export-queue-card .photo-selection-input:disabled { cursor: default; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
+.export-primary-actions { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; flex-direction: column; align-items: flex-end; }
+.export-retry-notice { max-width: min(30rem, 100%); margin: 0 0 4px; color: var(--export-waiting); font-size: 0.78rem; font-weight: 600; line-height: 1.35; text-align: right; }
 /* Immich actions stay visually distinct from local operations and destructive controls. */
 .immich-action-button { color: #fff; background: #a83f46; border: 1px solid #ce6068; }
 .immich-action-button:hover:not(:disabled) { background: #bf4c54; }

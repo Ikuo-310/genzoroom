@@ -50,6 +50,7 @@
     "retryConfirmation_one": "Retry export for {{count}} failed item?",
     "retryFailed": "Could not prepare exports for retry",
     "retryExcluded": "Queued photos are excluded while failed exports are being retried",
+    "retryPriorityNotice": "Some photos failed to export, so only failed photos can be managed.",
     "cancel": "Cancel export",
     "cancelExplanation": "Cancel remaining exports after the current export finishes.",
     "cancelFailed": "Could not request export cancellation",

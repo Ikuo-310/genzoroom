@@ -44,6 +44,7 @@
     "retryConfirmation": "出力に失敗した{{count}}件を再試行します。よろしいですか？",
     "retryFailed": "出力の再試行を準備できませんでした",
     "retryExcluded": "失敗した出力の再試行中は、Queue済み写真を操作できません",
+    "retryPriorityNotice": "出力に失敗した写真があるので、失敗した写真のみ操作できます",
     "cancel": "出力キャンセル",
     "cancelExplanation": "現在の出力処理を終了後、以降の出力をキャンセルします。",
     "cancelFailed": "出力キャンセルを要求できませんでした",

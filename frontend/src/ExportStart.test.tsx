@@ -64,11 +64,14 @@ it('retries failed Queue items through the primary action and starts only that f
   queue.retry = vi.fn().mockImplementation(async ids => { queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row); });
   await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
+  expect(host.querySelector('.export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
   await click('.immich-action-button');
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
   expect(host.querySelector('dialog p')?.textContent).toBe('Retry export for 2 failed items?');
   await click('dialog button:last-child');
   expect(queue.retry).toHaveBeenCalledWith(['failed-a', 'failed-b']);
   expect(queue.startRuntime).toHaveBeenCalledWith(['failed-a', 'failed-b']);
+  expect(host.querySelector('.export-retry-notice')).toBeNull();
   expect([...current.armedIds]).toEqual(['armed']);
   expect(host.querySelector('.export-retry')).toBeNull();
 });
@@ -81,17 +84,21 @@ it('gives active runtime Stop priority over failed Retry', async () => {
 it('returns the primary action to ordinary Export when the last failed item leaves Queue', async () => {
   queue.items = [item('failed', 'failed'), item('queued')]; queue.runtime = idle;
   await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
   queue.items = [item('queued')]; await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Export to Immich');
+  expect(host.querySelector('.export-retry-notice')).toBeNull();
 });
 it('keeps armed intent but limits selection, Q, and badges to failed items during Retry priority', async () => {
   queue.items = [item('queued')];
   await render(); await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
   queue.items = [item('failed', 'failed'), item('queued')]; await render();
+  expect(host.querySelector('.export-retry-notice')?.textContent).toBe('Some photos failed to export, so only failed photos can be managed.');
   expect(current.armedIds.has('queued')).toBe(true);
   expect(current.selectedIds).toEqual([]);
   expect(host.querySelector('[data-asset-id="failed"] .export-status-failed')?.textContent).toBe('Export failed');
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
   expect(host.querySelector<HTMLInputElement>('[data-asset-id="queued"] input')?.disabled).toBe(true);
   expect(host.querySelector<HTMLButtonElement>('[data-asset-id="queued"] .photo-card-button')?.disabled).toBe(true);
   await act(async () => current.selectAll());
@@ -120,17 +127,20 @@ it('suppresses unrelated armed badge through Retry transition and active run, th
   expect(queue.startRuntime).not.toHaveBeenCalled();
   await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
   await act(async () => { finishRetry(); await new Promise(resolve => setTimeout(resolve, 0)); });
   expect(queue.startRuntime).toHaveBeenCalledWith(['failed']);
   await render();
   expect(host.querySelector('[data-asset-id="failed"] .export-status-waiting')).not.toBeNull();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
   queue.runtime = null; await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
   queue.items = [item('queued')]; queue.runtime = idle; await render();
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')?.textContent).toBe('Ready to export');
+  expect(host.querySelector('.export-retry-notice')).toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
 });
 it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent remains', async () => {
@@ -144,6 +154,16 @@ it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent 
   expect(current.removalError).toBe('retryFailed');
   expect(current.armedIds.has('queued')).toBe(true);
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector('.export-retry-notice')).not.toBeNull();
+});
+it.each(['ja', 'en'])('shows the Retry priority explanation in %s and hides it during ordinary export', async language => {
+  await i18n.changeLanguage(language);
+  await render();
+  expect(host.querySelector('.export-retry-notice')).toBeNull();
+  queue.items = [item('failed', 'failed')]; await render();
+  expect(host.querySelector('.export-retry-notice')?.textContent).toBe(language === 'ja'
+    ? '出力に失敗した写真があるので、失敗した写真のみ操作できます'
+    : 'Some photos failed to export, so only failed photos can be managed.');
 });
 it('excludes failed/locked/mutating armed items and revalidates targets at confirmation', async () => {
   queue.items = [item('b'), item('a')];
