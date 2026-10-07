@@ -195,6 +195,56 @@ def test_registration_upload_tag_stack_and_cover_cases(existing, expected_write)
     assert not any(method == 'DELETE' for method, _ in remote.calls)
 
 
+@pytest.mark.parametrize('unrelated', [
+    [stack([UUID(int=200)], stack_id=UUID(int=300))],
+    [stack([UUID(int=200), UUID(int=201)], UUID(int=202), UUID(int=300))],
+    [{'id': str(UUID(int=300)), 'assets': [{'id': str(UUID(int=200))}]}],
+    [{'id': 'invalid', 'primaryAssetId': str(UUID(int=200)), 'assets': [{'id': str(UUID(int=200))}, None]}],
+    [stack([UUID(int=200), UUID(int=201)], stack_id=UUID(int=300)),
+     stack([UUID(int=200), UUID(int=202)], stack_id=UUID(int=301))],
+])
+def test_registration_ignores_unrelated_stack_defects_and_preserves_source_members(unrelated):
+    remote = Remote([stack([B, A, C], B)])
+    writes = []
+    async def handle(request):
+        if request.url.path == '/api/stacks' and request.method == 'GET':
+            return httpx.Response(200, json=[*remote.stacks, *unrelated])
+        if request.url.path == '/api/stacks' and request.method == 'POST':
+            writes.append(json.loads(request.content))
+        return await remote.handle(request)
+    adapter = ImmichExportRegistrar('http://immich.example/api', 'private-key', transport=httpx.MockTransport(handle))
+    result = asyncio.run(adapter.register(detail(), ExportArtifact('IMG-Genzo01.jpg', b'jpeg'), context()))
+    assert result.registered_asset_id == OUT
+    assert writes == [{'assetIds': [str(OUT), str(B)]}]
+    assert remote.stacks[0]['primaryAssetId'] == str(OUT)
+    assert {member['id'] for member in remote.stacks[0]['assets']} == {str(A), str(B), str(C), str(OUT)}
+    assert not any(method == 'DELETE' for method, _ in remote.calls)
+
+
+@pytest.mark.parametrize('target', [A, OUT])
+@pytest.mark.parametrize('defect', ['missing_primary', 'ambiguous', 'duplicate_stack_id', 'malformed'])
+def test_registration_rejects_target_quarantine_before_stack_mutation(target, defect, monkeypatch):
+    existing = [stack([target, B])]
+    if defect == 'missing_primary': existing[0]['primaryAssetId'] = str(C)
+    if defect == 'ambiguous': existing.append(stack([target, C], stack_id=OTHER))
+    if defect == 'duplicate_stack_id': existing.append(stack([C, UUID(int=200)]))
+    if defect == 'malformed': existing[0]['assets'].append({'id': 'invalid'})
+    remote = Remote(existing)
+    events = []
+    monkeypatch.setattr(immich_export, 'runtime_log', lambda event, **fields: events.append((event, fields)))
+    with pytest.raises(ExportRegistrationError) as error:
+        asyncio.run(registrar(remote).register(detail(), ExportArtifact('IMG-Genzo01.jpg', b'jpeg'), context()))
+    assert error.value.code == 'registration_failed'
+    assert not any(path.startswith('/stacks') and method != 'GET' for method, path in remote.calls)
+    failure = next(fields for event, fields in events if event == 'registration.stepFailed')
+    assert failure['phase'] == 'stack_context'
+    assert failure['sourceQuarantined'] is (target == A)
+    assert failure['outputQuarantined'] is (target == OUT)
+    assert failure['invalidStackCount'] >= 1 and failure['quarantinedMemberCount'] >= 2
+    assert set(failure) == {'level', 'runId', 'assetId', 'position', 'phase', 'errorCode',
+                           'sourceQuarantined', 'outputQuarantined', 'validStackCount', 'invalidStackCount', 'quarantinedMemberCount'}
+
+
 @pytest.mark.parametrize('existing', [
     [stack([A, B]), stack([OUT, C], stack_id=OTHER)], [stack([OUT, C], stack_id=OTHER)],
     [stack([A, B]), stack([A, C], stack_id=OTHER)], [{'id': str(STACK), 'primaryAssetId': str(A), 'assets': []}],

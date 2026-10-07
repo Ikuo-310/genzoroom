@@ -2,6 +2,14 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Phase 5F実機Export: Stack contextの対象限定修正（2026-10-07）
+
+ユーザーの最初のNAS実機Exportではsource取得／family検索／encode／upload／GenzoRoom tag付与まで成功し、Stack mutation前の`stack_context`で失敗した。Registrarがライブラリ全体のinvalid/quarantined Stackをglobal fatalとしていたため、source/outputと無関係な異常までExportを拒否していた。
+
+既存strict Stack parserは維持し、source/output自身がquarantinedの場合だけcontextを拒否するよう修正した。対象のinvalid/ambiguous ownershipをunstacked扱いせず、無関係なsingleton／missing-primary／malformed／ambiguous Stackは妨げない。既存A〜E registration、旧member保持、output COVER、STACK管理algorithmは変更していない。拒否logへ安全なtarget quarantine booleanと件数を追加した。upload/tag／family／timestamp／Queue／schema／Frontendは変更していない。対象限定の回帰テストを追加し、修正後のlive再確認は未実施。NASでは正常JPEG+RAW StackからのExportで旧member保持とgenerated COVERまで成功することを再確認する。
+
+Python 3.14.5の指定venvで関連Export/Stack回帰306 passed、Backend full pytest 709 passed、compileall／`git diff --check`成功。sandbox内の関連pytestは進行停止して中断し、同じvenv・引数で権限付き再実行した。13ケースを追加し、対象scope・quarantine保持・別Stack conflict・旧member保持をfocused reviewした。残存High/Medium findingは0。Frontendは変更していないためtest/buildは未実施。Commit/Push/deploy/live確認は行っていない。
+
 ## Export Phase 5E Actual Immich Export Registration / Production Start（2026-10-07）
 
 productionの`Immichへ出力`を接続した。armedな`queued`だけをQueue順に確認してStartし、保存済みRecipe/revisionをtransaction内で再検証・freezeする。`IMMICH_URL` / `IMMICH_API_KEY`から実Source／family provider／registrarをlifespanで構成し、active runはrequestから独立してstartup recoveryする。設定不足でもBackend全体は起動し、Startだけ503になる。Startは`POST /export/runtime/start`、1〜100 unique UUID、既存runtime projectionを返す。

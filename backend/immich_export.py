@@ -90,6 +90,7 @@ class ImmichExportRegistrar:
 
     async def register(self, source, artifact, context):
         phase = "upload"
+        context_diagnostics = {}
         trace = {"runId": str(context.run_id), "assetId": str(source.id), "position": context.position}
         try:
             url, key = _require_configuration(self._url, self._key)
@@ -134,7 +135,13 @@ class ImmichExportRegistrar:
                 phase = "stack_context"
                 raw = await _get_asset_stacks(url, key, transport=self._transport)
                 snapshot = _parse_stack_snapshot(raw, require_primary=True)
-                if snapshot.invalid_stack_ids or snapshot.quarantined_member_ids or len(snapshot.stacks) != len(raw):
+                source_quarantined = source.id in snapshot.quarantined_member_ids
+                output_quarantined = output in snapshot.quarantined_member_ids
+                # Invalid entries preserve possible ownership; unrelated library defects must not block export.
+                if source_quarantined or output_quarantined:
+                    context_diagnostics = {"sourceQuarantined": source_quarantined, "outputQuarantined": output_quarantined,
+                        "validStackCount": len(snapshot.stacks), "invalidStackCount": len(snapshot.invalid_stack_ids),
+                        "quarantinedMemberCount": len(snapshot.quarantined_member_ids)}
                     raise ValueError("invalid_stack_context")
                 owners = {UUID(member["id"]): stack for stack in snapshot.stacks for member in stack["assets"]}
                 source_stack, output_stack = owners.get(source.id), owners.get(output)
@@ -158,7 +165,7 @@ class ImmichExportRegistrar:
                 runtime_log("registration.completed", **trace, registeredAssetId=str(output), stackId=str(stack_id))
                 return RegistrationResult(output)
         except Exception:
-            runtime_log("registration.stepFailed", level="error", **trace, phase=phase, errorCode="registration_failed")
+            runtime_log("registration.stepFailed", level="error", **trace, phase=phase, errorCode="registration_failed", **context_diagnostics)
             raise ExportRegistrationError() from None
 
     @staticmethod
