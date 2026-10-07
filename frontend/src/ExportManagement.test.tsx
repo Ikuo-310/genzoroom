@@ -56,7 +56,21 @@ it.each(['en', 'ja'])('shows persistent Stop state and exact Cancel explanation 
   expect(button.disabled).toBe(true); expect(button.classList.contains('export-stop-requested')).toBe(true);
   expect(button.textContent).toBe(language === 'ja' ? '出力キャンセル' : 'Cancel export');
   expect(button.title).toBe(language === 'ja' ? '現在の出力処理を終了後、以降の出力をキャンセルします。' : 'Cancel remaining exports after the current export finishes.');
-  expect(host.querySelector('.export-status-stop')).not.toBeNull();
+  expect(host.querySelector('.export-status-stop')).toBeNull();
+  expect(host.querySelector('.export-status-encoding')?.textContent).toBe(i18n.t('exportManagement.encoding'));
+});
+it('shows Stop requested only for later waiting items, not the current processing item', async () => {
+  const queue: ExportManagementQueue = { items: [item('current', 'encoding'), item('registering', 'registering'), item('later', 'waiting')],
+    loaded: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }),
+    runtime: { runId: 'run', status: 'active', stopRequested: true, stopAllowed: false, currentAssetId: 'current' } };
+  function RuntimeProbe() {
+    const management = useExportManagement(queue, true);
+    return <><ExportManagementToolbar management={management} /><ExportManagementContent management={management} /></>;
+  }
+  await act(async () => root.render(<RuntimeProbe />));
+  expect(host.querySelector('[data-asset-id="current"] .export-status-encoding')?.textContent).toBe(i18n.t('exportManagement.encoding'));
+  expect(host.querySelector('[data-asset-id="registering"] .export-status-registering')?.textContent).toBe(i18n.t('exportManagement.registering'));
+  expect(host.querySelector('[data-asset-id="later"] .export-status-stop')?.textContent).toBe(i18n.t('exportManagement.stopping'));
 });
 it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata loading/error in %s', async language => {
   await i18n.changeLanguage(language);

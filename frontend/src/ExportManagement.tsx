@@ -25,7 +25,6 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
           {shortcut.inline(t(`exportManagement.${management.allSelectedArmed ? 'disarm' : 'arm'}`), 'exportArmToggle')}</button>
         <button type="button" className="export-queue-remove" disabled={busy || noSelection || !!management.message} onClick={management.removeSelected}>
           {shortcut.inline(t('exportManagement.remove'), 'exportQueueToggle')}</button>
-        <button type="button" className="export-retry" disabled={busy || !management.canRetry} onClick={management.retrySelected}>{t('exportManagement.retry')}</button>
       </div>
     </div>
     <div className="export-thumbnail-control"><HomeThumbnailSizeControl /></div>
@@ -34,12 +33,16 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
         ? <button type="button" className={`immich-action-button${management.queue.runtime.stopRequested ? ' export-stop-requested' : ''}`}
           disabled={busy || !!management.queue.cancelling || !management.queue.runtime.stopAllowed}
           title={t('exportManagement.cancelExplanation')} onClick={management.cancelExport}>{t('exportManagement.cancel')}</button>
-        : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
+        : management.failedIds.length
+          ? <button type="button" className="immich-action-button" disabled={!management.canRetryFailed} onClick={management.requestRetryFailed}>{t('exportManagement.retryExport')}</button>
+          : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
     </div>
   </div>{management.confirmation && <StackRedetectDialog onConfirm={management.confirmExport} onCancel={management.cancelConfirmation}
-    title={t(management.confirmation.kind === 'start' ? 'exportManagement.exportToImmich' : 'exportManagement.cancel')}
-    body={management.confirmation.kind === 'start' ? t('exportManagement.startConfirmation', { count: management.confirmation.assetIds.length })
-      : t('exportManagement.cancelExplanation')} />}</>;
+    title={t(management.confirmation.kind === 'start' ? 'exportManagement.exportToImmich'
+      : management.confirmation.kind === 'retry' ? 'exportManagement.retryExport' : 'exportManagement.cancel')}
+    body={management.confirmation.kind === 'stop' ? t('exportManagement.cancelExplanation')
+      : t(management.confirmation.kind === 'retry' ? 'exportManagement.retryConfirmation' : 'exportManagement.startConfirmation',
+        { count: management.confirmation.assetIds.length })} />}</>;
 }
 
 function ExportQueueCard({ entry: { item, asset }, management }: { entry: ExportQueueAsset; management: ExportManagementState }) {
@@ -48,6 +51,8 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
   const selected = management.selectedIds.includes(id);
   const armed = management.armedIds.has(id);
   const locked = !isMutableExportStatus(item.status);
+  const stopPending = management.queue.runtime?.stopRequested && item.status === 'waiting'
+    && id !== management.queue.runtime.currentAssetId?.toLowerCase();
   const disabled = locked || management.removing || management.undoing || !!management.queue.mutationFor(id).operation;
   const label = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
   const rangeClickHandled = useRef(false);
@@ -77,8 +82,8 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
     <div className="thumbnail">
       <img src={asset.thumbnail_url} alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-      {item.status !== 'queued' ? <span className={`export-status-bar export-status-${locked && management.queue.runtime?.stopRequested ? 'stop' : item.status}`}
-        role="status">{t(`exportManagement.${locked && management.queue.runtime?.stopRequested ? 'stopping' : item.status}`)}</span>
+      {item.status !== 'queued' ? <span className={`export-status-bar export-status-${stopPending ? 'stop' : item.status}`}
+        role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>
         : armed && <span className="export-status-bar export-status-armed">{t('exportManagement.armed')}</span>}
     </div>
     <div className="photo-info"><p title={asset.filename}>{asset.filename}</p>

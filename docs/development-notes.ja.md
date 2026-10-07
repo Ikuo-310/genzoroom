@@ -2,6 +2,12 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Phase 5F Export UI実機確認で見つかった2点（2026-10-07）
+
+Stop requested表示は後続waiting itemだけへ限定し、currentAssetのencoding/registering（およびcurrentがwaiting中の場合も）は通常状態表示を保つ。左のselection actionから個別Retryを外し、failedがあると右の主操作を「出力を再試行」へ切り替えた。failed IDsをQueue順で確認・freezeし、実行時に再検証したうえで全件Retry成功時だけ同じID群でnew runを開始する。部分Retry failureはrunを開始せずQueue refreshし、成功済みqueuedはrollbackしない。通常armed queued Export、Q removal、W/Q one-shot Undoは維持。live再確認は未実施。
+
+Export関連90 passed、Frontend full suite 113 files / 2354 passed / 2 skipped、`npx tsc --noEmit`、`npm run build`、`git diff --check`成功。既存Vite 500 kB超chunk警告あり。NAS／Firefox実機確認とCommit/Pushは行っていない。
+
 ## Phase 5F実機Export: Stack contextの対象限定修正（2026-10-07）
 
 ユーザーの最初のNAS実機Exportではsource取得／family検索／encode／upload／GenzoRoom tag付与まで成功し、Stack mutation前の`stack_context`で失敗した。Registrarがライブラリ全体のinvalid/quarantined Stackをglobal fatalとしていたため、source/outputと無関係な異常までExportを拒否していた。

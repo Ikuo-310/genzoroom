@@ -26,33 +26,44 @@ beforeEach(() => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
-it('retries single or selected failed items atomically without replacing W Undo', async () => {
+it('confirms and retries every failed item in Queue order, then starts exactly those IDs without replacing W Undo', async () => {
+  const starts = vi.fn(async (ids: readonly string[]) => undefined);
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = starts;
   queue.retry = vi.fn(async ids => {
     queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row);
   });
-  await render([item('a', 'failed'), item('b', 'failed')]);
-  await act(async () => current.selectOnly('a'));
-  await act(async () => current.toggleArmed());
-  expect(current.canRetry).toBe(true);
-  await settle(() => current.retrySelected());
-  expect(queue.retry).toHaveBeenCalledWith(['a']);
+  await render([item('b'), item('a', 'failed'), item('c', 'failed')]);
+  await act(async () => current.selectOnly('b')); await act(async () => current.toggleArmed());
+  expect(current.canRetryFailed).toBe(true);
+  await act(async () => current.requestRetryFailed());
+  expect(current.confirmation).toEqual({ kind: 'retry', assetIds: ['a', 'c'] });
+  await settle(() => current.confirmExport());
+  expect(queue.retry).toHaveBeenCalledWith(['a', 'c']); expect(starts).toHaveBeenCalledWith(['a', 'c']);
+  expect([...current.armedIds]).toEqual(['b']);
   await render();
   await act(async () => current.undo());
   expect([...current.armedIds]).toEqual([]);
-  await render([item('a', 'failed'), item('b', 'failed')]);
-  await act(async () => current.selectAll());
-  await settle(() => current.retrySelected());
-  expect(queue.retry).toHaveBeenLastCalledWith(['a', 'b']);
 });
-it('rejects mixed Retry selection and preserves failed state on atomic failure', async () => {
-  queue.retry = vi.fn().mockRejectedValue(new Error('private upstream'));
-  await render([item('a', 'failed'), item('b')]);
-  await act(async () => current.selectAll());
-  expect(current.canRetry).toBe(false); expect(current.retrySelected()).toBe(false);
-  expect(queue.retry).not.toHaveBeenCalled();
+it('does not start after partial Retry failure and refreshes without rolling back successful IDs', async () => {
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = vi.fn(); queue.refresh = vi.fn(async () => undefined);
+  queue.retry = vi.fn(async () => { queue.items[0] = item('a', 'queued'); throw new Error('partial'); });
+  await render([item('a', 'failed'), item('b', 'failed')]);
   await act(async () => current.selectOnly('a'));
-  await settle(() => current.retrySelected());
-  expect(current.removalError).toBe('retryFailed'); expect(queue.items[0].status).toBe('failed');
+  expect(current.canRetryFailed).toBe(true); await act(async () => current.requestRetryFailed());
+  await settle(() => current.confirmExport());
+  expect(queue.startRuntime).not.toHaveBeenCalled(); expect(queue.refresh).toHaveBeenCalled();
+  expect(queue.items[0].status).toBe('queued'); expect(current.removalError).toBe('retryFailed');
+});
+it('revalidates frozen failed targets and prevents repeated confirmation dispatch', async () => {
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = vi.fn(); queue.retry = vi.fn();
+  await render([item('a', 'failed')]); await act(async () => current.requestRetryFailed());
+  queue.items = [item('a', 'queued')]; await render(queue.items);
+  await act(async () => { expect(current.confirmExport()).toBe(true); expect(current.confirmExport()).toBe(false); });
+  expect(queue.retry).not.toHaveBeenCalled(); expect(queue.startRuntime).not.toHaveBeenCalled();
+  expect(current.removalError).toBe('retryFailed');
 });
 it('allows Cancel only for recognized active runtime and does not create Undo', async () => {
   queue.cancelRuntime = vi.fn().mockResolvedValue(undefined);

@@ -40,6 +40,8 @@
     "startConfirmation": "{{count}}件をImmichへ出力します。よろしいですか？",
     "startFailed": "Immichへの出力を開始できませんでした",
     "retry": "再試行",
+    "retryExport": "出力を再試行",
+    "retryConfirmation": "出力に失敗した{{count}}件を再試行します。よろしいですか？",
     "retryFailed": "出力の再試行を準備できませんでした",
     "cancel": "出力キャンセル",
     "cancelExplanation": "現在の出力処理を終了後、以降の出力をキャンセルします。",

@@ -55,11 +55,37 @@ it('confirmation cancellation does not Start and repeated Confirm cannot dispatc
   await act(async () => { expect(current.confirmExport()).toBe(true); expect(current.confirmExport()).toBe(false); });
   expect(queue.startRuntime).toHaveBeenCalledTimes(1);
 });
+it('retries failed Queue items through the primary action and starts only that frozen group', async () => {
+  queue.items = [item('armed'), item('failed-a', 'failed'), item('failed-b', 'failed')];
+  queue.runtime = idle;
+  queue.retry = vi.fn().mockResolvedValue(undefined);
+  await render(); await act(async () => current.selectOnly('armed')); await click('.export-arm-toggle');
+  expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
+  await click('.immich-action-button');
+  expect(host.querySelector('dialog p')?.textContent).toBe('Retry export for 2 failed items?');
+  await click('dialog button:last-child');
+  expect(queue.retry).toHaveBeenCalledWith(['failed-a', 'failed-b']);
+  expect(queue.startRuntime).toHaveBeenCalledWith(['failed-a', 'failed-b']);
+  expect([...current.armedIds]).toEqual(['armed']);
+  expect(host.querySelector('.export-retry')).toBeNull();
+});
+it('gives active runtime Stop priority over failed Retry', async () => {
+  queue.items = [item('failed', 'failed'), item('running', 'encoding')];
+  queue.runtime = { runId: 'run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'running' };
+  await render();
+  expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Cancel export');
+});
+it('returns the primary action to ordinary Export when the last failed item leaves Queue', async () => {
+  queue.items = [item('failed', 'failed'), item('queued')]; queue.runtime = idle;
+  await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
+  queue.items = [item('queued')]; await render();
+  expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Export to Immich');
+});
 it('excludes failed/locked/mutating armed items and revalidates targets at confirmation', async () => {
-  queue.items = [item('b', 'failed'), item('a')];
+  queue.items = [item('b'), item('a')];
   await render(); await act(async () => current.selectAll()); await click('.export-arm-toggle');
-  await click('.immich-action-button'); expect(host.querySelector('dialog p')?.textContent).toBe('Export 1 photo to Immich?');
-  queue.items = [item('b', 'failed'), item('a', 'waiting')]; await render();
+  await click('.immich-action-button'); expect(host.querySelector('dialog p')?.textContent).toBe('Export 2 photos to Immich?');
+  queue.items = [item('b'), item('a', 'waiting')]; await render();
   await click('dialog button:last-child'); expect(queue.startRuntime).not.toHaveBeenCalled();
   expect(current.removalError).toBe('startFailed'); expect(current.armedIds.has('a')).toBe(false);
 });

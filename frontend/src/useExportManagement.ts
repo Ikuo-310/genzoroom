@@ -12,7 +12,7 @@ export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 
   & Partial<Pick<ExportQueueState, 'retry' | 'runtime' | 'cancelRuntime' | 'cancelling' | 'startRuntime' | 'starting'>>;
 export const isMutableExportStatus = (status: ExportQueueStatus | undefined) => status === 'queued' || status === 'failed';
 type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed' | 'retryFailed' | 'cancelFailed' | 'startFailed';
-type ExportConfirmation = { kind: 'start'; assetIds: string[] } | { kind: 'stop'; runId: string };
+type ExportConfirmation = { kind: 'start'; assetIds: string[] } | { kind: 'retry'; assetIds: string[] } | { kind: 'stop'; runId: string };
 type ArmedUndoRecord = { kind: 'armed'; changes: Array<{ assetId: string; wasArmed: boolean }> };
 type QueueRemovalUndoRecord = { kind: 'queueRemoval'; removed: Array<{ assetId: string; wasArmed: boolean }> };
 type ExportUndoRecord = ArmedUndoRecord | QueueRemovalUndoRecord;
@@ -93,31 +93,21 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const visualIds = message ? [] : flattenExportQueueDisplay(rows)
     .filter(entry => isMutableExportStatus(entry.item.status)).map(entry => entry.item.assetId.toLowerCase());
   const allSelectedArmed = selectedIds.length > 0 && selectedIds.every(id => armedIds.has(id));
-  const canRetry = !!queue.retry && selectedIds.length > 0 && selectedIds.length <= 100 && !message
-    && selectedIds.every(id => items.find(item => item.assetId.toLowerCase() === id)?.status === 'failed'
-      && !queue.mutationFor(id).operation);
-  const retrySelected = () => {
-    if (operationRef.current || !canRetry) return false;
-    operationRef.current = true; setRemoving(true); setRemovalError(null);
-    const targets = [...selectedIds];
-    // Retry is new Queue intent, never an inverse operation in W/Q Undo.
-    void (async () => {
-      try {
-        await queueRef.current.retry!(targets);
-        log('info', 'retry.completed', { count: targets.length });
-      } catch {
-        if (mounted.current) setRemovalError('retryFailed');
-        log('error', 'retry.failed', { count: targets.length });
-      } finally {
-        if (mounted.current) { operationRef.current = false; setRemoving(false); }
-      }
-    })();
-    return true;
+  const failedIds = items.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
+  const runtimeIdle = queue.runtime?.status === null;
+  const canRetryFailed = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
+    && !confirmation && !!queue.retry && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
+    && failedIds.length >= 1 && failedIds.length <= 100 && failedIds.every(id => !queue.mutationFor(id).operation);
+  const requestRetryFailed = () => {
+    if (operationRef.current || !canRetryFailed) return false;
+    operationRef.current = true;
+    confirmationRef.current = { kind: 'retry', assetIds: [...failedIds] };
+    setConfirmation(confirmationRef.current); return true;
   };
   const startTargets = items.filter(item => item.status === 'queued' && armedIds.has(item.assetId.toLowerCase())
     && !queue.mutationFor(item.assetId).operation).map(item => item.assetId.toLowerCase());
   const canStart = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
-    && !confirmation && !!queue.startRuntime && queue.runtime?.status === null && !queue.starting && !queue.cancelling
+    && !confirmation && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
     && startTargets.length >= 1 && startTargets.length <= 100;
   const requestStart = () => {
     if (operationRef.current || !canStart) return false;
@@ -142,10 +132,14 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     void (async () => {
       try {
         const latest = queueRef.current;
-        if (intent.kind === 'start') {
+        if (intent.kind === 'start' || intent.kind === 'retry') {
           if (!latest.startRuntime || latest.runtime?.status !== null || latest.starting || latest.cancelling
-            || intent.assetIds.some(id => latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== 'queued'
-              || latest.mutationFor(id).operation)) throw new ExportQueueApiError('locked');
+            || intent.assetIds.some(id => latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== (intent.kind === 'retry' ? 'failed' : 'queued')
+              || latest.mutationFor(id).operation) || (intent.kind === 'retry' && !latest.retry)) throw new ExportQueueApiError('locked');
+          if (intent.kind === 'retry') {
+            // Retry and Start are one confirmed intent; any batch failure prevents a partial run.
+            await latest.retry!(intent.assetIds);
+          }
           await latest.startRuntime(intent.assetIds);
           if (mounted.current) {
             // Fast terminal failures may finish between polls; accepted targets still leave armed state.
@@ -160,8 +154,11 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
         }
       }
       catch {
-        if (mounted.current) setRemovalError(intent.kind === 'start' ? 'startFailed' : 'cancelFailed');
-        log('error', intent.kind === 'start' ? 'run.startRequestFailed' : 'run.stopRequestFailed', {});
+        if (intent.kind === 'retry') {
+          try { await queueRef.current.refresh(); } catch { /* Keep the original safe failure and refresh best-effort. */ }
+        }
+        if (mounted.current) setRemovalError(intent.kind === 'stop' ? 'cancelFailed' : intent.kind === 'retry' ? 'retryFailed' : 'startFailed');
+        log('error', intent.kind === 'stop' ? 'run.stopRequestFailed' : intent.kind === 'retry' ? 'retry.startRequestFailed' : 'run.startRequestFailed', {});
       }
       finally { if (mounted.current) { operationRef.current = false; setRemoving(false); } }
     })();
@@ -298,7 +295,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
-    undoing, canRetry, retrySelected, cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
+    undoing, canRetryFailed, requestRetryFailed, failedIds, cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
     hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
 }
 

@@ -123,9 +123,9 @@ describe('Home Export management', () => {
     expect(selection.classList.contains('selection-bar')).toBe(true);
     expect(selection.querySelector('.selection-count')?.textContent).toBe(language === 'ja' ? '0件選択' : '0 selected');
     const selectionButtons = [...selection.querySelectorAll<HTMLButtonElement>('.selection-actions button')];
-    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear', 'export-arm-toggle', 'export-queue-remove', 'export-retry']);
+    expect(selectionButtons.map(button => button.className)).toEqual(['selection-all', 'selection-clear', 'export-arm-toggle', 'export-queue-remove']);
     expect(selectionButtons.map(button => button.textContent)).toEqual(language === 'ja'
-      ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]', '再試行'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]', 'Retry']);
+      ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]']);
     expect(selectionButtons.every(button => button.disabled)).toBe(true);
     expect(selection.querySelector('.selection-open-stacks, .selection-open-workspace')).toBeNull();
     expect(toolbar.querySelector('.thumbnail-size-control')).not.toBeNull();
