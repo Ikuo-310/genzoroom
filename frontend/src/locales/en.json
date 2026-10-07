@@ -32,11 +32,17 @@
     "notConfiguredStatus": "Immich not configured"
   },
   "home": {
+    "exportTab": "Export",
     "sections": "Home sections",
     "recentTab": "Recent",
     "albumsTab": "Albums",
     "calendarTab": "Calendar",
     "favoritesTab": "Favorites"
+  },
+  "exportManagement": {
+    "selectionCount": "{{count}} selected",
+    "exportToImmich": "Export to Immich",
+    "empty": "No photos waiting for export"
   },
   "favorites": {
     "loading": "Loading favorites…",

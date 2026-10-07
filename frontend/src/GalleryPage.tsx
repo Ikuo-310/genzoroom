@@ -26,6 +26,7 @@ import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
+import { ExportManagementContent, ExportManagementToolbar } from './ExportManagement';
 import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, readPhotoFilterMode, writeEditStatusFilterMode, writePhotoFilterMode, type EditStatusFilterMode, type PhotoFilterMode } from './photoFilters';
@@ -40,6 +41,7 @@ import {
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
+type HomeNavigationTab = HomeTab | 'export';
 type PhotoView = {
   kind: 'recent' | 'favorites' | 'album' | 'calendar';
   assets: RecentAsset[];
@@ -82,6 +84,8 @@ export function GalleryPage() {
   const [favoriteAssets, setFavoriteAssets] = useState<RecentAsset[]>([]);
   const [favoriteState, setFavoriteState] = useState<'idle' | AssetState>('idle');
   const [activeTab, setActiveTab] = useState<HomeTab>(homeReturn?.tab ?? 'recent');
+  // Management navigation preserves the browsing tab without entering photo filters or route state.
+  const [showExport, setShowExport] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(homeReturn?.album ?? null);
@@ -121,7 +125,7 @@ export function GalleryPage() {
   const openStacksRef = useRef<() => void>(() => {});
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const queueSelectedRef = useRef<() => boolean>(() => false);
-  const homeTabClickRef = useRef<(tab: HomeTab) => void>(() => {});
+  const homeTabClickRef = useRef<(tab: HomeNavigationTab) => void>(() => {});
   const selectAllVisibleRef = useRef<() => boolean>(() => false);
   const navigateCalendarRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
   const captureHomeReturnRef = useRef<() => HomeReturnContext>(() => ({
@@ -136,11 +140,11 @@ export function GalleryPage() {
   const hasLoadedRecentAssets = useRef(false);
   const hasLoadedAlbums = useRef(false);
   const hasLoadedFavorites = useRef(false);
-  const showingAlbumPhotos = activeTab === 'albums' && selectedAlbum !== null;
-  const showingCalendarPhotos = activeTab === 'calendar' && selectedCalendarDate !== null;
+  const showingAlbumPhotos = !showExport && activeTab === 'albums' && selectedAlbum !== null;
+  const showingCalendarPhotos = !showExport && activeTab === 'calendar' && selectedCalendarDate !== null;
   const adjacentCalendarDates = useAdjacentCalendarDates(
     showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear);
-  const photoView: PhotoView | null = activeTab === 'recent'
+  const photoView: PhotoView | null = showExport ? null : activeTab === 'recent'
     ? { kind: 'recent', assets, state: assetState, selection: recentSelection }
     : activeTab === 'favorites'
       ? { kind: 'favorites', assets: favoriteAssets, state: favoriteState, selection: favoriteSelection }
@@ -152,7 +156,7 @@ export function GalleryPage() {
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
   const editStatuses = useEditStatuses(stackEditStatusIds(editStatusAssets));
   const photoFilters = photoFiltersForMode(photoFilterModes[activeTab]);
-  const viewKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+  const viewKey = showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
 
@@ -164,7 +168,7 @@ export function GalleryPage() {
       pendingScroll.current = null;
       return;
     }
-    const status = photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);
+    const status = showExport ? 'ready' : photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);
     if (pending.waitingForData || status === 'idle' || status === 'loading') return;
     // Card dimensions are established by CSS, so restoration can run after the data's DOM commit.
     restoreHomeScroll(pageRef.current, pending.position);
@@ -419,7 +423,7 @@ export function GalleryPage() {
         return;
       }
       for (const [id, tab] of [['homeRecent', 'recent'], ['homeAlbums', 'albums'],
-        ['homeCalendar', 'calendar'], ['homeFavorites', 'favorites']] as const) {
+        ['homeCalendar', 'calendar'], ['homeFavorites', 'favorites'], ['homeExport', 'export']] as const) {
         if (matchesShortcut(event, id)) {
           event.preventDefault();
           homeTabClickRef.current(tab);
@@ -455,6 +459,7 @@ export function GalleryPage() {
   }
 
   function openHomeWorkspace(): boolean {
+    if (showExport) return false;
     if (activeSelectedAssetIds.length > 0) {
       if (!selectedAssets.length) return false;
       openSelectedAssets();
@@ -498,16 +503,16 @@ export function GalleryPage() {
   }
   captureHomeReturnRef.current = captureHomeReturn;
 
-  function prepareScrollTransition(nextKey: string) {
+  function prepareScrollTransition(nextKey: string, waitingForData?: boolean) {
     if (nextKey === viewKey) return;
     // A view left before restoration completes must retain its intended offset, not the loading DOM's offset.
     scrollPositions.current.set(viewKey, pendingScroll.current?.key === viewKey
       ? pendingScroll.current.position : readScrollPosition());
     pendingScroll.current = { key: nextKey,
       position: scrollPositions.current.get(nextKey) ?? { pageScrollTop: 0, contentScrollTop: 0 },
-      waitingForData: nextKey === 'recent' ? !hasLoadedRecentAssets.current
+      waitingForData: waitingForData ?? (nextKey === 'export' ? false : nextKey === 'recent' ? !hasLoadedRecentAssets.current
         : nextKey === 'favorites' ? !hasLoadedFavorites.current
-        : nextKey === 'albums:list' ? !hasLoadedAlbums.current : true };
+        : nextKey === 'albums:list' ? !hasLoadedAlbums.current : true) };
   }
 
   function completeScrollRequest(key: string) {
@@ -610,7 +615,7 @@ export function GalleryPage() {
     return true;
   }
   function navigateCalendar(direction: 'previous' | 'next'): boolean {
-    if (activeTab !== 'calendar' || !calendarMinYearReady) return false;
+    if (showExport || activeTab !== 'calendar' || !calendarMinYearReady) return false;
     if (selectedCalendarDate !== null) return moveCalendarDay(direction);
     const target = adjacentCalendarPeriod(calendarYear, calendarMonth, calendarMode, direction === 'previous' ? -1 : 1);
     if (target.year < calendarMinYear || target.year > currentYear) return false;
@@ -630,9 +635,17 @@ export function GalleryPage() {
     setSelectedCalendarDate(null);
   }
 
-  function handleTabClick(tab: HomeTab) {
-    if (tab !== activeTab) {
-      prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode));
+  function handleTabClick(tab: HomeNavigationTab) {
+    if (tab === 'export') {
+      prepareScrollTransition('export');
+      setShowExport(true);
+      return;
+    }
+    if (showExport || tab !== activeTab) {
+      // The retained browsing view does not refetch when returning from management to the same tab.
+      prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode),
+        showExport && tab === activeTab ? false : undefined);
+      setShowExport(false);
       setActiveTab(tab);
       return;
     }
@@ -811,17 +824,23 @@ export function GalleryPage() {
       </header>
       <div className="home-tabs-bar">
         <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
-          <button id="home-recent-tab" type="button" role="tab" aria-controls="home-recent-panel"
-            aria-selected={activeTab === 'recent'} onClick={() => handleTabClick('recent')}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
-          <button id="home-albums-tab" type="button" role="tab" aria-controls="home-albums-panel"
-            aria-selected={activeTab === 'albums'} onClick={() => handleTabClick('albums')}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
-          <button id="home-calendar-tab" type="button" role="tab" aria-controls="home-calendar-panel"
-            aria-selected={activeTab === 'calendar'} onClick={() => handleTabClick('calendar')}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
-          <button id="home-favorites-tab" type="button" role="tab" aria-controls="home-favorites-panel"
-            aria-selected={activeTab === 'favorites'} onClick={() => handleTabClick('favorites')}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
+          <div className="home-tabs-gallery">
+            <button id="home-recent-tab" type="button" role="tab" aria-controls="home-recent-panel"
+              aria-selected={!showExport && activeTab === 'recent'} onClick={() => handleTabClick('recent')}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
+            <button id="home-albums-tab" type="button" role="tab" aria-controls="home-albums-panel"
+              aria-selected={!showExport && activeTab === 'albums'} onClick={() => handleTabClick('albums')}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
+            <button id="home-calendar-tab" type="button" role="tab" aria-controls="home-calendar-panel"
+              aria-selected={!showExport && activeTab === 'calendar'} onClick={() => handleTabClick('calendar')}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
+            <button id="home-favorites-tab" type="button" role="tab" aria-controls="home-favorites-panel"
+              aria-selected={!showExport && activeTab === 'favorites'} onClick={() => handleTabClick('favorites')}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
+          </div>
+          <div className="home-tabs-management">
+            <button id="home-export-tab" type="button" role="tab" aria-controls="home-export-panel"
+              aria-selected={showExport} onClick={() => handleTabClick('export')}>{shortcut.inline(t('home.exportTab'), 'homeExport')}</button>
+          </div>
         </div>
       </div>
-      <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
+      {showExport ? <ExportManagementToolbar /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
@@ -881,8 +900,9 @@ export function GalleryPage() {
             <HomeThumbnailSizeControl />
           </div>}
         </div>
-      </div>
+      </div>}
       <section className="home-content" aria-label={t('home.sections')}>
+        {showExport ? <ExportManagementContent /> : <>
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}
@@ -929,6 +949,7 @@ export function GalleryPage() {
             {calendarState === 'error' && <p className="gallery-message error-text" role="alert">{t('calendar.loadFailed')}</p>}
           </>}
         </div>}
+        </>}
       </section>
     </main>
   );

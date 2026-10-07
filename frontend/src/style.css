@@ -62,7 +62,15 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .home-content { width: 100%; min-width: 0; min-height: 0; margin-top: 0; }
 .home-tabs-bar { padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
-.home-tabs { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 0 0 auto; }
+.home-tabs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 40px; flex: 0 0 auto; }
+.home-tabs-gallery, .home-tabs-management { display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
+.export-toolbar { justify-content: flex-end; font-size: 0.85rem; }
+.export-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-right: auto; min-width: 0; }
+.export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
+/* Immich actions stay visually distinct from local operations and destructive controls. */
+.immich-action-button { color: #fff; background: #a83f46; border: 1px solid #ce6068; }
+.immich-action-button:hover:not(:disabled) { background: #bf4c54; }
+.immich-action-button:disabled { opacity: 0.6; cursor: not-allowed; }
 .home-tabs button { color: var(--text-secondary); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 5px 8px 8px; font-weight: 600; }
 .home-tabs button:hover { color: var(--text-primary); background: var(--bg-elevated); }
 .home-tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent); }

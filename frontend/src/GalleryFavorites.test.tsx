@@ -416,8 +416,8 @@ describe('Home favorites', () => {
     await click('#home-recent-tab'); await click('#home-favorites-tab'); expectScroll(0, 640);
   });
 
-  it('keeps all four tabs reachable without Arrow/Home/End tab navigation', async () => {
-    await mount(); expect(host.querySelectorAll('[role="tab"]')).toHaveLength(4);
+  it('keeps all five tabs reachable without Arrow/Home/End tab navigation', async () => {
+    await mount(); expect(host.querySelectorAll('[role="tab"]')).toHaveLength(5);
     for (const tab of host.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
       expect(tab.tabIndex).toBe(0);
       act(() => tab.focus());
