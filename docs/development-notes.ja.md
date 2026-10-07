@@ -2,6 +2,22 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Export Phase 5B filename / JPEG metadata（2026-10-07）
+
+`ExportArtifact(filename, jpeg)` と `create_export_artifact()` を追加した。source JPEG bytes、source filename、呼び出し側が取得したfamily filename一覧、normalized `RenderedImage` を受け、filename決定 → source Decoder validation → whitelist metadata再構築 → 既存JPEG Encoderの順で処理する。standalone境界ではJPEG自体やcritical ICCの安全性を呼び出し側へ仮定しないため、sourceを追加decodeし、そのRGB bufferをmetadata処理前に破棄する。Renderer / Recipe pixel math、compatibility fixture、Queue、Diagnostics UI、保存形式は変更していない。actual Export RuntimeとImmich upload/register、tag付与、Stack/COVER操作は未実装。Immich `GenzoRoom` tagはPhase 5Eで扱う。
+
+filename familyはFrontend Phase 0と同じfirst-dot root、terminal `-Genzo[0-9]+` の1回除去、case-sensitive、extension必須・末尾dot/empty root不可。source自身を含む同familyの最大番号+1で `<base>-GenzoNN.jpg` を生成し、欠番は再利用しない。2桁を超えても桁を切らず、巨大番号はdecimal stringで安全に比較・加算する。family一覧は非破壊で、Immich検索を追加していない。output rootにはpath/control/reserved punctuationを許可しないが、既存のfilename length方針がないため小さい独自上限は設けていない。完全なfamily取得、並行生成の予約・collision防止、upload先のlength制約は将来のOrchestrator責務。
+
+EXIF whitelistは撮影日時/offset/subseconds、Make/Model、LensMake/Model/Specification、標準exposure/capture fields、Artist/Copyright/ImageDescriptionと位置・高度・時刻・方向の標準GPS fields。GPS BYTEのAltitudeRefがPillowでbytesになることを初回テストで検出し、semantic integerへ正規化して保持した。個別malformed fieldはdropし、読めないoptional containerはpreserveを諦める。source JPEG validationとcritical ICC failureは従来どおりfailure。Software/CreatorTool=GenzoRoom、Orientation=1、rendered寸法、sRGB ColorSpaceと新規sRGB ICCを生成する。同一runのaware UTC時刻からEXIF DateTime/OffsetTimeとXMP ModifyDate/MetadataDateをwhole-secondで生成し、DateTimeOriginalは上書きしない。
+
+XMPは標準DC title/description（caption）/rightsのlanguage alternatives、creator sequence、subject/keywords bag、XMP Rating/Labelをpreserveし、fresh UTF-8 XMLへescapeして再構築する。source packet/private namespaceのraw copyはしない。これらの標準XMPに格納されたIPTC equivalentは対応するが、Photoshop APP13/IPTC IIM、extended XMP、private namespace alias、他のIPTC Core/Extension・任意structured fieldは対応外。EXIF ASCII fieldの非ASCII文字はdropし、Unicode user textはXMPで対応する。serial、MakerNote、vendor/RAW tags、source Software/Orientation/dimensions/ColorSpace/ICC、thumbnail/preview、Motion Photo/MPF/appended MP4/Ultra HDR/gain map/Google Containerは除外する。EXIF thumbnailは生成しない。
+
+上限はtext field 16,384 bytes、RDF array 128 items、XML depth 12 / 1,024 elements、source XMP 65,504 bytes。DTD/entity declarationはUTF-16も含めparse前の拡張段階で拒否する。再生成EXIF APP1は65,533 bytes、XMPはheaderを引いた65,504 bytesを上限とし、aggregate超過はsafe `metadata_too_large`、serialize failureは`metadata_encode_failed`。optional dropはwarn、artifact生成のterminal failureはerrorとしてcode/countだけを既存structured loggerへ渡し、metadata値・filename・例外本文は記録しない。logging failureはexport結果へ影響しない。
+
+Focused auditではmetadata leakage、private/vendor field、Orientation/寸法、case-sensitive collision semantics、実際のcorrupt EXIFとmalformed XMP、APP1総量、UTC秒境界、raw copy禁止、Pillow image/buffer lifetimeを確認した。残存High / Medium findingは0。source thumbnail IFD1、IPTC IIM/extended XMP、unapproved namespace/MPF/appended dataの除去、XML DTD/depth/elements/text/array limits、GPS malformed rationalとsafe loggingの回帰を追加した。並行生成時の同番号予約は5Bの純粋filename関数では行わず、Phase 5C以降へ接続する。
+
+Backendのfilename/metadata、jpeg codec、renderer regression、Export Engine診断、Export Queueの関連5 filesは84 passed / 122 subtests passed。指定venvを使用した。sandbox内では診断testに入る時点で進行停止したため今回のpytestを終了し、同じ指定Pythonを通常環境で再実行した。変更Pythonのcompileと`git diff --check`も成功した。既存Python formatter/linter workflowは見つからず、新規導入していない。Frontendは変更しておらず、Frontend testsやbrowser実機確認は実施していない。Commit/Push/NAS deployはしていない。Phase 5Cから利用可能なartifact境界は完成しているが、Immichへ出力できる状態を意味しない。
+
 ## Export Phase 5A JPEG基盤完了・focused audit（2026-10-07）
 
 Phase 5AをBackend JPEG Decoder / Renderer / Encoder基盤と、その読み取り専用Developer Diagnosticsの完了として閉じる。Export QueueとHomeの出力管理は実装済みだが、Actual Export Runtime、Immich upload/registration、RAW現像は未実装。次はPhase 5Bのmetadata / filename処理で、Runtimeの接続はPhase 5C以降とする。以下のPhase 4以前の「encoder未実装」「次はRuntime」等は当時の記録として変更していない。

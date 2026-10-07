@@ -8,6 +8,10 @@ from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 from rendered_image import RenderedImage
 
 
+JPEG_APP1_MAX_BYTES = 65533
+JPEG_XMP_MAX_BYTES = JPEG_APP1_MAX_BYTES - 29
+
+
 class JpegCodecError(ValueError):
     def __init__(self, code: str):
         super().__init__(code)
@@ -69,13 +73,16 @@ def decode_jpeg(source: bytes) -> RenderedImage:
         raise JpegCodecError("invalid_jpeg") from error
 
 
-def encode_jpeg(image: RenderedImage) -> bytes:
-    """v0.1.0: full-size RGB JPEG, quality 95, 4:4:4, embedded sRGB ICC only."""
+def encode_jpeg(image: RenderedImage, *, exif: bytes = b"", xmp: bytes = b"") -> bytes:
+    """Fixed RGB/sRGB encoding; optional metadata must be freshly prepared by the caller."""
+    # APP1 lengths include their two-byte length word; XMP also has a namespace header.
+    if len(exif) > JPEG_APP1_MAX_BYTES or len(xmp) > JPEG_XMP_MAX_BYTES:
+        raise JpegCodecError("metadata_too_large")
     try:
         with Image.frombytes("RGB", (image.width, image.height), image.pixels) as rgb:
             output = BytesIO()
             rgb.save(output, format="JPEG", quality=95, subsampling=0,
-                     icc_profile=_srgb_profile().tobytes())
+                     icc_profile=_srgb_profile().tobytes(), exif=exif, xmp=xmp)
             return output.getvalue()
     except (OSError, ValueError, ImageCms.PyCMSError) as error:
         raise JpegCodecError("jpeg_encode_failed") from error
