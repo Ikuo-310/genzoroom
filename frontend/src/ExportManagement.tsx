@@ -51,10 +51,12 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
   const selected = management.selectedIds.includes(id);
   const armed = management.armedIds.has(id);
   const locked = !isMutableExportStatus(item.status);
+  const retryExcluded = management.retryPriority && item.status === 'queued';
   const stopPending = management.queue.runtime?.stopRequested && item.status === 'waiting'
     && id !== management.queue.runtime.currentAssetId?.toLowerCase();
-  const disabled = locked || management.removing || management.undoing || !!management.queue.mutationFor(id).operation;
+  const disabled = locked || retryExcluded || management.removing || management.undoing || !!management.queue.mutationFor(id).operation;
   const label = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
+  const disabledReason = retryExcluded ? t('exportManagement.retryExcluded') : locked ? t('exportManagement.locked') : label;
   const rangeClickHandled = useRef(false);
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
     if (event.shiftKey) management.extendRange(id);
@@ -72,19 +74,19 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
     management.toggleSelection(id);
   }
   return <article className={`photo-card export-queue-card${selected ? ' selected' : ''}${management.selectedIds.length ? ' selection-mode' : ''}`} aria-label={asset.filename}
-    data-asset-id={item.assetId} data-queue-status={item.status} aria-disabled={locked || undefined}>
-    <label className="photo-selection-control" title={locked ? t('exportManagement.locked') : label}>
+    data-asset-id={item.assetId} data-queue-status={item.status} aria-disabled={locked || retryExcluded || undefined}>
+    <label className="photo-selection-control" title={disabled ? disabledReason : label}>
       <input className="photo-selection-input" type="checkbox" checked={selected} disabled={disabled}
         onClick={handleCheckboxClick} onChange={handleCheckboxChange} aria-label={label} />
     </label>
     <button className="photo-card-button" type="button" disabled={disabled} onClick={handleCardClick}
-      aria-label={label} aria-pressed={selected} aria-description={locked ? t('exportManagement.locked') : armed ? t('exportManagement.armed') : undefined}>
+      aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">
       <img src={asset.thumbnail_url} alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {item.status !== 'queued' ? <span className={`export-status-bar export-status-${stopPending ? 'stop' : item.status}`}
         role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>
-        : armed && <span className="export-status-bar export-status-armed">{t('exportManagement.armed')}</span>}
+        : armed && management.showArmedBadges && <span className="export-status-bar export-status-armed">{t('exportManagement.armed')}</span>}
     </div>
     <div className="photo-info"><p title={asset.filename}>{asset.filename}</p>
       <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time></div>

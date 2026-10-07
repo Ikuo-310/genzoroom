@@ -228,7 +228,7 @@ const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-
 
 describe('Export selection, readiness and Queue removal', () => {
   it('shares Gallery selection semantics in grouped visual order and excludes every locked status', async () => {
-    await openQueue();
+    await openQueue([queued('a'), queued('b'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')]);
     expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual([]);
     expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].map(card => card.dataset.assetId))
       .toEqual(['a', 'c', 'b', 'waiting', 'encoding', 'registering']);
@@ -251,7 +251,8 @@ describe('Export selection, readiness and Queue removal', () => {
     }
   });
   it('keeps armed state independent from selection and across Gallery tab visits', async () => {
-    await openQueue(); await cardClick('a'); await key('w');
+    await openQueue([queued('a'), queued('b'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')]);
+    await cardClick('a'); await key('w');
     expect(exportArmed()).toEqual(['a']); expect(host.querySelector('.export-arm-toggle')?.textContent).toBe('Clear export readiness[W]');
     const statusBar = exportCard('a').querySelector<HTMLElement>('.thumbnail .export-status-bar')!;
     expect(statusBar.textContent).toBe('Ready to export');
@@ -336,7 +337,7 @@ describe('Export selection, readiness and Queue removal', () => {
     }
   });
   it('applies native editing, modifier, composition, repeat and dialog guards to Export commands', async () => {
-    await openQueue(); await cardClick('a');
+    await openQueue([queued('a')]); await cardClick('a');
     for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }]) {
       await key('w', options); await key('q', options);
     }
@@ -363,7 +364,7 @@ describe('Export selection, readiness and Queue removal', () => {
     expect(host.querySelector('[data-asset-id="outside"]')).toBeNull(); expect(api.queue).toHaveBeenCalledTimes(1);
   });
   it('continues sequential removal after a middle failure and refreshes without rolling back successes', async () => {
-    const backend = await openQueue([queued('a'), queued('b', 'failed'), queued('c')]);
+    const backend = await openQueue([queued('a'), queued('b'), queued('c')]);
     api.remove.mockImplementation(async (id: string) => {
       if (id === 'b') throw new ExportQueueApiError('unavailable');
       backend.setItems(backend.getItems().filter(item => item.assetId !== id));
@@ -377,13 +378,13 @@ describe('Export selection, readiness and Queue removal', () => {
   it('undoes Q membership for queued and failed entries using enqueue, without restoring selection', async () => {
     const backend = await openQueue([queued('a'), queued('b', 'failed')]);
     await click('.export-selection .selection-all'); await key('q');
-    expect(exportCard('a')).toBeNull(); expect(exportCard('b')).toBeNull();
+    expect(exportCard('a')).not.toBeNull(); expect(exportCard('b')).toBeNull();
     api.enqueue.mockImplementation(async (ids: string[]) => {
       backend.setItems([...backend.getItems(), ...ids.map(id => queued(id))]);
       return backend.getItems();
     });
     expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
-    expect(api.enqueue.mock.calls.map(call => call[0])).toEqual([['a'], ['b']]);
+    expect(api.enqueue.mock.calls.map(call => call[0])).toEqual([['b']]);
     expect(exportCard('a').dataset.queueStatus).toBe('queued'); expect(exportCard('b').dataset.queueStatus).toBe('queued');
     expect(exportSelected()).toEqual([]);
     expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false);
@@ -396,7 +397,7 @@ describe('Export selection, readiness and Queue removal', () => {
     expect(exportArmed()).toEqual([]);
   });
   it('restores only successful Q removals when the restore batch partially fails', async () => {
-    const backend = await openQueue([queued('a'), queued('b', 'failed'), queued('c')]);
+    const backend = await openQueue([queued('a'), queued('b'), queued('c')]);
     await cardClick('a'); await key('w'); await cardClick('b', { ctrlKey: true }); await cardClick('c', { ctrlKey: true }); await key('w');
     api.remove.mockImplementation(async (id: string) => {
       if (id === 'b') throw new ExportQueueApiError('unavailable');

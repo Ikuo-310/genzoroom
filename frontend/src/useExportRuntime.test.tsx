@@ -26,7 +26,7 @@ it('dispatches one Start, ignores stale idle polls and refreshes canonical Queue
   await act(async () => vi.advanceTimersByTimeAsync(2000));
   let finishStart!: (value: ExportRuntimeState) => void;
   api.start.mockImplementation(() => new Promise(resolve => { finishStart = resolve; }));
-  let pending!: Promise<void>;
+  let pending!: Promise<ExportRuntimeState>;
   await act(async () => { pending = current.start(['b', 'a']); });
   expect(current.starting).toBe(true);
   await expect(current.start(['a'])).rejects.toMatchObject({ kind: 'locked' });

@@ -67,6 +67,7 @@ export function useExportRuntime(refreshQueue: () => Promise<void>) {
       if (mounted.current && !controller.signal.aborted && version === generation.current) {
         generation.current++; current.current = state.status === 'active' ? state : null; setRuntime(state.status === 'active' ? state : null);
       }
+      return state;
     } catch (error) {
       // A lost acknowledgement may follow a committed run; poll before authorizing another Start.
       if (mounted.current && version === generation.current) { current.current = null; setRuntime(null); }

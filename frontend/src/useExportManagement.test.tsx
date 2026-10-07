@@ -27,14 +27,15 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 it('confirms and retries every failed item in Queue order, then starts exactly those IDs without replacing W Undo', async () => {
-  const starts = vi.fn(async (ids: readonly string[]) => undefined);
+  const starts = vi.fn(async (ids: readonly string[]) => ({ runId: 'run', status: 'active' as const,
+    stopRequested: false, stopAllowed: true, currentAssetId: ids[0] }));
   queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
   queue.startRuntime = starts;
   queue.retry = vi.fn(async ids => {
     queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row);
   });
+  await render([item('b')]); await act(async () => current.selectOnly('b')); await act(async () => current.toggleArmed());
   await render([item('b'), item('a', 'failed'), item('c', 'failed')]);
-  await act(async () => current.selectOnly('b')); await act(async () => current.toggleArmed());
   expect(current.canRetryFailed).toBe(true);
   await act(async () => current.requestRetryFailed());
   expect(current.confirmation).toEqual({ kind: 'retry', assetIds: ['a', 'c'] });
@@ -166,7 +167,7 @@ it('replaces a W undo record only after a later W changes state', async () => {
 });
 
 it('undoes successful Q removals only, requeues them, and restores armed state only for successes', async () => {
-  const original = [item('a'), item('b', 'failed'), item('c')];
+  const original = [item('a'), item('b'), item('c')];
   queue.dequeue = vi.fn(async (id: string) => {
     if (id === 'b') throw new Error('delete failed');
     queue.items.splice(queue.items.findIndex(row => row.assetId === id), 1);

@@ -28,6 +28,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<ManagementError | null>(null);
   const [confirmation, setConfirmation] = useState<ExportConfirmation | null>(null);
+  const [retryStarting, setRetryStarting] = useState(false);
+  const [retryRunId, setRetryRunId] = useState<string | null>(null);
   const confirmationRef = useRef<ExportConfirmation | null>(null);
   const operationRef = useRef(false);
   const undoRecord = useRef<ExportUndoRecord | null>(null);
@@ -59,13 +61,21 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return asset ? [{ item, asset }] : [];
   });
   const rows = groupExportQueueAssets(entries);
-  const mutableIds = items.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
+  const failedIds = items.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
+  const retryRunActive = !!retryRunId && (queue.runtime == null
+    || queue.runtime.status === 'active' && queue.runtime.runId === retryRunId);
+  const retryPriority = failedIds.length > 0 || confirmation?.kind === 'retry' || retryStarting || retryRunActive;
+  const armedAvailableIds = items.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
+  const armedAvailableKey = JSON.stringify(armedAvailableIds);
+  const mutableIds = items.filter(item => retryPriority ? item.status === 'failed' : isMutableExportStatus(item.status))
+    .map(item => item.assetId.toLowerCase());
   const mutableKey = JSON.stringify(mutableIds);
   useEffect(() => {
     const available = new Set<string>(JSON.parse(mutableKey));
+    const armedAvailable = new Set<string>(JSON.parse(armedAvailableKey));
     selection.retainAvailable(available);
     setArmedIds(previous => {
-      const next = new Set([...previous].filter(id => available.has(id)));
+      const next = new Set([...previous].filter(id => armedAvailable.has(id)));
       return next.size === previous.size ? previous : next;
     });
     // Do not invalidate an older record mid-Q; a failed batch must leave it usable.
@@ -78,7 +88,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       undoRecord.current = reconciled.length ? record.kind === 'armed'
         ? { kind: 'armed', changes: reconciled } : { kind: 'queueRemoval', removed: reconciled } : null;
     }
-  }, [mutableKey, selection.retainAvailable, removing, undoing]);
+  }, [mutableKey, armedAvailableKey, selection.retainAvailable, removing, undoing]);
   const mutable = new Set(mutableIds);
   const selectedIds = selection.selectedIds.filter(id => mutable.has(id));
   const selectionMode = active && selectedIds.length > 0;
@@ -91,9 +101,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     previousSelectionMode.current = selectionMode;
   }, [selectionMode]);
   const visualIds = message ? [] : flattenExportQueueDisplay(rows)
-    .filter(entry => isMutableExportStatus(entry.item.status)).map(entry => entry.item.assetId.toLowerCase());
+    .filter(entry => mutable.has(entry.item.assetId.toLowerCase())).map(entry => entry.item.assetId.toLowerCase());
   const allSelectedArmed = selectedIds.length > 0 && selectedIds.every(id => armedIds.has(id));
-  const failedIds = items.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
   const runtimeIdle = queue.runtime?.status === null;
   const canRetryFailed = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
     && !confirmation && !!queue.retry && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
@@ -108,7 +117,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     && !queue.mutationFor(item.assetId).operation).map(item => item.assetId.toLowerCase());
   const canStart = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
     && !confirmation && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
-    && startTargets.length >= 1 && startTargets.length <= 100;
+    && !retryPriority && startTargets.length >= 1 && startTargets.length <= 100;
   const requestStart = () => {
     if (operationRef.current || !canStart) return false;
     operationRef.current = true;
@@ -129,6 +138,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     if (!intent) return false;
     // Consume synchronously so repeated activation cannot dispatch a second remote operation.
     confirmationRef.current = null; setConfirmation(null); setRemoving(true); setRemovalError(null);
+    if (intent.kind === 'retry') setRetryStarting(true);
     void (async () => {
       try {
         const latest = queueRef.current;
@@ -140,7 +150,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
             // Retry and Start are one confirmed intent; any batch failure prevents a partial run.
             await latest.retry!(intent.assetIds);
           }
-          await latest.startRuntime(intent.assetIds);
+          const started = await latest.startRuntime(intent.assetIds);
+          if (intent.kind === 'retry') setRetryRunId(started?.status === 'active' ? started.runId : null);
           if (mounted.current) {
             // Fast terminal failures may finish between polls; accepted targets still leave armed state.
             const started = new Set(intent.assetIds);
@@ -160,10 +171,14 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
         if (mounted.current) setRemovalError(intent.kind === 'stop' ? 'cancelFailed' : intent.kind === 'retry' ? 'retryFailed' : 'startFailed');
         log('error', intent.kind === 'stop' ? 'run.stopRequestFailed' : intent.kind === 'retry' ? 'retry.startRequestFailed' : 'run.startRequestFailed', {});
       }
-      finally { if (mounted.current) { operationRef.current = false; setRemoving(false); } }
+      finally { if (mounted.current) { if (intent.kind === 'retry') setRetryStarting(false); operationRef.current = false; setRemoving(false); } }
     })();
     return true;
   };
+  useEffect(() => {
+    if (retryRunId && queue.runtime != null
+      && (queue.runtime.status !== 'active' || queue.runtime.runId !== retryRunId)) setRetryRunId(null);
+  }, [queue.runtime?.runId, queue.runtime?.status, retryRunId]);
   const canOperate = (id: string) => !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };
@@ -172,7 +187,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const clear = () => { if (!operationRef.current) selection.clear(); };
   const selectAll = () => {
     if (operationRef.current || !visualIds.length) return false;
-    selection.selectVisible(visualIds.filter(id => !queue.mutationFor(id).operation));
+    selection.selectVisible(visualIds.filter(id => mutable.has(id) && !queue.mutationFor(id).operation));
     return true;
   };
   const toggleArmed = () => {
@@ -295,7 +310,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
-    undoing, canRetryFailed, requestRetryFailed, failedIds, cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
+    undoing, canRetryFailed, requestRetryFailed, failedIds, retryPriority, showArmedBadges: !retryPriority,
+    cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
     hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
 }
 

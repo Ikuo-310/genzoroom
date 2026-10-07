@@ -38,6 +38,7 @@ afterEach(() => {
 it('starts only armed queued IDs in Queue order, independently of selection, after confirmation', async () => {
   await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')!.disabled).toBe(true);
   await act(async () => current.selectAll()); await click('.export-arm-toggle');
+  expect(host.querySelectorAll('.export-status-armed')).toHaveLength(2);
   await act(async () => current.selectOnly('a'));
   await click('.immich-action-button'); expect(queue.startRuntime).not.toHaveBeenCalled();
   expect(host.querySelector('dialog p')?.textContent).toBe('Export 2 photos to Immich?');
@@ -56,10 +57,12 @@ it('confirmation cancellation does not Start and repeated Confirm cannot dispatc
   expect(queue.startRuntime).toHaveBeenCalledTimes(1);
 });
 it('retries failed Queue items through the primary action and starts only that frozen group', async () => {
-  queue.items = [item('armed'), item('failed-a', 'failed'), item('failed-b', 'failed')];
+  queue.items = [item('armed')];
   queue.runtime = idle;
-  queue.retry = vi.fn().mockResolvedValue(undefined);
   await render(); await act(async () => current.selectOnly('armed')); await click('.export-arm-toggle');
+  queue.items = [item('armed'), item('failed-a', 'failed'), item('failed-b', 'failed')];
+  queue.retry = vi.fn().mockImplementation(async ids => { queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row); });
+  await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
   await click('.immich-action-button');
   expect(host.querySelector('dialog p')?.textContent).toBe('Retry export for 2 failed items?');
@@ -80,6 +83,67 @@ it('returns the primary action to ordinary Export when the last failed item leav
   await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Retry export');
   queue.items = [item('queued')]; await render();
   expect(host.querySelector<HTMLButtonElement>('.immich-action-button')?.textContent).toBe('Export to Immich');
+});
+it('keeps armed intent but limits selection, Q, and badges to failed items during Retry priority', async () => {
+  queue.items = [item('queued')];
+  await render(); await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
+  queue.items = [item('failed', 'failed'), item('queued')]; await render();
+  expect(current.armedIds.has('queued')).toBe(true);
+  expect(current.selectedIds).toEqual([]);
+  expect(host.querySelector('[data-asset-id="failed"] .export-status-failed')?.textContent).toBe('Export failed');
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('[data-asset-id="queued"] input')?.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('[data-asset-id="queued"] .photo-card-button')?.disabled).toBe(true);
+  await act(async () => current.selectAll());
+  expect(current.selectedIds).toEqual(['failed']);
+  await click('.export-queue-remove');
+  expect(queue.dequeue).toHaveBeenCalledTimes(1);
+  expect(queue.dequeue).toHaveBeenCalledWith('failed');
+  expect(current.armedIds.has('queued')).toBe(true);
+});
+it('suppresses unrelated armed badge through Retry transition and active run, then restores it at idle', async () => {
+  queue.items = [item('queued')];
+  await render(); await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
+  queue.items = [item('failed', 'failed'), item('queued')];
+  let finishRetry!: () => void;
+  queue.retry = vi.fn(async ids => {
+    queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'queued' } : row);
+    await new Promise<void>(resolve => { finishRetry = resolve; });
+  });
+  queue.startRuntime = vi.fn(async ids => {
+    queue.items = queue.items.map(row => ids.includes(row.assetId) ? { ...row, status: 'waiting' } : row);
+    queue.runtime = { runId: 'retry-run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'failed' };
+    return queue.runtime;
+  });
+  await render(); await click('.immich-action-button'); await click('dialog button:last-child');
+  expect(queue.retry).toHaveBeenCalledWith(['failed']);
+  expect(queue.startRuntime).not.toHaveBeenCalled();
+  await render();
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(current.armedIds.has('queued')).toBe(true);
+  await act(async () => { finishRetry(); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(queue.startRuntime).toHaveBeenCalledWith(['failed']);
+  await render();
+  expect(host.querySelector('[data-asset-id="failed"] .export-status-waiting')).not.toBeNull();
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(current.armedIds.has('queued')).toBe(true);
+  queue.runtime = null; await render();
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  queue.items = [item('queued')]; queue.runtime = idle; await render();
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')?.textContent).toBe('Ready to export');
+  expect(current.armedIds.has('queued')).toBe(true);
+});
+it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent remains', async () => {
+  queue.items = [item('queued')]; await render();
+  await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
+  queue.items = [item('failed', 'failed'), item('queued')];
+  queue.retry = vi.fn().mockRejectedValue(new Error('retry failed'));
+  await render(); await click('.immich-action-button'); await click('dialog button:last-child');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(queue.startRuntime).not.toHaveBeenCalled();
+  expect(current.removalError).toBe('retryFailed');
+  expect(current.armedIds.has('queued')).toBe(true);
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
 });
 it('excludes failed/locked/mutating armed items and revalidates targets at confirmation', async () => {
   queue.items = [item('b'), item('a')];

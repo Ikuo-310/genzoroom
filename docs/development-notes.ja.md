@@ -6,7 +6,9 @@ Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites
 
 Stop requested表示は後続waiting itemだけへ限定し、currentAssetのencoding/registering（およびcurrentがwaiting中の場合も）は通常状態表示を保つ。左のselection actionから個別Retryを外し、failedがあると右の主操作を「出力を再試行」へ切り替えた。failed IDsをQueue順で確認・freezeし、実行時に再検証したうえで全件Retry成功時だけ同じID群でnew runを開始する。部分Retry failureはrunを開始せずQueue refreshし、成功済みqueuedはrollbackしない。通常armed queued Export、Q removal、W/Q one-shot Undoは維持。live再確認は未実施。
 
-Export関連90 passed、Frontend full suite 113 files / 2354 passed / 2 skipped、`npx tsc --noEmit`、`npm run build`、`git diff --check`成功。既存Vite 500 kB超chunk警告あり。NAS／Firefox実機確認とCommit/Pushは行っていない。
+その後、Retry対象外のarmed queued itemへ「出力待機中」が表示され、Retry処理中の操作対象にも混ざる表示・操作不整合を修正した。armed stateは保持したまま、failed／Retry確認・処理中／Retry run activeの間はbadgeを抑止し、selection・Select All・Q対象をfailedだけへ限定する。failedがなくなりRetry runが終了すると通常queued操作と保持済みbadgeが戻る。
+
+Export関連74 passed、Frontend full suite 113 files / 2357 passed / 2 skipped、`npx tsc --noEmit`、`npm run build`、`git diff --check`成功。既存Vite 500 kB超chunk警告あり。NAS／Firefox実機確認とCommit/Pushは行っていない。
 
 ## Phase 5F実機Export: Stack contextの対象限定修正（2026-10-07）
 
