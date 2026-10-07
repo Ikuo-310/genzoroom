@@ -43,7 +43,7 @@ describe('Home and thumbnail layout', () => {
     expect(rule.style.getPropertyValue('left')).toBe('0');
     expect(rule.style.getPropertyValue('right')).toBe('0');
     expect(rule.style.getPropertyValue('width')).toBe('100%');
-    expect(rule.style.getPropertyValue('height')).toBe('36px');
+    expect(rule.style.getPropertyValue('height')).toBe('30px');
     expect(rule.style.getPropertyValue('white-space')).toBe('nowrap');
     expect(rule.style.getPropertyValue('overflow')).toBe('hidden');
     expect(rule.style.getPropertyValue('text-align')).toBe('center');

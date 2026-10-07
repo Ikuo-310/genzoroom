@@ -71,7 +71,7 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .export-toolbar .export-selection { margin-right: auto; }
 .export-toolbar .export-selection { min-width: 0; max-width: 100%; flex-wrap: wrap; }
 .export-selection .selection-actions { flex: 0 1 auto; flex-wrap: wrap; }
-.export-status-bar { position: absolute; z-index: 2; top: 50%; left: 0; right: 0; display: flex; width: 100%; height: 36px; align-items: center; justify-content: center; transform: translateY(-50%); overflow: hidden; padding: 0 6px; border-block: 1px solid var(--border-subtle); background: rgb(33 34 37 / 90%); color: var(--text-primary); font-size: 0.85rem; text-align: center; white-space: nowrap; pointer-events: none; }
+.export-status-bar { position: absolute; z-index: 2; top: 50%; left: 0; right: 0; display: flex; width: 100%; height: 30px; align-items: center; justify-content: center; transform: translateY(-50%); overflow: hidden; padding: 0 6px; border-block: 1px solid var(--border-subtle); background: rgb(33 34 37 / 90%); color: var(--text-primary); font-size: 0.85rem; text-align: center; white-space: nowrap; pointer-events: none; }
 .export-queue-card .photo-card-button:disabled { opacity: 1; cursor: default; }
 .export-queue-card .photo-selection-input:disabled { cursor: default; }
 .export-thumbnail-control, .export-action-group { display: flex; align-items: center; flex: 0 0 auto; }
