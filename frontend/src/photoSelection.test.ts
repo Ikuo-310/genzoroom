@@ -6,6 +6,7 @@ import {
   blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
   resolveSelectedAssets,
+  selectOnlyAssetId,
   shouldClearSelectionOnEscape,
   toggleSelectedAssetId,
   workspacePath,
@@ -18,6 +19,9 @@ const assets: RecentAsset[] = [
 ];
 
 describe('photo selection', () => {
+  it('replaces the selection for a normal card click', () => {
+    expect(selectOnlyAssetId('c')).toEqual(['c']);
+  });
   it('starts selection mode, supports multiple unique IDs, and preserves selection order', () => {
     let selectedIds: string[] = [];
     selectedIds = toggleSelectedAssetId(selectedIds, 'b');

@@ -19,6 +19,8 @@ describe('command shortcut bindings', () => {
       }
       const primaryMask = platform === 'mac' ? 2 : 1;
       expect(matchesShortcut(event('A', options, !!(mask & 16)), 'homeSelectAll', platform)).toBe(mask === primaryMask);
+      expect(matchesShortcut(event('P', options), 'homeOpenPreview', platform)).toBe((mask & 15) === 0);
+      expect(matchesShortcut(event('p', options), 'homeOpenPreview', platform)).toBe((mask & 15) === 0);
     }
   });
   it.each(['other', 'mac'] as const)('matches Primary-based commands strictly on %s', (platform: ShortcutPlatform) => {
@@ -110,7 +112,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(29);
+    expect(Object.keys(shortcutBindings)).toHaveLength(30);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -143,7 +145,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(29);
+    expect(Object.keys(shortcutBindings)).toHaveLength(30);
   });
   it('matches Export Queue only for unmodified Q regardless of case', () => {
     for (const platform of ['other', 'mac'] as const) {
@@ -152,7 +154,7 @@ describe('command shortcut bindings', () => {
         { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true },
       ]) expect(matchesShortcut(event('Q', options), 'exportQueueToggle', platform)).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(29);
+    expect(Object.keys(shortcutBindings)).toHaveLength(30);
   });
   it('matches Stack Add only for unmodified A without matching other commands', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {

@@ -113,20 +113,23 @@ describe('Home stack display', () => {
       expect(filenames()).toEqual(state === 'child' || state === 'primary' ? ['x.jpg'] : ['primary.jpg', 'x.jpg']);
       expect(host.querySelector('img[src="/thumb/member"]')).toBeNull();
     });
-  it.each(['recent', 'albums', 'calendar'] as const)('opens non-RAW from a RAW primary on %s', async tab => {
+  it.each(['recent', 'albums', 'calendar'] as const)('selects the displayed Stack representative on %s', async tab => {
     const members = photos.map(photo => photo.stackId ? { ...photo, primaryAssetId: 'member' } : photo);
     api.recent.mockResolvedValue(members); api.album.mockResolvedValue(members); api.day.mockResolvedValue(members);
     await mount(tab);
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    expect(navigation).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.activeAssetId).toBe('primary');
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
     expect(navigation?.homeReturn?.tab).toBe(tab);
   });
 
-  it('opens non-RAW when clicking a Stack RAW member through the RAW filter', async () => {
+  it('selects the visible Stack representative through the RAW filter', async () => {
     await mount();
     change('.photo-filter-control select', 'raw');
     await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
   });
 
@@ -143,14 +146,17 @@ describe('Home stack display', () => {
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', 'primary', 'y']);
   });
 
-  it.each(['unsupported', 'ambiguous'] as const)('blocks single and multi selection for %s Stacks without changing selection', async status => {
+  it.each(['unsupported', 'ambiguous'] as const)('blocks Anshitsu navigation for %s Stacks without discarding selection', async status => {
     const members = status === 'unsupported' ? photos.slice(0, 3)
       : [...photos.slice(0, 3), { ...asset('a'), ...stackMetadata }, { ...asset('b'), ...stackMetadata }];
     api.recent.mockResolvedValue(members);
     await mount();
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
     expect(navigation).toBeNull();
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Cannot open the selection');
+    act(() => host.querySelector<HTMLButtonElement>('.selection-clear')!.click());
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
@@ -166,9 +172,10 @@ describe('Home stack display', () => {
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['member', 'primary']);
   });
 
-  it('opens the clicked Favorites RAW Asset itself', async () => {
+  it('keeps Favorites selection order for a RAW Asset', async () => {
     await mount('favorites');
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.activeAssetId).toBe('member');
   });
 

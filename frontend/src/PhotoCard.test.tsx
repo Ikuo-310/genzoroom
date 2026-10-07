@@ -30,15 +30,15 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
     stackId,
     stackAssetCount,
   };
-  return renderToStaticMarkup(<PhotoCard asset={asset} edited={edited} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />);
+  return renderToStaticMarkup(<PhotoCard asset={asset} edited={edited} language="en" onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />);
 }
 
 describe('PhotoCard format badge', () => {
   it.each([false, true])('isolates the sibling Queue button from navigation and selection (selection mode %s)', async selectionMode => {
-    const onOpen = vi.fn(), onToggleSelection = vi.fn(), onQueueToggle = vi.fn();
+    const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn(), onPreviewRequest = vi.fn(), onQueueToggle = vi.fn();
     await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" edited selected={selectionMode}
       selectionMode={selectionMode} queueKnown onQueueToggle={onQueueToggle}
-      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
+      onSelect={onSelect} onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection} onPreviewRequest={onPreviewRequest} />));
     const photo = host.querySelector<HTMLButtonElement>('.photo-card-button')!;
     const badge = host.querySelector<HTMLButtonElement>('.edited-badge')!;
     expect(photo.contains(badge)).toBe(false);
@@ -47,32 +47,50 @@ describe('PhotoCard format badge', () => {
     expect(badge.title).not.toContain('[Q]');
     await act(async () => badge.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(onQueueToggle).toHaveBeenCalledOnce();
-    expect(onOpen).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
     expect(onToggleSelection).not.toHaveBeenCalled();
+    expect(onExtendSelection).not.toHaveBeenCalled();
+    expect(onPreviewRequest).not.toHaveBeenCalled();
     expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(selectionMode);
-    expect(photo.getAttribute('aria-pressed')).toBe(selectionMode ? 'true' : null);
+    expect(photo.getAttribute('aria-pressed')).toBe(selectionMode ? 'true' : 'false');
   });
-  it.each([
-    [false, false, false],
-    [false, true, true],
-    [true, false, false],
-    [true, true, true],
-  ])('routes card clicks by selection mode and Shift (%s, Shift %s)', async (selectionMode, shiftKey, extendRange) => {
-    const onOpen = vi.fn(), onToggleSelection = vi.fn();
-    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" selectionMode={selectionMode}
-      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
-    const event = new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey });
-    await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.dispatchEvent(event));
-    expect(onOpen).toHaveBeenCalledTimes(selectionMode || shiftKey ? 0 : 1);
-    if (shiftKey) expect(onToggleSelection).toHaveBeenCalledWith(true);
-    else if (selectionMode) expect(onToggleSelection).toHaveBeenCalledOnce();
-    else expect(onToggleSelection).not.toHaveBeenCalled();
+  it('selects only on normal click and uses Primary and Shift for explicit selection actions', async () => {
+    const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn();
+    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en"
+      onSelect={onSelect} onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection} />));
+    const photo = host.querySelector<HTMLButtonElement>('.photo-card-button')!;
+    await act(async () => photo.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onSelect).toHaveBeenCalledOnce();
+    await act(async () => photo.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+    expect(onToggleSelection).toHaveBeenCalledOnce();
+    const shiftClick = new MouseEvent('click', { bubbles: true, shiftKey: true });
+    await act(async () => photo.dispatchEvent(shiftClick));
+    expect(onExtendSelection).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('uses Command as Primary for photo toggles on macOS', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window.navigator, 'platform');
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, value: 'MacIntel' });
+    const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn();
+    try {
+      await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en"
+        onSelect={onSelect} onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection} />));
+      const photo = host.querySelector<HTMLButtonElement>('.photo-card-button')!;
+      await act(async () => photo.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+      expect(onSelect).toHaveBeenCalledOnce();
+      await act(async () => photo.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true })));
+      expect(onToggleSelection).toHaveBeenCalledOnce();
+    } finally {
+      if (descriptor) Object.defineProperty(window.navigator, 'platform', descriptor);
+      else Reflect.deleteProperty(window.navigator, 'platform');
+    }
   });
 
   it('keeps checkbox normal toggles and Shift range clicks single-shot', async () => {
-    const onOpen = vi.fn(), onToggleSelection = vi.fn();
+    const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn();
     await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" selectionMode
-      onOpen={onOpen} onToggleSelection={onToggleSelection} />));
+      onSelect={onSelect} onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection} />));
     const checkbox = host.querySelector<HTMLInputElement>('.photo-selection-input')!;
     await act(async () => checkbox.click());
     expect(onToggleSelection).toHaveBeenCalledTimes(1);
@@ -81,11 +99,24 @@ describe('PhotoCard format badge', () => {
     const shiftClick = new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true });
     await act(async () => checkbox.dispatchEvent(shiftClick));
     expect(shiftClick.defaultPrevented).toBe(true);
-    expect(onToggleSelection).toHaveBeenCalledTimes(1);
-    expect(onToggleSelection).toHaveBeenCalledWith(true);
+    expect(onToggleSelection).not.toHaveBeenCalled();
+    expect(onExtendSelection).toHaveBeenCalledOnce();
     await act(async () => checkbox.dispatchEvent(new Event('change', { bubbles: true })));
-    expect(onToggleSelection).toHaveBeenCalledTimes(1);
-    expect(onOpen).not.toHaveBeenCalled();
+    expect(onToggleSelection).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+  it('requests Preview on double-click after the normal click selection', async () => {
+    const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn(), onPreviewRequest = vi.fn();
+    await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en"
+      onSelect={onSelect} onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection}
+      onPreviewRequest={onPreviewRequest} />));
+    const photo = host.querySelector<HTMLButtonElement>('.photo-card-button')!;
+    await act(async () => {
+      photo.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      photo.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onPreviewRequest).toHaveBeenCalledOnce();
   });
   it.each([true, false, undefined])('shows a display-only GenzoRoom badge only for known edited status %s', edited => {
     const markup = renderBadge('JPEG', false, 'photo.jpg', edited);
@@ -158,7 +189,7 @@ describe('PhotoCard format badge', () => {
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain('class="photo-selection-input"');
     expect(markup).toContain('aria-label="Select photo.jpg"');
-    expect(markup).toContain('aria-label="Open photo.jpg for development"');
+    expect(markup).toContain('aria-pressed="false"');
   });
 
   it('marks a selected card and changes the card action while selection mode is active', () => {
@@ -171,8 +202,9 @@ describe('PhotoCard format badge', () => {
       language="en"
       selected
       selectionMode
-      onOpen={vi.fn()}
+      onSelect={vi.fn()}
       onToggleSelection={vi.fn()}
+      onExtendSelection={vi.fn()}
     />);
     expect(markup).toContain('photo-card selected selection-mode');
     expect(markup).toContain('checked=""');
@@ -190,7 +222,7 @@ describe('PhotoCard format badge', () => {
       is_raw: false,
     }));
     const markup = renderToStaticMarkup(<div className="photo-grid">{assets.map((asset) => (
-      <PhotoCard key={asset.id} asset={asset} language="en" onOpen={vi.fn()} onToggleSelection={vi.fn()} />
+      <PhotoCard key={asset.id} asset={asset} language="en" onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />
     ))}</div>);
 
     expect(markup.match(/<article/g)).toHaveLength(100);

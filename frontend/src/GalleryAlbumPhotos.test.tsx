@@ -193,7 +193,7 @@ describe('album photo view', () => {
     expect(host.querySelector('.home-toolbar .selection-bar')?.textContent).toContain('0 selected');
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
-    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
   });
 
   it('shares filter state, keeps Recent selection, and isolates Album selection with Shift ranges', async () => {
@@ -249,9 +249,12 @@ describe('album photo view', () => {
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
   });
 
-  it('opens a single Album photo in the darkroom', async () => {
+  it('selects an Album photo before the explicit Anshitsu action', async () => {
     await mount(); click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
     click('.photo-card-button');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    expect(host.querySelector('.navigation-probe')).toBeNull();
+    click('.selection-open-workspace');
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('album-0');
   });
 });

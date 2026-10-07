@@ -399,23 +399,35 @@ describe('Home bulk edit status', () => {
     ]);
   });
 
-  it('starts safely on a shifted card click when there is no active selection', async () => {
+  it('ignores a Shift card click when there is no range anchor', async () => {
     await mount();
     shiftClick(visibleCardButtons()[5]);
-    expect(selectedVisibleFilenames()).toEqual(['photo-5.jpg']);
+    expect(selectedVisibleFilenames()).toEqual([]);
     expect(host.querySelector('.selection-navigation-probe')).toBeNull();
   });
 
-  it('falls back to a new visible anchor when filtering hides the old one', async () => {
+  it('replaces on normal click, adds with Primary, and never navigates from the photo surface', async () => {
+    await mount();
+    act(() => visibleCardButtons()[5].click());
+    expect(selectedVisibleFilenames()).toEqual(['photo-5.jpg']);
+    act(() => visibleCardButtons()[7].click());
+    expect(selectedVisibleFilenames()).toEqual(['photo-7.jpg']);
+    act(() => visibleCardButtons()[5].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
+    expect(selectedVisibleFilenames()).toEqual(['photo-5.jpg', 'photo-7.jpg']);
+    expect(host.querySelector('.selection-navigation-probe')).toBeNull();
+  });
+
+  it('keeps a hidden range anchor and does not start a new range after filtering', async () => {
     await mount();
     act(() => visibleSelectionInputs()[1].click());
     changeFilter('nonRaw');
     shiftClick(visibleCardButtons()[2]);
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+    expect(selectedVisibleFilenames()).toEqual([]);
+    act(() => visibleCardButtons()[2].click());
     expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
     shiftClick(visibleCardButtons()[4]);
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
-    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg', 'photo-6.jpg', 'photo-8.jpg']);
+    expect(selectedVisibleFilenames()).toContain('photo-4.jpg');
   });
 
   it('resets the range anchor when every photo is cleared', async () => {
@@ -423,8 +435,8 @@ describe('Home bulk edit status', () => {
     act(() => visibleSelectionInputs()[1].click());
     act(() => host.querySelector<HTMLButtonElement>('.selection-clear')!.click());
     shiftClick(visibleCardButtons()[4]);
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('0 selected');
+    expect(selectedVisibleFilenames()).toEqual([]);
   });
 
   it('keeps a failed lookup unknown and ignores responses after unmount', async () => {

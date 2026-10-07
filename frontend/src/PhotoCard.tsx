@@ -6,14 +6,17 @@ import { FormatBadge } from './FormatBadge';
 import { EditedBadge } from './EditedBadge';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
+import { isPrimaryModifier } from './shortcutModifiers';
 
 export type { RecentAsset } from './assets';
 
 type PhotoCardProps = {
   asset: RecentAsset;
   language: AppLanguage;
-  onOpen: () => void;
-  onToggleSelection: (extendRange?: boolean) => void;
+  onSelect: () => void;
+  onToggleSelection: () => void;
+  onExtendSelection: () => void;
+  onPreviewRequest?: () => void;
   selected?: boolean;
   selectionMode?: boolean;
   edited?: boolean;
@@ -26,8 +29,10 @@ type PhotoCardProps = {
 export function PhotoCard({
   asset,
   language,
-  onOpen,
+  onSelect,
   onToggleSelection,
+  onExtendSelection,
+  onPreviewRequest,
   selected = false,
   selectionMode = false,
   edited,
@@ -43,12 +48,11 @@ export function PhotoCard({
 
   function handleCardClick(event: ReactMouseEvent<HTMLButtonElement>) {
     if (event.shiftKey) {
-      onToggleSelection(true);
+      onExtendSelection();
       return;
     }
-    // Once selection mode starts, the card surface toggles selection instead of navigating.
-    if (selectionMode) onToggleSelection();
-    else onOpen();
+    if (isPrimaryModifier(event.nativeEvent)) onToggleSelection();
+    else onSelect();
   }
 
   function handleCheckboxClick(event: ReactMouseEvent<HTMLInputElement>) {
@@ -56,7 +60,7 @@ export function PhotoCard({
     if (!event.shiftKey) return;
     // Prevent native checkbox activation so a follow-up change event cannot toggle the range endpoint twice.
     event.preventDefault();
-    onToggleSelection(true);
+    onExtendSelection();
   }
 
   function handleCheckboxChange() {
@@ -83,8 +87,9 @@ export function PhotoCard({
         className="photo-card-button"
         type="button"
         onClick={handleCardClick}
-        aria-label={selectionMode ? selectionLabel : t('photos.openWorkspace', { filename: asset.filename })}
-        aria-pressed={selectionMode ? selected : undefined}
+        onDoubleClick={onPreviewRequest}
+        aria-label={selectionLabel}
+        aria-pressed={selected}
         aria-description={edited ? t('photos.edited') : undefined}
       >
         <div className="thumbnail">

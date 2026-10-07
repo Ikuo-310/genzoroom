@@ -5,7 +5,7 @@ describe('shortcut binding display', () => {
   it('formats Home command labels from the registry on both platforms', () => {
     for (const platform of ['other', 'mac'] as const) {
       for (const [id, label] of [['homeRecent', 'R'], ['homeAlbums', 'A'], ['homeCalendar', 'C'],
-        ['homeFavorites', 'F'], ['homeOpenStackManager', 'S'], ['homeOpenSelected', 'D']] as const) {
+        ['homeFavorites', 'F'], ['homeOpenStackManager', 'S'], ['homeOpenSelected', 'D'], ['homeOpenPreview', 'P']] as const) {
         expect(formatShortcut(id, platform)).toBe(label);
       }
     }

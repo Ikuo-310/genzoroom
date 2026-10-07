@@ -443,10 +443,6 @@ export function GalleryPage() {
   selectAllVisibleRef.current = selectAllVisible;
   homeTabClickRef.current = handleTabClick;
 
-  function openWorkspace(asset: RecentAsset) {
-    openWorkspaceAssets([asset]);
-  }
-
   function openStacks() {
     if (!selectedAssets.length) return;
     // Stack management preserves concrete selections, including RAW and favorite members.
@@ -522,8 +518,16 @@ export function GalleryPage() {
     setScrollRestoreRevision(revision => revision + 1);
   }
 
-  function togglePhotoSelection(assetId: string, extendRange = false) {
-    photoView?.selection.toggle(assetId, visibleAssets.map(asset => asset.id), extendRange);
+  function selectPhoto(assetId: string) {
+    photoView?.selection.selectOnly(assetId);
+  }
+
+  function togglePhotoSelection(assetId: string) {
+    photoView?.selection.toggle(assetId);
+  }
+
+  function extendPhotoSelection(assetId: string) {
+    photoView?.selection.extendRange(assetId, visibleAssets.map(asset => asset.id));
   }
 
   function clearPhotoSelection() {
@@ -782,8 +786,9 @@ export function GalleryPage() {
           queueStatus={queue.status}
           queueBusy={queue.busy}
           onQueueToggle={() => { void toggleQueue(asset); }}
-          onToggleSelection={(extendRange) => togglePhotoSelection(asset.id, extendRange)}
-          onOpen={() => openWorkspace(asset)}
+          onSelect={() => selectPhoto(asset.id)}
+          onToggleSelection={() => togglePhotoSelection(asset.id)}
+          onExtendSelection={() => extendPhotoSelection(asset.id)}
         />
       );
     })}</div>;

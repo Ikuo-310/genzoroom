@@ -6,6 +6,10 @@ export function toggleSelectedAssetId(selectedIds: string[], assetId: string): s
     : [...selectedIds, assetId];
 }
 
+export function selectOnlyAssetId(assetId: string): string[] {
+  return [assetId];
+}
+
 export function addVisiblePhotoRange(
   selectedIds: readonly string[],
   visibleIds: readonly string[],

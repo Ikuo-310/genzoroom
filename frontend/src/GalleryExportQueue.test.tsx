@@ -138,7 +138,7 @@ describe('Home Export Queue', () => {
     expect(api.editState).not.toHaveBeenCalled();
   });
 
-  it('isolates badge clicks from selection and lets Home Q operate the current selection', async () => {
+  it('isolates badge clicks, replaces selection on card click, and lets Home Q operate the selection', async () => {
     await mount();
     await click(card().querySelector<HTMLInputElement>('.photo-selection-input')!);
     await click(badge(2));
@@ -152,12 +152,13 @@ describe('Home Export Queue', () => {
     await act(async () => window.dispatchEvent(event));
     expect(event.defaultPrevented).toBe(true);
     expect(api.enqueue).toHaveBeenCalledTimes(2);
-    expect(api.enqueue).toHaveBeenLastCalledWith([ids[0]], expect.any(AbortSignal));
+    expect(api.enqueue).toHaveBeenLastCalledWith([ids[1]], expect.any(AbortSignal));
     expect(api.dequeue).not.toHaveBeenCalled();
     expect(host.querySelector('.workspace-probe')).toBeNull();
     await click(host.querySelector<HTMLButtonElement>('.selection-clear')!);
     await click(card().querySelector<HTMLButtonElement>('.photo-card-button')!);
-    expect(host.querySelector('.workspace-probe')).not.toBeNull();
+    expect(host.querySelector('.workspace-probe')).toBeNull();
+    expect(host.querySelector('.photo-card.selected')).toBe(card());
   });
 
   it('blocks a busy card while allowing a different card mutation', async () => {

@@ -115,14 +115,15 @@ describe('Home favorites', () => {
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
   });
 
-  it('starts selection with a Shift card click and uses that photo as the next range anchor', async () => {
+  it('ignores an initial Shift click and extends a range from a normal selection anchor', async () => {
     api.recent.mockResolvedValue(photos);
     await mount();
     const card = (index: number) => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[index];
     await act(async () => card(2).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
-    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
-    expect(host.querySelectorAll('.photo-card.selected .photo-info p')[0].textContent).toBe('photo-2');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
     expect(navigation).toBeNull();
+    await act(async () => card(2).dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(host.querySelectorAll('.photo-card.selected .photo-info p')[0].textContent).toBe('photo-2');
     await act(async () => card(0).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
     expect([...host.querySelectorAll('.photo-card.selected .photo-info p')].map(node => node.textContent))
       .toEqual(['photo-0', 'photo-1', 'photo-2']);
@@ -408,7 +409,7 @@ describe('Home favorites', () => {
     await mount(); setScroll(0, 120); await click('#home-favorites-tab'); setScroll(0, 420);
     await click('#home-recent-tab'); expectScroll(0, 120);
     await click('#home-favorites-tab'); expectScroll(0, 420);
-    setScroll(0, 640); await click('.photo-card-button');
+    setScroll(0, 640); await click('.photo-card-button'); await click('.selection-open-workspace');
     expect(navigation?.homeReturn?.contentScrollTop).toBe(640);
     await click('.return-home'); expectScroll(0, 640);
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');

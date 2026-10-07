@@ -180,7 +180,7 @@ describe('Home return context', () => {
   });
   it('returns from the darkroom to Favorites and restores its scroll after the list arrives', async () => {
     await mount(); await click('#home-favorites-tab'); setScroll(0, 622);
-    await click('.photo-card-button'); await click('.workspace-actions button');
+    await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button');
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
     expectScroll(0, 622);
     expect(readHomeReturn({ ...context, tab: 'favorites' })?.tab).toBe('favorites');
@@ -209,7 +209,7 @@ describe('Home return context', () => {
       days: [{ date: `${year}-${String(month ?? 8).padStart(2, '0')}-01`, hasAssets: true, count: 1 }] }));
     await mount(); await click('#home-calendar-tab'); change('#calendar-year', '2026'); await settle();
     await click('.calendar-view-toggle'); await click('.calendar-day.has-assets'); setScroll(0, 931);
-    await click('.photo-card-button'); await click('.workspace-actions button'); expectScroll(0, 931);
+    await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button'); expectScroll(0, 931);
     await click('#home-albums-tab'); await click('#home-calendar-tab'); expectScroll(0, 931);
     await click('#home-calendar-tab');
     expect(host.querySelector('.calendar-year')).not.toBeNull();
@@ -306,7 +306,7 @@ describe('Home return context', () => {
     if (tab === 'albums') { await click('#home-albums-tab'); await click('.album-card'); }
     else await openCalendarDay();
     await click('#home-recent-tab'); await click(`#home-${tab}-tab`);
-    await click('.photo-card-button'); await click('.workspace-actions button');
+    await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button');
     expect(host.querySelector(`#home-${tab}-tab`)?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     if (tab === 'albums') expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
@@ -338,7 +338,7 @@ describe('Home return context', () => {
   it('starts normally in Recent and returns to Recent after a successful save', async () => {
     await mount();
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
-    await click('.photo-card-button');
+    await click('.photo-card-button'); await click('.selection-open-workspace');
     await click('button[aria-label="Disable Basic"]');
     await click('.workspace-actions button');
     expect(api.put).toHaveBeenCalledTimes(1);
@@ -372,7 +372,7 @@ describe('Home return context', () => {
   it('returns to the same Calendar day, keeps its month, and leaves other modes separate', async () => {
     await mount(); await openCalendarDay();
     homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop = 520;
-    await click('.photo-card-button'); await click('.workspace-actions button');
+    await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button');
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(api.day).toHaveBeenLastCalledWith('2026-09-01', expect.any(AbortSignal));
     expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(520);
@@ -388,7 +388,7 @@ describe('Home return context', () => {
   it('retains the Calendar month context while returning to Recent', async () => {
     await mount(); await click('#home-calendar-tab');
     change('#calendar-year', '2024'); change('#calendar-month', '2'); await settle();
-    await click('#home-recent-tab'); await click('.photo-card-button'); await click('.workspace-actions button');
+    await click('#home-recent-tab'); await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button');
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
     await click('#home-calendar-tab');
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe('2024');
@@ -405,7 +405,7 @@ describe('Home return context', () => {
     expect(host.querySelector<HTMLSelectElement>('#calendar-year')!.value).toBe(String(currentYear));
     expect(host.querySelector<HTMLSelectElement>('#calendar-month')!.value).toBe(String(currentMonth));
     await click('.calendar-day.has-assets'); await settle();
-    await click('.photo-card-button'); await click('.workspace-actions button');
+    await click('.photo-card-button'); await click('.selection-open-workspace'); await click('.workspace-actions button');
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector('.home-toolbar-title')).not.toBeNull();
     await click('.album-back');
@@ -414,7 +414,7 @@ describe('Home return context', () => {
   });
 
   it('keeps a failed exit in the darkroom and restores the album when exiting without saving', async () => {
-    await mount(); await click('#home-albums-tab'); await click('.album-card'); await click('.photo-card-button');
+    await mount(); await click('#home-albums-tab'); await click('.album-card'); await click('.photo-card-button'); await click('.selection-open-workspace');
     await click('button[aria-label="Disable Basic"]');
     api.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
     await click('.workspace-actions button');

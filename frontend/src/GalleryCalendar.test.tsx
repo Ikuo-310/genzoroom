@@ -807,7 +807,7 @@ describe('Home calendar', () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('shows a calendar error and opens a single day photo through the usual card action', async () => {
+  it('shows a calendar error and selects a single day photo before Anshitsu', async () => {
     api.heatmap.mockRejectedValueOnce(new Error('Denied'))
       .mockImplementation(async (year: number, month: number) => monthData(year, month));
     await mount(); click('#home-calendar-tab'); await settle();
@@ -815,6 +815,9 @@ describe('Home calendar', () => {
     click('[aria-label="Next month"]'); await settle();
     click('.calendar-day.has-assets'); await settle();
     click('.photo-card-button');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    expect(host.querySelector('.navigation-probe')).toBeNull();
+    click('.selection-open-workspace');
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('day-0');
   });
 
