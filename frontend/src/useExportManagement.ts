@@ -8,9 +8,12 @@ import { useExportQueueAssets } from './useExportQueueAssets';
 import { usePhotoSelection } from './usePhotoSelection';
 import { blurPhotoSelectionCheckboxWhenSelectionEnds } from './photoSelection';
 
-export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'dequeue' | 'refresh' | 'mutationFor'>;
+export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>;
 export const isMutableExportStatus = (status: ExportQueueStatus | undefined) => status === 'queued' || status === 'failed';
-type RemovalError = 'locked' | 'removeFailed' | 'removePartialFailed';
+type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed';
+type ArmedUndoRecord = { kind: 'armed'; changes: Array<{ assetId: string; wasArmed: boolean }> };
+type QueueRemovalUndoRecord = { kind: 'queueRemoval'; removed: Array<{ assetId: string; wasArmed: boolean }> };
+type ExportUndoRecord = ArmedUndoRecord | QueueRemovalUndoRecord;
 
 function log(level: 'debug' | 'info' | 'warn' | 'error', event: string, context: Record<string, string | number>) {
   try { frontendLogger.add({ level, component: 'export_management', event, context }); }
@@ -21,8 +24,10 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const selection = usePhotoSelection();
   const [armedIds, setArmedIds] = useState<Set<string>>(() => new Set());
   const [removing, setRemoving] = useState(false);
-  const [removalError, setRemovalError] = useState<RemovalError | null>(null);
-  const removingRef = useRef(false);
+  const [removalError, setRemovalError] = useState<ManagementError | null>(null);
+  const operationRef = useRef(false);
+  const undoRecord = useRef<ExportUndoRecord | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const mounted = useRef(false);
   const queueRef = useRef(queue);
   queueRef.current = queue;
@@ -54,7 +59,17 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       const next = new Set([...previous].filter(id => available.has(id)));
       return next.size === previous.size ? previous : next;
     });
-  }, [mutableKey, selection.retainAvailable]);
+    // Do not invalidate an older record mid-Q; a failed batch must leave it usable.
+    if (!operationRef.current && undoRecord.current) {
+      const record = undoRecord.current;
+      const currentById = new Map(queueRef.current.items.map(item => [item.assetId.toLowerCase(), item]));
+      const reconciled = record.kind === 'armed'
+        ? record.changes.filter(change => isMutableExportStatus(currentById.get(change.assetId)?.status))
+        : record.removed.filter(change => !currentById.has(change.assetId));
+      undoRecord.current = reconciled.length ? record.kind === 'armed'
+        ? { kind: 'armed', changes: reconciled } : { kind: 'queueRemoval', removed: reconciled } : null;
+    }
+  }, [mutableKey, selection.retainAvailable, removing, undoing]);
   const mutable = new Set(mutableIds);
   const selectedIds = selection.selectedIds.filter(id => mutable.has(id));
   const selectionMode = active && selectedIds.length > 0;
@@ -69,41 +84,47 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const visualIds = message ? [] : flattenExportQueueDisplay(rows)
     .filter(entry => isMutableExportStatus(entry.item.status)).map(entry => entry.item.assetId.toLowerCase());
   const allSelectedArmed = selectedIds.length > 0 && selectedIds.every(id => armedIds.has(id));
-  const canOperate = (id: string) => !removingRef.current && !message && mutable.has(id.toLowerCase())
+  const canOperate = (id: string) => !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };
   const toggleSelection = (id: string) => { if (canOperate(id)) selection.toggle(id.toLowerCase()); };
   const extendRange = (id: string) => { if (canOperate(id)) selection.extendRange(id.toLowerCase(), visualIds); };
-  const clear = () => { if (!removingRef.current) selection.clear(); };
+  const clear = () => { if (!operationRef.current) selection.clear(); };
   const selectAll = () => {
-    if (removingRef.current || !visualIds.length) return false;
+    if (operationRef.current || !visualIds.length) return false;
     selection.selectVisible(visualIds.filter(id => !queue.mutationFor(id).operation));
     return true;
   };
   const toggleArmed = () => {
-    if (removingRef.current || !selectedIds.length || message) return false;
+    if (operationRef.current || !selectedIds.length || message) return false;
     const targets = selectedIds.filter(id => !queue.mutationFor(id).operation);
     if (!targets.length) return false;
+    const turnOn = targets.some(id => !armedIds.has(id));
+    const changes = targets.filter(id => armedIds.has(id) !== turnOn)
+      .map(assetId => ({ assetId, wasArmed: armedIds.has(assetId) }));
+    if (!changes.length) return false;
+    undoRecord.current = { kind: 'armed', changes };
     setArmedIds(previous => {
       const next = new Set(previous);
-      const turnOn = targets.some(id => !previous.has(id));
-      targets.forEach(id => { if (turnOn) next.add(id); else next.delete(id); });
+      changes.forEach(({ assetId }) => { if (turnOn) next.add(assetId); else next.delete(assetId); });
       return next;
     });
     return true;
   };
   const removeSelected = () => {
-    if (removingRef.current || !selectedIds.length || message) return false;
+    if (operationRef.current || !selectedIds.length || message) return false;
     const selected = new Set(selectedIds);
     // Snapshot IDs in Queue order; selection changes cannot expand an in-flight batch.
     const targets = items.filter(item => selected.has(item.assetId.toLowerCase()) && !queue.mutationFor(item.assetId).operation)
       .map(item => item.assetId.toLowerCase());
     if (!targets.length) return false;
-    removingRef.current = true;
+    operationRef.current = true;
     setRemoving(true); setRemovalError(null);
+    const wasArmed = new Map(targets.map(assetId => [assetId, armedIds.has(assetId)]));
     log('debug', 'remove.started', { count: targets.length });
     void (async () => {
       let succeeded = 0, failed = 0, locked = 0;
+      const removed: QueueRemovalUndoRecord['removed'] = [];
       for (const assetId of targets) {
         if (!mounted.current) return;
         const current = queueRef.current.items.find(item => item.assetId.toLowerCase() === assetId);
@@ -112,6 +133,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
           if (!isMutableExportStatus(current.status)) throw new ExportQueueApiError('locked');
           await queueRef.current.dequeue(assetId);
           succeeded++;
+          removed.push({ assetId, wasArmed: wasArmed.get(assetId) ?? false });
         } catch (error) {
           failed++;
           if (error instanceof ExportQueueApiError && error.kind === 'locked') locked++;
@@ -125,13 +147,75 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       }
       if (!mounted.current) return;
       setRemovalError(failed ? succeeded ? 'removePartialFailed' : locked === failed ? 'locked' : 'removeFailed' : null);
+      if (removed.length) undoRecord.current = { kind: 'queueRemoval', removed };
       log(failed ? succeeded ? 'warn' : 'error' : 'info', 'remove.completed', { count: targets.length, succeeded, failed, locked });
-      removingRef.current = false; setRemoving(false);
+      operationRef.current = false; setRemoving(false);
+    })();
+    return true;
+  };
+  const undo = () => {
+    if (operationRef.current || !undoRecord.current) return false;
+    const record = undoRecord.current;
+    const currentItems = queueRef.current.items;
+    if (record.kind === 'armed') {
+      const valid = record.changes.filter(change => isMutableExportStatus(
+        currentItems.find(item => item.assetId.toLowerCase() === change.assetId)?.status,
+      ) && !queueRef.current.mutationFor(change.assetId).operation);
+      undoRecord.current = null;
+      if (!valid.length) return false;
+      operationRef.current = true;
+      setArmedIds(previous => {
+        const next = new Set(previous);
+        valid.forEach(({ assetId, wasArmed }) => { if (wasArmed) next.add(assetId); else next.delete(assetId); });
+        return next;
+      });
+      operationRef.current = false;
+      return true;
+    }
+
+    // Consume before awaiting so repeat key events cannot enqueue the same removal twice.
+    undoRecord.current = null;
+    operationRef.current = true;
+    setUndoing(true); setRemovalError(null);
+    void (async () => {
+      let restored = 0, failed = 0;
+      const restoreArmed: string[] = [];
+      for (const removedItem of record.removed) {
+        if (!mounted.current) return;
+        const current = queueRef.current.items.find(item => item.assetId.toLowerCase() === removedItem.assetId);
+        if (current) {
+          if (isMutableExportStatus(current.status) && !queueRef.current.mutationFor(removedItem.assetId).operation) {
+            restored++;
+            if (removedItem.wasArmed) restoreArmed.push(removedItem.assetId);
+          } else failed++;
+          continue;
+        }
+        if (queueRef.current.mutationFor(removedItem.assetId).operation) { failed++; continue; }
+        try {
+          await queueRef.current.enqueue([removedItem.assetId]);
+          restored++;
+          if (removedItem.wasArmed) restoreArmed.push(removedItem.assetId);
+        } catch {
+          failed++;
+        }
+      }
+      if (!mounted.current) return;
+      if (failed) {
+        try { await queueRef.current.refresh(); }
+        catch { log('error', 'undo.refresh_failed', { count: record.removed.length }); }
+      }
+      if (!mounted.current) return;
+      if (restoreArmed.length) setArmedIds(previous => new Set([...previous, ...restoreArmed]));
+      setRemovalError(failed ? restored ? 'queueRestorePartialFailed' : 'queueRestoreFailed' : null);
+      log(failed ? restored ? 'warn' : 'error' : 'info', 'undo.queue_restore_completed', {
+        count: record.removed.length, restored, failed,
+      });
+      operationRef.current = false; setUndoing(false);
     })();
     return true;
   };
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
-    hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected };
+    undoing, hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
 }
 
 export type ExportManagementState = ReturnType<typeof useExportManagement>;

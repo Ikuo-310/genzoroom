@@ -12,7 +12,7 @@ import i18n from './i18n';
 import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
-  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn() }));
+  day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn(), enqueue: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums,
   fetchAlbumAssets: api.album, fetchCalendarDayAssets: api.day, fetchCalendarHeatmap: api.heatmap,
@@ -20,7 +20,7 @@ vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
   getAssetEditStatuses: api.statuses }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
-  listExportQueue: api.queue, dequeueExportAsset: api.remove }));
+  listExportQueue: api.queue, dequeueExportAsset: api.remove, enqueueExportAssets: api.enqueue }));
 
 const photos = Array.from({ length: 3 }, (_, index) => ({ id: `photo-${index}`, filename: `photo-${index}.jpg`,
   date: '2026-09-01', thumbnail_url: `/thumb/${index}`, format: index === 1 ? 'DNG' : 'JPEG', is_raw: index === 1 }));
@@ -58,6 +58,7 @@ beforeEach(async () => {
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos[0], id, preview_url: '', exif: {} }));
   api.stackRefresh.mockReset().mockResolvedValue([]);
   api.remove.mockReset().mockResolvedValue(undefined);
+  api.enqueue.mockReset().mockResolvedValue([]);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -265,6 +266,62 @@ describe('Export selection, readiness and Queue removal', () => {
     await key('e'); expect(exportArmed()).toEqual(['a', 'b']);
     expect(host.querySelector<HTMLButtonElement>('.immich-action-button')!.disabled).toBe(true);
   });
+  it('undoes W ON/OFF and mixed state after selection clear, without undoing Selection', async () => {
+    await openQueue([queued('a'), queued('b'), queued('c')]);
+    await cardClick('a'); await key('w');
+    await cardClick('b', { ctrlKey: true }); await cardClick('c', { ctrlKey: true });
+    await key('w'); expect(exportArmed()).toEqual(['a', 'c', 'b']);
+    const undoMixed = await key('z', { ctrlKey: true });
+    expect(undoMixed.defaultPrevented).toBe(true); expect(exportArmed()).toEqual(['a']);
+    await key('w'); await key('w'); expect(exportArmed()).toEqual([]);
+    const undoOff = await key('z', { ctrlKey: true });
+    expect(undoOff.defaultPrevented).toBe(true); expect(exportArmed()).toEqual(['a', 'c', 'b']);
+    await key('Escape'); expect(exportSelected()).toEqual([]);
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false); expect(exportArmed()).toEqual(['a', 'c', 'b']);
+  });
+  it('uses Primary+Z only for an available Export undo and keeps existing guards', async () => {
+    await openQueue([queued('a')]);
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false);
+    await cardClick('a'); await key('w');
+    for (const target of [document.createElement('input'), document.createElement('textarea'), document.createElement('select')]) {
+      host.append(target);
+      expect((await key('z', { ctrlKey: true }, target)).defaultPrevented).toBe(false);
+      target.remove();
+    }
+    const editable = document.createElement('div'); editable.setAttribute('contenteditable', 'true'); host.append(editable);
+    expect((await key('z', { ctrlKey: true }, editable)).defaultPrevented).toBe(false); editable.remove();
+    for (const options of [{ isComposing: true }, { repeat: true }]) expect((await key('z', { ctrlKey: true, ...options })).defaultPrevented).toBe(false);
+    for (const role of ['menu', 'dialog', 'alertdialog']) {
+      const overlay = document.createElement('div'); overlay.setAttribute('role', role); host.append(overlay);
+      expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false); overlay.remove();
+    }
+    const undo = await key('z', { ctrlKey: true });
+    expect(undo.defaultPrevented).toBe(true); expect(exportArmed()).toEqual([]);
+    await key('r'); expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false);
+  });
+  it('retains one-shot Undo across tab visits and replaces the record with a later W operation', async () => {
+    await openQueue([queued('a')]); await cardClick('a'); await key('w');
+    await key('r'); await key('e');
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(exportArmed()).toEqual([]);
+    await key('w'); await key('w');
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(exportArmed()).toEqual(['a']);
+  });
+  it.each(['Win32', 'MacIntel'])('matches Primary+Z using the OS modifier on %s', async platform => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+    try {
+      await openQueue([queued('a')]); await cardClick('a'); await key('w');
+      const primary = platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true };
+      const other = platform === 'MacIntel' ? { ctrlKey: true } : { metaKey: true };
+      expect((await key('z', other)).defaultPrevented).toBe(false);
+      expect((await key('z', primary)).defaultPrevented).toBe(true);
+      expect(exportArmed()).toEqual([]);
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'platform', descriptor); else Reflect.deleteProperty(navigator, 'platform');
+    }
+  });
   it.each(['Win32', 'MacIntel'])('uses the OS Primary for card toggle on %s', async platform => {
     const descriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
     Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
@@ -316,6 +373,48 @@ describe('Export selection, readiness and Queue removal', () => {
     expect(exportSelected()).toEqual(['b']); expect(exportArmed()).toEqual(['b']);
     expect(host.querySelector('.export-removal-error[role="alert"]')?.textContent).toBe('Some photos could not be removed from Queue');
     expect(exportCard('a')).toBeNull(); expect(exportCard('c')).toBeNull(); expect(exportCard('b')).not.toBeNull();
+  });
+  it('undoes Q membership for queued and failed entries using enqueue, without restoring selection', async () => {
+    const backend = await openQueue([queued('a'), queued('b', 'failed')]);
+    await click('.export-selection .selection-all'); await key('q');
+    expect(exportCard('a')).toBeNull(); expect(exportCard('b')).toBeNull();
+    api.enqueue.mockImplementation(async (ids: string[]) => {
+      backend.setItems([...backend.getItems(), ...ids.map(id => queued(id))]);
+      return backend.getItems();
+    });
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(api.enqueue.mock.calls.map(call => call[0])).toEqual([['a'], ['b']]);
+    expect(exportCard('a').dataset.queueStatus).toBe('queued'); expect(exportCard('b').dataset.queueStatus).toBe('queued');
+    expect(exportSelected()).toEqual([]);
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false);
+  });
+  it('preserves the previous undo when Q fails completely', async () => {
+    await openQueue([queued('a')]); await cardClick('a'); await key('w');
+    api.remove.mockRejectedValue(new ExportQueueApiError('unavailable'));
+    await key('q'); expect(exportCard('a')).not.toBeNull();
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(exportArmed()).toEqual([]);
+  });
+  it('restores only successful Q removals when the restore batch partially fails', async () => {
+    const backend = await openQueue([queued('a'), queued('b', 'failed'), queued('c')]);
+    await cardClick('a'); await key('w'); await cardClick('b', { ctrlKey: true }); await cardClick('c', { ctrlKey: true }); await key('w');
+    api.remove.mockImplementation(async (id: string) => {
+      if (id === 'b') throw new ExportQueueApiError('unavailable');
+      backend.setItems(backend.getItems().filter(item => item.assetId !== id));
+    });
+    await key('q');
+    api.enqueue.mockImplementation(async (ids: string[]) => {
+      if (ids[0] === 'c') throw new ExportQueueApiError('unavailable');
+      backend.setItems([...backend.getItems(), ...ids.map(id => queued(id))]);
+      return backend.getItems();
+    });
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(true);
+    expect(api.enqueue.mock.calls.map(call => call[0])).toEqual([['a'], ['c']]);
+    expect(exportCard('a').dataset.queueStatus).toBe('queued'); expect(exportCard('c')).toBeNull();
+    expect(exportArmed()).toEqual(['b', 'a']); expect(exportSelected()).toEqual(['b']);
+    expect(host.querySelector('.export-removal-error[role="alert"]')?.textContent).toBe('Some photos could not be restored to Queue');
+    expect((await key('z', { ctrlKey: true })).defaultPrevented).toBe(false);
+    expect(exportArmed()).toEqual(['b', 'a']);
   });
   it('prevents duplicate execution and disables actions for the duration of removal', async () => {
     await openQueue([queued('a')]); await cardClick('a');

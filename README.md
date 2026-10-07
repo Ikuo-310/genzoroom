@@ -65,6 +65,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - `W` explicitly marks selected mutable cards ready to export. Mixed selections turn readiness ON; an entirely ready selection turns it OFF. Readiness survives clearing selection and switching Home tabs, but is temporary and is not saved across reloads. It is separate from persistent Queue membership and the runtime status `waiting`.
 - Ready cards show **Ready to export / 出力待機中** in a full-width, 28px-high status bar over the thumbnail's bottom edge.
 - `Q` or Remove from Queue removes selected `queued` / `failed` assets sequentially. Successful removals disappear immediately; failures retain successful work and trigger a refresh with a localized alert. `waiting`, `encoding`, and `registering` cards are locked against selection, readiness changes, and removal. Gallery and Anshitsu keep their own Queue-toggle behavior.
+- In Export, `Primary+Z` (Ctrl+Z / ⌘Z) undoes the latest W readiness or Q removal operation once. It does not restore selection; there is no Redo.
 - **Export to Immich / Immichへ出力** remains disabled. Phase 4 completes Export management UI / selection / readiness / Queue management; Phase 5 Export Runtime, including encoding and upload, remains planned.
 
 ### STACK management

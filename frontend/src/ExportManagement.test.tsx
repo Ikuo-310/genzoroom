@@ -20,7 +20,7 @@ function Probe({ queue }: { queue: ExportManagementQueue }) {
 let root: Root, host: HTMLDivElement;
 async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {}) {
   await act(async () => root.render(<Probe queue={{ items, loaded: true, loading: false, error: null,
-    dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), ...extra }} />));
+    enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), ...extra }} />));
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en');

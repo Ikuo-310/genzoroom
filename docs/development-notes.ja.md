@@ -31,6 +31,14 @@ Armed表示は当初の中央小型badgeから、狭幅英語ラベルの縦折�
 
 Export管理thumbnailは現在Immich由来のsource thumbnailであり、Queue内Assetを識別・管理するための表示とした。現行がJPEGのみのv0.1.0では暫定仕様とし、Recipe適用済みthumbnailは実装していない。RAWでは現像前後の見た目の差が大きくなるため、将来はRecipe適用済みpreviewが望ましい。RAW engineはLightCraftを候補調査中だが採用は未決定。engine選定後、RAW decode / demosaicを含むdeveloping pipelineでpreview-sizeとfull-size renderを生成し、同じdeveloping / Recipe interpretation / renderer pathを共有してresolutionだけ切り替える方向を検討する。preview cacheやdemosaic cacheも将来の検討項目で、いずれも未実装。
 
+## Export管理 one-shot Undo追補（2026-10-07）
+
+隣接するW（出力待機）とQ（Queue除外）の誤操作を戻せるよう、Export tab中だけ`Primary+Z`を既存Undo registry commandから`useExportManagement`のtransient one-shot recordへ接続した。Wは実際に変化したAssetごとに変更前armed値を記録し、Undo時にtoggleではなく前状態へ戻す。QはQueue順の逐次DELETEで成功したAssetだけを記録し、各Assetの削除前armed値を保持する。全件失敗・no-opは前のUndo recordを維持し、実際に状態を変えた次のW/Qはrecordを置換する。
+
+Q Undoはrecordを一度だけ消費し、現在のQueue snapshotに存在するAssetを重複enqueueしない。存在しない対象は既存enqueue APIで順次再登録し、元が`failed`でもstatusは`queued`へ戻る。元のQueue順復元は保証しない。armed状態は再登録成功分だけ戻し、partial restoreでは残りを続行してfailure後にrefresh・localized alertを行う。Selectionは戻さず、Redoと永続履歴も設けない。Q / restore中はoperation guardでW/Q/Undoの重複を防止する。Queue消失・locked化したW record対象はreconcileで除外する。Home / STACK管理 / Anshitsuの既存Undoは変更しない。
+
+関連回帰は8 files / 215 tests passed。Frontend全testは8 workerの並列実行で6件の非関連Developer Diagnostics / STACK管理ログtestが失敗したが、該当2 files単独実行は97 tests passed。並列度1の全suiteは104 files / 2221 passed / 2 skipped。`npx tsc --noEmit`とproduction buildは成功し、buildには既知の500 kB超chunk warningが残る。文書更新後の関連testは8 files / 215 tests passed、`git diff --check`も成功した。
+
 ## Export Queue persistence / API Phase 1完了（2026-10-06）
 
 既存の`/data/genzoroom.db`へExport Queueを追加し、SQLite schema v2とv1→v2 migration、Asset単位Queue、`GET /export/queue`・`POST /export/queue`・`DELETE /export/queue/{asset_id}`を実装した。Queue順は内部連番で保持する。eligibilityはvalidated snapshotのcurrent Recipeで判定し、Historyだけが残るdefault Recipeは対象外。default Recipeの保存成功時はHistoryの有無に関係なく、edit-state保存と同じtransactionでQueueから自動削除する。

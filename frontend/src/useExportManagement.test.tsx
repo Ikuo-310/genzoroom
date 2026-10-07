@@ -15,11 +15,14 @@ async function render(items = queue.items, active = true) {
   queue = { ...queue, items };
   await act(async () => root.render(<Probe active={active} />));
 }
+async function settle(action: () => unknown) {
+  await act(async () => { action(); await new Promise(resolve => setTimeout(resolve, 0)); });
+}
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ id, filename: id, date: '', thumbnail_url: '', format: 'JPEG', is_raw: false, preview_url: '', exif: {} }));
   api.stacks.mockReset().mockResolvedValue([]);
-  queue = { items: [], loaded: true, loading: false, error: null, dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }) };
+  queue = { items: [], loaded: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }) };
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
@@ -63,4 +66,101 @@ it('starts a new Home mount with no selection or armed IDs', async () => {
   await render([item('a')]); await act(async () => current.selectOnly('a')); await act(async () => current.toggleArmed());
   await act(async () => root.unmount()); root = createRoot(host); await render([item('a')]);
   expect(current.selectedIds).toEqual([]); expect([...current.armedIds]).toEqual([]);
+});
+
+it('undoes W ON and OFF from per-asset snapshots without restoring selection', async () => {
+  await render([item('a'), item('b'), item('c')]);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await act(async () => current.selectOnly('b'));
+  await act(async () => current.toggleSelection('c'));
+  await act(async () => current.toggleArmed());
+  expect([...current.armedIds]).toEqual(['a', 'b', 'c']);
+  await act(async () => current.clear());
+  let handled = false;
+  await act(async () => { handled = current.undo(); });
+  expect(handled).toBe(true);
+  expect([...current.armedIds]).toEqual(['a']); expect(current.selectedIds).toEqual([]);
+  await act(async () => { handled = current.undo(); }); expect(handled).toBe(false);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  expect([...current.armedIds]).toEqual([]);
+  await act(async () => { handled = current.undo(); }); expect(handled).toBe(true);
+  expect([...current.armedIds]).toEqual(['a']);
+});
+
+it('keeps a previous Undo record after no-op W and invalidates it when its Asset becomes locked', async () => {
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await act(async () => current.clear());
+  expect(current.toggleArmed()).toBe(false);
+  let handled = false;
+  await act(async () => { handled = current.undo(); });
+  expect(handled).toBe(true); expect([...current.armedIds]).toEqual([]);
+
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await render([item('a', 'waiting')]);
+  expect(current.undo()).toBe(false); expect([...current.armedIds]).toEqual([]);
+});
+
+it('replaces a W undo record only after a later W changes state', async () => {
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await act(async () => current.toggleArmed());
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect([...current.armedIds]).toEqual(['a']);
+});
+
+it('undoes successful Q removals only, requeues them, and restores armed state only for successes', async () => {
+  const original = [item('a'), item('b', 'failed'), item('c')];
+  queue.dequeue = vi.fn(async (id: string) => {
+    if (id === 'b') throw new Error('delete failed');
+    queue.items.splice(queue.items.findIndex(row => row.assetId === id), 1);
+  });
+  queue.enqueue = vi.fn(async (ids: readonly string[]) => {
+    if (ids[0] === 'c') throw new Error('enqueue failed');
+    queue.items.push(item(ids[0], 'queued'));
+  });
+  await render(original);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await act(async () => current.selectOnly('c'));
+  await act(async () => current.toggleArmed());
+  await act(async () => current.selectOnly('b'));
+  await act(async () => current.toggleSelection('a'));
+  await act(async () => current.toggleSelection('c'));
+  await settle(() => current.removeSelected());
+  expect(queue.dequeue).toHaveBeenCalledTimes(3);
+  expect(queue.items.map(row => row.assetId)).toEqual(['b']);
+  await settle(() => { expect(current.undo()).toBe(true); });
+  expect(queue.enqueue).toHaveBeenCalledTimes(2);
+  expect(queue.items.map(row => row.assetId).sort()).toEqual(['a', 'b']);
+  expect([...current.armedIds].sort()).toEqual(['a']);
+  expect(current.selectedIds).toEqual(['b']);
+  expect(current.removalError).toBe('queueRestorePartialFailed');
+});
+
+it('preserves the prior Undo record when all Q removals fail', async () => {
+  queue.dequeue = vi.fn(async () => { throw new Error('delete failed'); });
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a'));
+  await act(async () => current.toggleArmed());
+  await settle(() => current.removeSelected());
+  expect(current.removalError).toBe('removeFailed');
+  let handled = false;
+  await act(async () => { handled = current.undo(); });
+  expect(handled).toBe(true); expect([...current.armedIds]).toEqual([]);
+});
+
+it('does not duplicate-enqueue a Q Undo target already present in the latest Queue snapshot', async () => {
+  queue.dequeue = vi.fn(async () => { queue.items = []; });
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a'));
+  await settle(() => current.removeSelected());
+  await render([item('a')]);
+  expect(current.undo()).toBe(false);
+  expect(queue.enqueue).not.toHaveBeenCalled();
 });

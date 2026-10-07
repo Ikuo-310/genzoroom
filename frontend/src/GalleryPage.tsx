@@ -409,6 +409,12 @@ export function GalleryPage() {
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       if (exportView.active) {
         // Export commands share Home guards, but own separate selection and session-only armed state.
+        if (matchesShortcut(event, 'undo')) {
+          // Keep native undo behavior for every form control, including non-text inputs.
+          if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+          if (exportView.state.undo()) event.preventDefault();
+          return;
+        }
         if (matchesShortcut(event, 'homeSelectAll') || matchesShortcut(event, 'exportArmToggle') || matchesShortcut(event, 'exportQueueToggle')) {
           if (event.target instanceof Element && event.target.closest('input')) return;
           const handled = matchesShortcut(event, 'homeSelectAll') ? exportView.state.selectAll()

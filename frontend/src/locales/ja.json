@@ -46,6 +46,8 @@
     "locked": "このQueue itemは出力処理中のため操作できません",
     "removeFailed": "Queueから写真を外せませんでした",
     "removePartialFailed": "一部の写真をQueueから外せませんでした",
+    "queueRestoreFailed": "写真をQueueへ戻せませんでした",
+    "queueRestorePartialFailed": "一部の写真をQueueへ戻せませんでした",
     "empty": "出力待ちの写真はありません",
     "queueLoading": "出力待ち一覧を読み込み中…",
     "queueLoadFailed": "出力待ち一覧の読み込みに失敗しました",

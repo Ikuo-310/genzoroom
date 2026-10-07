@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Added the Home Export management tab (`E`) with Queue photo cards, grouping of queued members from the same Immich Stack, shared thumbnail sizing, and card selection. Cards show Immich source thumbnails, not Recipe-rendered export previews. `W` marks selected photos ready to export independently of selection; `Q` removes them from Queue, retaining successful removals after partial failures. Ready cards show a full-width, 28px status bar at the thumbnail's bottom edge.
+- Added the Home Export management tab (`E`) with Queue photo cards, grouping of queued members from the same Immich Stack, shared thumbnail sizing, and card selection. Cards show Immich source thumbnails, not Recipe-rendered export previews. `W` marks selected photos ready to export independently of selection; `Q` removes them from Queue, retaining successful removals after partial failures. `Primary+Z` undoes the latest W or Q operation once. Ready cards show a full-width, 28px status bar at the thumbnail's bottom edge.
 - Added persistent Export Queue controls to Home and Anshitsu. Edited photos can be queued from Home; a Stack badge is ON when any member is queued and can add edited members or remove all queued members. `Q` toggles Queue membership for eligible Home selections. Dirty Anshitsu edits are saved before enqueue, and saving a default Recipe removes that asset from the Queue.
 - Home marks a photo as edited only when its current Recipe is non-default. Retained History has a separate indicator in the Anshitsu Filmstrip.
 - Actual export execution, encoding, and Immich upload are not implemented yet; the Export to Immich action remains disabled.

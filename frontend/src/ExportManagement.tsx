@@ -13,15 +13,16 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const noSelection = !management.selectedIds.length;
+  const busy = management.removing || management.undoing;
   return <div className="home-toolbar export-toolbar">
     <div className="selection-bar export-selection" role="group" aria-label={t('photos.selectionActions')}>
       <strong className="selection-count" aria-live="polite">{t('exportManagement.selectionCount', { count: management.selectedIds.length })}</strong>
       <div className="selection-actions">
-        <button type="button" className="selection-all" disabled={management.removing || !management.hasVisibleMutable} onClick={management.selectAll}>{t('photos.selectAll')}</button>
-        <button type="button" className="selection-clear" disabled={management.removing || noSelection} onClick={management.clear}>{t('photos.clearSelection')}</button>
-        <button type="button" className="export-arm-toggle" disabled={management.removing || noSelection || !!management.message} onClick={management.toggleArmed}>
+        <button type="button" className="selection-all" disabled={busy || !management.hasVisibleMutable} onClick={management.selectAll}>{t('photos.selectAll')}</button>
+        <button type="button" className="selection-clear" disabled={busy || noSelection} onClick={management.clear}>{t('photos.clearSelection')}</button>
+        <button type="button" className="export-arm-toggle" disabled={busy || noSelection || !!management.message} onClick={management.toggleArmed}>
           {shortcut.inline(t(`exportManagement.${management.allSelectedArmed ? 'disarm' : 'arm'}`), 'exportArmToggle')}</button>
-        <button type="button" className="export-queue-remove" disabled={management.removing || noSelection || !!management.message} onClick={management.removeSelected}>
+        <button type="button" className="export-queue-remove" disabled={busy || noSelection || !!management.message} onClick={management.removeSelected}>
           {shortcut.inline(t('exportManagement.remove'), 'exportQueueToggle')}</button>
       </div>
     </div>
@@ -38,7 +39,7 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
   const selected = management.selectedIds.includes(id);
   const armed = management.armedIds.has(id);
   const locked = !isMutableExportStatus(item.status);
-  const disabled = locked || management.removing || !!management.queue.mutationFor(id).operation;
+  const disabled = locked || management.removing || management.undoing || !!management.queue.mutationFor(id).operation;
   const label = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
   const rangeClickHandled = useRef(false);
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
