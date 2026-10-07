@@ -38,7 +38,7 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
         ? <button type="button" className={`immich-action-button${management.queue.runtime.stopRequested ? ' export-stop-requested' : ''}`}
           disabled={busy || !!management.queue.cancelling || !management.queue.runtime.stopAllowed}
           title={t('exportManagement.cancelExplanation')} onClick={management.cancelExport}>{t('exportManagement.cancel')}</button>
-        : management.failedIds.length
+        : management.retryPriority
           ? <button type="button" className="immich-action-button" disabled={!management.canRetryFailed} onClick={management.requestRetryFailed}>{t('exportManagement.retryExport')}</button>
           : <button type="button" className="immich-action-button" disabled={!management.canStart} onClick={management.requestStart}>{t('exportManagement.exportToImmich')}</button>}
     </div>

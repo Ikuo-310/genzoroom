@@ -129,6 +129,7 @@ it('suppresses unrelated armed badge through Retry transition and active run, th
   expect(queue.retry).toHaveBeenCalledWith(['failed']);
   expect(queue.startRuntime).not.toHaveBeenCalled();
   await render();
+  expect(host.querySelector('.immich-action-button')?.textContent).toBe('Retry export');
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
   expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
   expect(current.armedIds.has('queued')).toBe(true);
@@ -158,6 +159,40 @@ it('keeps unrelated armed badge hidden when Retry fails and failed Queue intent 
   expect(current.armedIds.has('queued')).toBe(true);
   expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
   expect(host.querySelector('.home-tabs-bar .export-retry-notice')).not.toBeNull();
+});
+it('holds Retry priority after a lost Start acknowledgement through unknown and active polls until confirmed idle', async () => {
+  queue.items = [item('queued')]; await render();
+  await act(async () => current.selectOnly('queued')); await click('.export-arm-toggle');
+  queue.items = [item('failed', 'failed'), item('queued')];
+  queue.retry = vi.fn(async () => { queue.items = [item('failed', 'waiting'), item('queued')]; });
+  queue.startRuntime = vi.fn(async () => { queue.runtime = null; throw new Error('lost acknowledgement'); });
+  await render(); await click('.immich-action-button'); await click('dialog button:last-child'); await render();
+  expect(current.retryPriority).toBe(true);
+  expect(host.querySelector('.immich-action-button')?.textContent).toBe('Retry export');
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('[data-asset-id="queued"] input')?.disabled).toBe(true);
+  queue.runtime = { runId: 'retry-run', status: 'active', stopRequested: false, stopAllowed: true, currentAssetId: 'failed' };
+  await render(); expect(current.retryPriority).toBe(true);
+  expect(host.querySelector('.immich-action-button')?.textContent).toBe('Cancel export');
+  queue.items = [item('queued')]; queue.runtime = idle; await render();
+  expect(current.retryPriority).toBe(false);
+  expect(host.querySelector('[data-asset-id="queued"] .export-status-armed')).not.toBeNull();
+});
+it('does not Start after Retry preparation reports a refresh failure, even if failed intent became queued', async () => {
+  queue.items = [item('failed', 'failed')];
+  queue.retry = vi.fn(async () => { queue.items = [item('failed')]; throw new Error('refresh failed'); });
+  await render(); await click('.immich-action-button'); await click('dialog button:last-child');
+  expect(queue.startRuntime).not.toHaveBeenCalled(); expect(current.removalError).toBe('retryFailed');
+});
+it('releases uncertain Retry priority when a fresh idle poll confirms Start did not leave an active run', async () => {
+  queue.items = [item('failed', 'failed')];
+  queue.retry = vi.fn(async () => { queue.items = [item('failed')]; });
+  queue.startRuntime = vi.fn(async () => { queue.runtime = null; throw new Error('Start failed'); });
+  await render(); await click('.immich-action-button'); await click('dialog button:last-child'); await render();
+  expect(current.retryPriority).toBe(true);
+  queue.runtime = idle; await render();
+  expect(current.retryPriority).toBe(false); expect(current.armedIds.size).toBe(0);
+  expect(host.querySelector('.immich-action-button')?.textContent).toBe('Export to Immich');
 });
 it.each(['ja', 'en'])('shows the Retry priority explanation in %s and hides it during ordinary export', async language => {
   await i18n.changeLanguage(language);

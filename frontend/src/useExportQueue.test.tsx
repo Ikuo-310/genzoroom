@@ -45,6 +45,23 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe('useExportQueue', () => {
+  it('rejects successful Retry preparation when its canonical refresh fails, without rolling back queued intent', async () => {
+    api.list.mockResolvedValue([item(A, 'failed')]); await render();
+    api.retry.mockResolvedValue([item(A)]);
+    const failure = new ExportQueueApiError('network');
+    api.list.mockRejectedValue(failure);
+    await act(async () => { await expect(current.retry([A])).rejects.toBe(failure); });
+    expect(current.getStatus(A)).toBe('queued'); expect(current.error).toBe(failure);
+  });
+  it('does not certify Retry preparation when its required refresh is superseded', async () => {
+    api.list.mockResolvedValue([item(A, 'failed')]); await render(); api.retry.mockResolvedValue([item(A)]);
+    const stale = deferred<ExportQueueItem[]>(); api.list.mockReturnValue(stale.promise);
+    let outcome!: Promise<unknown>;
+    await act(async () => { outcome = current.retry([A]).catch(error => error); });
+    api.list.mockResolvedValue([item(A)]); await act(async () => current.refresh());
+    await act(async () => stale.resolve([item(A, 'failed')]));
+    expect(await outcome).toMatchObject({ kind: 'locked' }); expect(current.getStatus(A)).toBe('queued');
+  });
   it('refreshes canonical Queue after successful and failed atomic Retry', async () => {
     api.list.mockResolvedValue([item(A, 'failed')]);
     await render();

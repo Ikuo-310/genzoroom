@@ -2,6 +2,18 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Phase 5 Export横断監査（2026-10-07）
+
+Queue/Run transaction、worker ownership、Stop/reclaim、frozen Recipe/timestampとJPEG byte再現性、Immich upload/tag/Stack convergence、failure/privacy/resource境界、Frontend polling/Retry/armed/selection/Undoを横断確認した。High 0、Medium 3を再現して修正、Low 1（現行仕様の文書差分）を修正。残存High/Mediumは0。
+
+1. Retryでfailedがqueuedへ戻ると主操作が通常Export表示になり、Start応答喪失後はRetry優先が消えてunrelated armed queuedのbadge/操作が復活した。主操作もretryPriorityで判定し、Start結果不明を保持してfresh runtime pollのactiveへ関連付け、confirmed idleまで抑止する。
+2. Retry成功後のcanonical Queue refresh失敗をhookが吸収し、自動Startへ進めた。Retry-to-Startとruntime同期はfailed/aborted/superseded refreshを拒否し、成功済みqueued intentはrollbackしない。
+3. active poll失敗を挟んだ終了やterminal Queue refresh失敗後に同期が止まり、古いwaiting/errorが残った。同期pendingをruntime認識とは別に保持し、idle確認とcanonical Queue取得が成功するまでpollで再試行する。Queue取得失敗で確定済みStart/Stop応答を無効にしない。
+
+6件の回帰を追加。Backend Python 3.14.5、Export関連247 passed、full pytest 709 passed、compileall成功。Frontend Export関連305 passed、full 113 files / 2366 passed / 2 skipped、typecheck/build/diff check成功。既存500 kB超chunk警告あり。sandboxのBackend fixtureエラー／Frontend Temp cache制限は同じ環境で権限付き再実行して確認した。architectureへ現行Retry優先と同期stateのowner/invariantを追記し、READMEのRetry説明とCHANGELOGの過去phase記述の位置付けを補った。
+
+実機成功事項はユーザー報告を監査前提とした。この監査でNAS deploy／live Immich／browser確認／Commit／Pushは行っていない。single Backend process、分散番号予約なし、partial registration rollbackなし、外部Stack変更race、同一source/toolchain前提のbyte再現性は維持する。コード上のPhase 5 blocking itemは解消し、UI polishへ進める。
+
 ## Phase 5F Export UI実機確認で見つかった2点（2026-10-07）
 
 Stop requested表示は後続waiting itemだけへ限定し、currentAssetのencoding/registering（およびcurrentがwaiting中の場合も）は通常状態表示を保つ。左のselection actionから個別Retryを外し、failedがあると右の主操作を「出力を再試行」へ切り替えた。failed IDsをQueue順で確認・freezeし、実行時に再検証したうえで全件Retry成功時だけ同じID群でnew runを開始する。部分Retry failureはrunを開始せずQueue refreshし、成功済みqueuedはrollbackしない。通常armed queued Export、Q removal、W/Q one-shot Undoは維持。live再確認は未実施。

@@ -16,7 +16,7 @@ async function render() { await act(async () => root.render(<Probe />)); }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.useFakeTimers();
   root = createRoot(document.createElement('div'));
-  api.list.mockReset().mockResolvedValue(idle); api.stop.mockReset(); api.start.mockReset(); refresh.mockClear();
+  api.list.mockReset().mockResolvedValue(idle); api.stop.mockReset(); api.start.mockReset(); refresh.mockReset().mockResolvedValue(undefined);
 });
 afterEach(() => { act(() => root.unmount()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('dispatches one Start, ignores stale idle polls and refreshes canonical Queue', async () => {
@@ -91,4 +91,14 @@ it('disables Cancel when runtime status cannot be verified and stops polling on 
   await act(async () => root.unmount());
   const calls = api.list.mock.calls.length;
   await vi.advanceTimersByTimeAsync(4000); expect(api.list).toHaveBeenCalledTimes(calls);
+});
+it('reconciles Queue after an unknown active poll and retries a failed terminal refresh', async () => {
+  api.list.mockResolvedValue(active); await render(); expect(refresh).toHaveBeenCalledTimes(1);
+  api.list.mockRejectedValue(new Error('runtime temporarily unavailable'));
+  await act(async () => vi.advanceTimersByTimeAsync(2000)); expect(current.runtime).toBeNull();
+  api.list.mockResolvedValue(idle); refresh.mockRejectedValueOnce(new Error('queue temporarily unavailable'));
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(refresh).toHaveBeenCalledTimes(2); expect(current.runtime).toEqual(idle);
+  await act(async () => vi.advanceTimersByTimeAsync(2000)); expect(refresh).toHaveBeenCalledTimes(3);
+  await act(async () => vi.advanceTimersByTimeAsync(2000)); expect(refresh).toHaveBeenCalledTimes(3);
 });

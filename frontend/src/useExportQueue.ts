@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   dequeueExportAsset, enqueueExportAssets, listExportQueue, retryExportAssets,
-  type ExportQueueApiError, type ExportQueueItem, type ExportQueueStatus,
+  ExportQueueApiError, type ExportQueueItem, type ExportQueueStatus,
 } from './exportQueueApi';
 import { useExportRuntime } from './useExportRuntime';
 
@@ -65,7 +65,7 @@ export function useExportQueue(): ExportQueueState {
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (requireCanonical = false) => {
     loadController.current?.abort();
     const controller = new AbortController();
     activeControllers.current.add(controller);
@@ -80,7 +80,10 @@ export function useExportQueue(): ExportQueueState {
     }
     try {
       const result = await listExportQueue(controller.signal);
-      if (!mounted.current || controller.signal.aborted || generation !== loadGeneration.current) return;
+      if (!mounted.current || controller.signal.aborted || generation !== loadGeneration.current) {
+        if (requireCanonical) throw new ExportQueueApiError('locked');
+        return;
+      }
       if (snapshotAtStart === snapshotGeneration.current
         && mutationsAtStart === mutationStartGeneration.current && busyAssets.current.size === 0) {
         setItems(result);
@@ -91,11 +94,14 @@ export function useExportQueue(): ExportQueueState {
       } else {
         // A GET racing a mutation may predate its commit; retry after mutations settle.
         refreshPending.current = true;
+        if (requireCanonical) throw new ExportQueueMutationBusyError();
       }
     } catch (cause) {
       if (mounted.current && !controller.signal.aborted && generation === loadGeneration.current) {
         setError(cause);
       }
+      // Retry-to-Start and runtime reconciliation require a fresh applied snapshot, not best effort.
+      if (requireCanonical) throw cause;
     } finally {
       activeControllers.current.delete(controller);
       if (loadController.current === controller) loadController.current = null;
@@ -189,10 +195,12 @@ export function useExportQueue(): ExportQueueState {
     [assetId], 'dequeue', async signal => { await dequeueExportAsset(assetId, signal); },
   ), [runMutation]);
   const retry = useCallback(async (assetIds: readonly string[]) => {
-    try { await runMutation(assetIds, 'retry', signal => retryExportAssets(assetIds, signal)); }
-    finally { await refresh(); }
+    let prepared = false;
+    try { await runMutation(assetIds, 'retry', signal => retryExportAssets(assetIds, signal)); prepared = true; }
+    finally { await refresh(prepared); }
   }, [runMutation, refresh]);
-  const { runtime, cancel: cancelRuntime, cancelling, start: startRuntime, starting } = useExportRuntime(refresh);
+  const refreshRuntimeQueue = useCallback(() => refresh(true), [refresh]);
+  const { runtime, cancel: cancelRuntime, cancelling, start: startRuntime, starting } = useExportRuntime(refreshRuntimeQueue);
 
   const itemsByAssetId = indexItems(items);
   const getItem = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId)), [itemsByAssetId]);

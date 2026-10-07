@@ -30,6 +30,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const [confirmation, setConfirmation] = useState<ExportConfirmation | null>(null);
   const [retryStarting, setRetryStarting] = useState(false);
   const [retryRunId, setRetryRunId] = useState<string | null>(null);
+  const [retryStartUncertain, setRetryStartUncertain] = useState(false);
   const confirmationRef = useRef<ExportConfirmation | null>(null);
   const operationRef = useRef(false);
   const undoRecord = useRef<ExportUndoRecord | null>(null);
@@ -64,7 +65,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const failedIds = items.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
   const retryRunActive = !!retryRunId && (queue.runtime == null
     || queue.runtime.status === 'active' && queue.runtime.runId === retryRunId);
-  const retryPriority = failedIds.length > 0 || confirmation?.kind === 'retry' || retryStarting || retryRunActive;
+  const retryPriority = failedIds.length > 0 || confirmation?.kind === 'retry' || retryStarting || retryRunActive || retryStartUncertain;
   const armedAvailableIds = items.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
   const armedAvailableKey = JSON.stringify(armedAvailableIds);
   const mutableIds = items.filter(item => retryPriority ? item.status === 'failed' : isMutableExportStatus(item.status))
@@ -140,6 +141,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     confirmationRef.current = null; setConfirmation(null); setRemoving(true); setRemovalError(null);
     if (intent.kind === 'retry') setRetryStarting(true);
     void (async () => {
+      let startAttempted = false;
       try {
         const latest = queueRef.current;
         if (intent.kind === 'start' || intent.kind === 'retry') {
@@ -150,6 +152,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
             // Retry and Start are one confirmed intent; any batch failure prevents a partial run.
             await latest.retry!(intent.assetIds);
           }
+          startAttempted = true;
           const started = await latest.startRuntime(intent.assetIds);
           if (intent.kind === 'retry') setRetryRunId(started?.status === 'active' ? started.runId : null);
           if (mounted.current) {
@@ -166,6 +169,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       }
       catch {
         if (intent.kind === 'retry') {
+          // A committed run can outlive a lost Start response; unknown status must retain Retry intent.
+          if (startAttempted && mounted.current) setRetryStartUncertain(true);
           try { await queueRef.current.refresh(); } catch { /* Keep the original safe failure and refresh best-effort. */ }
         }
         if (mounted.current) setRemovalError(intent.kind === 'stop' ? 'cancelFailed' : intent.kind === 'retry' ? 'retryFailed' : 'startFailed');
@@ -176,9 +181,13 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   useEffect(() => {
+    if (retryStartUncertain && queue.runtime != null) {
+      if (queue.runtime.status === 'active') setRetryRunId(queue.runtime.runId);
+      setRetryStartUncertain(false);
+    }
     if (retryRunId && queue.runtime != null
       && (queue.runtime.status !== 'active' || queue.runtime.runId !== retryRunId)) setRetryRunId(null);
-  }, [queue.runtime?.runId, queue.runtime?.status, retryRunId]);
+  }, [queue.runtime?.runId, queue.runtime?.status, retryRunId, retryStartUncertain]);
   const canOperate = (id: string) => !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };

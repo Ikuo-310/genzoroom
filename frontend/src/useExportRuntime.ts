@@ -11,6 +11,7 @@ export function useExportRuntime(refreshQueue: () => Promise<void>) {
   const controllers = useRef(new Set<AbortController>());
   const cancelBusy = useRef(false);
   const startBusy = useRef(false);
+  const queueSyncPending = useRef(false);
   useEffect(() => {
     mounted.current = true;
     let alive = true;
@@ -23,9 +24,15 @@ export function useExportRuntime(refreshQueue: () => Promise<void>) {
       try {
         const state = await listExportRuntime(controller.signal);
         if (!alive || !mounted.current || controller.signal.aborted || version !== generation.current) return;
-        const refresh = state.status === 'active' || current.current?.status === 'active';
+        if (state.status === 'active' || current.current?.status === 'active') queueSyncPending.current = true;
         current.current = state; setRuntime(state);
-        if (refresh) await refreshQueue();
+        if (queueSyncPending.current) {
+          try {
+            await refreshQueue();
+            if (alive && mounted.current && !controller.signal.aborted && version === generation.current)
+              queueSyncPending.current = state.status === 'active';
+          } catch { /* Retain the verified runtime and retry Queue reconciliation on the next poll. */ }
+        }
       } catch {
         // Unknown runtime state cannot authorize Cancel; retry on the next poll.
         if (alive && mounted.current && version === generation.current) { current.current = null; setRuntime(null); }
@@ -54,7 +61,10 @@ export function useExportRuntime(refreshQueue: () => Promise<void>) {
       }
     } finally {
       controllers.current.delete(controller); cancelBusy.current = false;
-      if (mounted.current) { setCancelling(false); await refreshQueue(); }
+      if (mounted.current) {
+        setCancelling(false); queueSyncPending.current = true;
+        try { await refreshQueue(); } catch { /* Polling retries without changing the Stop acknowledgement. */ }
+      }
     }
   }, [refreshQueue]);
   const start = useCallback(async (assetIds: readonly string[]) => {
@@ -74,7 +84,11 @@ export function useExportRuntime(refreshQueue: () => Promise<void>) {
       throw error;
     } finally {
       controllers.current.delete(controller); startBusy.current = false;
-      if (mounted.current) { setStarting(false); await refreshQueue(); }
+      if (mounted.current) {
+        // A lost acknowledgement or fast terminal run still needs a later canonical Queue reconciliation.
+        setStarting(false); queueSyncPending.current = true;
+        try { await refreshQueue(); } catch { /* Polling retries without changing the Start acknowledgement. */ }
+      }
     }
   }, [refreshQueue]);
   return { runtime, cancelling, cancel, starting, start };
