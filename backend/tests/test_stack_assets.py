@@ -35,6 +35,8 @@ def fetch(kind, items, stacks, *, pages=1):
         calls.append(request.url.path)
         assert request.headers["x-api-key"] == "key"
         assert request.headers["Accept"] == "application/json"
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json=[])
         if request.url.path == "/api/timeline/bucket":
             assert request.method == "GET"
             return httpx.Response(200, json={
@@ -69,7 +71,7 @@ def fetch(kind, items, stacks, *, pages=1):
     if kind == "calendar" and not items:
         assert calls == ["/api/timeline/bucket"]
     else:
-        assert calls == (["/api/timeline/bucket"] if kind == "calendar" else []) + ["/api/search/metadata"] * pages + ["/api/stacks"]
+        assert calls == (["/api/timeline/bucket"] if kind == "calendar" else []) + ["/api/search/metadata"] * pages + ["/api/stacks"] + (["/api/tags"] if result else [])
     return [a.model_dump(mode="json") for a in result]
 
 

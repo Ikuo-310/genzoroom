@@ -373,6 +373,7 @@ class CalendarTests(unittest.TestCase):
             "id": str(UUID(int=1)), "filename": "photo-0.dng", "date": "2026-09-30T12:00:00.000Z",
             "thumbnail_url": f"/api/assets/{UUID(int=1)}/thumbnail", "format": "DNG", "is_raw": True,
             "stackId": None, "primaryAssetId": None, "stackAssetCount": None,
+            "isGenzoRoomExport": False,
         })
 
     def test_day_batches_ids_preserves_bucket_order_and_deduplicates(self):

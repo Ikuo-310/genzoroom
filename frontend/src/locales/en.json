@@ -150,6 +150,7 @@
     "stackedOnly": "With STACK",
     "unstackedOnly": "Without STACK",
     "edited": "Edited in GenzoRoom",
+    "genzoRoomExport": "Exported by GenzoRoom",
     "exportQueue": {
       "addFailed": "Could not add the photo to Export Queue.",
       "removeFailed": "Could not remove the photo from Export Queue.",

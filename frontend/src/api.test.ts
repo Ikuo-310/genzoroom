@@ -12,6 +12,15 @@ describe('Home asset stack metadata', () => {
     (signal: AbortSignal) => fetchCalendarDayAssets('2026-09-01', signal),
     fetchFavoriteAssets,
   ];
+  it.each(readers)('preserves export identity and sanitizes unusable optional flags (%#)', async read => {
+    const data = [{ ...asset, isGenzoRoomExport: true }, { ...asset, isGenzoRoomExport: false },
+      asset, { ...asset, isGenzoRoomExport: 'true' }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data))));
+    try {
+      const result = await read(new AbortController().signal);
+      expect(result.map(value => value.isGenzoRoomExport)).toEqual([true, false, undefined, false]);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each(readers)('preserves separate full member IDs without adding child assets (%#)', async read => {
     const primary = { ...asset, ...stack, id: stack.primaryAssetId,
       stackMemberIds: [stack.primaryAssetId, '42345678-1234-4234-9234-123456789abc'] };

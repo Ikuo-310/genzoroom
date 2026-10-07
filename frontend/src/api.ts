@@ -35,6 +35,7 @@ export function isRecentAsset(value: unknown): value is RecentAsset {
     typeof value.thumbnail_url === 'string' &&
     typeof value.format === 'string' &&
     typeof value.is_raw === 'boolean' &&
+    (value.isGenzoRoomExport === undefined || typeof value.isGenzoRoomExport === 'boolean') &&
     ((value.stackId == null && value.primaryAssetId == null) ||
       (isUuid(value.stackId) && isUuid(value.primaryAssetId))) &&
     (value.stackAssetCount == null ||
@@ -72,7 +73,11 @@ function withSafeStackFormats(data: unknown[]): unknown[] {
 }
 
 function withSafeStackMetadata(data: unknown[]): unknown[] {
-  return withSafeStackFormats(withSafeStackCounts(data));
+  return withSafeStackFormats(withSafeStackCounts(data)).map(value => {
+    if (!isRecord(value) || value.isGenzoRoomExport === undefined || typeof value.isGenzoRoomExport === 'boolean') return value;
+    // Unusable optional identity metadata should hide the badge rather than the photo.
+    return { ...value, isGenzoRoomExport: false };
+  });
 }
 
 function isAssetDetail(value: unknown): value is AssetDetail {

@@ -96,6 +96,13 @@ function change(selector: string, value: string) {
 }
 
 describe('Home stack display', () => {
+  it.each([true, false])('uses only the primary export identity when a child is tagged (primary tagged %s)', async primaryTagged => {
+    api.recent.mockResolvedValue(photos.map(photo => ({ ...photo,
+      isGenzoRoomExport: photo.id === 'member' || photo.id === 'primary' && primaryTagged })));
+    await mount();
+    expect(host.querySelectorAll('.genzoroom-export-badge')).toHaveLength(primaryTagged ? 1 : 0);
+    if (primaryTagged) expect(host.querySelector('.genzoroom-export-badge')?.closest('.photo-card')?.querySelector('.photo-info p')?.textContent).toBe('primary.jpg');
+  });
   it.each(tabs.flatMap(tab => ['none', 'child', 'primary', 'unknown'].map(state => [tab, state] as const)))
     ('filters primary-only %s cards using full Stack member statuses: %s', async (tab, state) => {
       const primary = { ...asset('primary'), stackId: 'stack-s', primaryAssetId: 'primary',

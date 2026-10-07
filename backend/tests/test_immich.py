@@ -259,6 +259,8 @@ class ImmichAssetTests(unittest.TestCase):
                     "id": str(UUID(int=902)), "primaryAssetId": child_ids[25],
                     "assets": [*[{"id": asset_id} for asset_id in child_ids[25:]], {"id": child_ids[-1]}],
                 }])
+            if request.url.path == "/api/tags":
+                return httpx.Response(200, json=[])
             body = json.loads(request.content)
             search_requests.append(body)
             if len(search_requests) == 1:

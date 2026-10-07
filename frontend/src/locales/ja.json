@@ -144,6 +144,7 @@
     "stackedOnly": "STACKあり",
     "unstackedOnly": "STACKなし",
     "edited": "GenzoRoomで編集済み",
+    "genzoRoomExport": "GenzoRoomで出力",
     "exportQueue": {
       "addFailed": "写真を出力キューへ追加できませんでした。",
       "removeFailed": "写真を出力キューから削除できませんでした。",

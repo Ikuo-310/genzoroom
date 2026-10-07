@@ -36,6 +36,32 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
 }
 
 describe('PhotoCard format badge', () => {
+  it.each([true, false, undefined])('shows the export icon only for positive asset metadata (%s)', async isGenzoRoomExport => {
+    await act(async () => root.render(<PhotoCard asset={{ ...interactionAsset, isGenzoRoomExport }} language="en" edited queueKnown
+      onQueueToggle={vi.fn()} onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />));
+    const badge = host.querySelector('.genzoroom-export-badge');
+    expect(!!badge).toBe(isGenzoRoomExport === true);
+    if (badge) {
+      expect(badge.getAttribute('role')).toBe('img');
+      expect(badge.getAttribute('title')).toBe('Exported by GenzoRoom');
+      expect(badge.getAttribute('aria-label')).toBe('Exported by GenzoRoom');
+      expect(badge.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+      expect(badge.querySelector('text, button, [tabindex]')).toBeNull();
+      expect(badge.hasAttribute('tabindex')).toBe(false);
+      expect(badge.tagName).toBe('SPAN');
+      expect(badge.parentElement).toBe(host.querySelector('.photo-card-badges'));
+      expect(host.querySelector('.edited-badge')?.parentElement).toBe(badge.parentElement);
+      expect(host.querySelector('.photo-card-button')?.contains(badge)).toBe(false);
+    }
+  });
+  it('localizes the GenzoRoom export badge in Japanese', async () => {
+    await i18n.changeLanguage('ja');
+    await act(async () => root.render(<PhotoCard asset={{ ...interactionAsset, isGenzoRoomExport: true }} language="ja"
+      onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />));
+    const badge = host.querySelector('.genzoroom-export-badge')!;
+    expect(badge.getAttribute('title')).toBe('GenzoRoomで出力');
+    expect(badge.getAttribute('aria-label')).toBe('GenzoRoomで出力');
+  });
   it.each([false, true])('isolates the sibling Queue button from navigation and selection (selection mode %s)', async selectionMode => {
     const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn(), onPreviewRequest = vi.fn(), onQueueToggle = vi.fn();
     await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" edited selected={selectionMode}

@@ -5,6 +5,7 @@ export type RecentAsset = {
   thumbnail_url: string;
   format: string;
   is_raw: boolean;
+  isGenzoRoomExport?: boolean;
   stackId?: string | null;
   primaryAssetId?: string | null;
   stackAssetCount?: number | null;

@@ -22,6 +22,7 @@ MAX_RECENT_ASSET_LIMIT = 500
 RECENT_ASSET_LIMIT_STEP = 50
 ALBUM_ASSET_PAGE_SIZE = 1000
 CALENDAR_FORMAT_BATCH_SIZE = 100
+HOME_EXPORT_TAG_BATCH_SIZE = 500
 logger = logging.getLogger(__name__)
 FORMAT_ALIASES = {
     "jpg": "JPEG",
@@ -121,6 +122,7 @@ class RecentAsset(BaseModel):
     thumbnail_url: str
     format: str
     is_raw: bool
+    isGenzoRoomExport: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     stackId: UUID | None = None
     primaryAssetId: UUID | None = None
     stackAssetCount: int | None = None
@@ -511,7 +513,7 @@ async def get_recent_assets(
 
     try:
         body = response.json()
-        assets = _search_assets(body)
+        assets = _search_assets(body, home_metadata=True)
         next_cursor = _recent_next_cursor(body)
     except (KeyError, TypeError, ValueError):
         _log_response_failure(response, "unexpected_response")
@@ -547,7 +549,7 @@ async def get_recent_assets(
                         raise _request_error(page_response)
                     try:
                         page_body = page_response.json()
-                        page_assets = _search_assets(page_body)
+                        page_assets = _search_assets(page_body, home_metadata=True)
                         next_cursor = _recent_next_cursor(page_body)
                         if next_cursor is not None and next_cursor in seen_cursors:
                             raise TypeError
@@ -563,10 +565,10 @@ async def get_recent_assets(
             raise ImmichRequestError(
                 "unreachable", "The Immich server could not be reached.",
             ) from error
-    return result
+    return await _with_home_export_tags(url, key, result, transport=transport)
 
 
-def _search_assets(body: object) -> list[RecentAsset]:
+def _search_assets(body: object, *, home_metadata: bool = False) -> list[RecentAsset]:
     if not isinstance(body, Mapping) or not isinstance(body.get("assets"), Mapping):
         raise TypeError
     items = body["assets"].get("items")
@@ -591,6 +593,7 @@ def _search_assets(body: object) -> list[RecentAsset]:
             thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
             format=image_format,
             is_raw=is_raw,
+            isGenzoRoomExport=_home_export_tag(item.get("tags")) if home_metadata else None,
         ))
     return assets
 
@@ -695,7 +698,51 @@ async def _with_asset_stacks(
 ) -> list[RecentAsset]:
     # Home remains available when Immich exposes an incomplete Stack snapshot; editing keeps strict validation.
     stacks = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport), require_primary=False)
-    return _attach_home_stack_metadata(assets, stacks)
+    return await _with_home_export_tags(url, key, _attach_home_stack_metadata(assets, stacks), transport=transport)
+
+
+def _home_export_tag(tags: object) -> bool | None:
+    if not isinstance(tags, list) or any(not isinstance(tag, Mapping) or not isinstance(tag.get("value"), str) for tag in tags):
+        return None
+    return any(tag["value"] == "GenzoRoom" for tag in tags)
+
+
+async def _with_home_export_tags(
+    url: str, key: str, assets: list[RecentAsset], *, transport: httpx.AsyncBaseTransport | None = None,
+) -> list[RecentAsset]:
+    pending = [asset for asset in assets if asset.isGenzoRoomExport is None]
+    if not pending:
+        return assets
+    try:
+        async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport) as client:
+            response = await _immich_request(client, "GET", url, "/tags", headers={"x-api-key": key, "Accept": "application/json"})
+        if response.status_code != 200:
+            raise _request_error(response)
+        tags = response.json()
+        if not isinstance(tags, list) or any(not isinstance(tag, Mapping) or not isinstance(tag.get("value"), str) for tag in tags):
+            raise ValueError
+        tag_ids = [UUID(tag["id"]) for tag in tags if tag["value"] == "GenzoRoom"]
+        tagged_ids = set()
+        # Search does not load tag relations in Immich v3.2.4; resolve membership in bounded batches, never per card.
+        for start in range(0, len(pending), HOME_EXPORT_TAG_BATCH_SIZE) if tag_ids else []:
+            batch = {asset.id for asset in pending[start:start + HOME_EXPORT_TAG_BATCH_SIZE]}
+            matches = await _search_all_assets(url, key, {
+                "type": {"eq": "IMAGE"}, "trashedAt": {"eq": None},
+                "tagIds": {"any": [str(tag_id) for tag_id in tag_ids]},
+                "or": [{"id": {"eq": str(asset_id)}} for asset_id in sorted(batch)],
+            }, "fileCreatedAt", transport=transport)
+            matched_ids = {asset.id for asset in matches}
+            if not matched_ids <= batch:
+                raise ValueError
+            tagged_ids.update(matched_ids)
+        for asset in pending:
+            asset.isGenzoRoomExport = asset.id in tagged_ids
+    except (ImmichRequestError, httpx.InvalidURL, httpx.RequestError, KeyError, TypeError, ValueError) as error:
+        # Export identity is optional; a failed tag lookup must preserve the authoritative Home photo list.
+        _immich_log(level="warn", component="immich", event="home.exportTags.unavailable", context={
+            "assetCount": len(pending), "errorCode": getattr(error, "error_code", "unexpected_response"),
+        })
+    return assets
 
 
 def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapshot) -> list[RecentAsset]:
@@ -786,7 +833,7 @@ async def _search_home_assets(
 ) -> list[RecentAsset]:
     url, key = _require_configuration(immich_url, api_key)
     home_filter = {**search_filter, "trashedAt": {"eq": None}}
-    assets = await _search_all_assets(url, key, home_filter, order_field, transport=transport)
+    assets = await _search_all_assets(url, key, home_filter, order_field, transport=transport, home_metadata=True)
     # Join once after pagination, rather than fetching stacks for each page or asset.
     return await _with_asset_stacks(url, key, assets, transport=transport)
 
@@ -837,7 +884,7 @@ async def get_calendar_day_assets(
         assets = await _search_all_assets(url, key, {
             "type": {"eq": "IMAGE"}, "visibility": {"eq": "timeline"}, "trashedAt": {"eq": None},
             "or": [{"id": {"eq": str(asset_id)}} for asset_id in batch],
-        }, "fileCreatedAt", transport=transport)
+        }, "fileCreatedAt", transport=transport, home_metadata=True)
         assets_by_id.update((asset.id, asset) for asset in assets)
     # Metadata order is independent of timeline order; join stacks only after all batches succeed.
     ordered_assets = [assets_by_id[asset_id] for asset_id in asset_ids if asset_id in assets_by_id]
@@ -893,7 +940,7 @@ async def _search_all_assets(
     api_key: str | None,
     search_filter: dict[str, object],
     order_field: str,
-    *, transport: httpx.AsyncBaseTransport | None = None,
+    *, transport: httpx.AsyncBaseTransport | None = None, home_metadata: bool = False,
 ) -> list[RecentAsset]:
     url, key = _require_configuration(immich_url, api_key)
     assets: list[RecentAsset] = []
@@ -920,7 +967,7 @@ async def _search_all_assets(
                     raise _request_error(response)
                 try:
                     body = response.json()
-                    page = _search_assets(body)
+                    page = _search_assets(body, home_metadata=home_metadata)
                     next_cursor = body["assets"]["nextCursor"]
                     if next_cursor is not None and (
                         not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors
