@@ -2,6 +2,10 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Backend production Python 3.14移行（2026-10-07）
+
+Production Docker baseを`python:3.14-slim`へ更新し、Windows development `.venv`とPython major/minorを3.14で統一した。requirements pin（FastAPI 0.141.1、HTTPX 0.28.1、Uvicorn 0.52.4、Pillow 12.3.0、NumPy 2.5.3）は変更していない。Windows `.venv`はPython 3.14.5で5依存をimportでき、Backend full pytestは546 passed、Python compileallと`git diff --check`も成功した。Docker daemonへ接続できなかったためDocker image build / container smokeは未実施。PyPIでPillow / NumPyのCPython 3.14 manylinux wheelと、FastAPI / HTTPX / Uvicornのplatform-independent wheelsを確認した。venvにpipがなくDocker buildも未実施のため、依存installをこの環境で実行確認したわけではない。
+
 ## Export Phase 5B filename / JPEG metadata（2026-10-07）
 
 `ExportArtifact(filename, jpeg)` と `create_export_artifact()` を追加した。source JPEG bytes、source filename、呼び出し側が取得したfamily filename一覧、normalized `RenderedImage` を受け、filename決定 → source Decoder validation → whitelist metadata再構築 → 既存JPEG Encoderの順で処理する。standalone境界ではJPEG自体やcritical ICCの安全性を呼び出し側へ仮定しないため、sourceを追加decodeし、そのRGB bufferをmetadata処理前に破棄する。Renderer / Recipe pixel math、compatibility fixture、Queue、Diagnostics UI、保存形式は変更していない。actual Export RuntimeとImmich upload/register、tag付与、Stack/COVER操作は未実装。Immich `GenzoRoom` tagはPhase 5Eで扱う。

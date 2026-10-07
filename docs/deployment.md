@@ -100,7 +100,7 @@ The frontend image uses Vite only during the build. nginx serves the resulting s
 
 ### Optional checks before deployment
 
-Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker host. The current development toolchain uses Node.js 24 and Python 3.13. Start from the repository root with a Python virtual environment activated:
+Local checks can catch syntax and configuration errors, but they do not replace validation on the target Docker host. The current development toolchain uses Node.js 24 and Python 3.14. Start from the repository root with a Python virtual environment activated:
 
 ```sh
 cd frontend

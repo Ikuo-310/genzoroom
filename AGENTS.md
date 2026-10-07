@@ -46,6 +46,7 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 
 ## Compatibility and data integrity
 
+- The supported Backend Python baseline is 3.14 for development, tests, and production Docker. Check Backend compatibility against Python 3.14. The Windows development/test environment uses the repository `.venv` on Python 3.14; do not pin a patch version here.
 - Treat Recipe, History, Undo/Redo, persistent edit state, and frontend/backend validation as interconnected systems. When modifying any of them, check the impact on the others.
 - Preserve compatibility with supported saved-data versions unless a breaking change is explicitly authorized.
 - Do not change persistent-data versions or database schemas unnecessarily.
