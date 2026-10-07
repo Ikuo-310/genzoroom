@@ -184,6 +184,7 @@ class AssetDetail(BaseModel):
     thumbnail_url: str
     format: str
     is_raw: bool
+    is_favorite: bool = Field(exclude=True)
     exif: AssetExif
 
 
@@ -1121,7 +1122,8 @@ async def get_asset_detail(
             raise TypeError
         filename = body["originalFileName"]
         date = body["fileCreatedAt"]
-        if not isinstance(filename, str) or not isinstance(date, str):
+        is_favorite = body["isFavorite"]
+        if not isinstance(filename, str) or not isinstance(date, str) or type(is_favorite) is not bool:
             raise TypeError
         exif_value = body.get("exifInfo")
         exif = exif_value if isinstance(exif_value, Mapping) else {}
@@ -1141,6 +1143,7 @@ async def get_asset_detail(
         thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
         format=image_format,
         is_raw=is_raw,
+        is_favorite=is_favorite,
         exif=AssetExif(
             date_time_original=_optional_string(exif.get("dateTimeOriginal")),
             make=_optional_string(exif.get("make")),

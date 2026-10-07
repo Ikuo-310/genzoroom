@@ -100,7 +100,8 @@ class ImmichExportRegistrar:
                 response = await _immich_request(client, "POST", url, "/assets", expected_status=(200, 201),
                     headers=headers, timeout=UPLOAD_TIMEOUT,
                     data={"filename": artifact.filename, "fileCreatedAt": _date(source.date),
-                          "fileModifiedAt": _date(context.export_timestamp)},
+                          "fileModifiedAt": _date(context.export_timestamp),
+                          "isFavorite": source.is_favorite},
                     files={"assetData": (artifact.filename, artifact.jpeg, "image/jpeg")})
                 body = response.json()
                 if not isinstance(body, Mapping) or set(body) != {"status", "id"} \

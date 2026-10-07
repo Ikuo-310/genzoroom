@@ -32,7 +32,8 @@ def transport_for(stream, filename="PXL_RAW-01.COVER.jpg", status=200, media_typ
     def handler(request):
         assert request.headers["x-api-key"] == "secret"
         if request.url.path == f"/api/assets/{ASSET_ID}":
-            return httpx.Response(200, json={"type": "IMAGE", "originalFileName": filename, "fileCreatedAt": "2026-09-29"})
+            return httpx.Response(200, json={"type": "IMAGE", "originalFileName": filename,
+                                             "fileCreatedAt": "2026-09-29", "isFavorite": False})
         assert request.url.path == f"/api/assets/{ASSET_ID}/original"
         assert not request.url.params
         return httpx.Response(status, headers={"content-type": media_type}, stream=stream)

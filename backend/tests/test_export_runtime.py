@@ -350,7 +350,7 @@ class Source:
         if self.gate:
             await self.gate.wait()
         return AssetDetail(id=asset_id, filename="IMG.JPG", date="2026-10-07", preview_url="",
-                           thumbnail_url="", format="JPEG", is_raw=False, exif=AssetExif())
+                           thumbnail_url="", format="JPEG", is_raw=False, is_favorite=False, exif=AssetExif())
 
     async def original(self, asset_id):
         original = Original(b"invalid JPEG" if self.invalid == asset_id else jpg(), self.broken == asset_id)
@@ -566,7 +566,8 @@ def test_immich_source_adapter_closes_actual_httpx_stream_and_client(db, broken)
     stream, clients = Stream(), []
     def response(request):
         if request.url.path == f"/api/assets/{A}":
-            return httpx.Response(200, json={"type": "IMAGE", "originalFileName": "IMG.JPG", "fileCreatedAt": "2026-10-07"})
+            return httpx.Response(200, json={"type": "IMAGE", "originalFileName": "IMG.JPG",
+                                             "fileCreatedAt": "2026-10-07", "isFavorite": False})
         assert request.url.path == f"/api/assets/{A}/original"
         return httpx.Response(200, headers={"content-type": "image/jpeg"}, stream=stream)
     source = ImmichExportSource("http://immich", "secret", transport=httpx.MockTransport(response))

@@ -142,6 +142,7 @@ class ImmichAssetTests(unittest.TestCase):
             "type": "IMAGE",
             "originalFileName": "photo.jpg",
             "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+            "isFavorite": False,
             "exifInfo": {"make": "Example Camera Co.", "fNumber": 2.8, **exif},
         }
         # Raw JSON permits non-finite upstream values that httpx's json= encoder rejects.
@@ -360,6 +361,7 @@ class ImmichAssetTests(unittest.TestCase):
                     "type": "IMAGE",
                     "originalFileName": "capture.DNG",
                     "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+                    "isFavorite": True,
                     "exifInfo": {
                         "dateTimeOriginal": "2026-09-01T12:00:00.000Z",
                         "make": "Example Camera Co.",
@@ -389,6 +391,7 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(detail.preview_url, f"/api/assets/{ASSET_ID}/preview")
         self.assertEqual(detail.format, "DNG")
         self.assertTrue(detail.is_raw)
+        self.assertTrue(detail.is_favorite)
         self.assertEqual(detail.exif.focal_length, 35)
         self.assertEqual(detail.exif.width, 6000)
         self.assertEqual(detail.exif.latitude, 35.0)
@@ -401,6 +404,7 @@ class ImmichAssetTests(unittest.TestCase):
             "type": "IMAGE",
             "originalFileName": "photo.jpg",
             "fileCreatedAt": "2026-09-01T12:00:00.000Z",
+            "isFavorite": False,
         }
         detail = asyncio.run(get_asset_detail(
             IMMICH_URL,
@@ -410,6 +414,20 @@ class ImmichAssetTests(unittest.TestCase):
         ))
 
         self.assertEqual(detail.exif.model_dump(exclude_none=True), {})
+
+    def test_asset_detail_rejects_missing_or_non_boolean_favorite(self):
+        for value in (None, 0, 1, "true", {}):
+            with self.subTest(value=value):
+                body = {"type": "IMAGE", "originalFileName": "photo.jpg",
+                        "fileCreatedAt": "2026-09-01T12:00:00.000Z"}
+                if value is not None:
+                    body["isFavorite"] = value
+                with self.assertRaises(ImmichRequestError) as raised:
+                    asyncio.run(get_asset_detail(
+                        IMMICH_URL, API_KEY, ASSET_ID,
+                        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)),
+                    ))
+                self.assertEqual(raised.exception.error_code, "unexpected_response")
 
     def test_ignores_nonfinite_optional_exif_integers(self):
         fields = {"iso": "iso", "exifImageWidth": "width", "exifImageHeight": "height"}
@@ -483,6 +501,7 @@ class ImmichAssetTests(unittest.TestCase):
         detail = self.run_detail_with_exif({})
         self.assertIsNone(detail.exif.latitude)
         self.assertIsNone(detail.exif.longitude)
+        self.assertFalse(detail.is_favorite)
 
     def test_gps_is_added_to_the_existing_detail_endpoint_contract(self):
         detail = self.run_detail_with_exif({"latitude": 35.123, "longitude": 139.456})
@@ -545,6 +564,7 @@ class ImmichAssetTests(unittest.TestCase):
             thumbnail_url=f"/api/assets/{ASSET_ID}/thumbnail",
             format="JPEG",
             is_raw=False,
+            is_favorite=False,
             exif=AssetExif(),
         )
         with patch("main.get_asset_detail", new=AsyncMock(return_value=detail)):

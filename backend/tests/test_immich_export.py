@@ -23,9 +23,9 @@ STAMP = '2026-10-07T12:34:56.123Z'
 DATE = '2020-02-29T01:02:03.000Z'
 
 
-def detail(asset_id=A, filename='IMG.JPG'):
+def detail(asset_id=A, filename='IMG.JPG', is_favorite=False):
     return AssetDetail(id=asset_id, filename=filename, date=DATE, preview_url='', thumbnail_url='',
-                       format='JPEG', is_raw=False, exif=AssetExif())
+                       format='JPEG', is_raw=False, is_favorite=is_favorite, exif=AssetExif())
 
 
 def context():
@@ -67,13 +67,15 @@ class Remote:
             return search(['IMG.JPG', *[value[0] for value in self.outputs.values()]])
         if path == '/assets' and request.method == 'POST':
             parts = multipart(request)
-            assert set(parts) == {'assetData', 'filename', 'fileCreatedAt', 'fileModifiedAt'}
+            assert set(parts) == {'assetData', 'filename', 'fileCreatedAt', 'fileModifiedAt', 'isFavorite'}
             content = parts['assetData'].get_payload(decode=True)
             filename = parts['filename'].get_payload(decode=True).decode()
             assert parts['assetData'].get_filename() == filename and parts['assetData'].get_content_type() == 'image/jpeg'
             assert parts['fileCreatedAt'].get_payload(decode=True).decode() == DATE
             modified = parts['fileModifiedAt'].get_payload(decode=True).decode()
-            self.uploads.append((filename, content, modified))
+            favorite = parts['isFavorite'].get_payload(decode=True).decode()
+            assert favorite in ('true', 'false')
+            self.uploads.append((filename, content, modified, favorite == 'true'))
             if content in self.outputs:
                 asset_id = self.outputs[content][1]
                 return httpx.Response(200, json={'id': str(asset_id), 'status': 'duplicate'})
@@ -114,7 +116,7 @@ class Remote:
                 return httpx.Response(200, content=jpg(), headers={'Content-Type': 'image/jpeg'})
             tags = [{'id': str(TAG), 'value': 'GenzoRoom'}] if asset_id in self.tags else []
             return httpx.Response(200, json={'id': str(asset_id), 'type': 'IMAGE', 'originalFileName': 'IMG.JPG',
-                'fileCreatedAt': DATE, 'tags': tags})
+                'fileCreatedAt': DATE, 'isFavorite': False, 'tags': tags})
         raise AssertionError((request.method, path))
 
 
@@ -185,7 +187,7 @@ def test_registration_upload_tag_stack_and_cover_cases(existing, expected_write)
     artifact = ExportArtifact('IMG-Genzo01.jpg', b'JPEG content')
     result = asyncio.run(registrar(remote).register(detail(), artifact, context()))
     assert result.registered_asset_id == OUT
-    assert remote.uploads[0] == (artifact.filename, artifact.jpeg, STAMP)
+    assert remote.uploads[0][:3] == (artifact.filename, artifact.jpeg, STAMP)
     writes = [(method, path) for method, path in remote.calls if path.startswith('/stacks') and method != 'GET']
     assert [method for method, _ in writes] == ([expected_write] if expected_write else [])
     assert remote.stacks[0]['primaryAssetId'] == str(OUT)
@@ -193,6 +195,17 @@ def test_registration_upload_tag_stack_and_cover_cases(existing, expected_write)
     if existing and expected_write == 'POST':
         assert {str(A), str(B), str(C), str(OUT)} == {member['id'] for member in remote.stacks[0]['assets']}
     assert not any(method == 'DELETE' for method, _ in remote.calls)
+
+
+@pytest.mark.parametrize('is_favorite', [True, False])
+def test_registration_upload_inherits_source_favorite_without_update(is_favorite):
+    remote = Remote()
+    artifact = ExportArtifact('IMG-Genzo01.jpg', b'JPEG content')
+    asyncio.run(registrar(remote).register(detail(is_favorite=is_favorite), artifact, context()))
+    assert remote.uploads[0][:2] == (artifact.filename, artifact.jpeg)
+    assert remote.uploads[0][3] is is_favorite
+    assert ('POST', '/assets') in remote.calls
+    assert not any(method == 'PUT' and path.startswith('/assets') for method, path in remote.calls)
 
 
 @pytest.mark.parametrize('unrelated', [
