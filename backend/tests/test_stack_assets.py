@@ -184,6 +184,33 @@ def test_home_skips_stack_with_duplicate_member_inside_entry(kind):
     assert result == []
 
 
+def test_home_stack_formats_use_primary_first_and_stable_unique_identity():
+    members = [
+        {"id": IDS[1], "originalFileName": "second.jpg"},
+        {"id": IDS[2], "originalFileName": "third.jpeg"},
+        {"id": IDS[0], "originalFileName": "cover.dng"},
+        {"id": IDS[3], "originalFileName": "fourth.heic"},
+        {"id": IDS[4], "originalFileName": "fifth.dng"},
+    ]
+    result = fetch("recent", [asset(i) for i in IDS[:5]], [stack(member_ids=IDS[:5]) | {"assets": members}])
+
+    assert result[0]["stackFormats"] == [
+        {"format": "DNG", "isRaw": True},
+        {"format": "JPEG", "isRaw": False},
+        {"format": "HEIC", "isRaw": False},
+    ]
+    assert len(result) == 1
+
+
+def test_home_incomplete_stack_formats_do_not_hide_the_photo():
+    incomplete = stack(member_ids=IDS[:2])
+    incomplete["assets"][1]["originalFileName"] = "member.jpg"
+    result = fetch("recent", [asset(IDS[0]), asset(IDS[1])], [incomplete])
+
+    assert [item["id"] for item in result] == [IDS[0]]
+    assert "stackFormats" not in result[0]
+
+
 @pytest.mark.parametrize("invalid", [
     lambda: stack() | {"id": "bad"},
     lambda: stack() | {"primaryAssetId": "bad"},

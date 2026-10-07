@@ -183,7 +183,7 @@ describe('Home stack display', () => {
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelectorAll('.photo-card img')[1].getAttribute('src')).toBe('/thumb/primary');
-    expect(host.querySelector('.stack-assets')?.textContent).toBe('4');
+    expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
     expect(host.querySelector('.stack-assets')?.getAttribute('aria-label')).toBe('Stack, 4 assets');
     expect(api.statuses).toHaveBeenCalledWith(photos.map(a => a.id), expect.any(AbortSignal));
     expect(photos.map(a => a.id)).toEqual(['x', 'member', 'y', 'primary']);
@@ -194,7 +194,7 @@ describe('Home stack display', () => {
     api.album.mockResolvedValue(subset); api.day.mockResolvedValue(subset);
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'member.dng', 'y.jpg']);
-    expect(host.querySelector('.stack-assets')?.textContent).toBe('4');
+    expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
   });
 
   it('aggregates Stack edits before type expansion and collapse', async () => {
@@ -261,7 +261,7 @@ describe('Home stack display', () => {
     expect(filenames()).toEqual(['primary.jpg']);
     change('.photo-filter-control select', 'raw');
     expect(filenames()).toEqual(['member.dng']);
-    expect(host.querySelector('.stack-assets')?.textContent).toBe('4');
+    expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
     change('.photo-filter-control select', 'nonRaw');
     expect(filenames()).toEqual(['primary.jpg']);
     change('.stack-filter-control select', 'unstacked');

@@ -19,7 +19,8 @@ const interactionAsset: RecentAsset = {
   id: 'asset-id', filename: 'photo.jpg', date: '2026-09-08', thumbnail_url: '/thumbnail', format: 'JPEG', is_raw: false,
 };
 
-function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string, stackAssetCount?: number | null) {
+function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string, stackAssetCount?: number | null,
+  stackFormats?: RecentAsset['stackFormats']) {
   const asset: RecentAsset = {
     id: 'asset-id',
     filename,
@@ -29,6 +30,7 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
     is_raw: isRaw,
     stackId,
     stackAssetCount,
+    stackFormats,
   };
   return renderToStaticMarkup(<PhotoCard asset={asset} edited={edited} language="en" onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />);
 }
@@ -151,7 +153,24 @@ describe('PhotoCard format badge', () => {
 
   it('shows the singleton Stack as an invalid Stack warning without changing its badge structure', () => {
     const markup = renderBadge('JPEG', false, 'photo.jpg', undefined, 'stack-id', 1);
-    expect(markup).toContain('<div class="stack-assets" role="img" aria-label="Invalid Stack, 1 asset"><span class="stack-asset-count stack-asset-count-error">1</span></div>');
+    expect(markup).toContain('<div class="stack-assets" role="img" aria-label="Invalid Stack, 1 asset"><div class="stack-format-badges"><span class="format-badge">JPEG</span></div><span class="stack-asset-count stack-asset-count-error">1</span></div>');
+  });
+
+  it.each([
+    ['JPEG', false, [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }], ['JPEG', 'DNG'], 2],
+    ['JPEG', false, [{ format: 'JPEG', isRaw: false }, { format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }], ['JPEG', 'DNG'], 3],
+    ['JPEG', false, [{ format: 'JPEG', isRaw: false }, { format: 'JPEG', isRaw: false }], ['JPEG'], 2],
+    ['DNG', true, [{ format: 'DNG', isRaw: true }, { format: 'JPEG', isRaw: false }], ['DNG', 'JPEG'], 2],
+    ['JPEG', false, [{ format: 'JPEG', isRaw: false }, { format: 'HEIC', isRaw: false }, { format: 'DNG', isRaw: true }], ['JPEG', 'HEIC', 'DNG'], 3],
+  ] as const)('renders Stack format list in its supplied stable order', (coverFormat, coverRaw, formats, expected, count) => {
+    const markup = renderBadge(coverFormat, coverRaw, 'photo.jpg', undefined, 'stack-id', count, [...formats]);
+    const card = document.createElement('div');
+    card.innerHTML = markup;
+    const badges = Array.from(card.querySelectorAll('.stack-format-badges .format-badge'));
+    expect(badges.map(badge => badge.textContent)).toEqual(expected);
+    expect(badges.filter(badge => badge.textContent === 'JPEG')).toHaveLength(expected.filter(format => format === 'JPEG').length);
+    expect(card.querySelector('.stack-asset-count')?.textContent).toBe(String(count));
+    expect(card.querySelectorAll('.stack-format-badges .format-badge')).toHaveLength(expected.length);
   });
 
   it('shows no Stack labels for unstacked photos or missing and malformed counts', () => {

@@ -126,6 +126,8 @@ class RecentAsset(BaseModel):
     stackAssetCount: int | None = None
     # Only Home Stack covers expose membership; unrelated asset APIs retain their response shape.
     stackMemberIds: list[UUID] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Home can render the complete format set without resolving each Stack card separately.
+    stackFormats: list[dict[str, str | bool]] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ImmichStack(BaseModel):
@@ -700,16 +702,35 @@ def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapsh
     lookup = {}
     for stack in snapshot.stacks:
         member_ids = [UUID(member["id"]) for member in stack["assets"]]
+        members_by_id = {UUID(member["id"]): member for member in stack["assets"]}
+        primary_id = UUID(stack["primaryAssetId"])
+        stack_formats = None
+        if primary_id in members_by_id:
+            ordered_members = [primary_id] + [member_id for member_id in member_ids if member_id != primary_id]
+            formats = []
+            seen_formats = set()
+            for member_id in ordered_members:
+                filename = members_by_id[member_id].get("originalFileName")
+                if not isinstance(filename, str):
+                    formats = []
+                    break
+                image_format, is_raw = classify_image_format(filename)
+                identity = (image_format, is_raw)
+                if identity not in seen_formats:
+                    seen_formats.add(identity)
+                    formats.append({"format": image_format, "isRaw": is_raw})
+            stack_formats = formats or None
         for member_id in member_ids:
-            lookup[member_id] = (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(member_ids), member_ids)
+            lookup[member_id] = (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(member_ids), member_ids, stack_formats)
     # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
     for asset in assets:
         stack_info = lookup.get(asset.id)
         if stack_info is None:
             asset.stackId = asset.primaryAssetId = asset.stackAssetCount = None
             asset.stackMemberIds = None
+            asset.stackFormats = None
         else:
-            asset.stackId, asset.primaryAssetId, asset.stackAssetCount, asset.stackMemberIds = stack_info
+            asset.stackId, asset.primaryAssetId, asset.stackAssetCount, asset.stackMemberIds, asset.stackFormats = stack_info
     # A missing primary can leave only Stack children in search results; those are never Home cards.
     return [asset for asset in assets if asset.id not in snapshot.quarantined_member_ids
             and (asset.stackId is None or asset.id == asset.primaryAssetId)]

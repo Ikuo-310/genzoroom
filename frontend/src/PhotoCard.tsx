@@ -10,6 +10,14 @@ import { isPrimaryModifier } from './shortcutModifiers';
 
 export type { RecentAsset } from './assets';
 
+function stackFormatList(asset: RecentAsset) {
+  const formats = asset.stackFormats?.length ? asset.stackFormats : [{ format: asset.format, isRaw: asset.is_raw }];
+  const unique = formats.filter((format, index) => formats.findIndex(candidate =>
+    candidate.format === format.format && candidate.isRaw === format.isRaw) === index);
+  const coverIndex = unique.findIndex(format => format.format === asset.format && format.isRaw === asset.is_raw);
+  return coverIndex > 0 ? [unique[coverIndex], ...unique.slice(0, coverIndex), ...unique.slice(coverIndex + 1)] : unique;
+}
+
 type PhotoCardProps = {
   asset: RecentAsset;
   language: AppLanguage;
@@ -94,12 +102,15 @@ export function PhotoCard({
       >
         <div className="thumbnail">
           <img src={asset.thumbnail_url} alt="" loading="lazy" />
-          <FormatBadge format={asset.format} isRaw={asset.is_raw} />
-          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1 && (
+          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1 ? (
             <div className="stack-assets" role="img" aria-label={t(asset.stackAssetCount === 1 ? 'photos.invalidStack' : 'photos.stackAssets', { count: asset.stackAssetCount })}>
+              <div className="stack-format-badges">
+                {stackFormatList(asset).map(({ format, isRaw }, index) =>
+                  <FormatBadge key={`${format}:${isRaw}:${index}`} format={format} isRaw={isRaw} />)}
+              </div>
               <span className={`stack-asset-count${asset.stackAssetCount === 1 ? ' stack-asset-count-error' : ''}`}>{asset.stackAssetCount}</span>
             </div>
-          )}
+          ) : <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>
         <div className="photo-info">
           <p title={asset.filename}>{asset.filename}</p>

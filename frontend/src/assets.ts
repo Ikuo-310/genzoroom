@@ -9,7 +9,10 @@ export type RecentAsset = {
   primaryAssetId?: string | null;
   stackAssetCount?: number | null;
   stackMemberIds?: string[] | null;
+  stackFormats?: StackFormat[] | null;
 };
+
+export type StackFormat = { format: string; isRaw: boolean };
 
 export type ImmichStack = { id: string; primaryAssetId: string; assets: RecentAsset[] };
 

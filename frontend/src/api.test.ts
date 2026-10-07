@@ -19,6 +19,22 @@ describe('Home asset stack metadata', () => {
     try { expect(await read(new AbortController().signal)).toEqual([primary]); }
     finally { vi.unstubAllGlobals(); }
   });
+  it('preserves the ordered Stack format metadata', async () => {
+    const stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
+    const primary = { ...asset, ...stack, id: stack.primaryAssetId, stackFormats };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([primary]))));
+    try { expect((await fetchRecentAssets(100, new AbortController().signal))[0].stackFormats).toEqual(stackFormats); }
+    finally { vi.unstubAllGlobals(); }
+  });
+  it.each([['bad'], [{ format: 'JPEG', isRaw: 'false' }], [null]])('sanitizes malformed optional Stack formats without dropping the photo (%#)', async stackFormats => {
+    const primary = { ...asset, ...stack, id: stack.primaryAssetId, stackFormats };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([primary]))));
+    try {
+      const result = await fetchRecentAssets(100, new AbortController().signal);
+      expect(result).toHaveLength(1);
+      expect(result[0].stackFormats).toBeNull();
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each([[], ['bad'], [stack.primaryAssetId, stack.primaryAssetId],
     ['42345678-1234-4234-9234-123456789abc'], 'bad'])('rejects malformed member-ID metadata (%#)', stackMemberIds => {
     expect(isRecentAsset({ ...asset, ...stack, id: stack.primaryAssetId, stackMemberIds })).toBe(false);
