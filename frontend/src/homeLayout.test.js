@@ -359,7 +359,7 @@ describe('Home and thumbnail layout', () => {
     const tabs = document.createElement('div'); tabs.className = 'home-tabs';
     const controls = document.createElement('div');
     controls.className = 'home-toolbar-controls';
-    controls.innerHTML = '<label class="home-control photo-filter-control"><span class="home-control-label">Type</span><select><option>All</option></select></label><label class="home-control edit-status-filter-control"><span class="home-control-label">Edit status</span><select><option>All</option><option>Edited</option><option>Not edited</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
+    controls.innerHTML = '<div class="home-control edit-status-filter-control"><label class="home-control-label" for="edit-status">Edit status</label><span class="home-select-shell"><select id="edit-status" class="home-select-interactive"><option>All</option><option>Edited</option><option>Unedited</option></select><select class="home-select-sizing" aria-hidden="true" tabindex="-1"><option>All</option></select></span></div><div class="home-control develop-status-filter-control"><label class="home-control-label" for="develop-status">Developed</label><span class="home-select-shell"><select id="develop-status" class="home-select-interactive"><option>Both</option><option>Developed</option><option>Undeveloped</option></select><select class="home-select-sizing" aria-hidden="true" tabindex="-1"><option>Both</option></select></span></div><div class="home-control recent-count-control"><label class="home-control-label" for="recent-count">Recent count</label><span class="home-select-shell"><select id="recent-count" class="home-select-interactive"><option>100</option><option>500</option></select><select class="home-select-sizing" aria-hidden="true" tabindex="-1"><option>100</option></select></span></div><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
     toolbar.append(tabs, controls); host.querySelector('.home-content').prepend(toolbar);
     expect(getComputedStyle(toolbar).display).toBe('flex');
     expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
@@ -367,10 +367,35 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(controls).flexWrap).toBe('wrap');
     expect(controls.querySelectorAll('.home-control')).toHaveLength(4);
     for (const group of controls.querySelectorAll('.home-control')) expect(getComputedStyle(group).flexDirection).toBe('column');
-    expect(getComputedStyle(controls.querySelector('.photo-filter-control select')).width).toBe('88px');
-    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).width).toBe('auto');
-    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).minWidth).toBe('88px');
-    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).paddingRight).toBe('8px');
+    for (const selector of ['.edit-status-filter-control', '.develop-status-filter-control', '.recent-count-control']) {
+      const control = controls.querySelector(selector);
+      const sizing = control.querySelector('.home-select-sizing');
+      const interactive = control.querySelector('.home-select-interactive');
+      const shell = control.querySelector('.home-select-shell');
+      expect(sizing.tagName).toBe('SELECT');
+      expect(sizing.options).toHaveLength(1);
+      expect(sizing.getAttribute('aria-hidden')).toBe('true');
+      expect(sizing.tabIndex).toBe(-1);
+      expect(getComputedStyle(sizing).position).not.toBe('absolute');
+      expect(getComputedStyle(sizing).visibility).toBe('hidden');
+      expect(getComputedStyle(sizing).pointerEvents).toBe('none');
+      expect(getComputedStyle(shell).display).toBe('inline-block');
+      expect(getComputedStyle(shell).width).toBe('max-content');
+      expect(getComputedStyle(interactive).position).toBe('absolute');
+      expect(getComputedStyle(interactive).width).toBe('100%');
+      expect(getComputedStyle(interactive).height).toBe('100%');
+      expect(interactive.id).toBe(control.querySelector('label').htmlFor);
+      expect(interactive.getAttribute('aria-label')).toBeNull();
+    }
+    const toolbarSelectRules = Array.from(stylesheet.sheet.cssRules).filter(rule =>
+      ['.edit-status-filter-control select', '.develop-status-filter-control select', '.recent-count-control select']
+        .includes(rule.selectorText));
+    expect(toolbarSelectRules.every(rule => !rule.style.getPropertyValue('min-width'))).toBe(true);
+    const sizingRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.home-select-sizing');
+    expect(sizingRule.style.getPropertyValue('min-width')).toBe('');
+    expect(stylesheet.textContent).not.toContain('home-select-native-reserve');
+    const interactiveRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.home-select-shell > .home-select-interactive');
+    expect(interactiveRule.style.getPropertyValue('appearance')).toBe('');
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 760px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.home-toolbar-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);

@@ -1,5 +1,7 @@
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditStatusFilterMode } from './photoFilters';
+import { HomeToolbarSelect } from './HomeToolbarSelect';
 
 type EditStatusFilterControlsProps = {
   mode: EditStatusFilterMode;
@@ -8,16 +10,19 @@ type EditStatusFilterControlsProps = {
 
 export function EditStatusFilterControls({ mode, onChange }: EditStatusFilterControlsProps) {
   const { t } = useTranslation();
+  const selectId = useId();
   const label = t('photos.editFilterLabel');
+  const selectedLabel = t(mode === 'both' ? 'photos.allEdits' : mode === 'edited' ? 'photos.editedOnly' : 'photos.uneditedOnly');
 
   return (
-    <label className="home-control edit-status-filter-control">
-      <span className="home-control-label">{label}</span>
-      <select aria-label={label} value={mode} onChange={event => onChange(event.target.value as EditStatusFilterMode)}>
+    <div className="home-control edit-status-filter-control">
+      <label className="home-control-label" htmlFor={selectId}>{label}</label>
+      <HomeToolbarSelect id={selectId} aria-label={label} value={mode} selectedLabel={selectedLabel}
+        onChange={event => onChange(event.target.value as EditStatusFilterMode)}>
         <option value="both">{t('photos.allEdits')}</option>
         <option value="edited">{t('photos.editedOnly')}</option>
         <option value="unedited">{t('photos.uneditedOnly')}</option>
-      </select>
-    </label>
+      </HomeToolbarSelect>
+    </div>
   );
 }

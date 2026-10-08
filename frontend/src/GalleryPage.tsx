@@ -20,6 +20,7 @@ import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { DevelopStatusFilterControls } from './DevelopStatusFilterControls';
+import { HomeToolbarSelect } from './HomeToolbarSelect';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
@@ -50,6 +51,7 @@ type PhotoView = {
 
 export function GalleryPage() {
   const { t, i18n } = useTranslation();
+  const recentCountSelectId = useId();
   const shortcut = useShortcutDisplay();
   const settings = useAppSettings();
   const navigate = useNavigate();
@@ -907,12 +909,15 @@ export function GalleryPage() {
             writeDevelopStatusFilterMode(mode, activeTab);
           }} />}
           {activeTab === 'recent' && <>
-            <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
-              <select value={settings.recentPhotoCount}
+            <div className="home-control recent-count-control">
+              <label className="home-control-label" htmlFor={recentCountSelectId}>{t('photos.recentCount')}</label>
+              <HomeToolbarSelect id={recentCountSelectId} aria-label={t('photos.recentCount')}
+                value={settings.recentPhotoCount}
+                selectedLabel={t('photos.recentCountOption', { count: settings.recentPhotoCount })}
                 onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
                 {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
-              </select>
-            </label>
+              </HomeToolbarSelect>
+            </div>
           </>}
           {(photoView || activeTab === 'albums') && <div className="home-control thumbnail-size-setting">
             <span className="home-control-label">{t('photos.thumbnailSize')}</span>

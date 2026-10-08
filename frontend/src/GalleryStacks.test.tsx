@@ -225,8 +225,10 @@ describe('Home stack display', () => {
     expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
     change('.edit-status-filter-control select', 'edited');
     change('.develop-status-filter-control select', 'developed');
+    expect(host.querySelector('.develop-status-filter-control .home-select-sizing option')?.textContent).toBe('Developed');
     expect(filenames()).toEqual(['developed.jpg']);
     change('.develop-status-filter-control select', 'undeveloped');
+    expect(host.querySelector('.develop-status-filter-control .home-select-sizing option')?.textContent).toBe('Undeveloped');
     expect(filenames()).toEqual(['false.jpg']);
     change('.edit-status-filter-control select', 'unedited');
     expect(filenames()).toEqual(['unknown.jpg']);

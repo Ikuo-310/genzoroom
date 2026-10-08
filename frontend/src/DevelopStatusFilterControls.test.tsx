@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -12,6 +13,9 @@ describe('DevelopStatusFilterControls', () => {
     expect(markup).toContain('<option value="both" selected="">Both</option>');
     expect(markup).toContain('<option value="developed">Developed</option>');
     expect(markup).toContain('<option value="undeveloped">Undeveloped</option>');
+    const container = document.createElement('div'); container.innerHTML = markup;
+    expect(container.querySelector('.home-select-sizing option')?.textContent).toBe('Both');
+    expect(container.querySelector<HTMLLabelElement>('label.home-control-label')?.control).toBe(container.querySelector('.home-select-interactive'));
   });
 
   it('renders the Japanese label and choices', async () => {
@@ -21,5 +25,7 @@ describe('DevelopStatusFilterControls', () => {
     expect(markup).toContain('<option value="both">両方</option>');
     expect(markup).toContain('<option value="developed">現像済み</option>');
     expect(markup).toContain('<option value="undeveloped" selected="">未現像</option>');
+    const container = document.createElement('div'); container.innerHTML = markup;
+    expect(container.querySelector('.home-select-sizing option')?.textContent).toBe('未現像');
   });
 });
