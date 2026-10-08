@@ -100,3 +100,18 @@ it('preserves Stack filename padding while fitting the shared middle-ellipsis la
   expect(getComputedStyle(suffix).flexShrink).toBe('0');
   expect(suffix.textContent).toBe('-Genzo01.jpg');
 });
+
+it('lets the empty unmatched frame shrink to its Grid track while retaining its own scroll area', () => {
+  document.body.innerHTML = `<div class="stack-split-view">
+    <section class="stack-frame stack-unmatched-frame stack-unmatched-empty"><h2>STACK候補外</h2><p class="stack-empty">No unmatched photos</p></section>
+  </div>`;
+  const frame = document.querySelector<HTMLElement>('.stack-unmatched-frame')!;
+  expect(frame.classList.contains('stack-unmatched-empty')).toBe(true);
+  expect(getComputedStyle(frame).minHeight).toBe('0');
+  expect(getComputedStyle(frame).overflow).toBe('auto');
+  expect(frame.querySelector('.stack-empty')?.textContent).toBe('No unmatched photos');
+
+  frame.classList.remove('stack-unmatched-empty');
+  expect(getComputedStyle(frame).minHeight).toBe('0');
+  expect(getComputedStyle(frame).overflow).toBe('auto');
+});
