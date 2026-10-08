@@ -114,7 +114,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(32);
+    expect(Object.keys(shortcutBindings)).toHaveLength(34);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -147,7 +147,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(32);
+    expect(Object.keys(shortcutBindings)).toHaveLength(34);
   });
   it('matches Export Queue only for unmodified Q regardless of case', () => {
     for (const platform of ['other', 'mac'] as const) {
@@ -156,7 +156,22 @@ describe('command shortcut bindings', () => {
         { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true },
       ]) expect(matchesShortcut(event('Q', options), 'exportQueueToggle', platform)).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(32);
+    expect(Object.keys(shortcutBindings)).toHaveLength(34);
+  });
+
+  it('binds thumbnail sizing to unmodified physical numpad add/subtract keys', () => {
+    expect(shortcutBindings.thumbnailSizeDecrease[0].code).toBe('NumpadSubtract');
+    expect(shortcutBindings.thumbnailSizeIncrease[0].code).toBe('NumpadAdd');
+    expect(matchesShortcut(event('+', { code: 'NumpadAdd' }), 'thumbnailSizeIncrease')).toBe(true);
+    expect(matchesShortcut(event('-', { code: 'NumpadSubtract' }), 'thumbnailSizeDecrease')).toBe(true);
+    for (const [key, code] of [['-', 'Minus'], ['=', 'Equal'], ['+', 'Equal']] as const) {
+      expect(matchesShortcut(event(key, { code }), 'thumbnailSizeDecrease')).toBe(false);
+      expect(matchesShortcut(event(key, { code }), 'thumbnailSizeIncrease')).toBe(false);
+    }
+    for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }]) {
+      expect(matchesShortcut(event('-', { code: 'NumpadSubtract', ...options }), 'thumbnailSizeDecrease')).toBe(false);
+      expect(matchesShortcut(event('+', { code: 'NumpadAdd', ...options }), 'thumbnailSizeIncrease')).toBe(false);
+    }
   });
   it('matches Stack Add only for unmodified A without matching other commands', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {

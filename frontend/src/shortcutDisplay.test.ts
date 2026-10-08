@@ -50,5 +50,7 @@ describe('shortcut binding display', () => {
     expect(formatShortcut('scopeBlue', 'other')).toBe('Numpad 3');
     expect(formatShortcut('scopeYOnly', 'other')).toBe('Numpad 0');
     expect(formatShortcut('scopeScale', 'other')).toBe('Numpad .');
+    expect(formatShortcut('thumbnailSizeDecrease', 'other')).toBe('Numpad -');
+    expect(formatShortcut('thumbnailSizeIncrease', 'other')).toBe('Numpad +');
   });
 });

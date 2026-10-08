@@ -7,6 +7,8 @@ export type { ShortcutPlatform } from './shortcutModifiers';
 
 function displayKey(binding: ShortcutBinding) {
   if (binding.code === 'Backslash') return '\\';
+  if (binding.code === 'NumpadSubtract') return 'Numpad -';
+  if (binding.code === 'NumpadAdd') return 'Numpad +';
   if (binding.code?.startsWith('Numpad')) return `Numpad ${binding.code.slice(6) === 'Decimal' ? '.' : binding.code.slice(6)}`;
   const key = binding.key ?? binding.code ?? '';
   return ({ ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' } as Record<string, string>)[key]

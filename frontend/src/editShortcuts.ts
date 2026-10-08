@@ -57,6 +57,8 @@ export const shortcutBindings = {
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false, alt: false }],
   scopeYOnly: [{ code: 'Numpad0', ...commandModifiers, shift: false, alt: false }],
   scopeScale: [{ code: 'NumpadDecimal', ...commandModifiers, shift: false, alt: false }],
+  thumbnailSizeDecrease: [{ code: 'NumpadSubtract', ...commandModifiers, shift: false, alt: false }],
+  thumbnailSizeIncrease: [{ code: 'NumpadAdd', ...commandModifiers, shift: false, alt: false }],
   filmstripPrevious: [{ key: 'ArrowLeft', ...primaryModifiers, shift: true, alt: false, excludeAltGraph: true }],
   filmstripNext: [{ key: 'ArrowRight', ...primaryModifiers, shift: true, alt: false, excludeAltGraph: true }],
 } as const satisfies Record<string, readonly ShortcutBinding[]>;
