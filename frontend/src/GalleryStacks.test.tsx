@@ -8,6 +8,10 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import i18n from './i18n';
+import { makeGalleryStack } from './gallerySelectionTestHelpers';
+import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
+import { restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
+import { updateSetting } from './appSettings';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 
@@ -41,6 +45,8 @@ function WorkspaceProbe() {
 
 function resetFilters() {
   sessionStorage.clear();
+  restoreGalleryStackSelectionsFromSession();
+  clearWorkspaceSession();
   for (const tab of ['recent', 'albums', 'calendar'] as const) writeStackFilterMode('both', tab);
   for (const tab of tabs) {
     writePhotoFilterMode('both', tab);
@@ -54,6 +60,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
   resetFilters();
+  updateSetting('anshitsuInitialSelection', 'nonRaw');
   for (const reader of [api.recent, api.album, api.day, api.favorites]) {
     reader.mockReset().mockResolvedValue(photos);
   }
@@ -95,6 +102,78 @@ function change(selector: string, value: string) {
   });
 }
 
+function galleryPhotos(input: RecentAsset[]) {
+  for (const reader of [api.recent, api.album, api.day, api.favorites]) reader.mockResolvedValue(input);
+}
+
+describe('Gallery Stack target navigation', () => {
+  it.each(tabs)('expands multiple Stacks and a direct PNG in selection order on %s', async tab => {
+    const first = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
+    const last = makeGalleryStack(2, ['DNG', 'DNG']);
+    const png = { ...asset('solo'), format: 'PNG', filename: 'solo.png' };
+    galleryPhotos([first, png, last]);
+    await mount(tab);
+    act(() => {
+      const controls = host.querySelectorAll<HTMLInputElement>('.photo-selection-input');
+      for (const index of [2, 0, 1]) controls[index].click();
+    });
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(navigation?.selectedAssets).toEqual([...last.stackMembers!, ...first.stackMembers!.slice(0, 2), png]);
+    expect(navigation?.activeAssetId).toBe(last.id);
+    expect(navigation?.homeReturn?.tab).toBe(tab);
+  });
+
+  it.each(tabs.flatMap(tab => ['empty', 'unavailable', 'manualOff'].map(state => [tab, state] as const)))
+  ('never resumes a previous workspace for a selected %s Stack with %s targets', async (tab, state) => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG'], state === 'empty' ? [0, 1] : []);
+    const representative = state === 'unavailable' ? { ...stack, stackMembers: null } : stack;
+    if (state === 'manualOff') setManualGalleryStackSelection(stack, new Set());
+    galleryPhotos([representative]);
+    rememberWorkspaceSession({ selectedAssets: [asset('previous')], activeAssetId: 'previous' });
+    await mount(tab);
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(navigation).toBeNull();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(state === 'unavailable' ? 'information is unavailable' : 'No photos are selected');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+  });
+
+  it.each(tabs)('preserves remembered Filmstrip order and last active Asset without resolving on %s', async tab => {
+    const stack = makeGalleryStack(1, ['DNG', 'JPEG']);
+    galleryPhotos([{ ...stack, stackMembers: null }]);
+    const saved = stack.stackMembers!;
+    rememberWorkspaceSession({ selectedAssets: saved, activeAssetId: saved[1].id });
+    await mount(tab);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(navigation?.selectedAssets).toEqual(saved);
+    expect(navigation?.activeAssetId).toBe(saved[1].id);
+    expect(navigation?.homeReturn?.tab).toBe(tab);
+  });
+
+  it.each(['empty', 'unavailable'] as const)('handles mixed direct assets and %s Stacks atomically', async state => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG'], [0, 1]);
+    galleryPhotos([asset('solo'), state === 'empty' ? stack : { ...stack, stackMembers: undefined }]);
+    await mount();
+    act(() => host.querySelector<HTMLButtonElement>('.selection-all')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    if (state === 'empty') expect(navigation?.selectedAssets.map(item => item.id)).toEqual(['solo']);
+    else {
+      expect(navigation).toBeNull();
+      expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
+    }
+  });
+
+  it('honors session manual RAW selection without changing card checkbox behavior', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG']);
+    setManualGalleryStackSelection(stack, new Set([stack.stackMembers![1].id]));
+    galleryPhotos([stack]);
+    await mount();
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    expect(navigation?.selectedAssets).toEqual([stack.stackMembers![1]]);
+  });
+});
+
 describe('Home stack display', () => {
   it.each([true, false])('uses only the primary export identity when a child is tagged (primary tagged %s)', async primaryTagged => {
     api.recent.mockResolvedValue(photos.map(photo => ({ ...photo,
@@ -121,14 +200,15 @@ describe('Home stack display', () => {
       expect(host.querySelector('img[src="/thumb/member"]')).toBeNull();
     });
   it.each(['recent', 'albums', 'calendar'] as const)('selects the displayed Stack representative on %s', async tab => {
-    const members = photos.map(photo => photo.stackId ? { ...photo, primaryAssetId: 'member' } : photo);
+    const representative = makeGalleryStack(1, ['DNG', 'JPEG']);
+    const members = [representative];
     api.recent.mockResolvedValue(members); api.album.mockResolvedValue(members); api.day.mockResolvedValue(members);
     await mount(tab);
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
     expect(navigation).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
-    expect(navigation?.activeAssetId).toBe('primary');
-    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
+    expect(navigation?.activeAssetId).toBe(representative.stackMembers![1].id);
+    expect(navigation?.selectedAssets).toEqual([representative.stackMembers![1]]);
     expect(navigation?.homeReturn?.tab).toBe(tab);
   });
 
@@ -140,18 +220,19 @@ describe('Home stack display', () => {
   });
 
   it('resolves hidden selected members, preserves selection order and deduplicates before navigation', async () => {
+    const representative = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
+    api.recent.mockResolvedValue([asset('x'), representative, asset('y')]);
     await mount();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[2].click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('3 selected');
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
-    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', 'primary', 'y']);
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', ...representative.stackMembers!.slice(0, 2).map(a => a.id), 'y']);
   });
 
-  it.each(['unsupported', 'ambiguous'] as const)('blocks Anshitsu navigation for %s Stacks without discarding selection', async status => {
-    const members = status === 'unsupported' ? photos.slice(0, 3)
-      : [...photos.slice(0, 3), { ...asset('a'), ...stackMetadata }, { ...asset('b'), ...stackMetadata }];
+  it.each([undefined, null])('blocks unavailable Stacks without discarding the card selection (%s)', async stackMembers => {
+    const members = [asset('x'), { ...makeGalleryStack(1, ['JPEG', 'DNG']), stackMembers }, asset('y')];
     api.recent.mockResolvedValue(members);
     await mount();
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
@@ -167,19 +248,22 @@ describe('Home stack display', () => {
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
   });
 
-  it('keeps Favorites RAW clicks and selected members unchanged', async () => {
+  it('expands Favorites using Stack members rather than the old direct-card exception', async () => {
+    const representative = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG'], [0]);
+    api.favorites.mockResolvedValue([representative, asset('x')]);
     await mount('favorites');
+    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[0].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
-    act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[3].click());
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
-    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['member', 'primary']);
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual([representative.stackMembers![1].id, 'x']);
   });
 
   it('keeps Favorites selection order for a RAW Asset', async () => {
+    api.favorites.mockResolvedValue([asset('x'), asset('soloRaw', true)]);
     await mount('favorites');
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
-    expect(navigation?.activeAssetId).toBe('member');
+    expect(navigation?.activeAssetId).toBe('soloRaw');
   });
 
   it.each(['recent', 'albums', 'calendar'] as const)('collapses the %s grid and looks up statuses for all fetched IDs', async tab => {

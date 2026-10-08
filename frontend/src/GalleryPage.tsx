@@ -1,6 +1,7 @@
 import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
+import { frontendLogger } from './frontendLogging';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -78,7 +79,8 @@ export function GalleryPage() {
   const currentYear = new Date().getFullYear();
   const dateLocale = resolveDateLocale(settings.dateLocale);
   const [connection, setConnection] = useState<Connection>('checking');
-  const [workspaceOpenError, setWorkspaceOpenError] = useState<'unsupported' | 'ambiguous' | null>(null);
+  const [workspaceOpenError, setWorkspaceOpenError] = useState<'unavailable' | 'empty' | null>(null);
+  const workspaceNavigating = useRef(false);
   const [immichConnection, setImmichConnection] = useState<ImmichConnection>('checking');
   const [assets, setAssets] = useState<RecentAsset[]>([]);
   const [assetState, setAssetState] = useState<AssetState>('loading');
@@ -483,7 +485,7 @@ export function GalleryPage() {
   }
 
   function openHomeWorkspace(): boolean {
-    if (showExport) return false;
+    if (showExport || workspaceNavigating.current) return false;
     if (activeSelectedAssetIds.length > 0) {
       if (!selectedAssets.length) return false;
       openSelectedAssets();
@@ -491,6 +493,8 @@ export function GalleryPage() {
     }
     const resume = readWorkspaceSession();
     if (!resume) return false;
+    workspaceNavigating.current = true;
+    setWorkspaceOpenError(null);
     navigate(workspacePath(resume.activeAssetId), {
       state: { ...resume, homeReturn: captureHomeReturnRef.current() },
     });
@@ -498,16 +502,27 @@ export function GalleryPage() {
   }
 
   function openWorkspaceAssets(assetsToOpen: RecentAsset[]) {
-    const resolution = activeTab === 'favorites'
-      ? { status: 'resolved' as const, assets: assetsToOpen }
-      : resolveWorkspaceAssets(assetsToOpen, currentAssets);
+    if (workspaceNavigating.current) return;
+    const resolution = resolveWorkspaceAssets(assetsToOpen, settings.anshitsuInitialSelection);
+    try {
+      frontendLogger.add({ level: resolution.status === 'unavailable' ? 'error' : resolution.status === 'empty' ? 'info' : 'debug',
+        component: 'gallery', event: 'workspace.resolve', context: {
+          result: resolution.status, selectedCardCount: assetsToOpen.length,
+          stackCount: assetsToOpen.filter(asset => asset.stackId != null).length,
+          targetAssetCount: resolution.status === 'resolved' ? resolution.assets.length : 0,
+        } });
+    } catch { /* Diagnostics must not change navigation outcomes. */ }
     if (resolution.status !== 'resolved') {
       setWorkspaceOpenError(resolution.status);
       return;
     }
     setWorkspaceOpenError(null);
     const state = createWorkspaceNavigation(resolution.assets);
-    if (state) navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
+    if (state) {
+      // Guard synchronous button/shortcut re-entry until the successful route exit unmounts Gallery.
+      workspaceNavigating.current = true;
+      navigate(workspacePath(state.activeAssetId), { state: { ...state, homeReturn: captureHomeReturn() } });
+    }
   }
   selectedAssetsCountRef.current = selectedAssets.length;
   openHomeWorkspaceRef.current = openHomeWorkspace;
@@ -930,7 +945,7 @@ export function GalleryPage() {
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}
-        {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unsupported' ? 'photos.workspaceUnsupported' : 'photos.workspaceAmbiguous')}</p>}
+        {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unavailable' ? 'photos.workspaceUnavailable' : 'photos.workspaceEmpty')}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>

@@ -52,7 +52,7 @@ export function selectGalleryAssetTargets(
     const nonRaw = eligible.filter(member => !member.is_raw);
     const raw = eligible.filter(member => member.is_raw);
     switch (preset) {
-      case 'both': selected = [...nonRaw, ...raw]; break;
+      case 'both': selected = eligible; break;
       case 'raw': selected = raw.length > 0 ? raw : nonRaw; break;
       case 'nonRaw': selected = nonRaw.length > 0 ? nonRaw : raw; break;
       default: return unavailable();

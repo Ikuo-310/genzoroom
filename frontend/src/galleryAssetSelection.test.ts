@@ -29,6 +29,7 @@ describe('Gallery asset targets', () => {
     const mixed = card([member(0, 'cover.jpg', false), member(1, 'raw.dng', true), member(2, 'png.png', false)]);
     expect(idsOf(selectGalleryAssetTargets(mixed, 'raw'))).toEqual([ids[1]]);
     expect(idsOf(selectGalleryAssetTargets(mixed, 'both'))).toEqual([ids[0], ids[1], ids[2]].sort());
+    expect(selectGalleryAssetTargets(mixed, 'both').assets!.map(asset => asset.id)).toEqual([ids[0], ids[1], ids[2]]);
     const raws = card([member(0, 'cover.dng', true), member(1, 'second.dng', true), member(2, 'export.jpg', false, true)]);
     expect(idsOf(selectGalleryAssetTargets(raws, 'nonRaw'))).toEqual([ids[0], ids[1]].sort());
     const nonRaws = card([member(0, 'cover.jpg', false), member(1, 'output.dng', true, true)]);

@@ -11,10 +11,12 @@ import i18n from './i18n';
 import { clearWorkspaceSession, readWorkspaceSession } from './workspaceResume';
 import { updateSetting } from './appSettings';
 import { formatShortcut } from './shortcutDisplay';
+import { makeGalleryStack } from './gallerySelectionTestHelpers';
+import { getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
 
-const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
+const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn(), recent: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./api')>()), fetchAssetDetail: mocked.detail,
+  ...(await importOriginal<typeof import('./api')>()), fetchAssetDetail: mocked.detail, fetchRecentAssets: mocked.recent,
 }));
 vi.mock('./editStateApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./editStateApi')>()),
@@ -77,6 +79,8 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
   clearWorkspaceSession();
+  sessionStorage.clear(); restoreGalleryStackSelectionsFromSession();
+  mocked.recent.mockReset().mockRejectedValue(new Error('Unavailable'));
   updateSetting('showKeyboardShortcuts', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   mocked.detail.mockReset(); mocked.get.mockReset(); mocked.put.mockReset();
@@ -91,6 +95,41 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Anshitsu Filmstrip persistence', () => {
+  it('round-trips an expanded mixed Stack, saving JPEGs independently and resuming the last non-JPEG Asset', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG', 'PNG']);
+    const members = stack.stackMembers!;
+    setManualGalleryStackSelection(stack, new Set(members.map(asset => asset.id)));
+    mocked.recent.mockResolvedValue([stack]);
+    mocked.detail.mockImplementation(async (id: string) => ({ ...members.find(asset => asset.id === id)!, preview_url: '/preview', exif: {} }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
+    await act(async () => root.render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>));
+    await flush();
+    await click('.photo-selection-input');
+    await filmstripKey('d');
+    expect(container.querySelectorAll('.filmstrip-item')).toHaveLength(4);
+    expect(currentPhoto()).toBe(members[0].filename);
+    await click('button[aria-label="Disable Basic"]');
+    await click(`.filmstrip-item[aria-label="${members[1].filename}"]`);
+    expect(currentPhoto()).toBe(members[1].filename);
+    await click('button[aria-label="Disable Basic"]');
+    await click(`.filmstrip-item[aria-label="${members[2].filename}"]`);
+    expect(currentPhoto()).toBe(members[2].filename);
+    const ranges = [...container.querySelectorAll<HTMLInputElement>('.develop-panel input[type="range"]')];
+    expect(ranges).toHaveLength(0);
+    expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.jpegOnly'));
+    await click(`.filmstrip-item[aria-label="${members[3].filename}"]`);
+    expect(currentPhoto()).toBe(members[3].filename);
+    expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.jpegOnly'));
+    expect(mocked.put.mock.calls.map(call => call[0])).toEqual([members[0].id, members[1].id]);
+    await filmstripKey('g');
+    expect(container.querySelector('.home-page')).not.toBeNull();
+    expect(readWorkspaceSession()?.selectedAssets.map(asset => asset.id)).toEqual(members.map(asset => asset.id));
+    expect(readWorkspaceSession()?.activeAssetId).toBe(members[3].id);
+    expect([...getManualGalleryStackSelection(stack.stackId!)!]).toEqual(members.map(asset => asset.id));
+    await filmstripKey('d');
+    expect(container.querySelectorAll('.filmstrip-item')).toHaveLength(4);
+    expect(currentPhoto()).toBe(members[3].filename);
+  });
   it('shows G and Undo/Redo hints without adding G to HomeTitle, and still exits with G when OFF', async () => {
     await mount();
     const home = container.querySelector<HTMLButtonElement>('.workspace-actions button')!;
