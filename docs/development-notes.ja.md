@@ -2,6 +2,18 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Gallery STACK暗室送り Phase 1〜5 完了・最終横断監査（2026-10-08）
+
+GalleryのRecent / Albums / Calendar / Favoritesで、STACKのCOVERカードからSTACK内の複数Assetを暗室へ送る機能を実装した。初期選択はGenzoRoom未出力のNon-RAW全件で、対象がなければRAW全件へフォールバックする。GenzoRoom出力済みAssetは候補から除外し、タグ判定の不明・矛盾やSTACK情報の不整合時には不完全な候補を利用可能として扱わない。代表カードの表示は維持する。
+
+Phase 1ではGallery応答へSTACK全メンバー情報とAsset単位のタグ状態を追加した。Phase 2では初期選択、形式別全件切替、手動選択を実装し、STACK IDごとの手動選択だけをsessionStorageへ保持する。Phase 3では選択Assetを既存の暗室遷移へ展開し、未選択時の直前暗室への復帰を維持した。Phase 4では形式バッジを選択スイッチ化した。Phase 5では右クリックメニュー上段に個別暗室送り選択、下段にAssetごとの出力Q登録・解除を追加した。手動選択は4タブで共有され、メニュー操作だけでは暗室へ遷移しない。単独Assetの暗室送りは従来どおりそのAssetを使い、単独Assetの右クリックは標準メニューを維持する。RAW素材を暗室で表示できることはRAW現像対応を意味しない。RAW現像は未実装である。
+
+最初の横断監査はHigh 1 / Medium 6 / Low 1だった。修正AではF01・F02として同一Asset IDのタグ矛盾を候補情報の利用不可として扱い、Galleryカード表示を保つとともに、タブ間で共有するSTACK snapshotで古い表示データが新しい手動選択を削除しないようにした。修正BではF03〜F06としてQueue登録・解除条件、編集状態取得の失敗・timeout、canonical Queueの復旧制御を修正した。修正CではF07・F08としてメニュー内容のサイズ変化に応じた再配置と初期フォーカスを整えた。最終再監査ではR01〜R03を検出し、未終了Gallery要求の管理、可視化後の初期フォーカス、フォーカス中の項目がdisabled化または削除された際の退避を修正した。
+
+DeveloperLogsPanelのテスト間干渉は、共有Frontendログsingletonを利用するテストのBroadcastChannelがVitest worker間で状態を伝播する経路を確認し、テスト環境内で分離した。本番ログの収集・保持・通知仕様は変更していない。STACKメニューのホバー強調とチェックボックス明度も調整した。
+
+最終Frontend検証は**119ファイル、2,534件成功、既存2件skip、失敗0**。Backendは直近の最終再監査で**860件成功**した。最後のR01〜R03修正ではBackendを変更していない。Frontendの型チェック・buildと`git diff --check`も最終修正サイクルで成功し、buildには既存の大容量chunk警告が残る。自動テストとコード確認は完了した。NASへのdeployや今回の最終修正後のブラウザー実機確認、特殊な異常系の実機確認を行ったとは記録しない。ユーザー側の実機確認はこの自動検証とは別である。最終限定再確認では新たなHigh相当の問題はなく、Phase 1〜5の終了条件を満たした。
+
 ## Home Stack / filename / GenzoRoom tag改善とfocused audit（2026-10-08）
 
 HomeのStackカードへ、full Stack snapshotから得たunique format badgeを追加した。Cover/primaryのformatを先頭にし、JPEG / DNG / HEIC等と既存member countを表示する。素材の選択・filterではない。optional metadataが欠損・不正でもAsset本体を落とさず、Frontendでもformat metadataをsanitizationする。実機で表示を確認済み。
