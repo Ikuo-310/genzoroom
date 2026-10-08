@@ -12,7 +12,9 @@ import { AlbumCard } from './AlbumCard';
 import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
-import { useEditStatuses } from './useEditStatuses';
+import { selectGalleryAssetTargets } from './galleryAssetSelection';
+import { useGalleryStackSelections } from './useGalleryStackSelections';
+import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
 import { ExportQueueApiError } from './exportQueueApi';
@@ -58,6 +60,7 @@ export function GalleryPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const exportQueue = useExportQueue();
+  const stackSelections = useGalleryStackSelections();
   const [queueFailure, setQueueFailure] = useState<'addFailed' | 'removeFailed' | 'notEligible' | 'locked' | null>(null);
   const queueOperations = useRef(new Set<string>());
   const [queueBusy, setQueueBusy] = useState<Set<string>>(() => new Set());
@@ -157,7 +160,8 @@ export function GalleryPage() {
           ? { kind: 'calendar', assets: calendarAssets, state: calendarAssetState, selection: calendarSelection }
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
-  const editStatuses = useEditStatuses(stackEditStatusIds(editStatusAssets));
+  const editStatusSnapshot = useEditStatusesSnapshot(stackEditStatusIds(editStatusAssets));
+  const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
@@ -823,9 +827,45 @@ export function GalleryPage() {
     }
   }
 
+  async function toggleQueueMember(asset: RecentAsset, checked: boolean) {
+    const id = asset.id;
+    const key = id.toLowerCase();
+    if (queueBatchBusy.current || !exportQueue.loaded || queueOperations.current.has(key)
+      || exportQueue.mutationFor(id).operation) return;
+    const queued = exportQueue.hasAsset(id);
+    if (queued === undefined || checked === queued) return;
+    const status = exportQueue.getStatus(id);
+    if (status === 'waiting' || status === 'encoding' || status === 'registering') {
+      setQueueFailure('locked'); return;
+    }
+    if (checked && editStatuses[id] !== true) return;
+    queueOperations.current.add(key);
+    setQueueBusy(new Set(queueOperations.current));
+    setQueueFailure(null);
+    try {
+      if (checked) await exportQueue.enqueue([id]);
+      else await exportQueue.dequeue(id);
+    } catch (cause) {
+      if (queueMounted.current) {
+        setQueueFailure(cause instanceof ExportQueueApiError && cause.kind === 'not_eligible' ? 'notEligible'
+          : cause instanceof ExportQueueApiError && cause.kind === 'locked' ? 'locked'
+            : checked ? 'addFailed' : 'removeFailed');
+        void exportQueue.refresh();
+      }
+    } finally {
+      queueOperations.current.delete(key);
+      if (queueMounted.current) setQueueBusy(new Set(queueOperations.current));
+    }
+  }
+
   function renderPhotoGrid() {
     return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
       const queue = queueStateFor(asset);
+      const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
+      const manual = asset.stackId ? stackSelections.getManualSelection(asset.stackId) : undefined;
+      const resolvedStack = asset.stackId ? selectGalleryAssetTargets(asset, settings.anshitsuInitialSelection, manual) : null;
+      const stackMembers = resolvedStack?.status === 'ready' ? asset.stackMembers ?? null : null;
+      const selectedStackIds = resolvedStack?.status === 'ready' ? resolvedStack.selectedAssetIds : new Set<string>();
       return (
         <PhotoCard
           asset={asset}
@@ -837,7 +877,27 @@ export function GalleryPage() {
           queueKnown={exportQueue.loaded}
           queueStatus={queue.status}
           queueBusy={queue.busy}
+          queueVisible={queueVisible}
           onQueueToggle={() => { void toggleQueue(asset); }}
+          stackMenu={asset.stackId ? {
+            members: stackMembers,
+            selectedIds: selectedStackIds,
+            selectionAvailable: resolvedStack?.status === 'ready',
+            editStatuses,
+            editStatusState: editStatusSnapshot.state,
+            queueLoaded: exportQueue.loaded,
+            queueError: !!exportQueue.error,
+            queueFor: (assetId: string) => ({ status: exportQueue.getStatus(assetId),
+              known: exportQueue.hasAsset(assetId) !== undefined,
+              busy: queueBatchBusyState || queueBusy.has(assetId.toLowerCase()) || !!exportQueue.mutationFor(assetId).operation }),
+            onDarkroomToggle: (member: RecentAsset, checked: boolean) => {
+              if (!asset.stackId) return;
+              const current = new Set(stackSelections.getManualSelection(asset.stackId) ?? selectedStackIds);
+              if (checked) current.add(member.id.toLowerCase()); else current.delete(member.id.toLowerCase());
+              stackSelections.setManualSelection(asset, current);
+            },
+            onQueueToggle: (member: RecentAsset, checked: boolean) => { void toggleQueueMember(member, checked); },
+          } : undefined}
           onSelect={() => selectPhoto(asset.id)}
           onToggleSelection={() => togglePhotoSelection(asset.id)}
           onExtendSelection={() => extendPhotoSelection(asset.id)}

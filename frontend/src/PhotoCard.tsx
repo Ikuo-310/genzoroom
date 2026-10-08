@@ -1,9 +1,11 @@
 import { useAppSettings } from './appSettings';
-import { useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { FormatBadge } from './FormatBadge';
 import { StackFormatSwitches } from './StackFormatSwitches';
+import { StackContextMenu, type StackQueueRow } from './StackContextMenu';
+import type { AssetEditStatuses } from './editStatus';
 import { FilenameDisplay } from './FilenameDisplay';
 import { EditedBadge } from './EditedBadge';
 import { GenzoRoomExportBadge } from './GenzoRoomExportBadge';
@@ -35,7 +37,20 @@ type PhotoCardProps = {
   queueKnown?: boolean;
   queueStatus?: ExportQueueStatus;
   queueBusy?: boolean;
+  queueVisible?: boolean;
   onQueueToggle?: () => void;
+  stackMenu?: {
+    members: readonly RecentAsset[] | null;
+    selectedIds: ReadonlySet<string>;
+    selectionAvailable: boolean;
+    editStatuses: AssetEditStatuses;
+    editStatusState: 'loading' | 'ready' | 'partial' | 'error';
+    queueLoaded: boolean;
+    queueError: boolean;
+    queueFor: (assetId: string) => StackQueueRow;
+    onDarkroomToggle: (member: RecentAsset, checked: boolean) => void;
+    onQueueToggle: (member: RecentAsset, checked: boolean) => void;
+  };
 };
 
 export function PhotoCard({
@@ -51,11 +66,19 @@ export function PhotoCard({
   queueKnown,
   queueStatus,
   queueBusy,
+  queueVisible = false,
   onQueueToggle,
+  stackMenu,
 }: PhotoCardProps) {
   useAppSettings();
   const { t } = useTranslation();
   const rangeClickHandled = useRef(false);
+  const cardButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu = useCallback((restoreFocus = false) => {
+    setMenuPoint(null);
+    if (restoreFocus) cardButtonRef.current?.focus();
+  }, []);
   const selectionLabel = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
 
   function handleCardClick(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -84,7 +107,12 @@ export function PhotoCard({
   }
 
   return (
-    <article className={`photo-card${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}>
+    <article className={`photo-card${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
+      onContextMenu={event => {
+        if (!asset.stackId || !stackMenu) return;
+        event.preventDefault(); event.stopPropagation();
+        setMenuPoint({ x: event.clientX, y: event.clientY });
+      }}>
       <label className="photo-selection-control" title={selectionLabel}>
         <input
           className="photo-selection-input"
@@ -96,6 +124,7 @@ export function PhotoCard({
         />
       </label>
       <button
+        ref={cardButtonRef}
         className="photo-card-button"
         type="button"
         onClick={handleCardClick}
@@ -122,9 +151,14 @@ export function PhotoCard({
       )}
       <div className={`photo-card-badges${isGenzoRoomExported(asset) ? ' with-export-badge' : ''}`}>
         {isGenzoRoomExported(asset) && <GenzoRoomExportBadge />}
-        <EditedBadge edited={edited} queueKnown={queueKnown} queueStatus={queueStatus}
+        <EditedBadge edited={edited === true || queueVisible} queueKnown={queueKnown} queueStatus={queueStatus}
           busy={queueBusy} onQueueToggle={onQueueToggle} showQueueShortcut={false} />
       </div>
+      {menuPoint && stackMenu && <StackContextMenu point={menuPoint} members={stackMenu.members}
+        selectedIds={stackMenu.selectedIds} selectionAvailable={stackMenu.selectionAvailable}
+        editStatuses={stackMenu.editStatuses} editStatusState={stackMenu.editStatusState}
+        queueLoaded={stackMenu.queueLoaded} queueError={stackMenu.queueError} queueFor={stackMenu.queueFor}
+        onDarkroomToggle={stackMenu.onDarkroomToggle} onQueueToggle={stackMenu.onQueueToggle} onClose={closeMenu} />}
     </article>
   );
 }

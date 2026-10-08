@@ -13,7 +13,8 @@ vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import
 const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets }));
-vi.mock('./useEditStatuses', () => ({ useEditStatuses: () => ({}) }));
+vi.mock('./useEditStatuses', () => ({ useEditStatuses: () => ({}),
+  useEditStatusesSnapshot: () => ({ statuses: {}, state: 'ready' }) }));
 
 const photo = { id: 'photo-1', filename: 'photo.jpg', date: '2026-09-27', thumbnail_url: '/thumb/1', format: 'JPEG', is_raw: false };
 const album = { id: 'album-1', albumName: '旅行 2026', albumThumbnailAssetId: 'cover-1', assetCount: 2,

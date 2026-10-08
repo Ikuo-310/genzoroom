@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssetEditStatuses } from './editStatus';
-import { useEditStatuses } from './useEditStatuses';
+import { useEditStatuses, useEditStatusesSnapshot } from './useEditStatuses';
 
 const api = vi.hoisted(() => ({ statuses: vi.fn() }));
 vi.mock('./editStateApi', () => ({ getAssetEditStatuses: api.statuses }));
@@ -12,6 +12,10 @@ let root: Root;
 function Harness({ ids }: { ids: string[] }) {
   const statuses = useEditStatuses(ids);
   return <output>{ids.map(id => statuses[id] === undefined ? 'unknown' : statuses[id] ? 'edited' : 'clean').join(',')}</output>;
+}
+function StateHarness({ ids }: { ids: string[] }) {
+  const snapshot = useEditStatusesSnapshot(ids);
+  return <output>{snapshot.state}</output>;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -29,6 +33,18 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe('useEditStatuses batches', () => {
+  it('distinguishes pending, partial and failed edit snapshots', async () => {
+    const ids = Array.from({ length: 150 }, (_, index) => `id-${index}`);
+    api.statuses.mockImplementationOnce(async (batch: string[]) => Object.fromEntries(batch.map(id => [id, true])))
+      .mockRejectedValueOnce(new Error('Unavailable'));
+    await act(async () => root.render(<StateHarness ids={ids} />));
+    expect(host.querySelector('output')!.textContent).toBe('partial');
+    act(() => root.unmount());
+    root = createRoot(host);
+    api.statuses.mockRejectedValue(new Error('Unavailable'));
+    await act(async () => root.render(<StateHarness ids={['failed']} />));
+    expect(host.querySelector('output')!.textContent).toBe('error');
+  });
   it('uses one request for 100 assets', async () => {
     const ids = Array.from({ length: 100 }, (_, index) => `id-${index}`);
     api.statuses.mockImplementation(async (batch: string[]) => Object.fromEntries(batch.map(id => [id, true])));

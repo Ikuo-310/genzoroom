@@ -168,6 +168,16 @@
     "invalidStack": "Invalid Stack, {{count}} asset",
     "workspaceUnavailable": "Cannot open the selection: complete Stack member information is unavailable. Reload the Gallery and try again.",
     "workspaceEmpty": "No photos are selected for Develop in these Stacks.",
+    "stackMenu": {
+      "label": "Stack photo actions",
+      "darkroom": "Select photos for Develop",
+      "queue": "Select photos for Export Queue",
+      "membersUnavailable": "Stack member information is unavailable.",
+      "noCandidates": "No eligible photos.",
+      "loading": "Loading selection state…",
+      "unavailable": "Selection state could not be loaded.",
+      "partial": "Some photo edit states are unavailable."
+    },
     "recent": "Recent photos",
     "recentCount": "Recent count",
     "recentCountOption": "{{count}}",

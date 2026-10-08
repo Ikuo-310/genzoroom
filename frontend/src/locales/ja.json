@@ -162,6 +162,16 @@
     "invalidStack": "異常STACK、{{count}}枚",
     "workspaceUnavailable": "暗室を開けません。STACKの全メンバー情報を利用できません。ギャラリーを再読み込みしてお試しください。",
     "workspaceEmpty": "選択したSTACKに暗室送りの対象写真がありません。",
+    "stackMenu": {
+      "label": "STACK写真の操作",
+      "darkroom": "暗室に送る写真を選択",
+      "queue": "出力Qに登録する写真を選択",
+      "membersUnavailable": "STACKメンバー情報を取得できません。",
+      "noCandidates": "対象の写真はありません。",
+      "loading": "選択状態を読み込んでいます…",
+      "unavailable": "選択状態を取得できませんでした。",
+      "partial": "一部の写真の編集状態を取得できません。"
+    },
     "recent": "最近の写真",
     "recentCount": "表示枚数",
     "recentCountOption": "{{count}}枚",

@@ -12,8 +12,10 @@ import { makeGalleryStack } from './gallerySelectionTestHelpers';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import { restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
 import { updateSetting } from './appSettings';
+import type { ExportQueueItem } from './exportQueueApi';
+const queueApi = vi.hoisted(() => ({ list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), items: [] as ExportQueueItem[] }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
-  listExportQueue: async () => [] }));
+  listExportQueue: queueApi.list, enqueueExportAssets: queueApi.enqueue, dequeueExportAsset: queueApi.dequeue }));
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), album: vi.fn(), day: vi.fn(), favorites: vi.fn(),
   albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(), statuses: vi.fn() }));
@@ -69,6 +71,14 @@ beforeEach(async () => {
   api.heatmap.mockReset().mockResolvedValue({ year: 2026, month: 9, days: [] });
   api.statuses.mockReset().mockImplementation(async (ids: string[]) =>
     Object.fromEntries(ids.map(id => [id, id === 'member'])));
+  queueApi.items = [];
+  queueApi.list.mockReset().mockImplementation(async () => [...queueApi.items]);
+  queueApi.enqueue.mockReset().mockImplementation(async (ids: string[]) => {
+    const added = ids.map(assetId => ({ assetId, status: 'queued' as const,
+      queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' }));
+    queueApi.items = [...queueApi.items, ...added]; return [...queueApi.items];
+  });
+  queueApi.dequeue.mockReset().mockImplementation(async (id: string) => { queueApi.items = queueApi.items.filter(item => item.assetId !== id); });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -107,6 +117,81 @@ function galleryPhotos(input: RecentAsset[]) {
 }
 
 describe('Gallery Stack target navigation', () => {
+  it('excludes exported members from Darkroom while keeping independently edited Assets in Queue candidates', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG'], [0]);
+    stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
+    galleryPhotos([stack]);
+    api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, true])));
+    await mount();
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const sections = document.querySelectorAll('.stack-photo-context-menu section');
+    expect(sections[0].querySelectorAll('input')).toHaveLength(1);
+    expect(sections[0].textContent).toContain(stack.stackMembers![1].filename);
+    expect(sections[0].textContent).not.toContain(stack.stackMembers![0].filename);
+    expect(sections[1].querySelectorAll('input')).toHaveLength(2);
+    expect(sections[1].textContent).toContain(stack.stackMembers![0].filename);
+  });
+
+  it('keeps the representative Q badge on when an Asset is queued but edit status is unavailable or false', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG']);
+    galleryPhotos([stack]);
+    api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, false])));
+    queueApi.items = [{ assetId: stack.stackMembers![1].id, status: 'queued',
+      queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' }];
+    await mount();
+    expect(host.querySelector('.edited-badge')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('opens the STACK menu without card selection, toggles member choices and synchronizes individual Queue state', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
+    stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
+    galleryPhotos([stack]);
+    api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, true])));
+    await mount();
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    const article = host.querySelector<HTMLElement>('.photo-card')!;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return this.classList.contains('stack-photo-context-menu') ? new DOMRect(0, 0, 300, 220) : originalRect.call(this);
+    };
+    act(() => article.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 900, clientY: 700 })));
+    const menu = document.querySelector<HTMLElement>('.stack-photo-context-menu')!;
+    expect(menu).not.toBeNull();
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    expect(menu.style.left).toBe('716px');
+    expect(menu.style.top).toBe('540px');
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
+    const sections = menu.querySelectorAll('section');
+    const darkroom = sections[0].querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    const queue = sections[1].querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(darkroom).toHaveLength(3);
+    expect(queue).toHaveLength(3);
+    expect([...sections[0].querySelectorAll('.filename-middle-ellipsis')].map(node => node.getAttribute('title')))
+      .toEqual(stack.stackMembers!.map(member => member.filename));
+    expect(menu.querySelector('s, del')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true }));
+    });
+    expect(navigation).toBeNull();
+    expect(queueApi.enqueue).not.toHaveBeenCalled();
+    await act(async () => darkroom[0].click());
+    expect(darkroom[0].checked).toBe(false);
+    expect(darkroom[1].checked).toBe(true);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    await act(async () => queue[1].click());
+    expect(queueApi.enqueue).toHaveBeenCalledWith([stack.stackMembers![1].id], expect.any(AbortSignal));
+    expect(queue[1].checked).toBe(true);
+    expect(host.querySelector('.edited-badge')?.getAttribute('aria-pressed')).toBe('true');
+    await act(async () => queue[1].click());
+    expect(queueApi.dequeue).toHaveBeenCalledWith(stack.stackMembers![1].id, expect.any(AbortSignal));
+    expect(queue[1].checked).toBe(false);
+    expect(darkroom[1].checked).toBe(true);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(document.querySelector('.stack-photo-context-menu')).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('.photo-card-button'));
+  });
   it.each(tabs)('uses format switches without selecting the card and expands their selection on %s', async tab => {
     const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
     stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
