@@ -13,7 +13,7 @@ import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { selectGalleryAssetTargets } from './galleryAssetSelection';
-import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
+import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
 import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
@@ -252,8 +252,8 @@ export function GalleryPage() {
         setAssets([]);
         setAssetState('error');
       }
-    }).finally(() => window.clearTimeout(timeout));
-    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+    }).finally(() => { window.clearTimeout(timeout); finishGalleryStackSnapshotRequest(stackSnapshotRequest); });
+    return () => { active = false; window.clearTimeout(timeout); controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
   }, [settings.recentPhotoCount]);
 
   useEffect(() => {
@@ -295,8 +295,8 @@ export function GalleryPage() {
       if (!active) return;
       completeScrollRequest('favorites');
       setFavoriteState('error');
-    });
-    return () => { active = false; controller.abort(); };
+    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
   }, [activeTab]);
 
   useEffect(() => {
@@ -318,8 +318,8 @@ export function GalleryPage() {
         completeScrollRequest(`albums:${selectedAlbum.id}`);
         setAlbumAssetState('error');
       }
-    });
-    return () => { active = false; controller.abort(); };
+    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
   }, [activeTab, selectedAlbum?.id]);
 
   useEffect(() => {
@@ -381,8 +381,8 @@ export function GalleryPage() {
         completeScrollRequest(`calendar:${selectedCalendarDate}`);
         setCalendarAssetState('error');
       }
-    });
-    return () => { active = false; controller.abort(); };
+    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
   }, [activeTab, selectedCalendarDate]);
 
   // The active view owns its selection; shared asset IDs never carry selection across views.

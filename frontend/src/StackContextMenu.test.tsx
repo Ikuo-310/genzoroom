@@ -60,6 +60,26 @@ afterEach(() => {
 });
 
 describe('StackContextMenu layout and focus', () => {
+  it('focuses only after visible placement commits and never repeats initial focus on reflow or added rows', () => {
+    const focus = HTMLElement.prototype.focus;
+    const visibilityAtFocus: string[] = [];
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement) {
+      const visibility = window.getComputedStyle(this).visibility;
+      visibilityAtFocus.push(visibility);
+      // jsdom permits hidden focus, so enforce the native focusability boundary for this regression.
+      if (visibility !== 'hidden') focus.call(this);
+    });
+    mount({ members: [member('upper')], queueLoaded: false });
+    const upper = document.querySelector<HTMLInputElement>('.stack-photo-context-menu input')!;
+    expect(document.activeElement).toBe(upper);
+    expect(visibilityAtFocus).toEqual(['visible']);
+    measuredHeight = 360;
+    act(() => resizeCallbacks.forEach(callback => callback([], {} as ResizeObserver)));
+    mount();
+    expect(document.activeElement).toBe(upper);
+    expect(visibilityAtFocus).toEqual(['visible']);
+  });
+
   it('repositions to the original pointer point when measured size or viewport changes without moving focus', () => {
     mount();
     const menu = document.querySelector<HTMLElement>('.stack-photo-context-menu')!;
@@ -128,6 +148,37 @@ describe('StackContextMenu layout and focus', () => {
     const upper = document.querySelector<HTMLInputElement>('.stack-photo-context-menu section input')!;
     act(() => upper.focus());
     mount({ members: [member('lower')], editStatuses: { lower: true } });
+    expect(document.activeElement).toBe(document.querySelector<HTMLElement>('.stack-photo-context-menu'));
+  });
+
+  it('retreats from a focused Queue control when queued becomes waiting, even if native focus stays on the disabled input', () => {
+    const members = [member('upper', true), member('lower', true)];
+    mount({ members, queueRows: { upper: { status: 'queued', known: true, busy: false } } });
+    const input = document.querySelector<HTMLInputElement>('.stack-photo-context-menu input')!;
+    expect(document.activeElement).toBe(input);
+    mount({ members, queueRows: { upper: { status: 'waiting', known: true, busy: false } } });
+    expect(input.disabled).toBe(true);
+    expect(document.activeElement).toBe(document.querySelector<HTMLElement>('.stack-photo-context-menu'));
+  });
+
+  it('preserves focus on another enabled control when a previously focused row becomes disabled', () => {
+    const members = [member('upper', true), member('lower', true)];
+    mount({ members });
+    const inputs = document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu input');
+    act(() => inputs[1].focus());
+    mount({ members, queueRows: { upper: { status: 'waiting', known: true, busy: false } } });
+    expect(document.activeElement).toBe(inputs[1]);
+  });
+
+  it('retreats to the menu when every Queue row becomes disabled', () => {
+    const members = [member('upper', true), member('lower', true)];
+    mount({ members });
+    const inputs = document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu input');
+    act(() => inputs[1].focus());
+    mount({ members, queueRows: {
+      upper: { status: 'waiting', known: true, busy: false }, lower: { status: 'waiting', known: true, busy: false },
+    } });
+    expect([...inputs].every(input => input.disabled)).toBe(true);
     expect(document.activeElement).toBe(document.querySelector<HTMLElement>('.stack-photo-context-menu'));
   });
 });

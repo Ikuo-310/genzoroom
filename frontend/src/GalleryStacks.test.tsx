@@ -117,6 +117,28 @@ function galleryPhotos(input: RecentAsset[]) {
 }
 
 describe('Gallery Stack target navigation', () => {
+  it.each(['failure', 'cancellation'])('reconciles a confirmed removal after a newer Favorites request ends by %s', async outcome => {
+    const original = makeGalleryStack(1, ['JPEG', 'JPEG']);
+    const removed = makeGalleryStack(1, ['JPEG']);
+    setManualGalleryStackSelection(original, new Set([original.stackMembers![1].id]));
+    let resolveRecent!: (assets: RecentAsset[]) => void;
+    let rejectFavorites!: (cause: Error) => void;
+    api.recent.mockImplementation(() => new Promise(resolve => { resolveRecent = resolve; }));
+    api.favorites.mockImplementation(() => new Promise((_resolve, reject) => { rejectFavorites = reject; }));
+    await mount('favorites');
+    await act(async () => resolveRecent([removed]));
+    if (outcome === 'failure') await act(async () => rejectFavorites(new Error('Unavailable')));
+    await act(async () => host.querySelector<HTMLButtonElement>('#home-recent-tab')!.click());
+    expect(JSON.parse(sessionStorage.getItem('genzoroom.galleryStackSelections.v1')!).selections[original.stackId!]).toEqual([]);
+
+    api.favorites.mockResolvedValue([original]);
+    await act(async () => host.querySelector<HTMLButtonElement>('#home-favorites-tab')!.click());
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const inputs = [...document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu section:first-child input')];
+    expect(inputs).toHaveLength(2);
+    expect(inputs.every(input => !input.checked)).toBe(true);
+  });
+
   it('shares the newest Stack snapshot and manual choice across cached Recent and Favorites tabs', async () => {
     const recentStack = makeGalleryStack(1, ['JPEG', 'JPEG']);
     const favoritesStack = makeGalleryStack(1, ['JPEG', 'JPEG', 'JPEG']);

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import { PhotoCard, type RecentAsset } from './PhotoCard';
 import { makeGalleryStack } from './gallerySelectionTestHelpers';
-import { getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
+import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest,
+  getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
 import { updateSetting } from './appSettings';
 
 beforeEach(async () => i18n.changeLanguage('en'));
@@ -41,6 +42,21 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
 }
 
 describe('PhotoCard format badge', () => {
+  it('reconciles saved selection when a pending request ends without changing the visible snapshot', async () => {
+    const original = makeGalleryStack(1, ['JPEG', 'JPEG']);
+    acceptGalleryStackSnapshots([original], beginGalleryStackSnapshotRequest());
+    setManualGalleryStackSelection(original, new Set([original.stackMembers![1].id]));
+    const removalRequest = beginGalleryStackSnapshotRequest();
+    const pending = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([makeGalleryStack(1, ['JPEG'])], removalRequest);
+    await act(async () => root.render(<PhotoCard asset={original} language="en"
+      onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />));
+    expect([...getManualGalleryStackSelection(original.stackId!)!]).toEqual([original.stackMembers![1].id]);
+    await act(async () => finishGalleryStackSnapshotRequest(pending));
+    expect([...getManualGalleryStackSelection(original.stackId!)!]).toEqual([]);
+    expect(host.querySelector('.stack-format-switch')!.getAttribute('aria-pressed')).toBe('false');
+  });
+
   async function mountStack(asset: RecentAsset, callbacks = {}) {
     await act(async () => root.render(<PhotoCard asset={asset} language="en"
       onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} {...callbacks} />));

@@ -26,7 +26,7 @@ export function StackFormatSwitches({ asset, formats }: {
 
   // Reconcile persistence after rendering; notifying shared subscribers during render is unsafe.
   useEffect(() => { selections.resolve(currentCard, settings.anshitsuInitialSelection); },
-    [currentCard, settings.anshitsuInitialSelection, manual, selections.resolve]);
+    [currentCard, settings.anshitsuInitialSelection, manual, selections.resolve, selections.revision]);
 
   return <div className="stack-format-badges">
     {currentFormats.map(({ format, isRaw }) => {

@@ -28,6 +28,7 @@ export function StackContextMenu({
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const lastFocusedControl = useRef<HTMLInputElement | null>(null);
+  const initialFocusSet = useRef(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -44,13 +45,19 @@ export function StackContextMenu({
 
   useLayoutEffect(() => {
     reposition();
+  }, [point, reposition]);
+
+  useLayoutEffect(() => {
+    // Placement must commit visibility before native focus can succeed; later reflows retain user focus.
+    if (!position || initialFocusSet.current) return;
     const menu = menuRef.current;
     if (!menu) return;
     const sections = menu.querySelectorAll('section');
     const firstEnabled = [...sections].flatMap(section => [...section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')])
       .find(control => !control.disabled);
+    initialFocusSet.current = true;
     (firstEnabled ?? menu).focus();
-  }, [point, reposition]);
+  }, [position]);
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -68,7 +75,7 @@ export function StackContextMenu({
     const focused = lastFocusedControl.current;
     if (!focused || (focused.isConnected && !focused.disabled)) return;
     const menu = menuRef.current;
-    if (menu && !menu.contains(document.activeElement)) {
+    if (menu && (document.activeElement === focused || !menu.contains(document.activeElement))) {
       // Only recover focus when its former control became unusable; async content must not steal active focus.
       menu.focus();
     }

@@ -35,12 +35,14 @@ function readSelections(): SelectionMap {
 let manualSelections = readSelections();
 let revision = 0;
 let latestRequestGeneration = 0;
+const pendingSnapshotRequests = new Set<number>();
 const currentStackSnapshots = new Map<string, CurrentStackSnapshot>();
 const listeners = new Set<() => void>();
 
 export function clearGalleryStackSnapshots(): void {
-  if (currentStackSnapshots.size === 0) return;
+  if (currentStackSnapshots.size === 0 && pendingSnapshotRequests.size === 0) return;
   currentStackSnapshots.clear();
+  pendingSnapshotRequests.clear();
   publish();
 }
 
@@ -52,10 +54,18 @@ export function restoreGalleryStackSelectionsFromSession(): void {
 }
 
 export function beginGalleryStackSnapshotRequest(): number {
-  return ++latestRequestGeneration;
+  const generation = ++latestRequestGeneration;
+  pendingSnapshotRequests.add(generation);
+  return generation;
+}
+
+export function finishGalleryStackSnapshotRequest(requestGeneration: number): void {
+  // Failure and cancellation release the reconciliation barrier without replacing accepted evidence.
+  if (pendingSnapshotRequests.delete(requestGeneration)) publish();
 }
 
 export function acceptGalleryStackSnapshots(assets: readonly RecentAsset[], requestGeneration: number): void {
+  if (!pendingSnapshotRequests.has(requestGeneration)) return;
   const grouped = new Map<string, RecentAsset | null>();
   const returnedStackByAssetId = new Map<string, string | null>();
   for (const asset of assets) {
@@ -81,7 +91,8 @@ export function acceptGalleryStackSnapshots(assets: readonly RecentAsset[], requ
     currentStackSnapshots.set(stackId, { requestGeneration, card });
     changed = true;
   }
-  if (changed) publish();
+  const finished = pendingSnapshotRequests.delete(requestGeneration);
+  if (changed || finished) publish();
 }
 
 function currentCardFor(card: RecentAsset): RecentAsset {
@@ -95,7 +106,7 @@ function currentCardFor(card: RecentAsset): RecentAsset {
 function canReconcile(card: RecentAsset): boolean {
   if (card.stackId == null) return false;
   const current = currentStackSnapshots.get(card.stackId.toLowerCase());
-  if (current) return current.requestGeneration >= latestRequestGeneration;
+  if (current) return ![...pendingSnapshotRequests].some(generation => generation > current.requestGeneration);
   // Pure callers without Gallery fetches retain the existing complete-snapshot behavior.
   return latestRequestGeneration === 0;
 }
@@ -117,7 +128,7 @@ export function resolveGalleryStackSelection(card: RecentAsset, preset: Anshitsu
   const stackId = card.stackId.toLowerCase();
   const manual = manualSelections.get(stackId);
   const result = selectGalleryAssetTargets(current, preset, manual);
-  // Only the newest accepted Gallery request may prune IDs from persistent user intent.
+  // Only shared accepted evidence may prune intent, after any newer unresolved requests have settled.
   if (result.status === 'ready' && manual !== undefined && canReconcile(current)) {
     const reconciled = new Set(result.selectedAssetIds);
     if (manual.size !== reconciled.size || [...manual].some(id => !reconciled.has(id))) {
@@ -147,8 +158,8 @@ export function clearManualGalleryStackSelection(stackId: string): void {
 }
 
 export function useGalleryStackSelections() {
-  useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => revision, () => revision);
-  return { resolve: resolveGalleryStackSelection, setManualSelection: setManualGalleryStackSelection,
+  const selectionRevision = useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => revision, () => revision);
+  return { revision: selectionRevision, resolve: resolveGalleryStackSelection, setManualSelection: setManualGalleryStackSelection,
     clearManualSelection: clearManualGalleryStackSelection, getManualSelection: getManualGalleryStackSelection,
     currentCard: currentCardFor };
 }

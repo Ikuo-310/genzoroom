@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
 import { resolveGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection,
-  acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
+  acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
 
 const ids = Array.from({ length: 4 }, (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
 const stackId = '10000000-0000-4000-8000-000000000001';
@@ -84,6 +84,56 @@ describe('Gallery Stack session selections', () => {
     expect(resolveGalleryStackSelection(oldSnapshot, 'both').assets?.map(asset => asset.id)).toEqual([ids[0], ids[1]]);
     expect([...JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]])
       .toEqual([ids[0], ids[1]]);
+  });
+
+  it.each(['failed', 'cancelled'])('releases a %s newer request so confirmed removals cannot resurrect', outcome => {
+    const original = stack([], ids.slice(0, 2));
+    acceptGalleryStackSnapshots([original], beginGalleryStackSnapshotRequest());
+    setManualGalleryStackSelection(original, new Set([ids[1]]));
+    const removalRequest = beginGalleryStackSnapshotRequest();
+    const newerRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([stack([], [ids[0]])], removalRequest);
+    resolveGalleryStackSelection(original, 'both');
+    expect([...JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]]).toEqual([ids[1]]);
+
+    finishGalleryStackSnapshotRequest(newerRequest);
+    if (outcome === 'cancelled') acceptGalleryStackSnapshots([original], newerRequest);
+    expect(resolveGalleryStackSelection(original, 'both').assets).toEqual([]);
+    expect(JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]).toEqual([]);
+
+    acceptGalleryStackSnapshots([original], beginGalleryStackSnapshotRequest());
+    expect(resolveGalleryStackSelection(original, 'both').assets).toEqual([]);
+  });
+
+  it('does not let a completed unrelated Stack request block reconciliation', () => {
+    const original = stack([], ids.slice(0, 2));
+    acceptGalleryStackSnapshots([original], beginGalleryStackSnapshotRequest());
+    setManualGalleryStackSelection(original, new Set([ids[1]]));
+    const removalRequest = beginGalleryStackSnapshotRequest();
+    const unrelatedRequest = beginGalleryStackSnapshotRequest();
+    const otherStackId = '10000000-0000-4000-8000-000000000002';
+    const other = stack([], ids.map(id => id.replace(/^00000000/, '20000000')));
+    other.stackId = otherStackId;
+    other.primaryAssetId = other.id;
+    other.stackMembers = other.stackMembers!.map(member => ({ ...member, stackId: otherStackId, primaryAssetId: other.id }));
+    acceptGalleryStackSnapshots([other], unrelatedRequest);
+    acceptGalleryStackSnapshots([stack([], [ids[0]])], removalRequest);
+
+    expect(resolveGalleryStackSelection(original, 'both').assets).toEqual([]);
+    expect(JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]).toEqual([]);
+  });
+
+  it('preserves intent on unavailable accepted data and recovers after a failed request', () => {
+    const original = stack([], ids.slice(0, 2));
+    acceptGalleryStackSnapshots([original], beginGalleryStackSnapshotRequest());
+    setManualGalleryStackSelection(original, new Set([ids[1]]));
+    acceptGalleryStackSnapshots([{ ...original, stackMembers: null }], beginGalleryStackSnapshotRequest());
+    finishGalleryStackSnapshotRequest(beginGalleryStackSnapshotRequest());
+    expect(resolveGalleryStackSelection(original, 'both').status).toBe('unavailable');
+    expect(JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]).toEqual([ids[1]]);
+    acceptGalleryStackSnapshots([stack([], [ids[0]])], beginGalleryStackSnapshotRequest());
+    expect(resolveGalleryStackSelection(original, 'both').assets).toEqual([]);
+    expect(JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]).toEqual([]);
   });
 
   it('invalidates an old Stack when the latest response returns its representative as standalone', () => {
