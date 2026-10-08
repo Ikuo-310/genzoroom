@@ -117,6 +117,47 @@ function galleryPhotos(input: RecentAsset[]) {
 }
 
 describe('Gallery Stack target navigation', () => {
+  it('shares the newest Stack snapshot and manual choice across cached Recent and Favorites tabs', async () => {
+    const recentStack = makeGalleryStack(1, ['JPEG', 'JPEG']);
+    const favoritesStack = makeGalleryStack(1, ['JPEG', 'JPEG', 'JPEG']);
+    api.recent.mockResolvedValue([recentStack]);
+    api.favorites.mockResolvedValue([favoritesStack]);
+    await mount('recent');
+
+    await act(async () => host.querySelector<HTMLButtonElement>('#home-favorites-tab')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.stack-format-switch')!.click());
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const favoriteMembers = document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu section:first-child input');
+    expect(favoriteMembers).toHaveLength(3);
+    expect(favoriteMembers[2].checked).toBe(false);
+    await act(async () => favoriteMembers[2].click());
+    const stored = JSON.parse(sessionStorage.getItem('genzoroom.galleryStackSelections.v1')!);
+    expect(stored.selections[favoritesStack.stackId!]).toContain(favoritesStack.stackMembers![2].id);
+    expect(host.querySelector<HTMLButtonElement>('.stack-format-switch')?.getAttribute('aria-pressed')).toBe('true');
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+
+    await act(async () => host.querySelector<HTMLButtonElement>('#home-recent-tab')!.click());
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const recentMembers = document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu section:first-child input');
+    expect(recentMembers).toHaveLength(3);
+    expect(recentMembers[2].checked).toBe(true);
+    expect(JSON.parse(sessionStorage.getItem('genzoroom.galleryStackSelections.v1')!).selections[favoritesStack.stackId!])
+      .toContain(favoritesStack.stackMembers![2].id);
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+
+    await act(async () => host.querySelector<HTMLButtonElement>('#home-favorites-tab')!.click());
+    expect(api.favorites).toHaveBeenCalledTimes(1);
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const returnedMembers = document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu section:first-child input');
+    expect(returnedMembers).toHaveLength(3);
+    expect(returnedMembers[2].checked).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.stack-format-switch')?.getAttribute('aria-pressed')).toBe('true');
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    expect(navigation?.selectedAssets.map(item => item.id)).toEqual([favoritesStack.stackMembers![2].id]);
+  });
+
   it('excludes exported members from Darkroom while keeping independently edited Assets in Queue candidates', async () => {
     const stack = makeGalleryStack(1, ['JPEG', 'DNG'], [0]);
     stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];

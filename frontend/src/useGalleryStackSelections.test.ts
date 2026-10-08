@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
 import { resolveGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection,
-  GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
+  acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
 
 const ids = Array.from({ length: 4 }, (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
 const stackId = '10000000-0000-4000-8000-000000000001';
@@ -45,6 +45,74 @@ describe('Gallery Stack session selections', () => {
     const exported = stack([0, 1, 2], ids.slice(0, 3));
     expect(resolveGalleryStackSelection(exported, 'both').assets).toEqual([]);
     expect(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)).toContain('"' + stackId + '":[]');
+  });
+
+  it('keeps the newest accepted snapshot when requests complete in reverse order', () => {
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    const newRequest = beginGalleryStackSnapshotRequest();
+    const oldSnapshot = stack([], ids.slice(0, 2));
+    const newSnapshot = stack([], ids.slice(0, 3));
+    acceptGalleryStackSnapshots([newSnapshot], newRequest);
+    acceptGalleryStackSnapshots([oldSnapshot], oldRequest);
+
+    expect(resolveGalleryStackSelection(oldSnapshot, 'both').assets?.map(asset => asset.id)).toEqual(ids.slice(0, 3));
+  });
+
+  it('does not reconcile from a displayed snapshot while a newer Gallery request is unresolved', () => {
+    const oldSnapshot = stack([], ids.slice(0, 2));
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([oldSnapshot], oldRequest);
+    setManualGalleryStackSelection(oldSnapshot, new Set([ids[1]]));
+    const saved = sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY);
+    beginGalleryStackSnapshotRequest();
+
+    resolveGalleryStackSelection(oldSnapshot, 'nonRaw');
+
+    expect(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)).toBe(saved);
+    expect([...JSON.parse(saved!).selections[stackId]]).toEqual([ids[1]]);
+  });
+
+  it('uses the newest complete members for old cards and prunes only confirmed removals or exports', () => {
+    const oldSnapshot = stack([], ids.slice(0, 3));
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([oldSnapshot], oldRequest);
+    setManualGalleryStackSelection(oldSnapshot, new Set([ids[0], ids[1], ids[2]]));
+    const currentSnapshot = stack([2], [ids[0], ids[1], ids[3]]);
+    const currentRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([currentSnapshot], currentRequest);
+
+    expect(resolveGalleryStackSelection(oldSnapshot, 'both').assets?.map(asset => asset.id)).toEqual([ids[0], ids[1]]);
+    expect([...JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]])
+      .toEqual([ids[0], ids[1]]);
+  });
+
+  it('invalidates an old Stack when the latest response returns its representative as standalone', () => {
+    const oldSnapshot = stack([], ids.slice(0, 2));
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([oldSnapshot], oldRequest);
+    setManualGalleryStackSelection(oldSnapshot, new Set([ids[1]]));
+    const saved = sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY);
+
+    const newerRequest = beginGalleryStackSnapshotRequest();
+    const standalone = { ...oldSnapshot, stackId: null, primaryAssetId: null,
+      stackAssetCount: null, stackMemberIds: null, stackMembers: undefined } as RecentAsset;
+    acceptGalleryStackSnapshots([standalone], newerRequest);
+
+    expect(resolveGalleryStackSelection(oldSnapshot, 'both').status).toBe('unavailable');
+    expect(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)).toBe(saved);
+  });
+
+  it('preserves all-off and never adds new members to a manual selection', () => {
+    const oldSnapshot = stack([], ids.slice(0, 2));
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([oldSnapshot], oldRequest);
+    setManualGalleryStackSelection(oldSnapshot, new Set());
+    const newSnapshot = stack([], ids.slice(0, 3));
+    const newRequest = beginGalleryStackSnapshotRequest();
+    acceptGalleryStackSnapshots([newSnapshot], newRequest);
+
+    expect(resolveGalleryStackSelection(oldSnapshot, 'both').assets).toEqual([]);
+    expect(JSON.parse(sessionStorage.getItem(GALLERY_STACK_SELECTION_SESSION_KEY)!).selections[stackId]).toEqual([]);
   });
 
   it('keeps saved intent through unavailable data and restores it when a full snapshot returns', () => {

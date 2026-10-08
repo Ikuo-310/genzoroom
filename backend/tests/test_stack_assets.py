@@ -29,7 +29,7 @@ def test_complete_gallery_members_keep_individual_formats_and_tags(kind, filenam
                "tags": [{"value": "GenzoRoom"}] if tagged[index] else []}
                for index, filename in enumerate(filenames)]
     snapshot = stack(member_ids=IDS[:len(members)]) | {"assets": members}
-    result = fetch(kind, [{key: value for key, value in member.items() if key != "tags"} for member in members], [snapshot])
+    result = fetch(kind, members, [snapshot], expect_tag_lookup=False)
     assert len(result) == 1
     details = result[0]["stackMembers"]
     assert [member["id"] for member in details] == IDS[:len(members)]
@@ -50,7 +50,7 @@ def stack(stack_id=STACK_ID, primary_id=IDS[0], member_ids=None):
             "assets": [{"id": i} for i in (member_ids if member_ids is not None else IDS[:3])]}
 
 
-def fetch(kind, items, stacks, *, pages=1):
+def fetch(kind, items, stacks, *, pages=1, expect_tag_lookup=True, tag_response=None):
     calls = []
     search_count = 0
 
@@ -60,7 +60,7 @@ def fetch(kind, items, stacks, *, pages=1):
         assert request.headers["x-api-key"] == "key"
         assert request.headers["Accept"] == "application/json"
         if request.url.path == "/api/tags":
-            return httpx.Response(200, json=[])
+            return tag_response if tag_response is not None else httpx.Response(200, json=[])
         if request.url.path == "/api/timeline/bucket":
             assert request.method == "GET"
             return httpx.Response(200, json={
@@ -95,7 +95,7 @@ def fetch(kind, items, stacks, *, pages=1):
     if kind == "calendar" and not items:
         assert calls == ["/api/timeline/bucket"]
     else:
-        assert calls == (["/api/timeline/bucket"] if kind == "calendar" else []) + ["/api/search/metadata"] * pages + ["/api/stacks"] + (["/api/tags"] if result else [])
+        assert calls == (["/api/timeline/bucket"] if kind == "calendar" else []) + ["/api/search/metadata"] * pages + ["/api/stacks"] + (["/api/tags"] if result and expect_tag_lookup else [])
     return [a.model_dump(mode="json") for a in result]
 
 
@@ -120,6 +120,63 @@ def test_joins_primary_members_multiple_stacks_and_unstacked_assets(kind):
     assert result[0]["format"] == "JPEG" and not result[0]["is_raw"]
     assert all(a["format"] == "DNG" and a["is_raw"] for a in result[1:])
     assert "assets" not in result[0]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(("cover_search", "cover_snapshot", "expected_unavailable"), [
+    (True, False, True), (False, True, True), (True, True, False), (False, False, False),
+])
+def test_conflicting_cover_tag_evidence_disables_only_stack_candidates(kind, cover_search, cover_snapshot, expected_unavailable):
+    search_cover = asset(IDS[0]) | {"tags": [{"value": "GenzoRoom"}] if cover_search else []}
+    members = [asset(IDS[0]) | {"tags": [{"value": "GenzoRoom"}] if cover_snapshot else []},
+               asset(IDS[1]) | {"tags": []}]
+    snapshot = stack(member_ids=IDS[:2]) | {"assets": members}
+    result = fetch(kind, [search_cover], [snapshot], expect_tag_lookup=False)
+
+    assert len(result) == 1
+    assert result[0]["isGenzoRoomExport"] is cover_search
+    assert (result[0].get("stackMembers") is None) is expected_unavailable
+    if not expected_unavailable:
+        assert [member["isGenzoRoomExport"] for member in result[0]["stackMembers"]] == [cover_snapshot, False]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_exported_child_tag_stays_asset_local(kind):
+    cover = asset(IDS[0]) | {"tags": []}
+    snapshot = stack(member_ids=IDS[:2]) | {"assets": [
+        asset(IDS[0]) | {"tags": []}, asset(IDS[1]) | {"tags": [{"value": "GenzoRoom"}]},
+    ]}
+
+    result = fetch(kind, [cover], [snapshot], expect_tag_lookup=False)
+
+    assert result[0]["isGenzoRoomExport"] is False
+    assert [member["isGenzoRoomExport"] for member in result[0]["stackMembers"]] == [False, True]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_unknown_search_tag_uses_resolved_member_tag_without_guessing(kind):
+    cover = asset(IDS[0]) | {"tags": None}
+    snapshot = stack(member_ids=IDS[:2]) | {"assets": [
+        asset(IDS[0]) | {"tags": []}, asset(IDS[1]) | {"tags": []},
+    ]}
+    result = fetch(kind, [cover], [snapshot], expect_tag_lookup=True)
+
+    assert len(result) == 1
+    assert result[0]["isGenzoRoomExport"] is False
+    assert result[0]["stackMembers"][0]["isGenzoRoomExport"] is False
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_tag_lookup_failure_keeps_gallery_card_and_disables_candidates(kind):
+    cover = asset(IDS[0]) | {"tags": [{"value": "GenzoRoom"}]}
+    snapshot = stack(member_ids=IDS[:2]) | {"assets": [
+        asset(IDS[0]) | {"tags": [{"value": "GenzoRoom"}]}, asset(IDS[1]) | {"tags": None},
+    ]}
+    result = fetch(kind, [cover], [snapshot], expect_tag_lookup=True, tag_response=httpx.Response(500))
+
+    assert len(result) == 1
+    assert result[0]["isGenzoRoomExport"] is True
+    assert result[0].get("stackMembers") is None
 
 
 @pytest.mark.parametrize("kind", KINDS)

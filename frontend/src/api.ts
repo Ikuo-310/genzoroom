@@ -81,9 +81,13 @@ function withSafeStackMetadata(data: unknown[]): unknown[] {
           || member.stackMembers != null || typeof member.isGenzoRoomExport !== 'boolean')) throw new Error();
       const [stack] = validateImmichStacks([{ id: value.stackId, primaryAssetId: value.primaryAssetId, assets: value.stackMembers }], [value.stackId]);
       const ids = new Set(stack.assets.map(member => member.id));
-      if (typeof value.id !== 'string' || value.id.toLowerCase() !== value.primaryAssetId.toLowerCase()
+      if (typeof value.id !== 'string') throw new Error();
+      const representativeId = value.id.toLowerCase();
+      if (representativeId !== value.primaryAssetId.toLowerCase()
         || value.stackAssetCount !== ids.size || value.stackMemberIds.length !== ids.size
         || !value.stackMemberIds.every(id => typeof id === 'string' && ids.has(id.toLowerCase()))) throw new Error();
+      const primary = stack.assets.find(member => member.id === representativeId);
+      if (typeof value.isGenzoRoomExport === 'boolean' && primary?.isGenzoRoomExport !== value.isGenzoRoomExport) throw new Error();
       return { ...value, stackMembers: stack.assets };
     } catch {
       // Candidate failures must not stop browsing or become a successful partial selection.

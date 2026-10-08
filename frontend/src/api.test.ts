@@ -27,6 +27,18 @@ describe('Home asset stack metadata', () => {
       expect(fetchMock.mock.calls[0]).toBeDefined();
     } finally { vi.unstubAllGlobals(); }
   });
+  it.each(readers.flatMap(read => [true, false].map(tagged => [read, tagged] as const)))
+  ('discards candidate metadata when the representative tag disagrees with its Primary member (%s)', async (read, tagged) => {
+    const response = { ...complete, isGenzoRoomExport: !tagged,
+      stackMembers: complete.stackMembers.map((member, index) => ({ ...member, isGenzoRoomExport: index === 0 ? tagged : false })) };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([response]))));
+    try {
+      const result = await read(new AbortController().signal);
+      expect(result).toHaveLength(1);
+      expect(result[0].stackMembers).toBeNull();
+      expect(result[0].isGenzoRoomExport).toBe(!tagged);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each([
     complete.stackMembers.slice(0, 1),
     [complete.stackMembers[0], complete.stackMembers[0]],

@@ -714,41 +714,54 @@ async def _with_home_export_tags(
 ) -> list[RecentAsset]:
     all_assets = assets + [member for asset in assets for member in asset.stackMembers or []]
     pending = list({asset.id: asset for asset in all_assets if asset.isGenzoRoomExport is None}.values())
-    if not pending:
-        return assets
     try:
-        async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport) as client:
-            response = await _immich_request(client, "GET", url, "/tags", headers={"x-api-key": key, "Accept": "application/json"})
-        if response.status_code != 200:
-            raise _request_error(response)
-        tags = response.json()
-        if not isinstance(tags, list) or any(not isinstance(tag, Mapping) or not isinstance(tag.get("value"), str) for tag in tags):
-            raise ValueError
-        tag_ids = [UUID(tag["id"]) for tag in tags if tag["value"] == "GenzoRoom"]
-        tagged_ids = set()
-        # Search does not load tag relations in Immich v3.2.4; resolve membership in bounded batches, never per card.
-        for start in range(0, len(pending), HOME_EXPORT_TAG_BATCH_SIZE) if tag_ids else []:
-            batch = {asset.id for asset in pending[start:start + HOME_EXPORT_TAG_BATCH_SIZE]}
-            matches = await _search_all_assets(url, key, {
-                "type": {"eq": "IMAGE"}, "trashedAt": {"eq": None},
-                "tagIds": {"any": [str(tag_id) for tag_id in tag_ids]},
-                "or": [{"id": {"eq": str(asset_id)}} for asset_id in sorted(batch)],
-            }, "fileCreatedAt", transport=transport)
-            matched_ids = {asset.id for asset in matches}
-            if not matched_ids <= batch:
+        if pending:
+            async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport) as client:
+                response = await _immich_request(client, "GET", url, "/tags", headers={"x-api-key": key, "Accept": "application/json"})
+            if response.status_code != 200:
+                raise _request_error(response)
+            tags = response.json()
+            if not isinstance(tags, list) or any(not isinstance(tag, Mapping) or not isinstance(tag.get("value"), str) for tag in tags):
                 raise ValueError
-            tagged_ids.update(matched_ids)
-        pending_ids = {asset.id for asset in pending}
-        for asset in all_assets:
-            if asset.id in pending_ids and asset.isGenzoRoomExport is None:
-                asset.isGenzoRoomExport = asset.id in tagged_ids
+            tag_ids = [UUID(tag["id"]) for tag in tags if tag["value"] == "GenzoRoom"]
+            tagged_ids = set()
+            # Search does not load tag relations in Immich v3.2.4; resolve membership in bounded batches, never per card.
+            for start in range(0, len(pending), HOME_EXPORT_TAG_BATCH_SIZE) if tag_ids else []:
+                batch = {asset.id for asset in pending[start:start + HOME_EXPORT_TAG_BATCH_SIZE]}
+                matches = await _search_all_assets(url, key, {
+                    "type": {"eq": "IMAGE"}, "trashedAt": {"eq": None},
+                    "tagIds": {"any": [str(tag_id) for tag_id in tag_ids]},
+                    "or": [{"id": {"eq": str(asset_id)}} for asset_id in sorted(batch)],
+                }, "fileCreatedAt", transport=transport)
+                matched_ids = {asset.id for asset in matches}
+                if not matched_ids <= batch:
+                    raise ValueError
+                tagged_ids.update(matched_ids)
+            pending_ids = {asset.id for asset in pending}
+            for asset in all_assets:
+                if asset.id in pending_ids and asset.isGenzoRoomExport is None:
+                    asset.isGenzoRoomExport = asset.id in tagged_ids
     except (ImmichRequestError, httpx.InvalidURL, httpx.RequestError, KeyError, TypeError, ValueError) as error:
         # Export identity is optional; a failed tag lookup must preserve the authoritative Home photo list.
         _immich_log(level="warn", component="immich", event="home.exportTags.unavailable", context={
             "assetCount": len(pending), "errorCode": getattr(error, "error_code", "unexpected_response"),
         })
+    tag_evidence: dict[UUID, set[bool]] = {}
+    for asset in all_assets:
+        if isinstance(asset.isGenzoRoomExport, bool):
+            tag_evidence.setdefault(asset.id, set()).add(asset.isGenzoRoomExport)
+    conflicting_ids = {asset_id for asset_id, states in tag_evidence.items() if len(states) > 1}
     for asset in assets:
-        if asset.stackMembers is not None and any(member.isGenzoRoomExport is None for member in asset.stackMembers):
+        if asset.stackMembers is not None and any(
+            member.isGenzoRoomExport is None or member.id in conflicting_ids for member in asset.stackMembers
+        ):
+            if any(member.id in conflicting_ids for member in asset.stackMembers):
+                _immich_log(level="warn", component="immich", event="home.exportTags.conflict", context={
+                    "stackId": str(asset.stackId) if asset.stackId is not None else "unknown",
+                    "memberCount": len(asset.stackMembers), "conflictCount": sum(
+                        member.id in conflicting_ids for member in asset.stackMembers
+                    ),
+                })
             asset.stackMembers = None
     return assets
 

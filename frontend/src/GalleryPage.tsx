@@ -13,7 +13,7 @@ import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
 import { selectGalleryAssetTargets } from './galleryAssetSelection';
-import { useGalleryStackSelections } from './useGalleryStackSelections';
+import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
 import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
@@ -61,6 +61,7 @@ export function GalleryPage() {
   const location = useLocation();
   const exportQueue = useExportQueue();
   const stackSelections = useGalleryStackSelections();
+  useEffect(() => () => clearGalleryStackSnapshots(), []);
   const [queueFailure, setQueueFailure] = useState<'addFailed' | 'removeFailed' | 'notEligible' | 'locked' | null>(null);
   const queueOperations = useRef(new Set<string>());
   const [queueBusy, setQueueBusy] = useState<Set<string>>(() => new Set());
@@ -226,9 +227,11 @@ export function GalleryPage() {
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
+    const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     void fetchRecentAssets(settings.recentPhotoCount, controller.signal).then(data => {
       if (active) {
+        acceptGalleryStackSnapshots(data, stackSnapshotRequest);
         completeScrollRequest('recent');
         hasLoadedRecentAssets.current = true;
         setAssets(data);
@@ -272,9 +275,11 @@ export function GalleryPage() {
     if (activeTab !== 'favorites' || hasLoadedFavorites.current) return;
     const controller = new AbortController();
     let active = true;
+    const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     setFavoriteState('loading');
     void fetchFavoriteAssets(controller.signal).then(data => {
       if (!active) return;
+      acceptGalleryStackSnapshots(data, stackSnapshotRequest);
       hasLoadedFavorites.current = true;
       completeScrollRequest('favorites');
       setFavoriteAssets(data);
@@ -291,9 +296,11 @@ export function GalleryPage() {
     if (activeTab !== 'albums' || selectedAlbum === null) return;
     const controller = new AbortController();
     let active = true;
+    const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     const requestId = albumAssetRequestId.current;
     void fetchAlbumAssets(selectedAlbum.id, controller.signal).then(data => {
       if (!active || requestId !== albumAssetRequestId.current) return;
+      acceptGalleryStackSnapshots(data, stackSnapshotRequest);
       completeScrollRequest(`albums:${selectedAlbum.id}`);
       const availableIds = new Set(data.map(asset => asset.id));
       setAlbumAssets(data);
@@ -352,9 +359,11 @@ export function GalleryPage() {
     if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
     const controller = new AbortController();
     let active = true;
+    const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     const requestId = calendarAssetRequestId.current;
     void fetchCalendarDayAssets(selectedCalendarDate, controller.signal).then(data => {
       if (!active || requestId !== calendarAssetRequestId.current) return;
+      acceptGalleryStackSnapshots(data, stackSnapshotRequest);
       completeScrollRequest(`calendar:${selectedCalendarDate}`);
       setCalendarAssets(data);
       const availableIds = new Set(data.map(asset => asset.id));
@@ -862,9 +871,10 @@ export function GalleryPage() {
     return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
       const queue = queueStateFor(asset);
       const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
-      const manual = asset.stackId ? stackSelections.getManualSelection(asset.stackId) : undefined;
-      const resolvedStack = asset.stackId ? selectGalleryAssetTargets(asset, settings.anshitsuInitialSelection, manual) : null;
-      const stackMembers = resolvedStack?.status === 'ready' ? asset.stackMembers ?? null : null;
+      const selectionCard = asset.stackId ? stackSelections.currentCard(asset) : asset;
+      const manual = selectionCard.stackId ? stackSelections.getManualSelection(selectionCard.stackId) : undefined;
+      const resolvedStack = selectionCard.stackId ? selectGalleryAssetTargets(selectionCard, settings.anshitsuInitialSelection, manual) : null;
+      const stackMembers = resolvedStack?.status === 'ready' ? selectionCard.stackMembers ?? null : null;
       const selectedStackIds = resolvedStack?.status === 'ready' ? resolvedStack.selectedAssetIds : new Set<string>();
       return (
         <PhotoCard
@@ -891,10 +901,13 @@ export function GalleryPage() {
               known: exportQueue.hasAsset(assetId) !== undefined,
               busy: queueBatchBusyState || queueBusy.has(assetId.toLowerCase()) || !!exportQueue.mutationFor(assetId).operation }),
             onDarkroomToggle: (member: RecentAsset, checked: boolean) => {
-              if (!asset.stackId) return;
-              const current = new Set(stackSelections.getManualSelection(asset.stackId) ?? selectedStackIds);
+              if (!selectionCard.stackId) return;
+              const latestCard = stackSelections.currentCard(asset);
+              const latest = stackSelections.resolve(latestCard, settings.anshitsuInitialSelection);
+              if (latest.status !== 'ready') return;
+              const current = new Set(stackSelections.getManualSelection(selectionCard.stackId) ?? latest.selectedAssetIds);
               if (checked) current.add(member.id.toLowerCase()); else current.delete(member.id.toLowerCase());
-              stackSelections.setManualSelection(asset, current);
+              stackSelections.setManualSelection(latestCard, current);
             },
             onQueueToggle: (member: RecentAsset, checked: boolean) => { void toggleQueueMember(member, checked); },
           } : undefined}
