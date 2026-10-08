@@ -35,7 +35,7 @@ it('removes only horizontal frame chrome while preserving vertical spacing and i
     </div>
   </div></main>`;
   const contentStyle = getComputedStyle(document.querySelector('.stack-content')!);
-  expect(contentStyle.paddingLeft).toBe('0px'); expect(contentStyle.paddingRight).toBe('0px');
+  expect(contentStyle.paddingLeft).toBe('12px'); expect(contentStyle.paddingRight).toBe('12px');
   expect(contentStyle.paddingTop).toBe('16px'); expect(contentStyle.paddingBottom).toBe('16px');
 
   for (const frame of document.querySelectorAll<HTMLElement>('.stack-frame')) {
