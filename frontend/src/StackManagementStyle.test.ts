@@ -82,3 +82,21 @@ it('anchors accessibility labels inside Stack scroll containers without changing
   expect(positionedAncestor(document.getElementById('toolbar-label')!)).toBe(document.querySelector('.stack-management-page'));
   expect(getComputedStyle(document.querySelector('.stack-unmatched-frame')!).position).toBe('relative');
 });
+
+it('preserves Stack filename padding while fitting the shared middle-ellipsis layout into narrow cards', () => {
+  document.body.innerHTML = `<div class="stack-photo" style="width: 120px"><span class="stack-filename">
+    <span class="filename-middle-ellipsis" title="PXL_20260402_105016-Genzo01.jpg"><span class="filename-middle-ellipsis-visual">
+      <span class="filename-prefix">PXL_20260402_105016</span><span class="filename-suffix">-Genzo01.jpg</span>
+    </span></span></span></div>`;
+  const label = document.querySelector<HTMLElement>('.stack-filename')!;
+  expect(getComputedStyle(label).paddingLeft).toBe('8px');
+  expect(getComputedStyle(label).overflow).toBe('hidden');
+  const display = document.querySelector<HTMLElement>('.filename-middle-ellipsis')!;
+  expect(getComputedStyle(display).width).toBe('100%');
+  const prefix = document.querySelector<HTMLElement>('.filename-prefix')!;
+  expect(getComputedStyle(prefix).minWidth).toBe('0');
+  expect(getComputedStyle(prefix).overflow).toBe('hidden');
+  const suffix = document.querySelector<HTMLElement>('.filename-suffix')!;
+  expect(getComputedStyle(suffix).flexShrink).toBe('0');
+  expect(suffix.textContent).toBe('-Genzo01.jpg');
+});

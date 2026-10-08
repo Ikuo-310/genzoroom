@@ -61,6 +61,26 @@ it('guards S and opens concrete RAW through the button', async () => {
   const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); host.append(menu); await press('s'); menu.remove();
   expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('false'); await click('#home-stacks-tab'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
 });
+it('uses the shared middle-ellipsis filename display in candidate and unmatched Stack cards', async () => {
+  const filenames = ['PXL_20260402_105016-Genzo01.jpg', 'short.jpg', 'unmatched.jpg'];
+  const ids = ['72345678-1234-4234-9234-123456789abc', '62345678-1234-4234-9234-123456789abc', 'filename-unmatched'];
+  const assets = filenames.map((filename, index) => ({ ...photos[index % photos.length], id: ids[index], filename,
+    ...(index < 2 ? { stackId: '52345678-1234-4234-9234-123456789abc', primaryAssetId: ids[1], stackAssetCount: 2 } : {}) }));
+  const candidate = { id: '52345678-1234-4234-9234-123456789abc', primaryAssetId: ids[1], assets: assets.slice(0, 2) };
+  api.recent.mockResolvedValue(assets); api.favorites.mockResolvedValue(assets); api.resolve.mockResolvedValue([candidate]);
+  await mount();
+  for (const checkbox of host.querySelectorAll('.photo-card input')) await act(async () => (checkbox as HTMLInputElement).click());
+  await press('s');
+
+  const candidateDisplays = Array.from(host.querySelectorAll<HTMLElement>('.stack-candidate-group .stack-filename .filename-middle-ellipsis'));
+  const unmatchedDisplays = Array.from(host.querySelectorAll<HTMLElement>('.stack-unmatched-grid .stack-filename .filename-middle-ellipsis'));
+  expect(candidateDisplays).toHaveLength(2); expect(unmatchedDisplays).toHaveLength(1);
+  const displays = [...candidateDisplays, ...unmatchedDisplays];
+  expect(displays.map(display => display.title).sort()).toEqual([...filenames].sort());
+  expect(displays.find(display => display.title === filenames[0])?.querySelector('.filename-suffix')?.textContent).toBe('-Genzo01.jpg');
+  expect(displays.find(display => display.title === filenames[1])?.querySelector('.filename-suffix')).toBeNull();
+  expect(displays.map(display => display.textContent).sort()).toEqual([...filenames].sort());
+});
 it('renders compact header, isolated scroll sections and enables sending completed candidates', async () => {
   await mount('/stack', { selectedAssets: photos });
   const content = host.querySelector('.stack-content')!;

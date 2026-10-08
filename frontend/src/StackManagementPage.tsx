@@ -10,6 +10,7 @@ import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { FormatBadge } from './FormatBadge';
+import { FilenameDisplay } from './FilenameDisplay';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
@@ -709,7 +710,7 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
     <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={asset.thumbnail_url} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>
-    <span className="stack-filename" title={asset.filename}>{asset.filename}</span>
+    <span className="stack-filename"><FilenameDisplay filename={asset.filename} /></span>
   </button>{onPurge && <button className="stack-icon-button stack-purge-member" type="button" disabled={disabled}
     title={t('stackManagement.purgeMember', { filename: asset.filename })} aria-label={t('stackManagement.purgeMember', { filename: asset.filename })}
     onClick={event => { event.stopPropagation(); onPurge(); }}>×</button>}</div>;

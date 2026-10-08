@@ -746,7 +746,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-thumbnail { position: relative; aspect-ratio: 4 / 3; background: var(--bg-panel); }
 .stack-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
 .stack-management-page .format-badge { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-subtle); }
-.stack-filename { display: block; padding: 6px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stack-filename { display: block; min-width: 0; padding: 6px 8px; overflow: hidden; }
 @media (max-width: 600px) {
   .stack-management-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .stack-management-header h1 { grid-row: 2; grid-column: 1 / -1; font-size: 1rem; }
