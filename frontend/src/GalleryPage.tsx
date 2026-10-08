@@ -96,6 +96,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const [showExport, setShowExport] = useState(false);
   const [showStacks, setShowStacks] = useState(false);
   const [stackSession, setStackSession] = useState<{ assets: RecentAsset[]; generation: number } | null>(null);
+  // Keep the ratio above the keyed editor so a new asset session retains the SPA layout preference.
+  const [stackSplitRatio, setStackSplitRatio] = useState(2 / 3);
   const showStacksRef = useRef(showStacks);
   showStacksRef.current = showStacks;
   const exportManagement = useExportManagement(exportQueue, showExport && active);
@@ -1120,7 +1122,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         </>}
       </section>
       {stackSession && <div id="home-stacks-panel" className="home-stacks-panel" role="tabpanel" aria-labelledby="home-stacks-tab" hidden={!showStacks}>
-        <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={active && showStacks} />
+        <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={active && showStacks}
+          splitRatio={stackSplitRatio} onSplitRatioChange={setStackSplitRatio} />
       </div>}
     </main>
   );

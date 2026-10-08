@@ -782,6 +782,11 @@ function dragEvent(type:string,transfer:DataTransfer,relatedTarget?:EventTarget|
  if(type==='dragleave')Object.defineProperty(event,'relatedTarget',{value:relatedTarget??null});
  return event;
 }
+function pointerEvent(type:string,pointerId:number,clientY:number,button=0):PointerEvent {
+ const event=new Event(type,{bubbles:true,cancelable:true}) as PointerEvent;
+ Object.defineProperty(event,'pointerId',{value:pointerId});Object.defineProperty(event,'clientY',{value:clientY});Object.defineProperty(event,'button',{value:button});
+ return event;
+}
 it('records safe D&D diagnostics with Chrome dragover deduplication and preserves the drop result',async()=>{
  frontendLogger.setLevel('debug');
  await mount('/stack',{selectedAssets:[...photos,...singles]});
@@ -1392,3 +1397,69 @@ for (const navigation of ['shortcut', 'tab'] as const) {
     expect(host.querySelectorAll('.stack-unmatched-grid .stack-photo')).toHaveLength(1);
   });
 }
+
+it('splits Stack candidates into independently scrollable frames and retains the resized ratio across Home and Anshitsu', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  const split = host.querySelector<HTMLElement>('.stack-split-view')!;
+  const bounds = vi.spyOn(split, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 900));
+  const separator = host.querySelector<HTMLElement>('.stack-split-separator')!;
+  expect(separator.getAttribute('aria-valuenow')).toBe('67');
+  expect(host.querySelector('.stack-candidate-frame')).not.toBeNull();
+  expect(host.querySelector('.stack-unmatched-frame')).not.toBeNull();
+  const upper = host.querySelector<HTMLElement>('.stack-candidate-frame')!;
+  const lower = host.querySelector<HTMLElement>('.stack-unmatched-frame')!;
+  upper.scrollTop = 101; lower.scrollTop = 203;
+  expect(upper.scrollTop).toBe(101); expect(lower.scrollTop).toBe(203);
+
+  await act(async () => {
+    separator.dispatchEvent(pointerEvent('pointerdown', 7, 0));
+    separator.dispatchEvent(pointerEvent('pointermove', 7, 0));
+  });
+  expect(separator.getAttribute('aria-valuenow')).toBe('50');
+  await act(async () => {
+    separator.dispatchEvent(pointerEvent('pointermove', 7, 900));
+    separator.dispatchEvent(pointerEvent('pointerup', 7, 900));
+  });
+  expect(separator.getAttribute('aria-valuenow')).toBe('80');
+  bounds.mockRestore();
+
+  await click('#home-recent-tab'); await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-split-separator')?.getAttribute('aria-valuenow')).toBe('80');
+  await click('#home-recent-tab'); await click('.home-open-workspace');
+  expect(host.querySelector('.workspace-actions')).not.toBeNull();
+  await act(async () => navigateTest('/', null));
+  await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-split-separator')?.getAttribute('aria-valuenow')).toBe('80');
+
+  await click('#home-recent-tab'); await click('.selection-clear'); await click('.photo-card:first-child input'); await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-split-separator')?.getAttribute('aria-valuenow')).toBe('80');
+});
+
+it('allows Stack members to drop anywhere in the lower frame while preserving card-level drops', async () => {
+  api.resolve.mockResolvedValue([existingStack]);
+  await mount('/stack', { selectedAssets: [existingMembers[1], ...singles] });
+  const group = host.querySelector<HTMLElement>('.stack-candidate-group')!;
+  const source = group.querySelector<HTMLButtonElement>('.stack-photo')!;
+  const lower = host.querySelector<HTMLElement>('.stack-unmatched-frame')!;
+  const payload = { assetId: 'hidden-first', sourceGroupId: `draft:immich:${existingStackId}` };
+  const transfer = dragTransfer(payload);
+  await act(async () => source.dispatchEvent(dragEvent('dragstart', transfer)));
+  const over = dragEvent('dragover', transfer); await act(async () => lower.dispatchEvent(over));
+  expect(over.defaultPrevented).toBe(true);
+  expect(lower.classList.contains('stack-unmatched-drop-target')).toBe(true);
+  const drop = dragEvent('drop', transfer); await act(async () => lower.dispatchEvent(drop));
+  expect(drop.defaultPrevented).toBe(true);
+  expect(unmatched()).toContain('hidden.jpg');
+  await act(async () => source.dispatchEvent(dragEvent('dragend', transfer)));
+
+  const external = dragEvent('drop', dragTransfer(undefined, ['Files'], [new File(['x'], 'outside.jpg')]));
+  const before = unmatched(); await act(async () => lower.dispatchEvent(external));
+  expect(external.defaultPrevented).toBe(false); expect(unmatched()).toEqual(before);
+});
+
+it('uses the shared red Immich action style and keeps send disabled when the session is empty', async () => {
+  await mount('/stack', { selectedAssets: [] });
+  const send = button('Send to Immich');
+  expect(send.classList.contains('immich-action-button')).toBe(true);
+  expect(send.disabled).toBe(true);
+});

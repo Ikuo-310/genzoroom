@@ -892,6 +892,7 @@
     "add": "選択中のSTACKに追加",
     "detect": "再検出",
     "send": "Immichへ送信",
+    "resizePanes": "候補エリアの高さを変更",
     "candidates": "STACK候補",
     "unmatched": "STACK候補外",
     "noCandidates": "STACK候補はまだありません",

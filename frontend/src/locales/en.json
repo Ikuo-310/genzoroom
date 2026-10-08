@@ -902,6 +902,7 @@
     "add": "Add to selected stack",
     "detect": "Detect again",
     "send": "Send to Immich",
+    "resizePanes": "Resize candidate areas",
     "candidates": "Stack candidates",
     "unmatched": "Outside stack candidates",
     "noCandidates": "No stack candidates yet",

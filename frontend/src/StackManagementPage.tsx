@@ -23,6 +23,14 @@ import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, pars
 import { frontendLogger } from './frontendLogging';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
+const DEFAULT_SPLIT_RATIO = 2 / 3;
+const MIN_SPLIT_RATIO = 0.5;
+const MAX_SPLIT_RATIO = 0.8;
+const SPLITTER_HEIGHT = 8;
+
+function clampSplitRatio(value: number) {
+  return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, value));
+}
 
 type DndTarget = { targetKind: 'stack' | 'unmatched-area' | 'unmatched-photo'; targetGroupId: string | null; targetAssetId?: string };
 type DragDiagnosticSession = {
@@ -44,7 +52,9 @@ function readNavigation(value: unknown): StackNavigationState | null {
   return { selectedAssets: [...new Map(state.selectedAssets.map(asset => [asset.id, asset])).values()], ...(homeReturn ? { homeReturn } : {}) };
 }
 
-export function StackManagementPage({ sessionAssets, active = true }: { sessionAssets?: RecentAsset[]; active?: boolean } = {}) {
+export function StackManagementPage({ sessionAssets, active = true, splitRatio, onSplitRatioChange }: {
+  sessionAssets?: RecentAsset[]; active?: boolean; splitRatio?: number; onSplitRatioChange?: (ratio: number) => void;
+} = {}) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
@@ -69,6 +79,10 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
   const [confirmSend, setConfirmSend] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
+  const [localSplitRatio, setLocalSplitRatio] = useState(DEFAULT_SPLIT_RATIO);
+  const currentSplitRatio = splitRatio ?? localSplitRatio;
+  const splitViewRef = useRef<HTMLDivElement>(null);
+  const resizingPointer = useRef<number | null>(null);
   const [dragging, setDragging] = useState<StackDragPayload | null>(null);
   const draggingStateRef = useRef(dragging);
   draggingStateRef.current = dragging;
@@ -192,7 +206,7 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
     if (!(target instanceof Element)) return 'other';
     if (target.closest('.stack-photo')) return 'stack-photo';
     if (target.closest('.stack-candidate-group')) return 'stack-group';
-    if (target.closest('.stack-unmatched-grid, .stack-unmatched-empty, #stack-unmatched-heading')) return 'unmatched-area';
+    if (target.closest('.stack-unmatched-frame, .stack-unmatched-grid, .stack-unmatched-empty, #stack-unmatched-heading')) return 'unmatched-area';
     if (target.closest('.stack-control-bar')) return 'control-bar';
     if (target.closest('.stack-management-header')) return 'header';
     if (target.closest('.stack-content')) return 'content';
@@ -468,6 +482,17 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
   const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
   const { isOpen: settingsOpen } = useSettingsDialog();
   const shortcut = useShortcutDisplay();
+  const setCurrentSplitRatio = (ratio: number) => {
+    const clamped = clampSplitRatio(ratio);
+    if (onSplitRatioChange) onSplitRatioChange(clamped);
+    else setLocalSplitRatio(clamped);
+  };
+  const updateSplitRatioFromPointer = (clientY: number) => {
+    const bounds = splitViewRef.current?.getBoundingClientRect();
+    const usableHeight = (bounds?.height ?? 0) - SPLITTER_HEIGHT;
+    if (!bounds || usableHeight <= 0) return;
+    setCurrentSplitRatio((clientY - bounds.top - SPLITTER_HEIGHT / 2) / usableHeight);
+  };
   useEffect(() => { if (ready && redetecting) setRedetecting(false); }, [ready, redetecting]);
   const returnHome = useCallback(() => {
     navigate('/', { state: navigation?.homeReturn ? { homeReturn: navigation.homeReturn } : null });
@@ -522,7 +547,7 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
-        <button type="button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
+        <button type="button" className="immich-action-button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
       </div>
     </div>
     <div ref={contentRef} className="stack-content" aria-busy={busy || sending}>
@@ -531,7 +556,10 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
       {immich.error && <p className="stack-status" role="alert">{t('stackManagement.immichFailure')}</p>}
       {detection.loading && <p className="stack-status" role="status">{t('stackManagement.detecting')}</p>}
       {detection.failureCount > 0 && <p className="stack-status" role="status">{t(detection.failureCount === detection.detailCount ? 'stackManagement.allFailure' : 'stackManagement.partialFailure')}</p>}
-      <section aria-labelledby="stack-candidates-heading">
+      <div className="stack-split-view" ref={splitViewRef} style={{
+        '--stack-top-track': `${currentSplitRatio}fr`, '--stack-bottom-track': `${1 - currentSplitRatio}fr`,
+      } as CSSProperties}>
+      <section className="stack-frame stack-candidate-frame" aria-labelledby="stack-candidates-heading">
         <div className="stack-section-heading">
           <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
           {sendStatus && <span className={`stack-send-status${sendStatus === 'sendFailure' || sendStatus === 'sendUnknown' ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
@@ -575,7 +603,26 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
             onPurge={isSingletonImmichStack(group) ? undefined : () => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
       </section>
-      <section aria-labelledby="stack-unmatched-heading" className={`${displayed.unmatched.length ? '' : 'stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
+      <div className="stack-split-separator" role="separator" aria-orientation="horizontal"
+        aria-label={t('stackManagement.resizePanes')} aria-valuemin={50} aria-valuemax={80}
+        aria-valuenow={Math.round(currentSplitRatio * 100)} tabIndex={0}
+        onPointerDown={event => {
+          if (event.button !== 0) return;
+          event.preventDefault(); event.stopPropagation();
+          resizingPointer.current = event.pointerId;
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Pointer capture can be unavailable in embedded test browsers. */ }
+        }}
+        onPointerMove={event => {
+          if (resizingPointer.current !== event.pointerId) return;
+          event.preventDefault(); event.stopPropagation(); updateSplitRatioFromPointer(event.clientY);
+        }}
+        onPointerUp={event => {
+          if (resizingPointer.current !== event.pointerId) return;
+          event.preventDefault(); event.stopPropagation(); resizingPointer.current = null;
+        }}
+        onPointerCancel={() => { resizingPointer.current = null; }}
+        onLostPointerCapture={() => { resizingPointer.current = null; }} />
+      <section aria-labelledby="stack-unmatched-heading" className={`stack-frame stack-unmatched-frame${displayed.unmatched.length ? '' : ' stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
         onDragOver={event => { if (handleDragOver(event, { targetKind: 'unmatched-area', targetGroupId: null }, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === 'unmatched') setDropTarget(null); }}
         onDrop={event => acceptDrop(event, null)}>
@@ -605,6 +652,7 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
           onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
           : <p className="stack-empty">{t(assets.length ? 'stackManagement.noUnmatched' : 'stackManagement.empty')}</p>}
       </section>
+      </div>
     </div>
     {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
