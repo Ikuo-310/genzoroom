@@ -11,11 +11,20 @@ export type RecentAsset = {
   stackAssetCount?: number | null;
   stackMemberIds?: string[] | null;
   stackFormats?: StackFormat[] | null;
+  // Absent means unavailable, never an empty or partially resolved candidate set.
+  stackMembers?: RecentAsset[] | null;
 };
 
 export type StackFormat = { format: string; isRaw: boolean };
 
 export type ImmichStack = { id: string; primaryAssetId: string; assets: RecentAsset[] };
+
+// Derive from one view's response rather than retaining a second, independently refreshed snapshot.
+export function galleryStacksById(assets: readonly RecentAsset[]): ReadonlyMap<string, ImmichStack> {
+  return new Map(assets.flatMap(asset => asset.stackId && asset.primaryAssetId && asset.stackMembers
+    ? [[asset.stackId.toLowerCase(), { id: asset.stackId, primaryAssetId: asset.primaryAssetId, assets: asset.stackMembers }] as const]
+    : []));
+}
 
 export type AssetExif = {
   date_time_original?: string;

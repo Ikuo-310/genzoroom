@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fetchAssetDetail, fetchAlbumAssets, fetchAlbums, fetchCalendarDayAssets, fetchCalendarHeatmap, fetchCalendarMinYear, fetchFavoriteAssets, fetchRecentAssets, isRecentAsset } from './api';
+import { galleryStacksById } from './assets';
 
 describe('Home asset stack metadata', () => {
   const asset = { id: 'asset-1', filename: 'member.dng', date: '2026-09-01',
@@ -12,6 +13,36 @@ describe('Home asset stack metadata', () => {
     (signal: AbortSignal) => fetchCalendarDayAssets('2026-09-01', signal),
     fetchFavoriteAssets,
   ];
+  const memberIds = [stack.primaryAssetId, '42345678-1234-4234-9234-123456789abc'];
+  const complete = { ...asset, ...stack, id: stack.primaryAssetId, stackMemberIds: memberIds,
+    stackMembers: memberIds.map((id, index) => ({ ...asset, ...stack, id, isGenzoRoomExport: index === 0 })) };
+  it.each(readers)('retains atomic member metadata in the existing response and derives a Stack lookup (%#)', async read => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([complete])));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await read(controller.signal);
+      expect(galleryStacksById(result).get(stack.stackId)?.assets.map(member => member.isGenzoRoomExport)).toEqual([true, false]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]).toBeDefined();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([
+    complete.stackMembers.slice(0, 1),
+    [complete.stackMembers[0], complete.stackMembers[0]],
+    complete.stackMembers.map(member => ({ ...member, primaryAssetId: memberIds[1] })),
+    complete.stackMembers.map(member => ({ ...member, isGenzoRoomExport: undefined })),
+    complete.stackMembers.map(member => ({ ...member, stackMembers: [] })),
+  ].map(stackMembers => ({ stackMembers })))('discards only incomplete candidate metadata (%#)', async ({ stackMembers }) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ ...complete, stackMembers }]))));
+    try {
+      const result = await fetchRecentAssets(100, new AbortController().signal);
+      expect(result).toHaveLength(1);
+      expect(result[0].stackMembers).toBeNull();
+      expect(result[0].stackMemberIds).toEqual(memberIds);
+      expect(galleryStacksById(result).size).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it.each(readers)('preserves export identity and sanitizes unusable optional flags (%#)', async read => {
     const data = [{ ...asset, isGenzoRoomExport: true }, { ...asset, isGenzoRoomExport: false },
       asset, { ...asset, isGenzoRoomExport: 'true' }];

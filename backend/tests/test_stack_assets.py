@@ -16,6 +16,30 @@ IDS = [str(UUID(int=i)) for i in range(1, 8)]
 STACK_ID, SECOND_STACK_ID = IDS[5:7]
 
 
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("filenames,tagged", [
+    (["a.jpg", "a.dng", "a-Genzo01.jpg"], [False, False, True]),
+    (["a.jpg", "b.jpg", "c.jpg"], [False, True, False]),
+    (["a.jpg", "b.jpg"], [True, False]),
+    (["a.dng", "b.dng"], [False, True]),
+    (["a.png", "b.jpg", "c.dng"], [False, True, False]),
+])
+def test_complete_gallery_members_keep_individual_formats_and_tags(kind, filenames, tagged):
+    members = [asset(IDS[index]) | {"originalFileName": filename,
+               "tags": [{"value": "GenzoRoom"}] if tagged[index] else []}
+               for index, filename in enumerate(filenames)]
+    snapshot = stack(member_ids=IDS[:len(members)]) | {"assets": members}
+    result = fetch(kind, [{key: value for key, value in member.items() if key != "tags"} for member in members], [snapshot])
+    assert len(result) == 1
+    details = result[0]["stackMembers"]
+    assert [member["id"] for member in details] == IDS[:len(members)]
+    assert [member["filename"] for member in details] == filenames
+    assert [member["isGenzoRoomExport"] for member in details] == tagged
+    assert [member["is_raw"] for member in details] == [name.endswith(".dng") for name in filenames]
+    assert all(member["stackId"] == STACK_ID and member["primaryAssetId"] == IDS[0] for member in details)
+    assert all("stackMembers" not in member for member in details)
+
+
 def asset(asset_id):
     return {"id": asset_id, "type": "IMAGE", "originalFileName": "photo.dng",
             "fileCreatedAt": "2026-09-01T12:00:00Z"}

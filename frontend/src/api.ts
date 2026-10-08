@@ -74,6 +74,22 @@ function withSafeStackFormats(data: unknown[]): unknown[] {
 
 function withSafeStackMetadata(data: unknown[]): unknown[] {
   return withSafeStackFormats(withSafeStackCounts(data)).map(value => {
+    if (!isRecord(value) || value.stackMembers == null) return value;
+    try {
+      if (!isUuid(value.stackId) || !isUuid(value.primaryAssetId) || !Array.isArray(value.stackMemberIds)
+        || !Array.isArray(value.stackMembers) || value.stackMembers.some(member => !isRecord(member)
+          || member.stackMembers != null || typeof member.isGenzoRoomExport !== 'boolean')) throw new Error();
+      const [stack] = validateImmichStacks([{ id: value.stackId, primaryAssetId: value.primaryAssetId, assets: value.stackMembers }], [value.stackId]);
+      const ids = new Set(stack.assets.map(member => member.id));
+      if (typeof value.id !== 'string' || value.id.toLowerCase() !== value.primaryAssetId.toLowerCase()
+        || value.stackAssetCount !== ids.size || value.stackMemberIds.length !== ids.size
+        || !value.stackMemberIds.every(id => typeof id === 'string' && ids.has(id.toLowerCase()))) throw new Error();
+      return { ...value, stackMembers: stack.assets };
+    } catch {
+      // Candidate failures must not stop browsing or become a successful partial selection.
+      return { ...value, stackMembers: null };
+    }
+  }).map(value => {
     if (!isRecord(value) || value.isGenzoRoomExport === undefined || typeof value.isGenzoRoomExport === 'boolean') return value;
     // Unusable optional identity metadata should hide the badge rather than the photo.
     return { ...value, isGenzoRoomExport: false };
@@ -108,10 +124,11 @@ export async function fetchAlbumAssets(albumId: string, signal: AbortSignal): Pr
   const response = await fetch(`/api/albums/${encodeURIComponent(albumId)}/assets`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Album assets request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || withSafeStackMetadata(data).some(asset => !isRecentAsset(asset))) {
+  const assets = Array.isArray(data) ? withSafeStackMetadata(data) : null;
+  if (assets === null || assets.some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected album assets response');
   }
-  return withSafeStackMetadata(data) as RecentAsset[];
+  return assets as RecentAsset[];
 }
 
 export async function fetchCalendarHeatmap(year: number, month: number | null, signal: AbortSignal): Promise<CalendarHeatmap> {
@@ -142,30 +159,33 @@ export async function fetchCalendarDayAssets(day: string, signal: AbortSignal): 
   const response = await fetch(`/api/calendar/${encodeURIComponent(day)}/assets`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Calendar photos request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || withSafeStackMetadata(data).some(asset => !isRecentAsset(asset))) {
+  const assets = Array.isArray(data) ? withSafeStackMetadata(data) : null;
+  if (assets === null || assets.some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected calendar photos response');
   }
-  return withSafeStackMetadata(data) as RecentAsset[];
+  return assets as RecentAsset[];
 }
 
 export async function fetchFavoriteAssets(signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch('/api/assets/favorites', { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Favorites request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || withSafeStackMetadata(data).some(asset => !isRecentAsset(asset))) {
+  const assets = Array.isArray(data) ? withSafeStackMetadata(data) : null;
+  if (assets === null || assets.some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected favorites response');
   }
-  return withSafeStackMetadata(data) as RecentAsset[];
+  return assets as RecentAsset[];
 }
 
 export async function fetchRecentAssets(limit: number, signal: AbortSignal): Promise<RecentAsset[]> {
   const response = await fetch(`/api/assets/recent?limit=${limit}`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('Recent assets request failed');
   const data: unknown = await response.json();
-  if (!Array.isArray(data) || withSafeStackMetadata(data).some(asset => !isRecentAsset(asset))) {
+  const assets = Array.isArray(data) ? withSafeStackMetadata(data) : null;
+  if (assets === null || assets.some(asset => !isRecentAsset(asset))) {
     throw new Error('Unexpected recent assets response');
   }
-  return withSafeStackMetadata(data) as RecentAsset[];
+  return assets as RecentAsset[];
 }
 
 export async function fetchAssetDetail(assetId: string, signal: AbortSignal): Promise<AssetDetail> {

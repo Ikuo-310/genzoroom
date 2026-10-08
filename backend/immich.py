@@ -130,6 +130,8 @@ class RecentAsset(BaseModel):
     stackMemberIds: list[UUID] | None = Field(default=None, exclude_if=lambda value: value is None)
     # Home can render the complete format set without resolving each Stack card separately.
     stackFormats: list[dict[str, str | bool]] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Candidate metadata is atomic and shares the display membership snapshot; children never inherit cover tags.
+    stackMembers: list["RecentAsset"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ImmichStack(BaseModel):
@@ -710,7 +712,8 @@ def _home_export_tag(tags: object) -> bool | None:
 async def _with_home_export_tags(
     url: str, key: str, assets: list[RecentAsset], *, transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[RecentAsset]:
-    pending = [asset for asset in assets if asset.isGenzoRoomExport is None]
+    all_assets = assets + [member for asset in assets for member in asset.stackMembers or []]
+    pending = list({asset.id: asset for asset in all_assets if asset.isGenzoRoomExport is None}.values())
     if not pending:
         return assets
     try:
@@ -735,22 +738,43 @@ async def _with_home_export_tags(
             if not matched_ids <= batch:
                 raise ValueError
             tagged_ids.update(matched_ids)
-        for asset in pending:
-            asset.isGenzoRoomExport = asset.id in tagged_ids
+        pending_ids = {asset.id for asset in pending}
+        for asset in all_assets:
+            if asset.id in pending_ids and asset.isGenzoRoomExport is None:
+                asset.isGenzoRoomExport = asset.id in tagged_ids
     except (ImmichRequestError, httpx.InvalidURL, httpx.RequestError, KeyError, TypeError, ValueError) as error:
         # Export identity is optional; a failed tag lookup must preserve the authoritative Home photo list.
         _immich_log(level="warn", component="immich", event="home.exportTags.unavailable", context={
             "assetCount": len(pending), "errorCode": getattr(error, "error_code", "unexpected_response"),
         })
+    for asset in assets:
+        if asset.stackMembers is not None and any(member.isGenzoRoomExport is None for member in asset.stackMembers):
+            asset.stackMembers = None
     return assets
 
 
 def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapshot) -> list[RecentAsset]:
     lookup = {}
+    visible_ids = {asset.id for asset in assets}
     for stack in snapshot.stacks:
         member_ids = [UUID(member["id"]) for member in stack["assets"]]
         members_by_id = {UUID(member["id"]): member for member in stack["assets"]}
         primary_id = UUID(stack["primaryAssetId"])
+        stack_members = None
+        try:
+            # The full library snapshot is already loaded; materialize details only for covers on this page.
+            if primary_id in visible_ids and primary_id in members_by_id:
+                if any(member.get("type") != "IMAGE" for member in stack["assets"]):
+                    raise ValueError
+                stack_members = _search_assets({"assets": {"items": stack["assets"]}}, home_metadata=True)
+                for member in stack_members:
+                    member.stackId = UUID(stack["id"])
+                    member.primaryAssetId = primary_id
+                    member.stackAssetCount = len(member_ids)
+        except (KeyError, TypeError, ValueError):
+            _immich_log(level="warn", component="immich", event="home.stackMembers.unavailable", context={
+                "stackId": str(stack["id"]), "memberCount": len(member_ids), "errorCode": "unexpected_response",
+            })
         stack_formats = None
         if primary_id in members_by_id:
             ordered_members = [primary_id] + [member_id for member_id in member_ids if member_id != primary_id]
@@ -768,7 +792,7 @@ def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapsh
                     formats.append({"format": image_format, "isRaw": is_raw})
             stack_formats = formats or None
         for member_id in member_ids:
-            lookup[member_id] = (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(member_ids), member_ids, stack_formats)
+            lookup[member_id] = (UUID(stack["id"]), UUID(stack["primaryAssetId"]), len(member_ids), member_ids, stack_formats, stack_members)
     # Search metadata omits stacks in v3.2.4; only a successful full list establishes membership.
     for asset in assets:
         stack_info = lookup.get(asset.id)
@@ -776,8 +800,9 @@ def _attach_home_stack_metadata(assets: list[RecentAsset], snapshot: StackSnapsh
             asset.stackId = asset.primaryAssetId = asset.stackAssetCount = None
             asset.stackMemberIds = None
             asset.stackFormats = None
+            asset.stackMembers = None
         else:
-            asset.stackId, asset.primaryAssetId, asset.stackAssetCount, asset.stackMemberIds, asset.stackFormats = stack_info
+            asset.stackId, asset.primaryAssetId, asset.stackAssetCount, asset.stackMemberIds, asset.stackFormats, asset.stackMembers = stack_info
     # A missing primary can leave only Stack children in search results; those are never Home cards.
     return [asset for asset in assets if asset.id not in snapshot.quarantined_member_ids
             and (asset.stackId is None or asset.id == asset.primaryAssetId)]

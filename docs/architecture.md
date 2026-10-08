@@ -6,6 +6,8 @@ This document describes the current implementation and possible future extension
 
 ## Current request flow
 
+Gallery Stack candidate metadata (Phase 1) lives in optional `RecentAsset.stackMembers`, using the same `RecentAsset` member model as `ImmichStack.assets`. Backend attaches complete IMAGE members from the same `/stacks` snapshot used for display membership and formats; it never resolves individual cards. Missing member details or unknown export tags omit this field while preserving the existing Gallery display. Tag lookup uses exact Immich `GenzoRoom` relations, combining unknown cover/member IDs into deduplicated bounded batches; cover identity is never inherited by children. Frontend validates membership, primary, count and per-member boolean tag state atomically at the API boundary. Each Gallery tab retains members inside its existing response-owned asset array, so existing abort/stale-response guards also cover this metadata. `galleryStacksById()` derives a Stack-ID lookup without a second state owner or additional requests. A missing field means unavailable and must block future candidate selection, not mean no candidates. Phase 1 does not change selection, badges, Queue, Favorites semantics or workspace resolution.
+
 ```text
 Browser: http://<HOSTNAME-OR-IP>:3190
   ↓
