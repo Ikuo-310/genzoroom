@@ -397,6 +397,14 @@ shortcut、表示設定、Home↔Anshitsu復帰、各window listenerをfocused a
 
 回帰テストは切替保存失敗中のCtrl/Cmd+Z、Ctrl/Cmd+Shift+Z、Ctrl/Cmd+Y、Stay後のUndo／Redo復帰、退出保存失敗中のUndo遮断を確認した。修正後のfocused auditでは報告対象のHigh／Medium／Low問題は残らなかった。現行作業ツリーでの関連Vitestは2ファイル・130件成功、TypeScript／Frontend buildと`git diff --check`も成功した。実機ブラウザ確認は行っていない。
 
+## Keyboard shortcut横断確認（2026-10-08）
+
+`editShortcuts.ts`のregistry、platform modifier helper、matcher、formatter、設定連動のTooltip／Menu表示、Gallery/Home、Anshitsu、STACK、Export、Filmstrip、Scope、共通Thumbnail size controllerのkeydown処理を軽く横断確認した。commandの所有者は各機能に残し、ページ共通化目的のdispatcher追加は行っていない。`showKeyboardShortcuts`は説明表示だけを切り替え、shortcutの動作は維持する。Numpad `-` / `+`はregistryで`KeyboardEvent.code`の`NumpadSubtract` / `NumpadAdd`を使い、Gallery/Home、Export管理、STACK管理の共通controllerからbuttonと同じbounded callbackを呼ぶ。通常のMinus / Equalは対象外。
+
+監査はHigh 0／Medium 0／Low 2。低優先度の2件は、Thumbnail size shortcutにrepeatとopen dialog/menuの抑止がなかったこと。既存の他page commandと同じguardを共通controllerへ追加し、repeat、dialog、menu中に背面操作しない回帰testを追加した。input、textarea、select、range、contenteditable、IME、`defaultPrevented`と修飾キーも確認した。Registry内の同一キーはHome／STACK／Anshitsu等の別page contextで分離され、同一context内に明確な衝突は見つからなかった。shortcut表示OFF時も動作を保ち、tooltipは通常文言だけになる。
+
+focused shortcut testsは17ファイル・580件、Frontend全体は116ファイルで2418件成功・2件skip。TypeScript check、Frontend build、`git diff --check`が成功した。buildでは既知の500 kB超chunk warningが出た。Numpad操作の過去の利用者側実機確認をCodexが再確認したものではなく、今回Codex自身によるbrowser／NAS実機操作は行っていない。
+
 ## Developer Diagnostics完了（2026-10-02・現行仕様）
 
 ### Phase 1: DeveloperページとSynthetic WebGPU Smoke

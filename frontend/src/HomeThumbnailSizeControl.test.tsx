@@ -69,6 +69,8 @@ describe('Home thumbnail size controls', () => {
     await act(async () => dispatch('NumpadAdd', '+', window, { ctrlKey: true }));
     await act(async () => dispatch('NumpadSubtract', '-', window, { altKey: true }));
     expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    await act(async () => dispatch('NumpadSubtract', '-', window, { repeat: true }));
+    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
   });
 
   it.each(['input', 'range', 'textarea', 'select', 'contenteditable'] as const)('ignores numpad sizing while editing in %s', async kind => {
@@ -91,6 +93,17 @@ describe('Home thumbnail size controls', () => {
     await act(async () => dispatch('NumpadAdd', '+'));
     expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('3');
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
+  });
+
+  it.each(['dialog', 'menu'] as const)('does not resize behind an open %s', async kind => {
+    const overlay = document.createElement(kind === 'dialog' ? 'dialog' : 'div');
+    if (kind === 'dialog') overlay.setAttribute('open', '');
+    else overlay.setAttribute('role', 'menu');
+    document.body.append(overlay);
+    try {
+      await act(async () => dispatch('NumpadSubtract', '-'));
+      expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    } finally { overlay.remove(); }
   });
 
   it('shows formatted shortcut hints only when the existing setting is enabled', async () => {

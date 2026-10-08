@@ -20,8 +20,9 @@ export function HomeThumbnailSizeControl() {
       const target = event.target;
       // The shared guard excludes ranges for arrow-key handling, but numpad sizing must not steal slider input.
       const isInputTarget = target instanceof Element && target.matches('input');
-      if (event.defaultPrevented || event.isComposing || isNativeEditingTarget(target)
-        || isInputTarget) return;
+      if (event.defaultPrevented || event.isComposing || event.repeat || isNativeEditingTarget(target)
+        || isInputTarget
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       const action = matchesShortcut(event, 'thumbnailSizeDecrease') && canDecrease ? decrease
         : matchesShortcut(event, 'thumbnailSizeIncrease') && canIncrease ? increase : null;
       if (!action) return;

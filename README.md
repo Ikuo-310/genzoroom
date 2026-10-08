@@ -24,7 +24,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Favorites shows favorited Timeline images and reuses a successfully loaded list while Home remains mounted.
 - Photo grids support RAW / Non-RAW and edited / unedited filters. Each filter is independent per Home tab, and the two filters combine.
 - Recent, Album, and Calendar photo views can filter stacked versus unstacked assets. Stack cards retain member-count metadata and aggregate edit status across known members. Favorites uses the same primary-only Home data boundary while retaining its existing filter behavior.
-- Choose the thumbnail size used by the Home grids.
+- Choose the thumbnail size used by the Home grids with the shared controller; Numpad `-` / `+` steps it down or up. When shortcut explanations are enabled, the button tooltips include these hints.
 - Home shows a 「現」 badge on photos carrying Immich's `GenzoRoom` tag. If the tag is missing from a matching GenzoRoom-exported JPEG, Home silently restores it after checking the filename and embedded JPEG identity; no toast is shown.
 - Recent, Favorites, Album details, and Calendar date details have an ordered selection toolbar. Album lists and Calendar month/year views do not show photo selection controls. Select All adds currently visible photos and preserves hidden selections; the selection order is retained.
 - A normal photo-card click selects only that photo; `Primary`+click toggles it, and `Shift`+click adds the inclusive range from the anchor. A first Shift+click without an anchor does nothing. Checkboxes toggle selection, with Shift+click adding a range. Clear or Escape clears selection; opening Anshitsu uses `D` or the selection toolbar.

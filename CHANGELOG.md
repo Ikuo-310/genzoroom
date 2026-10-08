@@ -9,6 +9,7 @@ Internal changes are omitted unless they affect users.
 ### Added
 
 - Home Stack cards show the unique image formats in each Stack, with the Cover format first, alongside the member count. Home and Export cards preserve filename endings through shared middle-ellipsis display. Home marks GenzoRoom-tagged exports with a 「現」 badge and silently restores a missing tag on verified GenzoRoom JPEGs during browsing.
+- The shared thumbnail-size controller supports Numpad `-` / `+` on Gallery/Home, Export management, and STACK management. Shortcut hints appear in its button tooltips when shortcut explanations are enabled.
 
 Earlier Phase 5 foundation entries below describe their completion state; production Export is enabled by the Phase 5E integration and current Retry UI described first.
 
