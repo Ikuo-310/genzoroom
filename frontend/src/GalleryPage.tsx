@@ -19,6 +19,7 @@ import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
+import { DevelopStatusFilterControls } from './DevelopStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
@@ -27,7 +28,7 @@ import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { ExportManagementContent, ExportManagementToolbar, ExportRetryPriorityNotice } from './ExportManagement';
 import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, writeEditStatusFilterMode, type EditStatusFilterMode } from './photoFilters';
+import { filterPhotos, filterPhotosByDevelopStatus, filterPhotosByEditStatus, photoFiltersForMode, readDevelopStatusFilterMode, readEditStatusFilterMode, writeDevelopStatusFilterMode, writeEditStatusFilterMode, type DevelopStatusFilterMode, type EditStatusFilterMode } from './photoFilters';
 import {
   blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
@@ -107,6 +108,12 @@ export function GalleryPage() {
     albums: readEditStatusFilterMode('albums'),
     calendar: readEditStatusFilterMode('calendar'),
     favorites: readEditStatusFilterMode('favorites'),
+  }));
+  const [developStatusFilterModes, setDevelopStatusFilterModes] = useState<Record<HomeTab, DevelopStatusFilterMode>>(() => ({
+    recent: readDevelopStatusFilterMode('recent'),
+    albums: readDevelopStatusFilterMode('albums'),
+    calendar: readDevelopStatusFilterMode('calendar'),
+    favorites: readDevelopStatusFilterMode('favorites'),
   }));
   // Keep every selection mounted while other tabs or parent views are displayed.
   const recentSelection = usePhotoSelection();
@@ -363,7 +370,8 @@ export function GalleryPage() {
     ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], aggregateStackEditStatuses(stackAssets, editStatuses))
     : filterImmichStacksByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses);
   const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
-  const visibleAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
+  const collapsedAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
+  const visibleAssets = filterPhotosByDevelopStatus(collapsedAssets, developStatusFilterModes[activeTab]);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
@@ -893,6 +901,10 @@ export function GalleryPage() {
           {photoView && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
             setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
             writeEditStatusFilterMode(mode, activeTab);
+          }} />}
+          {photoView && <DevelopStatusFilterControls mode={developStatusFilterModes[activeTab]} onChange={mode => {
+            setDevelopStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
+            writeDevelopStatusFilterMode(mode, activeTab);
           }} />}
           {activeTab === 'recent' && <>
             <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>

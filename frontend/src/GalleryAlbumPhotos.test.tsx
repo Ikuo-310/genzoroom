@@ -51,6 +51,13 @@ async function mount() {
 function click(selector: string) { act(() => host.querySelector<HTMLButtonElement>(selector)!.click()); }
 function pressD() { act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))); }
 async function settle() { await act(async () => { await Promise.resolve(); }); }
+function changeDevelopFilter(value: 'both' | 'developed' | 'undeveloped') {
+  const select = host.querySelector<HTMLSelectElement>('.develop-status-filter-control select')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -85,6 +92,20 @@ describe('album photo view', () => {
     expect(host.querySelector('.home-toolbar-title')).toBeNull();
     expect(host.querySelectorAll('.album-card')).toHaveLength(2);
     expect(api.albums).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters Album detail by the export badge status and hides the control on the album list', async () => {
+    api.albumAssets.mockResolvedValue(albumPhotos.map((photo, index) => ({ ...photo,
+      isGenzoRoomExport: index === 0 ? true : index === 1 ? false : undefined })));
+    await mount(); click('#home-albums-tab'); await settle();
+    expect(host.querySelector('.develop-status-filter-control')).toBeNull();
+    click('.album-card'); await settle();
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    changeDevelopFilter('developed');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['photo-0.dng']);
+    changeDevelopFilter('undeveloped');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['photo-1.dng', 'photo-2.dng']);
   });
   it('only returns to the album list when reactivating Albums, preserving ordinary tab switches', async () => {
     await mount();

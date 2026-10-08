@@ -5,6 +5,11 @@ import {
   EDIT_STATUS_FILTER_SESSION_KEY,
   filterPhotos,
   filterPhotosByEditStatus,
+  filterPhotosByDevelopStatus,
+  isGenzoRoomExported,
+  DEVELOP_STATUS_FILTER_SESSION_KEYS,
+  readDevelopStatusFilterMode,
+  writeDevelopStatusFilterMode,
   PHOTO_FILTER_SESSION_KEY,
   PHOTO_FILTER_SESSION_KEYS,
   photoFiltersForMode,
@@ -162,5 +167,45 @@ describe('edit status filters', () => {
     expect(filterPhotosByEditStatus(assets, 'edited', { edited: true })).toEqual(assets);
     expect(filterPhotosByEditStatus(assets, 'edited', { edited: true, unedited: false })).toEqual([assets[0]]);
     expect(filterPhotosByEditStatus(assets, 'unedited', { edited: true, unedited: false })).toEqual([assets[1]]);
+  });
+});
+
+describe('GenzoRoom developed status filters', () => {
+  const assets = [
+    { id: 'exported', isGenzoRoomExport: true },
+    { id: 'not-exported', isGenzoRoomExport: false },
+    { id: 'unknown', isGenzoRoomExport: undefined },
+  ];
+
+  it('uses the exact export badge predicate and filters true versus everything else', () => {
+    expect(assets.map(isGenzoRoomExported)).toEqual([true, false, false]);
+    expect(filterPhotosByDevelopStatus(assets, 'both')).toBe(assets);
+    expect(filterPhotosByDevelopStatus(assets, 'developed')).toEqual([assets[0]]);
+    expect(filterPhotosByDevelopStatus(assets, 'undeveloped')).toEqual([assets[1], assets[2]]);
+  });
+
+  it('stores and restores independent values per Home tab, defaulting invalid values to both', () => {
+    const { storage, values } = makeStorage({
+      [DEVELOP_STATUS_FILTER_SESSION_KEYS.recent]: 'developed',
+      [DEVELOP_STATUS_FILTER_SESSION_KEYS.albums]: 'invalid',
+    });
+    writeDevelopStatusFilterMode('undeveloped', 'favorites', storage);
+    expect(readDevelopStatusFilterMode('recent', storage)).toBe('developed');
+    expect(readDevelopStatusFilterMode('albums', storage)).toBe('both');
+    expect(readDevelopStatusFilterMode('calendar', storage)).toBe('both');
+    expect(readDevelopStatusFilterMode('favorites', storage)).toBe('undeveloped');
+    expect(values.get(DEVELOP_STATUS_FILTER_SESSION_KEYS.favorites)).toBe('undeveloped');
+  });
+
+  it('keeps the per-tab memory value when session storage is blocked', () => {
+    const unavailable = {
+      getItem: () => { throw new Error('Blocked'); },
+      setItem: () => { throw new Error('Blocked'); },
+    } as unknown as Storage;
+    writeDevelopStatusFilterMode('developed', 'recent', unavailable);
+    writeDevelopStatusFilterMode('undeveloped', 'favorites', unavailable);
+    expect(readDevelopStatusFilterMode('recent', unavailable)).toBe('developed');
+    expect(readDevelopStatusFilterMode('albums', unavailable)).toBe('both');
+    expect(readDevelopStatusFilterMode('favorites', unavailable)).toBe('undeveloped');
   });
 });

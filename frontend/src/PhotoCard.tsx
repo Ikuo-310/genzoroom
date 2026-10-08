@@ -9,6 +9,7 @@ import { GenzoRoomExportBadge } from './GenzoRoomExportBadge';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { isPrimaryModifier } from './shortcutModifiers';
+import { isGenzoRoomExported } from './photoFilters';
 
 export type { RecentAsset } from './assets';
 
@@ -119,8 +120,8 @@ export function PhotoCard({
           <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time>
         </div>
       </button>
-      <div className={`photo-card-badges${asset.isGenzoRoomExport === true ? ' with-export-badge' : ''}`}>
-        {asset.isGenzoRoomExport === true && <GenzoRoomExportBadge />}
+      <div className={`photo-card-badges${isGenzoRoomExported(asset) ? ' with-export-badge' : ''}`}>
+        {isGenzoRoomExported(asset) && <GenzoRoomExportBadge />}
         <EditedBadge edited={edited} queueKnown={queueKnown} queueStatus={queueStatus}
           busy={queueBusy} onQueueToggle={onQueueToggle} showQueueShortcut={false} />
       </div>

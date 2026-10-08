@@ -58,10 +58,12 @@ describe('Home album tab', () => {
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).not.toHaveBeenCalled();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-controls .recent-count-control')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual([
-      'home-control edit-status-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
+      'home-control edit-status-filter-control', 'home-control develop-status-filter-control',
+      'home-control recent-count-control', 'home-control thumbnail-size-setting',
     ]);
     expect(host.querySelector('#recent-photos-heading')).toBeNull();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
@@ -75,6 +77,7 @@ describe('Home album tab', () => {
     expect(host.querySelector('.album-period')?.textContent).toBe('Apr 2026 – May 2026');
     expect(host.querySelector('.album-count')?.textContent).toBe('2 items');
     expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelector('.develop-status-filter-control')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
@@ -89,6 +92,7 @@ describe('Home album tab', () => {
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
     expect(host.querySelector('.selection-bar')).not.toBeNull();
   });
 

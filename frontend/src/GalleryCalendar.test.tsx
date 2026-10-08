@@ -372,6 +372,7 @@ describe('Home calendar', () => {
     for (const mode of ['month', 'year']) {
       expect(host.querySelector(`.calendar-${mode}`)).not.toBeNull();
       expect(host.querySelector('.home-toolbar .selection-bar')).toBeNull();
+      expect(host.querySelector('.develop-status-filter-control')).toBeNull();
       expect(host.querySelector('.home-toolbar-center .calendar-navigation')).not.toBeNull();
       expect(host.querySelector('.home-content .calendar-navigation')).toBeNull();
       expect(host.querySelector('.home-toolbar-left')).toBeNull();
@@ -723,6 +724,20 @@ describe('Home calendar', () => {
     act(() => cell.click()); await settle();
     expect(api.day).toHaveBeenCalledWith('2026-09-03', expect.any(AbortSignal));
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+  });
+
+  it('filters Calendar day detail by the GenzoRoom export badge status', async () => {
+    api.day.mockResolvedValue(dayPhotos.map((photo, index) => ({ ...photo,
+      isGenzoRoomExport: index === 0 ? true : index === 1 ? false : undefined })));
+    await openDate('2026-09-01');
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    selectValue('.develop-status-filter-control select', 'developed');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['day-0.dng']);
+    selectValue('.develop-status-filter-control select', 'undeveloped');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['day-1.jpg', 'day-2.dng']);
+    click('.selection-all');
+    expect(host.querySelector('.selection-count')?.textContent).toBe('2 selected');
   });
 
   it('ignores saved Calendar type filters across Home and date details', async () => {

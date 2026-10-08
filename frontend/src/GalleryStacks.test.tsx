@@ -212,6 +212,47 @@ describe('Home stack display', () => {
     expect(api.recent).toHaveBeenCalledTimes(1);
   });
 
+  it('filters mixed developed status with edit status using AND', async () => {
+    const mixed = [
+      { ...asset('developed'), isGenzoRoomExport: true },
+      { ...asset('false'), isGenzoRoomExport: false },
+      asset('unknown'),
+    ];
+    api.recent.mockResolvedValue(mixed);
+    api.statuses.mockResolvedValue({ developed: true, false: true, unknown: false });
+    await mount();
+    expect(filenames()).toEqual(['developed.jpg', 'false.jpg', 'unknown.jpg']);
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
+    change('.edit-status-filter-control select', 'edited');
+    change('.develop-status-filter-control select', 'developed');
+    expect(filenames()).toEqual(['developed.jpg']);
+    change('.develop-status-filter-control select', 'undeveloped');
+    expect(filenames()).toEqual(['false.jpg']);
+    change('.edit-status-filter-control select', 'unedited');
+    expect(filenames()).toEqual(['unknown.jpg']);
+  });
+
+  it('filters Stack cards by the primary export tag, not child tags', async () => {
+    const member = { ...asset('member', true), ...stackMetadata, isGenzoRoomExport: true };
+    const primary = { ...asset('primary'), ...stackMetadata, isGenzoRoomExport: false };
+    api.recent.mockResolvedValue([member, primary]);
+    await mount();
+    expect(filenames()).toEqual(['primary.jpg']);
+    change('.develop-status-filter-control select', 'developed');
+    expect(filenames()).toEqual([]);
+    change('.develop-status-filter-control select', 'undeveloped');
+    expect(filenames()).toEqual(['primary.jpg']);
+
+    api.recent.mockResolvedValue([
+      { ...member, isGenzoRoomExport: false },
+      { ...primary, isGenzoRoomExport: true },
+    ]);
+    act(() => root.render(<div />));
+    await mount();
+    change('.develop-status-filter-control select', 'developed');
+    expect(filenames()).toEqual(['primary.jpg']);
+  });
+
   it('keeps Stack children out of the selectable Home card list', async () => {
     await mount();
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
@@ -246,7 +287,8 @@ describe('Home stack display', () => {
     expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector('.edit-status-filter-control')).not.toBeNull();
     expect(controls.map(c => c.className)).toEqual([
-      'home-control edit-status-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
+      'home-control edit-status-filter-control', 'home-control develop-status-filter-control',
+      'home-control recent-count-control', 'home-control thumbnail-size-setting',
     ].filter(className => tab === 'recent' || className !== 'home-control recent-count-control'));
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');

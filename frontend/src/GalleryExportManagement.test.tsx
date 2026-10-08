@@ -10,7 +10,7 @@ import { updateSetting, useAppSettings } from './appSettings';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import i18n from './i18n';
 import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
-import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
+import { DEVELOP_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeDevelopStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
   day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn(), enqueue: vi.fn() }));
@@ -146,8 +146,10 @@ describe('Home Export management', () => {
 
   it.each(['recent', 'favorites', 'albums', 'calendar'] as const)('retains %s detail, selection, anchor and scroll across Export with saved type filter ignored', async tab => {
     writePhotoFilterMode('raw', tab);
+    writeDevelopStatusFilterMode('undeveloped', tab);
     await mount(tab);
     expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('.develop-status-filter-control select')?.value).toBe('undeveloped');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     await click('.photo-card-button');
     await act(async () => host.querySelectorAll('.photo-card-button')[1]
@@ -155,9 +157,11 @@ describe('Home Export management', () => {
     homeScrollContent(host.querySelector('.home-page')!)!.scrollTop = 390;
     await key('e');
     expect(host.querySelector('#home-export-panel')).not.toBeNull();
+    expect(host.querySelector('.develop-status-filter-control')).toBeNull();
     expect(host.querySelector('.photo-card')).toBeNull();
     await click(`#home-${tab}-tab`);
     expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('.develop-status-filter-control select')?.value).toBe('undeveloped');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS[tab])).toBe('raw');
     expect(host.querySelector('.selection-count')?.textContent).toBe('2 selected');

@@ -8,6 +8,7 @@ export type StackFilterMode = 'both' | 'stacked' | 'unstacked';
 export type StackFilterTab = 'recent' | 'albums' | 'calendar';
 export type PhotoFilterMode = 'both' | 'raw' | 'nonRaw';
 export type EditStatusFilterMode = 'both' | 'edited' | 'unedited';
+export type DevelopStatusFilterMode = 'both' | 'developed' | 'undeveloped';
 export type PhotoFilterTab = 'recent' | 'albums' | 'calendar' | 'favorites';
 
 // Keep the former shared key readable for sessions created before filters were tab-scoped.
@@ -25,6 +26,12 @@ export const EDIT_STATUS_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
   calendar: `${EDIT_STATUS_FILTER_SESSION_KEY}.calendar`,
   favorites: `${EDIT_STATUS_FILTER_SESSION_KEY}.favorites`,
 };
+export const DEVELOP_STATUS_FILTER_SESSION_KEYS: Record<PhotoFilterTab, string> = {
+  recent: 'genzoroom.homeDevelopStatusFilter.recent',
+  albums: 'genzoroom.homeDevelopStatusFilter.albums',
+  calendar: 'genzoroom.homeDevelopStatusFilter.calendar',
+  favorites: 'genzoroom.homeDevelopStatusFilter.favorites',
+};
 
 export const DEFAULT_PHOTO_FILTERS: PhotoFilters = {
   raw: true,
@@ -38,6 +45,12 @@ const memoryPhotoFilterModes: Record<PhotoFilterTab, PhotoFilterMode> = {
   favorites: 'both',
 };
 const memoryEditStatusFilterModes: Record<PhotoFilterTab, EditStatusFilterMode> = {
+  recent: 'both',
+  albums: 'both',
+  calendar: 'both',
+  favorites: 'both',
+};
+const memoryDevelopStatusFilterModes: Record<PhotoFilterTab, DevelopStatusFilterMode> = {
   recent: 'both',
   albums: 'both',
   calendar: 'both',
@@ -121,6 +134,44 @@ export function writeEditStatusFilterMode(
   memoryEditStatusFilterModes[tab] = mode;
   try { storage?.setItem(EDIT_STATUS_FILTER_SESSION_KEYS[tab], mode); }
   catch { /* Keep each tab's choice in memory when session storage is blocked. */ }
+}
+
+export function readDevelopStatusFilterMode(
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): DevelopStatusFilterMode {
+  if (storage === null) return memoryDevelopStatusFilterModes[tab];
+  try {
+    const stored = storage.getItem(DEVELOP_STATUS_FILTER_SESSION_KEYS[tab]);
+    const mode = stored === 'both' || stored === 'developed' || stored === 'undeveloped' ? stored : 'both';
+    memoryDevelopStatusFilterModes[tab] = mode;
+    return mode;
+  } catch {
+    // A blocked session store must not couple the in-memory choices between tabs.
+  }
+  return memoryDevelopStatusFilterModes[tab];
+}
+
+export function writeDevelopStatusFilterMode(
+  mode: DevelopStatusFilterMode,
+  tab: PhotoFilterTab = 'recent',
+  storage = browserSessionStorage(),
+): void {
+  memoryDevelopStatusFilterModes[tab] = mode;
+  try { storage?.setItem(DEVELOP_STATUS_FILTER_SESSION_KEYS[tab], mode); }
+  catch { /* Keep each tab's choice in memory when session storage is blocked. */ }
+}
+
+export function isGenzoRoomExported(asset: { isGenzoRoomExport?: boolean }): boolean {
+  return asset.isGenzoRoomExport === true;
+}
+
+export function filterPhotosByDevelopStatus<T extends { isGenzoRoomExport?: boolean }>(
+  photos: T[],
+  mode: DevelopStatusFilterMode,
+): T[] {
+  if (mode === 'both') return photos;
+  return photos.filter(asset => isGenzoRoomExported(asset) === (mode === 'developed'));
 }
 
 export function photoFiltersForMode(mode: PhotoFilterMode): PhotoFilters {

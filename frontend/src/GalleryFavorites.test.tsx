@@ -8,7 +8,8 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { homeScrollContent } from './homeReturn';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import { updateSetting } from './appSettings';
-import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
+import { DEVELOP_STATUS_FILTER_SESSION_KEYS, EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS,
+  writeDevelopStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
@@ -78,6 +79,32 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear(); clearWorkspaceSession(); vi.unstubAllGlobals(); });
 
 describe('Home favorites', () => {
+  it('shows the developed filter and applies it to Favorites Assets including unknown tags', async () => {
+    api.favorites.mockResolvedValue(photos.map((photo, index) => ({ ...photo,
+      isGenzoRoomExport: index === 1 ? true : index === 2 ? false : undefined })));
+    await mount(); await click('#home-favorites-tab');
+    expect(host.querySelector('.develop-status-filter-control')).not.toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(4);
+    await change('.develop-status-filter-control select', 'developed');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['photo-1']);
+    await click('.selection-all');
+    expect(host.querySelector('.selection-count')?.textContent).toBe('1 selected');
+    await change('.develop-status-filter-control select', 'undeveloped');
+    expect([...host.querySelectorAll('.photo-info p')].map(node => node.textContent)).toEqual(['photo-0', 'photo-2', 'photo-3']);
+    expect(host.querySelector('.selection-count')?.textContent).toBe('1 selected');
+  });
+
+  it('keeps developed filter choices separate by tab and restores each choice', async () => {
+    writeDevelopStatusFilterMode('developed', 'recent');
+    writeDevelopStatusFilterMode('undeveloped', 'favorites');
+    await mount();
+    expect((host.querySelector('.develop-status-filter-control select') as HTMLSelectElement).value).toBe('developed');
+    await click('#home-favorites-tab');
+    expect((host.querySelector('.develop-status-filter-control select') as HTMLSelectElement).value).toBe('undeveloped');
+    expect(sessionStorage.getItem(DEVELOP_STATUS_FILTER_SESSION_KEYS.recent)).toBe('developed');
+    expect(sessionStorage.getItem(DEVELOP_STATUS_FILTER_SESSION_KEYS.favorites)).toBe('undeveloped');
+  });
+
   it('switches tabs with registry commands and keeps commands enabled when hints are hidden', async () => {
     await mount();
     for (const [key, tab, label] of [['f', 'favorites', 'Favorites[F]'], ['A', 'albums', 'Albums[A]'],
