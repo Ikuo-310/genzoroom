@@ -550,7 +550,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         <button type="button" className="immich-action-button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
       </div>
     </div>
-    <div ref={contentRef} className="stack-content" aria-busy={busy || sending}>
+    <div className="stack-content" aria-busy={busy || sending}>
       {oversized && <p className="stack-status" role="status">{t('stackManagement.sendLimit')}</p>}
       {immich.loading && <p className="stack-status" role="status">{t('stackManagement.loadingImmich')}</p>}
       {immich.error && <p className="stack-status" role="alert">{t('stackManagement.immichFailure')}</p>}
@@ -564,7 +564,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
           {sendStatus && <span className={`stack-send-status${sendStatus === 'sendFailure' || sendStatus === 'sendUnknown' ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
         </div>
-        <div className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
+        {/* Measure the grid's usable width after frame padding and scrollbar space. */}
+        <div ref={contentRef} className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
           key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
             if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) {

@@ -264,8 +264,11 @@ it('keeps EXIF fallback groups editable, addable, purgeable and redetectable', a
 });
 it('clamps both grids to content width without writing the shared preference and restores it on widening', async () => {
  let resize!: ResizeObserverCallback;
- vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) {resize=callback;} observe() {} disconnect() {} });
+ const observed = vi.fn();
+ vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) {resize=callback;} observe(element: Element) { observed(element); } disconnect() {} });
  await mount('/stack', {selectedAssets:photos});
+ expect(observed).toHaveBeenCalledWith(host.querySelector('.stack-candidate-grid'));
+ expect(observed).not.toHaveBeenCalledWith(host.querySelector('.stack-content'));
  const page=host.querySelector<HTMLElement>('.stack-management-page')!;
  const change = async (width:number) => act(async () => resize([{contentRect:{width}} as ResizeObserverEntry], {} as ResizeObserver));
  await change(358); expect(page.style.getPropertyValue('--stack-effective-columns')).toBe('2');
