@@ -101,6 +101,7 @@ describe('useExportQueue', () => {
     expect(current.error).toBe(failure); expect(current.loaded).toBe(false);
     await act(async () => current.refresh());
     expect(current.error).toBeNull(); expect(current.loaded).toBe(true); expect(current.getStatus(A)).toBe('failed');
+    expect(current.canonical).toBe(true);
   });
 
   it('retains a valid Queue snapshot when a later refresh fails', async () => {
@@ -151,6 +152,7 @@ describe('useExportQueue', () => {
     expect(current.items).toEqual([item(A)]);
     expect(current.mutationFor(B)).toEqual({ operation: null, error: failure });
     expect(current.mutationFor(A).operation).toBeNull();
+    expect(current.canonical).toBe(true);
   });
 
   it('removes only the dequeued asset after success', async () => {
@@ -169,9 +171,54 @@ describe('useExportQueue', () => {
     const pending = deferred<ExportQueueItem[]>(); api.list.mockReturnValue(pending.promise);
     await render();
     api.dequeue.mockResolvedValue(undefined);
-    await act(async () => current.dequeue(A));
+    await expect(current.dequeue(A)).rejects.toBeInstanceOf(ExportQueueMutationBusyError);
     expect(current.loaded).toBe(false);
     expect(current.hasAsset(B)).toBeUndefined();
+    expect(api.dequeue).not.toHaveBeenCalled();
+  });
+
+  it('blocks Queue mutations after a lost response and failed refresh until a canonical refresh recovers', async () => {
+    api.list.mockResolvedValue([]);
+    await render();
+    const uncertain = new ExportQueueApiError('network');
+    api.enqueue.mockImplementation(async () => { throw uncertain; });
+    const committed = [item(A)];
+    api.list.mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await act(async () => {
+      await expect(current.enqueue([A])).rejects.toBe(uncertain);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(current.loaded).toBe(true);
+    expect(current.canonical).toBe(false);
+    expect(current.error).toBeInstanceOf(ExportQueueApiError);
+    await expect(current.dequeue(A)).rejects.toBeInstanceOf(ExportQueueMutationBusyError);
+    expect(api.dequeue).not.toHaveBeenCalled();
+    expect(api.enqueue).toHaveBeenCalledOnce();
+
+    api.list.mockResolvedValue(committed);
+    await act(async () => current.refresh());
+    expect(current.canonical).toBe(true);
+    expect(current.getStatus(A)).toBe('queued');
+    await act(async () => current.dequeue(A));
+    expect(api.dequeue).toHaveBeenCalledOnce();
+  });
+
+  it('does not let an older Queue GET overwrite the canonical recovery after an uncertain mutation', async () => {
+    api.list.mockResolvedValueOnce([]);
+    await render();
+    const stale = deferred<ExportQueueItem[]>();
+    const recovery = deferred<ExportQueueItem[]>();
+    api.list.mockReturnValueOnce(stale.promise).mockReturnValueOnce(recovery.promise);
+    let staleRefresh!: Promise<void>;
+    act(() => { staleRefresh = current.refresh(); });
+    api.enqueue.mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await act(async () => { await expect(current.enqueue([A])).rejects.toMatchObject({ kind: 'network' }); });
+    expect(api.list).toHaveBeenCalledTimes(3);
+    await act(async () => recovery.resolve([item(A)]));
+    expect(current.canonical).toBe(true);
+    await act(async () => { stale.resolve([item(B)]); await staleRefresh; });
+    expect(current.items).toEqual([item(A)]);
+    expect(current.hasAsset(B)).toBe(false);
   });
 
   it.each([
@@ -186,11 +233,14 @@ describe('useExportQueue', () => {
   });
 
   it('ignores a list response started before a successful mutation', async () => {
-    const oldList = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldList.promise).mockResolvedValueOnce([item(A)]);
+    api.list.mockResolvedValueOnce([]);
     await render();
+    const oldList = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(oldList.promise).mockResolvedValueOnce([item(A)]);
+    let refresh!: Promise<void>;
+    act(() => { refresh = current.refresh(); });
     api.enqueue.mockResolvedValue([item(A)]);
     await act(async () => current.enqueue([A]));
-    await act(async () => oldList.resolve([item(B)]));
+    await act(async () => { oldList.resolve([item(B)]); await refresh; await Promise.resolve(); });
     expect(current.items).toEqual([item(A)]);
   });
 

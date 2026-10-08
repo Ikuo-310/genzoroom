@@ -5,7 +5,9 @@ import { useShortcutDisplay } from './useShortcutDisplay';
 type EditedBadgeProps = {
   edited?: boolean;
   queueKnown?: boolean;
+  queueCurrent?: boolean;
   queueStatus?: ExportQueueStatus | null;
+  showQueuedWhenUnedited?: boolean;
   busy?: boolean;
   disabled?: boolean;
   onQueueToggle?: () => void;
@@ -19,23 +21,23 @@ export function EditedBadgeIcon() {
   </svg>;
 }
 
-export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, disabled = false, onQueueToggle, showQueueShortcut = true }: EditedBadgeProps) {
+export function EditedBadge({ edited, queueKnown, queueCurrent = true, queueStatus, showQueuedWhenUnedited = false, busy = false, disabled = false, onQueueToggle, showQueueShortcut = true }: EditedBadgeProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
-  if (edited !== true) return null;
-
   const known = queueKnown ?? queueStatus != null;
   const isQueued = known && queueStatus != null;
+  if (edited !== true && !(showQueuedWhenUnedited && isQueued)) return null;
   const locked = queueStatus === 'waiting' || queueStatus === 'encoding' || queueStatus === 'registering';
-  const canToggle = known && !!onQueueToggle && !busy && !disabled && !locked;
+  const canToggle = known && queueCurrent && !!onQueueToggle && !busy && !disabled && !locked;
   const withShortcut = (text: string) => showQueueShortcut ? shortcut.inline(`${text} `, 'exportQueueToggle').trimEnd() : text;
-  const description = !known ? t('photos.edited')
-    : queueStatus === 'waiting' ? t('photos.exportQueue.waiting')
-      : queueStatus === 'encoding' ? t('photos.exportQueue.encoding')
-        : queueStatus === 'registering' ? t('photos.exportQueue.registering')
-          : queueStatus === 'failed' ? withShortcut(t('photos.exportQueue.failed'))
-            : isQueued ? withShortcut(t('photos.exportQueue.remove'))
-              : withShortcut(t('photos.exportQueue.add'));
+  const description = !queueCurrent ? t('photos.exportQueue.reconciling')
+    : !known ? t('photos.edited')
+      : queueStatus === 'waiting' ? t('photos.exportQueue.waiting')
+        : queueStatus === 'encoding' ? t('photos.exportQueue.encoding')
+          : queueStatus === 'registering' ? t('photos.exportQueue.registering')
+            : queueStatus === 'failed' ? withShortcut(t('photos.exportQueue.failed'))
+              : isQueued ? withShortcut(t('photos.exportQueue.remove'))
+                : withShortcut(t('photos.exportQueue.add'));
   const stateClass = known
     ? !isQueued ? ' queue-inactive'
       : queueStatus === 'queued' ? ' queue-queued'
@@ -43,14 +45,14 @@ export function EditedBadge({ edited, queueKnown, queueStatus, busy = false, dis
           : queueStatus === 'encoding' || queueStatus === 'registering' ? ' queue-processing'
             : ' queue-failed'
     : '';
-  const classes = `edited-badge${stateClass}${known ? ' queue-aware' : ''}${busy ? ' queue-busy' : ''}${locked || disabled ? ' queue-locked' : ''}${onQueueToggle ? ' edited-badge-interactive' : ''}`;
+  const classes = `edited-badge${stateClass}${known ? ' queue-aware' : ''}${busy ? ' queue-busy' : ''}${locked || disabled || !queueCurrent ? ' queue-locked' : ''}${onQueueToggle ? ' edited-badge-interactive' : ''}`;
   const icon = <EditedBadgeIcon />;
 
   if (onQueueToggle) return <button
     type="button"
     className={classes}
     aria-label={description}
-    aria-pressed={known ? isQueued : undefined}
+    aria-pressed={known && queueCurrent ? isQueued : undefined}
     aria-busy={busy || undefined}
     title={description}
     disabled={!canToggle}

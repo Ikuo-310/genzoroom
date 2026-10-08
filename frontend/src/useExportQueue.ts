@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   dequeueExportAsset, enqueueExportAssets, listExportQueue, retryExportAssets,
-  ExportQueueApiError, type ExportQueueItem, type ExportQueueStatus,
+  ExportQueueApiError, isExportQueueMutationOutcomeUnknown, type ExportQueueItem, type ExportQueueStatus,
 } from './exportQueueApi';
 import { useExportRuntime } from './useExportRuntime';
 
@@ -15,6 +15,7 @@ export type ExportQueueState = {
   hasAsset: (assetId: string) => boolean | undefined;
   getStatus: (assetId: string) => ExportQueueStatus | undefined;
   loaded: boolean;
+  canonical: boolean;
   loading: boolean;
   error: ExportQueueApiError | unknown | null;
   refresh: () => Promise<void>;
@@ -41,10 +42,13 @@ export class ExportQueueMutationBusyError extends Error {
 export function useExportQueue(): ExportQueueState {
   const [items, setItems] = useState<ExportQueueItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [canonical, setCanonical] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ExportQueueApiError | unknown | null>(null);
   const [mutations, setMutations] = useState<Map<string, ExportQueueMutationState>>(() => new Map());
   const mounted = useRef(false);
+  const canonicalRef = useRef(false);
+  const canonicalRefreshPending = useRef(false);
   const activeControllers = useRef(new Set<AbortController>());
   const loadController = useRef<AbortController | null>(null);
   const loadGeneration = useRef(0);
@@ -88,6 +92,8 @@ export function useExportQueue(): ExportQueueState {
         && mutationsAtStart === mutationStartGeneration.current && busyAssets.current.size === 0) {
         setItems(result);
         setLoaded(true);
+        canonicalRef.current = true;
+        setCanonical(true);
         setError(null);
         snapshotGeneration.current++;
         refreshPending.current = false;
@@ -116,6 +122,7 @@ export function useExportQueue(): ExportQueueState {
   useEffect(() => { void refresh(); }, [refresh]);
 
   const runMutation = useCallback(async (assetIds: readonly string[], operation: ExportQueueMutation, run: (signal: AbortSignal) => Promise<ExportQueueItem[] | void>) => {
+    if (!canonicalRef.current) throw new ExportQueueMutationBusyError();
     const keys = [...new Set(assetIds.map(keyOf))];
     if (keys.some(key => busyAssets.current.has(key))) throw new ExportQueueMutationBusyError();
     keys.forEach(key => busyAssets.current.add(key));
@@ -161,6 +168,11 @@ export function useExportQueue(): ExportQueueState {
       setError(null);
     } catch (cause) {
       if (mounted.current && !controller.signal.aborted) {
+        if (isExportQueueMutationOutcomeUnknown(cause)) {
+          canonicalRef.current = false;
+          canonicalRefreshPending.current = true;
+          setCanonical(false);
+        }
         setMutations(previous => {
           const next = new Map(previous);
           keys.forEach(key => next.set(key, { operation: null, error: cause }));
@@ -182,7 +194,13 @@ export function useExportQueue(): ExportQueueState {
         });
         if (refreshPending.current && busyAssets.current.size === 0) {
           refreshPending.current = false;
-          void refresh();
+          if (canonicalRefreshPending.current) {
+            canonicalRefreshPending.current = false;
+            void refresh(true).catch(() => {});
+          } else void refresh();
+        } else if (canonicalRefreshPending.current && busyAssets.current.size === 0) {
+          canonicalRefreshPending.current = false;
+          void refresh(true).catch(() => {});
         }
       }
     }
@@ -196,8 +214,13 @@ export function useExportQueue(): ExportQueueState {
   ), [runMutation]);
   const retry = useCallback(async (assetIds: readonly string[]) => {
     let prepared = false;
+    let failure: unknown;
     try { await runMutation(assetIds, 'retry', signal => retryExportAssets(assetIds, signal)); prepared = true; }
-    finally { await refresh(prepared); }
+    catch (cause) { failure = cause; throw cause; }
+    finally {
+      if (prepared) await refresh(true);
+      else if (!isExportQueueMutationOutcomeUnknown(failure)) await refresh();
+    }
   }, [runMutation, refresh]);
   const refreshRuntimeQueue = useCallback(() => refresh(true), [refresh]);
   const { runtime, cancel: cancelRuntime, cancelling, start: startRuntime, starting } = useExportRuntime(refreshRuntimeQueue);
@@ -208,5 +231,5 @@ export function useExportQueue(): ExportQueueState {
   const getStatus = useCallback((assetId: string) => itemsByAssetId.get(keyOf(assetId))?.status, [itemsByAssetId]);
   const mutationFor = useCallback((assetId: string) => mutations.get(keyOf(assetId)) ?? { operation: null }, [mutations]);
 
-  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, loading, error, refresh, enqueue, dequeue, retry, runtime, cancelRuntime, cancelling, startRuntime, starting, mutationFor };
+  return { items, itemsByAssetId, getItem, hasAsset, getStatus, loaded, canonical, loading, error, refresh, enqueue, dequeue, retry, runtime, cancelRuntime, cancelling, startRuntime, starting, mutationFor };
 }

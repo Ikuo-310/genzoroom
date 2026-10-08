@@ -8,11 +8,12 @@ import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueStatusFor, queueBusyFor, onQueueToggle }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
   editStatuses?: AssetEditStatuses;
   historyOnlyStatuses?: AssetEditStatuses;
   queueKnown?: boolean;
+  queueCurrent?: boolean;
   queueStatusFor?: (id: string) => ExportQueueStatus | undefined;
   queueBusyFor?: (id: string) => boolean;
   onQueueToggle?: (id: string) => void;
@@ -65,7 +66,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
           ? <span className="filmstrip-history-badge" role="img" aria-label={t('workspace.historyRetained')} title={t('workspace.historyRetained')}>
             <EditedBadgeIcon />
           </span>
-          : <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown}
+          : <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown} queueCurrent={queueCurrent}
           queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}
           disabled={disabled || keyboardBlocked}
           onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />}

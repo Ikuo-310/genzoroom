@@ -17,7 +17,7 @@ import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, clearGal
 import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
-import { ExportQueueApiError } from './exportQueueApi';
+import { ExportQueueApiError, isExportQueueMutationOutcomeUnknown } from './exportQueueApi';
 import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
@@ -165,8 +165,15 @@ export function GalleryPage() {
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+  const queueRecoveryView = useRef(viewKey);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
+  useEffect(() => {
+    if (queueRecoveryView.current === viewKey) return;
+    queueRecoveryView.current = viewKey;
+    // A failed uncertainty refresh can recover on the next ordinary Gallery view transition.
+    if (exportQueue.loaded && !exportQueue.canonical && !exportQueue.loading) void exportQueue.refresh();
+  }, [viewKey, exportQueue.loaded, exportQueue.canonical, exportQueue.loading, exportQueue.refresh]);
 
   useLayoutEffect(() => {
     const pending = pendingScroll.current;
@@ -739,11 +746,11 @@ export function GalleryPage() {
   function queueSelectedAssets(): boolean {
     if (!selectionMode || selectedAssets.length === 0) return false;
     if (queueBatchBusy.current) return true;
-    if (!exportQueue.loaded) return true;
+    if (!exportQueue.loaded || !exportQueue.canonical) return true;
 
-    const eligible = selectedAssets.filter(asset => cardEditStatuses[asset.id] === true);
-    if (eligible.length === 0) return false;
-    const cards = eligible.map(asset => ({ asset, ...queueStateFor(asset) }));
+    const cards = selectedAssets.map(asset => ({ asset, ...queueStateFor(asset) }))
+      .filter(card => card.status !== undefined || cardEditStatuses[card.asset.id] === true);
+    if (cards.length === 0) return false;
     if (cards.some(card => card.status === 'waiting' || card.status === 'encoding' || card.status === 'registering')) {
       setQueueFailure('locked');
       return true;
@@ -780,7 +787,7 @@ export function GalleryPage() {
           setQueueFailure(cause instanceof ExportQueueApiError && cause.kind === 'not_eligible' ? 'notEligible'
             : cause instanceof ExportQueueApiError && cause.kind === 'locked' ? 'locked'
               : enqueueing ? 'addFailed' : 'removeFailed');
-          void exportQueue.refresh();
+          if (!isExportQueueMutationOutcomeUnknown(cause)) void exportQueue.refresh();
         }
       } finally {
         reservedKeys.forEach(key => queueOperations.current.delete(key));
@@ -796,7 +803,7 @@ export function GalleryPage() {
   queueSelectedRef.current = queueSelectedAssets;
 
   async function toggleQueue(asset: RecentAsset) {
-    if (queueBatchBusy.current || !exportQueue.loaded || cardEditStatuses[asset.id] !== true) return;
+    if (queueBatchBusy.current || !exportQueue.loaded || !exportQueue.canonical) return;
     const { memberIds, status } = queueStateFor(asset);
     const keys = memberIds.map(id => id.toLowerCase());
     if (memberIds.some((id, index) => queueOperations.current.has(keys[index]) || exportQueue.mutationFor(id).operation)) return;
@@ -805,6 +812,7 @@ export function GalleryPage() {
       return;
     }
     const removing = status !== undefined;
+    if (!removing && cardEditStatuses[asset.id] !== true) return;
     const targets = removing ? uniqueQueueMemberIds(memberIds).filter(id => exportQueue.hasAsset(id))
       : editedQueueMemberIds(memberIds);
     if (targets.length === 0) return;
@@ -828,7 +836,7 @@ export function GalleryPage() {
           : cause instanceof ExportQueueApiError && cause.kind === 'locked' ? 'locked'
             : removing ? 'removeFailed' : 'addFailed');
         // Reconcile uncertain or externally changed membership without undoing successful mutations.
-        void exportQueue.refresh();
+        if (!isExportQueueMutationOutcomeUnknown(cause)) void exportQueue.refresh();
       }
     } finally {
       keys.forEach(key => queueOperations.current.delete(key));
@@ -839,7 +847,7 @@ export function GalleryPage() {
   async function toggleQueueMember(asset: RecentAsset, checked: boolean) {
     const id = asset.id;
     const key = id.toLowerCase();
-    if (queueBatchBusy.current || !exportQueue.loaded || queueOperations.current.has(key)
+    if (queueBatchBusy.current || !exportQueue.loaded || !exportQueue.canonical || queueOperations.current.has(key)
       || exportQueue.mutationFor(id).operation) return;
     const queued = exportQueue.hasAsset(id);
     if (queued === undefined || checked === queued) return;
@@ -859,7 +867,7 @@ export function GalleryPage() {
         setQueueFailure(cause instanceof ExportQueueApiError && cause.kind === 'not_eligible' ? 'notEligible'
           : cause instanceof ExportQueueApiError && cause.kind === 'locked' ? 'locked'
             : checked ? 'addFailed' : 'removeFailed');
-        void exportQueue.refresh();
+        if (!isExportQueueMutationOutcomeUnknown(cause)) void exportQueue.refresh();
       }
     } finally {
       queueOperations.current.delete(key);
@@ -885,6 +893,7 @@ export function GalleryPage() {
           selectionMode={selectionMode}
           edited={cardEditStatuses[asset.id]}
           queueKnown={exportQueue.loaded}
+          queueCurrent={exportQueue.canonical}
           queueStatus={queue.status}
           queueBusy={queue.busy}
           queueVisible={queueVisible}
@@ -896,6 +905,7 @@ export function GalleryPage() {
             editStatuses,
             editStatusState: editStatusSnapshot.state,
             queueLoaded: exportQueue.loaded,
+            queueCurrent: exportQueue.canonical,
             queueError: !!exportQueue.error,
             queueFor: (assetId: string) => ({ status: exportQueue.getStatus(assetId),
               known: exportQueue.hasAsset(assetId) !== undefined,

@@ -157,6 +157,7 @@
       "notEligible": "The current adjustments cannot be added to Export Queue.",
       "locked": "Photos being exported cannot be removed from Export Queue.",
       "loadFailed": "Export Queue could not be loaded.",
+      "reconciling": "Confirming Export Queue status…",
       "add": "Edited — Add to Export Queue",
       "remove": "Edited — Remove from Export Queue",
       "waiting": "Waiting for export",
@@ -176,7 +177,8 @@
       "noCandidates": "No eligible photos.",
       "loading": "Loading selection state…",
       "unavailable": "Selection state could not be loaded.",
-      "partial": "Some photo edit states are unavailable."
+      "partial": "Some photo edit states are unavailable.",
+      "editStatusError": "Photo edit status could not be loaded."
     },
     "recent": "Recent photos",
     "recentCount": "Recent count",

@@ -8,6 +8,13 @@ export class ExportQueueApiError extends Error {
   }
 }
 
+export function isExportQueueMutationOutcomeUnknown(cause: unknown): boolean {
+  if (!(cause instanceof ExportQueueApiError)) return true;
+  if (cause.code === 'persistence_unavailable' || cause.code === 'unsupported_db_schema') return false;
+  if (cause.kind === 'network' || cause.kind === 'invalid_response' || cause.kind === 'unavailable') return true;
+  return cause.status === 408 || (cause.status !== undefined && cause.status >= 500);
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUSES: readonly string[] = ['queued', 'waiting', 'encoding', 'registering', 'failed'];
 function isRecord(value: unknown): value is Record<string, unknown> {

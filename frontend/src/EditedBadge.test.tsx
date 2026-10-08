@@ -27,6 +27,17 @@ describe('EditedBadge', () => {
     expect(host.querySelector('.edited-badge')).toBeNull();
   });
 
+  it.each([undefined, false])('keeps a confirmed Queue entry removable when edit state is %s', async edited => {
+    const onQueueToggle = vi.fn();
+    await render({ edited, queueKnown: true, queueStatus: 'queued', showQueuedWhenUnedited: true, onQueueToggle });
+    const badge = host.querySelector<HTMLButtonElement>('.edited-badge')!;
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute('aria-pressed')).toBe('true');
+    expect(badge.disabled).toBe(false);
+    await act(async () => badge.click());
+    expect(onQueueToggle).toHaveBeenCalledOnce();
+  });
+
   it('preserves the legacy edited-only display when Queue state is not provided or unknown', async () => {
     await render({ edited: true });
     const legacy = host.querySelector('.edited-badge')!;

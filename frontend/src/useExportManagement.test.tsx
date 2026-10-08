@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useExportManagement, type ExportManagementQueue, type ExportManagementState } from './useExportManagement';
-import type { ExportQueueItem } from './exportQueueApi';
+import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
 const api = vi.hoisted(() => ({ detail: vi.fn(), stacks: vi.fn() }));
 vi.mock('./api', () => ({ fetchAssetDetail: api.detail, refreshSelectedImmichStacks: api.stacks }));
 vi.mock('./frontendLogging', () => ({ frontendLogger: { add: vi.fn() } }));
@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ id, filename: id, date: '', thumbnail_url: '', format: 'JPEG', is_raw: false, preview_url: '', exif: {} }));
   api.stacks.mockReset().mockResolvedValue([]);
-  queue = { items: [], loaded: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }) };
+  queue = { items: [], loaded: true, canonical: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }) };
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
@@ -77,6 +77,16 @@ it('allows Cancel only for recognized active runtime and does not create Undo', 
   expect(queue.cancelRuntime).toHaveBeenCalledTimes(1); expect(current.undo()).toBe(false);
   queue.runtime = { ...queue.runtime, stopRequested: true, stopAllowed: false };
   await render(); expect(current.cancelExport()).toBe(false);
+});
+it('blocks Export management actions while Queue state is noncanonical', async () => {
+  queue.canonical = false;
+  queue.items = [item('a')];
+  await render(queue.items);
+  expect(current.message).toBe('queueLoadFailed');
+  expect(current.selectAll()).toBe(false);
+  expect(current.removeSelected()).toBe(false);
+  expect(current.canStart).toBe(false);
+  expect(queue.dequeue).not.toHaveBeenCalled();
 });
 it('preserves selection and armed across status-only refresh and tab changes, but prunes deleted IDs and range anchors', async () => {
   await render([item('A'), item('b')]);
@@ -169,11 +179,11 @@ it('replaces a W undo record only after a later W changes state', async () => {
 it('undoes successful Q removals only, requeues them, and restores armed state only for successes', async () => {
   const original = [item('a'), item('b'), item('c')];
   queue.dequeue = vi.fn(async (id: string) => {
-    if (id === 'b') throw new Error('delete failed');
+    if (id === 'b') throw new ExportQueueApiError('unavailable', 503, 'persistence_unavailable');
     queue.items.splice(queue.items.findIndex(row => row.assetId === id), 1);
   });
   queue.enqueue = vi.fn(async (ids: readonly string[]) => {
-    if (ids[0] === 'c') throw new Error('enqueue failed');
+    if (ids[0] === 'c') throw new ExportQueueApiError('unavailable', 503, 'persistence_unavailable');
     queue.items.push(item(ids[0], 'queued'));
   });
   await render(original);

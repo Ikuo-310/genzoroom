@@ -12,14 +12,14 @@ const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), refreshStacks: vi.fn() }))
 vi.mock('./api', () => ({ fetchAssetDetail: api.fetchDetail, refreshSelectedImmichStacks: api.refreshStacks }));
 vi.mock('./frontendLogging', () => ({ frontendLogger: { add: vi.fn() } }));
 const item = (assetId: string, status: ExportQueueStatus = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: 'q', updatedAt: 'u' });
-type Queue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error'>;
+type Queue = Pick<ExportQueueState, 'items' | 'loaded' | 'canonical' | 'loading' | 'error'>;
 function Probe({ queue }: { queue: ExportManagementQueue }) {
   const management = useExportManagement(queue, true);
   return <><ExportManagementContent management={management} /></>;
 }
 let root: Root, host: HTMLDivElement;
 async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {}) {
-  await act(async () => root.render(<Probe queue={{ items, loaded: true, loading: false, error: null,
+  await act(async () => root.render(<Probe queue={{ items, loaded: true, canonical: true, loading: false, error: null,
     enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), ...extra }} />));
 }
 beforeEach(async () => {
@@ -44,7 +44,7 @@ it('shows waiting/activity/failed bars while runtime cards remain locked', async
 });
 it.each(['en', 'ja'])('shows persistent Stop state and exact Cancel explanation in %s', async language => {
   await i18n.changeLanguage(language);
-  const queue: ExportManagementQueue = { items: [item('a', 'encoding')], loaded: true, loading: false, error: null,
+  const queue: ExportManagementQueue = { items: [item('a', 'encoding')], loaded: true, canonical: true, loading: false, error: null,
     enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }), cancelRuntime: vi.fn(),
     runtime: { runId: 'run', status: 'active', stopRequested: true, stopAllowed: false, currentAssetId: 'a' } };
   function RuntimeProbe() {
@@ -61,7 +61,7 @@ it.each(['en', 'ja'])('shows persistent Stop state and exact Cancel explanation 
 });
 it('shows Stop requested only for later waiting items, not the current processing item', async () => {
   const queue: ExportManagementQueue = { items: [item('current', 'encoding'), item('registering', 'registering'), item('later', 'waiting')],
-    loaded: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }),
+    loaded: true, canonical: true, loading: false, error: null, enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }),
     runtime: { runId: 'run', status: 'active', stopRequested: true, stopAllowed: false, currentAssetId: 'current' } };
   function RuntimeProbe() {
     const management = useExportManagement(queue, true);

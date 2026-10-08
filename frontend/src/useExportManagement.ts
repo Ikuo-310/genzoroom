@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RecentAsset } from './assets';
-import { ExportQueueApiError, type ExportQueueStatus } from './exportQueueApi';
+import { ExportQueueApiError, isExportQueueMutationOutcomeUnknown, type ExportQueueStatus } from './exportQueueApi';
 import { flattenExportQueueDisplay, groupExportQueueAssets, uniqueExportQueueItems } from './exportQueueDisplay';
 import { frontendLogger } from './frontendLogging';
 import type { ExportQueueState } from './useExportQueue';
@@ -8,7 +8,7 @@ import { useExportQueueAssets } from './useExportQueueAssets';
 import { usePhotoSelection } from './usePhotoSelection';
 import { blurPhotoSelectionCheckboxWhenSelectionEnds } from './photoSelection';
 
-export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>
+export type ExportManagementQueue = Pick<ExportQueueState, 'items' | 'loaded' | 'canonical' | 'loading' | 'error' | 'enqueue' | 'dequeue' | 'refresh' | 'mutationFor'>
   & Partial<Pick<ExportQueueState, 'retry' | 'runtime' | 'cancelRuntime' | 'cancelling' | 'startRuntime' | 'starting'>>;
 export const isMutableExportStatus = (status: ExportQueueStatus | undefined) => status === 'queued' || status === 'failed';
 type ManagementError = 'locked' | 'removeFailed' | 'removePartialFailed' | 'queueRestoreFailed' | 'queueRestorePartialFailed' | 'retryFailed' | 'cancelFailed' | 'startFailed';
@@ -55,7 +55,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const resolvedAssets = metadata.status === 'ready' ? metadata.assets
     : metadata.status === 'loading' && removalOnly ? previousReadyAssets.current : [];
   const assetsById = new Map(resolvedAssets.map(asset => [asset.id.toLowerCase(), asset]));
-  const message = queue.error ? 'queueLoadFailed' : !queue.loaded ? 'queueLoading' : !items.length ? 'empty'
+  const message = queue.error ? 'queueLoadFailed' : !queue.loaded || !queue.canonical && queue.loading ? 'queueLoading'
+    : !queue.canonical ? 'queueLoadFailed' : !items.length ? 'empty'
     : metadata.status === 'error' ? 'metadataLoadFailed' : resolvedAssets.length ? null : 'metadataLoading';
   const entries = items.flatMap(item => {
     const asset = assetsById.get(item.assetId.toLowerCase());
@@ -105,7 +106,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     .filter(entry => mutable.has(entry.item.assetId.toLowerCase())).map(entry => entry.item.assetId.toLowerCase());
   const allSelectedArmed = selectedIds.length > 0 && selectedIds.every(id => armedIds.has(id));
   const runtimeIdle = queue.runtime?.status === null;
-  const canRetryFailed = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
+  const canRetryFailed = active && queue.loaded && queue.canonical && !queue.loading && !queue.error && !message && !removing && !undoing
     && !confirmation && !!queue.retry && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
     && failedIds.length >= 1 && failedIds.length <= 100 && failedIds.every(id => !queue.mutationFor(id).operation);
   const requestRetryFailed = () => {
@@ -116,7 +117,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   };
   const startTargets = items.filter(item => item.status === 'queued' && armedIds.has(item.assetId.toLowerCase())
     && !queue.mutationFor(item.assetId).operation).map(item => item.assetId.toLowerCase());
-  const canStart = active && queue.loaded && !queue.loading && !queue.error && !message && !removing && !undoing
+  const canStart = active && queue.loaded && queue.canonical && !queue.loading && !queue.error && !message && !removing && !undoing
     && !confirmation && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
     && !retryPriority && startTargets.length >= 1 && startTargets.length <= 100;
   const requestStart = () => {
@@ -145,7 +146,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       try {
         const latest = queueRef.current;
         if (intent.kind === 'start' || intent.kind === 'retry') {
-          if (!latest.startRuntime || latest.runtime?.status !== null || latest.starting || latest.cancelling
+          if (!latest.canonical || !latest.startRuntime || latest.runtime?.status !== null || latest.starting || latest.cancelling
             || intent.assetIds.some(id => latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== (intent.kind === 'retry' ? 'failed' : 'queued')
               || latest.mutationFor(id).operation) || (intent.kind === 'retry' && !latest.retry)) throw new ExportQueueApiError('locked');
           if (intent.kind === 'retry') {
@@ -188,7 +189,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     if (retryRunId && queue.runtime != null
       && (queue.runtime.status !== 'active' || queue.runtime.runId !== retryRunId)) setRetryRunId(null);
   }, [queue.runtime?.runId, queue.runtime?.status, retryRunId, retryStartUncertain]);
-  const canOperate = (id: string) => !operationRef.current && !message && mutable.has(id.toLowerCase())
+  const canOperate = (id: string) => queue.canonical && !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };
   const toggleSelection = (id: string) => { if (canOperate(id)) selection.toggle(id.toLowerCase()); };
@@ -216,7 +217,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     return true;
   };
   const removeSelected = () => {
-    if (operationRef.current || !selectedIds.length || message) return false;
+    if (!queueRef.current.canonical || operationRef.current || !selectedIds.length || message) return false;
     const selected = new Set(selectedIds);
     // Snapshot IDs in Queue order; selection changes cannot expand an in-flight batch.
     const targets = items.filter(item => selected.has(item.assetId.toLowerCase()) && !queue.mutationFor(item.assetId).operation)
@@ -227,7 +228,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     const wasArmed = new Map(targets.map(assetId => [assetId, armedIds.has(assetId)]));
     log('debug', 'remove.started', { count: targets.length });
     void (async () => {
-      let succeeded = 0, failed = 0, locked = 0;
+      let succeeded = 0, failed = 0, locked = 0, outcomeUnknown = false;
       const removed: QueueRemovalUndoRecord['removed'] = [];
       for (const assetId of targets) {
         if (!mounted.current) return;
@@ -242,10 +243,11 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
           failed++;
           if (error instanceof ExportQueueApiError && error.kind === 'locked') locked++;
           log('debug', 'remove.item_failed', { assetId, errorCode: error instanceof ExportQueueApiError ? error.kind : 'operation_failed' });
+          if (isExportQueueMutationOutcomeUnknown(error)) { outcomeUnknown = true; break; }
         }
       }
       if (!mounted.current) return;
-      if (failed) {
+      if (failed && !outcomeUnknown) {
         try { await queueRef.current.refresh(); }
         catch { log('error', 'remove.refresh_failed', { count: targets.length }); }
       }
@@ -260,6 +262,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const undo = () => {
     if (operationRef.current || !undoRecord.current) return false;
     const record = undoRecord.current;
+    if (record.kind === 'queueRemoval' && !queueRef.current.canonical) return false;
     const currentItems = queueRef.current.items;
     if (record.kind === 'armed') {
       const valid = record.changes.filter(change => isMutableExportStatus(
@@ -282,7 +285,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     operationRef.current = true;
     setUndoing(true); setRemovalError(null);
     void (async () => {
-      let restored = 0, failed = 0;
+      let restored = 0, failed = 0, outcomeUnknown = false;
       const restoreArmed: string[] = [];
       for (const removedItem of record.removed) {
         if (!mounted.current) return;
@@ -299,12 +302,13 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
           await queueRef.current.enqueue([removedItem.assetId]);
           restored++;
           if (removedItem.wasArmed) restoreArmed.push(removedItem.assetId);
-        } catch {
+        } catch (error) {
           failed++;
+          if (isExportQueueMutationOutcomeUnknown(error)) { outcomeUnknown = true; break; }
         }
       }
       if (!mounted.current) return;
-      if (failed) {
+      if (failed && !outcomeUnknown) {
         try { await queueRef.current.refresh(); }
         catch { log('error', 'undo.refresh_failed', { count: record.removed.length }); }
       }

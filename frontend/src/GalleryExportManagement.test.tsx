@@ -379,7 +379,7 @@ describe('Export selection, readiness and Queue removal', () => {
   it('continues sequential removal after a middle failure and refreshes without rolling back successes', async () => {
     const backend = await openQueue([queued('a'), queued('b'), queued('c')]);
     api.remove.mockImplementation(async (id: string) => {
-      if (id === 'b') throw new ExportQueueApiError('unavailable');
+      if (id === 'b') throw new ExportQueueApiError('unexpected', 400);
       backend.setItems(backend.getItems().filter(item => item.assetId !== id));
     });
     await click('.export-selection .selection-all'); await key('w'); await click('.export-queue-remove');
@@ -413,12 +413,12 @@ describe('Export selection, readiness and Queue removal', () => {
     const backend = await openQueue([queued('a'), queued('b'), queued('c')]);
     await cardClick('a'); await key('w'); await cardClick('b', { ctrlKey: true }); await cardClick('c', { ctrlKey: true }); await key('w');
     api.remove.mockImplementation(async (id: string) => {
-      if (id === 'b') throw new ExportQueueApiError('unavailable');
+      if (id === 'b') throw new ExportQueueApiError('unavailable', 503, 'persistence_unavailable');
       backend.setItems(backend.getItems().filter(item => item.assetId !== id));
     });
     await key('q');
     api.enqueue.mockImplementation(async (ids: string[]) => {
-      if (ids[0] === 'c') throw new ExportQueueApiError('unavailable');
+      if (ids[0] === 'c') throw new ExportQueueApiError('unavailable', 503, 'persistence_unavailable');
       backend.setItems([...backend.getItems(), ...ids.map(id => queued(id))]);
       return backend.getItems();
     });

@@ -30,7 +30,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.statuses.mockReset();
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('useEditStatuses batches', () => {
   it('distinguishes pending, partial and failed edit snapshots', async () => {
@@ -107,5 +107,28 @@ describe('useEditStatuses batches', () => {
     expect(signals).toHaveLength(3);
     act(() => root.unmount());
     expect(signals.every(signal => signal.aborted)).toBe(true);
+  });
+
+  it('settles as error when every live request times out and aborts its transport', async () => {
+    vi.useFakeTimers();
+    api.statuses.mockImplementation(() => new Promise(() => {}));
+    await act(async () => root.render(<StateHarness ids={['one']} />));
+    const signal = api.statuses.mock.calls[0][1] as AbortSignal;
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    expect(signal.aborted).toBe(true);
+    expect(host.querySelector('output')!.textContent).toBe('error');
+  });
+
+  it('settles as partial when a batch succeeds before another live request times out', async () => {
+    vi.useFakeTimers();
+    const ids = Array.from({ length: 150 }, (_, index) => `timeout-${index}`);
+    api.statuses.mockImplementationOnce(async (batch: string[]) => Object.fromEntries(batch.map(id => [id, true])))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    await act(async () => root.render(<StateHarness ids={ids} />));
+    const signals = api.statuses.mock.calls.map(([, signal]) => signal as AbortSignal);
+    expect(host.querySelector('output')!.textContent).toBe('loading');
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(host.querySelector('output')!.textContent).toBe('partial');
   });
 });

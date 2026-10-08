@@ -8,7 +8,7 @@ import type { ExportQueueStatus } from './exportQueueApi';
 export type StackQueueRow = { status: ExportQueueStatus | undefined; known: boolean; busy: boolean };
 
 export function StackContextMenu({
-  point, members, selectedIds, selectionAvailable, editStatuses, editStatusState, queueLoaded, queueError,
+  point, members, selectedIds, selectionAvailable, editStatuses, editStatusState, queueLoaded, queueCurrent, queueError,
   queueFor, onDarkroomToggle, onQueueToggle, onClose,
 }: {
   point: { x: number; y: number };
@@ -18,6 +18,7 @@ export function StackContextMenu({
   editStatuses: Readonly<Record<string, boolean | undefined>>;
   editStatusState: 'loading' | 'ready' | 'partial' | 'error';
   queueLoaded: boolean;
+  queueCurrent: boolean;
   queueError: boolean;
   queueFor: (assetId: string) => StackQueueRow;
   onDarkroomToggle: (asset: RecentAsset, checked: boolean) => void;
@@ -56,9 +57,10 @@ export function StackContextMenu({
   const validMembers = members?.filter(member => member.isGenzoRoomExport === false) ?? [];
   const queueMembers = members?.filter(member => editStatuses[member.id] === true || queueFor(member.id).known && queueFor(member.id).status !== undefined) ?? [];
   const darkroomStatus = !selectionAvailable ? 'unavailable' : validMembers.length === 0 ? 'empty' : 'ready';
-  const unresolvedEditStatus = members?.some(member => editStatuses[member.id] === undefined && !queueFor(member.id).known) ?? false;
-  const queueStatus = queueError ? 'error' : !queueLoaded ? 'loading'
-    : queueMembers.length > 0 ? 'ready'
+  const unresolvedEditStatus = members?.some(member => editStatuses[member.id] === undefined) ?? false;
+  const queueStatus = queueError ? 'error' : !queueLoaded || !queueCurrent ? 'loading'
+    : !members ? 'error'
+      : queueMembers.length > 0 ? 'ready'
       : editStatusState === 'loading' ? 'loading'
         : unresolvedEditStatus || editStatusState !== 'ready' ? 'error' : 'empty';
 
@@ -78,12 +80,18 @@ export function StackContextMenu({
     <section aria-labelledby="stack-queue-heading">
       <h3 id="stack-queue-heading">{t('photos.stackMenu.queue')}</h3>
       {queueStatus === 'loading' ? <p role="status">{t('photos.stackMenu.loading')}</p>
-        : queueStatus === 'error' ? <p role="alert">{t('photos.stackMenu.unavailable')}</p>
+        : queueStatus === 'error' ? <p role="alert">{queueError ? t('photos.stackMenu.unavailable')
+          : !members ? t('photos.stackMenu.membersUnavailable')
+            : editStatusState === 'error' ? t('photos.stackMenu.editStatusError') : t('photos.stackMenu.unavailable')}</p>
           : queueStatus === 'empty' ? <p role="status">{t('photos.stackMenu.noCandidates')}</p>
-            : <>{unresolvedEditStatus && <p role="status">{t('photos.stackMenu.partial')}</p>}{queueMembers.map((member, index) => {
+            : <>{editStatusState === 'loading' && <p role="status">{t('photos.stackMenu.loading')}</p>}
+              {editStatusState === 'partial' && <p role="status">{t('photos.stackMenu.partial')}</p>}
+              {editStatusState === 'error' && <p role="alert">{t('photos.stackMenu.editStatusError')}</p>}
+              {unresolvedEditStatus && editStatusState === 'ready' && <p role="status">{t('photos.stackMenu.partial')}</p>}
+              {queueMembers.map((member, index) => {
               const row = queueFor(member.id);
               const queued = row.status !== undefined;
-              const locked = row.busy || !row.known || ['waiting', 'encoding', 'registering'].includes(row.status ?? '');
+              const locked = row.busy || !queueCurrent || !row.known || ['waiting', 'encoding', 'registering'].includes(row.status ?? '');
               return <label className="stack-photo-menu-row" key={member.id.toLowerCase()}>
                 <input ref={index === 0 && darkroomStatus !== 'ready' ? firstControl : undefined} type="checkbox" checked={queued}
                   disabled={locked} onChange={event => onQueueToggle(member, event.currentTarget.checked)} />

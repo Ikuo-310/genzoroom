@@ -132,6 +132,28 @@ describe('Home Export Queue', () => {
     expect(api.enqueue).not.toHaveBeenCalled();
   });
 
+  it.each(['queued', 'failed'] as const)('removes a standalone %s entry even when edit status is false or unknown', async status => {
+    items = [item(ids[0], status)];
+    api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, id === ids[0] ? undefined : false])));
+    await mount();
+    expect(badge().getAttribute('aria-pressed')).toBe('true');
+    expect(badge().disabled).toBe(false);
+    await click(badge());
+    expect(api.dequeue).toHaveBeenCalledWith(ids[0], expect.any(AbortSignal));
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('preserves the existing multi-selection direction when an unedited queued card is mixed with an eligible unqueued card', async () => {
+    items = [item(ids[0])];
+    api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, id !== ids[0] && id !== ids[3]])));
+    await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ();
+    expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
+    expect(api.dequeue).not.toHaveBeenCalled();
+  });
+
   it('does not display a badge for unedited or History-only default assets', async () => {
     await mount();
     expect(card(3).querySelector('.edited-badge, .filmstrip-history-badge')).toBeNull();
@@ -179,6 +201,31 @@ describe('Home Export Queue', () => {
     expect(host.querySelector('.home-queue-error')?.textContent).toBe('出力キューを読み込めませんでした。');
     expect(badge().disabled).toBe(true);
     expect(badge().getAttribute('aria-pressed')).toBeNull();
+  });
+
+  it('blocks representative and batch Q actions after an uncertain POST until a later refresh confirms Queue', async () => {
+    await mount();
+    api.enqueue.mockRejectedValueOnce(new ExportQueueApiError('network'));
+    api.list.mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await click(badge());
+    await flushQueueRefresh();
+    expect(api.enqueue).toHaveBeenCalledOnce();
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(badge().disabled).toBe(true);
+
+    await click(card().querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressQ();
+    expect(api.enqueue).toHaveBeenCalledOnce();
+    expect(api.dequeue).not.toHaveBeenCalled();
+
+    items = [item(ids[0])];
+    await click(host.querySelector<HTMLButtonElement>('#home-favorites-tab')!);
+    await flushQueueRefresh();
+    expect(api.list).toHaveBeenCalledTimes(3);
+    expect(badge().getAttribute('aria-pressed')).toBe('true');
+    expect(badge().disabled).toBe(false);
+    await click(badge());
+    expect(api.dequeue).toHaveBeenCalledWith(ids[0], expect.any(AbortSignal));
   });
 
   it.each(tabs)('toggles eligible multi-selection with Q in the %s photo view', async tab => {

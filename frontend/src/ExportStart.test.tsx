@@ -25,7 +25,7 @@ beforeEach(async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  queue = { items: [item('b'), item('a')], loaded: true, loading: false, error: null, runtime: idle,
+  queue = { items: [item('b'), item('a')], loaded: true, canonical: true, loading: false, error: null, runtime: idle,
     enqueue: vi.fn(), dequeue: vi.fn(), refresh: vi.fn(), mutationFor: () => ({ operation: null }),
     startRuntime: vi.fn().mockResolvedValue(undefined), cancelRuntime: vi.fn().mockResolvedValue(undefined) };
 });

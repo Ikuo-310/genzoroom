@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, listExportQueue, retryExportAssets, listExportRuntime, stopExportRuntime, startExportRuntime } from './exportQueueApi';
+import { dequeueExportAsset, enqueueExportAssets, ExportQueueApiError, isExportQueueMutationOutcomeUnknown, listExportQueue, retryExportAssets, listExportRuntime, stopExportRuntime, startExportRuntime } from './exportQueueApi';
 
 const id = '12345678-1234-4234-9234-123456789abc';
 const secondId = '22345678-1234-4234-9234-123456789abc';
@@ -12,6 +12,20 @@ function mockBody(body: unknown) {
   return fetcher;
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  [new ExportQueueApiError('network'), true],
+  [new ExportQueueApiError('invalid_response', 200), true],
+  [new ExportQueueApiError('unavailable', 503), true],
+  [new ExportQueueApiError('unavailable', 503, 'persistence_unavailable'), false],
+  [new ExportQueueApiError('unavailable', 503, 'unsupported_db_schema'), false],
+  [new ExportQueueApiError('unexpected', 500), true],
+  [new ExportQueueApiError('locked', 409), false],
+  [new ExportQueueApiError('not_eligible', 422), false],
+  [new ExportQueueApiError('invalid_request', 422), false],
+])('classifies Queue mutation outcome uncertainty for %s', (error, expected) => {
+  expect(isExportQueueMutationOutcomeUnknown(error)).toBe(expected);
+});
 
 it('posts Retry intent and accepts only canonical Queue response', async () => {
   const fetcher = mockBody({ items: [item] });

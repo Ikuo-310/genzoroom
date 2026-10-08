@@ -120,13 +120,13 @@ export function AnshitsuPage() {
   });
 
   async function toggleQueue(id: string) {
-    if (workspaceKeyboardBlocked || switchingRef.current || exitRef.current || !exportQueue.loaded
+    if (workspaceKeyboardBlocked || switchingRef.current || exitRef.current || !exportQueue.loaded || !exportQueue.canonical
       || queueOperations.current.has(id) || exportQueue.mutationFor(id).operation) return;
-    // A default Recipe has no Queue control, even while saved cleanup membership is still refreshing.
-    if (localStateFor(id).nonDefaultRecipe === false) return;
     const status = exportQueue.getStatus(id);
     if (status === 'waiting' || status === 'encoding' || status === 'registering') return;
     const removing = status === 'queued' || status === 'failed';
+    // A default Recipe has no Queue control, even while saved cleanup membership is still refreshing.
+    if (localStateFor(id).nonDefaultRecipe === false) return;
     if (!removing && id === assetId && !editable) return;
     queueOperations.current.add(id);
     setQueueBusy(new Set(queueOperations.current));
@@ -641,6 +641,7 @@ export function AnshitsuPage() {
         disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
         keyboardBlocked={workspaceKeyboardBlocked}
         queueKnown={exportQueue.loaded}
+        queueCurrent={exportQueue.canonical}
         queueStatusFor={exportQueue.getStatus}
         queueBusyFor={id => queueBusy.has(id) || !!exportQueue.mutationFor(id).operation || localStateFor(id).saving}
         onQueueToggle={id => { void queueToggleRef.current(id); }}

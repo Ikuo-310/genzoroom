@@ -183,6 +183,67 @@ describe('Gallery Stack target navigation', () => {
     expect(host.querySelector('.edited-badge')?.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it.each([false, undefined])('shows and removes a queued Stack member when its edit status is %s', async editStatus => {
+    const stack = makeGalleryStack(7, ['JPEG', 'DNG']);
+    galleryPhotos([stack]);
+    api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, id === stack.stackMembers![1].id ? editStatus : false])));
+    queueApi.items = [{ assetId: stack.stackMembers![1].id, status: 'queued',
+      queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' }];
+    await mount();
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const rows = [...document.querySelectorAll<HTMLInputElement>('.stack-photo-context-menu section:nth-of-type(2) input')];
+    const queued = rows.find(input => input.parentElement?.textContent?.includes(stack.stackMembers![1].filename))!;
+    expect(queued).not.toBeNull();
+    expect(queued.checked).toBe(true);
+    expect(queued.disabled).toBe(false);
+    await act(async () => queued.click());
+    expect(queueApi.dequeue).toHaveBeenCalledWith(stack.stackMembers![1].id, expect.any(AbortSignal));
+  });
+
+  it('shows edit-state partial failure while retaining known candidates and queued removal rows', async () => {
+    const stack = makeGalleryStack(8, Array(150).fill('JPEG'));
+    const queuedMember = stack.stackMembers![125];
+    galleryPhotos([stack]);
+    api.statuses.mockImplementationOnce(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, true])))
+      .mockRejectedValueOnce(new Error('temporarily unavailable'));
+    queueApi.items = [{ assetId: queuedMember.id, status: 'queued',
+      queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' }];
+    await mount();
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const queueSection = document.querySelectorAll('.stack-photo-context-menu section')[1];
+    expect(queueSection.textContent).toContain('Some photo edit states are unavailable.');
+    const queued = [...queueSection.querySelectorAll<HTMLInputElement>('input')]
+      .find(input => input.parentElement?.textContent?.includes(queuedMember.filename))!;
+    expect(queued.checked).toBe(true);
+    expect(queued.disabled).toBe(false);
+  });
+
+  it('shows edit-state failure separately from a known queued row', async () => {
+    const stack = makeGalleryStack(9, ['JPEG', 'DNG']);
+    galleryPhotos([stack]);
+    api.statuses.mockRejectedValue(new Error('unavailable'));
+    queueApi.items = [{ assetId: stack.stackMembers![1].id, status: 'failed',
+      queuedAt: '2026-10-06T01:02:03.004Z', updatedAt: '2026-10-06T01:02:03.004Z' }];
+    await mount();
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const queueSection = document.querySelectorAll('.stack-photo-context-menu section')[1];
+    expect(queueSection.textContent).toContain('Photo edit status could not be loaded.');
+    const queued = [...queueSection.querySelectorAll<HTMLInputElement>('input')]
+      .find(input => input.parentElement?.textContent?.includes(stack.stackMembers![1].filename))!;
+    expect(queued.checked).toBe(true);
+    expect(queued.disabled).toBe(false);
+  });
+
+  it('reports unavailable member metadata instead of displaying an empty Queue candidate state', async () => {
+    const stack = { ...makeGalleryStack(10, ['JPEG', 'DNG']), stackMembers: null };
+    galleryPhotos([stack]);
+    await mount();
+    act(() => host.querySelector<HTMLElement>('.photo-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const queueSection = document.querySelectorAll('.stack-photo-context-menu section')[1];
+    expect(queueSection.textContent).toContain('Stack member information is unavailable.');
+    expect(queueSection.textContent).not.toContain('No eligible photos.');
+  });
+
   it('opens the STACK menu without card selection, toggles member choices and synchronizes individual Queue state', async () => {
     const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
     stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
