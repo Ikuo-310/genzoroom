@@ -176,7 +176,8 @@ h2 { margin: 0; font-size: 1.35rem; }
 .home-control select:focus-visible { outline: 3px solid var(--text-primary); outline-offset: 2px; }
 .stack-filter-control select { width: auto; min-width: 88px; padding-right: 8px; }
 .photo-filter-control select { width: 88px; }
-.edit-status-filter-control select { width: auto; min-width: 88px; padding-right: 8px; }
+.edit-status-filter-control select { width: auto; min-width: 88px; padding-right: 14px; }
+.develop-status-filter-control select, .recent-count-control select { width: auto; padding-right: 14px; }
 .gallery-message { margin: 0; color: var(--text-secondary); }
 .error-text { color: #ffbbae; }
 /* Empty tracks must remain so sparse results keep the selected thumbnail density. */

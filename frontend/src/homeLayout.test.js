@@ -359,7 +359,7 @@ describe('Home and thumbnail layout', () => {
     const tabs = document.createElement('div'); tabs.className = 'home-tabs';
     const controls = document.createElement('div');
     controls.className = 'home-toolbar-controls';
-    controls.innerHTML = '<label class="home-control photo-filter-control"><span class="home-control-label">Type</span><select><option>All</option></select></label><label class="home-control edit-status-filter-control"><span class="home-control-label">Edit status</span><select><option>All</option><option>Edited</option><option>Not edited</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
+    controls.innerHTML = '<label class="home-control edit-status-filter-control"><span class="home-control-label">Edit status</span><select><option>All</option><option>Edited</option><option>Unedited</option></select></label><label class="home-control develop-status-filter-control"><span class="home-control-label">Developed</span><select><option>Both</option><option>Developed</option><option>Undeveloped</option></select></label><label class="home-control recent-count-control"><span class="home-control-label">Recent count</span><select><option>100</option></select></label><div class="home-control thumbnail-size-setting"><span class="home-control-label">Thumbnail size</span><div class="thumbnail-size-control"></div></div>';
     toolbar.append(tabs, controls); host.querySelector('.home-content').prepend(toolbar);
     expect(getComputedStyle(toolbar).display).toBe('flex');
     expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
@@ -367,10 +367,13 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(controls).flexWrap).toBe('wrap');
     expect(controls.querySelectorAll('.home-control')).toHaveLength(4);
     for (const group of controls.querySelectorAll('.home-control')) expect(getComputedStyle(group).flexDirection).toBe('column');
-    expect(getComputedStyle(controls.querySelector('.photo-filter-control select')).width).toBe('88px');
     expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).width).toBe('auto');
     expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).minWidth).toBe('88px');
-    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).paddingRight).toBe('8px');
+    expect(getComputedStyle(controls.querySelector('.edit-status-filter-control select')).paddingRight).toBe('14px');
+    for (const selector of ['.develop-status-filter-control select', '.recent-count-control select']) {
+      expect(getComputedStyle(controls.querySelector(selector)).width).toBe('auto');
+      expect(getComputedStyle(controls.querySelector(selector)).paddingRight).toBe('14px');
+    }
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 760px'));
     expect(Array.from(narrowScreen.cssRules).some((rule) => rule.selectorText === '.home-toolbar-controls'
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
