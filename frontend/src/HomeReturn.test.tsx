@@ -354,17 +354,15 @@ describe('Home return context', () => {
     await click('.home-open-workspace');
     await click('.filmstrip-entry:last-child .filmstrip-item');
     expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe(second.filename);
-    let resolve!: (assets: AssetDetail[]) => void;
-    api.albumAssets.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));
+    const albumRequestsBeforeReturn = api.albumAssets.mock.calls.length;
     await click('.workspace-title-link');
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector('.home-toolbar-title')?.textContent).toBe(album.albumName);
-    expect(host.querySelector('.photo-grid')).toBeNull();
+    expect(host.querySelector('.photo-grid')).not.toBeNull();
     expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
-    await act(async () => resolve([photo, second]));
     expect(host.querySelector<HTMLElement>('.home-page')!.scrollTop).toBe(0);
     expect(homeScrollContent(host.querySelector<HTMLElement>('.home-page')!)!.scrollTop).toBe(840);
-    expect(api.albumAssets).toHaveBeenLastCalledWith(album.id, expect.any(AbortSignal));
+    expect(api.albumAssets).toHaveBeenCalledTimes(albumRequestsBeforeReturn);
     await click('#home-recent-tab'); await click('#home-albums-tab'); expectScroll(0, 840);
     await click('.album-back'); expect(host.querySelector('.album-card')).not.toBeNull();
     await click('#home-recent-tab'); expect(host.querySelector('.photo-card.selected')).toBeNull();
@@ -471,4 +469,20 @@ it.each(['recent', 'albums', 'calendar', 'favorites'] as const)('opens Stacks fr
   expect(host.querySelector('.stack-management-page')).not.toBeNull();
   await click(`#home-${tab}-tab`);
   expect(host.querySelector('.photo-selection-input:checked')).not.toBeNull(); expectScroll(0, 347);
+});
+
+it.each(['button', 'shortcut'] as const)('resumes the prior darkroom from Export via %s and restores the Gallery scroll position', async method => {
+  rememberWorkspaceSession({ selectedAssets: [second], activeAssetId: second.id });
+  await mount(); await click('.photo-selection-input'); setScroll(0, 480);
+  await click('#home-export-tab'); setScroll(0, 35);
+  if (method === 'button') await click('.home-open-workspace');
+  else await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+  expect(host.querySelector('.workspace-actions')).not.toBeNull();
+  expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe(second.filename);
+  expect(navigationState?.homeReturn?.contentScrollTop).toBe(480);
+  await click('.workspace-actions button');
+  expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+  expect(host.querySelector('#home-export-tab')?.getAttribute('aria-selected')).toBe('false');
+  expect(host.querySelector('.photo-selection-input:checked')).not.toBeNull();
+  expectScroll(0, 480);
 });

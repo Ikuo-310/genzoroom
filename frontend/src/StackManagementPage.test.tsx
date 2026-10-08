@@ -1335,6 +1335,32 @@ it('gives A and Escape to the visible Stack editor without changing Gallery sele
   expect(host.querySelectorAll('.photo-selection-input:checked')).toHaveLength(3);
 });
 
+it('disables darkroom navigation and D while the Stack tab is active', async () => {
+  await mount(); await click('#home-stacks-tab');
+  expect(host.querySelector<HTMLButtonElement>('.home-open-workspace')?.disabled).toBe(true);
+  const event = new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true });
+  await act(async () => window.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(false);
+  expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+  expect(host.querySelector('.workspace-actions')).toBeNull();
+});
+
+it('keeps a Stack draft and Undo mounted across Gallery, Anshitsu and Home routes', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  const editor = host.querySelector('.stack-management-page');
+  await click('[aria-label="Set selected.dng as COVER"]');
+  await click('#home-recent-tab'); await click('.home-open-workspace');
+  expect(host.querySelector('.workspace-actions')).not.toBeNull();
+  await act(async () => navigateTest('/', null));
+  expect(host.querySelector('.stack-management-page')).toBe(editor);
+  await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  const undo = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+  await act(async () => window.dispatchEvent(undo));
+  expect(undo.defaultPrevented).toBe(true);
+  expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.jpg');
+});
+
 for (const navigation of ['shortcut', 'tab'] as const) {
   it(`${navigation} enters an empty first Stack session without a Gallery selection`, async () => {
     await mount();

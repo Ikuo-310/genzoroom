@@ -53,7 +53,7 @@ type PhotoView = {
   selection: ReturnType<typeof usePhotoSelection>;
 };
 
-export function GalleryPage() {
+export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const { t, i18n } = useTranslation();
   const recentCountSelectId = useId();
   const shortcut = useShortcutDisplay();
@@ -98,9 +98,9 @@ export function GalleryPage() {
   const [stackSession, setStackSession] = useState<{ assets: RecentAsset[]; generation: number } | null>(null);
   const showStacksRef = useRef(showStacks);
   showStacksRef.current = showStacks;
-  const exportManagement = useExportManagement(exportQueue, showExport);
-  const exportManagementRef = useRef({ active: showExport, state: exportManagement });
-  exportManagementRef.current = { active: showExport, state: exportManagement };
+  const exportManagement = useExportManagement(exportQueue, showExport && active);
+  const exportManagementRef = useRef({ active: showExport && active, state: exportManagement });
+  exportManagementRef.current = { active: showExport && active, state: exportManagement };
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [albumState, setAlbumState] = useState<'idle' | AssetState>('idle');
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumSummary | null>(homeReturn?.album ?? null);
@@ -173,6 +173,15 @@ export function GalleryPage() {
   const queueRecoveryView = useRef(viewKey);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
+  useLayoutEffect(() => {
+    if (!active) return;
+    workspaceNavigating.current = false;
+    if (!showExport) return;
+    // A routed workspace return restores the Gallery view, not the Export tab that launched it.
+    const galleryKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+    prepareScrollTransition(galleryKey, false);
+    setShowExport(false);
+  }, [active]);
   useEffect(() => {
     if (queueRecoveryView.current === viewKey) return;
     queueRecoveryView.current = viewKey;
@@ -417,6 +426,7 @@ export function GalleryPage() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (!active) return;
       const exportView = exportManagementRef.current;
       if (exportView.active && !event.isComposing && !event.repeat
         && !document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
@@ -489,7 +499,7 @@ export function GalleryPage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectionMode, photoView?.selection.clear, navigate]);
+  }, [active, selectionMode, photoView?.selection.clear, navigate]);
 
   function selectAllVisible(): boolean {
     if (!photoView || photoView.state !== 'ready' || visibleAssets.length === 0) return false;
@@ -521,7 +531,7 @@ export function GalleryPage() {
   }
 
   function openHomeWorkspace(): boolean {
-    if (workspaceNavigating.current) return false;
+    if (!active || showStacks || workspaceNavigating.current) return false;
     if (activeSelectedAssetIds.length > 0) {
       if (!selectedAssets.length) return false;
       openSelectedAssets();
@@ -573,7 +583,7 @@ export function GalleryPage() {
     // Route exits must preserve the intended offset while the current view is still restoring.
     const pending = pendingScroll.current;
     const galleryKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
-    const position = showStacks ? scrollPositions.current.get(galleryKey) ?? readScrollPosition()
+    const position = showStacks || showExport ? scrollPositions.current.get(galleryKey) ?? readScrollPosition()
       : pending?.key === viewKey ? pending.position : readScrollPosition();
     return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
       date: selectedCalendarDate, calendarMode, ...position };
@@ -983,7 +993,7 @@ export function GalleryPage() {
             <button id="home-export-tab" type="button" role="tab" aria-controls="home-export-panel"
               aria-selected={showExport} onClick={() => handleTabClick('export')}>{shortcut.inline(t('home.exportTab'), 'homeExport')}</button>
           </div>
-          <div><button type="button" className="home-open-workspace" onClick={openHomeWorkspace}
+          <div><button type="button" className="home-open-workspace" disabled={showStacks || !active} onClick={openHomeWorkspace}
             title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')}>{shortcut.inline(t(language === 'en' ? 'photos.openSelectedCompact' : 'photos.openSelected'), 'homeOpenSelected')}</button></div>
         </div>
         {showExport && <ExportRetryPriorityNotice management={exportManagement} />}
@@ -1099,7 +1109,7 @@ export function GalleryPage() {
         </>}
       </section>
       {stackSession && <div id="home-stacks-panel" className="home-stacks-panel" role="tabpanel" aria-labelledby="home-stacks-tab" hidden={!showStacks}>
-        <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={showStacks} />
+        <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={active && showStacks} />
       </div>}
     </main>
   );

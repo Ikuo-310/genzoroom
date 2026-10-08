@@ -49,7 +49,8 @@ export function StackManagementPage({ sessionAssets, active = true }: { sessionA
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
-  const sourceGeneration = `${location.key}:${JSON.stringify(location.state) ?? 'null'}`;
+  // Home owns Stack generations; routed Anshitsu changes must not invalidate that live session.
+  const sourceGeneration = sessionAssets ? 'home-session' : `${location.key}:${JSON.stringify(location.state) ?? 'null'}`;
   const assets = sessionAssets ?? navigation?.selectedAssets ?? EMPTY_ASSETS;
   const immich = useSelectedImmichStacks(assets);
   const detectionAssets = useMemo(() => {
