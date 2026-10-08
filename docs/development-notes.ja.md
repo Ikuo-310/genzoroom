@@ -14,6 +14,16 @@ DeveloperLogsPanelのテスト間干渉は、共有Frontendログsingletonを利
 
 最終Frontend検証は**119ファイル、2,534件成功、既存2件skip、失敗0**。Backendは直近の最終再監査で**860件成功**した。最後のR01〜R03修正ではBackendを変更していない。Frontendの型チェック・buildと`git diff --check`も最終修正サイクルで成功し、buildには既存の大容量chunk警告が残る。自動テストとコード確認は完了した。NASへのdeployや今回の最終修正後のブラウザー実機確認、特殊な異常系の実機確認を行ったとは記録しない。ユーザー側の実機確認はこの自動検証とは別である。最終限定再確認では新たなHigh相当の問題はなく、Phase 1〜5の終了条件を満たした。
 
+## Home自動タグ修復のStackメンバー対応・実機確認（2026-10-08）
+
+Immichへ出力した`-Genzo01.jpg`で、初回登録後に撮影情報・画像寸法の表示不備とGenzoRoomタグ欠落が確認された。JPEG現物の検証では、元画像、Genzo01、Genzo02はいずれも3072×4080で、Genzo01とGenzo02はデコード後の画素が完全一致した。Immichでメタデータ抽出とサムネイル再生成を行うと、Genzo01の画像表示と撮影情報は正常化したが、タグは復旧しなかった。画像表示・メタデータ不備とタグ欠落の因果関係、および初回Export登録時にタグが欠落した原因は確定していない。
+
+原因は、従来のHome-time tag repairがHome APIから渡される代表Assetだけを候補収集し、`stackMembers`内の非COVERメンバーを走査していなかったことだった。Genzo02がCOVERかつタグ付き、Genzo01が非COVERかつタグなしの状態では、Genzo01が修復対象にならなかった。`backend/genzoroom_tag_repair.py`では代表Assetに続けてStackメンバーを走査し、各Asset自身のタグ状態とfilenameで判定したうえでAsset ID単位に重複排除するよう修正した。JPEG EXIF検証、タグ付与処理、安全上限、ログ契約、Export Runtimeは変更していない。
+
+Codexによる検証は、対象テスト**81件成功**、Backend全テスト**866件成功**、`compileall`成功、`git diff --check`成功。
+
+NAS / Immich実機ではHomeを再取得し、自動タグ修復が動作してGenzo01へ`GenzoRoom`タグが復旧した。Backend Structured Logで`tagRepair.completed`を2件確認し、2件とも`result=restored`、`PUT /tags/assets`はHTTP 200だった。処理時間は1,984msと1,307msで、両方とも同一のGenzoRoom tag IDを使用した。2件目の修復対象Assetがどの写真かは特定・推測していない。この実機確認で確認できたのは自動修復の成功であり、初回Export登録時のタグ欠落原因が解明されたことを意味しない。
+
 ## Home Stack / filename / GenzoRoom tag改善とfocused audit（2026-10-08）
 
 HomeのStackカードへ、full Stack snapshotから得たunique format badgeを追加した。Cover/primaryのformatを先頭にし、JPEG / DNG / HEIC等と既存member countを表示する。素材の選択・filterではない。optional metadataが欠損・不正でもAsset本体を落とさず、Frontendでもformat metadataをsanitizationする。実機で表示を確認済み。

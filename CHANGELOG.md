@@ -9,6 +9,7 @@ Internal changes are omitted unless they affect users.
 ### Added
 
 - Gallery Stack Cover cards in Recent, Albums, Calendar, and Favorites can open all selected Stack assets in Anshitsu. Initial selection prefers every unexported Non-RAW asset and falls back to every unexported RAW asset; format badges toggle all eligible assets of that format, and the Stack context menu supports individual Anshitsu selection and per-asset Export Queue changes. Manual selections are shared across Gallery tabs for the browser session, and exported or inconsistent Stack candidates are handled safely.
+- Home silently repairs a missing GenzoRoom tag on eligible non-Cover assets in Immich Stacks as well as their representative assets.
 - Stack context-menu Queue actions handle unavailable edit-state and Queue information safely, preserve canonical Queue state, and keep the menu positioned and keyboard focus usable as its contents change.
 - Home Stack cards show the unique image formats in each Stack, with the Cover format first, alongside the member count. Home and Export cards preserve filename endings through shared middle-ellipsis display. Home marks GenzoRoom-tagged exports with a 「現」 badge and silently restores a missing tag on verified GenzoRoom JPEGs during browsing.
 - The shared thumbnail-size controller supports Numpad `-` / `+` on Gallery/Home, Export management, and STACK management. Shortcut hints appear in its button tooltips when shortcut explanations are enabled.
