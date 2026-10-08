@@ -5,8 +5,10 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import i18n from './i18n';
+import type { ExportQueueItem } from './exportQueueApi';
+const queueApi = vi.hoisted(() => ({ list: vi.fn(async () => [] as ExportQueueItem[]) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
-  listExportQueue: async () => [] }));
+  listExportQueue: queueApi.list }));
 import { homeScrollContent, readHomeReturn, type HomeReturnContext } from './homeReturn';
 import { activateWorkspaceAsset } from './photoSelection';
 import type { AssetDetail } from './assets';
@@ -15,12 +17,12 @@ import { EditStateApiError } from './editStateApi';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), albumAssets: vi.fn(),
-  heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn() }));
+  heatmap: vi.fn(), minYear: vi.fn(), day: vi.fn(), detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn(), refreshStacks: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets,
   fetchFavoriteAssets: api.favorites,
   fetchCalendarHeatmap: api.heatmap, fetchCalendarMinYear: api.minYear,
-  fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail }));
+  fetchCalendarDayAssets: api.day, fetchAssetDetail: api.detail, refreshSelectedImmichStacks: api.refreshStacks }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
   getAssetEditState: api.get, putAssetEditState: api.put, getAssetEditStatuses: api.statuses }));
 vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel" /> }));
@@ -109,6 +111,8 @@ beforeEach(async () => {
   api.put.mockReset().mockImplementation(async (_id, state, revision, saveId) => ({
     state, revision: revision + 1, updatedAt: '2026-09-01T00:00:00Z', lastSaveId: saveId }));
   api.statuses.mockReset().mockResolvedValue({});
+  api.refreshStacks.mockReset().mockResolvedValue([]);
+  queueApi.list.mockReset().mockResolvedValue([]);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
@@ -118,6 +122,44 @@ afterEach(() => { act(() => root.unmount()); host.remove();
   vi.unstubAllGlobals(); });
 
 describe('Home return context', () => {
+  it('refreshes the Home Queue only when returning from Anshitsu and applies the latest snapshot', async () => {
+    const queued: ExportQueueItem = { assetId: photo.id, status: 'queued',
+      queuedAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' };
+    queueApi.list.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([queued]);
+    api.statuses.mockResolvedValue({ [photo.id]: true });
+    rememberWorkspaceSession({ selectedAssets: [photo], activeAssetId: photo.id });
+    await mount(); await settle();
+    expect(queueApi.list).toHaveBeenCalledTimes(1);
+
+    await click('#home-albums-tab');
+    expect(queueApi.list).toHaveBeenCalledTimes(1);
+    await click('#home-recent-tab');
+    await click('.home-open-workspace'); await settle();
+    expect(queueApi.list).toHaveBeenCalledTimes(2);
+    await click('.workspace-actions button'); await settle();
+
+    expect(queueApi.list).toHaveBeenCalledTimes(3);
+    expect(host.querySelector('.photo-card .edited-badge.queue-queued')).not.toBeNull();
+    await click('#home-export-tab');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+    expect(queueApi.list).toHaveBeenCalledTimes(3);
+    expect(host.querySelectorAll('.export-queue-card')).toHaveLength(1);
+  });
+
+  it('removes a dequeued item from the Home badge after returning from Anshitsu', async () => {
+    const queued: ExportQueueItem = { assetId: photo.id, status: 'queued',
+      queuedAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' };
+    queueApi.list.mockResolvedValueOnce([queued]).mockResolvedValueOnce([queued]).mockResolvedValueOnce([]);
+    api.statuses.mockResolvedValue({ [photo.id]: true });
+    rememberWorkspaceSession({ selectedAssets: [photo], activeAssetId: photo.id });
+    await mount(); await settle();
+    expect(host.querySelector('.photo-card .edited-badge.queue-queued')).not.toBeNull();
+    await click('.home-open-workspace'); await settle();
+    await click('.workspace-actions button'); await settle();
+    expect(queueApi.list).toHaveBeenCalledTimes(3);
+    expect(host.querySelector('.photo-card .edited-badge.queue-inactive')).not.toBeNull();
+  });
+
   it.each(['shortcut', 'button'])('preserves pending Favorites restoration when resuming Anshitsu via %s', async method => {
     let resolve!: (assets: AssetDetail[]) => void;
     api.favorites.mockReturnValueOnce(new Promise<AssetDetail[]>(yes => { resolve = yes; }));

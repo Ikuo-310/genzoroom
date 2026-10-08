@@ -18,7 +18,7 @@ export type ExportQueueState = {
   canonical: boolean;
   loading: boolean;
   error: ExportQueueApiError | unknown | null;
-  refresh: () => Promise<void>;
+  refresh: (requireCanonical?: boolean) => Promise<void>;
   enqueue: (assetIds: readonly string[]) => Promise<void>;
   dequeue: (assetId: string) => Promise<void>;
   retry: (assetIds: readonly string[]) => Promise<void>;
@@ -79,6 +79,11 @@ export function useExportQueue(): ExportQueueState {
     const snapshotAtStart = snapshotGeneration.current;
     const mutationsAtStart = mutationStartGeneration.current;
     if (mounted.current) {
+      if (requireCanonical) {
+        // Strict reconciliation must not let the previous snapshot authorize another mutation.
+        canonicalRef.current = false;
+        setCanonical(false);
+      }
       setLoading(true);
       setError(null);
     }

@@ -172,6 +172,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
   const queueRecoveryView = useRef(viewKey);
+  const wasActive = useRef(active);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
   useLayoutEffect(() => {
@@ -184,11 +185,20 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     setShowExport(false);
   }, [active]);
   useEffect(() => {
+    if (active && !wasActive.current) {
+      queueRecoveryView.current = viewKey;
+      return;
+    }
     if (queueRecoveryView.current === viewKey) return;
     queueRecoveryView.current = viewKey;
     // A failed uncertainty refresh can recover on the next ordinary Gallery view transition.
     if (exportQueue.loaded && !exportQueue.canonical && !exportQueue.loading) void exportQueue.refresh();
-  }, [viewKey, exportQueue.loaded, exportQueue.canonical, exportQueue.loading, exportQueue.refresh]);
+  }, [active, viewKey, exportQueue.loaded, exportQueue.canonical, exportQueue.loading, exportQueue.refresh]);
+  useEffect(() => {
+    const returnedFromWorkspace = active && !wasActive.current;
+    wasActive.current = active;
+    if (returnedFromWorkspace) void exportQueue.refresh(true).catch(() => {});
+  }, [active, exportQueue.refresh]);
 
   useLayoutEffect(() => {
     const pending = pendingScroll.current;

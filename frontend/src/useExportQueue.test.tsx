@@ -111,7 +111,34 @@ describe('useExportQueue', () => {
     await act(async () => current.refresh());
     expect(current.items).toEqual([item(A)]);
     expect(current.loaded).toBe(true);
+    expect(current.canonical).toBe(true);
     expect(current.error).toBe(failure);
+  });
+
+  it('does not allow stale Queue state to be mutated while a refresh is pending', async () => {
+    api.list.mockResolvedValue([item(A)]);
+    await render();
+    const pending = deferred<ExportQueueItem[]>(); api.list.mockReturnValueOnce(pending.promise);
+    let refresh!: Promise<void>;
+    act(() => { refresh = current.refresh(true); });
+    expect(current.items).toEqual([item(A)]);
+    expect(current.canonical).toBe(false);
+    await expect(current.dequeue(A)).rejects.toBeInstanceOf(ExportQueueMutationBusyError);
+    expect(api.dequeue).not.toHaveBeenCalled();
+    await act(async () => pending.resolve([item(A, 'waiting')]));
+    await act(async () => refresh);
+    expect(current.canonical).toBe(true);
+    expect(current.getStatus(A)).toBe('waiting');
+  });
+
+  it('keeps stale Queue state non-canonical when a required refresh fails', async () => {
+    api.list.mockResolvedValueOnce([item(A)]).mockRejectedValueOnce(new ExportQueueApiError('network'));
+    await render();
+    await act(async () => current.refresh(true).catch(() => {}));
+    expect(current.items).toEqual([item(A)]);
+    expect(current.canonical).toBe(false);
+    await expect(current.dequeue(A)).rejects.toBeInstanceOf(ExportQueueMutationBusyError);
+    expect(api.dequeue).not.toHaveBeenCalled();
   });
 
   it('aborts initial load on unmount', async () => {
