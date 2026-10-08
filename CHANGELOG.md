@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Home's tab bar now includes STACK management between the four browsing tabs and Export management. STACK candidates and unmatched photos appear in independently scrolling upper and lower frames; drag the separator to adjust the initial 2:1 split from 1:1 to 4:1. The lower frame accepts Stack-member removal drops, and Stack filenames use Gallery's middle-ellipsis display.
+- STACK editing drafts and Undo remain available when switching Home tabs or visiting Anshitsu during the same SPA session. `S` opens the STACK tab with or without a Gallery selection; no selection resumes the previous session or shows an empty first session.
 - Gallery Stack Cover cards in Recent, Albums, Calendar, and Favorites can open all selected Stack assets in Anshitsu. Initial selection prefers every unexported Non-RAW asset and falls back to every unexported RAW asset; format badges toggle all eligible assets of that format, and the Stack context menu supports individual Anshitsu selection and per-asset Export Queue changes. Manual selections are shared across Gallery tabs for the browser session, and exported or inconsistent Stack candidates are handled safely.
 - Home silently repairs a missing GenzoRoom tag on eligible non-Cover assets in Immich Stacks as well as their representative assets.
 - Stack context-menu Queue actions handle unavailable edit-state and Queue information safely, preserve canonical Queue state, and keep the menu positioned and keyboard focus usable as its contents change.
@@ -30,7 +32,7 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 - Home marks a photo as edited only when its current Recipe is non-default. Retained History has a separate indicator in the Anshitsu Filmstrip.
 - Added the backend JPEG processing foundation with Recipe v18 compatibility, full-resolution sRGB output, and quality 95 / 4:4:4 encoding. Artifact preparation now assigns family-based `GenzoNN` filenames, preserves supported capture/GPS/user metadata, and regenerates output dimensions, orientation, timestamps and GenzoRoom identification while excluding private camera and auxiliary source metadata. Production Export execution and Immich upload/registration remain unavailable; the Export to Immich action remains disabled.
 - Added Structured Logs to Developer Diagnostics, with separate Frontend and Backend level controls, combined or source-specific views, clear, refresh, and JSON export.
-- Added an Immich STACK management workspace for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit, and the empty unmatched drop target is larger for easier Purge. Confirmed drafts can be written back to Immich.
+- Added Immich STACK management for detecting RAW / JPEG candidates, editing existing and manual Stacks, choosing Covers, adding or purging members, and moving photos with desktop Drag & Drop. Dropping one unmatched photo onto another creates a manual Stack; `Primary+Z` undoes one local draft edit. Confirmed drafts can be written back to Immich.
 
 - Added an opt-in Developer Diagnostics page with WebGPU capability and synthetic smoke diagnostics, Real JPEG CPU/GPU/Histogram measurements, and Full, JPEG-only, and WebGPU-only JSON reports.
 
@@ -40,7 +42,7 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 - Shift+click to start selection with one photo, then extend an anchored range; Select All adds visible photos while preserving hidden selections and selection order.
 - Independent per-tab RAW / Non-RAW and edited / unedited photo filters, adjustable Home thumbnail sizing, and ordered multi-photo selection with Shift+click ranges.
 - Home browsing-state and per-view scroll restoration when switching tabs and returning from Anshitsu or STACK management.
-- Keyboard navigation: Home `D` opens the current selection or resumes the last Anshitsu workspace in the same SPA session; unmodified `G` returns from Anshitsu or STACK management to Gallery/Home; Anshitsu `F` toggles Viewer-only focus mode, and `Shift+Z` (⇧+Z on macOS) switches between Fit and the previous zoom/pan. Filmstrip photos move with the platform's Primary+Shift+←/→ (Ctrl+Shift on Windows/Linux, ⌘+⇧ on macOS); relevant shortcuts remain available while focus mode hides their controls. Shortcut explanations appear in applicable Tooltips and Menus, with a Settings option to hide those explanations while keeping the shortcuts active. Platform labels use Ctrl / Alt / Shift on Windows/Linux and ⌘ / ⌥ / ⇧ on macOS.
+- Keyboard navigation: Home `D` opens the current selection or resumes the last Anshitsu workspace in the same SPA session; unmodified `G` returns from Anshitsu to Gallery/Home. STACK management is a Home tab and is not exited with `G`; `D` and its button are unavailable while that tab is active. Anshitsu `F` toggles Viewer-only focus mode, and `Shift+Z` (⇧+Z on macOS) switches between Fit and the previous zoom/pan. Filmstrip photos move with the platform's Primary+Shift+←/→ (Ctrl+Shift on Windows/Linux, ⌘+⇧ on macOS); relevant shortcuts remain available while focus mode hides their controls. Shortcut explanations appear in applicable Tooltips and Menus, with a Settings option to hide those explanations while keeping the shortcuts active. Platform labels use Ctrl / Alt / Shift on Windows/Linux and ⌘ / ⌥ / ⇧ on macOS.
 - A shared Settings dialog from Home and Anshitsu for browser-saved display language, independent date and time locale, calendar week start, WebGPU preference, initial Preview / Original choice, and keyboard-shortcut explanation visibility. Auto language follows browser preference with English fallback; Auto image choice prefers the JPEG original when WebGPU is enabled and available, switching from Preview when the original finishes loading unless the user has chosen a source manually. Settings also displays Immich server version and available build information.
 - Optional WebGPU image processing for JPEG previews and originals in Anshitsu, with a remembered GPU ON/OFF preference and automatic CPU fallback when GPU processing is unavailable or fails.
 - Anshitsu can acquire the selected JPEG original through the backend and switch between Preview and Original. Home and Filmstrip retain thumbnail browsing; both viewer sources share the current edits, and Original Info reports embedded profile details.
@@ -91,9 +93,10 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 
 ### Changed
 
+- The STACK management send button now uses the Export Immich action color. STACK candidate and unmatched photo cards use Gallery's shared middle-ellipsis filename display.
 - Refreshed Home to a neutral dark four-region desktop layout, sharing the basic theme with STACK management while retaining green status colors and Developer Diagnostics' console theme.
 - Integrated photo selection and Album / Calendar view controls into the Home Toolbar; compact English action labels and optional shortcut suffixes keep the controls concise.
-- Changed Gallery return from `H` to unmodified `G` across Anshitsu and STACK management.
+- Changed Gallery return from `H` to unmodified `G` in Anshitsu. STACK management now returns to Gallery through Home tab navigation.
 - Home shortcut hints use compact `[X]` suffixes when enabled in Settings; hiding hints leaves the shortcuts active.
 - ArrowLeft / ArrowRight move backward / forward through Calendar months, years, and photo days. Home tabs no longer switch with ArrowLeft / ArrowRight / Home / End; click and the existing direct tab commands remain available.
 
@@ -118,6 +121,7 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 
 ### Fixed
 
+- Fixed outer-page scrolling in Chrome by containing STACK accessibility labels within their frame, and added scrollbar clearance so Firefox's overlay scrollbar does not crowd the last card. Empty unmatched frames now shrink with their Grid track instead of clipping their contents.
 - Fixed Export registration rejecting healthy source/output Stack ownership because unrelated Immich Stacks were malformed or ambiguous; unsafe ownership of the export targets still fails safely.
 
 - Unified Calendar date-detail boundaries with the month view's Immich Timeline local-day rule, fixing photos with timezone offsets that cross UTC midnight appearing in the previous day's detail.

@@ -347,7 +347,7 @@ draft編集はCover変更、unmatchedからのAdd、Purge、新規MANUAL Stack�
 
 STACK管理のUndoは直前のlocal draft構成変更を一度だけ戻す。Primary+Zのみで、RedoとUndoボタンは提供しない。snapshotはgroups／unmatched／manualCounter相当のdraft構造に限り、sourceやImmich送信結果は戻さない。source initialize／navigation generation／send開始／write result／resetで破棄し、Undo後は現sourceに対してmodifiedとImmich lineageを再計算する。no-op操作は有効なsnapshotを保持する。draft永続化は未実装。
 
-unmatchedが0件のときのSTACK候補外sectionは`min-height: 200px`とし、Stack memberのPurge用drop面積を広げた。候補外assetがある場合は既存gridの自然な高さを使い、drop highlightはsection全体に表示する。
+当初、unmatchedが0件のときのSTACK候補外sectionに`min-height: 200px`を設定していた。これは後続の上下分割UIでGrid行の縮小を妨げるため、2026-10-09のSTACK-UI-01修正で削除した。現在は空状態もGrid行の高さに収まり、既存のsection全体drop handlerを維持する。
 
 利用者の実機確認報告では、1-step Undo、unmatched同士のdropによるMANUAL Stack作成、Stack memberからunmatchedへのPurgeを含むD&D全体の挙動が想定どおり動作した。ブラウザー名や環境など、この報告に含まれない条件は確認済みとして記載しない。
 
@@ -963,3 +963,17 @@ Phase 1・2の整理ロジックと一時的な整理Undoを使い、Historyヘ�
 全削除と編集初期化は日本語・英語のネイティブmodal dialogで確認する。Noを初期フォーカスとし、Tab／Shift+Tab、Enter、Y／N、Escapeに対応する。IME・AltGraph・修飾キー・リピート・処理済みのY／Nイベントを抑止し、背景のUndo／RedoとCopy／Pasteを遮断する。Yes時に写真IDと編集可否を再確認し、閉じた後は呼び出し元が再有効化されてからフォーカスを戻す。
 
 メニューはviewport内に収める固定配置のportalとし、外側クリック・Escape・Tab・写真切替で閉じる。圧縮失敗は簡潔なalertで伝える。保存経路、圧縮アルゴリズム、各version、SQLite schemaは変更していない。ブラウザの手動確認はユーザー側のNAS／Firefoxで実施する。
+
+## 18. STACK管理のHomeタブ統合と上下フレームUI（2026-10-09・現行仕様）
+
+HomeのナビゲーションをRecent／Albums／Calendar／Favorites／STACK管理／出力管理の6タブに整理した。最初の4つと管理2タブの間には視覚的な間隔を設け、「暗室へ」はタブ列右側の独立した画面遷移ボタンとした。暗室はHomeへマウントせず別routeで表示する。STACK管理タブが選択されている間は暗室ボタンをdisabledにし、`D`の遷移も実行しない。Galleryの`D`は選択写真で暗室へ入り、選択なしなら既存セッションへ戻る。`S`は選択有無にかかわらずSTACK管理タブを開き、既存のHome共通ガードを通る。ショートカット説明の表示設定をOFFにしても動作は変わらない。
+
+STACK編集セッションはHomeがメモリで所有する。Galleryの選択はSTACKタブへ入るときだけ比較し、Asset ID集合が空または前回と同一（順序違いを含む）ならdraft、Undo、STACK内の選択を保持する。初回の未選択では空状態を表示し、異なる非空集合では確認なしで新しいsession generationを開始する。新sessionは以前の未送信変更やUndoを含む一時状態を破棄し、既存の選択STACK解決・候補検出を実行する。Gallery上で選択を変えただけではdraftを更新しない。タブ切り替えと暗室往復ではHomeを維持し、STACK editorも保持する。古い取得・候補検出・送信結果はgenerationとabort制御で新sessionへ反映しない。Galleryの表示タブ、選択、filter、スクロール、および暗室復帰後の補正状態・Export Queue再取得も既存のHome所有状態として同期する。
+
+STACK管理の表示を常時表示の上下2フレームに分けた。上がSTACK候補、下がSTACK候補外で、初期比率は2:1。ポインターキャプチャを使うseparatorで上側50〜80%（1:1〜4:1）へ調整でき、比率はHome側のメモリに置くため、タブ移動・暗室往復・同じSPA内のsession切替では保持し、reloadで2:1へ戻る。各frameは独立スクロールで、下部frame全体をStack memberのPurge drop先にした。候補外写真カード上ではカード固有dropを優先し、unmatched同士のStack作成、候補groupへのdropなど既存操作を保つ。
+
+レイアウト調整では、STACKカードのグループ操作ボタンが共通button selectorの詳細度に負けて縮小された回帰を確認し、`.stack-management-page button:where(:not(.immich-action-button))`で一般ボタンの調整を限定して既存のアイコン寸法を戻した。Gallery基準の左右余白を設定し、Firefoxのoverlay scrollbarで右端カードに重なって見えないようframe内の右paddingとFirefox向けscrollbar設定を調整した。ChromeではSTACK内の`.visually-hidden`がbody基準の絶対配置となってdocument scroll範囲を拡大していたため、適切なframeを配置基準として外側スクロールを解消した。空の候補外frameに残っていた`min-height: 200px`はGrid行の縮小を妨げるため、最終限定監査後に削除した。写真カードとグループ自身の枠・ボタン表示、D&D領域は維持した。
+
+StackPhotoにもGallery／Exportと同じ`FilenameDisplay`を適用し、長いファイル名は中央を省略しながら末尾と拡張子を保つ。短い名前はそのまま表示する。「Immichへ送信」は出力管理のImmich actionと共通の赤色classを使う。
+
+監査と実機確認は別々に記録する。上下フレームUIの最終限定監査時点では**High 0 / Medium 0 / Low 1**だった。唯一のLowは空の下フレームの200px最小高さであり、直後にCSSから削除し、空・通常状態の関連テスト2件と`git diff --check`を通した。Firefox・Chromeで発生していた外側スクロールとスクロールバーの重なりは、利用者によるNAS実機確認で解消が確認された。コード上の関連Frontendテスト、TypeScript check、buildも実装段階で成功している。文書更新作業ではブラウザーやNASを操作していない。
