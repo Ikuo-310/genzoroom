@@ -41,6 +41,11 @@ def asset(state=False, filename="IMG-Genzo01.jpg", asset_id=ASSET):
         thumbnail_url="", format="JPEG", is_raw=False, isGenzoRoomExport=state)
 
 
+def stack_asset(cover, *members):
+    cover.stackMembers = list(members)
+    return cover
+
+
 @pytest.mark.parametrize("filename,expected", [
     ("IMG-Genzo01.jpg", True), ("IMG-Genzo123.jpg", True), ("IMG-Genzo00.jpg", False),
     ("IMG-Genzo1.jpg", False), ("IMG-Genzo" + "9" * 5000 + ".jpg", True),
@@ -261,6 +266,95 @@ def test_repair_requires_all_three_conditions(monkeypatch, state, filename, soft
     asyncio.run(run())
     assert len(read_calls) == reads and len(write_calls) == writes
     assert original.closed is bool(reads)
+
+
+def test_repair_scans_members_using_each_assets_own_tag_state(monkeypatch):
+    cover_id, child_id, second_child_id = UUID(int=73), UUID(int=74), UUID(int=75)
+    cover = asset(True, asset_id=cover_id)
+    child = asset(False, asset_id=child_id)
+    second_child = asset(False, "Other-Genzo02.jpg", second_child_id)
+    unknown = asset(None, asset_id=UUID(int=76))
+    reads, writes = [], []
+    mock_original(monkeypatch, [Original(jpeg("GenzoRoom")), Original(jpeg("GenzoRoom"))], reads)
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+
+    async def run():
+        await service.submit([stack_asset(cover, child, second_child, unknown)])
+        await service._task
+        await service.close()
+
+    asyncio.run(run())
+    assert reads == [child_id, second_child_id]
+    assert len(writes) == 4
+
+
+def test_repair_scans_cover_independently_when_member_is_tagged(monkeypatch):
+    child_id = UUID(int=73)
+    cover = asset(False)
+    tagged_child = asset(True, asset_id=child_id)
+    reads, writes = [], []
+    mock_original(monkeypatch, [Original(jpeg("GenzoRoom"))], reads)
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+
+    async def run():
+        await service.submit([stack_asset(cover, tagged_child)])
+        await service._task
+        await service.close()
+
+    asyncio.run(run())
+    assert reads == [ASSET]
+    assert len(writes) == 2
+
+
+def test_repair_deduplicates_representative_and_members(monkeypatch):
+    duplicate = asset(False)
+    reads, writes = [], []
+    mock_original(monkeypatch, [Original(jpeg("GenzoRoom"))], reads)
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+
+    async def run():
+        await service.submit([stack_asset(duplicate, asset(False), asset(False, asset_id=ASSET)),
+            asset(True, asset_id=UUID(int=74)), asset(True, asset_id=UUID(int=75))])
+        await service._task
+        await service.close()
+
+    asyncio.run(run())
+    assert reads == [ASSET]
+    assert len(writes) == 2
+
+
+def test_member_marker_failure_does_not_assign_tag(monkeypatch):
+    child_id = UUID(int=73)
+    reads, writes = [], []
+    mock_original(monkeypatch, [Original(jpeg("Other"))], reads)
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+
+    async def run():
+        await service.submit([stack_asset(asset(True), asset(False, asset_id=child_id))])
+        await service._task
+        await service.close()
+
+    asyncio.run(run())
+    assert reads == [child_id]
+    assert writes == []
+
+
+@pytest.mark.parametrize("members", [None, []])
+def test_missing_or_empty_stack_members_are_normal(monkeypatch, members):
+    reads, writes = [], []
+    mock_original(monkeypatch, [Original(jpeg("GenzoRoom"))], reads)
+    cover = asset(False)
+    cover.stackMembers = members
+    service = GenzoRoomTagRepair("http://immich/api", "key", transport=write_transport(writes))
+
+    async def run():
+        await service.submit([cover])
+        await service._task
+        await service.close()
+
+    asyncio.run(run())
+    assert reads == [ASSET]
+    assert len(writes) == 2
 
 
 @pytest.mark.parametrize("failure", ["fetch", "partial", "corrupt", "length", "size", "write"])

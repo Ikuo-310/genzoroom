@@ -39,16 +39,26 @@ class GenzoRoomTagRepair:
         if self._closed:
             return
         try:
+            seen_ids = set()
+            capacity_reached = False
             for asset in assets:
-                if asset.isGenzoRoomExport is not False or not is_genzoroom_export_filename(asset.filename):
-                    continue
-                if asset.id in self._in_flight or asset.id in self._negative:
-                    continue
-                if len(self._in_flight) >= MAX_PENDING_REPAIRS:
-                    _log("tagRepair.capacityReached", pendingCount=len(self._in_flight))
+                # Home lists Covers only, so inspect their ordered members without inheriting Cover tag state.
+                for candidate in (asset, *(asset.stackMembers or [])):
+                    if candidate.id in seen_ids:
+                        continue
+                    seen_ids.add(candidate.id)
+                    if candidate.isGenzoRoomExport is not False or not is_genzoroom_export_filename(candidate.filename):
+                        continue
+                    if candidate.id in self._in_flight or candidate.id in self._negative:
+                        continue
+                    if len(self._in_flight) >= MAX_PENDING_REPAIRS:
+                        _log("tagRepair.capacityReached", pendingCount=len(self._in_flight))
+                        capacity_reached = True
+                        break
+                    self._pending.append(candidate.id)
+                    self._in_flight.add(candidate.id)
+                if capacity_reached:
                     break
-                self._pending.append(asset.id)
-                self._in_flight.add(asset.id)
             if self._pending and (self._task is None or self._task.done()):
                 self._task = asyncio.create_task(self._drain())
         except Exception:
