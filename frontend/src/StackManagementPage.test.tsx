@@ -54,11 +54,12 @@ it('passes ordered concrete favorites with RAW via S and returns to the same Hom
   await click('#home-favorites-tab'); expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
 });
 it('guards S and opens concrete RAW through the button', async () => {
-  await mount(); await press('s'); expect(host.querySelector('.stack-management-page')).toBeNull(); await click('.photo-card input');
+  await mount(); await press('s'); expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+  await click('#home-recent-tab'); await click('.photo-card input');
   for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { repeat: true }]) await press('s', options);
   const input = document.createElement('input'); host.append(input); await press('s', {}, input); input.remove();
   const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); host.append(menu); await press('s'); menu.remove();
-  expect(host.querySelector('.stack-management-page')).toBeNull(); await click('#home-stacks-tab'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('false'); await click('#home-stacks-tab'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
 });
 it('renders compact header, isolated scroll sections and enables sending completed candidates', async () => {
   await mount('/stack', { selectedAssets: photos });
@@ -1333,3 +1334,35 @@ it('gives A and Escape to the visible Stack editor without changing Gallery sele
   await press('Escape'); await click('#home-recent-tab');
   expect(host.querySelectorAll('.photo-selection-input:checked')).toHaveLength(3);
 });
+
+for (const navigation of ['shortcut', 'tab'] as const) {
+  it(`${navigation} enters an empty first Stack session without a Gallery selection`, async () => {
+    await mount();
+    if (navigation === 'shortcut') await press('s'); else await click('#home-stacks-tab');
+    expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelectorAll('.stack-photo')).toHaveLength(0);
+  });
+
+  it(`${navigation} resumes the same Stack session when Gallery selection is cleared`, async () => {
+    await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input');
+    if (navigation === 'shortcut') await press('s'); else await click('#home-stacks-tab');
+    const editor = host.querySelector('.stack-management-page');
+    await click('[aria-label="Set selected.dng as COVER"]');
+    await click('#home-recent-tab'); await click('.selection-clear');
+    if (navigation === 'shortcut') await press('s'); else await click('#home-stacks-tab');
+    expect(host.querySelector('.stack-management-page')).toBe(editor);
+    expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  });
+
+  it(`${navigation} starts a fresh Stack session when Gallery selection IDs change`, async () => {
+    await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input');
+    if (navigation === 'shortcut') await press('s'); else await click('#home-stacks-tab');
+    const editor = host.querySelector('.stack-management-page');
+    await click('[aria-label="Set selected.dng as COVER"]');
+    await click('#home-recent-tab'); await click('.selection-clear'); await click('.photo-card:first-child input');
+    if (navigation === 'shortcut') await press('s'); else await click('#home-stacks-tab');
+    expect(host.querySelector('.stack-management-page')).not.toBe(editor);
+    expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+    expect(host.querySelectorAll('.stack-unmatched-grid .stack-photo')).toHaveLength(1);
+  });
+}

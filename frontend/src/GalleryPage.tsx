@@ -456,7 +456,7 @@ export function GalleryPage() {
         }
       }
       if (matchesShortcut(event, 'homeOpenStackManager')) {
-        if (!showStacksRef.current && selectionMode && selectedAssetsCountRef.current > 0) {
+        if (!showStacksRef.current) {
           event.preventDefault();
           openStacksRef.current();
         }
