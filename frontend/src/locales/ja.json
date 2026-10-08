@@ -29,6 +29,7 @@
     "notConfiguredStatus": "Immich未設定"
   },
   "home": {
+    "stacksTab": "STACK管理",
     "exportTab": "出力管理",
     "sections": "Homeの表示",
     "recentTab": "最近の写真",

@@ -20,8 +20,8 @@ describe('PhotoSelectionBar', () => {
   });
 
   it('keeps zero-count controls visible and the workspace action enabled', () => {
-    const inactive = renderToStaticMarkup(<PhotoSelectionBar count={0} onClear={vi.fn()} onOpen={vi.fn()} />);
-    const active = renderToStaticMarkup(<PhotoSelectionBar count={1} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const inactive = renderToStaticMarkup(<PhotoSelectionBar count={0} onClear={vi.fn()} onOpen={vi.fn()} onOpenStacks={vi.fn()} />);
+    const active = renderToStaticMarkup(<PhotoSelectionBar count={1} onClear={vi.fn()} onOpen={vi.fn()} onOpenStacks={vi.fn()} />);
 
     expect(inactive).toContain('0 selected');
     expect(inactive).not.toContain('aria-hidden');
@@ -36,7 +36,7 @@ describe('PhotoSelectionBar', () => {
 
   it('shows natural Japanese actions', async () => {
     await i18n.changeLanguage('ja');
-    const markup = renderToStaticMarkup(<PhotoSelectionBar count={2} onClear={vi.fn()} onOpen={vi.fn()} />);
+    const markup = renderToStaticMarkup(<PhotoSelectionBar count={2} onClear={vi.fn()} onOpen={vi.fn()} onOpenStacks={vi.fn()} />);
     expect(markup).toContain('2枚選択中');
     expect(markup).toContain('選択解除');
     expect(markup).toContain('暗室へ');

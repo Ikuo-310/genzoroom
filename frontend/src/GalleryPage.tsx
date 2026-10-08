@@ -1,3 +1,4 @@
+import { StackManagementPage } from './StackManagementPage';
 import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
@@ -44,7 +45,7 @@ import {
 type Connection = 'checking' | 'connected' | 'error';
 type ImmichConnection = Connection | 'not-configured';
 type AssetState = 'loading' | 'ready' | 'error';
-type HomeNavigationTab = HomeTab | 'export';
+type HomeNavigationTab = HomeTab | 'export' | 'stacks';
 type PhotoView = {
   kind: 'recent' | 'favorites' | 'album' | 'calendar';
   assets: RecentAsset[];
@@ -93,6 +94,10 @@ export function GalleryPage() {
   const [activeTab, setActiveTab] = useState<HomeTab>(homeReturn?.tab ?? 'recent');
   // Management navigation preserves the browsing tab without entering photo filters or route state.
   const [showExport, setShowExport] = useState(false);
+  const [showStacks, setShowStacks] = useState(false);
+  const [stackSession, setStackSession] = useState<{ assets: RecentAsset[]; generation: number } | null>(null);
+  const showStacksRef = useRef(showStacks);
+  showStacksRef.current = showStacks;
   const exportManagement = useExportManagement(exportQueue, showExport);
   const exportManagementRef = useRef({ active: showExport, state: exportManagement });
   exportManagementRef.current = { active: showExport, state: exportManagement };
@@ -164,7 +169,7 @@ export function GalleryPage() {
   const editStatusSnapshot = useEditStatusesSnapshot(stackEditStatusIds(editStatusAssets));
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
-  const viewKey = showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+  const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
   const queueRecoveryView = useRef(viewKey);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
@@ -183,7 +188,7 @@ export function GalleryPage() {
       pendingScroll.current = null;
       return;
     }
-    const status = showExport ? 'ready' : photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);
+    const status = showStacks || showExport ? 'ready' : photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);
     if (pending.waitingForData || status === 'idle' || status === 'loading') return;
     // Card dimensions are established by CSS, so restoration can run after the data's DOM commit.
     restoreHomeScroll(pageRef.current, pending.position);
@@ -419,7 +424,7 @@ export function GalleryPage() {
         exportView.state.clear();
         return;
       }
-      if (shouldClearSelectionOnEscape(event, selectionMode)) {
+      if (!showStacksRef.current && shouldClearSelectionOnEscape(event, selectionMode)) {
         if (selectionMode) photoView?.selection.clear();
         return;
       }
@@ -451,19 +456,19 @@ export function GalleryPage() {
         }
       }
       if (matchesShortcut(event, 'homeOpenStackManager')) {
-        if (selectionMode && selectedAssetsCountRef.current > 0) {
+        if (!showStacksRef.current && selectionMode && selectedAssetsCountRef.current > 0) {
           event.preventDefault();
           openStacksRef.current();
         }
         return;
       }
-      if (matchesShortcut(event, 'homeSelectAll')) {
+      if (!showStacksRef.current && matchesShortcut(event, 'homeSelectAll')) {
         // Checkboxes and sliders allow S/D, but Primary+A must remain native for all inputs.
         if (event.target instanceof Element && event.target.closest('input')) return;
         if (selectAllVisibleRef.current()) event.preventDefault();
         return;
       }
-      if (matchesShortcut(event, 'exportQueueToggle')) {
+      if (!showStacksRef.current && matchesShortcut(event, 'exportQueueToggle')) {
         if (event.target instanceof Element && event.target.closest('input')) return;
         if (selectionMode && selectedAssetsCountRef.current > 0 && queueSelectedRef.current()) event.preventDefault();
         return;
@@ -471,6 +476,8 @@ export function GalleryPage() {
       for (const [id, tab] of [['homeRecent', 'recent'], ['homeAlbums', 'albums'],
         ['homeCalendar', 'calendar'], ['homeFavorites', 'favorites'], ['homeExport', 'export']] as const) {
         if (matchesShortcut(event, id)) {
+          // A belongs to Add while the Stack editor is active, as in its previous workspace.
+          if (showStacksRef.current && id === 'homeAlbums') return;
           event.preventDefault();
           homeTabClickRef.current(tab);
           return;
@@ -494,9 +501,18 @@ export function GalleryPage() {
   homeTabClickRef.current = handleTabClick;
 
   function openStacks() {
-    if (!selectedAssets.length) return;
-    // Stack management preserves concrete selections, including RAW and favorite members.
-    navigate('/stack', { state: { selectedAssets, homeReturn: captureHomeReturn() } });
+    if (showStacks) return;
+    // Compare only on entry: browsing changes must not mutate a retained editing session.
+    const nextAssets = [...new Map(selectedAssets.map(asset => [asset.id, asset])).values()];
+    const previousIds = new Set(stackSession?.assets.map(asset => asset.id));
+    if (!showExport && nextAssets.length && (!stackSession
+      || nextAssets.length !== previousIds.size || nextAssets.some(asset => !previousIds.has(asset.id)))) {
+      // Remounting invalidates loader generations and aborts the previous send wait.
+      setStackSession({ assets: nextAssets, generation: (stackSession?.generation ?? 0) + 1 });
+    } else if (!stackSession) setStackSession({ assets: [], generation: 0 });
+    prepareScrollTransition('stacks', false);
+    setShowExport(false);
+    setShowStacks(true);
   }
   openStacksRef.current = openStacks;
 
@@ -505,7 +521,7 @@ export function GalleryPage() {
   }
 
   function openHomeWorkspace(): boolean {
-    if (showExport || workspaceNavigating.current) return false;
+    if (workspaceNavigating.current) return false;
     if (activeSelectedAssetIds.length > 0) {
       if (!selectedAssets.length) return false;
       openSelectedAssets();
@@ -556,7 +572,9 @@ export function GalleryPage() {
   function captureHomeReturn(): HomeReturnContext {
     // Route exits must preserve the intended offset while the current view is still restoring.
     const pending = pendingScroll.current;
-    const position = pending?.key === viewKey ? pending.position : readScrollPosition();
+    const galleryKey = homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+    const position = showStacks ? scrollPositions.current.get(galleryKey) ?? readScrollPosition()
+      : pending?.key === viewKey ? pending.position : readScrollPosition();
     return { tab: activeTab, album: selectedAlbum, year: calendarYear, month: calendarMonth,
       date: selectedCalendarDate, calendarMode, ...position };
   }
@@ -674,7 +692,7 @@ export function GalleryPage() {
     return true;
   }
   function navigateCalendar(direction: 'previous' | 'next'): boolean {
-    if (showExport || activeTab !== 'calendar' || !calendarMinYearReady) return false;
+    if (showStacks || showExport || activeTab !== 'calendar' || !calendarMinYearReady) return false;
     if (selectedCalendarDate !== null) return moveCalendarDay(direction);
     const target = adjacentCalendarPeriod(calendarYear, calendarMonth, calendarMode, direction === 'previous' ? -1 : 1);
     if (target.year < calendarMinYear || target.year > currentYear) return false;
@@ -695,16 +713,19 @@ export function GalleryPage() {
   }
 
   function handleTabClick(tab: HomeNavigationTab) {
+    if (tab === 'stacks') { openStacks(); return; }
     if (tab === 'export') {
       prepareScrollTransition('export');
+      setShowStacks(false);
       setShowExport(true);
       return;
     }
-    if (showExport || tab !== activeTab) {
+    if (showStacks || showExport || tab !== activeTab) {
       // The retained browsing view does not refetch when returning from management to the same tab.
       prepareScrollTransition(homeViewKey(tab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode),
-        showExport && tab === activeTab ? false : undefined);
+        (showStacks || showExport) && tab === activeTab ? false : undefined);
       setShowExport(false);
+      setShowStacks(false);
       setActiveTab(tab);
       return;
     }
@@ -948,27 +969,31 @@ export function GalleryPage() {
         <div className="home-tabs" role="tablist" aria-label={t('home.sections')}>
           <div className="home-tabs-gallery">
             <button id="home-recent-tab" type="button" role="tab" aria-controls="home-recent-panel"
-              aria-selected={!showExport && activeTab === 'recent'} onClick={() => handleTabClick('recent')}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
+              aria-selected={!showStacks && !showExport && activeTab === 'recent'} onClick={() => handleTabClick('recent')}>{shortcut.inline(t('home.recentTab'), 'homeRecent')}</button>
             <button id="home-albums-tab" type="button" role="tab" aria-controls="home-albums-panel"
-              aria-selected={!showExport && activeTab === 'albums'} onClick={() => handleTabClick('albums')}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
+              aria-selected={!showStacks && !showExport && activeTab === 'albums'} onClick={() => handleTabClick('albums')}>{shortcut.inline(t('home.albumsTab'), 'homeAlbums')}</button>
             <button id="home-calendar-tab" type="button" role="tab" aria-controls="home-calendar-panel"
-              aria-selected={!showExport && activeTab === 'calendar'} onClick={() => handleTabClick('calendar')}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
+              aria-selected={!showStacks && !showExport && activeTab === 'calendar'} onClick={() => handleTabClick('calendar')}>{shortcut.inline(t('home.calendarTab'), 'homeCalendar')}</button>
             <button id="home-favorites-tab" type="button" role="tab" aria-controls="home-favorites-panel"
-              aria-selected={!showExport && activeTab === 'favorites'} onClick={() => handleTabClick('favorites')}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
+              aria-selected={!showStacks && !showExport && activeTab === 'favorites'} onClick={() => handleTabClick('favorites')}>{shortcut.inline(t('home.favoritesTab'), 'homeFavorites')}</button>
           </div>
           <div className="home-tabs-management">
+            <button id="home-stacks-tab" type="button" role="tab" aria-controls="home-stacks-panel"
+              aria-selected={showStacks} title={shortcut.title(t('home.stacksTab'), 'homeOpenStackManager')} onClick={openStacks}>{shortcut.inline(t('home.stacksTab'), 'homeOpenStackManager')}</button>
             <button id="home-export-tab" type="button" role="tab" aria-controls="home-export-panel"
               aria-selected={showExport} onClick={() => handleTabClick('export')}>{shortcut.inline(t('home.exportTab'), 'homeExport')}</button>
           </div>
+          <div><button type="button" className="home-open-workspace" onClick={openHomeWorkspace}
+            title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')}>{shortcut.inline(t(language === 'en' ? 'photos.openSelectedCompact' : 'photos.openSelected'), 'homeOpenSelected')}</button></div>
         </div>
         {showExport && <ExportRetryPriorityNotice management={exportManagement} />}
       </div>
-      {showExport ? <ExportManagementToolbar management={exportManagement} /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
+      {showStacks ? <div hidden /> : showExport ? <ExportManagementToolbar management={exportManagement} /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
           onSelectAll={selectAllVisible}
-          onClear={clearPhotoSelection} onOpen={openHomeWorkspace} onOpenStacks={openStacks} />
+          onClear={clearPhotoSelection} />
           {activeTab === 'albums' && selectedAlbum && <div className="home-toolbar-context">
               <button type="button" className="album-back" aria-label={t('albums.backToList')} title={t('albums.backToList')} onClick={closeAlbum}>←</button>
             </div>}
@@ -1023,7 +1048,7 @@ export function GalleryPage() {
           </div>}
         </div>
       </div>}
-      <section className="home-content" aria-label={t('home.sections')}>
+      <section hidden={showStacks} className="home-content" aria-label={t('home.sections')}>
         {showExport ? <ExportManagementContent management={exportManagement} /> : <>
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
@@ -1073,6 +1098,9 @@ export function GalleryPage() {
         </div>}
         </>}
       </section>
+      {stackSession && <div id="home-stacks-panel" className="home-stacks-panel" role="tabpanel" aria-labelledby="home-stacks-tab" hidden={!showStacks}>
+        <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={showStacks} />
+      </div>}
     </main>
   );
 }

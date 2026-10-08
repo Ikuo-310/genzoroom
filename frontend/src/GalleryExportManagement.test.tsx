@@ -109,7 +109,7 @@ describe('Home Export management', () => {
   it.each(['en', 'ja'])('keeps the common shell and accessible tab/panel with the minimal toolbar in %s', async language => {
     await i18n.changeLanguage(language); await mount();
     expect(host.querySelectorAll('.home-tabs-gallery [role="tab"]')).toHaveLength(4);
-    expect(host.querySelectorAll('.home-tabs-management [role="tab"]')).toHaveLength(1);
+    expect(host.querySelectorAll('.home-tabs-management [role="tab"]')).toHaveLength(2);
     await click('#home-export-tab');
     expect(host.querySelector('output')!.dataset.path).toBe('/');
     expect([...host.querySelector('.home-page')!.children].map(element => element.classList[0]))
@@ -133,13 +133,13 @@ describe('Home Export management', () => {
     expect(selectionButtons.map(button => button.textContent)).toEqual(language === 'ja'
       ? ['すべて選択', '選択解除', '出力待機[W]', 'Queueから外す[Q]'] : ['Select all', 'Clear selection', 'Ready for export[W]', 'Remove from Queue[Q]']);
     expect(selectionButtons.every(button => button.disabled)).toBe(true);
-    expect(selection.querySelector('.selection-open-stacks, .selection-open-workspace')).toBeNull();
+    expect(selection.querySelector('#home-stacks-tab, .home-open-workspace')).toBeNull();
     expect(toolbar.querySelector('.thumbnail-size-control')).not.toBeNull();
     const action = toolbar.querySelector<HTMLButtonElement>('.export-action-group .immich-action-button')!;
     expect(action.textContent).toBe(language === 'ja' ? 'Immichへ出力' : 'Export to Immich');
     expect(action.disabled).toBe(true);
     expect(toolbar.querySelectorAll('.export-action-group button')).toHaveLength(1);
-    expect(toolbar.querySelector('[aria-haspopup], [role="menu"], .selection-open-stacks, .selection-open-workspace')).toBeNull();
+    expect(toolbar.querySelector('[aria-haspopup], [role="menu"], #home-stacks-tab, .home-open-workspace')).toBeNull();
     await click('.thumbnail-size-icon:last-of-type');
     expect(host.querySelector('output')?.textContent).toBe('4');
   });
@@ -195,7 +195,7 @@ describe('Home Export management', () => {
     await click('.photo-card-button');
     rememberWorkspaceSession({ selectedAssets: photos, activeAssetId: photos[0].id });
     expect((await key('E')).defaultPrevented).toBe(true);
-    for (const value of ['s', 'd', 'q', 'p', 'Escape', 'ArrowLeft']) expect((await key(value)).defaultPrevented).toBe(false);
+    for (const value of ['q', 'p', 'Escape', 'ArrowLeft']) expect((await key(value)).defaultPrevented).toBe(false);
     expect((await key('a', { ctrlKey: true })).defaultPrevented).toBe(false);
     expect(host.querySelector('output')!.dataset.path).toBe('/');
     expect((await key('r')).defaultPrevented).toBe(true);

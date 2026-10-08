@@ -266,7 +266,7 @@ describe('album photo view', () => {
     click('.photo-card-button');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
     expect(host.querySelector('.navigation-probe')).toBeNull();
-    click('.selection-open-workspace');
+    click('.home-open-workspace');
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('album-0');
   });
 });

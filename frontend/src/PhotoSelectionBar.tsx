@@ -6,7 +6,7 @@ type PhotoSelectionBarProps = {
   canSelectAll?: boolean;
   onSelectAll?: () => void;
   onClear: () => void;
-  onOpen: () => void;
+  onOpen?: () => void;
   onOpenStacks?: () => void;
 };
 
@@ -20,11 +20,11 @@ export function PhotoSelectionBar({ count, canSelectAll = false, onSelectAll, on
       <button type="button" className="selection-all" disabled={!canSelectAll || !onSelectAll} onClick={onSelectAll}>{t('photos.selectAll')}</button>
       <button type="button" className="selection-clear" aria-label={t('photos.clearSelection')} title={t('photos.clearSelection')}
         disabled={count === 0} onClick={onClear}>{t(compactEnglish ? 'photos.clearSelectionCompact' : 'photos.clearSelection')}</button>
-      <button type="button" className="selection-open-stacks" aria-label={t('photos.openStacks')}
+      {onOpenStacks && <button type="button" className="selection-open-stacks" aria-label={t('photos.openStacks')}
         disabled={count === 0 || !onOpenStacks} title={shortcut.title(t('photos.openStacks'), 'homeOpenStackManager')}
-        onClick={onOpenStacks}>{shortcut.inline(t(compactEnglish ? 'photos.openStacksCompact' : 'photos.openStacks'), 'homeOpenStackManager')}</button>
-      <button type="button" className="selection-open-workspace" aria-label={t('photos.openSelected')}
-        title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')} onClick={onOpen}>{shortcut.inline(t(compactEnglish ? 'photos.openSelectedCompact' : 'photos.openSelected'), 'homeOpenSelected')}</button>
+        onClick={onOpenStacks}>{shortcut.inline(t(compactEnglish ? 'photos.openStacksCompact' : 'photos.openStacks'), 'homeOpenStackManager')}</button>}
+      {onOpen && <button type="button" className="selection-open-workspace" aria-label={t('photos.openSelected')}
+        title={shortcut.title(t('photos.openSelected'), 'homeOpenSelected')} onClick={onOpen}>{shortcut.inline(t(compactEnglish ? 'photos.openSelectedCompact' : 'photos.openSelected'), 'homeOpenSelected')}</button>}
     </div>
   </div>;
 }

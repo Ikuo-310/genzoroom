@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { StackManagementPage } from './StackManagementPage';
+import { SettingsProvider } from './SettingsDialog';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
 import { frontendLogger } from './frontendLogging';
@@ -18,7 +20,7 @@ const photos = [
 let host: HTMLDivElement, root: Root;
 let navigateTest: (path: string, state?: unknown) => void = () => {};
 function NavigationProbe() { const navigate = useNavigate(); navigateTest = (path, state) => navigate(path, { state }); return null; }
-async function mount(path = '/', state?: unknown) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><App /><NavigationProbe /></MemoryRouter>)); }
+async function mount(path = '/', state?: unknown) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><SettingsProvider><Routes><Route path="/stack" element={<StackManagementPage />} /><Route path="*" element={<App />} /></Routes></SettingsProvider><NavigationProbe /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLElement>(selector)!.click()); }
 async function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
   await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options })); });
@@ -49,14 +51,14 @@ it('preserves D and adds the Stack selection callback', async () => {
 it('passes ordered concrete favorites with RAW via S and returns to the same Home tab', async () => {
   await mount(); await click('#home-favorites-tab'); await click('.photo-card:last-child input'); await click('.photo-card:first-child input'); await press('S');
   expect(Array.from(host.querySelectorAll('.stack-filename')).map(e => e.textContent)).toEqual(['selected.jpg', 'selected.dng']);
-  await press('G'); expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
+  await click('#home-favorites-tab'); expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
 });
 it('guards S and opens concrete RAW through the button', async () => {
   await mount(); await press('s'); expect(host.querySelector('.stack-management-page')).toBeNull(); await click('.photo-card input');
   for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }, { repeat: true }]) await press('s', options);
   const input = document.createElement('input'); host.append(input); await press('s', {}, input); input.remove();
   const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); host.append(menu); await press('s'); menu.remove();
-  expect(host.querySelector('.stack-management-page')).toBeNull(); await click('button[title="Manage Stacks (S)"]'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  expect(host.querySelector('.stack-management-page')).toBeNull(); await click('#home-stacks-tab'); expect(host.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
 });
 it('renders compact header, isolated scroll sections and enables sending completed candidates', async () => {
   await mount('/stack', { selectedAssets: photos });
@@ -1246,4 +1248,88 @@ it('keeps semantic status indicators accessible and outside drag sources',async(
  for(const indicator of indicators)expect(indicator.closest('[draggable="true"]')).toBeNull();
  expect(host.querySelector('.stack-photo')?.getAttribute('draggable')).toBe('true');
  expect(host.querySelector('.stack-cover')?.getAttribute('aria-label')).toContain('COVER');
+});
+
+it('retains unsent edits and Undo for same IDs, reordered IDs and empty Gallery selection', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  const editor = host.querySelector('.stack-management-page');
+  await click('[aria-label="Set selected.dng as COVER"]');
+  expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  await click('#home-recent-tab');
+  expect(host.querySelectorAll('.photo-selection-input:checked')).toHaveLength(2);
+  await click('.selection-clear'); await click('.photo-card:last-child input'); await click('.photo-card:first-child input');
+  await click('#home-stacks-tab'); expect(host.querySelector('.stack-management-page')).toBe(editor);
+  expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+  await press('z', { ctrlKey: true }); expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.jpg');
+  await click('[aria-label="Set selected.dng as COVER"]');
+  await click('#home-recent-tab'); await click('.selection-clear'); await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-management-page')).toBe(editor); expect(host.querySelector('.stack-cover-badge')?.closest('.stack-photo-wrapper')?.querySelector('.stack-filename')?.textContent).toBe('selected.dng');
+});
+it('replaces all editing state only when entering with different Gallery IDs', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await press('s');
+  const editor = host.querySelector('.stack-management-page');
+  await click('[aria-label="Set selected.dng as COVER"]');
+  await click('#home-recent-tab'); await click('.photo-card:last-child input');
+  expect(host.querySelector('.stack-management-page')).toBe(editor);
+  await click('#home-stacks-tab'); expect(host.querySelector('.stack-management-page')).not.toBe(editor);
+  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-photo')).toHaveLength(1);
+  await press('z', { ctrlKey: true }); expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+});
+it('shows an empty first session and exposes localized navigation hints independently of the toolbar', async () => {
+  await mount(); await click('#home-stacks-tab');
+  expect(host.querySelectorAll('.stack-photo')).toHaveLength(0);
+  expect(host.querySelector('.stack-management-header')).toBeNull();
+  expect(host.querySelector('.home-toolbar .selection-open-stacks, .home-toolbar .selection-open-workspace')).toBeNull();
+  expect(host.querySelector('#home-stacks-tab')?.textContent).toBe('Stacks[S]');
+  expect(host.querySelector('.home-open-workspace')?.getAttribute('role')).toBeNull();
+  await act(async () => i18n.changeLanguage('ja'));
+  expect(host.querySelector('#home-stacks-tab')?.textContent).toBe('STACK管理[S]');
+  expect(host.querySelector('.home-open-workspace')?.textContent).toBe('暗室へ[D]');
+  await act(async () => updateSetting('showKeyboardShortcuts', false));
+  expect(host.querySelector('#home-stacks-tab')?.textContent).toBe('STACK管理');
+  expect(host.querySelector('.home-open-workspace')?.textContent).toBe('暗室へ');
+});
+it('ignores late candidate details from a replaced session', async () => {
+  let finish!: (detail: Awaited<ReturnType<typeof import('./api').fetchAssetDetail>>) => void;
+  let oldSignal!: AbortSignal;
+  api.detail.mockImplementationOnce((_id: string, signal: AbortSignal) => {
+    oldSignal = signal; return new Promise(resolve => { finish = resolve; });
+  });
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  await click('#home-recent-tab'); await click('.photo-card:first-child input'); await click('#home-stacks-tab');
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => finish({ ...photos[0], exif: {}, preview_url: '/preview' }));
+  expect(Array.from(host.querySelectorAll('.stack-filename')).map(element => element.textContent)).toEqual(['selected.jpg']);
+});
+
+it('keeps a send alive across tab changes and ignores it after entry starts a new session', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  let finish!: (response: Response) => void;
+  let signal!: AbortSignal;
+  const fetch = vi.fn((_url: string, init: RequestInit) => {
+    signal = init.signal as AbortSignal;
+    return new Promise<Response>(resolve => { finish = resolve; });
+  });
+  vi.stubGlobal('fetch', fetch);
+  await act(async () => button('Send to Immich').click()); await act(async () => button('Continue').click());
+  await click('#home-recent-tab'); expect(signal.aborted).toBe(false);
+  await click('#home-stacks-tab'); expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');
+  await click('#home-recent-tab'); await click('.photo-card:first-child input'); await click('#home-stacks-tab');
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish(new Response(JSON.stringify({ results: [{ operationId: 'draft:auto:selected', status: 'success', stackId: existingStackId }] }))));
+  expect(Array.from(host.querySelectorAll('.stack-filename')).map(element => element.textContent)).toEqual(['selected.jpg']);
+  expect(host.querySelector('.stack-send-status')).toBeNull(); expect(fetch).toHaveBeenCalledOnce();
+});
+it('gives A and Escape to the visible Stack editor without changing Gallery selection', async () => {
+  const singles = [{ ...photos[1], id: 'single', filename: 'single.jpg' }];
+  api.recent.mockResolvedValue([...photos, ...singles]);
+  api.detail.mockImplementation(async (id: string) => ({ ...[...photos, ...singles].find(asset => asset.id === id), exif: {}, preview_url: '/preview' }));
+  await mount(); await click('.selection-all'); await click('#home-stacks-tab');
+  await click('.stack-unmatched-grid .stack-photo');
+  await click('[aria-label="Add target"]'); await press('a');
+  expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+  expect(host.querySelectorAll('.stack-candidate-group .stack-photo')).toHaveLength(3);
+  await press('Escape'); await click('#home-recent-tab');
+  expect(host.querySelectorAll('.photo-selection-input:checked')).toHaveLength(3);
 });

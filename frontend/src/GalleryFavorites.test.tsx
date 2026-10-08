@@ -116,8 +116,8 @@ describe('Home favorites', () => {
     act(() => updateSetting('showKeyboardShortcuts', false));
     await pressHome('f');
     expect(host.querySelector('#home-favorites-tab')?.textContent).toBe('Favorites');
-    expect(host.querySelector('.selection-open-stacks')?.textContent).toBe('Stacks');
-    expect(host.querySelector('.selection-open-workspace')?.textContent).toBe('Develop');
+    expect(host.querySelector('#home-stacks-tab')?.textContent).toBe('Stacks');
+    expect(host.querySelector('.home-open-workspace')?.textContent).toBe('Develop');
     expect(host.querySelector('.selection-all')?.textContent).toBe('Select all');
     expect(host.querySelector('.selection-all')?.getAttribute('title')).toBeNull();
     await act(async () => i18n.changeLanguage('ja'));
@@ -138,7 +138,7 @@ describe('Home favorites', () => {
     expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(true);
     expect((await pressHome('A', { ctrlKey: true })).defaultPrevented).toBe(true);
     expect(host.querySelector('.selection-count')?.textContent).toBe('4 selected');
-    await click('.selection-open-workspace');
+    await click('.home-open-workspace');
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2', 'photo-3']);
   });
 
@@ -196,12 +196,12 @@ describe('Home favorites', () => {
     expect(host.querySelector('.home-toolbar .selection-bar')?.getAttribute('role')).toBe('group');
     expect(host.querySelector('.selection-count')?.tagName).toBe('STRONG');
     expect(host.querySelector('.selection-count')?.closest('button')).toBeNull();
-    expect(host.querySelectorAll('.selection-actions button')).toHaveLength(4);
+    expect(host.querySelectorAll('.selection-actions button')).toHaveLength(2);
     expect(host.querySelector('.home-content .selection-bar')).toBeNull();
-    expect(host.querySelector<HTMLButtonElement>('.selection-open-stacks')!.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('#home-stacks-tab')!.disabled).toBe(false);
     expect(host.querySelector<HTMLButtonElement>('.selection-clear')!.disabled).toBe(true);
-    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
-    await click('.selection-open-workspace');
+    expect(host.querySelector<HTMLButtonElement>('.home-open-workspace')!.disabled).toBe(false);
+    await click('.home-open-workspace');
     expect(navigation).toBeNull();
     for (const tab of ['albums', 'calendar']) {
       await click(`#home-${tab}-tab`);
@@ -220,7 +220,7 @@ describe('Home favorites', () => {
     await click('.selection-all');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
     expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
-    await click('.selection-open-workspace');
+    await click('.home-open-workspace');
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-2', 'photo-1', 'photo-3']);
     await click('.return-home');
     await click('.selection-clear');
@@ -231,14 +231,14 @@ describe('Home favorites', () => {
   it('shows the selection group on Favorites and keeps Anshitsu enabled', async () => {
     await mount(); await click('#home-favorites-tab');
     expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
-    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.disabled).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>('.home-open-workspace')!.disabled).toBe(false);
   });
 
   it('resumes the previous workspace from the unselected toolbar button', async () => {
     rememberWorkspaceSession({ selectedAssets: photos.slice(0, 3), activeAssetId: 'photo-2' });
     await mount(); await click('#home-favorites-tab');
     setScroll(0, 120);
-    await click('.selection-open-workspace');
+    await click('.home-open-workspace');
     expect(navigation?.activeAssetId).toBe('photo-2');
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
     expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', contentScrollTop: 120 });
@@ -249,7 +249,7 @@ describe('Home favorites', () => {
     await click('.photo-selection-input');
     await act(async () => host.querySelectorAll('.photo-card-button')[3].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(4);
-    await click('.selection-open-workspace');
+    await click('.home-open-workspace');
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2', 'photo-3']);
   });
 
@@ -332,7 +332,7 @@ describe('Home favorites', () => {
     expect((await pressD()).defaultPrevented).toBe(false);
     await click('.photo-selection-input');
     act(() => updateSetting('showKeyboardShortcuts', false));
-    expect(host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.title).toBe(i18n.t('photos.openSelected'));
+    expect(host.querySelector<HTMLButtonElement>('.home-open-workspace')!.title).toBe(i18n.t('photos.openSelected'));
     const event = await pressD();
     expect(event.defaultPrevented).toBe(true);
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0']);
@@ -430,15 +430,15 @@ describe('Home favorites', () => {
     await mount(); setScroll(0, 120); await click('#home-favorites-tab'); setScroll(0, 420);
     await click('#home-recent-tab'); expectScroll(0, 120);
     await click('#home-favorites-tab'); expectScroll(0, 420);
-    setScroll(0, 640); await click('.photo-card-button'); await click('.selection-open-workspace');
+    setScroll(0, 640); await click('.photo-card-button'); await click('.home-open-workspace');
     expect(navigation?.homeReturn?.contentScrollTop).toBe(640);
     await click('.return-home'); expectScroll(0, 640);
     expect(host.querySelector('#home-favorites-tab')?.getAttribute('aria-selected')).toBe('true');
     await click('#home-recent-tab'); await click('#home-favorites-tab'); expectScroll(0, 640);
   });
 
-  it('keeps all five tabs reachable without Arrow/Home/End tab navigation', async () => {
-    await mount(); expect(host.querySelectorAll('[role="tab"]')).toHaveLength(5);
+  it('keeps all six tabs reachable without Arrow/Home/End tab navigation', async () => {
+    await mount(); expect(host.querySelectorAll('[role="tab"]')).toHaveLength(6);
     for (const tab of host.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
       expect(tab.tabIndex).toBe(0);
       act(() => tab.focus());

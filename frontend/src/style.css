@@ -769,3 +769,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-management-page .thumbnail-size-control input { accent-color: var(--accent); }
 
 .home-title-row, .stack-management-page .stack-home-title { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+
+/* Keep the mounted editor inside the remaining Home viewport. */
+.home-page > [hidden] { display: none; }
+.home-stacks-panel { grid-row: 3 / 5; min-height: 0; overflow: hidden; }
+.home-stacks-panel > .stack-management-page { height: 100%; grid-template-rows: auto minmax(0, 1fr); }

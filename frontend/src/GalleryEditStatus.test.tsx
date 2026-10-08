@@ -367,7 +367,7 @@ describe('Home bulk edit status', () => {
     ]);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('7 selected');
     await act(async () => {
-      host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click();
+      host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click();
       for (let index = 0; index < 5; index++) await Promise.resolve();
     });
     expect(host.querySelector('.selection-navigation-probe')?.textContent).toBe(
@@ -381,7 +381,7 @@ describe('Home bulk edit status', () => {
     act(() => visibleSelectionInputs()[9].click());
     shiftClick(visibleCardButtons()[3]);
     await act(async () => {
-      host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click();
+      host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click();
       for (let index = 0; index < 5; index++) await Promise.resolve();
     });
     const filmstripOrder = [...host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')]

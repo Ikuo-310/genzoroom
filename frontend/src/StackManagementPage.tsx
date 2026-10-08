@@ -44,13 +44,13 @@ function readNavigation(value: unknown): StackNavigationState | null {
   return { selectedAssets: [...new Map(state.selectedAssets.map(asset => [asset.id, asset])).values()], ...(homeReturn ? { homeReturn } : {}) };
 }
 
-export function StackManagementPage() {
+export function StackManagementPage({ sessionAssets, active = true }: { sessionAssets?: RecentAsset[]; active?: boolean } = {}) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
   const sourceGeneration = `${location.key}:${JSON.stringify(location.state) ?? 'null'}`;
-  const assets = navigation?.selectedAssets ?? EMPTY_ASSETS;
+  const assets = sessionAssets ?? navigation?.selectedAssets ?? EMPTY_ASSETS;
   const immich = useSelectedImmichStacks(assets);
   const detectionAssets = useMemo(() => {
     if (immich.loading || immich.error) return EMPTY_ASSETS;
@@ -473,18 +473,19 @@ export function StackManagementPage() {
   }, [navigate, navigation?.homeReturn]);
 
   useEffect(() => {
+    if (sessionAssets || !active) return;
     const original = document.title;
     document.title = `${t('stackManagement.title')} - GenzoRoom`;
     return () => { document.title = original; };
-  }, [t]);
+  }, [t, sessionAssets, active]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
+      if (!active || settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
         || confirmRedetect || confirmSend) return;
-      if (matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
+      if (!sessionAssets && matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
       else if (matchesShortcut(event, 'undo') && canEdit && draft.undoSnapshot) { event.preventDefault(); dispatch({ type: 'undo' }); }
       else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
       // Escape dismisses local page selection and Add targeting rather than an application command.
@@ -494,18 +495,19 @@ export function StackManagementPage() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
+  }, [active, sessionAssets, settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
 
-  return <main className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
+  const Container = sessionAssets ? 'div' : 'main';
+  return <Container className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
     onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
-    <header className="stack-management-header">
+    {!sessionAssets && <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
       <h1>{t('stackManagement.title')}</h1>
       <div className="stack-header-actions">
         <button type="button" onClick={returnHome} title={shortcut.title(t('stackManagement.backHome'), 'workspaceReturnHome')}>{t('stackManagement.backHome')}</button>
         <SettingsButton />
       </div>
-    </header>
+    </header>}
     <div className="stack-control-bar" role="region" aria-label={t('stackManagement.actions')}>
       <div className="stack-control-actions">
         <strong aria-live="polite">{t('stackManagement.selectionCount', { count: selectedIds.size })}</strong>
@@ -607,7 +609,7 @@ export function StackManagementPage() {
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
       create: createCount, update: updateCount, delete: deleteCount,
     })} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
-  </main>;
+  </Container>;
 }
 
 function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {

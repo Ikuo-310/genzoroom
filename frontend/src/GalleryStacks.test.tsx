@@ -176,7 +176,7 @@ describe('Gallery Stack target navigation', () => {
     expect(host.querySelector<HTMLButtonElement>('.stack-format-switch')?.getAttribute('aria-pressed')).toBe('true');
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
     await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(item => item.id)).toEqual([favoritesStack.stackMembers![2].id]);
   });
 
@@ -377,7 +377,7 @@ describe('Gallery Stack target navigation', () => {
     galleryPhotos([asset('solo'), state === 'empty' ? stack : { ...stack, stackMembers: undefined }]);
     await mount();
     act(() => host.querySelector<HTMLButtonElement>('.selection-all')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     if (state === 'empty') expect(navigation?.selectedAssets.map(item => item.id)).toEqual(['solo']);
     else {
       expect(navigation).toBeNull();
@@ -391,7 +391,7 @@ describe('Gallery Stack target navigation', () => {
     galleryPhotos([stack]);
     await mount();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.selectedAssets).toEqual([stack.stackMembers![1]]);
   });
 });
@@ -428,7 +428,7 @@ describe('Home stack display', () => {
     await mount(tab);
     await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
     expect(navigation).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.activeAssetId).toBe(representative.stackMembers![1].id);
     expect(navigation?.selectedAssets).toEqual([representative.stackMembers![1]]);
     expect(navigation?.homeReturn?.tab).toBe(tab);
@@ -437,7 +437,7 @@ describe('Home stack display', () => {
   it('selects the first visible card across all photo types', async () => {
     await mount();
     await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x']);
   });
 
@@ -449,7 +449,7 @@ describe('Home stack display', () => {
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[2].click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('3 selected');
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', ...representative.stackMembers!.slice(0, 2).map(a => a.id), 'y']);
   });
 
@@ -460,12 +460,12 @@ describe('Home stack display', () => {
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
     expect(navigation).toBeNull();
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Cannot open the selection');
     act(() => host.querySelector<HTMLButtonElement>('.selection-clear')!.click());
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation).toBeNull();
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
   });
@@ -476,7 +476,7 @@ describe('Home stack display', () => {
     await mount('favorites');
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[0].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual([representative.stackMembers![1].id, 'x']);
   });
 
@@ -484,7 +484,7 @@ describe('Home stack display', () => {
     api.favorites.mockResolvedValue([asset('x'), asset('soloRaw', true)]);
     await mount('favorites');
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.photo-card-button')[1].click());
-    await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('.home-open-workspace')!.click());
     expect(navigation?.activeAssetId).toBe('soloRaw');
   });
 
