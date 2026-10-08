@@ -28,14 +28,14 @@ it('keeps Stack group and photo close/add controls at their compact icon dimensi
   expect(getComputedStyle(photoClose).top).toBe('4px');
 });
 
-it('removes only horizontal frame chrome while preserving vertical spacing and independent scrolling', () => {
+it('matches Gallery spacing and gives independent Stack frames contained scrollbars', () => {
   document.body.innerHTML = `<main class="stack-management-page"><div class="stack-content">
-    <div class="stack-split-view"><section class="stack-frame stack-candidate-frame"></section>
-      <div class="stack-split-separator"></div><section class="stack-frame stack-unmatched-frame"></section>
+    <div class="stack-split-view"><section class="stack-frame stack-candidate-frame"><div class="stack-candidate-grid"></div></section>
+      <div class="stack-split-separator"></div><section class="stack-frame stack-unmatched-frame"><div class="stack-unmatched-grid"></div></section>
     </div>
   </div></main>`;
   const contentStyle = getComputedStyle(document.querySelector('.stack-content')!);
-  expect(contentStyle.paddingLeft).toBe('12px'); expect(contentStyle.paddingRight).toBe('12px');
+  expect(contentStyle.paddingLeft).toBe('24px'); expect(contentStyle.paddingRight).toBe('24px');
   expect(contentStyle.paddingTop).toBe('16px'); expect(contentStyle.paddingBottom).toBe('16px');
 
   for (const frame of document.querySelectorAll<HTMLElement>('.stack-frame')) {
@@ -44,5 +44,8 @@ it('removes only horizontal frame chrome while preserving vertical spacing and i
     expect(style.paddingTop).toBe('10px'); expect(style.paddingBottom).toBe('10px');
     expect(parseFloat(style.borderTopWidth)).toBe(0); expect(parseFloat(style.borderRadius)).toBe(0);
     expect(style.overflow).toBe('auto');
+    expect(style.scrollbarGutter).toBe('stable');
   }
+  expect(parseFloat(getComputedStyle(document.querySelector('.stack-candidate-grid')!).minWidth)).toBe(0);
+  expect(parseFloat(getComputedStyle(document.querySelector('.stack-unmatched-grid')!).minWidth)).toBe(0);
 });

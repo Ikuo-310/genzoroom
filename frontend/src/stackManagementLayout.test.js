@@ -9,14 +9,21 @@ it('uses shared responsive columns for both grids and keeps excess group members
   expect(css).not.toContain('grid-auto-flow: dense');
 });
 
-it('uses the shared dark content surface while preserving Stack chrome and card panels', () => {
+it('fits the editor within the Home viewport while preserving Stack chrome and card panels', () => {
   const css = readFileSync('src/style.css', 'utf8');
+  const normalizedCss = css.replace(/\r\n/g, '\n');
   expect(css).toContain('.home-page, .stack-management-page { --bg-content: #111214; }');
-  expect(css).toContain('.stack-content { min-height: 0; min-width: 0; overflow-y: auto; padding: 16px; background: var(--bg-content);');
+  expect(css).toContain('.stack-content { display: flex; min-height: 0; min-width: 0; flex-direction: column; gap: 8px; overflow: hidden; padding: 16px 24px; background: var(--bg-content);');
   expect(css).toContain('.stack-management-header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg-panel);');
   expect(css).toContain('.stack-control-bar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 16px; background: var(--bg-panel);');
   expect(css).toContain('.stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); min-width: 0; background: var(--bg-panel);');
-  expect(css).toContain('.stack-content { min-height: 0; min-width: 0; overflow-y: auto; padding: 16px; background: var(--bg-content); scrollbar-color: var(--border-subtle) var(--bg-content);');
+  expect(css).toContain('.stack-frame { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 10px 0; border: 0; border-radius: 0; scrollbar-color: var(--border-subtle) var(--bg-content);');
+  expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { min-width: 0; }');
+  expect(css).toContain('.stack-frame:hover { scrollbar-color: #93969d var(--bg-content); }');
+  expect(css).toContain('.stack-frame:active { scrollbar-color: #c3c6cc var(--bg-content); }');
+  expect(normalizedCss).toContain('@-moz-document url-prefix() {\n  .stack-frame { scrollbar-width: auto; scrollbar-color: #73767d var(--bg-content); }');
+  expect(css).toContain('.home-stacks-panel { grid-row: 4; min-height: 0; overflow: hidden; }');
+  expect(css).toContain('.home-stacks-panel > .stack-management-page { height: 100%; grid-template-rows: auto minmax(0, 1fr); }');
 });
 
 it('uses distinct semantic status colors', () => {
