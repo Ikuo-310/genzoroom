@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
 import { updateSetting } from './appSettings';
-import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
+import { writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
@@ -51,13 +51,6 @@ async function mount() {
 function click(selector: string) { act(() => host.querySelector<HTMLButtonElement>(selector)!.click()); }
 function pressD() { act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))); }
 async function settle() { await act(async () => { await Promise.resolve(); }); }
-function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
-  const select = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -127,7 +120,7 @@ describe('album photo view', () => {
     click('.album-card'); await settle();
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(host.querySelector('.home-toolbar-title')?.textContent).toBe(albumA.albumName);
-    expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).not.toBeNull();
+    expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     expect(host.querySelectorAll('.format-badge.raw')).toHaveLength(2);
@@ -196,15 +189,13 @@ describe('album photo view', () => {
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
   });
 
-  it('shares filter state, keeps Recent selection, and isolates Album selection with Shift ranges', async () => {
+  it('keeps Recent selection and isolates Album selection with Shift ranges while type controls stay hidden', async () => {
     await mount();
     click('.photo-selection-input');
     click('#home-albums-tab'); await settle(); click('.album-card'); await settle();
     expect(host.querySelector('.photo-card.selected')).toBeNull();
-    changeFilter('raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.albums)).toBe('raw');
-    changeFilter('both');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     const boxes = [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')];
     act(() => boxes[0].click());
     act(() => boxes[2].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
@@ -221,23 +212,23 @@ describe('album photo view', () => {
     expect(host.querySelector('.navigation-probe')?.textContent).toBe('album-0|album-2');
   });
 
-  it('keeps Album filters independent from Recent and shared across Album A and B', async () => {
+  it('ignores a saved Album type filter across Album A and B', async () => {
     await mount();
-    changeFilter('raw');
+    writePhotoFilterMode('raw', 'recent');
+    writePhotoFilterMode('nonRaw', 'albums');
     click('#home-albums-tab'); await settle();
     click('.album-card'); await settle();
-    changeFilter('nonRaw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.albums)).toBe('nonRaw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     click('.album-back');
     const cards = [...host.querySelectorAll<HTMLButtonElement>('.album-card')];
     act(() => cards[1].click()); await settle();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     click('#home-recent-tab');
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     click('#home-albums-tab'); await settle();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
   });
 
   it('loads edit statuses in batches of 100 for large albums', async () => {

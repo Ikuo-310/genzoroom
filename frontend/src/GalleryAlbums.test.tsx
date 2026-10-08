@@ -58,21 +58,14 @@ describe('Home album tab', () => {
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).not.toHaveBeenCalled();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
-    expect(host.querySelector('.home-toolbar-controls .photo-filter-control')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-controls .recent-count-control')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-controls .thumbnail-size-setting')).not.toBeNull();
     expect([...host.querySelector('.home-toolbar-controls')!.children].map(element => element.className)).toEqual([
-      'home-control stack-filter-control', 'home-control edit-status-filter-control', 'home-control photo-filter-control',
-      'home-control recent-count-control', 'home-control thumbnail-size-setting',
+      'home-control edit-status-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
     ]);
     expect(host.querySelector('#recent-photos-heading')).toBeNull();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     expect(host.querySelector('.selection-bar')).not.toBeNull();
-    const filter = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(filter, 'nonRaw');
-      filter.dispatchEvent(new Event('change', { bubbles: true }));
-    });
     clickTab('#home-albums-tab');
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
@@ -94,9 +87,8 @@ describe('Home album tab', () => {
     clickTab('#home-recent-tab');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
     expect(api.recent).toHaveBeenCalledTimes(1);
-    expect(host.querySelector('.photo-filter-control')).not.toBeNull();
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector('.selection-bar')).not.toBeNull();
   });
 

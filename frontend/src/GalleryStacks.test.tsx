@@ -132,23 +132,19 @@ describe('Home stack display', () => {
     expect(navigation?.homeReturn?.tab).toBe(tab);
   });
 
-  it('selects the visible Stack representative through the RAW filter', async () => {
+  it('selects the first visible card across all photo types', async () => {
     await mount();
-    change('.photo-filter-control select', 'raw');
     await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
-    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['primary']);
+    expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x']);
   });
 
   it('resolves hidden selected members, preserves selection order and deduplicates before navigation', async () => {
     await mount();
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    change('.photo-filter-control select', 'raw');
-    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    change('.photo-filter-control select', 'nonRaw');
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[1].click());
     act(() => host.querySelectorAll<HTMLInputElement>('.photo-selection-input')[2].click());
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('3 selected');
     await act(async () => host.querySelector<HTMLButtonElement>('.selection-open-workspace')!.click());
     expect(navigation?.selectedAssets.map(a => a.id)).toEqual(['x', 'primary', 'y']);
   });
@@ -204,18 +200,11 @@ describe('Home stack display', () => {
     expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
   });
 
-  it('aggregates Stack edits before type expansion and collapse', async () => {
+  it('aggregates Stack edits while keeping the primary collapsed', async () => {
     await mount();
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(0);
-    change('.photo-filter-control select', 'raw');
-    expect(filenames()).toEqual(['member.dng']);
-    change('.photo-filter-control select', 'nonRaw');
-    expect(filenames()).toEqual(['x.jpg', 'y.jpg', 'primary.jpg']);
-    change('.photo-filter-control select', 'both');
     change('.edit-status-filter-control select', 'edited');
-    expect(filenames()).toEqual(['primary.jpg']);
-    change('.photo-filter-control select', 'nonRaw');
     expect(filenames()).toEqual(['primary.jpg']);
     change('.edit-status-filter-control select', 'unedited');
     expect(filenames()).toEqual(['x.jpg', 'y.jpg']);
@@ -223,28 +212,18 @@ describe('Home stack display', () => {
     expect(api.recent).toHaveBeenCalledTimes(1);
   });
 
-  it('retains a selected fetched member when collapse hides it', async () => {
+  it('keeps Stack children out of the selectable Home card list', async () => {
     await mount();
-    change('.photo-filter-control select', 'raw');
-    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    change('.photo-filter-control select', 'both');
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    change('.photo-filter-control select', 'raw');
-    expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
+    expect(host.querySelectorAll('.photo-selection-input')).toHaveLength(3);
+    expect(host.querySelector('img[src="/thumb/member"]')).toBeNull();
   });
 
-  it('adds collapsed visible cards while retaining the hidden selected member', async () => {
+  it('Select All adds the collapsed visible cards', async () => {
     await mount();
-    change('.photo-filter-control select', 'raw');
-    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    change('.photo-filter-control select', 'both');
     act(() => host.querySelector<HTMLButtonElement>('.selection-all')!.click());
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('3 selected');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
-    expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
-    change('.photo-filter-control select', 'raw');
-    expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(true);
     expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
   });
 
@@ -258,39 +237,35 @@ describe('Home stack display', () => {
       .toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
   });
 
-  it.each(['recent', 'albums', 'calendar'] as const)('shows the Stack filter first and combines it with type on %s', async tab => {
+  it.each(['recent', 'albums', 'calendar'] as const)('hides Stack and type filters while preserving collapsed cards on %s', async tab => {
+    writeStackFilterMode('unstacked', tab);
+    writePhotoFilterMode('raw', tab);
     await mount(tab);
     const controls = [...host.querySelectorAll('.home-toolbar-controls > .home-control')];
-    expect(controls.slice(0, 3).map(c => c.className)).toEqual([
-      'home-control stack-filter-control', 'home-control edit-status-filter-control', 'home-control photo-filter-control',
-    ]);
-    change('.stack-filter-control select', 'stacked');
-    expect(filenames()).toEqual(['primary.jpg']);
-    change('.photo-filter-control select', 'raw');
-    expect(filenames()).toEqual(['member.dng']);
+    expect(host.querySelector('.stack-filter-control')).toBeNull();
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelector('.edit-status-filter-control')).not.toBeNull();
+    expect(controls.map(c => c.className)).toEqual([
+      'home-control edit-status-filter-control', 'home-control recent-count-control', 'home-control thumbnail-size-setting',
+    ].filter(className => tab === 'recent' || className !== 'home-control recent-count-control'));
+    expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
     expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
-    change('.photo-filter-control select', 'nonRaw');
-    expect(filenames()).toEqual(['primary.jpg']);
-    change('.stack-filter-control select', 'unstacked');
-    expect(filenames()).toEqual(['x.jpg', 'y.jpg']);
   });
 
-  it('restores the tab Stack choice after remounting without affecting selection on filter changes', async () => {
+  it('ignores saved Stack and type filter choices without deleting them', async () => {
+    writeStackFilterMode('unstacked', 'recent');
+    writePhotoFilterMode('raw', 'recent');
     await mount();
-    change('.stack-filter-control select', 'stacked');
-    change('.photo-filter-control select', 'raw');
-    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    change('.stack-filter-control select', 'unstacked');
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    act(() => root.render(<div />));
-    await mount();
-    expect(host.querySelector<HTMLSelectElement>('.stack-filter-control select')!.value).toBe('unstacked');
+    expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
+    expect(sessionStorage.getItem('genzoroom.homeStackFilter.recent')).toBe('unstacked');
+    expect(sessionStorage.getItem('genzoroom.homePhotoFilter.recent')).toBe('raw');
   });
 
   it('preserves the existing Favorites member display', async () => {
     await mount('favorites');
     expect(filenames()).toEqual(photos.map(a => a.filename));
     expect(host.querySelector('.stack-filter-control')).toBeNull();
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     change('.edit-status-filter-control select', 'edited');
     expect(filenames()).toEqual(['member.dng']);
   });

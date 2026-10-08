@@ -700,16 +700,13 @@ describe('Home calendar', () => {
     expect(api.day).toHaveBeenCalledWith('2026-09-01', expect.any(AbortSignal));
     expect(host.querySelector('.calendar-current-month')).toBeNull();
     expect(host.querySelector('.recent-count-control')).toBeNull();
-    expect(host.querySelector('.photo-filter-control')).not.toBeNull();
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector('.thumbnail-size-setting')).not.toBeNull();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     expect(host.querySelectorAll('.format-badge.raw')).toHaveLength(2);
     await settle();
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
-    selectValue('.photo-filter-control select', 'raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.calendar)).toBe('raw');
-    selectValue('.photo-filter-control select', 'both');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     const boxes = [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')];
     act(() => boxes[0].click());
     act(() => boxes[2].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
@@ -728,22 +725,24 @@ describe('Home calendar', () => {
     expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
   });
 
-  it('keeps Calendar filters independent from Recent and shared across date details', async () => {
+  it('ignores saved Calendar type filters across Home and date details', async () => {
+    writePhotoFilterMode('raw', 'recent');
+    writePhotoFilterMode('nonRaw', 'calendar');
     await mount();
-    selectValue('.photo-filter-control select', 'raw');
     click('#home-calendar-tab'); await settle();
     click('.calendar-day.has-assets'); await settle();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('both');
-    selectValue('.photo-filter-control select', 'nonRaw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     click('.album-back'); await settle();
     click('.calendar-day.has-assets'); await settle();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
     expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.calendar)).toBe('nonRaw');
     click('#home-recent-tab');
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     click('#home-calendar-tab'); await settle();
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('nonRaw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
   });
 
   it('keeps edit status filters independent across Recent, Albums, and Calendar details', async () => {

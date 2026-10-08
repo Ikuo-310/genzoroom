@@ -8,7 +8,7 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import { homeScrollContent } from './homeReturn';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import { updateSetting } from './appSettings';
-import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS } from './photoFilters';
+import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
@@ -105,14 +105,14 @@ describe('Home favorites', () => {
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(4);
   });
 
-  it('adds only visible selections with Primary+A, preserves hidden selections and consumes repeated all-selection', async () => {
+  it('selects all Favorite photo types with Primary+A and consumes repeated all-selection', async () => {
     await mount(); await pressHome('f'); await click('.photo-selection-input');
-    await change('.photo-filter-control select', 'raw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect((await pressHome('a', { ctrlKey: true })).defaultPrevented).toBe(true);
     expect((await pressHome('A', { ctrlKey: true })).defaultPrevented).toBe(true);
-    expect(host.querySelector('.selection-count')?.textContent).toBe('3 selected');
+    expect(host.querySelector('.selection-count')?.textContent).toBe('4 selected');
     await click('.selection-open-workspace');
-    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2']);
+    expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-1', 'photo-2', 'photo-3']);
   });
 
   it('ignores an initial Shift click and extends a range from a normal selection anchor', async () => {
@@ -182,27 +182,22 @@ describe('Home favorites', () => {
     }
   });
 
-  it('adds only visible IDs after hidden selections, without duplicates, and clears both', async () => {
+  it('adds edited and all Favorite IDs without duplicates, then clears selection', async () => {
     await mount(); await click('#home-favorites-tab');
     await click('.photo-selection-input');
-    await change('.photo-filter-control select', 'raw');
     await change('.edit-status-filter-control select', 'edited');
     await click('.selection-all');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('2 selected');
     expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
     await change('.edit-status-filter-control select', 'both');
     await click('.selection-all');
-    await change('.photo-filter-control select', 'both');
-    await click('.selection-all');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('4 selected');
     expect(host.querySelector<HTMLButtonElement>('.selection-all')!.disabled).toBe(true);
     await click('.selection-open-workspace');
     expect(navigation?.selectedAssets.map(asset => asset.id)).toEqual(['photo-0', 'photo-2', 'photo-1', 'photo-3']);
     await click('.return-home');
-    await change('.photo-filter-control select', 'raw');
     await click('.selection-clear');
     expect(host.querySelector('.selection-bar')?.textContent).toContain('0 selected');
-    await change('.photo-filter-control select', 'both');
     expect(host.querySelector('.photo-card.selected')).toBeNull();
   });
 
@@ -222,11 +217,9 @@ describe('Home favorites', () => {
     expect(navigation?.homeReturn).toMatchObject({ tab: 'favorites', contentScrollTop: 120 });
   });
 
-  it('preserves the existing range anchor when selecting a filtered set', async () => {
+  it('preserves the existing range anchor across the full Favorites set', async () => {
     await mount(); await click('#home-favorites-tab');
     await click('.photo-selection-input');
-    await change('.photo-filter-control select', 'raw'); await click('.selection-all');
-    await change('.photo-filter-control select', 'both');
     await act(async () => host.querySelectorAll('.photo-card-button')[3].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(4);
     await click('.selection-open-workspace');
@@ -268,27 +261,28 @@ describe('Home favorites', () => {
     expect(host.querySelector('.photo-card')).toBeNull();
   });
 
-  it('keeps tab filters independent and applies RAW and edit status with AND', async () => {
-    await mount(); await change('.photo-filter-control select', 'raw'); await click('#home-favorites-tab');
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('both');
+  it('ignores saved photo type filters in Favorites and preserves edit status filtering', async () => {
+    writePhotoFilterMode('raw', 'recent');
+    writePhotoFilterMode('nonRaw', 'favorites');
+    await mount(); await click('#home-favorites-tab');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(4);
     await change('.edit-status-filter-control select', 'edited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    await change('.photo-filter-control select', 'raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
-    expect(host.querySelector('.photo-info p')?.textContent).toBe('photo-2');
     await change('.edit-status-filter-control select', 'unedited');
-    expect(host.querySelector('.photo-info p')?.textContent).toBe('photo-1');
-    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.favorites)).toBe('raw');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.recent)).toBe('raw');
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS.favorites)).toBe('nonRaw');
     expect(sessionStorage.getItem(EDIT_STATUS_FILTER_SESSION_KEYS.favorites)).toBe('unedited');
     await click('#home-recent-tab');
     expect(host.querySelector<HTMLSelectElement>('.edit-status-filter-control select')?.value).toBe('both');
     await click('#home-favorites-tab');
     expect(host.querySelector<HTMLSelectElement>('.edit-status-filter-control select')?.value).toBe('unedited');
-    expect(host.querySelector('.photo-info p')?.textContent).toBe('photo-1');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
     act(() => root.render(<div />)); await mount(); await click('#home-favorites-tab');
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')?.value).toBe('raw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
     expect(host.querySelector<HTMLSelectElement>('.edit-status-filter-control select')?.value).toBe('unedited');
-    expect(host.querySelector('.photo-info p')?.textContent).toBe('photo-1');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
   });
 
   it('owns selection and range anchor independently, clears selection and sends only Favorites selections', async () => {

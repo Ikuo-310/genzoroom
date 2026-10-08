@@ -1,5 +1,3 @@
-import { StackFilterControls } from './StackFilterControls';
-import { readStackFilterMode, writeStackFilterMode, type StackFilterMode, type StackFilterTab } from './photoFilters';
 import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
 import { SettingsButton } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
@@ -20,7 +18,6 @@ import { ExportQueueApiError } from './exportQueueApi';
 import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
-import { PhotoFilterControls } from './PhotoFilterControls';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
@@ -30,7 +27,7 @@ import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { ExportManagementContent, ExportManagementToolbar, ExportRetryPriorityNotice } from './ExportManagement';
 import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
-import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, readPhotoFilterMode, writeEditStatusFilterMode, writePhotoFilterMode, type EditStatusFilterMode, type PhotoFilterMode } from './photoFilters';
+import { filterPhotos, filterPhotosByEditStatus, photoFiltersForMode, readEditStatusFilterMode, writeEditStatusFilterMode, type EditStatusFilterMode } from './photoFilters';
 import {
   blurPhotoSelectionCheckboxWhenSelectionEnds,
   createWorkspaceNavigation,
@@ -105,15 +102,6 @@ export function GalleryPage() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(homeReturn?.date ?? null);
   const [calendarAssets, setCalendarAssets] = useState<RecentAsset[]>([]);
   const [calendarAssetState, setCalendarAssetState] = useState<'idle' | AssetState>('idle');
-  const [stackFilterModes, setStackFilterModes] = useState<Record<StackFilterTab, StackFilterMode>>(() => ({
-    recent: readStackFilterMode('recent'), albums: readStackFilterMode('albums'), calendar: readStackFilterMode('calendar'),
-  }));
-  const [photoFilterModes, setPhotoFilterModes] = useState<Record<HomeTab, PhotoFilterMode>>(() => ({
-    recent: readPhotoFilterMode('recent'),
-    albums: readPhotoFilterMode('albums'),
-    calendar: readPhotoFilterMode('calendar'),
-    favorites: readPhotoFilterMode('favorites'),
-  }));
   const [editStatusFilterModes, setEditStatusFilterModes] = useState<Record<HomeTab, EditStatusFilterMode>>(() => ({
     recent: readEditStatusFilterMode('recent'),
     albums: readEditStatusFilterMode('albums'),
@@ -159,7 +147,7 @@ export function GalleryPage() {
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
   const editStatuses = useEditStatuses(stackEditStatusIds(editStatusAssets));
-  const photoFilters = photoFiltersForMode(photoFilterModes[activeTab]);
+  const photoFilters = photoFiltersForMode('both');
   const viewKey = showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
@@ -370,13 +358,12 @@ export function GalleryPage() {
   const currentAssets = photoView?.assets ?? [];
   const cardEditStatuses = aggregateStackEditStatuses(currentAssets, editStatuses);
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
-  const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, stackFilterModes[activeTab]);
+  const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, 'both');
   const editFilteredAssets = activeTab === 'favorites'
     ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], aggregateStackEditStatuses(stackAssets, editStatuses))
     : filterImmichStacksByEditStatus(stackAssets, editStatusFilterModes[activeTab], editStatuses);
   const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
-  const visibleAssets = activeTab !== 'favorites' && photoFilterModes[activeTab] === 'both'
-    ? collapseImmichStacks(typedAssets) : typedAssets;
+  const visibleAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
@@ -903,17 +890,9 @@ export function GalleryPage() {
             onNavigate={changeCalendarPeriod} onModeChange={changeCalendarMode} />
         </div>}
         <div className="home-toolbar-controls">
-          {photoView && activeTab !== 'favorites' && <StackFilterControls mode={stackFilterModes[activeTab]} onChange={mode => {
-            setStackFilterModes(current => ({ ...current, [activeTab]: mode }));
-            writeStackFilterMode(mode, activeTab);
-          }} />}
           {photoView && <EditStatusFilterControls mode={editStatusFilterModes[activeTab]} onChange={mode => {
             setEditStatusFilterModes(current => ({ ...current, [activeTab]: mode }));
             writeEditStatusFilterMode(mode, activeTab);
-          }} />}
-          {photoView && <PhotoFilterControls filters={photoFilters} onChange={mode => {
-            setPhotoFilterModes(current => ({ ...current, [activeTab]: mode }));
-            writePhotoFilterMode(mode, activeTab);
           }} />}
           {activeTab === 'recent' && <>
             <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>

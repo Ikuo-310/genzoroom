@@ -11,7 +11,7 @@ import i18n from './i18n';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 import { updateSetting } from './appSettings';
-import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEY, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
+import { EDIT_STATUS_FILTER_SESSION_KEYS, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import editStatusCases from './test-fixtures/edit-status.json';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
@@ -56,13 +56,6 @@ function selectedVisibleFilenames() {
 }
 function shiftClick(element: HTMLElement) {
   act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true })));
-}
-function changeFilter(value: 'both' | 'raw' | 'nonRaw') {
-  const select = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
 }
 function changeEditFilter(value: 'both' | 'edited' | 'unedited') {
   const select = host.querySelector<HTMLSelectElement>('.edit-status-filter-control select')!;
@@ -153,7 +146,7 @@ describe('Home bulk edit status', () => {
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
   });
 
-  it('fetches all 100 photos once, retains selection and does not refetch for filters', async () => {
+  it('shows all photo types, retains selection and does not refetch for filters', async () => {
     await mount();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
@@ -162,28 +155,25 @@ describe('Home bulk edit status', () => {
     expect(api.statuses.mock.calls[0][0]).toEqual(assets.map(asset => asset.id));
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    changeFilter('nonRaw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
     expect(api.statuses).toHaveBeenCalledTimes(1);
-    changeFilter('both');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     expect(host.querySelector('.photo-card.selected')).not.toBeNull();
   });
 
-  it('filters by edit status and ANDs the choice with the RAW filter without clearing selection', async () => {
+  it('filters by edit status across photo types without clearing selection', async () => {
     await mount();
     changeEditFilter('edited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     expect(host.querySelector('.photo-card .photo-info p')?.textContent).toBe('photo-0.jpg');
     expect(api.statuses).toHaveBeenCalledTimes(1);
     act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
-    changeFilter('raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
-    expect(host.querySelector('.gallery-message')?.textContent).toBe('No photos match this filter.');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
     changeEditFilter('unedited');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(99);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
   });
 
@@ -197,16 +187,16 @@ describe('Home bulk edit status', () => {
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
   });
 
-  it('restores the selected type filter after Home unmounts and remounts', async () => {
+  it('ignores a saved type filter after Home unmounts and remounts', async () => {
+    writePhotoFilterMode('raw', 'recent');
     await mount();
-    changeFilter('raw');
-    expect(localStorage.getItem(PHOTO_FILTER_SESSION_KEY)).toBeNull();
-    expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
+    expect(sessionStorage.getItem('genzoroom.homePhotoFilter.recent')).toBe('raw');
     act(() => root.render(<div />));
     await mount();
-    expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('raw');
-    expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
   });
 
   it('restores the edit status filter after Home unmounts and remounts', async () => {
@@ -220,18 +210,17 @@ describe('Home bulk edit status', () => {
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
   });
 
-  it('continues filtering and retains the choice in memory when session storage is blocked', async () => {
+  it('renders all photo types when session storage is blocked', async () => {
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
     try {
       await mount();
-      changeFilter('nonRaw');
-      expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('nonRaw');
-      expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+      expect(host.querySelector('.photo-filter-control')).toBeNull();
+      expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
       act(() => root.render(<div />));
       await mount();
-      expect((host.querySelector('.photo-filter-control select') as HTMLSelectElement).value).toBe('nonRaw');
-      expect(host.querySelectorAll('.photo-card')).toHaveLength(50);
+      expect(host.querySelector('.photo-filter-control')).toBeNull();
+      expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
     } finally {
       getItem.mockRestore(); setItem.mockRestore();
     }
@@ -417,17 +406,12 @@ describe('Home bulk edit status', () => {
     expect(host.querySelector('.selection-navigation-probe')).toBeNull();
   });
 
-  it('keeps a hidden range anchor and does not start a new range after filtering', async () => {
+  it('extends a range across the full photo type display', async () => {
     await mount();
     act(() => visibleSelectionInputs()[1].click());
-    changeFilter('nonRaw');
-    shiftClick(visibleCardButtons()[2]);
-    expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
-    expect(selectedVisibleFilenames()).toEqual([]);
-    act(() => visibleCardButtons()[2].click());
-    expect(selectedVisibleFilenames()).toEqual(['photo-4.jpg']);
-    shiftClick(visibleCardButtons()[4]);
-    expect(selectedVisibleFilenames()).toContain('photo-4.jpg');
+    shiftClick(visibleCardButtons()[3]);
+    expect(host.querySelector('.selection-bar')?.textContent).toContain('3 selected');
+    expect(selectedVisibleFilenames()).toEqual(['photo-1.jpg', 'photo-2.jpg', 'photo-3.jpg']);
   });
 
   it('resets the range anchor when every photo is cleared', async () => {

@@ -10,6 +10,7 @@ import { updateSetting, useAppSettings } from './appSettings';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import i18n from './i18n';
 import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
+import { PHOTO_FILTER_SESSION_KEYS, writePhotoFilterMode } from './photoFilters';
 
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
   day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn(), enqueue: vi.fn() }));
@@ -48,10 +49,6 @@ async function key(key: string, options: KeyboardEventInit = {}, target: EventTa
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
   await act(async () => target.dispatchEvent(event));
   return event;
-}
-async function filter(value: string) {
-  const select = host.querySelector<HTMLSelectElement>('.photo-filter-control select')!;
-  await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 beforeEach(async () => {
   api.queue.mockReset().mockResolvedValue([]);
@@ -147,24 +144,27 @@ describe('Home Export management', () => {
     expect(host.querySelector('output')?.textContent).toBe('4');
   });
 
-  it.each(['recent', 'favorites', 'albums', 'calendar'] as const)('retains %s detail, filters, hidden selection, anchor and scroll across Export', async tab => {
+  it.each(['recent', 'favorites', 'albums', 'calendar'] as const)('retains %s detail, selection, anchor and scroll across Export with saved type filter ignored', async tab => {
+    writePhotoFilterMode('raw', tab);
     await mount(tab);
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
     await click('.photo-card-button');
     await act(async () => host.querySelectorAll('.photo-card-button')[1]
       .dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })));
-    await filter('raw');
     homeScrollContent(host.querySelector('.home-page')!)!.scrollTop = 390;
     await key('e');
     expect(host.querySelector('#home-export-panel')).not.toBeNull();
     expect(host.querySelector('.photo-card')).toBeNull();
     await click(`#home-${tab}-tab`);
-    expect(host.querySelector<HTMLSelectElement>('.photo-filter-control select')!.value).toBe('raw');
+    expect(host.querySelector('.photo-filter-control')).toBeNull();
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(3);
+    expect(sessionStorage.getItem(PHOTO_FILTER_SESSION_KEYS[tab])).toBe('raw');
     expect(host.querySelector('.selection-count')?.textContent).toBe('2 selected');
     expect(homeScrollContent(host.querySelector('.home-page')!)!.scrollTop).toBe(390);
-    expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('photo-1.jpg');
+    expect(host.querySelector('.photo-card.selected .photo-info p')?.textContent).toBe('photo-0.jpg');
     if (tab === 'albums') expect(host.querySelector('.home-toolbar-title')?.textContent).toBe('Album A');
     if (tab === 'calendar') expect(host.querySelector('.calendar-detail-navigation')).not.toBeNull();
-    await filter('both');
     await act(async () => host.querySelectorAll('.photo-card-button')[2]
       .dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(3);
