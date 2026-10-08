@@ -486,6 +486,10 @@
   },
   "settings": {
     "showKeyboardShortcuts": "キーボードショートカットの表示",
+    "anshitsuInitialSelection": "暗室送りの初期選択",
+    "anshitsuInitialSelectionInfoLabel": "暗室送りの初期選択について",
+    "anshitsuInitialSelectionInfo": "STACK内で暗室へ送る写真の初期選択を指定します。ギャラリーの種別バッジや右クリックメニューから個別に変更できます。RAWと「両方」のプリセットはRAW現像対応後に利用可能になります。",
+    "anshitsuPresets": { "nonRaw": "Non-RAW", "raw": "RAW", "both": "両方" },
     "on": "ON",
     "off": "OFF",
     "title": "設定",

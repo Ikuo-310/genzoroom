@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsButton, SettingsProvider } from './SettingsDialog';
 import { changeAppLanguage } from './i18n';
-import { DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 
 vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { create: vi.fn() } }));
@@ -51,6 +51,36 @@ describe('shared Settings modal', () => {
     await click(radios[1]);
     await click(dialog().querySelector('header button')!); await click(host.querySelector('button')!);
     expect(dialog().querySelector<HTMLInputElement>('input[value="false"]')!.checked).toBe(true);
+  });
+  it('shows the Non-RAW default, keeps RAW presets disabled, and exposes a keyboard-dismissable translated explanation', async () => {
+    await click(host.querySelector('button')!);
+    const group = dialog().querySelector<HTMLElement>('.anshitsu-selection-options')!;
+    const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map(radio => radio.value)).toEqual(['nonRaw', 'raw', 'both']);
+    expect(radios[0].checked).toBe(true);
+    expect(radios.slice(1).every(radio => radio.disabled)).toBe(true);
+    expect(localStorage.getItem(ANSHITSU_INITIAL_SELECTION_KEY)).toBeNull();
+    const info = dialog().querySelector<HTMLButtonElement>('.anshitsu-selection-info-button')!;
+    expect(info.getAttribute('aria-expanded')).toBe('false');
+    await click(info);
+    expect(info.getAttribute('aria-expanded')).toBe('true');
+    expect(dialog().querySelector('[role="note"]')?.textContent).toContain('Gallery type badges');
+    act(() => info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(dialog().open).toBe(true);
+    expect(dialog().querySelector('[role="note"]')).toBeNull();
+    expect(document.activeElement).toBe(info);
+    await act(async () => changeAppLanguage('ja'));
+    expect(dialog().querySelector<HTMLElement>('.anshitsu-initial-selection-label')?.textContent).toContain('暗室送りの初期選択');
+    await click(info);
+    expect(dialog().querySelector('[role="note"]')?.textContent).toContain('種別バッジ');
+  });
+  it('closes the initial-selection explanation on an outside pointer press', async () => {
+    await click(host.querySelector('button')!);
+    const info = dialog().querySelector<HTMLButtonElement>('.anshitsu-selection-info-button')!;
+    await click(info);
+    act(() => dialog().querySelector('header button')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+    expect(dialog().querySelector('[role="note"]')).toBeNull();
+    expect(dialog().open).toBe(true);
   });
   it('offers two date Auto modes before a disabled separator and never saves the separator', async () => {
     await click(host.querySelector('button')!);

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
-import { DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTIONS, ANSHITSU_RAW_PRESETS_ENABLED, DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type AnshitsuInitialSelection, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
 import { BinaryRadioChoice } from './BinaryRadioChoice';
@@ -78,6 +78,18 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
   const [language, setLanguage] = useState(currentLanguagePreference);
   const dialog = useRef<HTMLDialogElement>(null); const title = useId();
   const backdropPointerDown = useRef(false);
+  const [selectionInfoOpen, setSelectionInfoOpen] = useState(false);
+  const selectionInfo = useRef<HTMLButtonElement>(null);
+  const selectionInfoPopover = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selectionInfoOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !selectionInfoPopover.current?.contains(event.target)
+        && !selectionInfo.current?.contains(event.target)) setSelectionInfoOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside, true);
+    return () => document.removeEventListener('pointerdown', closeOutside, true);
+  }, [selectionInfoOpen]);
   const isBackdropPointer = (event: ReactPointerEvent<HTMLDialogElement>) => {
     if (event.target !== event.currentTarget) return false;
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -143,6 +155,29 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
       </select></label>
       <BinaryRadioChoice label={t('settings.showKeyboardShortcuts')} value={settings.showKeyboardShortcuts}
         onChange={value => updateSetting('showKeyboardShortcuts', value)} onLabel={t('settings.on')} offLabel={t('settings.off')} />
+      <div className="anshitsu-initial-selection-row" onKeyDown={event => {
+        if (event.key === 'Escape' && selectionInfoOpen) {
+          event.preventDefault(); event.stopPropagation(); setSelectionInfoOpen(false); selectionInfo.current?.focus();
+        }
+      }}>
+        <div className="anshitsu-initial-selection-label">
+          <span>{t('settings.anshitsuInitialSelection')}</span>
+          <button ref={selectionInfo} type="button" className="anshitsu-selection-info-button"
+            aria-label={t('settings.anshitsuInitialSelectionInfoLabel')} aria-expanded={selectionInfoOpen}
+            aria-controls={`${title}-anshitsu-selection-info`} onClick={() => setSelectionInfoOpen(open => !open)}>ⓘ</button>
+          {selectionInfoOpen && <div ref={selectionInfoPopover} id={`${title}-anshitsu-selection-info`}
+            className="anshitsu-selection-info" role="note">{t('settings.anshitsuInitialSelectionInfo')}</div>}
+        </div>
+        <div className="anshitsu-selection-options" role="radiogroup" aria-label={t('settings.anshitsuInitialSelection')}>
+          {ANSHITSU_INITIAL_SELECTIONS.map(value => <label key={value}>
+            <input type="radio" name={`${title}-anshitsu-initial-selection`} value={value}
+              checked={settings.anshitsuInitialSelection === value}
+              disabled={value !== 'nonRaw' && !ANSHITSU_RAW_PRESETS_ENABLED}
+              onChange={() => updateSetting('anshitsuInitialSelection', value as AnshitsuInitialSelection)} />
+            <span>{t(`settings.anshitsuPresets.${value}`)}</span>
+          </label>)}
+        </div>
+      </div>
     </section>
     <section aria-labelledby={`${title}-processing`}><h3 id={`${title}-processing`}>{t('settings.processing')}</h3>
       <div className="settings-webgpu-row">

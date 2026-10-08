@@ -625,11 +625,26 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .binary-radio-options span { display: block; min-width: 42px; padding: 5px 10px; background: var(--bg-app); font-size: 0.81rem; text-align: center; }
 .binary-radio-options input:checked + span { background: var(--border-subtle); color: #fff; }
 .binary-radio-options input:focus-visible + span { outline: 2px solid #fff; outline-offset: -3px; }
+.anshitsu-initial-selection-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; }
+.anshitsu-initial-selection-label { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.settings-dialog .anshitsu-selection-info-button { border: 0; background: transparent; color: var(--text-secondary); padding: 2px 4px; font-size: 0.9rem; cursor: pointer; }
+.anshitsu-selection-info-button:hover { color: var(--text-primary); }
+.anshitsu-selection-info-button:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.anshitsu-selection-info { position: absolute; z-index: 2; top: calc(100% + 8px); left: 0; width: min(340px, calc(100vw - 72px)); padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); box-shadow: 0 4px 16px #0008; font-size: 0.9rem; line-height: 1.5; }
+.anshitsu-selection-options { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border-subtle); border-radius: 5px; overflow: hidden; }
+.settings-dialog .anshitsu-selection-options label { position: relative; display: block; margin: 0; cursor: pointer; }
+.anshitsu-selection-options input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.anshitsu-selection-options span { display: block; padding: 5px 9px; background: var(--bg-app); font-size: 0.81rem; text-align: center; }
+.anshitsu-selection-options input:checked + span { background: var(--border-subtle); color: #fff; }
+.anshitsu-selection-options input:focus-visible + span { outline: 2px solid #fff; outline-offset: -3px; }
+.anshitsu-selection-options input:disabled + span { color: var(--text-secondary); opacity: 0.5; cursor: not-allowed; }
 .edit-settings-menu-item { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .edit-settings-action-label { min-width: 0; overflow-wrap: anywhere; }
 .shortcut-label { margin-left: auto; font-size: 0.85em; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
   .settings-dialog label { align-items: stretch; flex-direction: column; gap: 8px; }
+  .settings-dialog .anshitsu-initial-selection-row { align-items: stretch; flex-direction: column; gap: 8px; }
+  .anshitsu-selection-options { align-self: flex-start; }
   .settings-dialog select { max-width: 100%; }
   .settings-webgpu-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 }
