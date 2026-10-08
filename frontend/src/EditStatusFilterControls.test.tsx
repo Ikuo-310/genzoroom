@@ -12,6 +12,7 @@ describe('EditStatusFilterControls', () => {
     expect(markup).toContain('<option value="both" selected="">All</option>');
     expect(markup).toContain('<option value="edited">Edited</option>');
     expect(markup).toContain('<option value="unedited">Not edited</option>');
+    expect(markup).toContain('class="home-select-measure" aria-hidden="true">All</span>');
   });
 
   it('renders the Japanese label and choices', async () => {
@@ -21,5 +22,6 @@ describe('EditStatusFilterControls', () => {
     expect(markup).toContain('<option value="both">すべて</option>');
     expect(markup).toContain('<option value="edited" selected="">補正あり</option>');
     expect(markup).toContain('<option value="unedited">補正なし</option>');
+    expect(markup).toContain('class="home-select-measure" aria-hidden="true">補正あり</span>');
   });
 });
