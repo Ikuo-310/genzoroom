@@ -20,7 +20,6 @@ import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
 import { HomeTitle } from './HomeTitle';
 import { EditStatusFilterControls } from './EditStatusFilterControls';
 import { DevelopStatusFilterControls } from './DevelopStatusFilterControls';
-import { HomeToolbarSelect } from './HomeToolbarSelect';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
@@ -909,11 +908,10 @@ export function GalleryPage() {
           }} />}
           {activeTab === 'recent' && <>
             <label className="home-control recent-count-control"><span className="home-control-label">{t('photos.recentCount')}</span>
-              <HomeToolbarSelect currentLabel={t('photos.recentCountOption', { count: settings.recentPhotoCount })}
-                value={settings.recentPhotoCount}
+              <select value={settings.recentPhotoCount}
                 onChange={event => updateSetting('recentPhotoCount', Number(event.target.value) as RecentPhotoCount)}>
                 {RECENT_PHOTO_COUNTS.map(count => <option key={count} value={count}>{t('photos.recentCountOption', { count })}</option>)}
-              </HomeToolbarSelect>
+              </select>
             </label>
           </>}
           {(photoView || activeTab === 'albums') && <div className="home-control thumbnail-size-setting">

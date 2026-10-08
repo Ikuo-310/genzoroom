@@ -98,7 +98,6 @@ describe('Home bulk edit status', () => {
     expect(host.querySelector('.edited-badge, .filmstrip-history-badge')).toBeNull();
     expect(host.querySelector('.photo-card-button')?.getAttribute('aria-description')).toBeNull();
     changeEditFilter('edited');
-    expect(host.querySelector('.edit-status-filter-control .home-select-measure')?.textContent).toBe('Edited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
     changeEditFilter('unedited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
@@ -135,9 +134,7 @@ describe('Home bulk edit status', () => {
       count.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await choose('250');
-    expect(host.querySelector('.recent-count-control .home-select-measure')?.textContent).toBe('250');
     await choose('500');
-    expect(host.querySelector('.recent-count-control .home-select-measure')?.textContent).toBe('500');
     expect(api.recent.mock.calls.map(([limit]) => limit)).toEqual([100, 250, 500]);
     expect((api.recent.mock.calls[1][1] as AbortSignal).aborted).toBe(true);
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);

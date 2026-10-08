@@ -12,7 +12,6 @@ describe('DevelopStatusFilterControls', () => {
     expect(markup).toContain('<option value="both" selected="">Both</option>');
     expect(markup).toContain('<option value="developed">Developed</option>');
     expect(markup).toContain('<option value="undeveloped">Undeveloped</option>');
-    expect(markup).toContain('class="home-select-measure" aria-hidden="true">Both</span>');
   });
 
   it('renders the Japanese label and choices', async () => {
@@ -22,6 +21,5 @@ describe('DevelopStatusFilterControls', () => {
     expect(markup).toContain('<option value="both">両方</option>');
     expect(markup).toContain('<option value="developed">現像済み</option>');
     expect(markup).toContain('<option value="undeveloped" selected="">未現像</option>');
-    expect(markup).toContain('class="home-select-measure" aria-hidden="true">未現像</span>');
   });
 });
