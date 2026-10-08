@@ -107,6 +107,19 @@ function galleryPhotos(input: RecentAsset[]) {
 }
 
 describe('Gallery Stack target navigation', () => {
+  it.each(tabs)('uses format switches without selecting the card and expands their selection on %s', async tab => {
+    const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
+    stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
+    galleryPhotos([stack]);
+    await mount(tab);
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.stack-format-switch')[1].click());
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+    expect(navigation).toBeNull();
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.stack-format-switch')[0].click());
+    act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
+    expect(navigation?.selectedAssets).toEqual([stack.stackMembers![2]]);
+  });
   it.each(tabs)('expands multiple Stacks and a direct PNG in selection order on %s', async tab => {
     const first = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
     const last = makeGalleryStack(2, ['DNG', 'DNG']);

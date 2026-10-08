@@ -3,6 +3,7 @@ import { useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { FormatBadge } from './FormatBadge';
+import { StackFormatSwitches } from './StackFormatSwitches';
 import { FilenameDisplay } from './FilenameDisplay';
 import { EditedBadge } from './EditedBadge';
 import { GenzoRoomExportBadge } from './GenzoRoomExportBadge';
@@ -105,21 +106,20 @@ export function PhotoCard({
       >
         <div className="thumbnail">
           <img src={asset.thumbnail_url} alt="" loading="lazy" />
-          {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1 ? (
-            <div className="stack-assets" role="img" aria-label={t(asset.stackAssetCount === 1 ? 'photos.invalidStack' : 'photos.stackAssets', { count: asset.stackAssetCount })}>
-              <div className="stack-format-badges">
-                {stackFormatList(asset).map(({ format, isRaw }, index) =>
-                  <FormatBadge key={`${format}:${isRaw}:${index}`} format={format} isRaw={isRaw} />)}
-              </div>
-              <span className={`stack-asset-count${asset.stackAssetCount === 1 ? ' stack-asset-count-error' : ''}`}>{asset.stackAssetCount}</span>
-            </div>
-          ) : <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
+          {!(asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1) &&
+            <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>
         <div className="photo-info">
           <p><FilenameDisplay filename={asset.filename} /></p>
           <time dateTime={asset.date}>{formatPhotoDate(asset.date)}</time>
         </div>
       </button>
+      {asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1 && (
+        <div className="stack-assets" role="group" aria-label={t(asset.stackAssetCount === 1 ? 'photos.invalidStack' : 'photos.stackAssets', { count: asset.stackAssetCount })}>
+          <StackFormatSwitches asset={asset} formats={stackFormatList(asset)} />
+          <span className={`stack-asset-count${asset.stackAssetCount === 1 ? ' stack-asset-count-error' : ''}`}>{asset.stackAssetCount}</span>
+        </div>
+      )}
       <div className={`photo-card-badges${isGenzoRoomExported(asset) ? ' with-export-badge' : ''}`}>
         {isGenzoRoomExported(asset) && <GenzoRoomExportBadge />}
         <EditedBadge edited={edited} queueKnown={queueKnown} queueStatus={queueStatus}

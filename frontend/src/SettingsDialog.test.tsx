@@ -70,7 +70,7 @@ describe('shared Settings modal', () => {
     expect(dialog().querySelector('[role="note"]')).toBeNull();
     expect(document.activeElement).toBe(info);
     await act(async () => changeAppLanguage('ja'));
-    expect(dialog().querySelector<HTMLElement>('.anshitsu-initial-selection-label')?.textContent).toContain('暗室送りの初期選択');
+    expect(dialog().querySelector<HTMLElement>('.anshitsu-initial-selection-label')?.textContent).toContain('暗室送りの初期設定');
     await click(info);
     expect(dialog().querySelector('[role="note"]')?.textContent).toContain('種別バッジ');
   });

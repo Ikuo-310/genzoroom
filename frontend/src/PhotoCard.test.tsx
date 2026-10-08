@@ -5,11 +5,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import { PhotoCard, type RecentAsset } from './PhotoCard';
+import { makeGalleryStack } from './gallerySelectionTestHelpers';
+import { getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
+import { updateSetting } from './appSettings';
 
 beforeEach(async () => i18n.changeLanguage('en'));
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  sessionStorage.clear(); restoreGalleryStackSelectionsFromSession();
+  updateSetting('anshitsuInitialSelection', 'nonRaw');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -36,6 +41,73 @@ function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.
 }
 
 describe('PhotoCard format badge', () => {
+  async function mountStack(asset: RecentAsset, callbacks = {}) {
+    await act(async () => root.render(<PhotoCard asset={asset} language="en"
+      onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} {...callbacks} />));
+  }
+  function switches() { return [...host.querySelectorAll<HTMLButtonElement>('.stack-format-switch')]; }
+
+  it.each([
+    [['JPEG', 'JPEG', 'DNG'], ['true', 'false']],
+    [['DNG', 'DNG'], ['true']],
+    [['JPEG', 'PNG', 'DNG'], ['true', 'true', 'false']],
+  ])('derives initial states from actual selections for %s', async (formats, expected) => {
+    const stack = makeGalleryStack(1, formats);
+    stack.stackFormats = formats.map(format => ({ format, isRaw: format === 'DNG' }));
+    await mountStack(stack);
+    expect(switches().map(button => button.getAttribute('aria-pressed'))).toEqual(expected);
+    expect(switches().every(button => !button.disabled)).toBe(true);
+    expect(host.querySelector('button button')).toBeNull();
+  });
+
+  it('toggles whole formats, preserves others and persists empty manual intent without selecting cards or Queue', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG', 'PNG']);
+    stack.stackFormats = [{ format: 'PNG', isRaw: false }, { format: 'DNG', isRaw: true }, { format: 'JPEG', isRaw: false }];
+    setManualGalleryStackSelection(stack, new Set([stack.id, stack.stackMembers![3].id]));
+    const callbacks = { onSelect: vi.fn(), onToggleSelection: vi.fn(), onExtendSelection: vi.fn(), onPreviewRequest: vi.fn(), onQueueToggle: vi.fn() };
+    await mountStack(stack, callbacks);
+    expect(switches().map(button => button.textContent)).toEqual(['JPEG', 'PNG', 'DNG']);
+    expect(switches()[0].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => switches()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true, ctrlKey: true })));
+    expect([...getManualGalleryStackSelection(stack.stackId!)!]).toEqual([stack.stackMembers![3].id]);
+    await act(async () => switches()[0].click());
+    expect(getManualGalleryStackSelection(stack.stackId!)!.size).toBe(3);
+    await act(async () => switches()[2].click());
+    expect(getManualGalleryStackSelection(stack.stackId!)!.size).toBe(4);
+    await act(async () => { for (const button of switches()) button.click(); });
+    expect(getManualGalleryStackSelection(stack.stackId!)!.size).toBe(0);
+    act(() => restoreGalleryStackSelectionsFromSession());
+    expect(switches().map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'false']);
+    for (const callback of Object.values(callbacks)) expect(callback).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLInputElement>('.photo-selection-input')!.checked).toBe(false);
+    expect(switches().every(button => button.type === 'button' && button.tabIndex === 0)).toBe(true);
+  });
+
+  it('disables exported formats and distinguishes unavailable metadata without discarding intent', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'DNG'], [0]);
+    stack.stackFormats = [{ format: 'JPEG', isRaw: false }, { format: 'DNG', isRaw: true }];
+    await mountStack(stack);
+    expect(switches()[0].disabled).toBe(true);
+    expect(switches()[0].getAttribute('aria-pressed')).toBe('false');
+    expect(switches()[1].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => switches()[0].click());
+    expect(getManualGalleryStackSelection(stack.stackId!)).toBeUndefined();
+    await act(async () => switches()[1].click());
+    await mountStack({ ...stack, stackMembers: null });
+    expect(switches().every(button => button.disabled && button.dataset.state === 'unavailable' && !button.hasAttribute('aria-pressed') && !!button.title)).toBe(true);
+    expect(getManualGalleryStackSelection(stack.stackId!)!.size).toBe(0);
+    await mountStack(stack);
+    expect(switches()[1].getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('reconciles changed complete snapshots after render without adding new members', async () => {
+    const stack = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG']);
+    setManualGalleryStackSelection(stack, new Set(stack.stackMembers!.map(member => member.id)));
+    await mountStack(stack);
+    const next = makeGalleryStack(1, ['JPEG', 'JPEG', 'DNG', 'PNG'], [1]);
+    await mountStack(next);
+    expect([...getManualGalleryStackSelection(stack.stackId!)!]).toEqual([next.id, next.stackMembers![2].id]);
+  });
   it.each([true, false, undefined])('shows the export icon only for positive asset metadata (%s)', async isGenzoRoomExport => {
     await act(async () => root.render(<PhotoCard asset={{ ...interactionAsset, isGenzoRoomExport }} language="en" edited queueKnown
       onQueueToggle={vi.fn()} onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />));
@@ -169,7 +241,7 @@ describe('PhotoCard format badge', () => {
 
   it.each([2, 3, 12])('shows the original format and total Stack count %s', count => {
     const markup = renderBadge('DNG', true, 'photo.dng', true, 'stack-id', count);
-    expect(markup).toContain('class="format-badge raw">DNG</span>');
+    expect(markup).toContain('>DNG</button>');
     expect(markup).toContain(`class="stack-asset-count">${count}</span>`);
     expect(markup).toContain(`aria-label="Stack, ${count} assets"`);
     expect(markup).not.toContain('stack-asset-count-error');
@@ -179,7 +251,9 @@ describe('PhotoCard format badge', () => {
 
   it('shows the singleton Stack as an invalid Stack warning without changing its badge structure', () => {
     const markup = renderBadge('JPEG', false, 'photo.jpg', undefined, 'stack-id', 1);
-    expect(markup).toContain('<div class="stack-assets" role="img" aria-label="Invalid Stack, 1 asset"><div class="stack-format-badges"><span class="format-badge">JPEG</span></div><span class="stack-asset-count stack-asset-count-error">1</span></div>');
+    expect(markup).toContain('role="group" aria-label="Invalid Stack, 1 asset"');
+    expect(markup).toContain('data-state="unavailable"');
+    expect(markup).toContain('class="stack-asset-count stack-asset-count-error">1</span>');
   });
 
   it.each([

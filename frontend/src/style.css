@@ -224,6 +224,11 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .stack-assets { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: calc(100% - 16px); pointer-events: none; }
 .stack-format-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 100%; }
 .stack-format-badges .format-badge { position: static; display: block; max-width: 100%; }
+/* Sibling controls overlay only the badge area, leaving the card body and Queue independent. */
+.photo-card .stack-format-switch { pointer-events: auto; cursor: pointer; color: #fff; background: rgb(20 20 22 / 88%); }
+.photo-card .stack-format-switch[data-state="off"] { color: #999; background: rgb(18 18 20 / 72%); border-color: #777; }
+.photo-card .stack-format-switch:disabled { color: #666; background: rgb(18 18 20 / 60%); border-color: #444; cursor: default; box-shadow: none; }
+.photo-card .stack-format-switch:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .stack-asset-count { overflow: hidden; color: #fff; background: rgb(15 20 18 / 82%); border: 1px solid rgb(255 255 255 / 70%); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); padding: 2px 6px; font-size: 0.68rem; font-weight: 750; line-height: 1.35; white-space: nowrap; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .stack-asset-count-error { background: #a51d2d; border-color: #fff; }
 .edited-badge { position: absolute; right: 6px; bottom: 6px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(255 255 255 / 60%); border-radius: 4px; color: #fff; background: rgb(15 20 18 / 82%); pointer-events: none; }

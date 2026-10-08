@@ -496,7 +496,7 @@
   },
   "settings": {
     "showKeyboardShortcuts": "Show keyboard shortcuts",
-    "anshitsuInitialSelection": "Initial selection for Develop",
+    "anshitsuInitialSelection": "Default Darkroom Selection",
     "anshitsuInitialSelectionInfoLabel": "About the initial selection for Develop",
     "anshitsuInitialSelectionInfo": "Choose which photos in a Stack are initially selected for Develop. You can change individual selections with the Gallery type badges or context menu. RAW and Both presets will be available after RAW development is supported.",
     "anshitsuPresets": { "nonRaw": "Non-RAW", "raw": "RAW", "both": "Both" },
