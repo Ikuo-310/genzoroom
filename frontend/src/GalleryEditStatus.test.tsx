@@ -135,6 +135,7 @@ describe('Home bulk edit status', () => {
     });
     await choose('250');
     await choose('500');
+    expect(host.querySelector('.recent-count-control .home-toolbar-select-measure')?.textContent).toBe('500');
     expect(api.recent.mock.calls.map(([limit]) => limit)).toEqual([100, 250, 500]);
     expect((api.recent.mock.calls[1][1] as AbortSignal).aborted).toBe(true);
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
