@@ -166,7 +166,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           ? { kind: 'calendar', assets: calendarAssets, state: calendarAssetState, selection: calendarSelection }
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
-  const editStatusSnapshot = useEditStatusesSnapshot(stackEditStatusIds(editStatusAssets));
+  const editStatusIds = active ? stackEditStatusIds(editStatusAssets) : [];
+  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds);
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);

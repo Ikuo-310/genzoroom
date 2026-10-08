@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
 import { GalleryPage } from './GalleryPage';
@@ -23,6 +23,7 @@ const assets = Array.from({ length: 100 }, (_, index) => ({ id: `asset-${index}`
   date: '2026-09-27', thumbnail_url: `/thumb/${index}`, format: index % 2 ? 'DNG' : 'JPEG', is_raw: !!(index % 2) }));
 let root: Root;
 let host: HTMLDivElement;
+let navigatePersistentHome: (path: string) => void = () => {};
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(yes => { resolve = yes; });
@@ -31,6 +32,15 @@ function deferred<T>() {
 function SelectionNavigationProbe() {
   const state = useLocation().state as { selectedAssets?: RecentAsset[] } | null;
   return <output className="selection-navigation-probe">{state?.selectedAssets?.map((asset) => asset.filename).join('|')}</output>;
+}
+function PersistentGalleryRoute() {
+  const active = useLocation().pathname === '/';
+  return <div hidden={!active}><GalleryPage active={active} /></div>;
+}
+function PersistentRouteProbe() {
+  const navigate = useNavigate();
+  navigatePersistentHome = path => navigate(path);
+  return null;
 }
 async function mount() {
   await act(async () => {
@@ -48,6 +58,11 @@ async function mountAnshitsuRoutes() {
     </Routes></MemoryRouter>);
   });
   await act(async () => { await Promise.resolve(); });
+}
+async function mountPersistentGallery() {
+  await act(async () => root.render(<MemoryRouter initialEntries={['/']}>
+    <PersistentGalleryRoute /><PersistentRouteProbe />
+  </MemoryRouter>));
 }
 function visibleCardButtons() { return [...host.querySelectorAll<HTMLButtonElement>('.photo-card-button')]; }
 function visibleSelectionInputs() { return [...host.querySelectorAll<HTMLInputElement>('.photo-selection-input')]; }
@@ -178,6 +193,60 @@ describe('Home bulk edit status', () => {
     changeEditFilter('unedited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(99);
     expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+  });
+
+  it.each([[false, true], [true, false]] as const)(
+    'refreshes edited status on Home return (%s to %s) without resetting Gallery state', async (before, after) => {
+      api.recent.mockResolvedValue([assets[0]]);
+      let serverEdited = before;
+      api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, serverEdited])));
+      await mountPersistentGallery();
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(api.statuses).toHaveBeenCalledTimes(1);
+      act(() => host.querySelector<HTMLInputElement>('.photo-selection-input')!.click());
+      changeEditFilter('edited');
+      const content = host.querySelector<HTMLElement>('.home-content')!;
+      content.scrollTop = 235;
+
+      await act(async () => navigatePersistentHome('/anshitsu/asset-0'));
+      await act(async () => { await Promise.resolve(); });
+      expect(api.statuses).toHaveBeenCalledTimes(1);
+      serverEdited = after;
+      await act(async () => navigatePersistentHome('/'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      expect(api.statuses.mock.calls.map(([ids]) => ids)).toEqual([[assets[0].id], [assets[0].id]]);
+      expect((host.querySelector('.edit-status-filter-control select') as HTMLSelectElement).value).toBe('edited');
+      expect(host.querySelector('.selection-bar')?.textContent).toContain('1 selected');
+      expect(content.scrollTop).toBe(235);
+      if (after) {
+        expect(host.querySelector('.edited-badge')).not.toBeNull();
+        expect(host.querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
+      } else {
+        expect(host.querySelector('.photo-card')).toBeNull();
+        changeEditFilter('unedited');
+        expect(host.querySelector('.photo-card.selected')).not.toBeNull();
+        expect(host.querySelector('.edited-badge')).toBeNull();
+      }
+    },
+  );
+
+  it('aborts hidden status requests and ignores their late result after Home return', async () => {
+    const stale = deferred<Record<string, boolean>>();
+    const latest = deferred<Record<string, boolean>>();
+    api.recent.mockResolvedValue([assets[0]]);
+    api.statuses.mockReturnValueOnce(stale.promise).mockReturnValueOnce(latest.promise);
+    await mountPersistentGallery();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const staleSignal = api.statuses.mock.calls[0][1] as AbortSignal;
+    await act(async () => navigatePersistentHome('/anshitsu/asset-0'));
+    expect(staleSignal.aborted).toBe(true);
+    expect(api.statuses).toHaveBeenCalledTimes(1);
+    await act(async () => navigatePersistentHome('/'));
+    await act(async () => latest.resolve({ [assets[0].id]: true }));
+    await act(async () => stale.resolve({ [assets[0].id]: false }));
+    expect(host.querySelector('.edited-badge')).not.toBeNull();
+    expect(api.statuses.mock.calls.map(([ids]) => ids)).toEqual([[assets[0].id], [assets[0].id]]);
   });
 
   it('keeps unknown edit statuses visible while the lookup is pending, then applies the filter', async () => {
