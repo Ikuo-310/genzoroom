@@ -27,20 +27,53 @@ export function StackContextMenu({
 }) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
-  const firstControl = useRef<HTMLInputElement>(null);
+  const lastFocusedControl = useRef<HTMLInputElement | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useLayoutEffect(() => {
+  const reposition = useCallback(() => {
     const bounds = menuRef.current?.getBoundingClientRect();
     if (!bounds) return;
-    setPosition({
+    const next = {
       left: Math.max(8, Math.min(point.x, window.innerWidth - bounds.width - 8)),
       top: Math.max(8, Math.min(point.y, window.innerHeight - bounds.height - 8)),
-    });
-    (firstControl.current ?? menuRef.current)?.focus();
-  }, [point, members]);
+    };
+    setPosition(current => current?.left === next.left && current.top === next.top ? current : next);
+  }, [point]);
+
+  useLayoutEffect(() => {
+    reposition();
+    const menu = menuRef.current;
+    if (!menu) return;
+    const sections = menu.querySelectorAll('section');
+    const firstEnabled = [...sections].flatMap(section => [...section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')])
+      .find(control => !control.disabled);
+    (firstEnabled ?? menu).focus();
+  }, [point, reposition]);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(reposition);
+    observer?.observe(menu);
+    window.addEventListener('resize', reposition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', reposition);
+    };
+  }, [reposition]);
+
+  useLayoutEffect(() => {
+    const focused = lastFocusedControl.current;
+    if (!focused || (focused.isConnected && !focused.disabled)) return;
+    const menu = menuRef.current;
+    if (menu && !menu.contains(document.activeElement)) {
+      // Only recover focus when its former control became unusable; async content must not steal active focus.
+      menu.focus();
+    }
+    lastFocusedControl.current = null;
+  }, [members, editStatuses, editStatusState, queueLoaded, queueCurrent, queueError, queueFor, selectionAvailable]);
 
   useEffect(() => {
     const outside = (event: PointerEvent) => {
@@ -65,13 +98,17 @@ export function StackContextMenu({
         : unresolvedEditStatus || editStatusState !== 'ready' ? 'error' : 'empty';
 
   const menu = <div ref={menuRef} className="stack-photo-context-menu workspace-menu-surface" role="dialog" tabIndex={-1}
+    onFocusCapture={event => {
+      const target = event.target;
+      lastFocusedControl.current = target instanceof HTMLInputElement ? target : null;
+    }}
     aria-label={t('photos.stackMenu.label')} style={{ left: position?.left ?? point.x, top: position?.top ?? point.y, visibility: position ? 'visible' : 'hidden' }}>
     <section aria-labelledby="stack-darkroom-heading">
       <h3 id="stack-darkroom-heading">{t('photos.stackMenu.darkroom')}</h3>
       {darkroomStatus === 'unavailable' ? <p role="status">{t('photos.stackMenu.membersUnavailable')}</p>
         : darkroomStatus === 'empty' ? <p role="status">{t('photos.stackMenu.noCandidates')}</p>
-          : validMembers.map((member, index) => <label className="stack-photo-menu-row" key={member.id.toLowerCase()}>
-            <input ref={index === 0 ? firstControl : undefined} type="checkbox" checked={selectedIds.has(member.id.toLowerCase())}
+          : validMembers.map(member => <label className="stack-photo-menu-row" key={member.id.toLowerCase()}>
+            <input type="checkbox" checked={selectedIds.has(member.id.toLowerCase())}
               onChange={event => onDarkroomToggle(member, event.currentTarget.checked)} />
             <FilenameDisplay filename={member.filename} />
           </label>)}
@@ -88,12 +125,12 @@ export function StackContextMenu({
               {editStatusState === 'partial' && <p role="status">{t('photos.stackMenu.partial')}</p>}
               {editStatusState === 'error' && <p role="alert">{t('photos.stackMenu.editStatusError')}</p>}
               {unresolvedEditStatus && editStatusState === 'ready' && <p role="status">{t('photos.stackMenu.partial')}</p>}
-              {queueMembers.map((member, index) => {
+              {queueMembers.map(member => {
               const row = queueFor(member.id);
               const queued = row.status !== undefined;
               const locked = row.busy || !queueCurrent || !row.known || ['waiting', 'encoding', 'registering'].includes(row.status ?? '');
               return <label className="stack-photo-menu-row" key={member.id.toLowerCase()}>
-                <input ref={index === 0 && darkroomStatus !== 'ready' ? firstControl : undefined} type="checkbox" checked={queued}
+                <input type="checkbox" checked={queued}
                   disabled={locked} onChange={event => onQueueToggle(member, event.currentTarget.checked)} />
                 <FilenameDisplay filename={member.filename} />
               </label>;
