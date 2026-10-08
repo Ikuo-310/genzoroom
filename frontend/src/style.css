@@ -376,7 +376,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-photo-context-menu h3 { margin: 4px 5px 7px; color: #ddd; font-size: 0.8rem; font-weight: 650; }
 .stack-photo-context-menu p { margin: 4px 5px; color: #aaa; font-size: 0.75rem; }
 .stack-photo-menu-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 4px 5px; border-radius: 3px; color: #ddd; font-size: 0.78rem; }
-.stack-photo-menu-row:not(:has(input:disabled)):is(:hover, :focus-within) { background: #38383b; }
+.stack-photo-menu-row:not(:has(input:disabled)):hover { background: #38383b; }
 .stack-photo-menu-row input {
   appearance: none;
   box-sizing: border-box;
