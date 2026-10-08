@@ -173,12 +173,11 @@ h2 { margin: 0; font-size: 1.35rem; }
 .home-control { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .home-control-label { color: var(--text-secondary); font-size: 0.74rem; line-height: 1.2; white-space: nowrap; }
 .home-control select { max-width: 100%; padding: 4px 22px 4px 8px; color: var(--text-primary); background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: 6px; font: inherit; font-size: 0.82rem; }
-.home-toolbar-select-sizing { display: inline-grid; grid-template-areas: "select"; max-width: 100%; vertical-align: middle; }
-.home-toolbar-select-sizing select { width: 100%; min-width: 0; grid-area: select; box-sizing: border-box; padding-right: 18px; }
-.home-toolbar-select-measure { grid-area: select; visibility: hidden; box-sizing: border-box; max-width: 100%; overflow: hidden; padding: 4px 18px 4px 8px; border: 1px solid transparent; font: inherit; font-size: 0.82rem; white-space: nowrap; }
 .home-control select:focus-visible { outline: 3px solid var(--text-primary); outline-offset: 2px; }
 .stack-filter-control select { width: auto; min-width: 88px; padding-right: 8px; }
 .photo-filter-control select { width: 88px; }
+.edit-status-filter-control select { width: auto; min-width: 88px; padding-right: 14px; }
+.develop-status-filter-control select, .recent-count-control select { width: auto; padding-right: 14px; }
 .gallery-message { margin: 0; color: var(--text-secondary); }
 .error-text { color: #ffbbae; }
 /* Empty tracks must remain so sparse results keep the selected thumbnail density. */
