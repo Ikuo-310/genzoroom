@@ -381,6 +381,10 @@ describe('Home and thumbnail layout', () => {
     const selectRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.home-select-shell select');
     expect(selectRule.style.getPropertyValue('appearance')).toBe('');
     expect(selectRule.style.getPropertyValue('position')).toBe('absolute');
+    const shellRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.home-select-shell');
+    expect(shellRule.style.getPropertyValue('--home-select-native-reserve')).toBe('12px');
+    const measureRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.home-select-measure');
+    expect(measureRule.style.getPropertyValue('padding')).toContain('var(--home-select-native-reserve)');
     expect(Array.from(stylesheet.sheet.cssRules).some(rule => rule.selectorText === '.edit-status-filter-control select'
       && Number.parseFloat(rule.style.getPropertyValue('min-width')) >= 88)).toBe(false);
     const narrowScreen = Array.from(stylesheet.sheet.cssRules).find((rule) => rule.conditionText?.includes('max-width: 760px'));
