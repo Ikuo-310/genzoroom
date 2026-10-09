@@ -145,6 +145,10 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const [trashMenu, setTrashMenu] = useState<{ groupId: string; assetId: string; x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    // A body portal survives the hidden Home panel unless its transient intent is discarded.
+    if (!active) setTrashMenu(null);
+  }, [active]);
   // A trash-only uncertainty belongs to a Stack already removed from the draft; it must not lock unrelated retries.
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
@@ -671,7 +675,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       </section>
       </div>
     </div>
-    {trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && canReserveStackTrash(group, trashMenu.assetId)) && <StackTrashMenu
+    {active && trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && canReserveStackTrash(group, trashMenu.assetId)) && <StackTrashMenu
       point={trashMenu} checked={!!draft.groups.find(group => group.id === trashMenu.groupId)?.trashAssetIds?.includes(trashMenu.assetId)}
       onToggle={() => dispatch({ type: 'trash', groupId: trashMenu.groupId, assetId: trashMenu.assetId })} onClose={() => setTrashMenu(null)} />}
     {trashFailed && sendStatus !== 'trashIncomplete' && <p role="alert">{t('stackManagement.trashIncomplete')}</p>}

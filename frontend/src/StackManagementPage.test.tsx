@@ -1516,6 +1516,50 @@ it('limits trash reservation to the context menu and displays/cancels the overla
  }
 });
 
+it('closes the trash portal on keyboard Home tab activation and never restores it on return',async()=>{
+ api.recent.mockResolvedValue([existingMembers[0]]);
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount(); await click('.photo-card input'); await click('#home-stacks-tab');
+ const editor=host.querySelector('.stack-management-page');
+ const card=[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')].find(item=>item.textContent?.includes('hidden.jpg'))!;
+ await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ expect(document.querySelector('.stack-trash-context-menu')).not.toBeNull();
+ const recent=host.querySelector<HTMLButtonElement>('#home-recent-tab')!;
+ recent.focus(); await press('Enter',{},recent);
+ // jsdom omits Enter's native button activation; click preserves its no-pointerdown path.
+ await act(async()=>recent.click());
+ expect(host.querySelector('#home-stacks-panel')?.hasAttribute('hidden')).toBe(true);
+ expect(document.querySelector('.stack-trash-context-menu')).toBeNull();
+ const stacks=host.querySelector<HTMLButtonElement>('#home-stacks-tab')!;
+ stacks.focus(); await press('Enter',{},stacks); await act(async()=>stacks.click());
+ expect(host.querySelector('.stack-management-page')).toBe(editor);
+ expect(document.querySelector('.stack-trash-context-menu')).toBeNull();
+ expect(host.querySelector('.stack-trash-overlay')).toBeNull();
+ await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ await act(async()=>document.querySelector<HTMLButtonElement>('.stack-trash-menu-item')!.click());
+ expect(host.querySelector('.stack-trash-overlay')).not.toBeNull();
+ expect(document.querySelector('.stack-trash-context-menu')).toBeNull();
+});
+
+it('dismisses the trash menu with Escape or an outside pointer without changing reservations',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[0]]});
+ const card=[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')].find(item=>item.textContent?.includes('hidden.jpg'))!;
+ for(const dismissal of ['escape','outside']) {
+  card.focus();
+  await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+  expect(document.querySelector('.stack-trash-context-menu')).not.toBeNull();
+  if(dismissal==='escape') {
+   await press('Escape',{},document.activeElement!);
+   expect(document.activeElement).toBe(card);
+  } else {
+   await act(async()=>document.body.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true})));
+  }
+  expect(document.querySelector('.stack-trash-context-menu')).toBeNull();
+  expect(host.querySelector('.stack-trash-overlay')).toBeNull();
+ }
+});
+
 it('disables reserved Stack edits and D&D without blocking reservation cancellation',async()=>{
  api.resolve.mockResolvedValue([existingStack]);
  await mount('/stack',{selectedAssets:[...photos,existingMembers[0]]});

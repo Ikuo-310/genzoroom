@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- STACK management can reserve existing non-COVER, non-RAW members for Immich's normal trash through a right-click menu, cancel reservations, and undo one local edit. Confirmed Send applies reservations alongside Stack changes without permanently deleting photos. Newly added or moved-in photos remain outside trash eligibility.
 - Home's tab bar now includes STACK management between the four browsing tabs and Export management. STACK candidates and unmatched photos appear in independently scrolling upper and lower frames; drag the separator to adjust the initial 2:1 split from 1:1 to 4:1. The lower frame accepts Stack-member removal drops, and Stack filenames use Gallery's middle-ellipsis display.
 - STACK editing drafts and Undo remain available when switching Home tabs or visiting Anshitsu during the same SPA session. `S` opens the STACK tab with or without a Gallery selection; no selection resumes the previous session or shows an empty first session.
 - Gallery Stack Cover cards in Recent, Albums, Calendar, and Favorites can open all selected Stack assets in Anshitsu. Initial selection prefers every unexported Non-RAW asset and falls back to every unexported RAW asset; format badges toggle all eligible assets of that format, and the Stack context menu supports individual Anshitsu selection and per-asset Export Queue changes. Manual selections are shared across Gallery tabs for the browser session, and exported or inconsistent Stack candidates are handled safely.
@@ -121,6 +122,7 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 
 ### Fixed
 
+- STACK trash protects both the original and current COVER, preserves completed Stack updates when trash fails, and distinguishes uncertain trash outcomes while allowing independent failed Stack candidates to be retried. Reserved Stacks show unavailable editing actions, and the trash menu closes when leaving the STACK tab.
 - Fixed outer-page scrolling in Chrome by containing STACK accessibility labels within their frame, and added scrollbar clearance so Firefox's overlay scrollbar does not crowd the last card. Empty unmatched frames now shrink with their Grid track instead of clipping their contents.
 - Fixed Export registration rejecting healthy source/output Stack ownership because unrelated Immich Stacks were malformed or ambiguous; unsafe ownership of the export targets still fails safely.
 

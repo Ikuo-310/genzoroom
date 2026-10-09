@@ -48,9 +48,13 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
                     if corruption == 'trash_member_owned': visible = [*current, stack(SECOND_STACK_ID, B, [B, D])]
                     if corruption == 'singleton_owned' and singleton: visible = [*current, stack(SECOND_STACK_ID, A, [A, D])]
                 return httpx.Response(200, json=visible)
+            if path.startswith('/api/stacks/'):
+                found = next((s for s in current if s['id'] == path.rsplit('/', 1)[-1]), None)
+                return httpx.Response(200, json=found) if found else httpx.Response(404)
+            assert path == f'/api/assets/{B}'
             asset_reads += 1
-            if detail_status is not None and asset_reads >= 3: return httpx.Response(detail_status, json={'error':'PRIVATE RESPONSE BODY'})
-            force_stack = corruption == 'detail_stack' and asset_reads >= 3
+            if detail_status is not None and asset_reads >= 2: return httpx.Response(detail_status, json={'error':'PRIVATE RESPONSE BODY'})
+            force_stack = corruption == 'detail_stack' and asset_reads >= 2
             if preflight_detail is not None and asset_reads == 1:
                 return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.jpg', 'isTrashed': False, **preflight_detail})
             return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.dng' if raw else 'photo.jpg', 'isTrashed': False,
@@ -134,6 +138,10 @@ def test_batch_recreates_and_creates_stacks_before_independent_trash_outcomes():
         if request.method == 'GET':
             if path == '/api/stacks':
                 return httpx.Response(200, json=current)
+            if path.startswith('/api/stacks/'):
+                found = next((s for s in current if s['id'] == path.rsplit('/', 1)[-1]), None)
+                return httpx.Response(200, json=found) if found else httpx.Response(404)
+            assert path.startswith('/api/assets/')
             asset_id = path.rsplit('/', 1)[-1]
             owner = next((s for s in current if asset_id in {a['id'] for a in s['assets']} or asset_id == s['primaryAssetId']), None)
             primary = owner['primaryAssetId'] if owner else None
@@ -203,6 +211,10 @@ def test_retry_after_release_preserves_original_primary_while_creating_new_stack
         if request.method == 'GET':
             if request.url.path == '/api/stacks':
                 return httpx.Response(200, json=current)
+            if request.url.path.startswith('/api/stacks/'):
+                found = next((s for s in current if s['id'] == request.url.path.rsplit('/', 1)[-1]), None)
+                return httpx.Response(200, json=found) if found else httpx.Response(404)
+            assert request.url.path == f'/api/assets/{C}'
             return httpx.Response(200, json={'id': C, 'originalFileName': 'photo.jpg', 'isTrashed': False,
                                             'stack': {'id': STACK_ID, 'primaryAssetId': A} if any(s['id'] == STACK_ID for s in current) else None})
         body = json.loads(request.content) if request.content else None
@@ -293,6 +305,9 @@ def test_success_logs_snapshot_counts_and_each_passed_condition(monkeypatch):
     try:
         results, _ = run_trash()
         assert results[0].status == 'success' and results[0].trashStatus == 'success'
+        created = [entry['context'] for entry in entries if entry.get('event') == 'create.verify']
+        assert len(created) == 1 and created[0]['matches'] is True
+        assert not any(entry.get('event') == 'verify.failed' for entry in entries)
         checks = [entry['context'] for entry in entries if entry.get('event') == 'trash.verify']
         by_step = {entry['verificationStep']: entry for entry in checks}
         assert by_step['stack_list_parse']['passed'] is True
@@ -325,6 +340,23 @@ def test_asset_detail_http_error_logs_status_code_and_exception_type(monkeypatch
         assert 'PRIVATE RESPONSE BODY' not in repr(entries)
     finally:
         backend_logger.set_level('off')
+
+
+@pytest.mark.parametrize('level', ['off', 'debug'])
+@pytest.mark.parametrize('kwargs', [{'detail_status': 503}, {'corruption': 'detail_stack'}])
+def test_asset_detail_failure_injection_is_independent_of_diagnostics(level, kwargs):
+    from backend_logging import backend_logger
+    previous_level = backend_logger.get_level()
+    backend_logger.set_level(level)
+    try:
+        results, calls = run_trash(**kwargs)
+        assert results[0].status == 'success'
+        assert results[0].trashStatus == 'blocked'
+        assert results[0].errorCode == 'trash_verification_failed'
+        assert [call[0] for call in calls] == ['DELETE', 'POST']
+        assert all(call[1] != '/api/assets' for call in calls)
+    finally:
+        backend_logger.set_level(previous_level)
 
 
 @pytest.mark.parametrize('singleton', [False, True])

@@ -1,6 +1,22 @@
 # GenzoRoom 開発ノート
 
-Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のExport / 出力管理タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
+
+## STACKゴミ箱予約・監査修正の完了記録（2026-10-09）
+
+`feature/stack-trash`で、既存STACKの非COVER・非RAWメンバーを右クリックからゴミ箱予約し、既存の「Immichへ送信」でSTACK編集と一括反映する機能を実装した。通常のメニュー項目で予約・取消しを行い、予約中はサムネイル中央にゴミ箱アイコンを表示する。予約・取消しは既存の1ステップUndoに含める。PurgeはSTACK所属を編集する操作であり、AssetをImmichのゴミ箱へ移す操作とは区別する。取得時点の元STACKメンバーだけが予約でき、Add・D&Dで追加した素材、元COVER、現在COVER、RAWは予約不可とした。
+
+送信は旧STACK解除、予約対象を除く残存メンバーの再作成、最新状態の検証、`DELETE /assets`の`force: false`による通常ゴミ箱移動の順で行う。残存1枚ならSTACKを作成しない。STACK更新に失敗すればゴミ箱へ進まず、ゴミ箱だけが失敗しても成功済みSTACKを巻き戻さない。成功済み候補は再送対象に戻さず、STACK結果とゴミ箱結果を分けて表示する。
+
+実機確認と自動テストは区別する。利用者から、NAS・Immichでの正常ケース確認日は**2026-10-09**との報告を受けた。確認した枚数別ケースの内訳は、この記録では特定していない。共有された実機診断ログでは旧STACK解除HTTP 204、新STACK作成HTTP 201、検証HTTP 200／`matches: true`まで成功し、ゴミ箱前の全体判定で停止する問題を確認した。正常676件に対して無関係な不正STACK 3件・隔離メンバー6件が存在したためで、検証を操作対象STACK・残存／予約Assetへの関連性と非所属の証明可能性に限定した。関連する不整合や所属を証明できない破損データは引き続き停止する。Homeの異常シングルSTACK検出と赤い「1」表示は変更していない。今回CodexからNAS・Immich実機操作は行っていない。
+
+初回Focused Auditの**High 2 / Medium 3 / Low 2**を段階的に修正した。Highは、旧STACK解除後の再作成失敗で失われた元COVER保護を`trashSource`としてMANUAL再送分類から分離して保持する修正と、解除前に最新Asset詳細の`stack.primaryAssetId`を照合する修正。Mediumは、取得時点の所属を基準に追加素材の予約を拒否する修正、ゴミ箱だけの失敗が独立した確定失敗候補の再送を妨げない修正、ゴミ箱APIの5xxを結果不明と分類する修正。Lowは、予約中のUI・D&DとReducerの制約を揃え、許可される未所属素材の追加を維持する修正と、元COVER保護・Undo・再送・混在バッチなど複合経路テストの補強だった。
+
+最終Focused Auditは**High 0 / Medium 0 / Low 2**。残ったLowは、キーボードでHomeタブを切り替えた際にbody Portalのゴミ箱メニューが残る問題と、Backendテストが単一STACK GETにもAsset形式を返し、失敗注入のAsset取得回数がDiagnosticsに依存する問題だった。今回、非アクティブ時のPortal描画抑止とメニュー状態破棄、キーボードタブ切替・復帰・Escape／外側クリックの回帰テスト、APIルート別GETモック、Asset詳細だけのカウント、debug正常時の作成後検証成功、Diagnostics off/debugで同じ失敗注入結果となるテストを追加・修正した。本番Backendの処理は変更していない。
+
+既知の制約として、最後の検証からImmich書き込みまでの外部並行変更を原子的には防止できない。自動再送・分散ロック・削除rollbackは導入していない。実機ブラウザーでのキーボードタブ切替と復帰時の表示、および今回修正後のNAS・Immich動作は利用者側の確認対象とする。
+
+今回の自動検証はFrontend関連6ファイル**174 passed**、指定Windows `.venv`のPython 3.14.5でBackend STACK関連**106 passed**。Frontend typecheck、production build、`git diff --check`も成功した。元COVERの再編集・Undo・再送、最新COVER照合、追加素材の予約拒否、独立候補の再送、5xx／timeoutの結果分類を含む既存回帰テストを再実行した。初回のサンドボックス実行ではVitest一時ファイルのENOENTとBackendテストの停止が発生し、同じテストコマンドを通常環境で再実行して成功を確認した。buildの既存500 kB超chunk警告は残る。実機確認とは別の検証結果であり、新しい網羅監査を実施したという意味ではない。
 
 ## Gallery STACK暗室送り Phase 1〜5 完了・最終横断監査（2026-10-08）
 
