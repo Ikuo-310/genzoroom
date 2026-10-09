@@ -5,6 +5,19 @@ export function isSingletonImmichStack(group: { origin?: string; originalMemberI
   return group.origin === 'immich' && group.originalMemberIds?.length === 1;
 }
 
+export function stackTrashSource(group: DraftStack) {
+  return group.origin === 'immich'
+    ? { stackId: group.immichStackId, memberIds: group.originalMemberIds, primaryAssetId: group.originalPrimaryAssetId }
+    : group.trashSource;
+}
+
+export function canReserveStackTrash(group: DraftStack, assetId: string) {
+  const source = stackTrashSource(group);
+  const asset = group.members.find(member => member.id === assetId);
+  return !!source && source.memberIds.length > 1 && source.memberIds.includes(assetId)
+    && !!asset && !asset.is_raw && assetId !== group.coverAssetId && assetId !== source.primaryAssetId;
+}
+
 function sameMemberIds(current: readonly string[], original: readonly string[]) {
   const ids = new Set(current);
   return ids.size === current.length && new Set(original).size === original.length

@@ -135,3 +135,35 @@ it('retains reservations after failed replacement and retries creation without d
  expect(retry.operations).toHaveLength(1);expect(retry.operations[0]).toMatchObject({type:'create',memberIds:['a','c'],trashAssetIds:['b']});
  expect(retry.operations[0].stackId).toBeUndefined();
 });
+
+it('keeps original COVER and member provenance through failed replacement, editing, Undo and retries',()=>{
+ const original3:DraftStack={...original,members:[a,b,c],originalMemberIds:['a','b','c']};
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[original3],unmatched:[d]},assets:[a,b,c,d]});
+ draft=reduce(draft,{type:'cover',groupId:'old',assetId:'b'});
+ draft=reduce(draft,{type:'trash',groupId:'old',assetId:'c'});
+ const plan=buildStackWritePlan(draft.groups,sources(draft));
+ draft=reduce(draft,{type:'writeResults',plan,results:[{operationId:'old',status:'failed',releasedStackId:'stack',trashStatus:'blocked'}]});
+ expect(reduce(draft,{type:'trash',groupId:'old',assetId:'a'})).toBe(draft);
+ expect(()=>buildStackWritePlan([{...draft.groups[0],trashAssetIds:['a']}],sources(draft))).toThrow('Invalid trash reservation');
+ draft=reduce(draft,{type:'trash',groupId:'old',assetId:'c'});
+ draft=reduce(draft,{type:'cover',groupId:'old',assetId:'c'});
+ draft=reduce(draft,{type:'undo'});
+ draft=reduce(draft,{type:'select',assetId:'d'});
+ draft=reduce(draft,{type:'add',targetGroupId:'old'});
+ expect(reduce(draft,{type:'trash',groupId:'old',assetId:'d'})).toBe(draft);
+ expect(reduce(draft,{type:'trash',groupId:'old',assetId:'a'})).toBe(draft);
+ draft=reduce(draft,{type:'trash',groupId:'old',assetId:'c'});
+ const retry=buildStackWritePlan(draft.groups,sources(draft));
+ expect(retry.operations[0]).toMatchObject({type:'create',memberIds:['a','b','d'],trashAssetIds:['c'],expectedMemberIds:['a','b','c'],expectedPrimaryAssetId:'a'});
+ draft=reduce(draft,{type:'writeResults',plan:retry,results:[{operationId:'old',status:'failed',trashStatus:'blocked'}]});
+ expect(reduce(draft,{type:'trash',groupId:'old',assetId:'a'})).toBe(draft);
+ expect(buildStackWritePlan(draft.groups,sources(draft)).operations).toEqual(retry.operations);
+});
+
+it('rejects invalid added reservations before unchanged completion or batch generation',()=>{
+ for(const group of [{...original,members:[a,b,c],trashAssetIds:['c']},
+   {...original,members:[a,b,c,d],trashAssetIds:['c']},
+   {...manual,trashAssetIds:['c']}]) {
+  expect(()=>buildStackWritePlan([group],[original])).toThrow('Invalid trash reservation');
+ }
+});

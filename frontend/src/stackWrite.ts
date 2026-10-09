@@ -1,4 +1,5 @@
 import type { DraftStack } from './stackCandidateDetection';
+import { canReserveStackTrash, stackTrashSource } from './immichStackDraft';
 
 export type StackWriteOperation = { operationId: string; type: 'create' | 'update' | 'delete'; stackId?: string; memberIds?: string[]; primaryAssetId?: string; trashAssetIds?: string[]; expectedMemberIds?: string[]; expectedPrimaryAssetId?: string };
 export type StackWriteResult = { operationId: string; status: 'success' | 'failed' | 'unknown' | 'blocked'; stackId?: string; releasedStackId?: string; errorCode?: string; trashStatus?: 'success' | 'failed' | 'unknown' | 'blocked' };
@@ -24,7 +25,8 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
   };
   for (const group of groups) {
     const trashAssetIds = [...(group.trashAssetIds ?? [])];
-    if (new Set(trashAssetIds).size !== trashAssetIds.length || trashAssetIds.some(id => !group.members.some(asset => asset.id === id && !asset.is_raw) || id === group.coverAssetId || group.origin === 'immich' && id === group.originalPrimaryAssetId)) throw new Error('Invalid trash reservation');
+    if (new Set(trashAssetIds).size !== trashAssetIds.length || trashAssetIds.some(id => !canReserveStackTrash(group, id))) throw new Error('Invalid trash reservation');
+    const trashSource = stackTrashSource(group);
     const memberIds = group.members.filter(asset => !trashAssetIds.includes(asset.id)).map(asset => asset.id);
     if (new Set(memberIds).size !== memberIds.length || memberIds.length < 1 || !memberIds.includes(group.coverAssetId)) throw new Error('Invalid draft membership');
     for (const id of [...memberIds, ...trashAssetIds]) {
@@ -38,7 +40,7 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
       if (matches.length !== 1) throw new Error('Ambiguous lineage');
       const snapshot = matches[0];
       if (!snapshot || snapshot.origin !== 'immich') throw new Error('Missing original Stack');
-      if (memberIds.length === snapshot.originalMemberIds.length && snapshot.originalMemberIds.every(id => memberIds.includes(id)) && group.coverAssetId === snapshot.originalPrimaryAssetId) {
+      if (!trashAssetIds.length && memberIds.length === snapshot.originalMemberIds.length && snapshot.originalMemberIds.every(id => memberIds.includes(id)) && group.coverAssetId === snapshot.originalPrimaryAssetId) {
         // A dissolve-only singleton must remain visible after sending, so it is not completed as unchanged.
         if (snapshot.originalMemberIds.length === 1) continue;
         unchanged.push(group.id); continue;
@@ -48,8 +50,8 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
     if (memberIds.length < 2 && !trashAssetIds.length) throw new Error('Invalid draft membership');
     operations.push({ operationId: allocateOperationId(group.id, group.id), type: group.origin === 'immich' ? 'update' : 'create',
       ...(group.origin === 'immich' ? { stackId: group.immichStackId } : {}), memberIds, primaryAssetId: group.coverAssetId,
-      ...(trashAssetIds.length ? { trashAssetIds, expectedMemberIds: group.origin === 'immich' ? [...group.originalMemberIds] : group.members.map(asset => asset.id),
-        expectedPrimaryAssetId: group.origin === 'immich' ? group.originalPrimaryAssetId : group.coverAssetId } : {}) });
+      ...(trashAssetIds.length ? { trashAssetIds, expectedMemberIds: [...trashSource!.memberIds],
+        expectedPrimaryAssetId: trashSource!.primaryAssetId } : {}) });
   }
   for (const original of source) {
     if (original.origin === 'immich' && !groups.some(group => group.origin === 'immich' && group.immichStackId === original.immichStackId)) {

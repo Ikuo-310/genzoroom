@@ -257,6 +257,10 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                     owner = owners.get(asset_id)
                     if owner != op.stackId or (body.get("stack") is not None and UUID(body["stack"]["id"]) != op.stackId):
                         raise ValueError("Changed asset ownership")
+                    # The detail response can be newer than the batch's initial Stack snapshot.
+                    if op.stackId and (body.get("stack") is None
+                                       or UUID(body["stack"]["primaryAssetId"]) != op.expectedPrimaryAssetId):
+                        raise ValueError("Changed source primary")
             except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError):
                 results[op.operationId] = StackWriteResult(operationId=op.operationId, status="failed", errorCode="trash_preflight_failed")
 

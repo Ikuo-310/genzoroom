@@ -10,7 +10,7 @@ from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STAC
 from test_stack_assets import stack
 
 
-def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False):
+def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
     calls = []
     stack_reads = 0
     asset_reads = 0
@@ -51,8 +51,10 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
             asset_reads += 1
             if detail_status is not None and asset_reads >= 3: return httpx.Response(detail_status, json={'error':'PRIVATE RESPONSE BODY'})
             force_stack = corruption == 'detail_stack' and asset_reads >= 3
+            if preflight_detail is not None and asset_reads == 1:
+                return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.jpg', 'isTrashed': False, **preflight_detail})
             return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.dng' if raw else 'photo.jpg', 'isTrashed': False,
-                                            'stack': {'id': NEW} if force_stack else {'id': STACK_ID} if any(s['id'] == STACK_ID for s in current) else None})
+                                            'stack': {'id': NEW, 'primaryAssetId': A} if force_stack else {'id': STACK_ID, 'primaryAssetId': A} if any(s['id'] == STACK_ID for s in current) else None})
         body = json.loads(request.content) if request.content else None
         calls.append((request.method, path, body))
         if path == '/api/assets':
@@ -117,6 +119,59 @@ def test_failed_replacement_reports_release_without_trash():
     assert results[0].status == 'failed' and str(results[0].releasedStackId) == STACK_ID
     assert results[0].trashStatus == 'blocked'
     assert [c[0] for c in calls] == ['DELETE', 'POST']
+
+
+@pytest.mark.parametrize('detail', [
+    {'stack': {'id': STACK_ID, 'primaryAssetId': B}},
+    {'stack': {'id': STACK_ID, 'primaryAssetId': C}},
+    {'stack': {'id': STACK_ID}},
+    {'stack': {'id': STACK_ID, 'primaryAssetId': 'bad'}},
+    {'stack': {'id': STACK_ID, 'primaryAssetId': None}},
+    {'stack': None},
+    {},
+])
+def test_latest_detail_primary_must_match_before_any_write(detail):
+    results, calls = run_trash(preflight_detail=detail, unrelated_invalid=True)
+    assert results[0].status == 'failed'
+    assert results[0].errorCode == 'trash_preflight_failed'
+    assert calls == []
+
+
+def test_retry_after_release_preserves_original_primary_while_creating_new_stack():
+    current = [stack(member_ids=[A, B, C])]
+    calls = []
+    creates = 0
+
+    def handler(request):
+        nonlocal current, creates
+        if request.method == 'GET':
+            if request.url.path == '/api/stacks':
+                return httpx.Response(200, json=current)
+            return httpx.Response(200, json={'id': C, 'originalFileName': 'photo.jpg', 'isTrashed': False,
+                                            'stack': {'id': STACK_ID, 'primaryAssetId': A} if any(s['id'] == STACK_ID for s in current) else None})
+        body = json.loads(request.content) if request.content else None
+        calls.append((request.method, request.url.path, body))
+        if request.url.path == f'/api/stacks/{STACK_ID}':
+            current = []
+            return httpx.Response(204)
+        if request.method == 'POST':
+            creates += 1
+            if creates == 1:
+                return httpx.Response(500)
+            current = [stack(NEW, B, [A, B])]
+            return written(ids=[A, B], primary=B)
+        return httpx.Response(204)
+
+    transport = httpx.MockTransport(handler)
+    reservation = dict(memberIds=[A, B], primaryAssetId=B, trashAssetIds=[C],
+                       expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A)
+    first = asyncio.run(apply_stacks('http://immich.example/api', 'key', StackApplyRequest(operations=[op('update', **reservation)]), transport=transport)).results[0]
+    assert first.status == 'failed' and str(first.releasedStackId) == STACK_ID
+    assert first.trashStatus == 'blocked'
+    retry = asyncio.run(apply_stacks('http://immich.example/api', 'key', StackApplyRequest(operations=[op('create', **reservation)]), transport=transport)).results[0]
+    assert retry.status == 'success' and retry.trashStatus == 'success'
+    assert [call[0] for call in calls] == ['DELETE', 'POST', 'POST', 'DELETE']
+    assert calls[-1][2] == {'ids': [C], 'force': False}
 
 
 @pytest.mark.parametrize(('corruption','step','reason'), [

@@ -8,6 +8,8 @@ export type DraftStack = {
   coverAssetId: string;
   modified?: boolean;
   trashAssetIds?: readonly string[];
+  // Retry classification must not discard the acquisition-time trash eligibility snapshot.
+  trashSource?: { stackId: string; memberIds: readonly string[]; primaryAssetId: string };
   evidence: { name: MatchState; nameReason: NameReason; time: MatchState; camera: MatchState; gps: MatchState };
 } & ({ origin: 'auto' | 'manual' } | {
   origin: 'immich'; immichStackId: string; originalPrimaryAssetId: string; originalMemberIds: readonly string[];

@@ -208,7 +208,8 @@ it('ignores invalid unmatched photo drops without replacing the current Undo sna
 });
 
 it('reserves only non-COVER non-RAW members, supports cancellation and Undo',()=>{
- let draft=initial();
+ const original:DraftStack={...source.groups[0],origin:'immich',immichStackId:'stack',originalPrimaryAssetId:source.groups[0].coverAssetId,originalMemberIds:['a','b','c']};
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{...source,groups:[original,source.groups[1]]},assets});
  expect(reduce(draft,{type:'trash',groupId:first,assetId:'a'})).toBe(draft);
  expect(reduce(draft,{type:'trash',groupId:first,assetId:draft.groups[0].coverAssetId})).toBe(draft);
  draft=reduce(draft,{type:'trash',groupId:first,assetId:'c'});
@@ -220,4 +221,20 @@ it('reserves only non-COVER non-RAW members, supports cancellation and Undo',()=
  expect(reduce(cancelled,{type:'undo'}).groups[0].trashAssetIds).toEqual(['c']);
  expect(reduce(draft,{type:'undo'}).groups[0].trashAssetIds).toBeUndefined();
  expect(reduce(draft,{type:'initialize',source,assets}).groups[0].trashAssetIds).toBeUndefined();
+});
+
+it('rejects Add, unmatched drop and other-Stack members using acquisition membership',()=>{
+ const original:DraftStack={...source.groups[0],origin:'immich',immichStackId:'stack',originalPrimaryAssetId:'b',originalMemberIds:['a','b','c']};
+ const other:DraftStack={...source.groups[1],origin:'immich',immichStackId:'other',originalPrimaryAssetId:'e',originalMemberIds:['d','e']};
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[original,other],unmatched:source.unmatched},assets});
+ draft=reduce(draft,{type:'select',assetId:'x'});
+ draft=reduce(draft,{type:'add',targetGroupId:first});
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:'x'})).toBe(draft);
+ draft=reduce(draft,{type:'dropUnmatched',assetId:'y',targetGroupId:first});
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:'y'})).toBe(draft);
+ draft=reduce(draft,{type:'moveMember',assetId:'e',sourceGroupId:second,targetGroupId:first});
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:'e'})).toBe(draft);
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:'c'}).groups[0].trashAssetIds).toEqual(['c']);
+ const local=initial();
+ expect(reduce(local,{type:'trash',groupId:first,assetId:'c'})).toBe(local);
 });

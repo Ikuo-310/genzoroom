@@ -1488,10 +1488,10 @@ it('uses the shared red Immich action style and keeps send disabled when the ses
 });
 
 it('limits trash reservation to the context menu and displays/cancels the overlay', async()=>{
- const extra={...photos[1],id:'png',filename:'selected.png',format:'PNG'};
- await mount('/stack',{selectedAssets:[...photos,extra]});
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[existingMembers[0],singles[0]]});
  const cards=()=>[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')];
- const member=()=>cards().find(card=>card.textContent?.includes('selected.png'))!;
+ const member=()=>cards().find(card=>card.textContent?.includes('hidden.png'))!;
  await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
  const action=()=>document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
  expect(action().textContent).toBe('Move to trash');
@@ -1510,10 +1510,30 @@ it('limits trash reservation to the context menu and displays/cancels the overla
  await act(async()=>action().click());
  await act(async()=>i18n.changeLanguage('en'));
 
- for(const card of cards().filter(card=>!card.textContent?.includes('selected.png'))) {
+ for(const card of cards().filter(card=>card.classList.contains('stack-cover') || card.textContent?.includes(singles[0].filename))) {
   await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
   expect(document.querySelector('[role="menuitem"]')).toBeNull();
  }
+});
+
+it('does not offer trash for added or transferred photos',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[0],singles[0]]});
+ const [immich,auto]=Array.from(host.querySelectorAll<HTMLElement>('.stack-candidate-group'));
+ const unmatched=[...host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')].find(card=>card.textContent?.includes(singles[0].filename))!;
+ await act(async()=>unmatched.click());
+ await act(async()=>immich.querySelector<HTMLButtonElement>('.stack-set-target')!.click());
+ const added=[...immich.querySelectorAll<HTMLButtonElement>('.stack-photo')].find(card=>card.textContent?.includes(singles[0].filename))!;
+ await act(async()=>added.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+ expect(document.querySelector('[role="menu"]')).toBeNull();
+ const transferred=immich.querySelector<HTMLButtonElement>('[aria-label="Set hidden.jpg as COVER"]')!;
+ const transfer=dragTransfer({assetId:existingMembers[0].id,sourceGroupId:immich.dataset.stackId!});
+ await act(async()=>transferred.dispatchEvent(dragEvent('dragstart',transfer)));
+ await act(async()=>auto.dispatchEvent(dragEvent('drop',transfer)));
+ const moved=auto.querySelector<HTMLButtonElement>('[aria-label="Set hidden.jpg as COVER"]')!;
+ expect(moved).not.toBeNull();
+ await act(async()=>moved.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+ expect(document.querySelector('[role="menu"]')).toBeNull();
 });
 
 

@@ -16,7 +16,7 @@ import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
 import { useEditableStackDraft } from './useEditableStackDraft';
 import { useSelectedImmichStacks } from './useSelectedImmichStacks';
-import { isSingletonImmichStack, mergeImmichStackSource } from './immichStackDraft';
+import { canReserveStackTrash, isSingletonImmichStack, mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
 import { StackTrashMenu } from './StackTrashMenu';
@@ -608,7 +608,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
             selected={false} member trash={group.trashAssetIds?.includes(asset.id)}
-            onContextMenu={event => { if (!canEdit || asset.is_raw || asset.id === group.coverAssetId || group.origin === 'immich' && asset.id === group.originalPrimaryAssetId) return; event.preventDefault(); setTrashMenu({ groupId: group.id, assetId: asset.id, x: event.clientX, y: event.clientY }); }} cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)}
+            onContextMenu={event => { if (!canEdit || !canReserveStackTrash(group, asset.id)) return; event.preventDefault(); setTrashMenu({ groupId: group.id, assetId: asset.id, x: event.clientX, y: event.clientY }); }} cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)}
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
             onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: group.id })} onDragEnd={handleDragEnd}
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
@@ -666,7 +666,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       </section>
       </div>
     </div>
-    {trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && group.members.some(asset => asset.id === trashMenu.assetId && !asset.is_raw && asset.id !== group.coverAssetId && (group.origin !== 'immich' || asset.id !== group.originalPrimaryAssetId))) && <StackTrashMenu
+    {trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && canReserveStackTrash(group, trashMenu.assetId)) && <StackTrashMenu
       point={trashMenu} checked={!!draft.groups.find(group => group.id === trashMenu.groupId)?.trashAssetIds?.includes(trashMenu.assetId)}
       onToggle={() => dispatch({ type: 'trash', groupId: trashMenu.groupId, assetId: trashMenu.assetId })} onClose={() => setTrashMenu(null)} />}
     {trashFailed && sendStatus !== 'trashIncomplete' && <p role="alert">{t('stackManagement.trashIncomplete')}</p>}

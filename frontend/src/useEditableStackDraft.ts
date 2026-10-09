@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from 'react';
 import type { RecentAsset } from './assets';
-import { isSingletonImmichStack, isStackDraftModified, reconcileImmichLineage } from './immichStackDraft';
+import { canReserveStackTrash, isSingletonImmichStack, isStackDraftModified, reconcileImmichLineage, stackTrashSource } from './immichStackDraft';
 import { chooseStackCover, type DraftStack, type StackDetection } from './stackCandidateDetection';
 import type { StackWritePlan, StackWriteResult } from './stackWrite';
 
@@ -79,7 +79,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
       if (group.origin !== 'immich' || result?.releasedStackId !== group.immichStackId) return group;
       // A replacement can fail after its delete committed; retry must create, never delete again.
       const { immichStackId: _stack, originalMemberIds: _members, originalPrimaryAssetId: _primary, ...local } = group;
-      return { ...local, origin: 'manual' as const, modified: true };
+      return { ...local, origin: 'manual' as const, trashSource: stackTrashSource(group), modified: true };
     });
     return normalize({ ...state, groups, completedSourceIds, writeResults, selectedIds: new Set(), addTargetStackId: null, undoSnapshot: null });
   }
@@ -160,10 +160,9 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
   const group = state.groups.find(current => current.id === action.groupId);
   if (!group) return state;
   if (action.type === 'trash') {
-    const asset = group.members.find(member => member.id === action.assetId);
-    if (!asset || asset.is_raw || asset.id === group.coverAssetId || group.origin === 'immich' && asset.id === group.originalPrimaryAssetId || isSingletonImmichStack(group)) return state;
+    if (!canReserveStackTrash(group, action.assetId)) return state;
     const reserved = new Set(group.trashAssetIds ?? []);
-    if (reserved.has(asset.id)) reserved.delete(asset.id); else reserved.add(asset.id);
+    if (reserved.has(action.assetId)) reserved.delete(action.assetId); else reserved.add(action.assetId);
     return normalize({ ...state, groups: state.groups.map(current => current === group
       ? { ...group, trashAssetIds: [...reserved] } : current) });
   }
