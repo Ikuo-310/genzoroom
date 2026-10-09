@@ -214,8 +214,12 @@ it('reserves only non-COVER non-RAW members, supports cancellation and Undo',()=
  expect(reduce(draft,{type:'trash',groupId:first,assetId:draft.groups[0].coverAssetId})).toBe(draft);
  draft=reduce(draft,{type:'trash',groupId:first,assetId:'c'});
  expect(draft.groups[0].trashAssetIds).toEqual(['c']);expect(draft.modified).toBe(true);
+ expect(reduce(draft,{type:'purgeGroup',groupId:first})).toBe(draft);
  expect(reduce(draft,{type:'purgeMember',groupId:first,assetId:'c'})).toBe(draft);
  expect(reduce(draft,{type:'cover',groupId:first,assetId:'c'})).toBe(draft);
+ expect(reduce(draft,{type:'moveMember',assetId:'c',sourceGroupId:first,targetGroupId:second})).toBe(draft);
+ expect(reduce(draft,{type:'moveMember',assetId:'d',sourceGroupId:second,targetGroupId:first})).toBe(draft);
+ expect(reduce(draft,{type:'dropUnmatched',assetId:'y',targetGroupId:first}).groups[0].members.map(asset=>asset.id)).toContain('y');
  const cancelled=reduce(draft,{type:'trash',groupId:first,assetId:'c'});
  expect(cancelled.groups[0].trashAssetIds).toEqual([]);
  expect(reduce(cancelled,{type:'undo'}).groups[0].trashAssetIds).toEqual(['c']);

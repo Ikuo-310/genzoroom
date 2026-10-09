@@ -870,6 +870,7 @@
     "newStack": "新規STACK",
     "manual": "手動で構成したSTACK",
     "purgeGroup": "draft STACKを解体",
+    "cancelTrashBeforeEdit": "STACK編集の前にゴミ箱予約を取り消してください",
     "purgeMember": "{{filename}}をdraft STACKから外す",
     "addTarget": "追加先",
     "setCover": "{{filename}}をCOVERに設定",

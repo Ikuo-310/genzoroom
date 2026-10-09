@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 from stack_write import StackApplyRequest, apply_stacks
 from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STACK_ID
-from test_stack_assets import stack
+from test_stack_assets import IDS, stack
 
 
 def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, trash_status=500, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
@@ -112,6 +112,55 @@ def test_other_stack_updates_finish_before_trash():
     results, calls = run_trash(extra=True)
     assert all(r.status == 'success' for r in results)
     assert [c[0] for c in calls] == ['DELETE', 'POST', 'PUT', 'DELETE']
+
+
+def test_batch_recreates_and_creates_stacks_before_independent_trash_outcomes():
+    old_extra = str(UUID(int=8))
+    trash_extra = str(UUID(int=9))
+    second_new = str(UUID(int=101))
+    current = [stack(member_ids=[A, B, C]), stack(SECOND_STACK_ID, D, [D, old_extra])]
+    calls = []
+    operations = [
+        op('update', name='replace', memberIds=[A, C], primaryAssetId=A, trashAssetIds=[B],
+           expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A),
+        op('create', name='create', memberIds=[D, IDS[4]], primaryAssetId=D, trashAssetIds=[trash_extra],
+           expectedMemberIds=[D, IDS[4], trash_extra], expectedPrimaryAssetId=D),
+        op('delete', name='delete', stackId=SECOND_STACK_ID),
+    ]
+
+    def handler(request):
+        nonlocal current
+        path = request.url.path
+        if request.method == 'GET':
+            if path == '/api/stacks':
+                return httpx.Response(200, json=current)
+            asset_id = path.rsplit('/', 1)[-1]
+            owner = next((s for s in current if asset_id in {a['id'] for a in s['assets']} or asset_id == s['primaryAssetId']), None)
+            primary = owner['primaryAssetId'] if owner else None
+            return httpx.Response(200, json={'id': asset_id, 'originalFileName': 'photo.jpg', 'isTrashed': False,
+                                             'stack': {'id': owner['id'], 'primaryAssetId': primary} if owner else None})
+        body = json.loads(request.content) if request.content else None
+        calls.append((request.method, path, body))
+        if path == '/api/assets':
+            return httpx.Response(500 if body['ids'] == [B] else 400)
+        if request.method == 'DELETE':
+            stack_id = path.rsplit('/', 1)[-1]
+            current = [s for s in current if s['id'] != stack_id]
+            return httpx.Response(204)
+        if body['assetIds'][0] == A:
+            current.append(stack(NEW, A, [A, C]))
+            return written(ids=[A, C], primary=A)
+        current.append(stack(second_new, D, [D, IDS[4]]))
+        return written(ids=[D, IDS[4]], primary=D, stack_id=second_new)
+
+    result = asyncio.run(apply_stacks('http://immich.example/api', 'key', StackApplyRequest(operations=operations),
+                                      transport=httpx.MockTransport(handler))).results
+    assert [(item.status, item.trashStatus) for item in result] == [
+        ('success', 'unknown'), ('success', 'failed'), ('success', None),
+    ]
+    assert [call[1] for call in calls] == [
+        f'/api/stacks/{STACK_ID}', f'/api/stacks/{SECOND_STACK_ID}', '/api/stacks', '/api/stacks', '/api/assets', '/api/assets',
+    ]
 
 
 @pytest.mark.parametrize('changes', [{'trashAssetIds': [A]}, {'trashAssetIds': [B, B]}, {'expectedPrimaryAssetId': B}])

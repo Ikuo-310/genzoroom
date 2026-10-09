@@ -748,6 +748,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); min-width: 0; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px; }
 .stack-management-page .stack-photo { width: 100%; min-width: 0; padding: 0; overflow: hidden; text-align: left; }
 .stack-singleton-warning .stack-photo:disabled { opacity: 1; }
+.stack-management-page .stack-photo.stack-edit-disabled { cursor: not-allowed; opacity: 0.72; }
 .stack-management-page .stack-photo.stack-selection-active { background: var(--selection); border-color: var(--accent); }
 .stack-thumbnail { position: relative; aspect-ratio: 4 / 3; background: var(--bg-panel); }
 .stack-thumbnail img { width: 100%; height: 100%; object-fit: contain; }

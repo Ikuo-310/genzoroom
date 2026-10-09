@@ -1516,6 +1516,52 @@ it('limits trash reservation to the context menu and displays/cancels the overla
  }
 });
 
+it('disables reserved Stack edits and D&D without blocking reservation cancellation',async()=>{
+ api.resolve.mockResolvedValue([existingStack]);
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[0]]});
+ const groups=()=>Array.from(host.querySelectorAll<HTMLElement>('.stack-candidate-group'));
+ const immich=groups().find(group=>group.dataset.stackId==='draft:immich:'+existingStackId)!;
+ const auto=groups().find(group=>group!==immich)!;
+ const card=[...immich.querySelectorAll<HTMLButtonElement>('.stack-photo')].find(item=>item.textContent?.includes('hidden.jpg'))!;
+ const originalCover=immich.querySelector('.stack-cover .stack-filename')?.textContent;
+ const reserve=async()=>{
+  await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+  await act(async()=>document.querySelector<HTMLButtonElement>('.stack-trash-menu-item')!.click());
+ };
+ await reserve();
+ expect(immich.querySelector<HTMLButtonElement>('.stack-purge-group')?.disabled).toBe(true);
+ expect(immich.querySelector<HTMLButtonElement>('.stack-set-target')?.disabled).toBe(false);
+ expect(immich.querySelectorAll<HTMLButtonElement>('.stack-purge-member:disabled')).toHaveLength(3);
+ expect([...immich.querySelectorAll<HTMLButtonElement>('.stack-photo')].every(photo=>photo.getAttribute('aria-disabled')==='true' && !photo.draggable)).toBe(true);
+ await act(async()=>card.click());
+ expect(immich.querySelector('.stack-cover .stack-filename')?.textContent).toBe(originalCover);
+
+ const reservedSource=dragTransfer({assetId:existingMembers[0].id,sourceGroupId:immich.dataset.stackId!});
+ const blockedStart=dragEvent('dragstart',reservedSource);
+ await act(async()=>card.dispatchEvent(blockedStart));
+ expect(blockedStart.defaultPrevented).toBe(true);
+ const targetBefore=immich.querySelectorAll('.stack-photo').length;
+ const incoming=auto.querySelector<HTMLButtonElement>('.stack-photo')!;
+ const incomingTransfer=dragTransfer({assetId:incoming.dataset.assetId ?? photos[0].id,sourceGroupId:auto.dataset.stackId!});
+ const beforeIncoming=dragEvent('dragstart',incomingTransfer);
+ await act(async()=>incoming.dispatchEvent(beforeIncoming));
+ const overReserved=dragEvent('dragover',incomingTransfer);
+ await act(async()=>immich.dispatchEvent(overReserved));
+ expect(overReserved.defaultPrevented).toBe(false);
+ const dropReserved=dragEvent('drop',incomingTransfer);
+ await act(async()=>immich.dispatchEvent(dropReserved));
+ expect(immich.querySelectorAll('.stack-photo')).toHaveLength(targetBefore);
+
+ await reserve();
+ expect(immich.querySelector<HTMLButtonElement>('.stack-purge-group')?.disabled).toBe(false);
+ expect(immich.querySelectorAll<HTMLButtonElement>('.stack-purge-member:disabled')).toHaveLength(0);
+ expect([...immich.querySelectorAll<HTMLButtonElement>('.stack-photo')].every(photo=>photo.getAttribute('aria-disabled')!=='true' && photo.draggable)).toBe(true);
+ const restored=dragTransfer({assetId:incoming.dataset.assetId ?? photos[0].id,sourceGroupId:auto.dataset.stackId!});
+ const restoredOver=dragEvent('dragover',restored);
+ await act(async()=>immich.dispatchEvent(restoredOver));
+ expect(restoredOver.defaultPrevented).toBe(true);
+});
+
 it('does not offer trash for added or transferred photos',async()=>{
  api.resolve.mockResolvedValue([existingStack]);
  await mount('/stack',{selectedAssets:[...photos,existingMembers[0],singles[0]]});

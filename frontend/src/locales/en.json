@@ -880,6 +880,7 @@
     "newStack": "New Stack",
     "manual": "Manually assembled Stack",
     "purgeGroup": "Dissolve draft Stack",
+    "cancelTrashBeforeEdit": "Cancel the trash reservation before editing this Stack",
     "purgeMember": "Remove {{filename}} from draft Stack",
     "addTarget": "Add target",
     "setCover": "Set {{filename}} as COVER",
