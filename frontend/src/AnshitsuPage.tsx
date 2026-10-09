@@ -508,8 +508,10 @@ export function AnshitsuPage() {
     excludedIdsRef.current = nextExcluded;
     setExcludedIds(nextExcluded);
     // Reuse the confirmed in-memory Recipe/History, including its cursor, for this one restoration.
-    retainForUndo(undo.asset.id);
-    if (undo.wasActive) void activateAsset(undo.asset.id);
+    if (undo.wasActive) {
+      retainForUndo(undo.asset.id);
+      void activateAsset(undo.asset.id);
+    }
     logExclusion('undo', { assetId: undo.asset.id, index: undo.index });
     return true;
   };

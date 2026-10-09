@@ -146,6 +146,10 @@ describe('Anshitsu Filmstrip exclusion', () => {
   });
 
   it('excludes a validated inactive photo without redundant PUT, then restores its saved Recipe and History', async () => {
+    mocked.get.mockImplementation(async id => {
+      const saved = [...mocked.put.mock.calls].reverse().find(([savedId]) => savedId === id);
+      return saved ? { state: saved[1], revision: saved[2] + 1 } : { state: null };
+    });
     await mount([first, second, third]);
     await click('button[aria-label="Disable Basic"]');
     await click('.filmstrip-item[aria-label="second.jpg"]');
@@ -163,6 +167,38 @@ describe('Anshitsu Filmstrip exclusion', () => {
     expect(currentHistoryEntry()).toContain('Basic OFF');
     expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
     expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads a restored inactive photo after another writer updates its saved state', async () => {
+    const previous = editStateModule.createEditStateSnapshot(editSession(newSession(), { type: 'toggleColor' }), {
+      provider: 'immich', assetId: second.id, inputKind: 'immich-preview',
+    });
+    const latest = editStateModule.createEditStateSnapshot(editSession(newSession(), { type: 'toggleBasic' }), {
+      provider: 'immich', assetId: second.id, inputKind: 'immich-preview',
+    });
+    if (!previous.ok || !latest.ok) throw new Error('Invalid edit-state fixture');
+    let secondGets = 0;
+    mocked.get.mockImplementation(async id => id === second.id
+      ? { state: secondGets++ === 0 ? previous.value : latest.value, revision: secondGets === 1 ? 1 : 2 }
+      : { state: null });
+
+    await mount();
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(currentHistoryEntry()).toContain('Color OFF');
+    await click('.filmstrip-item[aria-label="first.jpg"]');
+    await excludePhoto(second.filename);
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(secondGets).toBe(1);
+
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(secondGets).toBe(2);
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    await click('button[aria-label="Enable Basic"]');
+    await click('.filmstrip-item[aria-label="first.jpg"]');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][2]).toBe(2);
   });
 
   it('saves Recipe, History and cursor before exclusion, restores them without edit Undo, then resumes normal Undo/Redo', async () => {
@@ -288,7 +324,7 @@ describe('Anshitsu Filmstrip exclusion', () => {
     expect(mocked.put).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['button', 'slider', 'number', 'paste', 'reset', 'history'] as const)
+  it.each(['button', 'slider', 'number', 'paste', 'history'] as const)
     ('expires exclusion Undo through the shared %s edit path and returns to History Undo', async path => {
       await mount();
       await click('button[aria-label="Disable Color"]');
@@ -309,13 +345,39 @@ describe('Anshitsu Filmstrip exclusion', () => {
         });
       } else {
         await click('button[aria-label="Disable Basic"]');
-        if (path === 'reset') await click('.workspace-section-action');
-        else await click('.edit-actions button');
+        await click('.edit-actions button');
       }
       await exclusionUndoKey();
       expect(filmstripPhotos()).toEqual(['second.jpg']);
       expect(currentPhoto()).toBe('second.jpg');
     });
+
+  it('expires exclusion Undo on Reset all alone, then Primary+Z undoes Reset through edit History', async () => {
+    const savedSession = editSession(editSession(newSession(), { type: 'toggleColor' }), { type: 'toggleBasic' });
+    const savedState = editStateModule.createEditStateSnapshot(savedSession, {
+      provider: 'immich', assetId: second.id, inputKind: 'immich-preview',
+    });
+    if (!savedState.ok) throw new Error('Invalid edit-state fixture');
+    mocked.get.mockImplementation(async id => id === second.id ? { state: savedState.value, revision: 4 } : { state: null });
+
+    await mount();
+    await filmstripKey('x');
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    await click('.develop-panel .workspace-section-action');
+    expect(container.querySelector('button[aria-label="Disable Basic"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Disable Color"]')).not.toBeNull();
+    expect(currentHistoryEntry()).toContain('Reset all');
+
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['second.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Enable Color"]')).not.toBeNull();
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    expect(container.querySelector<HTMLButtonElement>('.edit-actions button:nth-child(2)')?.disabled).toBe(false);
+    expect(mocked.put).not.toHaveBeenCalled();
+  });
 
   it('expires Undo after manual Filmstrip navigation while keeping all excluded photos hidden', async () => {
     await mount([first, second, third]);

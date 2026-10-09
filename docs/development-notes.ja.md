@@ -2,6 +2,20 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 暗室フィルムストリップ写真除外・復帰の完了記録（2026-10-10）
+
+サムネイル左上の独立した×ボタンと中央ショートカットレジストリの`X`で、暗室セッション内だけ写真を除外できるようにした。最後の1枚は除外不可。アクティブ写真の除外後は次の写真（末尾なら前の写真）へ移動し、非アクティブ写真の除外では表示を維持する。既存`save()`の`ok && clean`を確認してから確定し、PUT中の追加編集も保存する。保存失敗・結果不明では除外せず、復旧可能な状態を保持する。写真とSQLiteの編集レコードは削除せず、Recipe・History・カーソルを保持する。除外自体はExport Queue・STACKの操作を発生させない。
+
+直前の除外は`Primary+Z`で1回だけ元の順序へ復帰できる。アクティブ写真のUndoはその写真を表示し、非アクティブ写真のUndoは現在の表示を維持するよう改善した。次の編集、手動移動、次の除外、Gallery復帰でUndo権を破棄する。除外による自動移動では破棄しない。除外Undoは編集Historyと分離し、同一キーハンドラーで優先判定するため、編集Undoと二重実行されない。
+
+初回Focused Auditは**High 0 / Medium 1 / Low 1**。Mediumは非アクティブUndo後に`retainForUndo()`の保持予約が残り、後の通常移動で古い状態を再利用する問題で、予約をアクティブ写真への即時復帰だけに限定した。外部更新後の通常移動で最新Recipe・HistoryをGETし、最新revisionで保存する回帰テストを追加した。LowはReset allによるUndo失効テストが先に別の編集を行い、Historyメニューと混同するセレクターを使用していた不備。編集済みGET fixtureからDevelopのReset allを直接操作し、単独で除外Undoが失効し、その後の`Primary+Z`が編集Historyを戻してRecipeとカーソル位置を復元するテストへ修正した。
+
+最終限定確認は、この2件と直接関連する保存・遷移・Undo・セッション条件を対象に実施し、両修正の成立を確認した。新規Findingは**High 0 / Medium 0 / Low 0**。全面的な再監査ではない。
+
+監査指摘修正時の関連Frontendテストは7ファイル・401件成功。今回の限定再確認では`AnshitsuPersistence`、`Filmstrip`、`useAssetEdits`、`editShortcuts`の4ファイル・215件成功。Frontend typecheck（`tsc --noEmit`）とproduction build、`git diff --check`も成功した。buildには既存の500 kB超チャンク警告が残る。
+
+ユーザーから本機能のブラウザー実機確認は「確認済み・問題なし」と報告を受けた。個別ケースの内訳および監査指摘修正後の再確認時点は特定していない。Codexによる確認はコードと自動テストに限定し、ブラウザー・NAS・Immich実機操作は実施していない。
+
 ## STACKゴミ箱予約・監査修正の完了記録（2026-10-09）
 
 `feature/stack-trash`で、既存STACKの非COVER・非RAWメンバーを右クリックからゴミ箱予約し、既存の「Immichへ送信」でSTACK編集と一括反映する機能を実装した。通常のメニュー項目で予約・取消しを行い、予約中はサムネイル中央にゴミ箱アイコンを表示する。予約・取消しは既存の1ステップUndoに含める。PurgeはSTACK所属を編集する操作であり、AssetをImmichのゴミ箱へ移す操作とは区別する。取得時点の元STACKメンバーだけが予約でき、Add・D&Dで追加した素材、元COVER、現在COVER、RAWは予約不可とした。

@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Anshitsu Filmstrip photos can be temporarily excluded with the top-left × button or `X`, then restored once with `Primary+Z`. Exclusion confirms saved edits and preserves photos, Recipe, and History.
 - STACK management can reserve existing non-COVER, non-RAW members for Immich's normal trash through a right-click menu, cancel reservations, and undo one local edit. Confirmed Send applies reservations alongside Stack changes without permanently deleting photos. Newly added or moved-in photos remain outside trash eligibility.
 - Home's tab bar now includes STACK management between the four browsing tabs and Export management. STACK candidates and unmatched photos appear in independently scrolling upper and lower frames; drag the separator to adjust the initial 2:1 split from 1:1 to 4:1. The lower frame accepts Stack-member removal drops, and Stack filenames use Gallery's middle-ellipsis display.
 - STACK editing drafts and Undo remain available when switching Home tabs or visiting Anshitsu during the same SPA session. `S` opens the STACK tab with or without a Gallery selection; no selection resumes the previous session or shows an empty first session.
