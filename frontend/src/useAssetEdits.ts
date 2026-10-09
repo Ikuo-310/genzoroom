@@ -61,7 +61,13 @@ function freshRecord(assetId: string): AssetEditRecord {
   };
 }
 
-export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked = false) {
+export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked = false, workspaceActions: {
+  onEdit?: () => void;
+  undo?: () => boolean;
+} = {}) {
+  const workspaceActionsRef = useRef(workspaceActions);
+  workspaceActionsRef.current = workspaceActions;
+  const retainedLoads = useRef(new Set<string>());
   const records = useRef<Record<string, AssetEditRecord>>({});
   // Presence also represents unknown: discarded assets must not fall back to an old bulk result.
   const discardedEditStatuses = useRef(new Map<string, {
@@ -125,11 +131,12 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
       window.clearTimeout(loads.current[id].timeout);
     }
     const existingRecord = getRecord(id);
-    if (existingRecord.editedThisSession && existingRecord.savedFingerprint !== null
-      && (existingRecord.retrySave || fingerprintFor(existingRecord) !== existingRecord.savedFingerprint)) {
-      // A failed exit save leaves valuable local edits that must survive a
-      // Filmstrip revisit. Keep that dirty session instead of replacing it with
-      // a GET result; discard explicitly removes the record and still forces GET.
+    const retainForUndo = retainedLoads.current.delete(id) && existingRecord.savedFingerprint !== null;
+    if (retainForUndo || (existingRecord.editedThisSession && existingRecord.savedFingerprint !== null
+      && (existingRecord.retrySave || fingerprintFor(existingRecord) !== existingRecord.savedFingerprint))) {
+      // Failed saves retain dirty edits; workspace Undo also restores its exact
+      // confirmed Recipe/History without replacing the cursor with a fresh GET.
+      // Discard explicitly removes the record and still forces GET.
       const retained = { ...existingRecord, loadStatus: 'ready' as const, loadError: undefined };
       setRecord(id, retained);
       scheduleAutosaveRef.current(id);
@@ -209,6 +216,8 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
   const dispatch = useCallback((action: EditAction) => {
     const current = getRecord(assetId);
     if (!enabled || exitSaving.current || current.loadStatus !== 'ready') return;
+    // All edit entry points share dispatch; late gesture commits must not expire workspace Undo.
+    if (action.type !== 'commit') workspaceActionsRef.current.onEdit?.();
     if (action.type === 'undo' && current.organizationUndo) {
       updateSession(current, current.organizationUndo);
       return;
@@ -230,6 +239,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
       dispatch(operation === 'trimHistory' ? { type: operation, cursor } : { type: operation });
       return true;
     }
+    workspaceActionsRef.current.onEdit?.();
     // A new organization attempt consumes the previous restoration right,
     // including no-op and failed attempts. A failure leaves the session intact.
     try {
@@ -250,11 +260,18 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
   }, [assetId, dispatch, enabled, getRecord, updateSession]);
 
   useEffect(() => {
-    if (!enabled || keyboardBlocked) return;
+    if (keyboardBlocked) return;
     const keydown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isNativeEditingTarget(event.target)) return;
+      if (event.defaultPrevented || event.repeat || isNativeEditingTarget(event.target)
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       const type = undoShortcut(event);
       if (!type) return;
+      // Arbitration happens in one handler, independent of listener registration order.
+      if (type === 'undo' && workspaceActionsRef.current.undo?.()) {
+        event.preventDefault();
+        return;
+      }
+      if (!enabled) return;
       event.preventDefault();
       dispatch({ type });
     };
@@ -551,6 +568,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
     canUndo: !!current.organizationUndo || current.session.cursor > 0 || !!current.session.pending,
     loadStatus: current.loadStatus, saveStatus: current.saveStatus,
     revision: current.revision, dirty, save, discard, retryLoad: () => load(assetId),
+    retainForUndo: (id: string) => { retainedLoads.current.add(id); },
     pauseAutosave, resumeAutosave, autosaveError: current.autosaveError ?? null,
     saveEditedAssetsForExit, resumeAfterExitFailure,
   };

@@ -7,9 +7,13 @@ import type { AssetEditStatuses } from './editStatus';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { useShortcutDisplay } from './useShortcutDisplay';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
+  onExclude?: (id: string) => void;
+  excludeDisabled?: boolean;
+  excludeBusyFor?: (id: string) => boolean;
   editStatuses?: AssetEditStatuses;
   historyOnlyStatuses?: AssetEditStatuses;
   queueKnown?: boolean;
@@ -19,6 +23,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
   onQueueToggle?: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const shortcut = useShortcutDisplay();
   const scroll = useRef<HTMLDivElement>(null);
   const latest = useRef({ assets, activeAssetId, onActivate, disabled, keyboardBlocked });
   latest.current = { assets, activeAssetId, onActivate, disabled, keyboardBlocked };
@@ -70,6 +75,13 @@ export function Filmstrip({ assets, activeAssetId, onActivate, disabled = false,
           queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}
           disabled={disabled || keyboardBlocked}
           onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />}
+        {onExclude && <button type="button" className="filmstrip-exclude"
+          disabled={disabled || keyboardBlocked || excludeDisabled || assets.length <= 1 || excludeBusyFor?.(asset.id)}
+          aria-label={t('workspace.excludePhoto', { filename: asset.filename })}
+          title={asset.id === activeAssetId
+            ? shortcut.title(t('workspace.excludePhoto', { filename: asset.filename }), 'filmstripExclude')
+            : t('workspace.excludePhoto', { filename: asset.filename })}
+          onClick={() => onExclude(asset.id)}><span aria-hidden="true">×</span></button>}
       </div>)}
     </div>
   </section>;

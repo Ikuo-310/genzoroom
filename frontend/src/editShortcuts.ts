@@ -52,6 +52,7 @@ export const shortcutBindings = {
   calendarNavigateNext: [{ key: 'ArrowRight', ...commandModifiers, shift: false, alt: false }],
   stackAddSelected: [{ key: 'a', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   workspaceReturnHome: [{ key: 'g', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  filmstripExclude: [{ key: 'x', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   scopeRed: [{ code: 'Numpad1', ...commandModifiers, shift: false, alt: false }],
   scopeGreen: [{ code: 'Numpad2', ...commandModifiers, shift: false, alt: false }],
   scopeBlue: [{ code: 'Numpad3', ...commandModifiers, shift: false, alt: false }],

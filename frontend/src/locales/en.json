@@ -222,6 +222,8 @@
     "name": "Develop",
     "subtitle": "Photo development workspace",
     "backToPhotos": "Back to Gallery",
+    "excludePhoto": "Exclude {{filename}} from Filmstrip",
+    "excludeFailed": "The photo could not be excluded. Your edits are retained. Retry or continue editing.",
     "loading": "Loading photo…",
     "detailFailed": "This photo could not be loaded.",
     "editStateLoading": "Loading saved edits…",

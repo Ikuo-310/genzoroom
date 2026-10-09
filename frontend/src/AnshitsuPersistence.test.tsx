@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { AssetDetail, WorkspaceNavigationState } from './assets';
@@ -13,6 +13,8 @@ import { updateSetting } from './appSettings';
 import { formatShortcut } from './shortcutDisplay';
 import { makeGalleryStack } from './gallerySelectionTestHelpers';
 import { getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
+import { editSession, newSession } from './editing';
+import { copyEditSettings } from './editClipboard';
 
 const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn(), recent: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
@@ -32,6 +34,7 @@ const first: AssetDetail = {
   thumbnail_url: '/first-thumb', preview_url: '/first-preview', format: 'JPEG', is_raw: false, exif: {},
 };
 const second: AssetDetail = { ...first, id: '87654321-4321-4321-8321-cba987654321', filename: 'second.jpg' };
+const third: AssetDetail = { ...first, id: 'abcdefab-1234-4234-9234-123456789abc', filename: 'third.jpg' };
 
 let root: Root;
 let container: HTMLDivElement;
@@ -47,10 +50,14 @@ async function click(selector: string) {
   if (!button) throw new Error(`Missing button: ${selector}`);
   await act(async () => { button.click(); });
 }
-async function mount() {
-  const state: WorkspaceNavigationState = { selectedAssets: [first, second], activeAssetId: first.id };
+function RouteControls() {
+  const navigate = useNavigate();
+  return <button className="test-back" onClick={() => navigate(-1)}>Back</button>;
+}
+async function mount(assets = [first, second], activeAssetId = first.id, routeControls = false) {
+  const state: WorkspaceNavigationState = { selectedAssets: assets, activeAssetId };
   await act(async () => {
-    root.render(<MemoryRouter initialEntries={[{ pathname: `/anshitsu/${first.id}`, state }]}><App /></MemoryRouter>);
+    root.render(<MemoryRouter initialEntries={[{ pathname: `/anshitsu/${activeAssetId}`, state }]}><App />{routeControls && <RouteControls />}</MemoryRouter>);
   });
   await flush();
 }
@@ -84,7 +91,7 @@ beforeEach(async () => {
   updateSetting('showKeyboardShortcuts', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   mocked.detail.mockReset(); mocked.get.mockReset(); mocked.put.mockReset();
-  mocked.detail.mockImplementation(async (id: string) => id === first.id ? first : second);
+  mocked.detail.mockImplementation(async (id: string) => [first, second, third].find(asset => asset.id === id)!);
   mocked.get.mockResolvedValue({ state: null });
   mocked.statuses.mockReset();
   mocked.statuses.mockResolvedValue({ [first.id]: false, [second.id]: true });
@@ -93,6 +100,297 @@ beforeEach(async () => {
   }));
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+const filmstripPhotos = () => [...container.querySelectorAll('.filmstrip-item')].map(button => button.getAttribute('aria-label'));
+const excludePhoto = (filename: string) => click(`.filmstrip-exclude[aria-label="${i18n.t('workspace.excludePhoto', { filename })}"]`);
+const exclusionUndoKey = () => filmstripKey('z', { ctrlKey: true });
+
+describe('Anshitsu Filmstrip exclusion', () => {
+  it('excludes the active photo with its independent button and restores its position with one-shot Undo', async () => {
+    await mount([first, second, third], second.id);
+    await excludePhoto(second.filename);
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'third.jpg']);
+    expect(currentPhoto()).toBe('third.jpg');
+    expect(mocked.put).not.toHaveBeenCalled();
+    expect((await exclusionUndoKey()).defaultPrevented).toBe(true);
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.put).not.toHaveBeenCalled();
+  });
+
+  it('excludes with X, moves from the last photo to its predecessor, and protects the last remaining photo', async () => {
+    await mount([first, second], second.id);
+    expect((await filmstripKey('x')).defaultPrevented).toBe(true);
+    expect(filmstripPhotos()).toEqual(['first.jpg']);
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector<HTMLButtonElement>('.filmstrip-exclude')!.disabled).toBe(true);
+    await filmstripKey('x');
+    expect(filmstripPhotos()).toEqual(['first.jpg']);
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
+  it('excludes an inactive unvisited photo without changing the current photo or requesting edit state', async () => {
+    await mount([first, second, third]);
+    await excludePhoto(second.filename);
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'third.jpg']);
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id]);
+    expect(mocked.put).not.toHaveBeenCalled();
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
+  });
+
+  it('excludes a validated inactive photo without redundant PUT, then restores its saved Recipe and History', async () => {
+    await mount([first, second, third]);
+    await click('button[aria-label="Disable Basic"]');
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await excludePhoto(first.filename);
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves Recipe, History and cursor before exclusion, restores them without edit Undo, then resumes normal Undo/Redo', async () => {
+    await mount();
+    await editWithUndoAndRedoAvailable();
+    const history = container.querySelector('.edit-history')!.innerHTML;
+    await filmstripKey('x');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    const snapshot = mocked.put.mock.calls[0][1];
+    expect(snapshot.currentRecipe).toMatchObject({ basicEnabled: false, colorEnabled: true });
+    expect(snapshot.history).toHaveLength(2);
+    expect(snapshot.historyCursor).toBe(1);
+    expect(currentPhoto()).toBe('second.jpg');
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(container.querySelector('.edit-history')!.innerHTML).toBe(history);
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
+    await exclusionUndoKey();
+    expect(currentHistoryEntry()).toBe('Initial State');
+    await filmstripKey('z', { ctrlKey: true, shiftKey: true });
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg']);
+  });
+
+  it('arbitrates keyboard Undo before the destination History handler and keeps panel Undo as an edit operation', async () => {
+    const result = editStateModule.createEditStateSnapshot(editSession(newSession(), { type: 'toggleColor' }), {
+      provider: 'immich', assetId: second.id, inputKind: 'immich-preview',
+    });
+    if (!result.ok) throw new Error('Invalid fixture');
+    mocked.get.mockImplementation(async id => ({ state: id === second.id ? result.value : null, revision: 1 }));
+    await mount(); await filmstripKey('x');
+    expect(currentHistoryEntry()).toContain('Color OFF');
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    // A simultaneous destination History Undo would dirty it and cause a PUT on restoration.
+    expect(mocked.put).not.toHaveBeenCalled();
+    await filmstripKey('x');
+    expect(currentHistoryEntry()).toContain('Color OFF');
+    await click('.edit-actions button');
+    expect(currentHistoryEntry()).toBe('Initial State');
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['second.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('z', { ctrlKey: true, shiftKey: true });
+    expect(currentHistoryEntry()).toContain('Color OFF');
+  });
+
+  it('waits for all edits made during PUT and blocks repeated exclusion and navigation until the latest save is clean', async () => {
+    const pending = deferred<any>();
+    const latest = deferred<any>();
+    mocked.put.mockReturnValueOnce(pending.promise).mockReturnValueOnce(latest.promise);
+    await mount([first, second, third]);
+    await click('button[aria-label="Disable Basic"]');
+    await filmstripKey('x');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(filmstripPhotos()).toHaveLength(3);
+    expect([...container.querySelectorAll<HTMLButtonElement>('.filmstrip-exclude')].every(button => button.disabled)).toBe(true);
+    await filmstripKey('x');
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
+    await filmstripKey('g');
+    await click('button[aria-label="Disable Color"]');
+    const [, state, revision, saveId] = mocked.put.mock.calls[0];
+    await act(async () => pending.resolve({ state, revision: revision + 1, lastSaveId: saveId }));
+    await flush();
+    expect(mocked.put).toHaveBeenCalledTimes(2);
+    expect(mocked.put.mock.calls[1][1].currentRecipe).toMatchObject({ basicEnabled: false, colorEnabled: false });
+    expect(mocked.put.mock.calls[1][1].history).toHaveLength(2);
+    expect(filmstripPhotos()).toHaveLength(3);
+    expect(currentPhoto()).toBe('first.jpg');
+    const [, newer, newerRevision, newerSaveId] = mocked.put.mock.calls[1];
+    await act(async () => latest.resolve({ state: newer, revision: newerRevision + 1, lastSaveId: newerSaveId }));
+    await flush();
+    expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
+  it.each([
+    new EditStateApiError('network'),
+    new EditStateApiError('unexpected', 504, undefined, 'unknown'),
+    new EditStateApiError('conflict', 409, 'revision_conflict'),
+  ])('retains the photo and recoverable edits after save failure ($kind/$saveOutcome)', async error => {
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(error);
+    await filmstripKey('x');
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg']);
+    expect(container.querySelector('.workspace-page [role="alert"]')?.textContent).toContain(i18n.t('workspace.excludeFailed'));
+    expect(currentHistoryEntry()).toContain('Basic OFF');
+    await exclusionUndoKey();
+    expect(currentHistoryEntry()).toBe('Initial State');
+    expect(filmstripPhotos()).toHaveLength(2);
+  });
+
+  it('retries the exact uncertain PUT before exclusion without losing newer local edits', async () => {
+    await mount();
+    await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unexpected', 504, undefined, 'unknown'));
+    await filmstripKey('x');
+    await click('button[aria-label="Disable Color"]');
+    await filmstripKey('x');
+    expect(mocked.put).toHaveBeenCalledTimes(3);
+    expect(mocked.put.mock.calls[1].slice(1, 4)).toEqual(mocked.put.mock.calls[0].slice(1, 4));
+    expect(mocked.put.mock.calls[2][1].currentRecipe).toMatchObject({ basicEnabled: false, colorEnabled: false });
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(filmstripPhotos()).toEqual(['second.jpg']);
+  });
+
+  it('prevents exclusion during an existing autosave and leaves the photo available until that save settles', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<any>();
+    mocked.put.mockReturnValueOnce(pending.promise);
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    await advance(5000);
+    expect(container.querySelector<HTMLButtonElement>('.filmstrip-exclude')!.disabled).toBe(true);
+    await filmstripKey('x');
+    expect(filmstripPhotos()).toHaveLength(2);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    const [, state, revision, saveId] = mocked.put.mock.calls[0];
+    await act(async () => pending.resolve({ state, revision: revision + 1, lastSaveId: saveId }));
+    await flush(); await filmstripKey('x');
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['button', 'slider', 'number', 'paste', 'reset', 'history'] as const)
+    ('expires exclusion Undo through the shared %s edit path and returns to History Undo', async path => {
+      await mount();
+      await click('button[aria-label="Disable Color"]');
+      if (path === 'paste') copyEditSettings({ ...newSession().recipe, adjustments: { ...newSession().recipe.adjustments, exposure: 0.5 } }, first.id, first.filename);
+      await filmstripKey('x');
+      expect(currentPhoto()).toBe('second.jpg');
+      if (path === 'button') await click('button[aria-label="Disable Basic"]');
+      else if (path === 'paste') await filmstripKey('v', { ctrlKey: true });
+      else if (path === 'slider' || path === 'number') {
+        const input = container.querySelector<HTMLInputElement>(path === 'slider' ? '.adjustment-range[data-adjustment-id="exposure"]' : '.adjustment-number')!;
+        await act(async () => {
+          if (path === 'slider') input.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+          else input.focus();
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '0.5');
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+        });
+      } else {
+        await click('button[aria-label="Disable Basic"]');
+        if (path === 'reset') await click('.workspace-section-action');
+        else await click('.edit-actions button');
+      }
+      await exclusionUndoKey();
+      expect(filmstripPhotos()).toEqual(['second.jpg']);
+      expect(currentPhoto()).toBe('second.jpg');
+    });
+
+  it('expires Undo after manual Filmstrip navigation while keeping all excluded photos hidden', async () => {
+    await mount([first, second, third]);
+    await filmstripKey('x');
+    expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true });
+    expect(currentPhoto()).toBe('third.jpg');
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
+    expect(currentPhoto()).toBe('third.jpg');
+  });
+
+  it('replaces the previous exclusion Undo and restores only the most recently excluded photo', async () => {
+    await mount([first, second, third]);
+    await filmstripKey('x'); await filmstripKey('x');
+    expect(filmstripPhotos()).toEqual(['third.jpg']);
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+    await exclusionUndoKey();
+    expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
+  });
+
+  it('does not let delayed Asset detail or browser history revive an excluded photo', async () => {
+    const pending = deferred<AssetDetail>();
+    mocked.detail.mockImplementationOnce(() => pending.promise);
+    await mount([first, second, third], first.id, true);
+    await excludePhoto(second.filename);
+    await act(async () => pending.resolve(first));
+    await flush();
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'third.jpg']);
+    await filmstripKey('x');
+    expect(currentPhoto()).toBe('third.jpg');
+    await click('.test-back'); await flush();
+    expect(currentPhoto()).toBe('third.jpg');
+    expect(filmstripPhotos()).toEqual(['third.jpg']);
+  });
+
+  it('resumes the original selection after Gallery return and reentry without exclusion Undo', async () => {
+    mocked.recent.mockResolvedValue([]);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
+    await mount(); await filmstripKey('x'); await filmstripKey('g');
+    expect(readWorkspaceSession()?.selectedAssets.map(asset => asset.id)).toEqual([first.id, second.id]);
+    expect(readWorkspaceSession()?.activeAssetId).toBe(second.id);
+    await filmstripKey('d');
+    expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg']);
+    expect(currentPhoto()).toBe('second.jpg');
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+
+  it('ignores X and exclusion Undo for native inputs, menus, dialogs, repeat and composition', async () => {
+    await mount();
+    const native = container.querySelector<HTMLInputElement>('.adjustment-number')!;
+    await filmstripKey('x', {}, native);
+    await filmstripKey('x', { repeat: true });
+    await filmstripKey('x', { isComposing: true });
+    const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); document.body.append(menu);
+    await filmstripKey('x'); menu.remove();
+    expect(filmstripPhotos()).toHaveLength(2);
+    await filmstripKey('x');
+    const nextInput = container.querySelector<HTMLInputElement>('.adjustment-number')!;
+    await filmstripKey('z', { ctrlKey: true }, nextInput);
+    const dialog = document.createElement('dialog'); dialog.open = true; document.body.append(dialog);
+    await exclusionUndoKey(); dialog.remove();
+    expect(filmstripPhotos()).toEqual(['second.jpg']);
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+  });
+
+  it('supports exclusion Undo when the automatic destination is a non-editable RAW photo', async () => {
+    const raw = { ...second, format: 'DNG', is_raw: true };
+    mocked.detail.mockImplementation(async id => id === first.id ? first : raw);
+    await mount([first, raw]); await filmstripKey('x');
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(container.querySelector('.format-badge.raw')).not.toBeNull();
+    await exclusionUndoKey();
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(filmstripPhotos()).toHaveLength(2);
+  });
+});
 
 describe('Anshitsu Filmstrip persistence', () => {
   it('round-trips an expanded mixed Stack, saving JPEGs independently and resuming the last non-JPEG Asset', async () => {
@@ -126,6 +424,8 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(readWorkspaceSession()?.selectedAssets.map(asset => asset.id)).toEqual(members.map(asset => asset.id));
     expect(readWorkspaceSession()?.activeAssetId).toBe(members[3].id);
     expect([...getManualGalleryStackSelection(stack.stackId!)!]).toEqual(members.map(asset => asset.id));
+    // Gallery selection takes priority over resume; clear it to exercise the remembered workspace.
+    await click('.photo-selection-input');
     await filmstripKey('d');
     expect(container.querySelectorAll('.filmstrip-item')).toHaveLength(4);
     expect(currentPhoto()).toBe(members[3].filename);
@@ -547,7 +847,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     await mount();
     await click('button[aria-label="Disable Basic"]');
     await advance(5000); await flush();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Autosave failed');
+    expect(container.querySelector('.workspace-page [role="alert"]')?.textContent).toContain('Autosave failed');
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Enable Basic"]')).not.toBeNull();
     expect(mocked.put).toHaveBeenCalledTimes(1);

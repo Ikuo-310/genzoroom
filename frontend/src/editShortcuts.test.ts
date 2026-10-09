@@ -10,6 +10,12 @@ function event(key: string, options: KeyboardEventInit = {}, altGraph = false) {
 }
 
 describe('command shortcut bindings', () => {
+  it.each(['other', 'mac'] as const)('matches exclusion only for unmodified X on %s', platform => {
+    for (let mask = 0; mask < 16; mask++) {
+      const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };
+      for (const key of ['x', 'X']) expect(matchesShortcut(event(key, options), 'filmstripExclude', platform)).toBe(mask === 0);
+    }
+  });
   it.each(['other', 'mac'] as const)('separates Home tabs from Primary select all on %s', platform => {
     for (let mask = 0; mask < 32; mask++) {
       const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };
@@ -114,7 +120,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(34);
+    expect(Object.keys(shortcutBindings)).toHaveLength(35);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -147,7 +153,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(34);
+    expect(Object.keys(shortcutBindings)).toHaveLength(35);
   });
   it('matches Export Queue only for unmodified Q regardless of case', () => {
     for (const platform of ['other', 'mac'] as const) {
@@ -156,7 +162,7 @@ describe('command shortcut bindings', () => {
         { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true },
       ]) expect(matchesShortcut(event('Q', options), 'exportQueueToggle', platform)).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(34);
+    expect(Object.keys(shortcutBindings)).toHaveLength(35);
   });
 
   it('binds thumbnail sizing to unmodified physical numpad add/subtract keys', () => {

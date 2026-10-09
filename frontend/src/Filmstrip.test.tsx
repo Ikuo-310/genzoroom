@@ -132,6 +132,44 @@ describe('Filmstrip keyboard navigation', () => {
   });
 });
 
+describe('Filmstrip exclusion buttons', () => {
+  it.each(['en', 'ja'])('keeps localized exclusion, selection, format and Queue controls independent (%s)', async language => {
+    await i18n.changeLanguage(language);
+    const exclude = vi.fn(), toggle = vi.fn();
+    const items = [assets[0], { ...assets[1], format: 'DNG', is_raw: true }, assets[2]];
+    act(() => root.render(<Filmstrip assets={items} activeAssetId="a" onActivate={activate} onExclude={exclude}
+      editStatuses={{ a: true }} queueKnown queueStatusFor={() => 'queued'} onQueueToggle={toggle} />));
+    const buttons = host.querySelectorAll<HTMLButtonElement>('.filmstrip-exclude');
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0].getAttribute('aria-label')).toBe(language === 'en'
+      ? 'Exclude a.jpg from Filmstrip' : 'a.jpgをフィルムストリップから除外');
+    expect(item(0).querySelector('.format-badge')?.textContent).toBe('JPEG');
+    expect(item(1).querySelector('.format-badge.raw')?.textContent).toBe('DNG');
+    expect(host.querySelector('button button')).toBeNull();
+    act(() => buttons[1].click());
+    expect(exclude.mock.calls).toEqual([['b']]);
+    expect(activate).not.toHaveBeenCalled();
+    expect(toggle).not.toHaveBeenCalled();
+    act(() => host.querySelector<HTMLButtonElement>('.edited-badge')!.click());
+    expect(toggle).toHaveBeenCalledWith('a');
+    expect(exclude).toHaveBeenCalledTimes(1);
+    act(() => item(2).click());
+    expect(activate).toHaveBeenCalledWith('c');
+  });
+  it('locks exclusion for the last photo, blocked workspace and busy targets', () => {
+    const exclude = vi.fn();
+    act(() => root.render(<Filmstrip assets={[assets[0]]} activeAssetId="a" onActivate={activate} onExclude={exclude} />));
+    act(() => host.querySelector<HTMLButtonElement>('.filmstrip-exclude')!.click());
+    expect(exclude).not.toHaveBeenCalled();
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate} onExclude={exclude} keyboardBlocked />));
+    expect([...host.querySelectorAll<HTMLButtonElement>('.filmstrip-exclude')].every(button => button.disabled)).toBe(true);
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate} onExclude={exclude} excludeBusyFor={id => id === 'a'} />));
+    const buttons = host.querySelectorAll<HTMLButtonElement>('.filmstrip-exclude');
+    expect(buttons[0].disabled).toBe(true);
+    expect(buttons[1].disabled).toBe(false);
+  });
+});
+
 describe('Filmstrip Queue buttons', () => {
   it.each(['en', 'ja'])('separates edited, History-only and untouched indicators (%s)', async language => {
     await i18n.changeLanguage(language);

@@ -29,7 +29,7 @@ import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
 import { ScopeResizeHandle } from './ScopeResizeHandle';
 import { readScopePanelBasis, saveScopePanelBasis } from './scopeSizing';
-import type { EditStateApiErrorKind } from './editStateApi';
+import { EditStateApiError, type EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
 import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
@@ -42,10 +42,18 @@ import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { rememberWorkspaceSession } from './workspaceResume';
 import { useShortcutDisplay } from './useShortcutDisplay';
+import { frontendLogger } from './frontendLogging';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
   | { mode: 'paste'; assetId: string; clipboard: EditClipboard };
+
+function logExclusion(event: 'start' | 'complete' | 'failed' | 'undo', context: Record<string, string | number>) {
+  try {
+    frontendLogger.add({ level: event === 'failed' ? 'error' : 'info', component: 'AnshitsuPage',
+      event: `filmstrip.exclude.${event}`, context });
+  } catch { /* Diagnostics must not change saving, exclusion or restoration. */ }
+}
 
 export function AnshitsuPage() {
   const shortcut = useShortcutDisplay();
@@ -57,6 +65,20 @@ export function AnshitsuPage() {
   const initialNavigation = useMemo(() => readNavigationState(location.state), [location.state]);
   // Preserve selection order for the Filmstrip while the route identifies the active asset.
   const [selectedAssets, setSelectedAssets] = useState<RecentAsset[]>(initialNavigation?.selectedAssets ?? []);
+  // Keep the original selection for Gallery resume; exclusions belong only to this mounted workspace.
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(() => new Set());
+  const excludedIdsRef = useRef(excludedIds);
+  excludedIdsRef.current = excludedIds;
+  const visibleAssets = selectedAssets.filter(asset => !excludedIds.has(asset.id));
+  const exclusionUndo = useRef<{ asset: RecentAsset; index: number; order: string[]; anchorAssetId: string } | null>(null);
+  const clearExclusionUndo = () => { exclusionUndo.current = null; };
+  const undoExclusionRef = useRef<() => boolean>(() => false);
+  const excludeRef = useRef<(id: string) => Promise<void>>(async () => {});
+  const exclusionBusy = useRef(false);
+  const [excluding, setExcluding] = useState(false);
+  const [excludeFailure, setExcludeFailure] = useState(false);
+  const activeRouteRef = useRef(assetId);
+  activeRouteRef.current = assetId;
   const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id));
   const exportQueue = useExportQueue();
   const queueToggleRef = useRef<(id: string) => Promise<void>>(async () => {});
@@ -97,12 +119,14 @@ export function AnshitsuPage() {
   const settings = useAppSettings();
   const { isOpen: settingsOpen, publishGpu } = useSettingsDialog();
   const workspaceKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
-    || switching || exitSaving || exitFailure !== null || failedSwitch !== null;
+    || switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null;
   const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
-    saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked);
+    saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor, retainForUndo } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked, {
+      onEdit: clearExclusionUndo, undo: () => undoExclusionRef.current(),
+    });
   const editable = canEdit && loadStatus === 'ready';
   const seenSaveRevisions = useRef(new Map<string, number>());
   useEffect(() => {
@@ -191,9 +215,11 @@ export function AnshitsuPage() {
       const isFocusToggle = matchesShortcut(event, 'viewerFocusMode');
       const isHomeExit = matchesShortcut(event, 'workspaceReturnHome');
       const isQueueToggle = matchesShortcut(event, 'exportQueueToggle');
-      if (!isFocusToggle && !isHomeExit && !isQueueToggle) return;
+      const isExclude = matchesShortcut(event, 'filmstripExclude');
+      if (!isFocusToggle && !isHomeExit && !isQueueToggle && !isExclude) return;
       event.preventDefault();
-      if (isQueueToggle) void queueToggleRef.current(assetId);
+      if (isExclude) void excludeRef.current(assetId);
+      else if (isQueueToggle) void queueToggleRef.current(assetId);
       else if (isHomeExit) void exitToHomeRef.current();
       else setViewerFocusMode(current => !current);
     };
@@ -364,7 +390,9 @@ export function AnshitsuPage() {
   }
 
   async function activateAsset(nextId: string) {
-    if (nextId === assetId || switchingRef.current || exitRef.current || failedSwitch) return;
+    if (nextId === assetId || switchingRef.current || exclusionBusy.current || exitRef.current || failedSwitch
+      || excludedIdsRef.current.has(nextId)) return;
+    clearExclusionUndo();
     if (!editable) { navigateToAsset(nextId); return; }
     switchingRef.current = true;
     pauseAutosave(assetId);
@@ -391,7 +419,8 @@ export function AnshitsuPage() {
   }
 
   async function exitToHome() {
-    if (exitRef.current || switchingRef.current || failedSwitch) return;
+    if (exitRef.current || switchingRef.current || exclusionBusy.current || failedSwitch) return;
+    clearExclusionUndo();
     exitRef.current = true;
     setExitSaving(true);
     try {
@@ -417,9 +446,85 @@ export function AnshitsuPage() {
   }
 
   function returnToHome() {
+    clearExclusionUndo();
     rememberWorkspaceSession({ selectedAssets, activeAssetId: assetId, homeReturn: initialNavigation?.homeReturn });
     navigate('/', { state: initialNavigation?.homeReturn ? { homeReturn: initialNavigation.homeReturn } : null });
   }
+
+  async function excludeAsset(id: string) {
+    const index = visibleAssets.findIndex(asset => asset.id === id);
+    if (workspaceKeyboardBlocked || exclusionBusy.current || switchingRef.current || exitRef.current
+      || visibleAssets.length <= 1 || index < 0 || localStateFor(id).saving
+      || queueOperations.current.has(id) || (id === assetId && canEdit && !editable)) return;
+    clearExclusionUndo();
+    exclusionBusy.current = true;
+    setExcluding(true);
+    setExcludeFailure(false);
+    pauseAutosave(id);
+    logExclusion('start', { assetId: id });
+    try {
+      // Unvisited assets have no local edits to save. Validated inactive records use the same save boundary.
+      const local = localStateFor(id);
+      if (local.dirty && !local.canSave) throw new EditStateApiError('invalid_state');
+      if (local.canSave) {
+        for (;;) {
+          const result = await save(id);
+          if (!result.ok) throw result.error;
+          if (result.clean) break;
+        }
+      }
+      if (!queueMounted.current || activeRouteRef.current !== assetId) return;
+      const nextExcluded = new Set(excludedIdsRef.current).add(id);
+      excludedIdsRef.current = nextExcluded;
+      setExcludedIds(nextExcluded);
+      const destination = id === assetId ? (visibleAssets[index + 1] ?? visibleAssets[index - 1]).id : assetId;
+      exclusionUndo.current = { asset: visibleAssets[index], index, order: visibleAssets.map(asset => asset.id), anchorAssetId: destination };
+      if (id === assetId) {
+        // Automatic removal navigation must preserve the newly created workspace Undo.
+        navigateToAsset(destination);
+      }
+      logExclusion('complete', { assetId: id, remainingCount: visibleAssets.length - 1 });
+    } catch (cause) {
+      if (queueMounted.current) setExcludeFailure(true);
+      logExclusion('failed', {
+        assetId: id, errorCode: cause instanceof EditStateApiError ? cause.kind : 'unexpected',
+      });
+    } finally {
+      resumeAutosave(id);
+      exclusionBusy.current = false;
+      if (queueMounted.current) setExcluding(false);
+    }
+  }
+  excludeRef.current = excludeAsset;
+  undoExclusionRef.current = () => {
+    const undo = exclusionUndo.current;
+    if (!undo || workspaceKeyboardBlocked || exclusionBusy.current || switchingRef.current || exitRef.current) return false;
+    clearExclusionUndo();
+    const nextExcluded = new Set(excludedIdsRef.current);
+    nextExcluded.delete(undo.asset.id);
+    excludedIdsRef.current = nextExcluded;
+    setExcludedIds(nextExcluded);
+    // Reuse the confirmed in-memory Recipe/History, including its cursor, for this one restoration.
+    retainForUndo(undo.asset.id);
+    void activateAsset(undo.asset.id);
+    logExclusion('undo', { assetId: undo.asset.id, index: undo.index });
+    return true;
+  };
+
+  useEffect(() => {
+    if (exclusionUndo.current && exclusionUndo.current.anchorAssetId !== assetId) clearExclusionUndo();
+  }, [assetId]);
+
+  useEffect(() => {
+    if (!excludedIdsRef.current.has(assetId)) return;
+    // Browser history may revisit a route created before exclusion; never revive its thumbnail.
+    const index = selectedAssets.findIndex(asset => asset.id === assetId);
+    const next = selectedAssets.slice(index + 1).find(asset => !excludedIdsRef.current.has(asset.id))
+      ?? selectedAssets.slice(0, index).reverse().find(asset => !excludedIdsRef.current.has(asset.id));
+    if (next) navigate(workspacePath(next.id), { replace: true, state: {
+      selectedAssets, activeAssetId: next.id, homeReturn: initialNavigation?.homeReturn,
+    } });
+  }, [assetId, selectedAssets, navigate, initialNavigation]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -434,6 +539,7 @@ export function AnshitsuPage() {
       setDetailState('ready');
       setSelectedAssets((current) => {
         const summary = detailToRecent(asset);
+        if (excludedIdsRef.current.has(asset.id)) return current;
         return current.some((item) => item.id === asset.id)
           ? current.map((item) => item.id === asset.id ? summary : item)
           : [summary];
@@ -634,11 +740,14 @@ export function AnshitsuPage() {
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip
-        assets={selectedAssets}
+        assets={visibleAssets}
         editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
         historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id).historyOnly]))}
         activeAssetId={assetId}
-        disabled={switching || exitSaving || exitFailure !== null || failedSwitch !== null}
+        disabled={switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null}
+        onExclude={id => { void excludeRef.current(id); }}
+        excludeDisabled={canEdit && !editable}
+        excludeBusyFor={id => !!localStateFor(id).saving || queueBusy.has(id)}
         keyboardBlocked={workspaceKeyboardBlocked}
         queueKnown={exportQueue.loaded}
         queueCurrent={exportQueue.canonical}
@@ -697,6 +806,8 @@ export function AnshitsuPage() {
     {historyConfirmation && historyConfirmation.assetId === assetId && <HistoryConfirmationDialog
       operation={historyConfirmation.operation} returnFocus={historyConfirmation.trigger} onConfirm={confirmHistoryOperation} onCancel={() => setHistoryConfirmation(null)} />}
     {historyError && <p className="workspace-autosave-warning" role="alert">{t('workspace.historyFailed')}</p>}
+    {excludeFailure && <p className="workspace-autosave-warning" role="alert">{t('workspace.excludeFailed')}</p>}
+    {excluding && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {autosaveError && <p className="workspace-autosave-warning" role="alert">{t('workspace.autosaveFailed')}</p>}
     {exitSaving && <div className="workspace-save-backdrop"><section role="status" className="workspace-save-dialog">
