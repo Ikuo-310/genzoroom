@@ -1,4 +1,5 @@
 """Explicit Stack writes; no retries or cross-request transaction assumptions."""
+from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend_logging import backend_logger
 from immich import (
     IMMICH_TIMEOUT, ImmichRequestError, classify_image_format, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
-    _log_response_failure, _request_error, _require_configuration,
+    _log_response_failure, _request_error, _require_configuration, _stack_uuid,
 )
 
 
@@ -309,14 +310,31 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 raw_stacks = await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id)
                 step = "stack_list_parse"
                 current = _parse_stack_snapshot(raw_stacks, require_primary=True)
+                target_members = set(op.memberIds) | set(op.trashAssetIds)
+                target_stacks = {stack_id for stack_id in (op.stackId, result.stackId) if stack_id is not None}
+                related_invalid = current.invalid_stack_ids & target_stacks
+                related_quarantined = current.quarantined_member_ids & target_members
+                # Known, unrelated quarantined ownership is harmless. Missing identities cannot prove non-membership.
+                unproven_entries = sum(
+                    not isinstance(stack, Mapping)
+                    or _stack_uuid(stack.get("id")) is None
+                    or _stack_uuid(stack.get("primaryAssetId")) is None
+                    or not isinstance(stack.get("assets"), list)
+                    or any(not isinstance(asset, Mapping) or _stack_uuid(asset.get("id")) is None for asset in stack["assets"])
+                    for stack in raw_stacks
+                )
                 snapshot_fields = {"invalidStackCount": len(current.invalid_stack_ids), "quarantinedMemberCount": len(current.quarantined_member_ids),
-                                   "validStackCount": len(current.stacks)}
-                snapshot_ok = not current.invalid_stack_ids and not current.quarantined_member_ids
+                                   "validStackCount": len(current.stacks), "relatedInvalidStackCount": len(related_invalid),
+                                   "relatedQuarantinedMemberCount": len(related_quarantined), "unprovenOwnershipEntryCount": unproven_entries,
+                                   "relatedInvalidStackIds": [str(stack_id) for stack_id in related_invalid],
+                                   "relatedQuarantinedMemberIds": [str(asset_id) for asset_id in related_quarantined]}
+                snapshot_ok = not related_invalid and not related_quarantined and not unproven_entries
+                snapshot_reason = "unproven_stack_ownership" if unproven_entries else "related_invalid_or_quarantined_stack_state"
                 _log_operation(op, "trash.verify", level="debug" if snapshot_ok else "error", batchId=batch_id,
-                               verificationStep="stack_list_parse", passed=snapshot_ok, reason=None if snapshot_ok else "invalid_or_quarantined_stack_state",
+                               verificationStep="stack_list_parse", passed=snapshot_ok, reason=None if snapshot_ok else snapshot_reason,
                                **snapshot_fields)
                 if not snapshot_ok:
-                    raise ValueError("invalid_or_quarantined_stack_state")
+                    raise ValueError(snapshot_reason)
                 current_owners = {UUID(a["id"]): UUID(stack["id"]) for stack in current.stacks for a in stack["assets"]}
                 for asset_id in op.trashAssetIds:
                     step = "trash_asset_stack_membership"
@@ -379,7 +397,7 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                         raise ValueError("asset_detail_still_stacked")
             except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError) as error:
                 details = {"batchId": batch_id, "verificationStep": step, "reason": str(error) if isinstance(error, ValueError) and str(error) in {
-                    "invalid_or_quarantined_stack_state", "trash_asset_still_in_stack", "replacement_stack_missing",
+                    "related_invalid_or_quarantined_stack_state", "unproven_stack_ownership", "trash_asset_still_in_stack", "replacement_stack_missing",
                     "replacement_members_mismatch", "replacement_primary_mismatch", "singleton_still_in_stack", "asset_detail_still_stacked"} else "verification_exception",
                     "exceptionType": type(error).__name__}
                 if isinstance(error, ImmichRequestError):

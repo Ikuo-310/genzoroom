@@ -148,7 +148,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown' || result.status === 'success' && result.trashStatus !== undefined && result.trashStatus !== 'success');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
   const trashCount = plan.operations.reduce((count, op) => count + (op.trashAssetIds?.length ?? 0), 0);
-  const trashIncomplete = Object.values(draft.writeResults).some(result => result.status === 'success' && result.trashStatus !== undefined && result.trashStatus !== 'success');
+  const trashFailed = Object.values(draft.writeResults).some(result => result.status === 'success' && (result.trashStatus === 'failed' || result.trashStatus === 'blocked'));
+  const trashUnknown = Object.values(draft.writeResults).some(result => result.status === 'success' && result.trashStatus === 'unknown');
   const createCount = plan.operations.filter(op => op.type === 'create').length;
   const updateCount = plan.operations.filter(op => op.type === 'update').length;
   const deleteCount = plan.operations.filter(op => op.type === 'delete').length;
@@ -167,8 +168,12 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     if (controller.signal.aborted || sendRequest.current !== request || currentGeneration.current !== request.generation) return;
     // Unchanged local completion waits for the same generation check as remote results.
     dispatch({ type: 'writeResults', plan, results });
-    setSendStatus(results.some(result => result.status === 'unknown' || result.trashStatus === 'unknown') ? 'sendUnknown'
-      : results.some(result => result.status !== 'success' || result.trashStatus !== undefined && result.trashStatus !== 'success') ? 'sendFailure' : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
+    setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
+      : results.some(result => result.status !== 'success')
+        ? results.some(result => result.status === 'success' && result.trashStatus !== undefined && result.trashStatus !== 'success') ? 'sendFailureNoRetry' : 'sendFailure'
+        : results.some(result => result.trashStatus === 'unknown') ? 'trashUnknown'
+          : results.some(result => result.trashStatus === 'failed' || result.trashStatus === 'blocked') ? 'trashIncomplete'
+            : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
     sendRequest.current = null; setSending(false);
   };
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
@@ -567,7 +572,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       <section className="stack-frame stack-candidate-frame" aria-labelledby="stack-candidates-heading">
         <div className="stack-section-heading">
           <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
-          {sendStatus && <span className={`stack-send-status${sendStatus === 'sendFailure' || sendStatus === 'sendUnknown' ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
+          {sendStatus && <span className={`stack-send-status${['sendFailure', 'sendFailureNoRetry', 'sendUnknown', 'trashIncomplete', 'trashUnknown'].includes(sendStatus) ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
         </div>
         {/* Measure the grid's usable width after frame padding and scrollbar space. */}
         <div ref={contentRef} className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
@@ -593,7 +598,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit}
               title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
               onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
-            <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} />
+            <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} retryAllowed={!unknown} />
             {!isSingletonImmichStack(group) && <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
               onClick={() => selectedUnmatched.length
@@ -664,7 +669,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     {trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && group.members.some(asset => asset.id === trashMenu.assetId && !asset.is_raw && asset.id !== group.coverAssetId && (group.origin !== 'immich' || asset.id !== group.originalPrimaryAssetId))) && <StackTrashMenu
       point={trashMenu} checked={!!draft.groups.find(group => group.id === trashMenu.groupId)?.trashAssetIds?.includes(trashMenu.assetId)}
       onToggle={() => dispatch({ type: 'trash', groupId: trashMenu.groupId, assetId: trashMenu.assetId })} onClose={() => setTrashMenu(null)} />}
-    {trashIncomplete && <p role="alert">{t('stackManagement.trashIncomplete')}</p>}
+    {trashFailed && sendStatus !== 'trashIncomplete' && <p role="alert">{t('stackManagement.trashIncomplete')}</p>}
+    {trashUnknown && sendStatus !== 'trashUnknown' && <p role="alert">{t('stackManagement.trashUnknown')}</p>}
     {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
       create: createCount, update: updateCount, delete: deleteCount,
@@ -672,17 +678,17 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   </Container>;
 }
 
-function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {
+function StackEvidenceHeader({ group, result, retryAllowed }: { group: DraftStack; result?: StackWriteResult; retryAllowed: boolean }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
   if (isSingletonImmichStack(group)) {
     const failure = result && result.status !== 'success'
-      ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure') : null;
+      ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : retryAllowed ? 'stackManagement.sendFailure' : 'stackManagement.sendFailureNoRetry') : null;
     const description = [t('stackManagement.immichSingleton'), failure].filter(Boolean).join(' — ');
     return <div className="stack-group-indicators"><span className="stack-evidence singleton-warning" title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;
   }
   if (result && result.status !== 'success') {
-    const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure');
+    const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : retryAllowed ? 'stackManagement.sendFailure' : 'stackManagement.sendFailureNoRetry');
     return <div className="stack-group-indicators"><span className="stack-evidence error" title={description}><span aria-hidden="true">{group.origin === 'immich' ? 'IMMICH' : group.origin === 'manual' || group.modified ? 'MANUAL' : 'STACK'}</span><span className="visually-hidden">{description}</span></span></div>;
   }
   if (group.origin === 'immich') {

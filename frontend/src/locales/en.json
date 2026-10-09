@@ -862,7 +862,8 @@
   },
   "stackManagement": {
     "trashCount": "Move to trash: {{count}} assets",
-    "trashIncomplete": "Stack updates completed, but trash processing did not complete. Check Immich and re-detect before sending again.",
+    "trashIncomplete": "Stack updates completed, but moving photos to trash failed. The affected photos remain in Immich.",
+    "trashUnknown": "Stack updates completed, but the trash outcome could not be confirmed. Check the affected photos in Immich.",
 
     "trash": "Move to trash",
     "cancelTrash": "Cancel trash reservation",
@@ -874,6 +875,7 @@
     "sendConfirm": "Apply Stack changes to Immich? New {{create}}, update {{update}}, dissolve {{delete}}.",
     "sendUnknown": "Some Stack outcomes could not be confirmed. Detect again before sending.",
     "sendFailure": "Some Stacks could not be applied to Immich. Send again to retry.",
+    "sendFailureNoRetry": "Some Stacks could not be applied to Immich. Check their state in Immich.",
     "sendBlocked": "This Stack was not sent because a required membership change did not complete.",
     "newStack": "New Stack",
     "manual": "Manually assembled Stack",

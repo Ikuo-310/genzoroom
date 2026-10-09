@@ -852,7 +852,8 @@
   },
   "stackManagement": {
     "trashCount": "ゴミ箱移動予約: {{count}}枚",
-    "trashIncomplete": "STACK更新は完了しましたが、ゴミ箱移動が完了していません。Immichの状態を確認して再検出してください。",
+    "trashIncomplete": "STACKの更新は完了しましたが、ゴミ箱への移動に失敗しました。対象の写真はImmichに残っています。",
+    "trashUnknown": "STACKの更新は完了しましたが、ゴミ箱への移動結果を確認できませんでした。Immich側で対象の写真の状態を確認してください。",
 
     "trash": "ゴミ箱に入れる",
     "cancelTrash": "ゴミ箱予約を取り消す",
@@ -864,6 +865,7 @@
     "sendConfirm": "STACKの変更をImmichへ反映しますか？ 新規 {{create}}、更新 {{update}}、解除 {{delete}}。",
     "sendUnknown": "一部STACKの反映結果を確認できませんでした。再検出して確認してください。",
     "sendFailure": "一部のSTACKをImmichへ反映できませんでした。再送できます。",
+    "sendFailureNoRetry": "一部のSTACKをImmichへ反映できませんでした。Immich側で状態を確認してください。",
     "sendBlocked": "必要な所属変更が完了しなかったため、このSTACKは送信されませんでした。",
     "newStack": "新規STACK",
     "manual": "手動で構成したSTACK",

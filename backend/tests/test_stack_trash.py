@@ -10,11 +10,13 @@ from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STAC
 from test_stack_assets import stack
 
 
-def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None):
+def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False):
     calls = []
     stack_reads = 0
     asset_reads = 0
     current = [stack(member_ids=[A, B] if singleton else [A, B, C])]
+    if unrelated_invalid:
+        current.append(stack(SECOND_STACK_ID, str(UUID(int=99)), [D]))
     if changed:
         current[0]['primaryAssetId'] = B
     if extra:
@@ -34,6 +36,12 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
                 if stack_reads > 1:
                     if corruption == 'invalid_snapshot': visible = [{**current[0], 'primaryAssetId': B}]
                     if corruption == 'quarantined_snapshot': visible = [*current, stack(SECOND_STACK_ID, A, [A, D])]
+                    if corruption == 'unknown_members': visible = [*current, {'id': SECOND_STACK_ID, 'primaryAssetId': D}]
+                    if corruption == 'unknown_member_id': visible = [*current, stack(SECOND_STACK_ID, D, [D, 'bad'])]
+                    if corruption == 'unknown_entry': visible = [*current, None]
+                    if corruption == 'unknown_primary': visible = [*current, stack(SECOND_STACK_ID, 'bad', [D])]
+                    if corruption == 'duplicate_target_stack': visible = [*current, stack(NEW, D, [D, str(UUID(int=99))])]
+                    if corruption == 'invalid_old_stack': visible = [*current, stack(STACK_ID, str(UUID(int=99)), [D])]
                     if corruption == 'replacement_missing': visible = [s for s in current if s['id'] != NEW]
                     if corruption == 'replacement_members': visible = [{**s, 'assets': [{'id': A}, {'id': D}]} if s['id'] == NEW else s for s in current]
                     if corruption == 'replacement_primary': visible = [{**s, 'primaryAssetId': C} if s['id'] == NEW else s for s in current]
@@ -112,8 +120,14 @@ def test_failed_replacement_reports_release_without_trash():
 
 
 @pytest.mark.parametrize(('corruption','step','reason'), [
-    ('invalid_snapshot','stack_list_parse','invalid_or_quarantined_stack_state'),
-    ('quarantined_snapshot','stack_list_parse','invalid_or_quarantined_stack_state'),
+    ('invalid_snapshot','stack_list_parse','related_invalid_or_quarantined_stack_state'),
+    ('quarantined_snapshot','stack_list_parse','related_invalid_or_quarantined_stack_state'),
+    ('unknown_members','stack_list_parse','unproven_stack_ownership'),
+    ('unknown_member_id','stack_list_parse','unproven_stack_ownership'),
+    ('unknown_entry','stack_list_parse','unproven_stack_ownership'),
+    ('unknown_primary','stack_list_parse','unproven_stack_ownership'),
+    ('duplicate_target_stack','stack_list_parse','related_invalid_or_quarantined_stack_state'),
+    ('invalid_old_stack','stack_list_parse','related_invalid_or_quarantined_stack_state'),
     ('trash_member_owned','trash_asset_stack_membership','trash_asset_still_in_stack'),
     ('detail_stack','trash_asset_detail_stack','asset_detail_still_stacked'),
     ('replacement_missing','replacement_stack_exists','replacement_stack_missing'),
@@ -198,5 +212,26 @@ def test_asset_detail_http_error_logs_status_code_and_exception_type(monkeypatch
         assert failed['context']['errorCode'] == 'unexpected_response'
         assert failed['context']['exceptionType'] == 'ImmichRequestError'
         assert 'PRIVATE RESPONSE BODY' not in repr(entries)
+    finally:
+        backend_logger.set_level('off')
+
+
+@pytest.mark.parametrize('singleton', [False, True])
+def test_unrelated_invalid_stack_does_not_block_trash(singleton, monkeypatch):
+    from backend_logging import backend_logger
+    import stack_write
+    entries = []
+    monkeypatch.setattr(stack_write.backend_logger, 'add', lambda **entry: entries.append(entry))
+    backend_logger.set_level('debug')
+    try:
+        results, calls = run_trash(singleton=singleton, unrelated_invalid=True)
+        assert results[0].status == 'success' and results[0].trashStatus == 'success'
+        assert calls[-1] == ('DELETE', '/api/assets', {'ids': [B], 'force': False})
+        check = next(entry['context'] for entry in entries if entry.get('event') == 'trash.verify' and entry['context']['verificationStep'] == 'stack_list_parse')
+        assert check['passed'] is True
+        assert check['invalidStackCount'] == 1 and check['quarantinedMemberCount'] == 2
+        assert check['relatedInvalidStackCount'] == 0
+        assert check['relatedQuarantinedMemberCount'] == 0
+        assert check['unprovenOwnershipEntryCount'] == 0
     finally:
         backend_logger.set_level('off')
