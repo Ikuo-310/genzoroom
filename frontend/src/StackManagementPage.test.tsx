@@ -1486,3 +1486,21 @@ it('uses the shared red Immich action style and keeps send disabled when the ses
   expect(send.classList.contains('immich-action-button')).toBe(true);
   expect(send.disabled).toBe(true);
 });
+
+it('limits trash reservation to the context menu and displays/cancels the overlay', async()=>{
+ const extra={...photos[1],id:'png',filename:'selected.png',format:'PNG'};
+ await mount('/stack',{selectedAssets:[...photos,extra]});
+ const cards=()=>[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')];
+ const member=()=>cards().find(card=>card.textContent?.includes('selected.png'))!;
+ await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ const checkbox=()=>document.querySelector<HTMLInputElement>('[role="menuitemcheckbox"]')!;
+ expect(checkbox()).not.toBeNull();expect(checkbox().checked).toBe(false);
+ await act(async()=>checkbox().click());
+ expect(host.querySelectorAll('.stack-trash-overlay')).toHaveLength(1);expect(checkbox().checked).toBe(true);
+ await act(async()=>checkbox().click());expect(host.querySelector('.stack-trash-overlay')).toBeNull();
+ await press('Escape',{},document);
+ for(const card of cards().filter(card=>!card.textContent?.includes('selected.png'))) {
+  await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+  expect(document.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+ }
+});

@@ -108,3 +108,30 @@ it('uses a bounded backend operation ID for long filename families and maps comp
  draft=reduce(draft,{type:'writeResults',plan,results:[result(plan.operations[0].operationId,'success',{stackId:'12345678-1234-4234-8234-123456789abc'})]});
  expect(draft.groups).toHaveLength(0);expect(draft.writeResults[group.id].status).toBe('success');
 });
+
+it('plans two-member trash as a singleton update and rejects COVER or RAW',()=>{
+ const group={...original,trashAssetIds:['b']};
+ expect(buildStackWritePlan([group],[original]).operations[0]).toMatchObject({type:'update',memberIds:['a'],trashAssetIds:['b'],expectedMemberIds:['a','b'],expectedPrimaryAssetId:'a'});
+ expect(()=>buildStackWritePlan([{...group,trashAssetIds:['a']}],[original])).toThrow();
+ expect(()=>buildStackWritePlan([{...group,members:[a,{...b,is_raw:true}]}],[original])).toThrow();
+});
+it('keeps committed Stack results and blocks duplicate trash submission after a partial outcome',()=>{
+ const draft={...initial(),groups:[{...original,trashAssetIds:['b']}]};
+ const plan=buildStackWritePlan(draft.groups,sources(draft));
+ const next=reduce(draft,{type:'writeResults',plan,results:[{operationId:'old',status:'success',stackId:undefined,releasedStackId:'stack',trashStatus:'failed'}]});
+ expect(next.groups).toEqual([]);expect(next.undoSnapshot).toBeNull();
+ expect(next.writeResults.old.trashStatus).toBe('failed');
+ expect(buildStackWritePlan(next.groups,sources(next)).operations).toEqual([]);
+});
+
+it('retains reservations after failed replacement and retries creation without deleting twice',()=>{
+ const original3={...original,members:[a,b,c],originalMemberIds:['a','b','c']};
+ let draft=reduce(emptyStackDraft,{type:'initialize',source:{groups:[original3],unmatched:[]},assets:[a,b,c]});
+ draft=reduce(draft,{type:'trash',groupId:'old',assetId:'b'});
+ const plan=buildStackWritePlan(draft.groups,sources(draft));
+ draft=reduce(draft,{type:'writeResults',plan,results:[{operationId:'old',status:'failed',releasedStackId:'stack',trashStatus:'blocked'}]});
+ expect(draft.groups[0].origin).toBe('manual');expect(draft.groups[0].trashAssetIds).toEqual(['b']);
+ const retry=buildStackWritePlan(draft.groups,sources(draft));
+ expect(retry.operations).toHaveLength(1);expect(retry.operations[0]).toMatchObject({type:'create',memberIds:['a','c'],trashAssetIds:['b']});
+ expect(retry.operations[0].stackId).toBeUndefined();
+});

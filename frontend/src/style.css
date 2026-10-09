@@ -792,3 +792,5 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .home-page > [hidden] { display: none; }
 .home-stacks-panel { grid-row: 4; min-height: 0; overflow: hidden; }
 .home-stacks-panel > .stack-management-page { height: 100%; grid-template-rows: auto minmax(0, 1fr); }
+
+.stack-trash-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: white; background: #0008; pointer-events: none; }

@@ -32,6 +32,7 @@ export type StackDraftAction =
   | { type: 'target'; groupId: string }
   | { type: 'purgeGroup'; groupId: string }
   | { type: 'purgeMember'; groupId: string; assetId: string }
+  | { type: 'trash'; groupId: string; assetId: string }
   | { type: 'cover'; groupId: string; assetId: string }
   | { type: 'dropUnmatched'; assetId: string; targetGroupId: string }
   | { type: 'createFromUnmatchedDrop'; draggedAssetId: string; targetAssetId: string }
@@ -130,7 +131,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
     const source = state.groups.find(group => group.id === action.sourceGroupId);
     const target = state.groups.find(group => group.id === action.targetGroupId);
     const asset = source?.members.find(member => member.id === action.assetId);
-    if (!source || !target || !asset || isSingletonImmichStack(source) || isSingletonImmichStack(target) || target.members.some(member => member.id === asset.id)
+    if (!source || !target || !asset || source.trashAssetIds?.length || target.trashAssetIds?.length || isSingletonImmichStack(source) || isSingletonImmichStack(target) || target.members.some(member => member.id === asset.id)
       || state.groups.some(group => group !== source && group.members.some(member => member.id === asset.id))
       || state.unmatched.some(member => member.id === asset.id)) return state;
     const remaining = source.members.filter(member => member.id !== asset.id);
@@ -158,6 +159,16 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
   }
   const group = state.groups.find(current => current.id === action.groupId);
   if (!group) return state;
+  if (action.type === 'trash') {
+    const asset = group.members.find(member => member.id === action.assetId);
+    if (!asset || asset.is_raw || asset.id === group.coverAssetId || group.origin === 'immich' && asset.id === group.originalPrimaryAssetId || isSingletonImmichStack(group)) return state;
+    const reserved = new Set(group.trashAssetIds ?? []);
+    if (reserved.has(asset.id)) reserved.delete(asset.id); else reserved.add(asset.id);
+    return normalize({ ...state, groups: state.groups.map(current => current === group
+      ? { ...group, trashAssetIds: [...reserved] } : current) });
+  }
+  // Reservations keep their owner until cancellation; Undo restores both together.
+  if (group.trashAssetIds?.length) return state;
   if (action.type === 'purgeGroup') return normalize({ ...state, modified: true,
     groups: state.groups.filter(current => current !== group), unmatched: [...state.unmatched, ...group.members] });
   // Invalid singleton sources are dissolve-only, including actions dispatched outside the UI.
@@ -177,7 +188,7 @@ function reduceStackDraft(state: EditableStackDraft, action: StackDraftEditActio
 }
 
 const UNDOABLE_ACTIONS = new Set<StackDraftAction['type']>([
-  'cover', 'add', 'create', 'createFromUnmatchedDrop', 'purgeMember', 'purgeGroup', 'dropUnmatched', 'moveMember',
+  'cover', 'trash', 'add', 'create', 'createFromUnmatchedDrop', 'purgeMember', 'purgeGroup', 'dropUnmatched', 'moveMember',
 ]);
 
 export function stackDraftReducer(state: EditableStackDraft, action: StackDraftAction): EditableStackDraft {

@@ -1,7 +1,7 @@
 import type { DraftStack } from './stackCandidateDetection';
 
-export type StackWriteOperation = { operationId: string; type: 'create' | 'update' | 'delete'; stackId?: string; memberIds?: string[]; primaryAssetId?: string };
-export type StackWriteResult = { operationId: string; status: 'success' | 'failed' | 'unknown' | 'blocked'; stackId?: string; releasedStackId?: string; errorCode?: string };
+export type StackWriteOperation = { operationId: string; type: 'create' | 'update' | 'delete'; stackId?: string; memberIds?: string[]; primaryAssetId?: string; trashAssetIds?: string[]; expectedMemberIds?: string[]; expectedPrimaryAssetId?: string };
+export type StackWriteResult = { operationId: string; status: 'success' | 'failed' | 'unknown' | 'blocked'; stackId?: string; releasedStackId?: string; errorCode?: string; trashStatus?: 'success' | 'failed' | 'unknown' | 'blocked' };
 export type StackWritePlan = { operations: StackWriteOperation[]; unchanged: string[]; operationGroupIds?: Record<string, string> };
 
 export function buildStackWritePlan(groups: readonly DraftStack[], source: readonly DraftStack[]): StackWritePlan {
@@ -23,9 +23,11 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
     return operationId;
   };
   for (const group of groups) {
-    const memberIds = group.members.map(asset => asset.id);
+    const trashAssetIds = [...(group.trashAssetIds ?? [])];
+    if (new Set(trashAssetIds).size !== trashAssetIds.length || trashAssetIds.some(id => !group.members.some(asset => asset.id === id && !asset.is_raw) || id === group.coverAssetId || group.origin === 'immich' && id === group.originalPrimaryAssetId)) throw new Error('Invalid trash reservation');
+    const memberIds = group.members.filter(asset => !trashAssetIds.includes(asset.id)).map(asset => asset.id);
     if (new Set(memberIds).size !== memberIds.length || memberIds.length < 1 || !memberIds.includes(group.coverAssetId)) throw new Error('Invalid draft membership');
-    for (const id of memberIds) {
+    for (const id of [...memberIds, ...trashAssetIds]) {
       if (members.has(id)) throw new Error('Duplicate draft membership');
       members.add(id);
     }
@@ -43,9 +45,11 @@ export function buildStackWritePlan(groups: readonly DraftStack[], source: reado
       }
       if (snapshot.originalMemberIds.length === 1) throw new Error('Singleton Stack is dissolve-only');
     }
-    if (memberIds.length < 2) throw new Error('Invalid draft membership');
+    if (memberIds.length < 2 && !trashAssetIds.length) throw new Error('Invalid draft membership');
     operations.push({ operationId: allocateOperationId(group.id, group.id), type: group.origin === 'immich' ? 'update' : 'create',
-      ...(group.origin === 'immich' ? { stackId: group.immichStackId } : {}), memberIds, primaryAssetId: group.coverAssetId });
+      ...(group.origin === 'immich' ? { stackId: group.immichStackId } : {}), memberIds, primaryAssetId: group.coverAssetId,
+      ...(trashAssetIds.length ? { trashAssetIds, expectedMemberIds: group.origin === 'immich' ? [...group.originalMemberIds] : group.members.map(asset => asset.id),
+        expectedPrimaryAssetId: group.origin === 'immich' ? group.originalPrimaryAssetId : group.coverAssetId } : {}) });
   }
   for (const original of source) {
     if (original.origin === 'immich' && !groups.some(group => group.origin === 'immich' && group.immichStackId === original.immichStackId)) {
@@ -68,7 +72,9 @@ export async function sendStackWritePlan(operations: readonly StackWriteOperatio
     const operation = operations.find(op => op.operationId === result?.operationId);
     if (!operation || seen.has(result.operationId) || !['success','failed','unknown','blocked'].includes(result.status)
       || (result.releasedStackId !== undefined && result.releasedStackId !== operation.stackId)
-      || (result.status === 'success' && operation.type !== 'delete' && (typeof result.stackId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(result.stackId)))) throw new Error('Invalid Stack results');
+      || (result.status === 'success' && operation.type !== 'delete' && operation.memberIds?.length !== 1 && (typeof result.stackId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(result.stackId)))) throw new Error('Invalid Stack results');
+    if (result.trashStatus !== undefined && (!operation.trashAssetIds?.length || !['success','failed','unknown','blocked'].includes(result.trashStatus))) throw new Error('Invalid trash results');
+    if (operation.trashAssetIds?.length && result.status === 'success' && result.trashStatus === undefined) throw new Error('Missing trash results');
     seen.add(result.operationId);
   }
   return results;

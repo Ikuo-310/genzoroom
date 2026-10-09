@@ -206,3 +206,18 @@ it('ignores invalid unmatched photo drops without replacing the current Undo sna
   const duplicate = { ...edited, unmatched: [...edited.unmatched, edited.unmatched[0]] };
   expect(reduce(duplicate, { type: 'createFromUnmatchedDrop', draggedAssetId: 'x', targetAssetId: 'y' })).toBe(duplicate);
 });
+
+it('reserves only non-COVER non-RAW members, supports cancellation and Undo',()=>{
+ let draft=initial();
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:'a'})).toBe(draft);
+ expect(reduce(draft,{type:'trash',groupId:first,assetId:draft.groups[0].coverAssetId})).toBe(draft);
+ draft=reduce(draft,{type:'trash',groupId:first,assetId:'c'});
+ expect(draft.groups[0].trashAssetIds).toEqual(['c']);expect(draft.modified).toBe(true);
+ expect(reduce(draft,{type:'purgeMember',groupId:first,assetId:'c'})).toBe(draft);
+ expect(reduce(draft,{type:'cover',groupId:first,assetId:'c'})).toBe(draft);
+ const cancelled=reduce(draft,{type:'trash',groupId:first,assetId:'c'});
+ expect(cancelled.groups[0].trashAssetIds).toEqual([]);
+ expect(reduce(cancelled,{type:'undo'}).groups[0].trashAssetIds).toEqual(['c']);
+ expect(reduce(draft,{type:'undo'}).groups[0].trashAssetIds).toBeUndefined();
+ expect(reduce(draft,{type:'initialize',source,assets}).groups[0].trashAssetIds).toBeUndefined();
+});

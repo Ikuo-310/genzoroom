@@ -27,7 +27,7 @@ export function reconcileImmichLineage(groups: readonly DraftStack[], source: re
       }
     }
     if (restored.origin !== 'immich') return restored;
-    return { ...restored, modified: !sameMemberIds(restored.members.map(asset => asset.id), restored.originalMemberIds)
+    return { ...restored, modified: !!restored.trashAssetIds?.length || !sameMemberIds(restored.members.map(asset => asset.id), restored.originalMemberIds)
       || restored.coverAssetId !== restored.originalPrimaryAssetId };
   });
 }
@@ -42,7 +42,7 @@ export function isStackDraftModified(groups: readonly DraftStack[], source: read
     const current = matches[0];
     if (original.origin === 'immich') return current.modified === true;
     // Auto membership edits retain their MANUAL semantics even if members are later restored.
-    return current.modified !== original.modified || current.coverAssetId !== original.coverAssetId
+    return !!current.trashAssetIds?.length || current.modified !== original.modified || current.coverAssetId !== original.coverAssetId
       || current.members.length !== original.members.length
       || current.members.some((asset, index) => asset.id !== original.members[index].id);
   });

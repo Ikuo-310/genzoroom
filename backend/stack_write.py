@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend_logging import backend_logger
 from immich import (
-    IMMICH_TIMEOUT, ImmichRequestError, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
+    IMMICH_TIMEOUT, ImmichRequestError, classify_image_format, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
     _log_response_failure, _request_error, _require_configuration,
 )
 
@@ -20,6 +20,10 @@ class StackOperation(BaseModel):
     memberIds: list[UUID] | None = Field(default=None, max_length=1000)
     primaryAssetId: UUID | None = None
 
+    trashAssetIds: list[UUID] = Field(default_factory=list, max_length=1000)
+    expectedMemberIds: list[UUID] | None = Field(default=None, max_length=1000)
+    expectedPrimaryAssetId: UUID | None = None
+
     @model_validator(mode="after")
     def validate_operation(self):
         if (self.type == "create") != (self.stackId is None):
@@ -27,8 +31,17 @@ class StackOperation(BaseModel):
         if self.type == "delete":
             if self.memberIds is not None or self.primaryAssetId is not None:
                 raise ValueError("Delete accepts no members or primary")
-        elif self.memberIds is None or len(self.memberIds) < 2 or len(set(self.memberIds)) != len(self.memberIds) or self.primaryAssetId not in self.memberIds:
+        elif self.memberIds is None or len(self.memberIds) < (1 if self.trashAssetIds else 2) or len(set(self.memberIds)) != len(self.memberIds) or self.primaryAssetId not in self.memberIds:
             raise ValueError("Invalid members or primary")
+        if self.trashAssetIds:
+            if self.type == "delete" or len(set(self.trashAssetIds)) != len(self.trashAssetIds) or set(self.trashAssetIds) & set(self.memberIds or []):
+                raise ValueError("Invalid trash membership")
+            if not self.expectedMemberIds or len(set(self.expectedMemberIds)) != len(self.expectedMemberIds) or not set(self.trashAssetIds) <= set(self.expectedMemberIds):
+                raise ValueError("Missing trash source")
+            if self.expectedPrimaryAssetId not in self.expectedMemberIds or self.expectedPrimaryAssetId in self.trashAssetIds or self.primaryAssetId in self.trashAssetIds:
+                raise ValueError("Protected primary")
+        elif self.expectedMemberIds is not None or self.expectedPrimaryAssetId is not None:
+            raise ValueError("Unexpected trash source")
         return self
 
 
@@ -45,7 +58,7 @@ class StackApplyRequest(BaseModel):
             operations.add(op.operationId)
             if op.stackId is not None:
                 stacks.add(op.stackId)
-            for member in op.memberIds or []:
+            for member in [*(op.memberIds or []), *op.trashAssetIds]:
                 if member in members:
                     raise ValueError("Duplicate final membership")
                 members.add(member)
@@ -58,6 +71,7 @@ class StackWriteResult(BaseModel):
     stackId: UUID | None = None
     releasedStackId: UUID | None = None
     errorCode: str | None = None
+    trashStatus: Literal["success", "failed", "unknown", "blocked"] | None = None
 
 
 class StackApplyResponse(BaseModel):
@@ -141,20 +155,21 @@ def _operation_results(ops, results, batch_id):
     counts = {status: sum(result.status == status for result in results) for status in ("success", "failed", "unknown", "blocked")}
     for op, result in zip(ops, results):
         fields = {"batchId": batch_id, "status": result.status}
-        for field in ("stackId", "releasedStackId", "errorCode"):
+        for field in ("stackId", "releasedStackId", "errorCode", "trashStatus"):
             value = getattr(result, field)
             if value is not None:
                 fields[field] = str(value)
         # Failed/unknown writes are terminal for this requested operation; dependency blocks are recoverable.
-        severity = "error" if result.status in ("failed", "unknown") else "warn" if result.status == "blocked" else "info"
+        severity = "error" if result.status in ("failed", "unknown") else "warn" if result.status == "blocked" else "error" if result.trashStatus in ("failed", "unknown", "blocked") else "info"
         _log_operation(op, "operation.result", level=severity, **fields)
-    overall = "success" if counts["success"] == len(results) else "partial_failure" if counts["success"] else "failure"
+    trash_failures = sum(result.trashStatus in ("failed", "unknown", "blocked") for result in results)
+    overall = "success" if counts["success"] == len(results) and not trash_failures else "partial_failure" if counts["success"] else "failure"
     # A retained final summary still explains large batches whose detailed evidence has overflowed.
     backend_logger.add(level="info" if overall == "success" else "warn" if overall == "partial_failure" else "error",
                        component="stack_write", event="batch.result", context={
                            "batchId": batch_id, "operationCount": len(results), "successCount": counts["success"],
                            "failedCount": counts["failed"], "unknownCount": counts["unknown"],
-                           "blockedCount": counts["blocked"], "overallResult": overall,
+                           "blockedCount": counts["blocked"], "trashFailureCount": trash_failures, "overallResult": overall,
                        })
     return StackApplyResponse(results=results)
 
@@ -180,7 +195,7 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
     results = {
         op.operationId: StackWriteResult(operationId=op.operationId, status="failed", errorCode="unexpected_response")
         for op in ops if op.stackId in snapshot.invalid_stack_ids
-        or any(member in snapshot.quarantined_member_ids for member in op.memberIds or [])
+        or any(member in snapshot.quarantined_member_ids for member in [*(op.memberIds or []), *op.trashAssetIds])
     }
     released = set()
     replacements = set()
@@ -215,6 +230,35 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 # The write may have committed despite an unusable success body.
                 return StackWriteResult(operationId=op.operationId, status="unknown", errorCode="unexpected_response")
 
+        async def asset_state(op, asset_id):
+            response = await _immich_request(client, "GET", url, f"/assets/{asset_id}", headers=headers,
+                                             batch_id=batch_id, operation_id=op.operationId, request_id=uuid4().hex)
+            if response.status_code != 200:
+                raise _request_error(response)
+            body = response.json()
+            if UUID(body["id"]) != asset_id or not isinstance(body.get("originalFileName"), str) or not body["originalFileName"] or not isinstance(body.get("isTrashed"), bool):
+                raise ValueError("Unusable asset state")
+            if classify_image_format(body["originalFileName"])[1] or body["isTrashed"]:
+                raise ValueError("Protected or already trashed asset")
+            return body
+
+        # Validate reservation provenance before releasing any Stack, including current COVER and RAW.
+        for op in ops:
+            if not op.trashAssetIds or op.operationId in results:
+                continue
+            try:
+                old = lookup.get(op.stackId) if op.stackId else None
+                if op.stackId and (old is None or {UUID(a["id"]) for a in old["assets"]} != set(op.expectedMemberIds)
+                                   or UUID(old["primaryAssetId"]) != op.expectedPrimaryAssetId):
+                    raise ValueError("Changed source Stack")
+                for asset_id in op.trashAssetIds:
+                    body = await asset_state(op, asset_id)
+                    owner = owners.get(asset_id)
+                    if owner != op.stackId or (body.get("stack") is not None and UUID(body["stack"]["id"]) != op.stackId):
+                        raise ValueError("Changed asset ownership")
+            except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError):
+                results[op.operationId] = StackWriteResult(operationId=op.operationId, status="failed", errorCode="trash_preflight_failed")
+
         # Release all changing memberships first, including cycles between two updated Stacks.
         # v3.2.4 PUT changes only primary; membership updates require delete then create.
         for op in ops:
@@ -243,6 +287,8 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
             # Do not steal or merge assets from active or unsuccessfully released Stacks.
             if any(owner not in released for owner in dependencies):
                 results[op.operationId] = StackWriteResult(operationId=op.operationId, status="blocked", errorCode="membership_dependency")
+            elif len(op.memberIds) == 1 and op.trashAssetIds:
+                results[op.operationId] = StackWriteResult(operationId=op.operationId, status="success")
             elif op.type == "create" or op.operationId in replacements:
                 ordered = [op.primaryAssetId, *[member for member in op.memberIds if member != op.primaryAssetId]]
                 results[op.operationId] = await write(op, "POST", "/stacks", {"assetIds": [str(member) for member in ordered]})
@@ -250,4 +296,39 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 results[op.operationId] = await write(op, "PUT", f"/stacks/{op.stackId}", {"primaryAssetId": str(op.primaryAssetId)}, op.stackId)
             if op.operationId in replacements:
                 results[op.operationId].releasedStackId = op.stackId
+        # Trash is a separate outcome: a committed Stack update is never rolled back or repeated.
+        for op in ops:
+            result = results[op.operationId]
+            if not op.trashAssetIds:
+                continue
+            if result.status != "success":
+                result.trashStatus = "blocked"
+                continue
+            try:
+                current = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id), require_primary=True)
+                if current.invalid_stack_ids or current.quarantined_member_ids:
+                    raise ValueError("Uncertain current ownership")
+                current_owners = {UUID(a["id"]): UUID(stack["id"]) for stack in current.stacks for a in stack["assets"]}
+                if any(asset_id in current_owners for asset_id in op.trashAssetIds):
+                    raise ValueError("Trash asset still stacked")
+                if len(op.memberIds) > 1:
+                    surviving = next((stack for stack in current.stacks if UUID(stack["id"]) == result.stackId), None)
+                    if surviving is None or {UUID(a["id"]) for a in surviving["assets"]} != set(op.memberIds) or UUID(surviving["primaryAssetId"]) != op.primaryAssetId:
+                        raise ValueError("Replacement not verified")
+                elif op.memberIds[0] in current_owners:
+                    raise ValueError("Singleton not released")
+                for asset_id in op.trashAssetIds:
+                    body = await asset_state(op, asset_id)
+                    if body.get("stack") is not None:
+                        raise ValueError("Trash asset still stacked")
+            except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError):
+                result.trashStatus = "blocked"
+                result.errorCode = "trash_verification_failed"
+                _log_operation(op, "trash.result", level="error", batchId=batch_id, status="blocked", errorCode=result.errorCode)
+                continue
+            trash_result = await write(op, "DELETE", "/assets", {"ids": [str(asset_id) for asset_id in op.trashAssetIds], "force": False})
+            result.trashStatus = trash_result.status
+            result.errorCode = trash_result.errorCode
+            _log_operation(op, "trash.result", level="info" if trash_result.status == "success" else "error",
+                           batchId=batch_id, status=trash_result.status, assetCount=len(op.trashAssetIds), errorCode=trash_result.errorCode)
     return _operation_results(ops, [results[op.operationId] for op in ops], batch_id)
