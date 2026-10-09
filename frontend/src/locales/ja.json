@@ -851,6 +851,12 @@
     }
   },
   "stackManagement": {
+    "trashCount": "ゴミ箱移動予約: {{count}}枚",
+    "trashIncomplete": "STACKの更新は完了しましたが、ゴミ箱への移動に失敗しました。Immich側で対象の写真の状態を確認してください。",
+    "trashUnknown": "STACKの更新は完了しましたが、ゴミ箱への移動結果を確認できませんでした。Immich側で対象の写真の状態を確認してください。",
+
+    "trash": "ゴミ箱に入れる",
+    "cancelTrash": "ゴミ箱予約を取り消す",
     "sendLimit": "一度に送信できるのは500件まで、1つのSTACKは1,000枚までです。候補を減らしてから送信してください。",
     "sending": "Immichへ反映中…",
     "pendingSummary": "未送信: 新規 {{create}} / 更新 {{update}} / 解除 {{delete}}",
@@ -859,10 +865,12 @@
     "sendConfirm": "STACKの変更をImmichへ反映しますか？ 新規 {{create}}、更新 {{update}}、解除 {{delete}}。",
     "sendUnknown": "一部STACKの反映結果を確認できませんでした。再検出して確認してください。",
     "sendFailure": "一部のSTACKをImmichへ反映できませんでした。再送できます。",
+    "sendFailureNoRetry": "一部のSTACKをImmichへ反映できませんでした。Immich側で状態を確認してください。",
     "sendBlocked": "必要な所属変更が完了しなかったため、このSTACKは送信されませんでした。",
     "newStack": "新規STACK",
     "manual": "手動で構成したSTACK",
     "purgeGroup": "draft STACKを解体",
+    "cancelTrashBeforeEdit": "STACK編集の前にゴミ箱予約を取り消してください",
     "purgeMember": "{{filename}}をdraft STACKから外す",
     "addTarget": "追加先",
     "setCover": "{{filename}}をCOVERに設定",

@@ -1,6 +1,6 @@
 # GenzoRoom
 
-GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and exporting developed JPEGs to Immich. Confirmed Export uploads a new JPEG, adds the GenzoRoom tag, and makes it the source Stack's Cover while preserving its members. Ordinary photo browsing is read-focused; STACK management sends create, update, and delete operations to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
+GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and exporting developed JPEGs to Immich. Confirmed Export uploads a new JPEG, adds the GenzoRoom tag, and makes it the source Stack's Cover while preserving its members. Ordinary photo browsing is read-focused; STACK management sends Stack changes and reserved photo trash moves to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
 
@@ -81,6 +81,8 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 - Untouched auto candidates show NAME / TIME / CAM / GPS evidence. Existing Immich groups keep the IMMICH indicator (yellow when modified); manual groups and auto groups with member changes show MANUAL. The workspace selects a COVER automatically and lets you change it.
 - Add unmatched photos to a Stack, Purge groups or members, create manual Stacks, and use desktop Drag & Drop to move unmatched photos into a Stack, move members between Stacks, or return members to unmatched. Dropping one unmatched photo onto another creates a two-member MANUAL Stack; dropping onto the unmatched section's empty space does nothing. Returning a group to its original Immich membership and COVER restores its original Stack lineage.
 - Use `Primary+Z` to undo the last local Stack-structure edit once, including D&D-created manual Stacks. Undo does not rewind Immich source data or send results; Redo and an Undo button are not provided.
+- Right-click an existing Stack's non-COVER, non-RAW member and choose **Move to trash / ゴミ箱に入れる** to reserve it; a trash icon marks its thumbnail. The current COVER and the COVER originally loaded from Immich are protected. Newly added or moved-in photos are not eligible. Choose **Cancel trash reservation / ゴミ箱予約を取り消す** to cancel, or use the same one-step `Primary+Z` Undo before sending.
+- Reservations take effect together with Stack edits through **Send to Immich / Immichへ送信**. Photos move to Immich's normal trash, without permanent deletion. **Purge** only removes photos from the Stack draft and leaves them in Immich; it is different from moving a photo to trash. While a Stack has reservations, cancel them before changing its COVER, purging it, or moving its members; adding unmatched photos remains available.
 - On confirmed send, the final draft is classified as unchanged, create, update, or delete. Unchanged Stacks do not issue a write; Cover-only changes update the primary. Immich v3.2.4 membership changes release the old Stack and create its replacement. Partial outcomes are shown; uncertain outcomes block blind retry and require re-detection.
 - Stack cards use the shared Gallery middle-ellipsis filename display. The Immich send button uses the same red action style as Export.
 - The workspace is desktop-browser oriented. Touch Drag & Drop, Stack/group reordering, and external file drop are not supported.
@@ -144,7 +146,7 @@ These are current boundaries, not release commitments or a promised roadmap.
 
 ## Security and data handling
 
-- Normal photo access uses Immich read endpoints. Confirmed STACK management additionally uses only Stack create/update/delete operations; it does not modify image originals, delete assets, upload files, or perform unrelated Immich writes. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.download` retrieves selected JPEG originals and `server.about` supplies the server information shown in Settings.
+- Normal photo access uses Immich read endpoints. Confirmed STACK management uses Stack create/update/delete operations and explicitly reserved photo moves to Immich trash; it does not permanently delete assets, modify image originals, or upload files. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `asset.delete`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.delete` permits reserved trash moves, `asset.download` retrieves selected JPEG originals, and `server.about` supplies the server information shown in Settings.
 - The Immich API key is supplied to the backend through environment variables. It is not sent to the frontend or embedded in the frontend image.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
@@ -157,7 +159,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 
 - Docker Engine with Docker Compose v2, or Portainer connected to a Docker Standalone environment.
 - An existing Immich server reachable from the GenzoRoom backend container.
-- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. Stack permissions are used by confirmed STACK management operations.
+- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `asset.delete`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. Stack permissions and `asset.delete` are used by confirmed STACK management operations.
 - A browser that can reach the GenzoRoom frontend. The default host port is `3190` and can be changed with `GENZOROOM_PORT`.
 
 ## Quick start

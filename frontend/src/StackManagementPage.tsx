@@ -16,9 +16,10 @@ import { useStackCandidateDetection } from './useStackCandidateDetection';
 import { useStackColumns } from './useStackColumns';
 import { useEditableStackDraft } from './useEditableStackDraft';
 import { useSelectedImmichStacks } from './useSelectedImmichStacks';
-import { isSingletonImmichStack, mergeImmichStackSource } from './immichStackDraft';
+import { canReserveStackTrash, isSingletonImmichStack, mergeImmichStackSource } from './immichStackDraft';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import type { DraftStack } from './stackCandidateDetection';
+import { StackTrashMenu } from './StackTrashMenu';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 import { frontendLogger } from './frontendLogging';
@@ -143,8 +144,17 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   useEffect(() => () => { sendRequest.current?.controller.abort(); dragDiagnosticSession.current = null; clearDragVisuals(); draggingRef.current = null; dragPayloadForEndLog.current = null;
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
+  const [trashMenu, setTrashMenu] = useState<{ groupId: string; assetId: string; x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    // A body portal survives the hidden Home panel unless its transient intent is discarded.
+    if (!active) setTrashMenu(null);
+  }, [active]);
+  // A trash-only uncertainty belongs to a Stack already removed from the draft; it must not lock unrelated retries.
   const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
+  const trashCount = plan.operations.reduce((count, op) => count + (op.trashAssetIds?.length ?? 0), 0);
+  const trashFailed = Object.values(draft.writeResults).some(result => result.status === 'success' && (result.trashStatus === 'failed' || result.trashStatus === 'blocked'));
+  const trashUnknown = Object.values(draft.writeResults).some(result => result.status === 'success' && result.trashStatus === 'unknown');
   const createCount = plan.operations.filter(op => op.type === 'create').length;
   const updateCount = plan.operations.filter(op => op.type === 'update').length;
   const deleteCount = plan.operations.filter(op => op.type === 'delete').length;
@@ -153,7 +163,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const startSend = async () => {
     if (!canSend || sendRequest.current) return;
     dispatch({ type: 'clearUndo' });
-    setConfirmSend(false); setSending(true); setSendStatus('sending');
+    setTrashMenu(null); setConfirmSend(false); setSending(true); setSendStatus('sending');
     const controller = new AbortController();
     const request = { controller, generation: currentGeneration.current };
     sendRequest.current = request;
@@ -164,11 +174,15 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     // Unchanged local completion waits for the same generation check as remote results.
     dispatch({ type: 'writeResults', plan, results });
     setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
-      : results.some(result => result.status !== 'success') ? 'sendFailure' : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
+      : results.some(result => result.status !== 'success')
+        ? 'sendFailure'
+        : results.some(result => result.trashStatus === 'unknown') ? 'trashUnknown'
+          : results.some(result => result.trashStatus === 'failed' || result.trashStatus === 'blocked') ? 'trashIncomplete'
+            : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
     sendRequest.current = null; setSending(false);
   };
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));
-  const canEdit = ready && !confirmRedetect && !confirmSend && !sending;
+  const canEdit = ready && !unknown && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && draft.groups.some(group => group.id === addTargetStackId && !isSingletonImmichStack(group)) && selectedUnmatched.length > 0;
   const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
   const payloadFrom = (transfer: DataTransfer) => {
@@ -294,7 +308,9 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       catch { return 'getdata-unreadable'; }
     }
     if (payload.sourceGroupId && draft.groups.some(group => group.id === payload.sourceGroupId && isSingletonImmichStack(group))) return 'singleton-source';
+    if (payload.sourceGroupId && draft.groups.some(group => group.id === payload.sourceGroupId && group.trashAssetIds?.length)) return 'trash-reserved-source';
     if (targetGroupId && draft.groups.some(group => group.id === targetGroupId && isSingletonImmichStack(group))) return 'singleton-target';
+    if (payload.sourceGroupId && targetGroupId && draft.groups.some(group => group.id === targetGroupId && group.trashAssetIds?.length)) return 'trash-reserved-target';
     return validTarget ? null : 'invalid-target';
   };
   const handleDragOver = (event: React.DragEvent, target: DndTarget, targetGroupId: string | null) => {
@@ -322,7 +338,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
     dragDiagnosticSession.current = null;
-    if (!canEdit || event.dataTransfer.files.length) {
+    const sourceReserved = payload.sourceGroupId !== null && !!draft.groups.find(group => group.id === payload.sourceGroupId)?.trashAssetIds?.length;
+    if (!canEdit || sourceReserved || event.dataTransfer.files.length) {
       event.preventDefault();
       clearDragVisuals();
       if (frontendLogger.getLevel() === 'debug') {
@@ -330,7 +347,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         logStackDnd('dragstart.rejected', { assetId: payload.assetId, sourceGroupId: payload.sourceGroupId,
           ...observed, refPayloadPresent: draggingRef.current !== null,
           statePayloadPresent: dragging !== null, canEdit,
-          accepted: false, rejectionReason: !canEdit ? 'not-editable' : 'external-file' });
+          accepted: false, rejectionReason: !canEdit ? 'not-editable' : sourceReserved ? 'trash-reserved-source' : 'external-file' });
       }
       return false;
     }
@@ -543,7 +560,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         <button type="button" disabled={!canEdit || selectedUnmatched.length < 2} onClick={() => dispatch({ type: 'create' })}>{t('stackManagement.newStack')}</button>
       </div>
       {plan.operations.length > 0 && <span className="stack-pending-summary" role="status">
-        {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}
+        {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}{trashCount > 0 && ` — ${t('stackManagement.trashCount', { count: trashCount })}`}
       </span>}
       <div className="stack-control-actions">
         <HomeThumbnailSizeControl />
@@ -563,7 +580,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       <section className="stack-frame stack-candidate-frame" aria-labelledby="stack-candidates-heading">
         <div className="stack-section-heading">
           <h2 id="stack-candidates-heading">{t('stackManagement.candidates')}</h2>
-          {sendStatus && <span className={`stack-send-status${sendStatus === 'sendFailure' || sendStatus === 'sendUnknown' ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
+          {sendStatus && <span className={`stack-send-status${['sendFailure', 'sendFailureNoRetry', 'sendUnknown', 'trashIncomplete', 'trashUnknown'].includes(sendStatus) ? ' stack-send-status-error' : ''}`} role="status">{t(`stackManagement.${sendStatus}`)}</span>}
         </div>
         {/* Measure the grid's usable width after frame padding and scrollbar space. */}
         <div ref={contentRef} className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
@@ -586,10 +603,10 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           }}
           style={{ '--stack-member-count': group.members.length } as CSSProperties}>
           <header className="stack-group-header">
-            <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit}
-              title={t('stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
+            <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit || !!group.trashAssetIds?.length}
+              title={t(group.trashAssetIds?.length ? 'stackManagement.cancelTrashBeforeEdit' : 'stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
               onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
-            <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} />
+            <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} retryAllowed={!unknown} />
             {!isSingletonImmichStack(group) && <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
               onClick={() => selectedUnmatched.length
@@ -598,11 +615,13 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
-            selected={false} member cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)}
+            selected={false} member trash={group.trashAssetIds?.includes(asset.id)}
+            onContextMenu={event => { if (!canEdit || !canReserveStackTrash(group, asset.id)) return; event.preventDefault(); setTrashMenu({ groupId: group.id, assetId: asset.id, x: event.clientX, y: event.clientY }); }} cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)} toggleDisabled={!!group.trashAssetIds?.length} dragDisabled={!!group.trashAssetIds?.length}
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
             onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: group.id })} onDragEnd={handleDragEnd}
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
-            onPurge={isSingletonImmichStack(group) ? undefined : () => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })} />)}</div>
+            onPurge={isSingletonImmichStack(group) ? undefined : () => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })}
+            purgeDisabled={!!group.trashAssetIds?.length} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
       </section>
       <div className="stack-split-separator" role="separator" aria-orientation="horizontal"
@@ -656,24 +675,29 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
       </section>
       </div>
     </div>
+    {active && trashMenu && canEdit && displayed.groups.some(group => group.id === trashMenu.groupId && canReserveStackTrash(group, trashMenu.assetId)) && <StackTrashMenu
+      point={trashMenu} checked={!!draft.groups.find(group => group.id === trashMenu.groupId)?.trashAssetIds?.includes(trashMenu.assetId)}
+      onToggle={() => dispatch({ type: 'trash', groupId: trashMenu.groupId, assetId: trashMenu.assetId })} onClose={() => setTrashMenu(null)} />}
+    {trashFailed && sendStatus !== 'trashIncomplete' && <p role="alert">{t('stackManagement.trashIncomplete')}</p>}
+    {trashUnknown && sendStatus !== 'trashUnknown' && <p role="alert">{t('stackManagement.trashUnknown')}</p>}
     {confirmRedetect && <StackRedetectDialog onConfirm={continueRedetect} onCancel={() => setConfirmRedetect(false)} />}
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
       create: createCount, update: updateCount, delete: deleteCount,
-    })} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
+    }) + (trashCount ? ` ${t('stackManagement.trashCount', { count: trashCount })}` : '')} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
   </Container>;
 }
 
-function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: StackWriteResult }) {
+function StackEvidenceHeader({ group, result, retryAllowed }: { group: DraftStack; result?: StackWriteResult; retryAllowed: boolean }) {
   const { t } = useTranslation();
   const labels = [['name', 'NAME'], ['time', 'TIME'], ['camera', 'CAM'], ['gps', 'GPS']] as const;
   if (isSingletonImmichStack(group)) {
     const failure = result && result.status !== 'success'
-      ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure') : null;
+      ? t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : retryAllowed ? 'stackManagement.sendFailure' : 'stackManagement.sendFailureNoRetry') : null;
     const description = [t('stackManagement.immichSingleton'), failure].filter(Boolean).join(' — ');
     return <div className="stack-group-indicators"><span className="stack-evidence singleton-warning" title={description}><span aria-hidden="true">IMMICH</span><span className="visually-hidden">{description}</span></span></div>;
   }
   if (result && result.status !== 'success') {
-    const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : 'stackManagement.sendFailure');
+    const description = t(result.status === 'unknown' ? 'stackManagement.sendUnknown' : result.status === 'blocked' ? 'stackManagement.sendBlocked' : retryAllowed ? 'stackManagement.sendFailure' : 'stackManagement.sendFailureNoRetry');
     return <div className="stack-group-indicators"><span className="stack-evidence error" title={description}><span aria-hidden="true">{group.origin === 'immich' ? 'IMMICH' : group.origin === 'manual' || group.modified ? 'MANUAL' : 'STACK'}</span><span className="visually-hidden">{description}</span></span></div>;
   }
   if (group.origin === 'immich') {
@@ -689,9 +713,11 @@ function StackEvidenceHeader({ group, result }: { group: DraftStack; result?: St
   })}</div>;
 }
 
-function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, dragging = false, dropTarget = false,
-  onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
-  asset: RecentAsset; selected: boolean; cover?: boolean; member?: boolean; disabled?: boolean;
+function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
+  purgeDisabled = false, dragging = false, dropTarget = false,
+  trash = false, onContextMenu, onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
+  asset: RecentAsset; selected: boolean; trash?: boolean; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; cover?: boolean; member?: boolean; disabled?: boolean;
+  toggleDisabled?: boolean; dragDisabled?: boolean; purgeDisabled?: boolean;
   dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean;
   onDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
   onToggle: () => void; onPurge?: () => void;
@@ -701,17 +727,17 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
 }) {
   const { t } = useTranslation();
   const suppressClick = useRef(false);
-  return <div className="stack-photo-wrapper" onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled} draggable={!disabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" aria-pressed={member ? cover : selected}
+  return <div className="stack-photo-wrapper" onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled} draggable={!disabled && !dragDisabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${toggleDisabled || dragDisabled ? ' stack-edit-disabled' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" onContextMenu={onContextMenu} aria-disabled={disabled || toggleDisabled || dragDisabled || undefined} title={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : undefined} aria-description={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : cover ? t('stackManagement.cover') : undefined} aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
-    aria-description={cover ? t('stackManagement.cover') : undefined}
     onDragStart={event => { suppressClick.current = onDragStart(event); }}
     onDragEnd={event => { onDragEnd(event); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
-    onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}>
+    onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } if (!toggleDisabled) onToggle(); }}>
     <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={asset.thumbnail_url} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
+      {trash && <span className="stack-trash-overlay" aria-label={t('stackManagement.trash')}><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></span>}
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>
     <span className="stack-filename"><FilenameDisplay filename={asset.filename} /></span>
-  </button>{onPurge && <button className="stack-icon-button stack-purge-member" type="button" disabled={disabled}
-    title={t('stackManagement.purgeMember', { filename: asset.filename })} aria-label={t('stackManagement.purgeMember', { filename: asset.filename })}
+  </button>{onPurge && <button className="stack-icon-button stack-purge-member" type="button" disabled={disabled || purgeDisabled}
+    title={t(purgeDisabled ? 'stackManagement.cancelTrashBeforeEdit' : 'stackManagement.purgeMember', { filename: asset.filename })} aria-label={t('stackManagement.purgeMember', { filename: asset.filename })}
     onClick={event => { event.stopPropagation(); onPurge(); }}>×</button>}</div>;
 }

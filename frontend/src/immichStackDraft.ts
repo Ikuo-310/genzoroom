@@ -5,6 +5,19 @@ export function isSingletonImmichStack(group: { origin?: string; originalMemberI
   return group.origin === 'immich' && group.originalMemberIds?.length === 1;
 }
 
+export function stackTrashSource(group: DraftStack) {
+  return group.origin === 'immich'
+    ? { stackId: group.immichStackId, memberIds: group.originalMemberIds, primaryAssetId: group.originalPrimaryAssetId }
+    : group.trashSource;
+}
+
+export function canReserveStackTrash(group: DraftStack, assetId: string) {
+  const source = stackTrashSource(group);
+  const asset = group.members.find(member => member.id === assetId);
+  return !!source && source.memberIds.length > 1 && source.memberIds.includes(assetId)
+    && !!asset && !asset.is_raw && assetId !== group.coverAssetId && assetId !== source.primaryAssetId;
+}
+
 function sameMemberIds(current: readonly string[], original: readonly string[]) {
   const ids = new Set(current);
   return ids.size === current.length && new Set(original).size === original.length
@@ -27,7 +40,7 @@ export function reconcileImmichLineage(groups: readonly DraftStack[], source: re
       }
     }
     if (restored.origin !== 'immich') return restored;
-    return { ...restored, modified: !sameMemberIds(restored.members.map(asset => asset.id), restored.originalMemberIds)
+    return { ...restored, modified: !!restored.trashAssetIds?.length || !sameMemberIds(restored.members.map(asset => asset.id), restored.originalMemberIds)
       || restored.coverAssetId !== restored.originalPrimaryAssetId };
   });
 }
@@ -42,7 +55,7 @@ export function isStackDraftModified(groups: readonly DraftStack[], source: read
     const current = matches[0];
     if (original.origin === 'immich') return current.modified === true;
     // Auto membership edits retain their MANUAL semantics even if members are later restored.
-    return current.modified !== original.modified || current.coverAssetId !== original.coverAssetId
+    return !!current.trashAssetIds?.length || current.modified !== original.modified || current.coverAssetId !== original.coverAssetId
       || current.members.length !== original.members.length
       || current.members.some((asset, index) => asset.id !== original.members[index].id);
   });

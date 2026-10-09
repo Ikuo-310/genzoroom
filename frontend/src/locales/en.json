@@ -861,6 +861,12 @@
     }
   },
   "stackManagement": {
+    "trashCount": "Move to trash: {{count}} assets",
+    "trashIncomplete": "Stack updates completed, but moving photos to trash failed. Check the affected photos in Immich.",
+    "trashUnknown": "Stack updates completed, but the trash outcome could not be confirmed. Check the affected photos in Immich.",
+
+    "trash": "Move to trash",
+    "cancelTrash": "Cancel trash reservation",
     "sendLimit": "Send up to 500 Stack changes at a time, with up to 1,000 photos per Stack. Reduce the candidates before sending.",
     "sending": "Applying Stacks to Immich…",
     "pendingSummary": "Pending: New {{create}} / Update {{update}} / Dissolve {{delete}}",
@@ -869,10 +875,12 @@
     "sendConfirm": "Apply Stack changes to Immich? New {{create}}, update {{update}}, dissolve {{delete}}.",
     "sendUnknown": "Some Stack outcomes could not be confirmed. Detect again before sending.",
     "sendFailure": "Some Stacks could not be applied to Immich. Send again to retry.",
+    "sendFailureNoRetry": "Some Stacks could not be applied to Immich. Check their state in Immich.",
     "sendBlocked": "This Stack was not sent because a required membership change did not complete.",
     "newStack": "New Stack",
     "manual": "Manually assembled Stack",
     "purgeGroup": "Dissolve draft Stack",
+    "cancelTrashBeforeEdit": "Cancel the trash reservation before editing this Stack",
     "purgeMember": "Remove {{filename}} from draft Stack",
     "addTarget": "Add target",
     "setCover": "Set {{filename}} as COVER",

@@ -32,6 +32,14 @@ it('allows only live assets moved between eligible distinct targets',()=>{
  expect(canDropStackPayload({assetId:'e',sourceGroupId:null},'missing',groups,unmatched)).toBe(false);
  expect(canDropStackPayload({assetId:'a',sourceGroupId:'one'},'two',groups,[...unmatched,{id:'a'}])).toBe(false);
 });
+it('matches reserved-member D&D rules while preserving Add-compatible unmatched drops',()=>{
+ const reserved={id:'one',members,trashAssetIds:['a']};
+ const all=[reserved,{...groups[1]}];
+ expect(canDropStackPayload({assetId:'a',sourceGroupId:'one'},'two',all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'a',sourceGroupId:'one'},null,all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'c',sourceGroupId:'two'},'one',all,unmatched)).toBe(false);
+ expect(canDropStackPayload({assetId:'e',sourceGroupId:null},'one',all,unmatched)).toBe(true);
+});
 it('accepts only distinct, uniquely unmatched photo targets for unmatched-to-unmatched creation',()=>{
  const payload={assetId:'e',sourceGroupId:null};
  expect(canCreateStackFromUnmatchedDrop(payload,'f',groups,[...unmatched,{id:'f'}])).toBe(true);
