@@ -221,7 +221,7 @@
     "historyRetained": "Edit history retained",
     "name": "Develop",
     "subtitle": "Photo development workspace",
-    "backToPhotos": "Back to photos",
+    "backToPhotos": "Back to Gallery",
     "loading": "Loading photo…",
     "detailFailed": "This photo could not be loaded.",
     "editStateLoading": "Loading saved edits…",

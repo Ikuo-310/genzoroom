@@ -47,6 +47,7 @@ function renderWorkspace(
 describe('Anshitsu workspace', () => {
   it('renders the English name, subtitle, selected filename, and localized date', () => {
     const markup = renderWorkspace('en');
+    expect(markup).toContain('>Back to Gallery</button>');
     expect(markup).toContain('Develop');
     expect(markup).toContain('Photo development workspace');
     expect(markup).toContain(`title="${asset.filename}"`);
@@ -58,6 +59,7 @@ describe('Anshitsu workspace', () => {
 
   it('renders the Japanese name without the English-only subtitle', () => {
     const markup = renderWorkspace('ja');
+    expect(markup).toContain('>ギャラリーに戻る</button>');
     expect(markup).toContain('暗室');
     expect(markup).not.toContain('Photo development workspace');
     expect(markup).toContain(formatPhotoDate(asset.date));

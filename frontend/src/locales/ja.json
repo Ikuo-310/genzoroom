@@ -211,7 +211,7 @@
   "workspace": {
     "historyRetained": "編集履歴あり",
     "name": "暗室",
-    "backToPhotos": "写真一覧へ戻る",
+    "backToPhotos": "ギャラリーに戻る",
     "loading": "写真を読み込んでいます…",
     "detailFailed": "写真を読み込めませんでした。",
     "editStateLoading": "保存済みの編集状態を読み込んでいます…",
