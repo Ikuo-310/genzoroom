@@ -852,7 +852,7 @@
   },
   "stackManagement": {
     "trashCount": "ゴミ箱移動予約: {{count}}枚",
-    "trashIncomplete": "STACKの更新は完了しましたが、ゴミ箱への移動に失敗しました。対象の写真はImmichに残っています。",
+    "trashIncomplete": "STACKの更新は完了しましたが、ゴミ箱への移動に失敗しました。Immich側で対象の写真の状態を確認してください。",
     "trashUnknown": "STACKの更新は完了しましたが、ゴミ箱への移動結果を確認できませんでした。Immich側で対象の写真の状態を確認してください。",
 
     "trash": "ゴミ箱に入れる",

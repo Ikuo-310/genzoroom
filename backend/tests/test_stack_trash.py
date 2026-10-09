@@ -10,7 +10,7 @@ from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STAC
 from test_stack_assets import stack
 
 
-def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
+def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, trash_status=500, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
     calls = []
     stack_reads = 0
     asset_reads = 0
@@ -60,7 +60,7 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
         if path == '/api/assets':
             if timeout:
                 raise httpx.ReadTimeout('unknown')
-            return httpx.Response(500 if trash_failure else 204)
+            return httpx.Response(trash_status if trash_failure else 204)
         if request.method == 'DELETE':
             if stack_failure:
                 return httpx.Response(500)
@@ -93,12 +93,19 @@ def test_unsafe_or_failed_update_never_trashes(kwargs):
     assert all(c[1] != '/api/assets' for c in calls)
 
 
-@pytest.mark.parametrize('timeout', [False, True])
-def test_trash_failure_preserves_successful_update(timeout):
-    results, calls = run_trash(trash_failure=True, timeout=timeout)
+@pytest.mark.parametrize(('timeout', 'trash_status', 'expected'), [(False, 400, 'failed'), (False, 500, 'unknown'), (False, 503, 'unknown'), (True, 500, 'unknown')])
+def test_trash_failure_preserves_successful_update(timeout, trash_status, expected):
+    results, calls = run_trash(trash_failure=True, timeout=timeout, trash_status=trash_status)
     assert results[0].status == 'success' and str(results[0].stackId) == NEW
-    assert results[0].trashStatus == ('unknown' if timeout else 'failed')
+    assert results[0].trashStatus == expected
     assert len(calls) == 3
+
+
+def test_stack_write_http_5xx_remains_definite_failure():
+    results, calls = run_trash(stack_failure=True)
+    assert results[0].status == 'failed'
+    assert results[0].trashStatus == 'blocked'
+    assert all(path != '/api/assets' for _, path, _ in calls)
 
 
 def test_other_stack_updates_finish_before_trash():

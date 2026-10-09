@@ -145,7 +145,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     dragoverLogged.current.clear(); globalDragoverLogged.current.clear(); }, []);
   const source = (draft.sourceGroups ?? []).filter(group => !draft.completedSourceIds.has(group.id));
   const [trashMenu, setTrashMenu] = useState<{ groupId: string; assetId: string; x: number; y: number } | null>(null);
-  const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown' || result.status === 'success' && result.trashStatus !== undefined && result.trashStatus !== 'success');
+  // A trash-only uncertainty belongs to a Stack already removed from the draft; it must not lock unrelated retries.
+  const unknown = Object.values(draft.writeResults).some(result => result.status === 'unknown');
   const plan = ready ? buildStackWritePlan(draft.groups, source) : { operations: [], unchanged: [] };
   const trashCount = plan.operations.reduce((count, op) => count + (op.trashAssetIds?.length ?? 0), 0);
   const trashFailed = Object.values(draft.writeResults).some(result => result.status === 'success' && (result.trashStatus === 'failed' || result.trashStatus === 'blocked'));
@@ -170,7 +171,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     dispatch({ type: 'writeResults', plan, results });
     setSendStatus(results.some(result => result.status === 'unknown') ? 'sendUnknown'
       : results.some(result => result.status !== 'success')
-        ? results.some(result => result.status === 'success' && result.trashStatus !== undefined && result.trashStatus !== 'success') ? 'sendFailureNoRetry' : 'sendFailure'
+        ? 'sendFailure'
         : results.some(result => result.trashStatus === 'unknown') ? 'trashUnknown'
           : results.some(result => result.trashStatus === 'failed' || result.trashStatus === 'blocked') ? 'trashIncomplete'
             : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');

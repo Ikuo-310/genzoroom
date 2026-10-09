@@ -1566,22 +1566,29 @@ it.each(['en','ja'])('distinguishes failed, blocked and unknown trash after comm
 });
 
 
-it('does not promise retry when a failed Stack shares a batch with committed Stack trash failure', async()=>{
+it.each(['failed','blocked','unknown'] as const)('retries only independent failed candidates when committed trash is %s', async trashStatus=>{
  api.resolve.mockResolvedValue([existingStack]);
  await mount('/stack',{selectedAssets:[existingMembers[0],...photos]});
  const member=[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')].find(card=>card.textContent?.includes('hidden.jpg'))!;
  await act(async()=>member.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
  await act(async()=>document.querySelector<HTMLButtonElement>('.stack-trash-menu-item')!.click());
+ const sent:Array<Array<{operationId:string;type:string;stackId?:string;trashAssetIds?:string[]}>>=[];
  vi.mocked(fetch).mockImplementation(async(_url,init)=>{
-  const operations=JSON.parse(init!.body as string).operations;
-  return new Response(JSON.stringify({results:operations.map((operation:{operationId:string;type:string})=>operation.type==='update'
-   ? {operationId:operation.operationId,status:'success',stackId:secondStackId,releasedStackId:existingStackId,trashStatus:'blocked'}
-   : {operationId:operation.operationId,status:'failed'})}));
+  const operations=JSON.parse(init!.body as string).operations as {operationId:string;type:string;stackId?:string}[];
+  sent.push(operations);
+  return new Response(JSON.stringify({results:operations.map(operation=>operation.stackId===existingStackId
+   ? {operationId:operation.operationId,status:'success',stackId:secondStackId,releasedStackId:existingStackId,trashStatus}
+   : {operationId:operation.operationId,status:sent.length===1?'failed':'success',...(sent.length===1?{}:{stackId:secondStackId})})}));
  });
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- expect(host.querySelector('.stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailureNoRetry'));
- expect(host.textContent).toContain(i18n.t('stackManagement.trashIncomplete'));
- expect(host.textContent).not.toContain('Send again to retry.');
+ expect(host.querySelector('.stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailure'));
+ expect(host.textContent).toContain(i18n.t(trashStatus==='unknown'?'stackManagement.trashUnknown':'stackManagement.trashIncomplete'));
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
- expect(button('Send to Immich').disabled).toBe(true);
+ expect(button('Send to Immich').disabled).toBe(false);
+ await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(sent).toHaveLength(2);
+ expect(sent[1]).toHaveLength(1);
+ expect(sent[1][0].stackId).not.toBe(existingStackId);
+ expect(sent[1][0]).not.toHaveProperty('trashAssetIds');
+ expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
 });

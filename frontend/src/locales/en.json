@@ -862,7 +862,7 @@
   },
   "stackManagement": {
     "trashCount": "Move to trash: {{count}} assets",
-    "trashIncomplete": "Stack updates completed, but moving photos to trash failed. The affected photos remain in Immich.",
+    "trashIncomplete": "Stack updates completed, but moving photos to trash failed. Check the affected photos in Immich.",
     "trashUnknown": "Stack updates completed, but the trash outcome could not be confirmed. Check the affected photos in Immich.",
 
     "trash": "Move to trash",

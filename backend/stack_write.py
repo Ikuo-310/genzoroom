@@ -202,7 +202,7 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
     replacements = set()
     headers = {"x-api-key": key, "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, trust_env=False, follow_redirects=False, transport=transport) as client:
-        async def write(op, method, path, body=None, expected_id=None):
+        async def write(op, method, path, body=None, expected_id=None, *, server_error_unknown=False):
             request_id = uuid4().hex
             _log_operation(op, "operation.start", batchId=batch_id, requestId=request_id, method=method, endpoint=path,
                            memberIds=[str(member) for member in op.memberIds] if op.memberIds is not None else [])
@@ -214,8 +214,11 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 if response.status_code != expected_status:
                     _log_operation(op, "operation.response", level="warn", batchId=batch_id, requestId=request_id, method=method,
                                    endpoint=path, httpStatus=response.status_code, errorCode=_request_error(response).error_code)
-                    # A returned error is definite; malformed/redirected success cannot establish outcome.
-                    status = "failed" if response.status_code >= 400 else "unknown"
+                    # Trash can be committed before Immich emits a server error; other writes keep their definite-error behavior.
+                    if server_error_unknown and response.status_code >= 500:
+                        status = "unknown"
+                    else:
+                        status = "failed" if response.status_code >= 400 else "unknown"
                     return StackWriteResult(operationId=op.operationId, status=status, errorCode=_request_error(response).error_code)
                 stack_id = None if method == "DELETE" else _validate_written(response, op, expected_id)
                 if method == "DELETE":
@@ -417,7 +420,8 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 result.errorCode = "trash_verification_failed"
                 _log_operation(op, "trash.result", level="error", batchId=batch_id, status="blocked", errorCode=result.errorCode)
                 continue
-            trash_result = await write(op, "DELETE", "/assets", {"ids": [str(asset_id) for asset_id in op.trashAssetIds], "force": False})
+            trash_result = await write(op, "DELETE", "/assets", {"ids": [str(asset_id) for asset_id in op.trashAssetIds], "force": False},
+                                       server_error_unknown=True)
             result.trashStatus = trash_result.status
             result.errorCode = trash_result.errorCode
             _log_operation(op, "trash.result", level="info" if trash_result.status == "success" else "error",
