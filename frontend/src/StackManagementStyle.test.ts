@@ -115,3 +115,28 @@ it('lets the empty unmatched frame shrink to its Grid track while retaining its 
   expect(getComputedStyle(frame).minHeight).toBe('0');
   expect(getComputedStyle(frame).overflow).toBe('auto');
 });
+
+it('keeps Gallery and Stack trash menu hover and keyboard focus dark above the global button hover rule', () => {
+  const rules = [...document.styleSheets].flatMap(sheet => {
+    try { return [...sheet.cssRules] as CSSStyleRule[]; } catch { return []; }
+  });
+  const rule = (selector: string) => rules.find(item => typeof item.selectorText === 'string' && item.selectorText.split(',').map(part => part.trim()).includes(selector))?.style;
+  const globalHover = rule('button:hover:not(:disabled)');
+  expect(globalHover?.background).toBe('#e3f0d6');
+
+  for (const [selector, background] of [
+    ['.stack-photo-context-menu .stack-photo-menu-row:not(:has(input:disabled)):hover', '#38383b'],
+    ['.stack-photo-context-menu .stack-photo-menu-row:focus-within', '#38383b'],
+    ['.stack-photo-context-menu .workspace-menu-item:hover:not(:disabled)', '#3b3b3e'],
+    ['.stack-photo-context-menu .workspace-menu-item:focus-visible', '#3b3b3e'],
+    ['.stack-trash-context-menu .stack-trash-menu-item:hover:not(:disabled)', '#38383b'],
+    ['.stack-trash-context-menu .stack-trash-menu-item:focus-visible', '#38383b'],
+  ] as const) {
+    const style = rule(selector);
+    expect(style?.background).toBe(background);
+    expect(style?.color).toBe('#fff');
+  }
+  expect(rule('.stack-photo-context-menu .stack-photo-menu-row:has(input:disabled)')?.color).toBe('#777');
+  expect(rule('.stack-photo-context-menu .workspace-menu-item:disabled')?.color).toBe('#777');
+  expect(rule('.stack-trash-context-menu .stack-trash-menu-item:disabled')?.color).toBe('#777');
+});

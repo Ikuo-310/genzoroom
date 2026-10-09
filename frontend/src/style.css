@@ -377,6 +377,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-photo-context-menu p { margin: 4px 5px; color: #aaa; font-size: 0.75rem; }
 .stack-photo-menu-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 4px 5px; border-radius: 3px; color: #ddd; font-size: 0.78rem; }
 .stack-photo-menu-row:not(:has(input:disabled)):hover { background: #38383b; }
+.stack-photo-context-menu .stack-photo-menu-row:not(:has(input:disabled)):hover,
+.stack-photo-context-menu .stack-photo-menu-row:focus-within { color: #fff; background: #38383b; }
 .stack-photo-menu-row input {
   appearance: none;
   box-sizing: border-box;
@@ -405,11 +407,15 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-photo-menu-row .filename-middle-ellipsis { overflow: hidden; }
 .stack-photo-menu-row .filename-middle-ellipsis, .stack-photo-menu-row .filename-middle-ellipsis-visual { color: inherit; font-weight: inherit; text-decoration: none; }
 .stack-photo-menu-row:has(input:disabled) { color: #777; }
+.stack-photo-context-menu .stack-photo-menu-row:has(input:disabled) { color: #777; background: transparent; }
 .stack-photo-menu-separator { height: 1px; margin: 8px 2px; background: #48484b; }
 .workspace-menu-item { width: 100%; min-width: 0; padding: 6px 10px; border: 0; border-radius: 3px; color: #ddd; background: transparent; text-align: left; font: inherit; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
 .workspace-menu-item:hover:not(:disabled), .workspace-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
+.stack-photo-context-menu .workspace-menu-item:hover:not(:disabled),
+.stack-photo-context-menu .workspace-menu-item:focus-visible { color: #fff; background: #3b3b3e; }
 .workspace-menu-item:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
 .workspace-menu-item:disabled { color: #777; cursor: default; }
+.stack-photo-context-menu .workspace-menu-item:disabled { color: #777; background: transparent; cursor: default; }
 .edit-settings-action-list[data-focus-mode="pointer"] .workspace-menu-item:focus { outline: none; background: transparent; color: #ddd; }
 .edit-settings-action-list[data-focus-mode="pointer"] .workspace-menu-item:hover:not(:disabled),
 .edit-settings-action-list[data-focus-mode="keyboard"] .workspace-menu-item:focus:not(:disabled) { color: #fff; background: #3b3b3e; }
@@ -797,3 +803,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .stack-trash-context-menu { width: max-content; min-width: 0; max-width: calc(100vw - 16px); padding: 4px; }
 .stack-trash-menu-item { display: block; width: 100%; padding: 6px 9px; border: 0; border-radius: 3px; background: transparent; color: #ddd; font: inherit; font-size: 0.8rem; text-align: left; white-space: nowrap; cursor: pointer; }
 .stack-trash-menu-item:hover, .stack-trash-menu-item:focus-visible { background: #38383b; outline: none; }
+.stack-trash-context-menu .stack-trash-menu-item:hover:not(:disabled),
+.stack-trash-context-menu .stack-trash-menu-item:focus-visible { color: #fff; background: #38383b; outline: none; }
+.stack-trash-context-menu .stack-trash-menu-item:disabled { color: #777; background: transparent; cursor: default; }
