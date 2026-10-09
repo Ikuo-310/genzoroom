@@ -304,24 +304,93 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
             if result.status != "success":
                 result.trashStatus = "blocked"
                 continue
+            step = "stack_list_fetch"
             try:
-                current = _parse_stack_snapshot(await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id), require_primary=True)
-                if current.invalid_stack_ids or current.quarantined_member_ids:
-                    raise ValueError("Uncertain current ownership")
+                raw_stacks = await _get_asset_stacks(url, key, transport=transport, batch_id=batch_id)
+                step = "stack_list_parse"
+                current = _parse_stack_snapshot(raw_stacks, require_primary=True)
+                snapshot_fields = {"invalidStackCount": len(current.invalid_stack_ids), "quarantinedMemberCount": len(current.quarantined_member_ids),
+                                   "validStackCount": len(current.stacks)}
+                snapshot_ok = not current.invalid_stack_ids and not current.quarantined_member_ids
+                _log_operation(op, "trash.verify", level="debug" if snapshot_ok else "error", batchId=batch_id,
+                               verificationStep="stack_list_parse", passed=snapshot_ok, reason=None if snapshot_ok else "invalid_or_quarantined_stack_state",
+                               **snapshot_fields)
+                if not snapshot_ok:
+                    raise ValueError("invalid_or_quarantined_stack_state")
                 current_owners = {UUID(a["id"]): UUID(stack["id"]) for stack in current.stacks for a in stack["assets"]}
-                if any(asset_id in current_owners for asset_id in op.trashAssetIds):
-                    raise ValueError("Trash asset still stacked")
-                if len(op.memberIds) > 1:
-                    surviving = next((stack for stack in current.stacks if UUID(stack["id"]) == result.stackId), None)
-                    if surviving is None or {UUID(a["id"]) for a in surviving["assets"]} != set(op.memberIds) or UUID(surviving["primaryAssetId"]) != op.primaryAssetId:
-                        raise ValueError("Replacement not verified")
-                elif op.memberIds[0] in current_owners:
-                    raise ValueError("Singleton not released")
                 for asset_id in op.trashAssetIds:
+                    step = "trash_asset_stack_membership"
+                    owner_id = current_owners.get(asset_id)
+                    passed = owner_id is None
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "trash_asset_still_in_stack",
+                                   assetId=str(asset_id), actualStackId=str(owner_id) if owner_id else None)
+                    if not passed:
+                        raise ValueError("trash_asset_still_in_stack")
+                if len(op.memberIds) > 1:
+                    step = "replacement_stack_exists"
+                    surviving = next((stack for stack in current.stacks if UUID(stack["id"]) == result.stackId), None)
+                    passed = surviving is not None
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "replacement_stack_missing",
+                                   expectedStackId=str(result.stackId), actualStackId=str(UUID(surviving["id"])) if surviving else None)
+                    if not passed:
+                        raise ValueError("replacement_stack_missing")
+                    step = "replacement_stack_members"
+                    actual_members = {UUID(a["id"]) for a in surviving["assets"]}
+                    passed = actual_members == set(op.memberIds)
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "replacement_members_mismatch",
+                                   expectedMemberIds=[str(member) for member in op.memberIds],
+                                   actualMemberIds=[str(member) for member in actual_members])
+                    if not passed:
+                        raise ValueError("replacement_members_mismatch")
+                    step = "replacement_stack_primary"
+                    actual_primary = UUID(surviving["primaryAssetId"])
+                    passed = actual_primary == op.primaryAssetId
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "replacement_primary_mismatch",
+                                   expectedPrimaryAssetId=str(op.primaryAssetId), actualPrimaryAssetId=str(actual_primary))
+                    if not passed:
+                        raise ValueError("replacement_primary_mismatch")
+                else:
+                    step = "singleton_released"
+                    actual_owner = current_owners.get(op.memberIds[0])
+                    passed = actual_owner is None
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "singleton_still_in_stack",
+                                   assetId=str(op.memberIds[0]), actualStackId=str(actual_owner) if actual_owner else None)
+                    if not passed:
+                        raise ValueError("singleton_still_in_stack")
+                for asset_id in op.trashAssetIds:
+                    step = "trash_asset_detail_fetch"
                     body = await asset_state(op, asset_id)
-                    if body.get("stack") is not None:
-                        raise ValueError("Trash asset still stacked")
-            except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError):
+                    step = "trash_asset_detail_stack"
+                    actual_stack = body.get("stack")
+                    actual_stack_id = None
+                    if isinstance(actual_stack, dict) and actual_stack.get("id") is not None:
+                        actual_stack_id = str(UUID(actual_stack["id"]))
+                    passed = actual_stack is None
+                    _log_operation(op, "trash.verify", level="debug" if passed else "error", batchId=batch_id,
+                                   verificationStep=step, passed=passed, reason=None if passed else "asset_detail_still_stacked",
+                                   assetId=str(asset_id), actualStackId=actual_stack_id,
+                                   stackFieldState="absent" if "stack" not in body else "null" if actual_stack is None else "present")
+                    if not passed:
+                        raise ValueError("asset_detail_still_stacked")
+            except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError) as error:
+                details = {"batchId": batch_id, "verificationStep": step, "reason": str(error) if isinstance(error, ValueError) and str(error) in {
+                    "invalid_or_quarantined_stack_state", "trash_asset_still_in_stack", "replacement_stack_missing",
+                    "replacement_members_mismatch", "replacement_primary_mismatch", "singleton_still_in_stack", "asset_detail_still_stacked"} else "verification_exception",
+                    "exceptionType": type(error).__name__}
+                if isinstance(error, ImmichRequestError):
+                    if error.status_code is None and error.error_code == "unexpected_response":
+                        details["verificationStep"] = "stack_list_parse"
+                    details["errorCode"] = error.error_code
+                    if error.status_code is not None:
+                        details["httpStatus"] = error.status_code
+                elif isinstance(error, (httpx.RequestError, httpx.InvalidURL)):
+                    details["errorCode"] = "unreachable"
+                _log_operation(op, "trash.verify.failed", level="error", **details)
                 result.trashStatus = "blocked"
                 result.errorCode = "trash_verification_failed"
                 _log_operation(op, "trash.result", level="error", batchId=batch_id, status="blocked", errorCode=result.errorCode)

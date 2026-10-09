@@ -10,8 +10,10 @@ from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STAC
 from test_stack_assets import stack
 
 
-def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False):
+def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None):
     calls = []
+    stack_reads = 0
+    asset_reads = 0
     current = [stack(member_ids=[A, B] if singleton else [A, B, C])]
     if changed:
         current[0]['primaryAssetId'] = B
@@ -22,13 +24,27 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
     if extra:
         operations.append(op('update', name='two', stackId=SECOND_STACK_ID, memberIds=[D, str(UUID(int=99))], primaryAssetId=str(UUID(int=99))))
     def handler(request):
-        nonlocal current
+        nonlocal current, stack_reads, asset_reads
         path = request.url.path
         if request.method == 'GET':
             if path == '/api/stacks':
-                return httpx.Response(200, json=current)
+                stack_reads += 1
+                if stack_reads > 1 and corruption == 'snapshot_http': return httpx.Response(503)
+                visible = current
+                if stack_reads > 1:
+                    if corruption == 'invalid_snapshot': visible = [{**current[0], 'primaryAssetId': B}]
+                    if corruption == 'quarantined_snapshot': visible = [*current, stack(SECOND_STACK_ID, A, [A, D])]
+                    if corruption == 'replacement_missing': visible = [s for s in current if s['id'] != NEW]
+                    if corruption == 'replacement_members': visible = [{**s, 'assets': [{'id': A}, {'id': D}]} if s['id'] == NEW else s for s in current]
+                    if corruption == 'replacement_primary': visible = [{**s, 'primaryAssetId': C} if s['id'] == NEW else s for s in current]
+                    if corruption == 'trash_member_owned': visible = [*current, stack(SECOND_STACK_ID, B, [B, D])]
+                    if corruption == 'singleton_owned' and singleton: visible = [*current, stack(SECOND_STACK_ID, A, [A, D])]
+                return httpx.Response(200, json=visible)
+            asset_reads += 1
+            if detail_status is not None and asset_reads >= 3: return httpx.Response(detail_status, json={'error':'PRIVATE RESPONSE BODY'})
+            force_stack = corruption == 'detail_stack' and asset_reads >= 3
             return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.dng' if raw else 'photo.jpg', 'isTrashed': False,
-                                            'stack': {'id': STACK_ID} if any(s['id'] == STACK_ID for s in current) else None})
+                                            'stack': {'id': NEW} if force_stack else {'id': STACK_ID} if any(s['id'] == STACK_ID for s in current) else None})
         body = json.loads(request.content) if request.content else None
         calls.append((request.method, path, body))
         if path == '/api/assets':
@@ -93,3 +109,94 @@ def test_failed_replacement_reports_release_without_trash():
     assert results[0].status == 'failed' and str(results[0].releasedStackId) == STACK_ID
     assert results[0].trashStatus == 'blocked'
     assert [c[0] for c in calls] == ['DELETE', 'POST']
+
+
+@pytest.mark.parametrize(('corruption','step','reason'), [
+    ('invalid_snapshot','stack_list_parse','invalid_or_quarantined_stack_state'),
+    ('quarantined_snapshot','stack_list_parse','invalid_or_quarantined_stack_state'),
+    ('trash_member_owned','trash_asset_stack_membership','trash_asset_still_in_stack'),
+    ('detail_stack','trash_asset_detail_stack','asset_detail_still_stacked'),
+    ('replacement_missing','replacement_stack_exists','replacement_stack_missing'),
+    ('replacement_members','replacement_stack_members','replacement_members_mismatch'),
+    ('replacement_primary','replacement_stack_primary','replacement_primary_mismatch'),
+    ('singleton_owned','singleton_released','singleton_still_in_stack'),
+])
+def test_verification_failures_emit_step_and_reason(corruption, step, reason, monkeypatch):
+    from backend_logging import backend_logger
+    import stack_write
+    entries = []
+    monkeypatch.setattr(stack_write.backend_logger, 'add', lambda **entry: entries.append(entry))
+    backend_logger.set_level('debug')
+    try:
+        results, calls = run_trash(singleton=corruption == 'singleton_owned', corruption=corruption)
+        assert results[0].trashStatus == 'blocked'
+        failed = [entry for entry in entries if entry.get('event') == 'trash.verify.failed']
+        assert failed and failed[-1]['context']['verificationStep'] == step, failed
+        assert failed[-1]['context']['reason'] == reason
+        assert failed[-1]['context']['batchId']
+        assert failed[-1]['context']['operationId'] == 'one'
+        assert all(call[1] != '/api/assets' for call in calls)
+    finally:
+        backend_logger.set_level('off')
+
+
+def test_snapshot_fetch_http_error_logs_status_code_without_response_body(monkeypatch):
+    from backend_logging import backend_logger
+    import stack_write
+    entries = []
+    monkeypatch.setattr(stack_write.backend_logger, 'add', lambda **entry: entries.append(entry))
+    backend_logger.set_level('debug')
+    try:
+        results, _ = run_trash(corruption='snapshot_http')
+        failed = next(entry for entry in entries if entry.get('event') == 'trash.verify.failed')
+        assert results[0].errorCode == 'trash_verification_failed'
+        assert failed['context']['verificationStep'] == 'stack_list_fetch'
+        assert failed['context']['httpStatus'] == 503
+        assert failed['context']['errorCode'] == 'unexpected_response'
+        assert failed['context']['exceptionType'] == 'ImmichRequestError'
+        assert 'PRIVATE RESPONSE BODY' not in repr(entries)
+    finally:
+        backend_logger.set_level('off')
+
+
+def test_success_logs_snapshot_counts_and_each_passed_condition(monkeypatch):
+    from backend_logging import backend_logger
+    import stack_write
+    entries = []
+    monkeypatch.setattr(stack_write.backend_logger, 'add', lambda **entry: entries.append(entry))
+    backend_logger.set_level('debug')
+    try:
+        results, _ = run_trash()
+        assert results[0].status == 'success' and results[0].trashStatus == 'success'
+        checks = [entry['context'] for entry in entries if entry.get('event') == 'trash.verify']
+        by_step = {entry['verificationStep']: entry for entry in checks}
+        assert by_step['stack_list_parse']['passed'] is True
+        assert by_step['stack_list_parse']['invalidStackCount'] == 0
+        assert by_step['stack_list_parse']['quarantinedMemberCount'] == 0
+        assert by_step['trash_asset_stack_membership']['passed'] is True
+        assert by_step['replacement_stack_exists']['passed'] is True
+        assert by_step['replacement_stack_members']['passed'] is True
+        assert by_step['replacement_stack_primary']['passed'] is True
+        assert by_step['trash_asset_detail_stack']['stackFieldState'] == 'null'
+        assert all(entry['batchId'] and entry['operationId'] == 'one' for entry in checks)
+    finally:
+        backend_logger.set_level('off')
+
+
+def test_asset_detail_http_error_logs_status_code_and_exception_type(monkeypatch):
+    from backend_logging import backend_logger
+    import stack_write
+    entries = []
+    monkeypatch.setattr(stack_write.backend_logger, 'add', lambda **entry: entries.append(entry))
+    backend_logger.set_level('debug')
+    try:
+        results, _ = run_trash(detail_status=503)
+        failed = next(entry for entry in entries if entry.get('event') == 'trash.verify.failed')
+        assert results[0].errorCode == 'trash_verification_failed'
+        assert failed['context']['verificationStep'] == 'trash_asset_detail_fetch'
+        assert failed['context']['httpStatus'] == 503
+        assert failed['context']['errorCode'] == 'unexpected_response'
+        assert failed['context']['exceptionType'] == 'ImmichRequestError'
+        assert 'PRIVATE RESPONSE BODY' not in repr(entries)
+    finally:
+        backend_logger.set_level('off')
