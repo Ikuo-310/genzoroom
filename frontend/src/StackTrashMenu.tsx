@@ -13,7 +13,7 @@ export function StackTrashMenu({ point, checked, onToggle, onClose }: {
     const bounds = ref.current!.getBoundingClientRect();
     setPosition({ left: Math.max(8, Math.min(point.x, window.innerWidth - bounds.width - 8)),
       top: Math.max(8, Math.min(point.y, window.innerHeight - bounds.height - 8)) });
-    ref.current?.querySelector('input')?.focus();
+    ref.current?.querySelector('button')?.focus();
   }, [point]);
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
@@ -27,7 +27,9 @@ export function StackTrashMenu({ point, checked, onToggle, onClose }: {
     document.addEventListener('keydown', keyboard, true);
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keyboard, true); };
   }, [onClose]);
-  return createPortal(<div ref={ref} role="menu" className="stack-photo-context-menu workspace-menu-surface" style={{ position: 'fixed', ...position, zIndex: 1000 }}>
-    <label className="stack-photo-menu-row"><input role="menuitemcheckbox" type="checkbox" checked={checked} onChange={onToggle} />{t('stackManagement.trash')}</label>
+  return createPortal(<div ref={ref} role="menu" className="stack-photo-context-menu stack-trash-context-menu workspace-menu-surface" style={{ position: 'fixed', ...position, zIndex: 1000 }}>
+    <button type="button" role="menuitem" className="stack-trash-menu-item" onClick={() => { onToggle(); onClose(); }}>
+      {t(checked ? 'stackManagement.cancelTrash' : 'stackManagement.trash')}
+    </button>
   </div>, document.body);
 }

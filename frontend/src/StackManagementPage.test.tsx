@@ -1493,14 +1493,25 @@ it('limits trash reservation to the context menu and displays/cancels the overla
  const cards=()=>[...host.querySelectorAll<HTMLButtonElement>('.stack-photo')];
  const member=()=>cards().find(card=>card.textContent?.includes('selected.png'))!;
  await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
- const checkbox=()=>document.querySelector<HTMLInputElement>('[role="menuitemcheckbox"]')!;
- expect(checkbox()).not.toBeNull();expect(checkbox().checked).toBe(false);
- await act(async()=>checkbox().click());
- expect(host.querySelectorAll('.stack-trash-overlay')).toHaveLength(1);expect(checkbox().checked).toBe(true);
- await act(async()=>checkbox().click());expect(host.querySelector('.stack-trash-overlay')).toBeNull();
- await press('Escape',{},document);
+ const action=()=>document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+ expect(action().textContent).toBe('Move to trash');
+ await act(async()=>action().click());
+ expect(host.querySelectorAll('.stack-trash-overlay')).toHaveLength(1);expect(document.querySelector('[role="menu"]')).toBeNull();
+ await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ expect(action().textContent).toBe('Cancel trash reservation');
+ await act(async()=>action().click());
+ expect(host.querySelector('.stack-trash-overlay')).toBeNull();expect(document.querySelector('[role="menu"]')).toBeNull();
+ await act(async()=>i18n.changeLanguage('ja'));
+ await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ expect(action().textContent).toBe('ゴミ箱に入れる');
+ await act(async()=>action().click());
+ await act(async()=>member().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:50,clientY:50})));
+ expect(action().textContent).toBe('ゴミ箱予約を取り消す');
+ await act(async()=>action().click());
+ await act(async()=>i18n.changeLanguage('en'));
+
  for(const card of cards().filter(card=>!card.textContent?.includes('selected.png'))) {
   await act(async()=>card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
-  expect(document.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+  expect(document.querySelector('[role="menuitem"]')).toBeNull();
  }
 });

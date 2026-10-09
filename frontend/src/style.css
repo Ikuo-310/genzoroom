@@ -794,3 +794,6 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .home-stacks-panel > .stack-management-page { height: 100%; grid-template-rows: auto minmax(0, 1fr); }
 
 .stack-trash-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: white; background: #0008; pointer-events: none; }
+.stack-trash-context-menu { width: max-content; min-width: 0; max-width: calc(100vw - 16px); padding: 4px; }
+.stack-trash-menu-item { display: block; width: 100%; padding: 6px 9px; border: 0; border-radius: 3px; background: transparent; color: #ddd; font: inherit; font-size: 0.8rem; text-align: left; white-space: nowrap; cursor: pointer; }
+.stack-trash-menu-item:hover, .stack-trash-menu-item:focus-visible { background: #38383b; outline: none; }

@@ -865,6 +865,7 @@
     "trashIncomplete": "Stack updates completed, but trash processing did not complete. Check Immich and re-detect before sending again.",
 
     "trash": "Move to trash",
+    "cancelTrash": "Cancel trash reservation",
     "sendLimit": "Send up to 500 Stack changes at a time, with up to 1,000 photos per Stack. Reduce the candidates before sending.",
     "sending": "Applying Stacks to Immich…",
     "pendingSummary": "Pending: New {{create}} / Update {{update}} / Dissolve {{delete}}",
