@@ -70,7 +70,7 @@ export function AnshitsuPage() {
   const excludedIdsRef = useRef(excludedIds);
   excludedIdsRef.current = excludedIds;
   const visibleAssets = selectedAssets.filter(asset => !excludedIds.has(asset.id));
-  const exclusionUndo = useRef<{ asset: RecentAsset; index: number; order: string[]; anchorAssetId: string } | null>(null);
+  const exclusionUndo = useRef<{ asset: RecentAsset; index: number; order: string[]; anchorAssetId: string; wasActive: boolean } | null>(null);
   const clearExclusionUndo = () => { exclusionUndo.current = null; };
   const undoExclusionRef = useRef<() => boolean>(() => false);
   const excludeRef = useRef<(id: string) => Promise<void>>(async () => {});
@@ -478,7 +478,10 @@ export function AnshitsuPage() {
       excludedIdsRef.current = nextExcluded;
       setExcludedIds(nextExcluded);
       const destination = id === assetId ? (visibleAssets[index + 1] ?? visibleAssets[index - 1]).id : assetId;
-      exclusionUndo.current = { asset: visibleAssets[index], index, order: visibleAssets.map(asset => asset.id), anchorAssetId: destination };
+      exclusionUndo.current = {
+        asset: visibleAssets[index], index, order: visibleAssets.map(asset => asset.id), anchorAssetId: destination,
+        wasActive: id === assetId,
+      };
       if (id === assetId) {
         // Automatic removal navigation must preserve the newly created workspace Undo.
         navigateToAsset(destination);
@@ -506,7 +509,7 @@ export function AnshitsuPage() {
     setExcludedIds(nextExcluded);
     // Reuse the confirmed in-memory Recipe/History, including its cursor, for this one restoration.
     retainForUndo(undo.asset.id);
-    void activateAsset(undo.asset.id);
+    if (undo.wasActive) void activateAsset(undo.asset.id);
     logExclusion('undo', { assetId: undo.asset.id, index: undo.index });
     return true;
   };

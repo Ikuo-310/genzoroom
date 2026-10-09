@@ -131,7 +131,7 @@ describe('Anshitsu Filmstrip exclusion', () => {
     expect(currentPhoto()).toBe('second.jpg');
   });
 
-  it('excludes an inactive unvisited photo without changing the current photo or requesting edit state', async () => {
+  it('excludes and restores an inactive unvisited photo without switching the current photo or requesting edit state', async () => {
     await mount([first, second, third]);
     await excludePhoto(second.filename);
     expect(currentPhoto()).toBe('first.jpg');
@@ -139,8 +139,10 @@ describe('Anshitsu Filmstrip exclusion', () => {
     expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id]);
     expect(mocked.put).not.toHaveBeenCalled();
     await exclusionUndoKey();
-    expect(currentPhoto()).toBe('second.jpg');
+    expect(currentPhoto()).toBe('first.jpg');
     expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id]);
+    expect(mocked.put).not.toHaveBeenCalled();
   });
 
   it('excludes a validated inactive photo without redundant PUT, then restores its saved Recipe and History', async () => {
@@ -153,6 +155,10 @@ describe('Anshitsu Filmstrip exclusion', () => {
     expect(filmstripPhotos()).toEqual(['second.jpg', 'third.jpg']);
     expect(mocked.put).toHaveBeenCalledTimes(1);
     await exclusionUndoKey();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.get.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    await click('.filmstrip-item[aria-label="first.jpg"]');
     expect(currentPhoto()).toBe('first.jpg');
     expect(currentHistoryEntry()).toContain('Basic OFF');
     expect(filmstripPhotos()).toEqual(['first.jpg', 'second.jpg', 'third.jpg']);
