@@ -216,6 +216,10 @@ The Settings implementation and follow-up layout/backdrop changes do not alter R
 
 ## Docker deployment
 
+Distribution uses `compose.release.yml` with an explicitly required `GENZOROOM_IMAGE_TAG` under `ghcr.io/ikuo-310/genzoroom`; ordinary users pull the built single-container image without source. `compose.release.immich-network.yml` adds the existing external Immich network; `compose.release.immich-standalone.yml` provides the same complete configuration for Portainer Web editor. Development continues to build two containers through its unchanged Compose/Dockerfiles. Both mount the same application-parent layout at `/genzoroom`, with separate host roots when run concurrently.
+
+The publishing workflow accepts only main-history commits, uses SHA/run/attempt tags for manual validation, and stable `vMAJOR.MINOR.PATCH` tags for future releases. It never creates `latest`, Git tags or GitHub Releases. It builds only `linux/amd64`, tests startup/storage/shutdown before pushing the exact tested image, and records OCI source/revision/version metadata. Registry visibility and anonymous pulling still need maintainer verification; see [release-validation.md](release-validation.md).
+
 `docker-compose.yml` defines two services:
 
 | Service | Container port | Host exposure | Role |
@@ -243,7 +247,7 @@ Both containers run as non-root users, drop Linux capabilities, and disable priv
 
 Compose starts the backend before the frontend but does not wait for API readiness. Startup failures are visible in container logs and the UI; the user can check again after services become ready. Both services use `restart: unless-stopped`.
 
-The files support builds on a Docker host with Docker Compose. When Portainer is used, a Git Repository stack can use `docker-compose.yml` as its Compose path and, when same-host networking is needed, `docker-compose.immich-network.yml` as an additional path. Portainer must target the Docker endpoint where the external network already exists. The configuration does not provide prebuilt registry images or Swarm deployment support.
+The development files support builds on a Docker host with Docker Compose. A development Portainer Git Repository stack uses `docker-compose.yml` and optionally `docker-compose.immich-network.yml`. Distribution users instead use the GHCR image and Web editor/CLI files described above. Portainer must target the Docker endpoint where the external network already exists. These configurations target Docker Standalone, not Swarm.
 
 See the [deployment guide](deployment.md) for startup, verification, troubleshooting, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 
@@ -695,7 +699,7 @@ Possible extensions include:
 - Responsive preview rendering, with client-side GPU assistance only if useful.
 - High-quality server-side final rendering; output storage and export behavior are undecided.
 - Further adjustments beyond JPEG Temperature, Tint, Exposure, Contrast, Highlights, Whites, Shadows, Blacks, Vibrance, and Saturation: tone curve and HSL. Waveform Monitor (WFM), RGB Parade, and Vectorscope remain unimplemented; the Histogram Scope is available.
-- Future config, logs, and file-export storage paths as needed; only data is mounted today.
+- Future config, logs, and file-export storage paths as needed; the parent is mounted today and only `data` is currently populated.
 
 These are provisional directions, not available functionality or delivery commitments. The current Immich integration provides authenticated browsing, explicit Stack writes, generated previews, selected JPEG original acquisition, and the Anshitsu workspace with its Histogram Scope described above.
 

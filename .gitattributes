@@ -1,0 +1,2 @@
+# Publishing scripts must remain executable by Bash after Windows checkouts.
+release/*.sh text eol=lf

@@ -1,13 +1,14 @@
 # Deployment
 
-This guide covers the supported Docker Compose workflow and the optional Portainer workflow for GenzoRoom. Exact host, repository, network, and container names depend on the deployment.
+This guide covers the single-container GHCR distribution for ordinary users and the separate two-container source-build workflow for development. Exact host, network, and container names depend on the deployment. Distribution images must first be published and made Public by the maintainer; this change does not publish `v0.1.0` or any other image.
 
-GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. nginx serves the built frontend and forwards same-origin `/api/` requests to the backend over an internal Docker network. Backend port `8000` is not published to the host, and the frontend does not receive the Immich API key.
+GenzoRoom exposes only nginx on container port `8080`, mapped by default to host port `3190`. nginx serves the built frontend and forwards same-origin `/api/` requests to Uvicorn: loopback `127.0.0.1:8000` in the distribution container, or the internal Docker network in development. Backend port `8000` is not published to the host, and the frontend does not receive the Immich API key.
 
 ## Requirements
 
 - Docker Engine with Docker Compose v2, or Portainer connected to a Docker Standalone environment.
-- Access to the repository contents and internet access during the initial image build.
+- A Linux amd64 Docker host and access to an already published GHCR tag for distribution. No source clone, Node.js, Python installation or local image build is required. Arm64 is not validated or advertised as supported.
+- Development only: repository contents and internet access during image builds.
 - An existing Immich deployment reachable from the GenzoRoom backend.
 - A dedicated Immich API key with these minimum permissions:
   - `user.read` for the authenticated connection check.
@@ -34,6 +35,7 @@ The nginx proxy keeps its normal 10-second read timeout for `/api/` requests. Th
 | `IMMICH_URL` | Yes | Immich base URL as reached from the backend container. |
 | `IMMICH_API_KEY` | Yes | Dedicated Immich API key. Keep the real value outside the repository. |
 | `GENZOROOM_PORT` | No | Frontend host port; defaults to `3190`. |
+| `GENZOROOM_IMAGE_TAG` | Distribution only, required | An already published validation tag or fixed stable version. No default, `latest` fallback or assumed available `v0.1.0`. |
 | `GENZOROOM_PERSIST_ROOT` | Yes | Host application parent directory, mounted at `/genzoroom` in development and release. SQLite stays in its `data/genzoroom.db` subdirectory. |
 | `IMMICH_DOCKER_NETWORK` | Same-host route only | Existing external Docker network used by Immich. |
 
@@ -51,7 +53,7 @@ GenzoRoom always uses `IMMICH_URL` and `IMMICH_API_KEY` at the application level
 
 ### Network-accessible Immich
 
-Use `docker-compose.yml` by itself when Immich is reachable through a LAN or routed address:
+Use `compose.release.yml` for distribution, or `docker-compose.yml` for development, when Immich is reachable through a LAN or routed address:
 
 ```env
 IMMICH_URL=http://192.168.1.50:2283
@@ -73,7 +75,7 @@ IMMICH_URL=http://your-immich-server-name:2283
 IMMICH_API_KEY=replace-with-your-api-key
 ```
 
-The external network must already exist. Combine the standard configuration with `docker-compose.immich-network.yml`:
+The external network must already exist. Distribution uses `compose.release.yml` plus `compose.release.immich-network.yml`; Portainer Web editor can instead use the complete `compose.release.immich-standalone.yml` file described below. Development combines its standard configuration with `docker-compose.immich-network.yml`:
 
 ```sh
 docker compose \
@@ -84,7 +86,71 @@ docker compose \
 
 The override attaches only the backend to the external network. The frontend remains isolated from Immich. `IMMICH_DOCKER_NETWORK` is consumed by Compose and is not read by the GenzoRoom application.
 
-## Deploy with Docker Compose
+## Install the GHCR distribution without cloning source
+
+Obtain only `compose.release.yml` from the repository file download, after the maintainer has made this configuration available. For LAN/HTTPS Immich access this is the complete deployment file. For same-host Immich, also obtain `compose.release.immich-network.yml`, or use the single complete `compose.release.immich-standalone.yml` instead. These files contain `image:`, not `build:`. Do not use `--build` for distribution.
+
+### Prepare storage and runtime settings
+
+Install/start Docker Engine and Compose v2 (or a compatible newer Compose) on the target Linux amd64 host. Portainer must manage that same Docker Standalone endpoint. Prepare a local filesystem supporting SQLite WAL locks. For a new installation, replace this example path with the chosen application parent:
+
+```sh
+sudo mkdir -p /share/Container/genzoroom-release
+sudo chown 10001:10001 /share/Container/genzoroom-release
+sudo chmod u+rwx /share/Container/genzoroom-release
+```
+
+For existing installations, check ownership/access of `data`, DB and any WAL/SHM too; changing the parent alone does not grant access to existing children. Preserve the existing files. Select the application parent, never `data` itself. A new installation creates only `data`; existing installations continue using the same `data/genzoroom.db`. Stop the old writer before reusing its storage. Do not deploy development and distribution against the same DB together.
+
+In Immich Settings, create a dedicated API key with the scopes listed in Requirements above. Set the actual reachable `IMMICH_URL` and the key as runtime values. For CLI use an untracked `.env` alongside the downloaded Compose file:
+
+```env
+GENZOROOM_IMAGE_TAG=replace-with-an-already-published-tag
+GENZOROOM_PERSIST_ROOT=/share/Container/genzoroom-release
+GENZOROOM_PORT=3190
+IMMICH_URL=https://photos.example.com
+IMMICH_API_KEY=replace-with-your-api-key
+```
+
+Copy the exact validation tag from the maintainer's successful workflow summary: `sha-<40-character-commit>-run<run-id>-attempt<attempt>`. Once a stable release has actually been published, use its fixed tag, for example `v0.1.0`; that example is not a claim it is available now. Leaving the tag or storage root empty makes Compose validation fail before pull/start. Do not share resolved Compose output containing the API key.
+
+### CLI Compose
+
+Run from the directory containing the Compose file and `.env`:
+
+```sh
+docker compose -f compose.release.yml config --quiet
+docker compose -f compose.release.yml pull
+docker compose -f compose.release.yml up -d
+docker compose -f compose.release.yml ps
+docker compose -f compose.release.yml logs --tail=100 genzoroom
+```
+
+A Public GHCR package requires no registry login. A pull failure may mean the tag is unpublished, the package is still Private or the host architecture is unsupported. Do not infer anonymous availability from a successful publishing workflow; maintainer checks are in [release-validation.md](release-validation.md#github-setup-and-anonymous-pull).
+
+For same-host Immich, set `IMMICH_DOCKER_NETWORK` to the existing network and `IMMICH_URL` to the Immich server's actual Docker DNS name. Use both `-f compose.release.yml -f compose.release.immich-network.yml` on every command above. Neither file creates the Immich network. Using `-f compose.release.immich-standalone.yml` alone is equivalent.
+
+### Portainer Web editor
+
+Create a new Stack on the Docker Standalone endpoint. Select Web editor, paste the entire `compose.release.yml` for LAN/HTTPS or `compose.release.immich-standalone.yml` for same-host networking, and add the five runtime variables above under Stack environment variables. The same-host file also requires `IMMICH_DOCKER_NETWORK`. Pre-create the storage parent on the endpoint host, not on the computer running the browser. Deploy the Stack after an actual tag is Public and anonymously pullable. Do not select Git Repository build or paste only the small network override into Web editor.
+
+### Verify, update and back up
+
+Open `http://<host>:3190` (or the selected port), confirm Backend and Immich connection, and check `/api/health` and `/api/immich/status` as described under Verify below. Edit a test JPEG, wait for a confirmed Recipe/History save, recreate the container with the same parent, and reopen it to confirm restoration. Container replacement must preserve Queue/Runtime too; use the NAS checks in [release-validation.md](release-validation.md#nas-acceptance-checks).
+
+Before updating, request Export Stop-after-current and wait for idle, complete edit saves, stop the sole writer and copy the entire `data` directory (DB plus any WAL/SHM) to a separate backup location. Record the previous image tag/digest and runtime settings. Do not copy a live DB alone. CLI update:
+
+```sh
+docker compose -f compose.release.yml stop
+# Back up the stopped data/ here, then set GENZOROOM_IMAGE_TAG to the new published tag.
+docker compose -f compose.release.yml config --quiet
+docker compose -f compose.release.yml pull
+docker compose -f compose.release.yml up -d
+```
+
+For Portainer, stop the service/Stack, back up the endpoint-host data, change `GENZOROOM_IMAGE_TAG` in Stack settings and use Update Stack with image pull/re-pull enabled. Confirm the new container's image and connection/save results. Re-pulling without changing a fixed tag is not version selection. UI wording depends on Portainer version. Keep the same Compose file/network route and storage parent during updates. To roll back, stop the new writer first; use the previous image only if its schema is compatible, otherwise restore the consistent pre-update backup and matching image. No automatic downgrade, file move or data conversion is provided. `down` or Stack removal retains bind-mounted host data and the external Immich network.
+
+## Development: deploy source with Docker Compose
 
 1. Clone the repository into a deployment directory, or place the complete repository contents there by another method. Do not copy local `node_modules`, virtual environments, or build output.
 2. Supply the environment variables described above. To use a local `.env` file, copy `.env.example`, replace its example values, and keep `.env` untracked.
@@ -129,7 +195,7 @@ Run the Backend checks from `backend/` so the tests can import `main` and `immic
 
 For optional frontend development, `npm run dev` proxies `/api/` to loopback port `8000`. A directly launched Backend now requires a writable Linux parent mount at `/genzoroom`, just like the containers; unmounted Windows/local starts deliberately fail. Automated Backend tests inject temporary storage separately. The Vite development server is not used in deployed containers.
 
-## Deploy with a Portainer Git Repository Stack
+## Development: deploy with a Portainer Git Repository Stack
 
 Portainer can fetch, build, and deploy GenzoRoom directly from any Git repository it can access. Manual copying to the deployment host is not required.
 
@@ -169,7 +235,7 @@ Successful execution in a local development environment does not establish deplo
 
 ## Logs and troubleshooting
 
-Inspect both service logs first:
+Distribution uses `docker compose -f compose.release.yml logs genzoroom` (include the selected network file when applicable). Development uses both service logs:
 
 ```sh
 docker compose logs frontend backend
@@ -190,9 +256,9 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 
 ## Security and host isolation
 
-- Only the frontend port is published. Backend port `8000` remains on GenzoRoom's internal Docker network.
+- Only nginx port `8080` is published. Backend `8000` is loopback in distribution or on the internal Docker network in development.
 - The Immich API key is supplied only to the backend and must not be stored in the repository.
-- The optional same-host override attaches only the backend to the Immich network; the frontend remains isolated.
+- The development same-host override attaches only Backend to Immich. Distribution attaches the combined nginx/Backend container; both processes share that network namespace, while Uvicorn still binds only loopback.
 - Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
 - The Compose files do not use privileged mode or host networking. The development backend (or release service) mounts only the application parent at `/genzoroom`.
 - TLS certificate verification for HTTPS Immich URLs remains enabled.
@@ -200,7 +266,7 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 
 ## Stop or remove GenzoRoom
 
-Stop and remove a standard Compose deployment with:
+Stop and remove the distribution with `docker compose -f compose.release.yml down`, including the selected network override when used, or `-f compose.release.immich-standalone.yml` for the complete same-host file. Development uses:
 
 ```sh
 docker compose down

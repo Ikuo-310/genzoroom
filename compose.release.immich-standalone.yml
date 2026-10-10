@@ -1,11 +1,10 @@
+# Complete same-host distribution configuration for Portainer Web editor.
 services:
   genzoroom:
-    # Require an explicitly published validation or stable tag; never fall back to latest.
     image: ghcr.io/ikuo-310/genzoroom:${GENZOROOM_IMAGE_TAG:?Set GENZOROOM_IMAGE_TAG to a published tag}
     ports:
       - "${GENZOROOM_PORT:-3190}:8080"
     volumes:
-      # SQLite needs directory write access, including WAL/SHM creation.
       - type: bind
         source: ${GENZOROOM_PERSIST_ROOT:?Set GENZOROOM_PERSIST_ROOT}
         target: /genzoroom
@@ -15,7 +14,6 @@ services:
       IMMICH_URL: ${IMMICH_URL:-}
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
     restart: unless-stopped
-    # Allow the supervisor's bounded drain and final child reaping before Docker SIGKILL.
     stop_grace_period: 75s
     cap_drop:
       - ALL
@@ -23,6 +21,10 @@ services:
       - no-new-privileges:true
     networks:
       outbound:
+      immich:
 
 networks:
   outbound:
+  immich:
+    external: true
+    name: ${IMMICH_DOCKER_NETWORK:?Set IMMICH_DOCKER_NETWORK to an existing Immich Docker network}
