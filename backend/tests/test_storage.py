@@ -81,14 +81,17 @@ def test_storage_permission_failures_are_explicit(mounted_storage, monkeypatch, 
         monkeypatch.setattr(storage.tempfile, "NamedTemporaryFile", denied)
     else:
         (mounted_storage / "data").mkdir()
-        storage.DB_PATH.write_bytes(b"existing database")
-        monkeypatch.setattr(storage.os, "access", lambda *args: False)
-    code = "storage_database_not_writable" if failure == "database" else "storage_data_not_writable"
+        import sqlite3
+        with sqlite3.connect(storage.DB_PATH) as connection:
+            connection.execute("PRAGMA user_version=4")
+        monkeypatch.setattr(storage.sqlite3, "connect", lambda *args, **kwargs:
+                            (_ for _ in ()).throw(storage.sqlite3.OperationalError("unable to open database file")))
+    code = "storage_database_unavailable" if failure == "database" else "storage_data_not_writable"
     with pytest.raises(storage.StorageInitializationError, match=code) as caught:
-        storage.initialize_storage()
+        storage.validate_existing_database() if failure == "database" else storage.initialize_storage()
     assert "private host detail" not in str(caught.value)
     if failure == "database":
-        assert storage.DB_PATH.read_bytes() == b"existing database"
+        assert storage.DB_PATH.exists()
     else:
         assert not storage.DB_PATH.exists()
 
@@ -137,9 +140,93 @@ def test_lifespan_aborts_before_export_recovery_when_unmounted(mounted_storage, 
     async def start():
         async with main.app.router.lifespan_context(main.app):
             pytest.fail("startup should fail")
-    with pytest.raises(storage.StorageInitializationError, match="storage_root_not_mounted"):
+    with pytest.raises(RuntimeError, match="storage_root_not_mounted"):
         asyncio.run(start())
     assert not storage.DB_PATH.exists()
+
+
+def start_lifespan():
+    async def start():
+        async with main.app.router.lifespan_context(main.app):
+            return app_state()
+    return asyncio.run(start())
+
+
+def app_state():
+    return main.app.state.export_runtime
+
+
+def test_lifespan_opens_existing_database_and_preserves_runtime_state(mounted_storage, monkeypatch):
+    monkeypatch.delenv("IMMICH_URL", raising=False)
+    monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    storage.initialize_storage()
+    saved = snapshot()
+    edit_store.put_edit_state(A, 0, uuid4(), saved)
+    edit_store.enqueue_export_assets([A])
+    run = create_export_run([A], worker_id=uuid4())
+    db_bytes = storage.DB_PATH.read_bytes()
+    result = start_lifespan()
+    assert result._task is None
+    assert edit_store.get_edit_state(A)["state"] == saved
+    assert edit_store.list_export_queue()[0]["status"] == "waiting"
+    assert recoverable_export_run().run_id == run.run_id
+    assert storage.DB_PATH.read_bytes() == db_bytes
+
+
+def test_lifespan_initializes_missing_database_for_new_install(mounted_storage, monkeypatch):
+    monkeypatch.delenv("IMMICH_URL", raising=False)
+    monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    assert not storage.DB_PATH.exists()
+    start_lifespan()
+    with edit_store._connection() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("SELECT count(*) FROM asset_edit_states").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("filename,payload,expected_code", [
+    ("genzoroom.db", b"old database", "storage_root_may_be_data_directory"),
+    ("data/genzoroom.db", b"", "storage_database_empty"),
+    ("data/genzoroom.db", b"not a SQLite database", "storage_database_corrupt"),
+])
+def test_lifespan_rejects_wrong_root_or_invalid_existing_db_without_changes(
+        mounted_storage, monkeypatch, filename, payload, expected_code):
+    monkeypatch.delenv("IMMICH_URL", raising=False)
+    monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    path = mounted_storage / filename
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(payload)
+    before = path.read_bytes()
+    monkeypatch.setattr(main, "ExportRuntime", lambda **_: pytest.fail("Runtime started before validation"))
+    with pytest.raises(RuntimeError, match=expected_code):
+        start_lifespan()
+    assert path.read_bytes() == before
+    assert not storage.DB_PATH.exists() if filename == "genzoroom.db" else storage.DB_PATH.read_bytes() == before
+
+
+def test_lifespan_rejects_existing_version_zero_sqlite_file(mounted_storage, monkeypatch):
+    import sqlite3
+    monkeypatch.delenv("IMMICH_URL", raising=False)
+    monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    storage.initialize_storage()
+    with sqlite3.connect(storage.DB_PATH) as connection:
+        connection.execute("CREATE TABLE unrelated (id INTEGER)")
+    before = storage.DB_PATH.read_bytes()
+    with pytest.raises(RuntimeError, match="storage_database_uninitialized"):
+        start_lifespan()
+    assert storage.DB_PATH.read_bytes() == before
+
+
+def test_lifespan_rejects_unusable_wal_locks_before_runtime_recovery(mounted_storage, monkeypatch):
+    monkeypatch.delenv("IMMICH_URL", raising=False)
+    monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    storage.initialize_storage()
+    edit_store.put_edit_state(A, 0, uuid4(), snapshot())
+    monkeypatch.setattr(storage.sqlite3, "connect", lambda *args, **kwargs:
+                        (_ for _ in ()).throw(storage.sqlite3.OperationalError("disk I/O error")))
+    monkeypatch.setattr(main, "ExportRuntime", lambda **_: pytest.fail("Runtime started before SQLite validation"))
+    with pytest.raises(RuntimeError, match="storage_database_unavailable"):
+        start_lifespan()
+    assert edit_store.DB_PATH.exists()
 
 
 def test_both_compose_files_use_the_same_required_parent_bind():

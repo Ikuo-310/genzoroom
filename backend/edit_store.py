@@ -9,7 +9,7 @@ from uuid import UUID
 
 from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
-from storage import DB_PATH
+from storage import DB_PATH, StorageInitializationError
 
 SCHEMA_VERSION = 4
 
@@ -185,6 +185,15 @@ def _connection():
             connection.close()
     except sqlite3.Error as error:
         raise StoreUnavailable() from error
+
+
+def initialize_database() -> None:
+    """Run the existing schema initialization only after storage.py validates existing files."""
+    try:
+        with _connection():
+            pass
+    except StoreUnavailable as error:
+        raise StorageInitializationError(error.code) from None
 
 
 def _json(value: object) -> str:
