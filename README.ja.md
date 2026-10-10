@@ -14,8 +14,7 @@ Immichとの連携に特化しているため、外部からの写真の取り�
 
 現在はJPEG現像のみ対応していますが、将来的にはRAW現像への対応も予定しています。
 
-![JPEG写真の現像前後を表示するGenzoRoom Anshitsuワークスペース](docs/images/Anshitsu_Sakura.jpg)
-
+![JPEG写真の現像前後を表示するGenzoRoom Anshitsuワークスペース](docs/images/Anshitsu_Sakura.jpg)  
 *デスクトップ版Anshitsuワークスペースで編集したJPEGの現像前後の比較。*
 
 ## 現在の機能
@@ -26,25 +25,23 @@ Immichとの連携に特化しているため、外部からの写真の取り�
 
 写真の一覧には、JPEG・RAWなどのファイル形式やスタック内の写真枚数がバッジで表示されます。また、写真の絞り込み、サムネイルサイズの変更、複数の写真の選択にも対応しています。
 
-![GenzoRoomのギャラリー（カレンダーの日付別写真一覧）](docs/images/Gallery_calendar_ja.png)
-
+![GenzoRoomのギャラリー（カレンダーの日付別写真一覧）](docs/images/Gallery_calendar_ja.png)  
 *写真の形式やスタック情報を確認できるギャラリー画面。*
 
 ### 〇 STACK管理
 
-RAW+JPEGのペアなどを自動検出してSTACK候補を作成できるほか、手動での組み換えやカバー写真の変更にも対応しています。  
-不要な写真はImmichのゴミ箱へ移動予約し、確認後にまとめて送信できます。
-  
+RAW+JPEGのペアなどを自動検出してSTACK候補を作成できるほか、手動での組み換えやカバー写真の変更にも対応しています。
+
+自動検出では、ファイル名の最初のドットより前の部分が一致する写真をSTACK候補とします。  
+名前が一致しない場合も、撮影日時・カメラ情報・GPS情報（利用可能な場合）を照合して判定します。  
+判定の根拠はSTACK上部の「NAME」「TIME」「CAM」「GPS」のバッジで確認できます。
+
+不要な写真はImmichのゴミ箱へ移動予約し、確認後にまとめて送信できます。  
+
 GenzoRoomが元素材ファイルを直接変更・削除することはありません。
 
-![GenzoRoomのSTACK管理タブ](docs/images/Stack_ja.png)
-
+![GenzoRoomのSTACK管理タブ](docs/images/Stack_ja.png)  
 *既存STACKの確認、自動候補の検出、手動での組み換え、カバー変更、不要写真のゴミ箱予約に対応したSTACK管理画面。*
-
-
-### Developer Diagnostics
-
-- オプトインのDeveloper Diagnostics Logsタブでは、FrontendとBackendの個別レベル、消去とJSON書き出しの操作、更新、統合/ソース別ビューを利用できます。Frontendのログは同一オリジンのタブ間で同期されます。Developer Diagnosticsを閉じると、両方の収集機能が停止します。既定ではログ記録はオフです。診断イベントには[`AGENTS.md`](AGENTS.md)に記載されたプライバシー境界が適用されます。
 
 ### Export管理
 
