@@ -71,6 +71,8 @@ it('adds build and one safe Immich snapshot to the downloaded report', async () 
     });
     const exported = JSON.parse(text);
     expect(exported).toMatchObject({ ...report, schemaVersion: 2, application: { name: 'GenzoRoom', channel: 'development' },
+      browser: { secureContext: report.environment.secureContext, crossOriginIsolated: report.environment.crossOriginIsolated,
+        webGpuApiAvailable: report.environment.gpuApiAvailable },
       immich: { status: 'ok', version: 'v3.2.4', build: null, sourceRef: 'v3.2.4', errorCode: null } });
     expect(fetch).toHaveBeenCalledOnce(); expect(fetch.mock.calls[0][0]).toBe('/api/immich/about');
     vi.runAllTimers(); expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:diagnostics');
@@ -118,6 +120,6 @@ it('projects each diagnostic scope explicitly and uses a distinct download name'
     ]);
     expect(fetch).toHaveBeenCalledTimes(3);
     for (const blob of blobs) expect(JSON.parse(await readBlob(blob))).toMatchObject({ schemaVersion: 2,
-      application: { name: 'GenzoRoom' }, immich: { status: 'ok', version: 'v3' } });
+      application: { name: 'GenzoRoom' }, browser: { name: 'unknown' }, immich: { status: 'ok', version: 'v3' } });
   } finally { Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
 });

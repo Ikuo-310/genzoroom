@@ -180,12 +180,14 @@ it('downloads fresh independent FE/BE/All reports regardless of viewer selection
   const backendDownload = await read(blobs[1]);
   expect(backendDownload.entries[0].event).toBe('fresh.response');
   expect(backendDownload).toMatchObject({ schemaVersion: 2, application: { name: 'GenzoRoom' }, immich: { status: 'ok', version: 'v3.2.4' } });
+  expect(backendDownload).not.toHaveProperty('browser');
   feEntry();
   await click(host.querySelectorAll<HTMLButtonElement>('.developer-log-sources button')[2]);
   await click(button('exportAll')); expect(names[2]).toMatch(/^genzoroom-all-logs-/);
   const all = await read(blobs[2]);
-  expect(Object.keys(all)).toEqual(['schemaVersion', 'generatedAt', 'frontend', 'backend', 'buffers', 'application', 'immich']);
+  expect(Object.keys(all)).toEqual(['schemaVersion', 'generatedAt', 'frontend', 'backend', 'buffers', 'application', 'immich', 'browser']);
   expect(all.schemaVersion).toBe(2); expect(all.application.name).toBe('GenzoRoom');
+  expect(all.browser).toMatchObject({ name: 'unknown', version: null });
   expect(all.immich).toMatchObject({ status: 'ok', version: 'v3.2.4', build: null, sourceRef: null });
   expect(fetchMock.mock.calls.filter(([url]) => url === '/api/immich/about')).toHaveLength(3);
   expect(all.frontend).toHaveLength(2); expect(all.backend).toHaveLength(1);

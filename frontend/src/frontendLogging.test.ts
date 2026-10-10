@@ -252,6 +252,7 @@ it('downloads an independent machine-readable JSON snapshot with the shared down
     });
     expect(JSON.parse(text)).toMatchObject({ ...report, schemaVersion: 2,
       application: { name: 'GenzoRoom', channel: 'development' },
+      browser: { name: 'unknown' },
       immich: { status: 'error', version: null, build: null, sourceRef: null, errorCode: 'backend_request_failed' } });
     expect(report.entries[0]).not.toHaveProperty('message');
     expect(document.querySelector('a[download]')).toBeNull();

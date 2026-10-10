@@ -37,6 +37,7 @@ it('downloads the safe report with common metadata and releases its URL', async 
   const blob = create.mock.calls[0][0]; expect(blob.type).toBe('application/json');
   const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
   expect(JSON.parse(text)).toMatchObject({ ...report, schemaVersion: 2, application: { name: 'GenzoRoom' },
+    browser: { name: 'unknown' },
     immich: { status: 'ok', version: 'v3.2.4', build: null, sourceRef: null, errorCode: null } });
   vi.runAllTimers(); expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:diagnostic-report');
 });

@@ -133,7 +133,8 @@ export function DeveloperLogs() {
         if (!current()) return;
         const snapshot = scope === 'backend' ? report
           : createAllLogsReport(frontendSnapshot!, report, generatedAt, frontendBufferSnapshot);
-        await downloadDiagnosticJson(snapshot, scope === 'backend' ? 'genzoroom-backend-logs' : 'genzoroom-all-logs', signal);
+        await downloadDiagnosticJson(snapshot, scope === 'backend' ? 'genzoroom-backend-logs' : 'genzoroom-all-logs', signal,
+          { includeBrowser: scope !== 'backend' });
         succeeded(`${scope}.export`);
       } catch (error) {
         if (current()) { failed(`${scope}.export`, error); setBackendError('exportFailed'); if (scope === 'all') setAllError('allExportFailed'); }

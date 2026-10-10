@@ -1,5 +1,6 @@
 import { BUILD_INFO } from './buildInfo';
 import { downloadJsonReport } from './jsonReportDownload';
+import { collectBrowserDiagnosticsInfo, createBrowserDiagnosticsInfo, type DiagnosticsEnvironment } from './diagnosticsEnvironment';
 
 export type DiagnosticErrorCode = 'configuration_missing' | 'immich_url_missing' | 'immich_api_key_missing'
   | 'unreachable' | 'authentication_failed' | 'unexpected_response' | 'backend_unreachable' | 'backend_request_failed';
@@ -70,7 +71,8 @@ async function fetchImmichInfo(signal?: AbortSignal): Promise<ImmichDiagnosticIn
   }
 }
 
-export async function downloadDiagnosticJson<T extends { generatedAt: string }>(report: T, prefix: string, signal?: AbortSignal): Promise<void> {
+export async function downloadDiagnosticJson<T extends { generatedAt: string }>(report: T, prefix: string, signal?: AbortSignal,
+  options: { includeBrowser?: boolean } = {}): Promise<void> {
   // A resolved no-op would make callers report a skipped export as successful.
   if (exportInFlight) throw new DiagnosticExportInProgressError();
   exportInFlight = true;
@@ -79,6 +81,10 @@ export async function downloadDiagnosticJson<T extends { generatedAt: string }>(
     const snapshot = JSON.parse(JSON.stringify(report)) as Record<string, unknown> & { generatedAt: string };
     const immich = await fetchImmichInfo(signal);
     if (signal?.aborted) throw new DOMException('Diagnostic export cancelled', 'AbortError');
-    downloadJsonReport({ ...snapshot, schemaVersion: 2, application: { ...BUILD_INFO }, immich }, prefix);
+    const environment = snapshot.environment as DiagnosticsEnvironment | undefined;
+    const browser = options.includeBrowser === false ? undefined
+      : environment ? createBrowserDiagnosticsInfo(environment) : collectBrowserDiagnosticsInfo();
+    downloadJsonReport({ ...snapshot, schemaVersion: 2, application: { ...BUILD_INFO }, immich,
+      ...(browser ? { browser } : {}) }, prefix);
   } finally { exportInFlight = false; }
 }
