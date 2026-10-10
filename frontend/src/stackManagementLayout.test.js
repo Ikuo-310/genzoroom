@@ -55,8 +55,9 @@ it('styles unmatched selection independently from the Cover badge', () => {
   expect(css).not.toMatch(/\.stack-management-page \.stack-photo-wrapper\s*\{[^}]*background:/);
 });
 
-it('gives the empty unmatched drop target a compact minimum hit area', () => {
+it('keeps the empty unmatched drop target shrinkable and preserves its drop feedback', () => {
   const css = readFileSync('src/style.css', 'utf8');
-  expect(css).toMatch(/\.stack-unmatched-empty\s*\{\s*min-height:\s*200px;\s*\}/);
+  expect(css).toMatch(/\.stack-frame\s*\{[^}]*min-height:\s*0;/);
+  expect(css).not.toMatch(/\.stack-unmatched-empty\s*\{[^}]*min-height:/);
   expect(css).toContain('.stack-unmatched-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; background: var(--selection); }');
 });
