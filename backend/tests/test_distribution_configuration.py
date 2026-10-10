@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -133,9 +134,117 @@ def test_tag_changed_since_event_is_rejected(bash, source_repo, tmp_path):
     assert outputs == {}
 
 
-@pytest.mark.parametrize("filename", ["prepare-image.sh", "smoke-test.sh"])
+@pytest.mark.parametrize("filename", [
+    "prepare-image.sh", "smoke-test.sh", "publish-stable-image.sh", "create-github-release.sh"
+])
 def test_publishing_scripts_have_valid_bash_syntax(bash, filename):
     subprocess.run([bash, "-n", (ROOT / "release" / filename).as_posix()], check=True)
+
+
+def test_release_notes_extract_only_the_exact_version_section(tmp_path):
+    changelog = tmp_path / "CHANGELOG.md"
+    output = tmp_path / "notes.md"
+    changelog.write_text("""# Changelog
+
+## [Unreleased]
+
+- Future work.
+
+## [0.1.0] - 2026-10-10
+
+### Added
+
+- First release feature.
+
+## [0.0.9]
+
+- Previous release feature.
+""", encoding="utf-8")
+    result = subprocess.run([
+        sys.executable, str(ROOT / "release/extract-release-notes.py"), "--changelog", str(changelog),
+        "--tag", "v0.1.0", "--output", str(output)
+    ], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    notes = output.read_text(encoding="utf-8")
+    assert "First release feature." in notes
+    assert "Future work." not in notes and "Previous release feature." not in notes
+    assert "ghcr.io/ikuo-310/genzoroom:v0.1.0" in notes
+    assert "docs/deployment.md#install-the-ghcr-distribution-without-cloning-source" in notes
+
+
+@pytest.mark.parametrize("section", ["missing", "empty", "duplicate"])
+def test_release_notes_reject_missing_ambiguous_or_empty_version_sections(tmp_path, section):
+    changelog = tmp_path / "CHANGELOG.md"
+    output = tmp_path / "notes.md"
+    contents = {
+        "missing": "# Changelog\n\n## [Unreleased]\n\n- Work.\n",
+        "empty": "# Changelog\n\n## [v0.1.0]\n\n## [Unreleased]\n",
+        "duplicate": "# Changelog\n\n## [v0.1.0]\n\n- A.\n\n## [0.1.0]\n\n- B.\n",
+    }[section]
+    changelog.write_text(contents, encoding="utf-8")
+    result = subprocess.run([
+        sys.executable, str(ROOT / "release/extract-release-notes.py"), "--changelog", str(changelog),
+        "--tag", "v0.1.0", "--output", str(output)
+    ], text=True, capture_output=True)
+    assert result.returncode != 0
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("current,target,expected", [
+    ("0.0.0-validation", "v0.1.0", "newer"),
+    ("v0.1.0", "v0.2.0", "newer"),
+    ("v0.2.0", "v0.2.0", "same"),
+    ("v0.3.0", "v0.2.0", "older"),
+    ("v1.99999999999999999999.0", "v2.0.0", "newer"),
+])
+def test_latest_release_comparison_is_semver_monotonic(current, target, expected):
+    result = subprocess.run([
+        sys.executable, str(ROOT / "release/compare-release-versions.py"), current, target
+    ], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+def test_release_workflow_gates_stable_aliases_and_release_on_smoke_tested_image():
+    workflow = (ROOT / ".github/workflows/publish-image.yml").read_text(encoding="utf-8")
+    stable = workflow.index("- name: Publish immutable version and monotonic latest tags")
+    alpha = workflow.index("- name: Publish alpha only for the latest main image")
+    release_job = workflow.index("  release:\n")
+    smoke = workflow.index("- name: Verify startup, storage and graceful shutdown before publishing")
+    assert smoke < stable < alpha < release_job
+    assert "if: needs.prepare.outputs.channel == 'validation'" in workflow
+    assert "if: needs.prepare.outputs.channel == 'stable'" in workflow
+    assert "if: needs.prepare.outputs.channel == 'stable'" in workflow[release_job:]
+    assert "packages: write" in workflow[:release_job]
+    release_permissions = workflow[release_job:].split("permissions:", 1)[1].split("steps:", 1)[0]
+    assert "contents: write" in release_permissions and "packages: write" not in release_permissions
+    assert "needs: [prepare, publish]" in workflow[release_job:]
+    assert "GITHUB_TOKEN" in workflow[release_job:]
+    assert "Require complete release notes for stable tags" in workflow
+    assert "publish-stable-image.sh" in workflow
+    assert "tags:\n      - 'v*.*.*'" in workflow
+    assert "LATEST_REF: ghcr.io/ikuo-310/genzoroom:latest" in workflow
+
+
+def test_stable_publish_preserves_fixed_tags_and_verifies_latest_digest():
+    script = (ROOT / "release/publish-stable-image.sh").read_text(encoding="utf-8")
+    assert "Refusing to reuse or overwrite immutable image tag" in script
+    assert "reused_after_smoke" in script and "bash release/smoke-test.sh" in script
+    assert "docker pull \"$IMAGE_REF\"" in script
+    assert "docker push \"$LATEST_REF\"" in script
+    assert "compare-release-versions.py" in script
+    assert '[[ "$latest_digest" == "$fixed_digest" ]]' in script
+    assert "retained_newer_release" in script
+    assert "docker build " not in script
+
+
+def test_github_release_retry_verifies_existing_release_without_overwriting_it():
+    script = (ROOT / "release/create-github-release.sh").read_text(encoding="utf-8")
+    assert "gh release view" in script
+    assert "release_status=reused" in script
+    assert "gh release create" in script and "--verify-tag" in script
+    assert "--notes-file" in script
+    assert "gh release edit" not in script and "gh release delete" not in script
 
 
 def test_release_workflow_passes_matching_metadata_to_both_build_outputs():
@@ -154,7 +263,7 @@ def test_release_workflow_passes_matching_metadata_to_both_build_outputs():
 def test_alpha_alias_is_smoke_gated_serialized_and_reuses_the_tested_image():
     workflow = (ROOT / ".github/workflows/publish-image.yml").read_text()
     smoke = workflow.index("- name: Verify startup, storage and graceful shutdown before publishing")
-    unique_push = workflow.index("- name: Publish the exact image that passed the smoke test")
+    unique_push = workflow.index("- name: Publish the smoke-tested validation image")
     alpha_push = workflow.index("- name: Publish alpha only for the latest main image")
     assert smoke < unique_push < alpha_push
     assert "group: publish-${{ github.repository }}-${{ github.event_name }}" in workflow
@@ -167,7 +276,7 @@ def test_alpha_alias_is_smoke_gated_serialized_and_reuses_the_tested_image():
     assert 'docker push "$ALPHA_REF"' in workflow
     assert 'docker buildx imagetools inspect --raw "$IMAGE_REF"' in workflow
     assert 'docker buildx imagetools inspect --raw "$ALPHA_REF"' in workflow
-    assert "Publish the exact image that passed the smoke test" in workflow
+    assert "Publish the smoke-tested validation image" in workflow
     assert "push: false" in workflow
 
 

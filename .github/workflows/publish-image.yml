@@ -41,10 +41,26 @@ jobs:
         env:
           REQUESTED_COMMIT: ${{ inputs.commit }}
         run: bash release/prepare-image.sh
+      - name: Require complete release notes for stable tags
+        if: steps.source.outputs.channel == 'stable'
+        env:
+          RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          git show "${RELEASE_COMMIT}:CHANGELOG.md" > "$RUNNER_TEMP/CHANGELOG.md"
+          python3 release/extract-release-notes.py \
+            --changelog "$RUNNER_TEMP/CHANGELOG.md" \
+            --tag "$RELEASE_VERSION" \
+            --output "$RUNNER_TEMP/release-notes.md"
 
   publish:
     needs: prepare
-    # Serialize validation publishers so an older run cannot finish after a newer alpha update.
+    outputs:
+      fixed_digest: ${{ steps.stable.outputs.fixed_digest }}
+      latest_status: ${{ steps.stable.outputs.latest_status }}
+      latest_digest: ${{ steps.stable.outputs.latest_digest }}
+    # Serialize publishers for each event type so concurrent stable runs cannot roll latest back.
     concurrency:
       group: publish-${{ github.repository }}-${{ github.event_name }}
       cancel-in-progress: false
@@ -55,6 +71,7 @@ jobs:
       packages: write
     env:
       IMAGE_REF: ghcr.io/ikuo-310/genzoroom:${{ needs.prepare.outputs.image_tag }}
+      LATEST_REF: ghcr.io/ikuo-310/genzoroom:latest
       ALPHA_REF: ghcr.io/ikuo-310/genzoroom:alpha
       ALPHA_ELIGIBLE: ${{ needs.prepare.outputs.alpha_eligible }}
       EXPECTED_REVISION: ${{ needs.prepare.outputs.commit }}
@@ -99,7 +116,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the exact image that passed the smoke test
+      - name: Publish the smoke-tested validation image
+        if: needs.prepare.outputs.channel == 'validation'
         run: |
           set -euo pipefail
           docker push "$IMAGE_REF"
@@ -110,7 +128,12 @@ jobs:
             printf 'Digest reference: `%s`\n\n' "$digest_ref"
             printf 'Platform: `linux/amd64`. Anonymous pull still requires Public package visibility and separate verification.\n\n'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish immutable version and monotonic latest tags
+        id: stable
+        if: needs.prepare.outputs.channel == 'stable'
+        run: bash release/publish-stable-image.sh
       - name: Publish alpha only for the latest main image
+        if: needs.prepare.outputs.channel == 'validation'
         run: |
           set -euo pipefail
           trap 'printf "Alpha: publication failed before digest verification completed.\n" >> "$GITHUB_STEP_SUMMARY"' ERR
@@ -139,3 +162,45 @@ jobs:
             printf 'Alpha digest: `sha256:%s` (matches the smoke-tested image).\n' "$alpha_digest"
           } >> "$GITHUB_STEP_SUMMARY"
           trap - ERR
+
+  release:
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.channel == 'stable'
+    concurrency:
+      group: release-${{ github.repository }}-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GENZOROOM_VERSION: ${{ needs.prepare.outputs.version }}
+      GH_REPO: ${{ github.repository }}
+      FIXED_DIGEST: ${{ needs.publish.outputs.fixed_digest }}
+      LATEST_STATUS: ${{ needs.publish.outputs.latest_status }}
+      LATEST_DIGEST: ${{ needs.publish.outputs.latest_digest }}
+    steps:
+      # Release tooling is trusted from main; notes come from the exact tagged source.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.automation_commit }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - name: Extract exact-version release notes
+        env:
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: |
+          set -euo pipefail
+          python3 release/extract-release-notes.py \
+            --changelog source/CHANGELOG.md \
+            --tag "$GENZOROOM_VERSION" \
+            --output "$RELEASE_NOTES_FILE"
+      - name: Create or verify the public GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: bash release/create-github-release.sh

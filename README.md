@@ -163,6 +163,8 @@ Never commit a real API key or bake one into a container image. See the [deploym
 - A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `asset.delete`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. Stack permissions and `asset.delete` are used by confirmed STACK management operations.
 - A browser that can reach the GenzoRoom frontend. The default host port is `3190` and can be changed with `GENZOROOM_PORT`.
 
+Formal GHCR releases use fixed `vMAJOR.MINOR.PATCH` image tags; `latest` follows the newest formal version. The mutable `alpha` tag is for validation builds and is not a formal release. A stable Git tag push creates a public GitHub Release from that version's finalized CHANGELOG section after its image checks pass. See [the deployment guide](docs/deployment.md) and [release validation notes](docs/release-validation.md). No formal v0.1.0 release is available until published.
+
 ## Quick start
 
 1. Create a dedicated Immich API key with the permissions listed above.
