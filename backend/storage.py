@@ -133,7 +133,8 @@ def validate_existing_database(database_path: Path | None = None) -> None:
                                      "error_code", "registered_asset_id", "updated_at")},
         }[version]
         for table, columns in required.items():
-            projection = ", ".join(f'"{column}"' for column in columns)
+            # SQLite can interpret missing double-quoted identifiers as string literals.
+            projection = ", ".join(f'[{column}]' for column in columns)
             connection.execute(f'SELECT {projection} FROM "{table}" LIMIT 0')
 
         # This acquires SQLite's real writer lock (including WAL shared-memory locks) without pages changed.

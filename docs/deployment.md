@@ -41,7 +41,21 @@ The nginx proxy keeps its normal 10-second read timeout for `/api/` requests. Th
 
 Set `GENZOROOM_PERSIST_ROOT` to the existing application parent directory, not its `data` subdirectory. Compose requires this variable without nested interpolation. `GENZOROOM_DATA_PATH` is retired and ignored: an old setting alone fails Compose validation instead of silently falling back. For command-line Compose, supply values through the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Host paths are never passed to Backend. Never commit a real API key or bake it into a container image.
 
-Before deployment, create the host parent directory, for example `/path/to/genzoroom`. The backend runs as UID/GID `10001:10001`; grant that user/group parent write/traverse access and existing `data`/DB read/write access, including SQLite WAL/SHM creation. `create_host_path: false` prevents implicit host-directory creation. At startup Backend checks Linux mount information for the exact `/genzoroom` parent mount before any DB access, creates only `data` if absent and probes file creation/write/removal there. Missing mount or insufficient access aborts startup with `storage_root_not_mounted`, `storage_data_not_writable` or `storage_database_not_writable`. It never moves, overwrites or resets an existing DB. The DB is `/genzoroom/data/genzoroom.db`; mount the parent, not the DB file. Storage must support local SQLite WAL locking; verify this on the target Docker host.
+Before deployment, create the host parent directory, for example `/path/to/genzoroom`. The backend runs as UID/GID `10001:10001`; grant that user/group parent write/traverse access and existing `data`/DB read/write access, including SQLite WAL/SHM creation. `create_host_path: false` prevents implicit host-directory creation. Before Export recovery, Backend checks Linux mount information for the exact `/genzoroom` parent mount, creates only `data` if absent and probes file creation/write/removal there. It then validates existing SQLite integrity/schema and writer access before schema initialization. It never moves, overwrites or resets an existing DB. The DB is `/genzoroom/data/genzoroom.db`; mount the parent, not the DB file. Storage must support local SQLite WAL locking; verify this on the target Docker host.
+
+Startup errors distinguish the failed check:
+
+| Error code | Meaning / check |
+| --- | --- |
+| `storage_root_not_mounted` | The exact `/genzoroom` mount is missing or Linux mount information cannot be read. |
+| `storage_root_may_be_data_directory` | A DB is at the mount root, but not at `data/genzoroom.db`; check that the parent rather than the old data directory was selected. No automatic move is performed. |
+| `storage_data_not_writable` | Creating/accessing `data`, or the disposable file's create/write/flush/delete probe, failed. Check UID/GID permissions and read-only mounts. |
+| `storage_database_unavailable` | An existing DB cannot be inspected/opened for SQLite writes, or DB/WAL/SHM access, I/O or writer-lock acquisition fails. This is separate from directory write access and from DB corruption. |
+| `storage_database_empty` | An existing DB is zero bytes; it is rejected rather than treated as a fresh installation. |
+| `storage_database_uninitialized` | An existing SQLite file has no supported GenzoRoom schema version. |
+| `storage_database_corrupt` | SQLite integrity/format or required-schema validation failed. Preserve the files for diagnosis; there is no automatic repair. |
+| `unsupported_db_schema` | The DB schema is newer than this Backend supports. |
+| `persistence_unavailable` | SQLite schema initialization/migration or connection setup failed after preliminary validation, including for a new installation. |
 
 For existing NAS data, use `/share/Container/genzoroom` for development and `/share/Container/genzoroom-release` for release validation. Their existing `data/genzoroom.db` files remain physically unchanged. Before redeployment, stop the writer and back up the complete data directory including WAL/SHM; remove `GENZOROOM_DATA_PATH` and verify the new parent resolves to that same existing DB. If the old override pointed to custom storage, explicitly choose a parent containing its existing `data/genzoroom.db`; do not guess a new root or start against an empty directory. A wrong existing root is indistinguishable from a deliberate fresh installation. Never run two Backends against one DB. Rollback requires stopping the new writer and restoring the previous Compose mount/settings against the same physical data, with no file conversion.
 
@@ -76,6 +90,8 @@ IMMICH_API_KEY=replace-with-your-api-key
 ```
 
 The external network must already exist. Distribution uses `compose.release.yml` plus `compose.release.immich-network.yml`; Portainer Web editor can instead use the complete `compose.release.immich-standalone.yml` file described below. Development combines its standard configuration with `docker-compose.immich-network.yml`:
+
+Distribution retains its project-local `outbound` bridge for the LAN/HTTPS route and adds the existing Immich network for Docker DNS access. `external: true` means Compose does not own/create the network; it does not guarantee internet/LAN egress (the existing network may be internal or have host-specific routing restrictions). The same-host standalone file retains `outbound` to match base+override and avoid assuming that existing network's egress settings. If the Immich network alone supplies all required reachability, including the selected `IMMICH_URL`, operators may omit `outbound` from the complete standalone file. This is an optional local simplification, not a prerequisite or extra security setting; no new network is added by this revision. A plain default bridge could also serve the LAN route, but renaming this already working bridge supplies no functional gain.
 
 ```sh
 docker compose \

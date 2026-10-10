@@ -6,6 +6,17 @@ Distribution uses a prebuilt GHCR image and one nginx/FastAPI container. Develop
 
 `.github/workflows/publish-image.yml` builds `Dockerfile.release` with the checked-out source directory as context. Docker official actions and checkout are pinned to verified release commit SHAs. `contents: read` is the workflow default; only the publish job receives `packages: write`. Login uses `GITHUB_TOKEN` after the smoke test, with no PAT or Immich secret. Source/revision/version OCI labels identify the exact source and image tag. Checkout credentials are not persisted. No PR or ordinary branch-push publishing trigger is present.
 
+The 2026-10-10 pre-release review checked the following non-prerelease official releases, tag-to-commit refs and their pinned `action.yml` definitions. All use `node24`; their previously pinned versions used `node20`. All three checkout steps retain `persist-credentials: false`. Current inputs remain supported: checkout's fork-PR protection does not affect these dispatch/tag triggers; Buildx removed deprecated inputs not used here; login's optional authentication scope remains unset, preserving ordinary Docker CLI push authentication. Node 24 requires Actions Runner 2.327.1 or newer; this workflow continues using GitHub-hosted `ubuntu-24.04`, not a self-hosted runner. No runtime-forcing environment variable is used.
+
+| Official release | Fixed commit SHA |
+| --- | --- |
+| [actions/checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| [docker/setup-buildx-action v4.4.1](https://github.com/docker/setup-buildx-action/releases/tag/v4.4.1) | `f87e5991a6d7451dcb8d9637bfbc97413f497069` |
+| [docker/build-push-action v7.4.0](https://github.com/docker/build-push-action/releases/tag/v7.4.0) | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
+| [docker/login-action v4.6.0](https://github.com/docker/login-action/releases/tag/v4.6.0) | `dbcb813823bdd20940b903addbd779551569679f` |
+
+Reported NAS validation of the previous GHCR image covers installation, Immich connection, existing Recipe/Queue restoration, edits surviving restart and storage surviving Portainer Stack removal/recreation. It does not validate these updated Actions or an update between different image tags. After this revision is merged, the maintainer must manually dispatch a second validation image and test that tag change with the same storage parent before the formal release decision. No formal `v0.1.0` tag or GitHub Release is to be created until then.
+
 After the maintainer reviews and merges this configuration into `main`, open repository **Actions → Publish distribution image → Run workflow**. Select branch `main` and supply the full 40-character SHA of the main-history source to validate. An arbitrary branch dispatch is skipped; malformed SHAs and commits outside main history fail before the write-permission job starts. The selected source must contain a compatible `Dockerfile.release`, current storage layout and schema v4. Trusted automation is checked out separately from that source, so an earlier main commit cannot replace the publishing scripts. Reference: [GitHub manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
 | Event | Image tag | Conditions |

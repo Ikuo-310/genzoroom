@@ -1,5 +1,7 @@
 import asyncio
 import copy
+from contextlib import closing
+import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
@@ -181,6 +183,31 @@ def test_lifespan_initializes_missing_database_for_new_install(mounted_storage, 
     with edit_store._connection() as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
         assert connection.execute("SELECT count(*) FROM asset_edit_states").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("table,column", [
+    ("asset_edit_states", "history_json"),
+    ("export_queue", "queued_at"),
+    ("export_runs", "created_at"),
+    ("export_run_items", "frozen_recipe_json"),
+])
+def test_lifespan_rejects_missing_required_columns_before_initialization(
+        mounted_storage, monkeypatch, table, column):
+    storage.initialize_storage()
+    edit_store.put_edit_state(A, 0, uuid4(), snapshot())
+    edit_store.enqueue_export_assets([A])
+    create_export_run([A], worker_id=uuid4())
+    # A structurally valid SQLite file can still lack a column needed by persistence.
+    with closing(sqlite3.connect(storage.DB_PATH)) as connection:
+        connection.execute(f'ALTER TABLE "{table}" DROP COLUMN [{column}]')
+        connection.commit()
+        assert connection.execute("PRAGMA quick_check(1)").fetchone() == ("ok",)
+    before = storage.DB_PATH.read_bytes()
+    monkeypatch.setattr(main, "initialize_database", lambda: pytest.fail("Initialization preceded validation"))
+    monkeypatch.setattr(main, "ExportRuntime", lambda **_: pytest.fail("Runtime preceded validation"))
+    with pytest.raises(RuntimeError, match="storage_database_corrupt"):
+        start_lifespan()
+    assert storage.DB_PATH.read_bytes() == before
 
 
 @pytest.mark.parametrize("filename,payload,expected_code", [

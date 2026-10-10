@@ -2,14 +2,24 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from storage import StorageInitializationError
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("filename", ["deployment.md", "release-validation.md", "architecture.md"])
+def test_distribution_docs_reference_defined_storage_error_codes(filename):
+    content = (ROOT / "docs" / filename).read_text(encoding="utf-8")
+    codes = re.findall(r"`(storage_[a-z_]+|unsupported_db_schema|persistence_unavailable)`", content)
+    assert set(codes) <= StorageInitializationError.MESSAGES.keys()
 
 
 @pytest.fixture
