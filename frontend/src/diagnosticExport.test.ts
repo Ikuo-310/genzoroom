@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { downloadDiagnosticJson } from './diagnosticExport';
+import { DiagnosticExportInProgressError, downloadDiagnosticJson } from './diagnosticExport';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const readBlob = (blob: Blob) => new Promise<string>((resolve, reject) => {
@@ -34,7 +34,7 @@ it('records local API failures distinctly and still downloads the report', async
   expect(JSON.parse(await readBlob(blobs[0])).immich.errorCode).toBe('backend_unreachable');
 });
 
-it('allows cancellation without downloading and ignores repeated clicks while one export is pending', async () => {
+it('rejects concurrent exports while preserving one Immich request and cancellation behavior', async () => {
   let resolve!: (response: { ok: boolean; json: () => Promise<unknown> }) => void;
   const fetch = vi.fn((_url: string, options: RequestInit) => new Promise<{ ok: boolean; json: () => Promise<unknown> }>((done, reject) => {
     resolve = done;
@@ -46,7 +46,7 @@ it('allows cancellation without downloading and ignores repeated clicks while on
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   const report = { generatedAt: '2026-10-10T00:00:00.000Z' };
   const first = downloadDiagnosticJson(report, 'logs');
-  await downloadDiagnosticJson(report, 'logs');
+  await expect(downloadDiagnosticJson(report, 'logs')).rejects.toBeInstanceOf(DiagnosticExportInProgressError);
   expect(fetch).toHaveBeenCalledOnce();
   resolve({ ok: true, json: async () => ({ error_code: 'authentication_failed' }) });
   await first;

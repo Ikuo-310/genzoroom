@@ -13,6 +13,13 @@ const IMMICH_ERRORS = new Set<string>([
 ]);
 let exportInFlight = false;
 
+export class DiagnosticExportInProgressError extends Error {
+  constructor() {
+    super('A diagnostic export is already in progress');
+    this.name = 'DiagnosticExportInProgressError';
+  }
+}
+
 function normalizeImmich(value: unknown): ImmichDiagnosticInfo {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { status: 'error', version: null, build: null, sourceRef: null, errorCode: 'unexpected_response' };
@@ -64,7 +71,8 @@ async function fetchImmichInfo(signal?: AbortSignal): Promise<ImmichDiagnosticIn
 }
 
 export async function downloadDiagnosticJson<T extends { generatedAt: string }>(report: T, prefix: string, signal?: AbortSignal): Promise<void> {
-  if (exportInFlight) return;
+  // A resolved no-op would make callers report a skipped export as successful.
+  if (exportInFlight) throw new DiagnosticExportInProgressError();
   exportInFlight = true;
   try {
     // Reports are copied at the click boundary; diagnostics continuing during the request cannot alter this export.
