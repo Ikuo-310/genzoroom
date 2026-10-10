@@ -29,6 +29,7 @@ jobs:
       image_tag: ${{ steps.source.outputs.image_tag }}
       channel: ${{ steps.source.outputs.channel }}
       version: ${{ steps.source.outputs.version }}
+      alpha_eligible: ${{ steps.source.outputs.alpha_eligible }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +44,10 @@ jobs:
 
   publish:
     needs: prepare
+    # Serialize validation publishers so an older run cannot finish after a newer alpha update.
+    concurrency:
+      group: publish-${{ github.repository }}-${{ github.event_name }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -50,6 +55,8 @@ jobs:
       packages: write
     env:
       IMAGE_REF: ghcr.io/ikuo-310/genzoroom:${{ needs.prepare.outputs.image_tag }}
+      ALPHA_REF: ghcr.io/ikuo-310/genzoroom:alpha
+      ALPHA_ELIGIBLE: ${{ needs.prepare.outputs.alpha_eligible }}
       EXPECTED_REVISION: ${{ needs.prepare.outputs.commit }}
       GENZOROOM_CHANNEL: ${{ needs.prepare.outputs.channel }}
       GENZOROOM_VERSION: ${{ needs.prepare.outputs.version }}
@@ -101,5 +108,34 @@ jobs:
             printf 'Image: `%s`\n\n' "$IMAGE_REF"
             printf 'Source commit: `%s`\n\n' "$EXPECTED_REVISION"
             printf 'Digest reference: `%s`\n\n' "$digest_ref"
-            printf 'Platform: `linux/amd64`. Anonymous pull still requires Public package visibility and separate verification.\n'
+            printf 'Platform: `linux/amd64`. Anonymous pull still requires Public package visibility and separate verification.\n\n'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish alpha only for the latest main image
+        run: |
+          set -euo pipefail
+          trap 'printf "Alpha: publication failed before digest verification completed.\n" >> "$GITHUB_STEP_SUMMARY"' ERR
+          if [[ "$ALPHA_ELIGIBLE" != true ]]; then
+            printf 'Alpha: skipped; selected source was not the main tip during preparation.\n' >> "$GITHUB_STEP_SUMMARY"
+            trap - ERR
+            exit 0
+          fi
+          git fetch --quiet --no-tags origin main
+          latest_main=$(git rev-parse FETCH_HEAD)
+          if [[ "$latest_main" != "$EXPECTED_REVISION" ]]; then
+            printf 'Alpha: skipped; main advanced to `%s` before publication.\n' "$latest_main" >> "$GITHUB_STEP_SUMMARY"
+            trap - ERR
+            exit 0
+          fi
+          source_image_id=$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')
+          docker image tag "$IMAGE_REF" "$ALPHA_REF"
+          docker push "$ALPHA_REF"
+          alpha_image_id=$(docker image inspect "$ALPHA_REF" --format '{{.Id}}')
+          [[ "$source_image_id" == "$alpha_image_id" ]]
+          image_digest=$(docker buildx imagetools inspect --raw "$IMAGE_REF" | sha256sum | cut -d ' ' -f1)
+          alpha_digest=$(docker buildx imagetools inspect --raw "$ALPHA_REF" | sha256sum | cut -d ' ' -f1)
+          [[ "$image_digest" == "$alpha_digest" ]]
+          {
+            printf 'Alpha: `%s`\n\n' "$ALPHA_REF"
+            printf 'Alpha digest: `sha256:%s` (matches the smoke-tested image).\n' "$alpha_digest"
+          } >> "$GITHUB_STEP_SUMMARY"
+          trap - ERR

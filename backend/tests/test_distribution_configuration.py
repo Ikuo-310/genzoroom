@@ -74,10 +74,18 @@ def test_manual_build_uses_exact_main_commit_and_distinct_retry_tags(bash, sourc
     assert result.returncode == 0, result.stderr
     assert outputs == {"commit": first, "automation_commit": current,
                        "image_tag": f"sha-{first}-run42-attempt1", "channel": "validation",
-                       "version": "0.0.0-validation"}
+                       "version": "0.0.0-validation", "alpha_eligible": "false"}
     retry, retry_outputs = prepare(bash, source_repo, tmp_path, GITHUB_RUN_ATTEMPT="2")
     assert retry.returncode == 0, retry.stderr
     assert retry_outputs["image_tag"] == f"sha-{first}-run42-attempt2"
+    assert retry_outputs["alpha_eligible"] == "false"
+
+
+def test_only_the_current_main_validation_build_is_alpha_eligible(bash, source_repo, tmp_path):
+    _, _, current, _, _ = source_repo
+    result, outputs = prepare(bash, source_repo, tmp_path, REQUESTED_COMMIT=current)
+    assert result.returncode == 0, result.stderr
+    assert outputs["alpha_eligible"] == "true"
 
 
 def test_stable_tag_uses_version_only(bash, source_repo, tmp_path):
@@ -86,6 +94,7 @@ def test_stable_tag_uses_version_only(bash, source_repo, tmp_path):
     assert result.returncode == 0, result.stderr
     assert outputs["image_tag"] == "v0.1.0"
     assert outputs["channel"] == "stable" and outputs["version"] == "v0.1.0"
+    assert outputs["alpha_eligible"] == "false"
     assert "latest" not in outputs.values()
 
 
@@ -140,6 +149,36 @@ def test_release_workflow_passes_matching_metadata_to_both_build_outputs():
     assert "channel=validation" in script and "version=0.0.0-validation" in script
     assert "org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}" in workflow
     assert "org.opencontainers.image.version=${{ needs.prepare.outputs.version }}" in workflow
+
+
+def test_alpha_alias_is_smoke_gated_serialized_and_reuses_the_tested_image():
+    workflow = (ROOT / ".github/workflows/publish-image.yml").read_text()
+    smoke = workflow.index("- name: Verify startup, storage and graceful shutdown before publishing")
+    unique_push = workflow.index("- name: Publish the exact image that passed the smoke test")
+    alpha_push = workflow.index("- name: Publish alpha only for the latest main image")
+    assert smoke < unique_push < alpha_push
+    assert "group: publish-${{ github.repository }}-${{ github.event_name }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "alpha_eligible: ${{ steps.source.outputs.alpha_eligible }}" in workflow
+    assert 'if [[ "$ALPHA_ELIGIBLE" != true ]]' in workflow
+    assert "git fetch --quiet --no-tags origin main" in workflow
+    assert 'if [[ "$latest_main" != "$EXPECTED_REVISION" ]]' in workflow
+    assert 'docker image tag "$IMAGE_REF" "$ALPHA_REF"' in workflow
+    assert 'docker push "$ALPHA_REF"' in workflow
+    assert 'docker buildx imagetools inspect --raw "$IMAGE_REF"' in workflow
+    assert 'docker buildx imagetools inspect --raw "$ALPHA_REF"' in workflow
+    assert "Publish the exact image that passed the smoke test" in workflow
+    assert "push: false" in workflow
+
+
+def test_alpha_publish_run_block_has_valid_bash_syntax(bash, tmp_path):
+    workflow = (ROOT / ".github/workflows/publish-image.yml").read_text()
+    block = workflow.split("- name: Publish alpha only for the latest main image\n", 1)[1]
+    run_block = block.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+    script = "\n".join(line[10:] if line.startswith("          ") else line for line in run_block.splitlines()) + "\n"
+    script_path = tmp_path / "publish-alpha.sh"
+    script_path.write_text(script)
+    subprocess.run([bash, "-n", str(script_path)], check=True)
 
 
 def test_release_smoke_checks_frontend_backend_and_oci_build_identity():
