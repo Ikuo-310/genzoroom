@@ -2,6 +2,8 @@
 
 この文書は、検証済みのDocker環境へGenzoRoomを再デプロイするときの内部向け手順である。Portainerを使う場合の手順も含む。公開リポジトリに置くため、APIキーの実値は記載しない。
 
+> ここに記録したGitHub Repository Stackと2コンテナ構成は開発版の検証用手順であり、一般利用者向け配布手順ではない。配布版は[deployment.md](deployment.md)のGHCR単一コンテナ手順を使う。インストール前にGitHub Releases／Packagesで公開済みタグを確認する。この文書更新ではv0.1.0イメージやGitHub Releaseを公開していない。
+
 ## 1. 前提
 
 - Docker host上でDocker Composeを使用する。Portainerを使う場合はGitHub Repository Stackとしてデプロイする。

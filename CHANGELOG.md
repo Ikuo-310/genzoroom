@@ -6,6 +6,18 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-10
+
+### Added
+
+- Immich-connected photo browsing with Recent, Albums, Calendar, Favorites, and tools for organizing capture Stacks.
+- Non-destructive JPEG development in Anshitsu, with saved Recipes, edit History, Undo/Redo, and optional WebGPU acceleration with CPU fallback.
+- A persistent Export Queue that creates developed JPEGs in Immich, applies the GenzoRoom tag, and preserves the source Stack relationship.
+- SQLite-backed persistence for edit state, History, Export Queue, and Export Runtime across container restarts.
+- A single-container GHCR distribution for Linux `amd64`, alongside the two-container source-build setup used for development.
+
+## [Development history before v0.1.0]
+
 ### Added
 
 - Anshitsu Filmstrip photos can be temporarily excluded with the top-left × button or `X`, then restored once with `Primary+Z`. Exclusion confirms saved edits and preserves photos, Recipe, and History.

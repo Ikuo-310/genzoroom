@@ -147,7 +147,7 @@ These are current boundaries, not release commitments or a promised roadmap.
 
 ## Security and data handling
 
-- Normal photo access uses Immich read endpoints. Confirmed STACK management uses Stack create/update/delete operations and explicitly reserved photo moves to Immich trash; it does not permanently delete assets, modify image originals, or upload files. Use a dedicated API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `asset.delete`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.delete` permits reserved trash moves, `asset.download` retrieves selected JPEG originals, and `server.about` supplies the server information shown in Settings.
+- Normal photo access uses Immich read endpoints. A dedicated API key needs `user.read`, `asset.read`, `asset.view`, `asset.download`, `album.read`, `tag.read`, `asset.upload`, `tag.create`, `tag.asset`, `asset.delete`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete`. These cover Home browsing, JPEG original retrieval, Export upload/tagging, tag repair, confirmed Stack writes, and confirmed moves to Immich Trash (`force: false`). STACK management does not permanently delete assets or modify image originals. `server.about` is optional and supplies Immich version/build information in Settings and diagnostic exports.
 - The Immich API key is supplied to the backend through environment variables. It is not sent to the frontend or embedded in the frontend image.
 - Browser requests use same-origin `/api/` routes. The backend port is not published to the host in the provided Compose configuration.
 - TLS certificate verification remains enabled for HTTPS Immich URLs. Upstream response bodies, credentials, and internal exception details are not exposed to the browser.
@@ -159,25 +159,29 @@ Never commit a real API key or bake one into a container image. See the [deploym
 ## Requirements
 
 - Docker Engine with Docker Compose v2, or Portainer connected to a Docker Standalone environment.
+- A Linux `amd64` Docker host for the currently verified GHCR distribution image. Arm64 is not advertised as supported.
 - An existing Immich server reachable from the GenzoRoom backend container.
-- A dedicated Immich API key with `user.read`, `asset.read`, `asset.view`, `asset.download`, `asset.delete`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions. Stack permissions and `asset.delete` are used by confirmed STACK management operations.
+- A dedicated Immich API key with the required permissions listed under [Security and data handling](#security-and-data-handling). `server.about` is optional.
 - A browser that can reach the GenzoRoom frontend. The default host port is `3190` and can be changed with `GENZOROOM_PORT`.
 
-Formal GHCR releases use fixed `vMAJOR.MINOR.PATCH` image tags; `latest` follows the newest formal version. The mutable `alpha` tag is for validation builds and is not a formal release. A stable Git tag push creates a public GitHub Release from that version's finalized CHANGELOG section after its image checks pass. See [the deployment guide](docs/deployment.md) and [release validation notes](docs/release-validation.md). No formal v0.1.0 release is available until published.
+Formal GHCR releases use fixed `vMAJOR.MINOR.PATCH` image tags; `latest` follows the newest formal version. The mutable `alpha` tag is for validation builds and is not a formal release. Distribution Compose requires an explicit published image tag and does not silently select `latest`. A stable Git tag push creates a public GitHub Release from that version's finalized CHANGELOG section after its image checks pass. See [the deployment guide](docs/deployment.md) and [release validation notes](docs/release-validation.md).
 
 ## Quick start
 
-1. Create a dedicated Immich API key with the permissions listed above.
-2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Set `GENZOROOM_PERSIST_ROOT` to the host application parent directory, mounted at `/genzoroom`, and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Backend uses its existing `data/genzoroom.db` and creates `data` only if absent. The old `GENZOROOM_DATA_PATH` variable is retired. Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
-3. From a repository checkout, build and start the standard Docker Compose deployment:
+GenzoRoom is distributed as a single GHCR image; ordinary users do not need a source checkout, Node.js, or Python. The supported distribution target is Linux `amd64`. Install only with a tag shown as published on the repository's Releases or package page. This documentation update does not publish `v0.1.0`, so confirm that it is available before selecting it.
+
+1. Create a dedicated Immich API key with the required permissions listed above. `server.about` is optional.
+2. Download [`compose.release.yml`](compose.release.yml) and [`.env.example`](.env.example) from this repository. Set `GENZOROOM_IMAGE_TAG` to a published fixed version tag, `GENZOROOM_PERSIST_ROOT` to a pre-created host parent directory, and `IMMICH_URL` / `IMMICH_API_KEY`. Grant UID/GID `10001:10001` write/traverse access to the parent. SQLite remains at `data/genzoroom.db` beneath that directory. See the [deployment guide](docs/deployment.md) for LAN/HTTPS and same-host Immich options.
+3. With Docker Compose, validate and start the published image:
 
    ```sh
-   docker compose up -d --build
+   docker compose -f compose.release.yml config --quiet
+   docker compose -f compose.release.yml pull
+   docker compose -f compose.release.yml up -d
    ```
 
-4. Open the configured GenzoRoom address. HTTPS is recommended for general use; the default local Compose setup publishes HTTP on port `3190` and does not encrypt that connection.
-
-If Immich runs on the same Docker host and is not reachable through the host LAN address, use the optional shared-network configuration documented in the [deployment guide](docs/deployment.md). Portainer Git Repository Stack instructions are covered there as well.
+   In Portainer, use **Web editor**, paste the complete `compose.release.yml`, and set the same variables in Stack environment settings. For Immich on the same Docker host, use the standalone Compose example documented in the deployment guide.
+4. Open the configured address, using HTTPS where available. The default host port is `3190`; plain HTTP does not encrypt the connection.
 
 ## Architecture and documentation
 
