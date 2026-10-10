@@ -61,8 +61,12 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 ## Testing
 
 - Add or update regression tests for new behavior and bug fixes. Test interactions between related features, not only isolated functions.
-- As appropriate, run relevant tests, the full test suite for affected components, TypeScript checks, builds, and `git diff --check`.
-- Never claim that a test or manual verification passed unless it was actually performed. Report any tests that could not be run.
+- During incremental implementation and small fixes, run focused tests covering changed code, affected dependencies, and relevant integration points. Do not run the full test suite by default.
+- Expand regression testing according to the scope and risk of changes. Run the full suite during implementation when cross-cutting or high-risk changes justify it.
+- At feature completion and final code audit, run the full Frontend and Backend test suites, along with applicable TypeScript checks, production builds, and `git diff --check`.
+- For long-running development, perform broader regression testing at appropriate phase boundaries rather than postponing it until the entire feature is complete.
+- Keep test output concise. Report test counts, failures, skips, and relevant warnings without unnecessarily displaying verbose output from successful tests.
+- Never skip relevant tests solely to reduce execution time or token consumption. Never claim that a test or manual verification passed unless it was actually performed. Report any tests that could not be run.
 
 ## Development workflow
 

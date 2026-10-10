@@ -29,19 +29,19 @@ export function DeveloperPage() {
     setSelectedTab(tab);
     if (focus) tabButtons.current[tab]?.focus();
   };
-  const exportFull = () => {
+  const exportFull = async () => {
     setExportFailed(value => ({ ...value, full: false }));
-    try { exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu, new Date(), jpeg)); }
+    try { await exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu, new Date(), jpeg)); }
     catch { setExportFailed(value => ({ ...value, full: true })); }
   };
-  const exportJpeg = () => {
+  const exportJpeg = async () => {
     setExportFailed(value => ({ ...value, jpeg: false }));
-    try { exportJpegDiagnosticsReport(createJpegDiagnosticsReport(environment, jpeg)); }
+    try { await exportJpegDiagnosticsReport(createJpegDiagnosticsReport(environment, jpeg)); }
     catch { setExportFailed(value => ({ ...value, jpeg: true })); }
   };
-  const exportWebGpu = () => {
+  const exportWebGpu = async () => {
     setExportFailed(value => ({ ...value, webgpu: false }));
-    try { exportWebGpuDiagnosticsReport(createWebGpuDiagnosticsReport(environment, webgpu)); }
+    try { await exportWebGpuDiagnosticsReport(createWebGpuDiagnosticsReport(environment, webgpu)); }
     catch { setExportFailed(value => ({ ...value, webgpu: true })); }
   };
   useEffect(() => {

@@ -7,14 +7,14 @@ import i18n from './i18n';
 import { App } from './App';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { SMOKE_CASES, type SmokeFactory } from './webgpuSmoke';
-import type { DiagnosticsReport } from './developerDiagnostics';
 import { frontendLogger } from './frontendLogging';
 vi.mock('./GalleryPage', () => ({ GalleryPage: () => <p>Gallery route</p> }));
 vi.mock('./AnshitsuPage', () => ({ AnshitsuPage: () => <p>Anshitsu route</p> }));
 let host: HTMLDivElement, root: Root;
 let originalLanguage: string, originalTitle: string;
 const logsResponse = (url: string) => ({ ok: true, json: async () => url.endsWith('/level') ? { level: 'off' }
-  : { schemaVersion: 1, generatedAt: '2026-10-03T16:00:00.000Z', source: 'backend', entries: [] } });
+  : url.endsWith('/immich/about') ? { version: 'v3.2.4' }
+    : { schemaVersion: 1, generatedAt: '2026-10-03T16:00:00.000Z', source: 'backend', entries: [] } });
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => logsResponse(url)));
@@ -174,7 +174,7 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: (blob: Blob) => { blobs.push(blob); return 'blob:page'; } });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-  const readReport = (blob: Blob) => new Promise<DiagnosticsReport>((resolve, reject) => {
+  const readReport = (blob: Blob) => new Promise<Record<string, any>>((resolve, reject) => {
     const reader = new FileReader(); reader.onload = () => resolve(JSON.parse(String(reader.result))); reader.onerror = () => reject(reader.error); reader.readAsText(blob);
   });
   try {
@@ -208,7 +208,8 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(webgpuPanel.querySelector('section')).toBe(webgpuSection);
     await act(async () => exportButton.click());
     const initial = await readReport(blobs[0]);
-    expect(initial.schemaVersion).toBe(1); expect(initial.generatedAt).toMatch(/Z$/);
+    expect(initial.schemaVersion).toBe(2); expect(initial.application.channel).toBe('development');
+    expect(initial.immich).toMatchObject({ status: 'ok', version: 'v3.2.4' }); expect(initial.generatedAt).toMatch(/Z$/);
     expect(initial.environment.hardwareConcurrency).toBe(8); expect(initial.environment.deviceMemory).toBeNull();
     expect(initial.webgpu.smoke.status).toBe('not_run');
     expect(initial.jpeg.status).toBe('not_run');
@@ -227,7 +228,7 @@ it.each(['en', 'ja'])('exports environment and not-run/failed WebGPU data throug
     expect(host.querySelector<HTMLElement>('#webgpu-panel')!.hidden).toBe(true);
     await act(async () => host.querySelector<HTMLButtonElement>('#webgpu-tab')!.click());
     expect(host.querySelector('#webgpu-panel')!.textContent).toContain(i18n.t('webgpuSmoke.codes.insecure'));
-    expect(fetch.mock.calls.every(([url]) => url.startsWith('/api/developer/logs/'))).toBe(true);
+    expect(fetch.mock.calls.every(([url]) => url.startsWith('/api/developer/logs/') || url === '/api/immich/about')).toBe(true);
     expect(gpu.requestAdapter).not.toHaveBeenCalled();
   } finally { vi.runAllTimers(); vi.useRealTimers(); Reflect.deleteProperty(URL, 'createObjectURL'); Reflect.deleteProperty(URL, 'revokeObjectURL'); }
 });

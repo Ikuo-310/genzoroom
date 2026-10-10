@@ -252,8 +252,8 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
       <button type="button" disabled={busy || !selected} onClick={() => { void run(); }}>{t('exportEngine.run')}</button>
       <button type="button" disabled={busy} onClick={() => {
         setJsonError(false);
-        try { exportEngineReport(createExportEngineReport({ status: phase, error, metadata }, decodeReport, new Date(), roundTripReport)); }
-        catch { setJsonError(true); }
+        void exportEngineReport(createExportEngineReport({ status: phase, error, metadata }, decodeReport, new Date(), roundTripReport))
+          .catch(() => setJsonError(true));
       }}>{t('decodeCompare.exportJson')}</button>
     </div>
     {candidateStatus !== 'idle' && <p role="status">{t(`jpegDiagnostics.candidates.${candidateStatus}`)}</p>}

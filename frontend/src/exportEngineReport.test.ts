@@ -23,18 +23,20 @@ it('has a distinct schema and explicitly excludes private fields, arbitrary exce
   expect(report.encodeRoundTripComparison.deltaDirection).toBe('decoded-jpeg-minus-pre-encode-rgb');
   expect(JSON.stringify(report)).not.toMatch(/PRIVATE|assetId|filename|pixelbuffer|recipe"|history|url"/i);
 });
-it('downloads the safe report with a timestamp-only filename and releases its URL', async () => {
+it('downloads the safe report with common metadata and releases its URL', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const create = vi.fn((_blob: Blob) => 'blob:diagnostic-report'), revoke = vi.fn();
   vi.stubGlobal('URL', { createObjectURL: create, revokeObjectURL: revoke });
   const report = createExportEngineReport({ status: 'idle', error: null, metadata: null }, emptyDecodeComparison(), new Date('2026-10-07T00:01:02.000Z'));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ version: 'v3.2.4', build: null }) })));
   const clicked = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
     expect(this.download).toBe('genzoroom-export-engine-diagnostics-20261007T000102Z.json');
     expect(this.isConnected).toBe(true);
   });
-  exportEngineReport(report); expect(clicked).toHaveBeenCalledOnce(); expect(document.querySelector('a[download]')).toBeNull();
+  await exportEngineReport(report); expect(clicked).toHaveBeenCalledOnce(); expect(document.querySelector('a[download]')).toBeNull();
   const blob = create.mock.calls[0][0]; expect(blob.type).toBe('application/json');
   const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
-  expect(JSON.parse(text)).toEqual(report);
+  expect(JSON.parse(text)).toMatchObject({ ...report, schemaVersion: 2, application: { name: 'GenzoRoom' },
+    immich: { status: 'ok', version: 'v3.2.4', build: null, sourceRef: null, errorCode: null } });
   vi.runAllTimers(); expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:diagnostic-report');
 });

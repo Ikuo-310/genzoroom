@@ -370,7 +370,8 @@ it('exports Decode Compare results from this tab without private selection data 
     expect(anchor).toHaveBeenCalledOnce();
     const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)![0] as Blob;
     const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
-    const json = JSON.parse(text); expect(json.schemaVersion).toBe(1); expect(json.decodeComparison.status).toBe('completed');
+    const json = JSON.parse(text); expect(json.schemaVersion).toBe(2); expect(json.application.name).toBe('GenzoRoom');
+    expect(json.immich.status).toBe('error'); expect(json.decodeComparison.status).toBe('completed');
     expect(json.decodeComparison.statistics.exactMatchPixelPercent).toBe(100);
     expect(text).not.toMatch(/PRIVATE|assetId|filename|recipe"|pixels"|blob:/);
     vi.runAllTimers();
@@ -435,6 +436,8 @@ it('includes safe Encode Round-trip values in the tab-specific JSON', async () =
     const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)![0] as Blob;
     const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
     const json = JSON.parse(text);
+    expect(json.schemaVersion).toBe(2); expect(json.application.name).toBe('GenzoRoom');
+    expect(json.immich.status).toBe('error');
     expect(json.encodeRoundTripComparison.status).toBe('completed');
     expect(json.encodeRoundTripComparison.deltaDirection).toBe('decoded-jpeg-minus-pre-encode-rgb');
     expect(json.encodeRoundTripComparison.encoder).toEqual({ format: 'JPEG', quality: 95, subsampling: '4:4:4', outputColorSpace: 'sRGB' });

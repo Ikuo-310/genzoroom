@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SettingsButton, SettingsProvider } from './SettingsDialog';
+import { applicationBuildLabel, SettingsButton, SettingsProvider } from './SettingsDialog';
 import { changeAppLanguage } from './i18n';
 import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
@@ -32,6 +32,16 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('localizes each embedded release channel and does not present validation as stable', async () => {
+    const { default: i18n } = await import('./i18n');
+    const tr = (key: string) => i18n.t(key);
+    expect(applicationBuildLabel({ name: 'GenzoRoom', version: '0.0.0-development', channel: 'development', commit: null }, tr))
+      .toBe(i18n.t('settings.development'));
+    expect(applicationBuildLabel({ name: 'GenzoRoom', version: '0.0.0-validation', channel: 'validation', commit: 'abcdef0123456789'.padEnd(40, '0') }, tr))
+      .toBe(`${i18n.t('settings.validation')} (abcdef0)`);
+    expect(applicationBuildLabel({ name: 'GenzoRoom', version: 'v0.1.0', channel: 'stable', commit: 'a'.repeat(40) }, tr))
+      .toBe(`${i18n.t('settings.stable')} · v0.1.0`);
+  });
   it('uses native grouped radios for shortcut hints and retains session choice when storage fails', async () => {
     await click(host.querySelector('button')!);
     const group = dialog().querySelector<HTMLElement>('[role="radiogroup"]')!;
@@ -167,6 +177,7 @@ describe('shared Settings modal', () => {
   it('shows independent connection and safe server information', async () => {
     await click(host.querySelector('button')!);
     expect(dialog().textContent).toContain('Development build');
+    expect(dialog().textContent).not.toContain('v0.1.0');
     expect(dialog().textContent).toContain('Backend: Connected');
     expect(dialog().textContent).toContain('v3.0.0');
     expect(dialog().textContent).toContain('release');

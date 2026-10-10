@@ -1,4 +1,10 @@
 FROM node:24-alpine AS frontend-build
+ARG GENZOROOM_CHANNEL
+ARG GENZOROOM_VERSION
+ARG GENZOROOM_COMMIT
+ENV VITE_GENZOROOM_CHANNEL=${GENZOROOM_CHANNEL} \
+    VITE_GENZOROOM_VERSION=${GENZOROOM_VERSION} \
+    VITE_GENZOROOM_COMMIT=${GENZOROOM_COMMIT}
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -11,14 +17,21 @@ COPY backend/requirements.txt /build/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r /build/requirements.txt
 
 FROM python:3.14-slim
+ARG GENZOROOM_CHANNEL
+ARG GENZOROOM_VERSION
+ARG GENZOROOM_COMMIT
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    GENZOROOM_CHANNEL=${GENZOROOM_CHANNEL} \
+    GENZOROOM_VERSION=${GENZOROOM_VERSION} \
+    GENZOROOM_COMMIT=${GENZOROOM_COMMIT}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nginx tini \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python-build /install /usr/local
 WORKDIR /app
 COPY backend/*.py ./
+RUN python -c "import build_info"
 COPY --from=frontend-build /build/dist /usr/share/nginx/html
 COPY release/nginx.conf /etc/nginx/nginx.conf
 COPY release/supervisor.py /opt/genzoroom/supervisor.py

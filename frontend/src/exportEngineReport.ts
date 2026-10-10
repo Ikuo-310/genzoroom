@@ -1,7 +1,7 @@
 import { DECODE_COMPARE_ERRORS, ENCODE_ROUNDTRIP_ERRORS, EXPORT_ENGINE_ERRORS, type ExportEngineErrorCode, type ExportEngineMetadata } from './exportEngineApi';
 import type { DecodeComparisonReport } from './decodeComparison';
 import { emptyEncodeRoundTrip, type EncodeRoundTripReport } from './encodeRoundTrip';
-import { downloadJsonReport } from './jsonReportDownload';
+import { downloadDiagnosticJson } from './diagnosticExport';
 
 export const DECODE_STATISTIC_KEYS = ['meanDeltaR', 'meanDeltaG', 'meanDeltaB', 'meanAbsoluteDeltaR', 'meanAbsoluteDeltaG',
   'meanAbsoluteDeltaB', 'maxAbsoluteDeltaR', 'maxAbsoluteDeltaG', 'maxAbsoluteDeltaB', 'meanAbsoluteError', 'rmse',
@@ -66,6 +66,6 @@ export function createExportEngineReport(engine: { status: string; error: Export
   };
 }
 
-export function exportEngineReport(report: ReturnType<typeof createExportEngineReport>) {
-  downloadJsonReport(report, 'genzoroom-export-engine-diagnostics');
+export function exportEngineReport(report: ReturnType<typeof createExportEngineReport>): Promise<void> {
+  return downloadDiagnosticJson(report, 'genzoroom-export-engine-diagnostics');
 }

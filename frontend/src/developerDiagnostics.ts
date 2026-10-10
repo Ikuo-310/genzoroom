@@ -1,4 +1,4 @@
-import { downloadJsonReport } from './jsonReportDownload';
+import { downloadDiagnosticJson } from './diagnosticExport';
 import type { AdapterInfo, DiagnosticValue, SmokeCode, SmokeState } from './webgpuSmoke';
 import { createJpegReport, emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 
@@ -182,6 +182,6 @@ export function createWebGpuDiagnosticsReport(environment: DiagnosticsEnvironmen
   return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu })) as WebGpuDiagnosticsReport;
 }
 
-export function exportDiagnosticsReport(report: DiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-diagnostics'); }
-export function exportJpegDiagnosticsReport(report: JpegDiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-jpeg-diagnostics'); }
-export function exportWebGpuDiagnosticsReport(report: WebGpuDiagnosticsReport): void { downloadJsonReport(report, 'genzoroom-webgpu-diagnostics'); }
+export function exportDiagnosticsReport(report: DiagnosticsReport): Promise<void> { return downloadDiagnosticJson(report, 'genzoroom-diagnostics'); }
+export function exportJpegDiagnosticsReport(report: JpegDiagnosticsReport): Promise<void> { return downloadDiagnosticJson(report, 'genzoroom-jpeg-diagnostics'); }
+export function exportWebGpuDiagnosticsReport(report: WebGpuDiagnosticsReport): Promise<void> { return downloadDiagnosticJson(report, 'genzoroom-webgpu-diagnostics'); }

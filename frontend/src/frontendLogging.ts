@@ -1,4 +1,4 @@
-import { downloadJsonReport } from './jsonReportDownload';
+import { downloadDiagnosticJson } from './diagnosticExport';
 
 export type LogEntryLevel = 'error' | 'warn' | 'info' | 'debug';
 export type LogLevel = 'off' | LogEntryLevel;
@@ -226,6 +226,6 @@ export function projectLogBufferStats(buffer: LogBufferStats, expectedCapacity =
   return { capacity: expectedCapacity, droppedEntryCount: buffer.droppedEntryCount };
 }
 
-export function exportFrontendLogsReport(report: FrontendLogsReport): void {
-  downloadJsonReport(createFrontendLogsReport(report.entries, new Date(report.generatedAt), report.buffer), 'genzoroom-frontend-logs');
+export function exportFrontendLogsReport(report: FrontendLogsReport, signal?: AbortSignal): Promise<void> {
+  return downloadDiagnosticJson(createFrontendLogsReport(report.entries, new Date(report.generatedAt), report.buffer), 'genzoroom-frontend-logs', signal);
 }

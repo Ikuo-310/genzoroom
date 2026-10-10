@@ -1,4 +1,4 @@
-export function downloadJsonReport(report: { generatedAt: string }, prefix: string): void {
+export function downloadJsonReport<T extends { generatedAt: string }>(report: T, prefix: string): void {
   const blob = new Blob([JSON.stringify(report, null, 2) + '\n'], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

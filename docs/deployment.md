@@ -20,9 +20,11 @@ GenzoRoom exposes only nginx on container port `8080`, mapped by default to host
   - `asset.upload` for Export JPEG registration.
   - `tag.create` and `tag.asset` for Export tagging and Home tag repair.
   - `asset.delete` for explicitly confirmed Trash operations (`force: false`).
-  - `server.about` for optional Immich version and build information in Settings.
+  - `server.about` (optional) for Immich version/build information in Settings and diagnostic exports.
   - `stack.read` for membership and full Stack resolution.
   - `stack.create`, `stack.update`, and `stack.delete` for confirmed STACK management writes.
+
+Settings reads the GenzoRoom build identity from the Frontend bundle without another request. Downloaded Developer Diagnostics JSON adds this `application` identity and one export-time `immich` result from the existing Backend `/immich/about` route. It uses the existing `server.about` scope; a denied/failed about request is recorded safely and does not imply Immich photo APIs are unavailable. The direct Backend Logs API remains its existing schema; Frontend downloads use diagnostics `schemaVersion: 2`.
 
 These scopes cover current browsing, Export, tag repair and confirmed Stack/Trash operations. `server.about` is optional Settings information. No `asset.update`, `asset.copy`, `tag.update`, `tag.delete` or album write scope is required by current calls; Favorite inheritance is part of upload. Stack creation also requires ownership of the requested assets under Immich access validation. The endpoint-to-scope mapping and versioned upstream references are in [release-validation.md](release-validation.md#immich-api-key-scopes).
 

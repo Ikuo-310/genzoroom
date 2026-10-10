@@ -27,6 +27,8 @@ jobs:
       commit: ${{ steps.source.outputs.commit }}
       automation_commit: ${{ steps.source.outputs.automation_commit }}
       image_tag: ${{ steps.source.outputs.image_tag }}
+      channel: ${{ steps.source.outputs.channel }}
+      version: ${{ steps.source.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,6 +51,9 @@ jobs:
     env:
       IMAGE_REF: ghcr.io/ikuo-310/genzoroom:${{ needs.prepare.outputs.image_tag }}
       EXPECTED_REVISION: ${{ needs.prepare.outputs.commit }}
+      GENZOROOM_CHANNEL: ${{ needs.prepare.outputs.channel }}
+      GENZOROOM_VERSION: ${{ needs.prepare.outputs.version }}
+      GENZOROOM_COMMIT: ${{ needs.prepare.outputs.commit }}
     steps:
       # Keep trusted tooling separate from the requested source commit, including older main commits.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,11 +75,15 @@ jobs:
           load: true
           push: false
           provenance: false
+          build-args: |
+            GENZOROOM_CHANNEL=${{ env.GENZOROOM_CHANNEL }}
+            GENZOROOM_VERSION=${{ env.GENZOROOM_VERSION }}
+            GENZOROOM_COMMIT=${{ env.GENZOROOM_COMMIT }}
           tags: ${{ env.IMAGE_REF }}
           labels: |
             org.opencontainers.image.source=https://github.com/Ikuo-310/genzoroom
             org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}
-            org.opencontainers.image.version=${{ needs.prepare.outputs.image_tag }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
       - name: Verify startup, storage and graceful shutdown before publishing
         run: bash release/smoke-test.sh
       - name: Authenticate to GHCR

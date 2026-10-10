@@ -2,6 +2,9 @@
 set -euo pipefail
 : "${IMAGE_REF:?Set IMAGE_REF}"
 : "${EXPECTED_REVISION:?Set EXPECTED_REVISION}"
+: "${GENZOROOM_CHANNEL:?Set GENZOROOM_CHANNEL}"
+: "${GENZOROOM_VERSION:?Set GENZOROOM_VERSION}"
+: "${GENZOROOM_COMMIT:?Set GENZOROOM_COMMIT}"
 : "${RUNNER_TEMP:?Set RUNNER_TEMP}"
 
 storage_root=$(mktemp -d "$RUNNER_TEMP/genzoroom-smoke.XXXXXX")
@@ -35,15 +38,22 @@ done
 [[ $(docker image inspect "$IMAGE_REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}') == "$EXPECTED_REVISION" ]]
 docker exec "$container" nginx -t
 docker exec "$container" python -c '
-import shutil, sqlite3
+import shutil, sqlite3, sys
 from pathlib import Path
+from build_info import BUILD_INFO
 assert not shutil.which("node") and not shutil.which("npm")
+expected = {"name": "GenzoRoom", "channel": sys.argv[1], "version": sys.argv[2], "commit": sys.argv[3]}
+assert BUILD_INFO == expected
+bundles = list(Path("/usr/share/nginx/html/assets").glob("*.js"))
+assert bundles and all(value in "".join(path.read_text() for path in bundles)
+                       for value in (expected["channel"], expected["version"], expected["commit"]))
 assert Path("/genzoroom/data/genzoroom.db").is_file()
 with sqlite3.connect("file:/genzoroom/data/genzoroom.db?mode=rw", uri=True) as connection:
     assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     connection.execute("BEGIN IMMEDIATE")
     connection.rollback()
-'
+' "$GENZOROOM_CHANNEL" "$GENZOROOM_VERSION" "$GENZOROOM_COMMIT"
+[[ $(docker image inspect "$IMAGE_REF" --format '{{index .Config.Labels "org.opencontainers.image.version"}}') == "$GENZOROOM_VERSION" ]]
 docker stop --time 75 "$container" >/dev/null
 [[ $(docker inspect "$container" --format '{{.State.ExitCode}}') == 0 ]]

@@ -21,6 +21,7 @@ beforeEach(() => {
   level = 'off'; failLevel = failReport = failClear = failPut = false; report = initialReport();
   fetchMock = vi.fn(async (url: string, options?: RequestInit) => {
     if (options?.signal?.aborted) throw new Error('Aborted');
+    if (url.endsWith('/immich/about')) return { ok: true, json: async () => ({ version: 'v3.2.4' }) };
     if (url.endsWith('/level')) {
       if (options?.method === 'PUT') { if (failPut) throw new Error('PRIVATE'); level = JSON.parse(options.body as string).level; }
       else if (failLevel) throw new Error('PRIVATE');
@@ -172,15 +173,21 @@ it('downloads fresh independent FE/BE/All reports regardless of viewer selection
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
   const read = (blob: Blob) => new Promise<Record<string, any>>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(JSON.parse(String(reader.result))); reader.readAsText(blob); });
+  fetchMock.mockClear();
   await click(action('frontend', 'export')); expect(names[0]).toMatch(/^genzoroom-frontend-logs-/);
   report.entries[0].event = 'fresh.response';
   await click(action('backend', 'export')); expect(names[1]).toMatch(/^genzoroom-backend-logs-/);
-  expect((await read(blobs[1])).entries[0].event).toBe('fresh.response');
+  const backendDownload = await read(blobs[1]);
+  expect(backendDownload.entries[0].event).toBe('fresh.response');
+  expect(backendDownload).toMatchObject({ schemaVersion: 2, application: { name: 'GenzoRoom' }, immich: { status: 'ok', version: 'v3.2.4' } });
   feEntry();
   await click(host.querySelectorAll<HTMLButtonElement>('.developer-log-sources button')[2]);
   await click(button('exportAll')); expect(names[2]).toMatch(/^genzoroom-all-logs-/);
   const all = await read(blobs[2]);
-  expect(Object.keys(all)).toEqual(['schemaVersion', 'generatedAt', 'frontend', 'backend', 'buffers']);
+  expect(Object.keys(all)).toEqual(['schemaVersion', 'generatedAt', 'frontend', 'backend', 'buffers', 'application', 'immich']);
+  expect(all.schemaVersion).toBe(2); expect(all.application.name).toBe('GenzoRoom');
+  expect(all.immich).toMatchObject({ status: 'ok', version: 'v3.2.4', build: null, sourceRef: null });
+  expect(fetchMock.mock.calls.filter(([url]) => url === '/api/immich/about')).toHaveLength(3);
   expect(all.frontend).toHaveLength(2); expect(all.backend).toHaveLength(1);
   expect(all.generatedAt).toMatch(/Z$/); expect(all.backend[0].timestamp).toMatch(/Z$/);
   expect(JSON.stringify(all)).not.toContain('PRIVATE');

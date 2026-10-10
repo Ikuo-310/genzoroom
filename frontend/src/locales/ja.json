@@ -525,6 +525,8 @@
     "original": "原版優先",
     "preview": "プレビュー優先",
     "development": "開発版",
+    "validation": "検証版",
+    "stable": "正式版",
     "refresh": "再確認",
     "aboutPermission": "サーバー情報を取得できません。APIキーの server.about 権限を確認してください。",
     "aboutFailed": "サーバー情報を取得できませんでした。",

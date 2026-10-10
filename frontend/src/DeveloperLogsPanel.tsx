@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createFrontendLogsReport, exportFrontendLogsReport, frontendLogger, type LogLevel, type LogBufferStats } from './frontendLogging';
 import { clearBackendLogs, createAllLogsReport, formatLogTimestamp, getBackendLogLevel, getBackendLogsReport,
   DeveloperLogsError, mergeLogEntries, setBackendLogLevel, type BackendLogEntry } from './developerLogs';
-import { downloadJsonReport } from './jsonReportDownload';
+import { downloadDiagnosticJson } from './diagnosticExport';
 
 type Scope = 'frontend' | 'backend' | 'all';
 type BackendAction = 'load' | 'refresh' | 'level' | 'clear' | 'export';
@@ -119,17 +119,21 @@ export function DeveloperLogs() {
     setAllError(null);
     if (scope === 'frontend') {
       setFrontendError(null);
-      try { exportFrontendLogsReport(createFrontendLogsReport(frontendLogger.getEntries(), new Date(), frontendLogger.getBufferStats())); succeeded('frontend.export'); }
-      catch (error) { failed('frontend.export', error); setFrontendError('exportFailed'); }
+      void exportFrontendLogsReport(createFrontendLogsReport(frontendLogger.getEntries(), new Date(), frontendLogger.getBufferStats()))
+        .then(() => succeeded('frontend.export')).catch(error => { failed('frontend.export', error); setFrontendError('exportFailed'); });
       return;
     }
+    const frontendSnapshot = scope === 'all' ? frontendLogger.getEntries() : null;
+    const frontendBufferSnapshot = scope === 'all' ? frontendLogger.getBufferStats() : undefined;
+    const generatedAt = new Date();
     void runBackend('export', async (signal, current) => {
       setBackendError(null);
       try {
         const report = await getBackendLogsReport(signal);
         if (!current()) return;
-        if (scope === 'backend') downloadJsonReport(report, 'genzoroom-backend-logs');
-        else downloadJsonReport(createAllLogsReport(frontendLogger.getEntries(), report, new Date(), frontendLogger.getBufferStats()), 'genzoroom-all-logs');
+        const snapshot = scope === 'backend' ? report
+          : createAllLogsReport(frontendSnapshot!, report, generatedAt, frontendBufferSnapshot);
+        await downloadDiagnosticJson(snapshot, scope === 'backend' ? 'genzoroom-backend-logs' : 'genzoroom-all-logs', signal);
         succeeded(`${scope}.export`);
       } catch (error) {
         if (current()) { failed(`${scope}.export`, error); setBackendError('exportFailed'); if (scope === 'all') setAllError('allExportFailed'); }

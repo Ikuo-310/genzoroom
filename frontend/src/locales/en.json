@@ -535,6 +535,8 @@
     "original": "Original preferred",
     "preview": "Preview preferred",
     "development": "Development build",
+    "validation": "Validation build",
+    "stable": "Stable release",
     "refresh": "Check again",
     "aboutPermission": "Server information unavailable. Check the server.about API key permission.",
     "aboutFailed": "Server information could not be retrieved.",

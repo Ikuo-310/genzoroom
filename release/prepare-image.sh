@@ -26,10 +26,14 @@ if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
   [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || reject 'Invalid run identity.'
   # Rebuilding one commit must not overwrite an earlier validation image.
   image_tag="sha-${commit}-run${GITHUB_RUN_ID}-attempt${GITHUB_RUN_ATTEMPT}"
+  channel=validation
+  version=0.0.0-validation
 else
   tag_commit=$(git rev-parse --verify "${GITHUB_REF}^{commit}") || reject 'Stable tag was not found.'
   [[ "$tag_commit" == "$commit" ]] || reject 'Tag no longer identifies the triggering commit.'
   image_tag=${GITHUB_REF#refs/tags/}
+  channel=stable
+  version=$image_tag
 fi
 
 # No latest alias is created, even for stable releases.
@@ -37,4 +41,6 @@ fi
   printf 'commit=%s\n' "$commit"
   printf 'automation_commit=%s\n' "$automation_commit"
   printf 'image_tag=%s\n' "$image_tag"
+  printf 'channel=%s\n' "$channel"
+  printf 'version=%s\n' "$version"
 } >> "$GITHUB_OUTPUT"

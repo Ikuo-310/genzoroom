@@ -241,15 +241,18 @@ it('downloads an independent machine-readable JSON snapshot with the shared down
     expect(this.download).toBe('genzoroom-frontend-logs-20261003T160000Z.json');
   });
   try {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     const logger = createFrontendLogger(); logger.setLevel('error');
     logger.add({ level: 'error', component: 'renderer', event: 'initialization.failed' });
     const report = createFrontendLogsReport(logger.getEntries(), new Date('2026-10-03T16:00:00Z'));
-    exportFrontendLogsReport(report); expect(click).toHaveBeenCalledOnce();
+    await exportFrontendLogsReport(report); expect(click).toHaveBeenCalledOnce();
     const blob = create.mock.calls[0][0]; expect(blob.type).toBe('application/json');
     const text = await new Promise<string>(resolve => {
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob);
     });
-    expect(JSON.parse(text)).toEqual(report);
+    expect(JSON.parse(text)).toMatchObject({ ...report, schemaVersion: 2,
+      application: { name: 'GenzoRoom', channel: 'development' },
+      immich: { status: 'error', version: null, build: null, sourceRef: null, errorCode: 'backend_request_failed' } });
     expect(report.entries[0]).not.toHaveProperty('message');
     expect(document.querySelector('a[download]')).toBeNull();
     expect(revoke).not.toHaveBeenCalled(); vi.runAllTimers();

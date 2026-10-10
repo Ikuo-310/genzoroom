@@ -73,7 +73,8 @@ def test_manual_build_uses_exact_main_commit_and_distinct_retry_tags(bash, sourc
     result, outputs = prepare(bash, source_repo, tmp_path)
     assert result.returncode == 0, result.stderr
     assert outputs == {"commit": first, "automation_commit": current,
-                       "image_tag": f"sha-{first}-run42-attempt1"}
+                       "image_tag": f"sha-{first}-run42-attempt1", "channel": "validation",
+                       "version": "0.0.0-validation"}
     retry, retry_outputs = prepare(bash, source_repo, tmp_path, GITHUB_RUN_ATTEMPT="2")
     assert retry.returncode == 0, retry.stderr
     assert retry_outputs["image_tag"] == f"sha-{first}-run42-attempt2"
@@ -84,6 +85,7 @@ def test_stable_tag_uses_version_only(bash, source_repo, tmp_path):
                               GITHUB_REF="refs/tags/v0.1.0")
     assert result.returncode == 0, result.stderr
     assert outputs["image_tag"] == "v0.1.0"
+    assert outputs["channel"] == "stable" and outputs["version"] == "v0.1.0"
     assert "latest" not in outputs.values()
 
 
@@ -125,6 +127,29 @@ def test_tag_changed_since_event_is_rejected(bash, source_repo, tmp_path):
 @pytest.mark.parametrize("filename", ["prepare-image.sh", "smoke-test.sh"])
 def test_publishing_scripts_have_valid_bash_syntax(bash, filename):
     subprocess.run([bash, "-n", (ROOT / "release" / filename).as_posix()], check=True)
+
+
+def test_release_workflow_passes_matching_metadata_to_both_build_outputs():
+    workflow = (ROOT / ".github/workflows/publish-image.yml").read_text()
+    dockerfile = (ROOT / "Dockerfile.release").read_text()
+    script = (ROOT / "release/prepare-image.sh").read_text()
+    for value in ("GENZOROOM_CHANNEL", "GENZOROOM_VERSION", "GENZOROOM_COMMIT"):
+        assert f"{value}=${{{{ env.{value} }}}}" in workflow
+        assert value in dockerfile
+    assert "version=$image_tag" in script and "channel=stable" in script
+    assert "channel=validation" in script and "version=0.0.0-validation" in script
+    assert "org.opencontainers.image.revision=${{ needs.prepare.outputs.commit }}" in workflow
+    assert "org.opencontainers.image.version=${{ needs.prepare.outputs.version }}" in workflow
+
+
+def test_release_smoke_checks_frontend_backend_and_oci_build_identity():
+    smoke = (ROOT / "release/smoke-test.sh").read_text()
+    assert '"${GENZOROOM_CHANNEL:?Set GENZOROOM_CHANNEL}"' in smoke
+    assert '"${GENZOROOM_VERSION:?Set GENZOROOM_VERSION}"' in smoke
+    assert '"${GENZOROOM_COMMIT:?Set GENZOROOM_COMMIT}"' in smoke
+    assert "from build_info import BUILD_INFO" in smoke
+    assert "Path(\"/usr/share/nginx/html/assets\").glob(\"*.js\")" in smoke
+    assert "org.opencontainers.image.version" in smoke
 
 
 @pytest.fixture

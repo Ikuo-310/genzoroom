@@ -6,6 +6,7 @@ import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
 import { BinaryRadioChoice } from './BinaryRadioChoice';
 import { isPrimaryModifier } from './shortcutModifiers';
+import { BUILD_INFO } from './buildInfo';
 
 type GpuStatus = { enabled: boolean; availability: GpuAvailability; active: boolean; setPreference: (value: boolean) => void };
 const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGpu: (_value: GpuStatus | null) => {} });
@@ -38,6 +39,11 @@ function HomeGpuControl() {
   const gpu = useWorkspaceGpu('settings-home', true);
   return <WebGpuControl {...gpu} onChange={gpu.setPreference} />;
 }
+export function applicationBuildLabel(info: typeof BUILD_INFO, translate: (key: string) => string): string {
+  if (info.channel === 'development') return translate('settings.development');
+  if (info.channel === 'validation') return `${translate('settings.validation')} (${info.commit?.slice(0, 7)})`;
+  return `${translate('settings.stable')} · ${info.version}`;
+}
 function ConnectionInformation() {
   const { t } = useTranslation();
   const [attempt, setAttempt] = useState(0);
@@ -64,7 +70,8 @@ function ConnectionInformation() {
     return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
   }, [attempt]);
   return <>
-    <h4>GenzoRoom</h4><p>{t('settings.development')}</p>
+    <h4>{BUILD_INFO.name}</h4>
+    <p>{applicationBuildLabel(BUILD_INFO, t)}</p>
     <p role="status">Backend: {t(`connection.${backend}`)}</p>
     <h4>Immich</h4><p role="status">{t(`connection.${immich}`)}</p>
     {about ? about.error_code ? <p className="error-text" role="status">{t(about.error_code === 'authentication_failed' ? 'settings.aboutPermission' : 'settings.aboutFailed')}</p>
