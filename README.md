@@ -1,5 +1,7 @@
 # GenzoRoom
 
+English | [日本語](README.ja.md)
+
 GenzoRoom is a self-hosted, Immich-oriented photo-development workflow for browsing photos, organizing RAW/JPEG capture stacks, developing JPEGs, and exporting developed JPEGs to Immich. Confirmed Export uploads a new JPEG, adds the GenzoRoom tag, and makes it the source Stack's Cover while preserving its members. Ordinary photo browsing is read-focused; STACK management sends Stack changes and reserved photo trash moves to Immich only after explicit user confirmation. Anshitsu applies adjustments locally and does not modify image originals.
 
 This is not yet a RAW development pipeline. RAW files can be browsed and filtered, but RAW processing itself is not implemented. The name comes from the Japanese word **現像 (genzō)**, meaning photographic development.
