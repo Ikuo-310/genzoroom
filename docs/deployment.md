@@ -14,11 +14,16 @@ GenzoRoom exposes only its frontend. The default Web UI host port is `3190`. ngi
   - `asset.read` for recent-photo metadata and asset details.
   - `asset.view` for thumbnails and previews.
   - `asset.download` for selected JPEG originals.
+  - `album.read` for Home album listing.
+  - `tag.read` for Home GenzoRoom tag filtering.
+  - `asset.upload` for Export JPEG registration.
+  - `tag.create` and `tag.asset` for Export tagging and Home tag repair.
+  - `asset.delete` for explicitly confirmed Trash operations (`force: false`).
   - `server.about` for optional Immich version and build information in Settings.
   - `stack.read` for membership and full Stack resolution.
   - `stack.create`, `stack.update`, and `stack.delete` for confirmed STACK management writes.
 
-GenzoRoom uses read endpoints and explicitly confirmed Stack create/update/delete operations. No upload, asset deletion, or unrelated write permissions are needed. Stack creation also requires ownership of the requested assets under Immich access validation.
+These scopes cover current browsing, Export, tag repair and confirmed Stack/Trash operations. `server.about` is optional Settings information. No `asset.update`, `asset.copy`, `tag.update`, `tag.delete` or album write scope is required by current calls; Favorite inheritance is part of upload. Stack creation also requires ownership of the requested assets under Immich access validation. The endpoint-to-scope mapping and versioned upstream references are in [release-validation.md](release-validation.md#immich-api-key-scopes).
 
 The nginx proxy keeps its normal 10-second read timeout for `/api/` requests. The exact `/api/stacks/apply` location uses 90 minutes because a 500-operation batch can make one membership preflight request and up to two sequential Immich writes per operation; at the backend's configured 5-second read timeout this is about 83 minutes 25 seconds, with margin for application processing. The three exact `POST /api/developer/export-engine` diagnostic locations (base, `/decode`, and `/roundtrip`) use a 1-hour proxy read timeout so long in-process image work is not cut off by the normal 10-second limit; the UI's manual Cancel/Abort remains the normal stop control. These proxy limits do not change the backend's Immich network timeout, response buffering, or the Stack endpoint's unknown-outcome behavior.
 
@@ -172,7 +177,7 @@ When using the same-host override, include both `-f` arguments in operational co
 Check the following when the backend or Immich connection fails:
 
 - Confirm that `IMMICH_URL` is reachable from the backend container, including its scheme, host, and port.
-- Confirm that `IMMICH_API_KEY` is current and has `user.read`, `asset.read`, `asset.view`, `asset.download`, `server.about`, `stack.read`, `stack.create`, `stack.update`, and `stack.delete` permissions.
+- Confirm that `IMMICH_API_KEY` is current and has the scopes listed under Requirements; use the endpoint mapping in [release-validation.md](release-validation.md#immich-api-key-scopes) for Export, Trash, Calendar, Album and Tag failures.
 - If the connection check succeeds but photos fail, verify `asset.read` and `asset.view` specifically.
 - If photo browsing works but STACK management cannot resolve or send Stacks, verify `stack.read` and the required `stack.create`, `stack.update`, and `stack.delete` permissions. `asset.download` is used only for selected JPEG originals; `server.about` is optional Settings information.
 - For same-host deployments, confirm the external network name, Immich Docker DNS name, additional Compose path, and Docker endpoint.

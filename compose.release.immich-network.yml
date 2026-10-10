@@ -1,0 +1,9 @@
+services:
+  genzoroom:
+    networks:
+      immich:
+
+networks:
+  immich:
+    external: true
+    name: ${IMMICH_DOCKER_NETWORK:?Set IMMICH_DOCKER_NETWORK to an existing Immich Docker network}

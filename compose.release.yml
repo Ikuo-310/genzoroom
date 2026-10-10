@@ -1,0 +1,29 @@
+services:
+  genzoroom:
+    build:
+      context: .
+      dockerfile: Dockerfile.release
+    ports:
+      - "${GENZOROOM_PORT:-3190}:8080"
+    volumes:
+      # SQLite needs directory write access, including WAL/SHM creation.
+      - type: bind
+        source: ${GENZOROOM_DATA_PATH:-${GENZOROOM_PERSIST_ROOT:?Set GENZOROOM_PERSIST_ROOT or GENZOROOM_DATA_PATH}/data}
+        target: /data
+        bind:
+          create_host_path: false
+    environment:
+      IMMICH_URL: ${IMMICH_URL:-}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+    restart: unless-stopped
+    # Allow the supervisor's bounded drain and final child reaping before Docker SIGKILL.
+    stop_grace_period: 75s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      outbound:
+
+networks:
+  outbound:
