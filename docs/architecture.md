@@ -53,9 +53,9 @@ Frontend: nginx on container port 8080
                        ├─ GET /assets/{id}/thumbnail
                        ├─ GET /assets/{id}/preview
                        ├─ GET /assets/{id}/original
-                       ├─ POST /assets/edit-status → SQLite /data/genzoroom.db
-                       ├─ GET/PUT /assets/{id}/edit-state → SQLite /data/genzoroom.db
-                       └─ GET/POST /export/queue, DELETE /export/queue/{id} → SQLite /data/genzoroom.db
+                       ├─ POST /assets/edit-status → SQLite /genzoroom/data/genzoroom.db
+                       ├─ GET/PUT /assets/{id}/edit-state → SQLite /genzoroom/data/genzoroom.db
+                       └─ GET/POST /export/queue, DELETE /export/queue/{id} → SQLite /genzoroom/data/genzoroom.db
                             ↓ x-api-key (server-side only)
                           Immich: authenticated reads, explicit Stack writes and reserved trash moves
                             via LAN / routed network,
@@ -223,11 +223,23 @@ The Settings implementation and follow-up layout/backdrop changes do not alter R
 | `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
 | `backend` | `8000` | None | Immich proxying and SQLite edit-state API. |
 
-Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. The backend bind-mounts one host data directory at `/data`; no host networking, GPU, or privileged mode is used.
+Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. The backend bind-mounts the host application parent at `/genzoroom`; no host networking, GPU, or privileged mode is used.
+
+`backend/storage.py` owns the fixed internal `STORAGE_ROOT = /genzoroom` and derives `DB_PATH = STORAGE_ROOT / data / genzoroom.db`. `edit_store.py` imports that DB path; Recipe, History, Queue and Runtime all retain the same connection helper and schema v4. No host path or storage-root environment variable enters Backend. Development and release both require the Compose-only `GENZOROOM_PERSIST_ROOT` parent with `create_host_path: false`, without nested variable expansion. `GENZOROOM_DATA_PATH` is retired with no fallback.
+
+Before constructing the Export coordinator or running recovery, FastAPI lifespan checks `/proc/self/mountinfo` for the exact parent mount (including same-filesystem binds), creates `data` only if absent, probes actual file creation/write/removal, and checks existing DB read/write access. Failure aborts startup with a fixed storage error code and an operation-level structured error without host paths. It does not create a DB itself, move existing files or add migrations. Mount information unavailable or an unmounted root fails closed, including direct unmounted Windows/local Uvicorn starts. Tests inject temporary paths and mount evidence. Existing NAS parents retain their physical `data/genzoroom.db`, WAL and SHM unchanged; changing the mount root requires stopping the sole writer first.
+
+Future storage paths derive from the same root (`cache`, `config`, `logs`) and are created by their owning features only when implemented. The normal parent bind covers them; a user may overlay `/genzoroom/cache` with an optional bind from another pool. No unused directories or extra default mounts are added.
+
+| Storage state | Owner / invariant |
+| --- | --- |
+| Internal root and DB path | `storage.py`; fixed `/genzoroom`, all persistent SQLite features share `data/genzoroom.db`. |
+| Host parent mapping | Compose / operator; existing root required, correct existing DB selected, UID/GID 10001:10001 access, one Backend writer. |
+| Required `data` directory | Backend startup; parent must already be mounted, create only if absent, fail before recovery if unwritable. |
 
 The standard `docker-compose.yml` has no dependency on an Immich Docker network. The optional `docker-compose.immich-network.yml` attaches only the backend to an existing external network selected with `IMMICH_DOCKER_NETWORK`. This enables Docker DNS access to an Immich service on the same host without exposing the backend or attaching the frontend to Immich. The external network and Immich service name belong to the deployment environment and are never hardcoded by GenzoRoom. The application still receives only `IMMICH_URL` and `IMMICH_API_KEY`; `IMMICH_DOCKER_NETWORK` is consumed by Compose.
 
-Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. The backend runs as UID/GID 10001:10001 and requires a writable host data directory. `.env` provides Compose inputs for the host port, Immich connection, and persistence root, but it is not mounted into the application; Portainer can supply the same values through stack environment variables.
+Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation. The backend runs as UID/GID 10001:10001 and requires access to the host application parent and writable `data` subdirectory. `.env` provides Compose inputs for the host port, Immich connection, and persistence root, but it is not mounted into the application; Portainer can supply the same values through stack environment variables.
 
 Compose starts the backend before the frontend but does not wait for API readiness. Startup failures are visible in container logs and the UI; the user can check again after services become ready. Both services use `restart: unless-stopped`.
 
@@ -362,7 +374,7 @@ The Backend stores the current recipe, full Undo/Redo History and cursor, source
 
 The Phase 1–4 sections record each phase's scope at completion. Their later-phase exclusions are historical; current Export management and the JPEG engine foundation are described in Phase 4 and Phase 5A below.
 
-The asset-level Export Queue shares `/data/genzoroom.db` and the per-operation connection helper in `edit_store.py`. Fresh databases migrate sequentially from v0 to v1 to v2. Existing v1 databases gain `export_queue` in one migration transaction; `asset_edit_states` rows, Recipe/History versions, revisions and save IDs are preserved. Reopening v2 does not rerun migrations, future schema versions are refused, and failed migrations roll back their schema changes. For a deployment rollback to a backend that supports only v1, retain a consistent SQLite backup taken before upgrade; restoring that backup also loses later writes. No downgrade or live database replacement is performed by Phase 1.
+The asset-level Export Queue shares `/genzoroom/data/genzoroom.db` and the per-operation connection helper in `edit_store.py`. Fresh databases migrate sequentially from v0 to v1 to v2. Existing v1 databases gain `export_queue` in one migration transaction; `asset_edit_states` rows, Recipe/History versions, revisions and save IDs are preserved. Reopening v2 does not rerun migrations, future schema versions are refused, and failed migrations roll back their schema changes. For a deployment rollback to a backend that supports only v1, retain a consistent SQLite backup taken before upgrade; restoring that backup also loses later writes. No downgrade or live database replacement is performed by Phase 1.
 
 `export_queue` contains an internal `INTEGER PRIMARY KEY AUTOINCREMENT`, unique `asset_id`, `status`, `queued_at` and `updated_at`. Listing orders by the internal key, never timestamp alone, and does not expose that key. Status permits `queued`, `waiting`, `encoding`, `registering` and `failed`; normal Phase 1 enqueue only inserts `queued`. Both timestamps use canonical UTC millisecond ISO form ending in `Z`; persisted offsets such as `+00:00` and `+09:00` are treated as corrupt storage. No job checkpoint, Recipe snapshot, progress or runtime transition is stored.
 
@@ -689,7 +701,7 @@ These are provisional directions, not available functionality or delivery commit
 
 ## Portability and validation
 
-The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify Docker host OS settings or install application files into host system directories. Persistent data uses the explicitly declared `/data` bind mount.
+The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify Docker host OS settings or install application files into host system directories. Persistent data uses the explicitly declared application-parent bind at `/genzoroom`, with SQLite under `data`.
 
 The validation workflow is to develop locally, copy or deploy the required files to the target Docker host, start them with Docker Compose (or Portainer when used), and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 

@@ -34,13 +34,16 @@ The nginx proxy keeps its normal 10-second read timeout for `/api/` requests. Th
 | `IMMICH_URL` | Yes | Immich base URL as reached from the backend container. |
 | `IMMICH_API_KEY` | Yes | Dedicated Immich API key. Keep the real value outside the repository. |
 | `GENZOROOM_PORT` | No | Frontend host port; defaults to `3190`. |
-| `GENZOROOM_PERSIST_ROOT` | Required unless `GENZOROOM_DATA_PATH` is set | Host persistence root; set it to a writable directory such as `/path/to/genzoroom`. The data directory is `${GENZOROOM_PERSIST_ROOT}/data`. |
-| `GENZOROOM_DATA_PATH` | No | Use this host data directory directly, overriding `GENZOROOM_PERSIST_ROOT/data`. |
+| `GENZOROOM_PERSIST_ROOT` | Yes | Host application parent directory, mounted at `/genzoroom` in development and release. SQLite stays in its `data/genzoroom.db` subdirectory. |
 | `IMMICH_DOCKER_NETWORK` | Same-host route only | Existing external Docker network used by Immich. |
 
-Set at least one of `GENZOROOM_PERSIST_ROOT` or `GENZOROOM_DATA_PATH`. Compose uses `GENZOROOM_DATA_PATH` when supplied; otherwise it requires `GENZOROOM_PERSIST_ROOT` and uses its `data` subdirectory. With neither set, `docker compose config` fails instead of selecting a host-specific path. For command-line Compose, supply these values through the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Never commit a real API key or bake it into a container image.
+Set `GENZOROOM_PERSIST_ROOT` to the existing application parent directory, not its `data` subdirectory. Compose requires this variable without nested interpolation. `GENZOROOM_DATA_PATH` is retired and ignored: an old setting alone fails Compose validation instead of silently falling back. For command-line Compose, supply values through the shell or an ignored `.env` file based on `.env.example`. For Portainer, configure them as Stack environment variables. Host paths are never passed to Backend. Never commit a real API key or bake it into a container image.
 
-Before deployment, create the host data directory, for example `/path/to/genzoroom/data`. The backend container runs as UID/GID `10001:10001`; grant that user/group write access to the directory, including permission to create SQLite's database, WAL, and SHM files. The bind mount requires the directory to exist and does not create it as root. `GENZOROOM_DATA_PATH` can place only data on another host storage location. The container path is always `/data`, and the DB is `/data/genzoroom.db`. Do not mount the DB file alone. The host filesystem should support local SQLite WAL locking; verify this on the target Docker host. Config, logs, and exports directories are not created or mounted at this stage.
+Before deployment, create the host parent directory, for example `/path/to/genzoroom`. The backend runs as UID/GID `10001:10001`; grant that user/group parent write/traverse access and existing `data`/DB read/write access, including SQLite WAL/SHM creation. `create_host_path: false` prevents implicit host-directory creation. At startup Backend checks Linux mount information for the exact `/genzoroom` parent mount before any DB access, creates only `data` if absent and probes file creation/write/removal there. Missing mount or insufficient access aborts startup with `storage_root_not_mounted`, `storage_data_not_writable` or `storage_database_not_writable`. It never moves, overwrites or resets an existing DB. The DB is `/genzoroom/data/genzoroom.db`; mount the parent, not the DB file. Storage must support local SQLite WAL locking; verify this on the target Docker host.
+
+For existing NAS data, use `/share/Container/genzoroom` for development and `/share/Container/genzoroom-release` for release validation. Their existing `data/genzoroom.db` files remain physically unchanged. Before redeployment, stop the writer and back up the complete data directory including WAL/SHM; remove `GENZOROOM_DATA_PATH` and verify the new parent resolves to that same existing DB. If the old override pointed to custom storage, explicitly choose a parent containing its existing `data/genzoroom.db`; do not guess a new root or start against an empty directory. A wrong existing root is indistinguishable from a deliberate fresh installation. Never run two Backends against one DB. Rollback requires stopping the new writer and restoring the previous Compose mount/settings against the same physical data, with no file conversion.
+
+Future storage uses `/genzoroom/cache`, `/genzoroom/config` and `/genzoroom/logs` under the same parent mount, creating only directories actually needed by implemented features. They are not created now. An optional extra bind to `/genzoroom/cache` can place future cache data on another pool; the ordinary Compose needs no extra mounts.
 
 ## Choose an Immich connection route
 
@@ -124,7 +127,7 @@ docker compose config
 
 Run the Backend checks from `backend/` so the tests can import `main` and `immich`. For the same-host Immich route, use both Compose files for the final configuration check as shown above.
 
-For optional frontend development, run Uvicorn from `backend/` on loopback port `8000` and `npm run dev` from `frontend/`. Vite proxies `/api/` to that local backend. The Vite development server is not used in the deployed frontend container.
+For optional frontend development, `npm run dev` proxies `/api/` to loopback port `8000`. A directly launched Backend now requires a writable Linux parent mount at `/genzoroom`, just like the containers; unmounted Windows/local starts deliberately fail. Automated Backend tests inject temporary storage separately. The Vite development server is not used in deployed containers.
 
 ## Deploy with a Portainer Git Repository Stack
 
@@ -133,7 +136,7 @@ Portainer can fetch, build, and deploy GenzoRoom directly from any Git repositor
 1. Create a Stack using a Git repository as its source or build method.
 2. Enter the repository URL and select the required branch or reference.
 3. Set the Compose path to `docker-compose.yml`.
-4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Set `GENZOROOM_PERSIST_ROOT` to the prepared host root, or set `GENZOROOM_DATA_PATH` to the prepared data directory directly. Add `GENZOROOM_PORT` only to change the default port.
+4. Add `IMMICH_URL` and `IMMICH_API_KEY` as Stack environment variables. Set `GENZOROOM_PERSIST_ROOT` to the prepared application parent directory (not `data`). Remove the retired `GENZOROOM_DATA_PATH` setting. Add `GENZOROOM_PORT` only to change the default port.
 5. Build and deploy the Stack.
 
 For same-host Immich networking, add `docker-compose.immich-network.yml` as an additional Compose path and set `IMMICH_DOCKER_NETWORK` to the existing Immich network name. The Stack must target the Docker endpoint where that network exists.
@@ -191,7 +194,7 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 - The Immich API key is supplied only to the backend and must not be stored in the repository.
 - The optional same-host override attaches only the backend to the Immich network; the frontend remains isolated.
 - Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
-- The Compose files do not use privileged mode or host networking. Only the backend's `/data` directory uses a host bind mount.
+- The Compose files do not use privileged mode or host networking. The development backend (or release service) mounts only the application parent at `/genzoroom`.
 - TLS certificate verification for HTTPS Immich URLs remains enabled.
 - GenzoRoom does not require changes to Docker host OS settings or system files.
 

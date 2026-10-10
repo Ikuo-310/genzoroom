@@ -166,7 +166,7 @@ Never commit a real API key or bake one into a container image. See the [deploym
 ## Quick start
 
 1. Create a dedicated Immich API key with the permissions listed above.
-2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Set `GENZOROOM_PERSIST_ROOT` or `GENZOROOM_DATA_PATH`, then prepare the resulting host data directory and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
+2. For Docker Compose, copy [`.env.example`](.env.example) to `.env` and configure `IMMICH_URL` and `IMMICH_API_KEY`. Set `GENZOROOM_PERSIST_ROOT` to the host application parent directory, mounted at `/genzoroom`, and grant UID/GID `10001:10001` write access as described in the [deployment guide](docs/deployment.md). Backend uses its existing `data/genzoroom.db` and creates `data` only if absent. The old `GENZOROOM_DATA_PATH` variable is retired. Portainer users can set the same values as Stack environment variables. Optionally set `GENZOROOM_PORT`; it defaults to `3190`.
 3. From a repository checkout, build and start the standard Docker Compose deployment:
 
    ```sh

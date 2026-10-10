@@ -44,6 +44,8 @@ def enqueue(*ids):
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
+    # These tests inject a local DB; Linux mount validation is covered by storage tests.
+    monkeypatch.setattr("main.initialize_storage", lambda: None)
     path = tmp_path / "genzoroom.db"
     monkeypatch.setattr(edit_store, "DB_PATH", path)
     return path

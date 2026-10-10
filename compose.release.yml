@@ -8,8 +8,8 @@ services:
     volumes:
       # SQLite needs directory write access, including WAL/SHM creation.
       - type: bind
-        source: ${GENZOROOM_DATA_PATH:?Set GENZOROOM_DATA_PATH}
-        target: /data
+        source: ${GENZOROOM_PERSIST_ROOT:?Set GENZOROOM_PERSIST_ROOT}
+        target: /genzoroom
         bind:
           create_host_path: false
     environment:

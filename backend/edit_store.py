@@ -4,14 +4,13 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from time import monotonic
 from uuid import UUID
 
 from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
+from storage import DB_PATH
 
-DB_PATH = Path("/data/genzoroom.db")
 SCHEMA_VERSION = 4
 
 SCHEMA = """

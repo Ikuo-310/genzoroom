@@ -16,6 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend_logging import LogLevel, backend_logger
+from storage import initialize_storage
 from edit_state import InvalidEditState, validate_snapshot
 from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
@@ -57,6 +58,8 @@ from immich import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse ephemeral/unwritable storage before recovery can create or claim any DB state.
+    await run_in_threadpool(initialize_storage)
     url, key = os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY")
     runtime = ExportRuntime(source=ImmichExportSource(url, key), family=ImmichFamilyFilenameProvider(url, key),
                             registrar=ImmichExportRegistrar(url, key)) if (url or '').strip() and (key or '').strip() else ExportRuntime()
