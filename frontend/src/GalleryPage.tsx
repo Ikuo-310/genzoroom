@@ -52,6 +52,8 @@ type PhotoView = {
   state: 'idle' | AssetState;
   selection: ReturnType<typeof usePhotoSelection>;
 };
+type GalleryLoader = 'recent' | 'favorites' | 'albums' | 'album' | 'heatmap' | 'day';
+type GalleryRefresh = { key: string; loader: GalleryLoader; id: number; pending: number; failed: boolean; controllers: Set<AbortController> };
 
 export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const { t, i18n } = useTranslation();
@@ -80,6 +82,12 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     ? { key: homeViewKey(homeReturn.tab, homeReturn.album?.id ?? null, homeReturn.year, homeReturn.month, homeReturn.date, homeReturn.calendarMode),
       position: homeReturn, waitingForData: true } : null);
   const [scrollRestoreRevision, setScrollRestoreRevision] = useState(0);
+  const [refreshRevisions, setRefreshRevisions] = useState<Record<GalleryLoader, number>>({ recent: 0, favorites: 0, albums: 0, album: 0, heatmap: 0, day: 0 });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshOperation = useRef<GalleryRefresh | null>(null);
+  const refreshId = useRef(0);
+  const refreshPhotosRef = useRef<() => boolean>(() => false);
   const language: AppLanguage = i18n.resolvedLanguage === 'ja' ? 'ja' : 'en';
   const currentYear = new Date().getFullYear();
   const dateLocale = resolveDateLocale(settings.dateLocale);
@@ -157,7 +165,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const showingAlbumPhotos = !showExport && activeTab === 'albums' && selectedAlbum !== null;
   const showingCalendarPhotos = !showExport && activeTab === 'calendar' && selectedCalendarDate !== null;
   const adjacentCalendarDates = useAdjacentCalendarDates(
-    showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear);
+    showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear, refreshRevisions.day);
   const photoView: PhotoView | null = showExport ? null : activeTab === 'recent'
     ? { kind: 'recent', assets, state: assetState, selection: recentSelection }
     : activeTab === 'favorites'
@@ -173,8 +181,85 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
+  const galleryViewState = photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);
+  const canRefreshPhotos = active && !showStacks && !showExport && galleryViewState !== 'idle' && galleryViewState !== 'loading'
+    && (activeTab !== 'calendar' || calendarMinYearReady);
+  // A newly emptied historical period remains browsable until the user leaves it.
+  const calendarNavigationMinYear = Math.min(calendarMinYear, calendarYear);
+  const refreshContext = `${viewKey}:${active}:${activeTab === 'recent' ? settings.recentPhotoCount : ''}`;
+  const refreshContextRef = useRef(refreshContext);
+  refreshContextRef.current = refreshContext;
   const queueRecoveryView = useRef(viewKey);
   const wasActive = useRef(active);
+
+  function ownsRefresh(operation: GalleryRefresh) {
+    return refreshOperation.current === operation && refreshContextRef.current === operation.key;
+  }
+  function refreshFor(loader: GalleryLoader, controller: AbortController) {
+    const operation = refreshOperation.current;
+    if (!operation || operation.loader !== loader || !ownsRefresh(operation)) return null;
+    operation.controllers.add(controller);
+    return operation;
+  }
+  function logRefresh(operation: GalleryRefresh, result: 'started' | 'completed' | 'failed' | 'cancelled') {
+    try {
+      frontendLogger.add({ level: result === 'failed' ? 'warn' : 'debug', component: 'gallery', event: `photos.refresh.${result}`,
+        context: { operationId: operation.id, viewType: operation.loader } });
+    } catch { /* Diagnostics must not change refresh outcomes. */ }
+  }
+  function failRefresh(operation: GalleryRefresh) {
+    if (!ownsRefresh(operation)) return;
+    operation.failed = true;
+    setRefreshFailed(true);
+  }
+  function finishRefresh(operation: GalleryRefresh | null) {
+    if (!operation || !ownsRefresh(operation) || --operation.pending > 0) return;
+    logRefresh(operation, operation.failed ? 'failed' : 'completed');
+    refreshOperation.current = null;
+    setRefreshing(false);
+  }
+  function cancelRefresh() {
+    const operation = refreshOperation.current;
+    if (!operation) return;
+    refreshOperation.current = null;
+    operation.controllers.forEach(controller => controller.abort());
+    logRefresh(operation, 'cancelled');
+    setRefreshing(false);
+  }
+  useLayoutEffect(() => {
+    const operation = refreshOperation.current;
+    if (operation && !ownsRefresh(operation)) cancelRefresh();
+    setRefreshFailed(false);
+  }, [refreshContext]);
+  useEffect(() => () => {
+    refreshOperation.current?.controllers.forEach(controller => controller.abort());
+    refreshOperation.current = null;
+  }, []);
+
+  function refreshPhotos(): boolean {
+    if (!canRefreshPhotos || refreshOperation.current) return false;
+    const loader: GalleryLoader = activeTab === 'recent' ? 'recent' : activeTab === 'favorites' ? 'favorites'
+      : activeTab === 'albums' ? selectedAlbum ? 'album' : 'albums' : selectedCalendarDate ? 'day' : 'heatmap';
+    // Lock before scheduling React state: a click and shortcut in one turn must share one request.
+    const operation: GalleryRefresh = { key: refreshContext, loader, id: ++refreshId.current,
+      pending: activeTab === 'calendar' ? 2 : 1, failed: false, controllers: new Set() };
+    refreshOperation.current = operation;
+    setRefreshing(true);
+    setRefreshFailed(false);
+    logRefresh(operation, 'started');
+    if (activeTab === 'calendar') {
+      const controller = new AbortController();
+      operation.controllers.add(controller);
+      void fetchCalendarMinYear(controller.signal).then(minYear => {
+        if (!ownsRefresh(operation)) return;
+        // Imported historical photos may extend navigation, without moving the period being viewed.
+        setCalendarMinYear(minYear !== null && minYear >= 1 && minYear <= currentYear ? minYear : currentYear);
+      }).catch(() => failRefresh(operation)).finally(() => finishRefresh(operation));
+    }
+    setRefreshRevisions(current => ({ ...current, [loader]: current[loader] + 1 }));
+    return true;
+  }
+  refreshPhotosRef.current = refreshPhotos;
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
   useLayoutEffect(() => {
@@ -262,11 +347,12 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
+    const manual = refreshFor('recent', controller);
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     void fetchRecentAssets(settings.recentPhotoCount, controller.signal).then(data => {
-      if (active) {
+      if (active && (!manual || ownsRefresh(manual))) {
         acceptGalleryStackSnapshots(data, stackSnapshotRequest);
-        completeScrollRequest('recent');
+        if (!manual) completeScrollRequest('recent');
         hasLoadedRecentAssets.current = true;
         setAssets(data);
         const availableIds = new Set(data.map(asset => asset.id));
@@ -274,57 +360,63 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         setAssetState('ready');
       }
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (active && !hasLoadedRecentAssets.current) {
         completeScrollRequest('recent');
         setAssets([]);
         setAssetState('error');
       }
-    }).finally(() => { window.clearTimeout(timeout); finishGalleryStackSnapshotRequest(stackSnapshotRequest); });
+    }).finally(() => { window.clearTimeout(timeout); finishGalleryStackSnapshotRequest(stackSnapshotRequest); finishRefresh(manual); });
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
-  }, [settings.recentPhotoCount]);
+  }, [settings.recentPhotoCount, refreshRevisions.recent]);
 
   useEffect(() => {
     // Returning from an album detail should reuse the already loaded list.
-    if (activeTab !== 'albums' || hasLoadedAlbums.current) return;
+    if (activeTab !== 'albums' || (hasLoadedAlbums.current && refreshOperation.current?.loader !== 'albums')) return;
     const controller = new AbortController();
     let active = true;
+    const manual = refreshFor('albums', controller);
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     if (!hasLoadedAlbums.current) setAlbumState('loading');
     void fetchAlbums(controller.signal).then(data => {
-      if (!active) return;
+      if (!active || manual && !ownsRefresh(manual)) return;
       hasLoadedAlbums.current = true;
-      completeScrollRequest('albums:list');
+      if (!manual) completeScrollRequest('albums:list');
       setAlbums(data);
       setAlbumState('ready');
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (active && !hasLoadedAlbums.current) {
         completeScrollRequest('albums:list');
         setAlbumState('error');
       }
-    }).finally(() => window.clearTimeout(timeout));
+    }).finally(() => { window.clearTimeout(timeout); finishRefresh(manual); });
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
-  }, [activeTab]);
+  }, [activeTab, refreshRevisions.albums]);
 
   useEffect(() => {
-    if (activeTab !== 'favorites' || hasLoadedFavorites.current) return;
+    if (activeTab !== 'favorites' || (hasLoadedFavorites.current && refreshOperation.current?.loader !== 'favorites')) return;
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
-    setFavoriteState('loading');
+    const manual = refreshFor('favorites', controller);
+    if (!manual) setFavoriteState('loading');
     void fetchFavoriteAssets(controller.signal).then(data => {
-      if (!active) return;
+      if (!active || manual && !ownsRefresh(manual)) return;
       acceptGalleryStackSnapshots(data, stackSnapshotRequest);
       hasLoadedFavorites.current = true;
-      completeScrollRequest('favorites');
+      if (!manual) completeScrollRequest('favorites');
       setFavoriteAssets(data);
+      favoriteSelection.retainAvailable(new Set(data.map(asset => asset.id)));
       setFavoriteState('ready');
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (!active) return;
       completeScrollRequest('favorites');
       setFavoriteState('error');
-    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    }).finally(() => { finishGalleryStackSnapshotRequest(stackSnapshotRequest); finishRefresh(manual); });
     return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
-  }, [activeTab]);
+  }, [activeTab, refreshRevisions.favorites]);
 
   useEffect(() => {
     if (activeTab !== 'albums' || selectedAlbum === null) return;
@@ -332,22 +424,24 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     const requestId = albumAssetRequestId.current;
+    const manual = refreshFor('album', controller);
     void fetchAlbumAssets(selectedAlbum.id, controller.signal).then(data => {
-      if (!active || requestId !== albumAssetRequestId.current) return;
+      if (!active || requestId !== albumAssetRequestId.current || manual && !ownsRefresh(manual)) return;
       acceptGalleryStackSnapshots(data, stackSnapshotRequest);
-      completeScrollRequest(`albums:${selectedAlbum.id}`);
+      if (!manual) completeScrollRequest(`albums:${selectedAlbum.id}`);
       const availableIds = new Set(data.map(asset => asset.id));
       setAlbumAssets(data);
       albumSelection.retainAvailable(availableIds);
       setAlbumAssetState('ready');
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (active && requestId === albumAssetRequestId.current) {
         completeScrollRequest(`albums:${selectedAlbum.id}`);
         setAlbumAssetState('error');
       }
-    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    }).finally(() => { finishGalleryStackSnapshotRequest(stackSnapshotRequest); finishRefresh(manual); });
     return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
-  }, [activeTab, selectedAlbum?.id]);
+  }, [activeTab, selectedAlbum?.id, refreshRevisions.album]);
 
   useEffect(() => {
     if (activeTab !== 'calendar' || calendarMinYearReady) return;
@@ -374,20 +468,22 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const controller = new AbortController();
     let active = true;
     const requestId = ++calendarHeatmapRequestId.current;
-    setCalendarState('loading');
+    const manual = refreshFor('heatmap', controller);
+    if (!manual) setCalendarState('loading');
     void fetchCalendarHeatmap(calendarYear, calendarMode === 'year' ? null : calendarMonth, controller.signal).then(data => {
-      if (!active || requestId !== calendarHeatmapRequestId.current) return;
-      completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
+      if (!active || requestId !== calendarHeatmapRequestId.current || manual && !ownsRefresh(manual)) return;
+      if (!manual) completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
       setCalendarDays(data.days);
       setCalendarState('ready');
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (active && requestId === calendarHeatmapRequestId.current) {
         completeScrollRequest(homeViewKey('calendar', null, calendarYear, calendarMonth, null, calendarMode));
         setCalendarState('error');
       }
-    });
+    }).finally(() => finishRefresh(manual));
     return () => { active = false; controller.abort(); };
-  }, [activeTab, calendarYear, calendarMonth, calendarMode, selectedCalendarDate, calendarMinYearReady]);
+  }, [activeTab, calendarYear, calendarMonth, calendarMode, selectedCalendarDate, calendarMinYearReady, refreshRevisions.heatmap]);
 
   useEffect(() => {
     if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
@@ -395,22 +491,24 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
     const requestId = calendarAssetRequestId.current;
+    const manual = refreshFor('day', controller);
     void fetchCalendarDayAssets(selectedCalendarDate, controller.signal).then(data => {
-      if (!active || requestId !== calendarAssetRequestId.current) return;
+      if (!active || requestId !== calendarAssetRequestId.current || manual && !ownsRefresh(manual)) return;
       acceptGalleryStackSnapshots(data, stackSnapshotRequest);
-      completeScrollRequest(`calendar:${selectedCalendarDate}`);
+      if (!manual) completeScrollRequest(`calendar:${selectedCalendarDate}`);
       setCalendarAssets(data);
       const availableIds = new Set(data.map(asset => asset.id));
       calendarSelection.retainAvailable(availableIds);
       setCalendarAssetState('ready');
     }).catch(() => {
+      if (manual) { failRefresh(manual); return; }
       if (active && requestId === calendarAssetRequestId.current) {
         completeScrollRequest(`calendar:${selectedCalendarDate}`);
         setCalendarAssetState('error');
       }
-    }).finally(() => finishGalleryStackSnapshotRequest(stackSnapshotRequest));
+    }).finally(() => { finishGalleryStackSnapshotRequest(stackSnapshotRequest); finishRefresh(manual); });
     return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
-  }, [activeTab, selectedCalendarDate]);
+  }, [activeTab, selectedCalendarDate, refreshRevisions.day]);
 
   // The active view owns its selection; shared asset IDs never carry selection across views.
   const currentAssets = photoView?.assets ?? [];
@@ -454,6 +552,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      if (matchesShortcut(event, 'homeRefreshPhotos')) {
+        if (refreshPhotosRef.current()) event.preventDefault();
+        return;
+      }
       if (exportView.active) {
         // Export commands share Home guards, but own separate selection and session-only armed state.
         if (matchesShortcut(event, 'undo')) {
@@ -605,6 +707,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function prepareScrollTransition(nextKey: string, waitingForData?: boolean) {
     if (nextKey === viewKey) return;
+    // Revoke ownership synchronously, before React commits the next view or runs effect cleanup.
+    cancelRefresh();
     // A view left before restoration completes must retain its intended offset, not the loading DOM's offset.
     scrollPositions.current.set(viewKey, pendingScroll.current?.key === viewKey
       ? pendingScroll.current.position : readScrollPosition());
@@ -659,7 +763,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }
 
   function changeCalendarPeriod(year: number, month: number, mode: CalendarViewMode = calendarMode) {
-    if (year < calendarMinYear || year > currentYear || month < 1 || month > 12) return;
+    if (year < calendarNavigationMinYear || year > currentYear || month < 1 || month > 12) return;
     if (year === calendarYear && month === calendarMonth && mode === calendarMode) return;
     // Year-crossing arrows must queue one final view key, not an intermediate year/month combination.
     prepareScrollTransition(homeViewKey('calendar', null, year, month, null, mode));
@@ -718,7 +822,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     if (showStacks || showExport || activeTab !== 'calendar' || !calendarMinYearReady) return false;
     if (selectedCalendarDate !== null) return moveCalendarDay(direction);
     const target = adjacentCalendarPeriod(calendarYear, calendarMonth, calendarMode, direction === 'previous' ? -1 : 1);
-    if (target.year < calendarMinYear || target.year > currentYear) return false;
+    if (target.year < calendarNavigationMinYear || target.year > currentYear) return false;
     // Period navigation uses the same pre-commit input lock as date-detail navigation.
     navigateCalendarRef.current = () => false;
     changeCalendarPeriod(target.year, target.month);
@@ -1012,6 +1116,15 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         {showExport && <ExportRetryPriorityNotice management={exportManagement} />}
       </div>
       {showStacks ? <div hidden /> : showExport ? <ExportManagementToolbar management={exportManagement} /> : <div className={`home-toolbar${activeTab === 'calendar' && !selectedCalendarDate ? ' home-toolbar-calendar' : ''}${(activeTab === 'albums' && selectedAlbum) || (activeTab === 'calendar' && selectedCalendarDate) ? ' home-toolbar-centered' : ''}`}>
+        <div className="home-toolbar-start">
+          <button type="button" className="gallery-refresh" onClick={refreshPhotos}
+            disabled={!canRefreshPhotos || refreshing}
+            aria-busy={refreshing} aria-label={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}
+            title={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M20 7v5h-5M4 17v-5h5M5.2 8a7.5 7.5 0 0 1 12.4-3L20 8M4 16l2.4 3A7.5 7.5 0 0 0 18.8 16" />
+            </svg>
+          </button>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}
           canSelectAll={photoView?.state === 'ready' && visibleAssets.some(asset => !activeSelectedAssetIds.includes(asset.id))}
@@ -1025,6 +1138,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
                 title={t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')} onClick={closeCalendarDay}>←</button>
             </div>}
         </div>}
+        </div>
         {(activeTab === 'albums' && selectedAlbum || activeTab === 'calendar' && selectedCalendarDate) && <div className="home-toolbar-center">
           {selectedAlbum && activeTab === 'albums' && <h2 className="home-toolbar-title" title={selectedAlbum.albumName}>{selectedAlbum.albumName}</h2>}
           {selectedCalendarDate && activeTab === 'calendar' && <div className="calendar-detail-navigation">
@@ -1040,7 +1154,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         </div>}
         {activeTab === 'calendar' && !selectedCalendarDate && <div className="home-toolbar-center">
           <HomeCalendarNavigation year={calendarYear} month={calendarMonth} mode={calendarMode}
-            minYear={calendarMinYear} maxYear={currentYear} dateLocale={dateLocale}
+            minYear={calendarNavigationMinYear} maxYear={currentYear} dateLocale={dateLocale}
             onYearChange={changeCalendarYear} onMonthChange={changeCalendarMonth}
             onCurrentMonth={goToCurrentCalendarMonth} onCurrentYear={goToCurrentCalendarYear}
             onNavigate={changeCalendarPeriod} onModeChange={changeCalendarMode} />
@@ -1073,6 +1187,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       </div>}
       <section hidden={showStacks} className="home-content" aria-label={t('home.sections')}>
         {showExport ? <ExportManagementContent management={exportManagement} /> : <>
+        {refreshFailed && <p className="gallery-message error-text" role="alert">{t('photos.refreshFailed')}</p>}
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}

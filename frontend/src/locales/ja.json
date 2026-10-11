@@ -139,6 +139,8 @@
     "dateRange": "{{start}}〜{{end}}"
   },
   "photos": {
+    "refresh": "写真を再読み込み",
+    "refreshFailed": "写真を再読み込みできませんでした。前の表示を保持しています。もう一度お試しください。",
     "openStacks": "STACK管理へ",
     "stackFilterLabel": "スタック",
     "allStacks": "両方",

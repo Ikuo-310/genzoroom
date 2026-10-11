@@ -145,6 +145,8 @@
     "dateRange": "{{start}} – {{end}}"
   },
   "photos": {
+    "refresh": "Refresh photos",
+    "refreshFailed": "Could not refresh photos. The previous view has been kept. Try again.",
     "openStacks": "Manage Stacks",
     "stackFilterLabel": "Stack",
     "allStacks": "Both",

@@ -11,6 +11,8 @@ describe('shortcut binding display', () => {
     }
   });
   it('formats plain keys and modifier commands', () => {
+    expect(formatShortcut('homeRefreshPhotos', 'other')).toBe('Shift+R');
+    expect(formatShortcut('homeRefreshPhotos', 'mac')).toBe('⇧+R');
     expect(formatShortcut('exportQueueToggle', 'other')).toBe('Q');
     expect(formatShortcut('exportQueueToggle', 'mac')).toBe('Q');
     expect(formatShortcut('exportArmToggle', 'other')).toBe('W');

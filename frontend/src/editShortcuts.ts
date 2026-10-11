@@ -41,6 +41,7 @@ export const shortcutBindings = {
   homeOpenPreview: [{ key: 'p', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeOpenStackManager: [{ key: 's', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeRecent: [{ key: 'r', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  homeRefreshPhotos: [{ key: 'r', ignoreCase: true, ...commandModifiers, shift: true, alt: false }],
   homeAlbums: [{ key: 'a', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeCalendar: [{ key: 'c', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeFavorites: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],

@@ -16,6 +16,35 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('keeps the common refresh outside selection and preserves center tracks at existing breakpoints', () => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.classList.add('home-toolbar-centered');
+    toolbar.innerHTML = '<div class="home-toolbar-start"><button class="gallery-refresh">↻</button><div class="home-toolbar-left"><div class="selection-bar"></div></div></div><div class="home-toolbar-center"><h2>Album</h2></div><div class="home-toolbar-controls"></div>';
+    const start = toolbar.firstElementChild;
+    const center = toolbar.querySelector('.home-toolbar-center');
+    const controls = toolbar.querySelector('.home-toolbar-controls');
+    const button = start.firstElementChild;
+    expect(button.closest('.selection-bar')).toBeNull();
+    expect(getComputedStyle(button).flexShrink).toBe('0');
+    expect(getComputedStyle(start).gridColumn).toBe('1');
+    expect(getComputedStyle(start).gridRow).toBe('1');
+    expect(getComputedStyle(center).gridColumn).toBe('2');
+    expect(getComputedStyle(controls).gridColumn).toBe('3');
+    const rules = Array.from(stylesheet.sheet.cssRules);
+    const activeRules = [];
+    for (const breakpoint of ['(max-width: 76rem)', '(max-width: 760px)']) {
+      const media = rules.find(rule => rule.conditionText === breakpoint);
+      activeRules.push(...Array.from(media.cssRules));
+      const responsive = document.createElement('style');
+      // Narrow viewports also match the earlier breakpoint; jsdom needs that cascade applied explicitly.
+      responsive.textContent = activeRules.map(rule => rule.cssText).join('\n');
+      document.head.append(responsive);
+      expect(getComputedStyle(start).gridColumn).toBe('1');
+      expect(getComputedStyle(start).gridRow).toBe('1');
+      expect(getComputedStyle(center).gridRow).toBe('2');
+      responsive.remove();
+    }
+  });
   it('uses a neutral Export group frame and shared column sizing without changing the Home scroll owner', () => {
     const content = host.querySelector('.home-content');
     content.innerHTML = '<div class="export-queue-grid" style="--export-columns: 5"><section class="export-stack-group" style="--export-member-count: 7"><div class="export-stack-members"><article class="photo-card export-queue-card"><div class="thumbnail"><img></div></article></div></section><article class="photo-card export-queue-card"></article></div>';

@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- Gallery's Refresh button and `Shift+R` shortcut retrieve the latest Immich photos in Recent, Albums, Calendar, and Favorites while preserving the current Gallery context without a full browser reload.
+
 ## [0.1.1] - 2026-10-11
 
 ### Changed

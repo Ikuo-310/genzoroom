@@ -2,6 +2,18 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Gallery「写真を再読み込み」（v0.1.2予定、2026-10-11）
+
+Gallery系4タブのToolbar左端に、Selection groupから独立したRefreshアイコンを追加した。Recent、Favorites、Album一覧／詳細、Calendar年／月／日付詳細の現在表示だけを再取得する。中央タイトル・Calendar navigationと右側controlsは既存のGrid trackとresponsive breakpointを保つ。STACK管理、Export管理、暗室は対象外。
+
+`editShortcuts.ts`の`homeRefreshPhotos`にShift+Rを登録し、HomeのIME、repeat、native editing、dialog／menu、defaultPreventedのガードと共通shortcut表示helperを再利用した。R単独はRecent、Ctrl+R／Command+Rはブラウザー標準Reloadとして維持する。
+
+取得処理は既存useEffectを各loaderのrevisionで再実行し、Favorites／Album一覧の通常cacheだけ手動Refresh時にバイパスする。同期refのoperation lock、context key、AbortControllerで重複実行と古い応答の適用を防ぐ。ビュー遷移時はReactのcommit前にoperation所有権を破棄する。正常表示中のデータはLoadingで置換せず、失敗時も保持して再試行できる。ログはoperation ID、view type、結果だけを共通loggerへ記録し、診断失敗で本処理を止めない。
+
+取得後の写真は通常loadと同じStack snapshot更新と`retainAvailable()`を通す。存在する選択を保持し、消えたAssetだけ選択から除く。タブ、Album、Calendar階層、filter、Thumbnail size、Recent件数、他タブのSPA状態を維持する。Refresh自体は`prepareScrollTransition()`やスクロール復元を呼ばず、同じscroll ownerを残す。実ブラウザーでのカード減少時のclampはブラウザーに任せる。
+
+Calendarではminimum yearも更新するが、表示年／月をclampしない。日付詳細では隣接日の年別Heatmap cacheと結果revisionを無効化し、新しい写真のある日を検索する。保持している日付が新minimum yearより古くなった場合も、次の日はminimum year以降から探索する。Album詳細APIは写真配列だけを返すため、summary／Album名は一覧から取得した値を保持し、一覧Refresh後の再入場で更新する。詳細Refreshで全Album一覧を追加取得しない。
+
 ## 暗室フィルムストリップ写真除外・復帰の完了記録（2026-10-10）
 
 サムネイル左上の独立した×ボタンと中央ショートカットレジストリの`X`で、暗室セッション内だけ写真を除外できるようにした。最後の1枚は除外不可。アクティブ写真の除外後は次の写真（末尾なら前の写真）へ移動し、非アクティブ写真の除外では表示を維持する。既存`save()`の`ok && clean`を確認してから確定し、PUT中の追加編集も保存する。保存失敗・結果不明では除外せず、復旧可能な状態を保持する。写真とSQLiteの編集レコードは削除せず、Recipe・History・カーソルを保持する。除外自体はExport Queue・STACKの操作を発生させない。

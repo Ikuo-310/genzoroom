@@ -104,6 +104,10 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .album-info .album-period, .album-info .album-count { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 0.8rem; }
 .album-info .album-count { color: var(--accent); }
 .home-toolbar-left { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.home-toolbar-start { display: flex; flex: 1 1 auto; align-items: center; gap: 12px; min-width: 0; }
+/* Keep the common action inside the first track so detail titles retain symmetric side tracks. */
+.home-toolbar-centered .home-toolbar-start, .home-toolbar-calendar .home-toolbar-start { grid-column: 1; grid-row: 1; }
+.gallery-refresh { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 6px; }
 .home-toolbar-context { display: flex; flex: 0 0 auto; align-items: center; min-width: 0; }
 .home-toolbar-centered { display: grid; grid-template-columns: minmax(34rem, 1fr) minmax(0, auto) minmax(34rem, 1fr); align-items: center; }
 .home-toolbar-centered .home-toolbar-center { grid-column: 2; min-width: 0; }
