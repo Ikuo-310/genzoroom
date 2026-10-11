@@ -258,10 +258,21 @@ describe('Gallery manual refresh', () => {
     await press(); expect(api.recent).toHaveBeenCalledTimes(1);
   });
 
-  it('uses shared shortcut hints and both languages without permanent icon text', async () => {
-    await mount(); expect(refreshButton().title).toBe('Refresh photos (Shift+R)'); expect(refreshButton().textContent).toBe('');
-    await act(async () => updateSetting('showKeyboardShortcuts', false)); expect(refreshButton().getAttribute('aria-label')).toBe('Refresh photos');
-    await act(async () => i18n.changeLanguage('ja')); expect(refreshButton().title).toBe('写真を再読み込み');
+  it('uses a localized text label and shared shortcut hints in both languages', async () => {
+    await mount();
+    expect(refreshButton().textContent).toBe('Reload');
+    expect(refreshButton().querySelector('svg')).toBeNull();
+    expect(refreshButton().title).toBe('Refresh photos [Shift+R]');
+    expect(refreshButton().getAttribute('aria-label')).toBe('Refresh photos [Shift+R]');
+    await act(async () => updateSetting('showKeyboardShortcuts', false));
+    expect(refreshButton().getAttribute('aria-label')).toBe('Refresh photos');
+    expect(refreshButton().title).toBe('Refresh photos');
+    await act(async () => i18n.changeLanguage('ja'));
+    expect(refreshButton().textContent).toBe('リロード');
+    expect(refreshButton().title).toBe('写真を再読み込み');
+    await act(async () => updateSetting('showKeyboardShortcuts', true));
+    expect(refreshButton().title).toBe('写真を再読み込み [Shift+R]');
+    expect(refreshButton().getAttribute('aria-label')).toBe('写真を再読み込み [Shift+R]');
   });
 
   it('replaces Stack Cover and members through the normal Gallery snapshot path', async () => {

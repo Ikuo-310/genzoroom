@@ -19,11 +19,12 @@ describe('Home and thumbnail layout', () => {
   it('keeps the common refresh outside selection and preserves center tracks at existing breakpoints', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');
-    toolbar.innerHTML = '<div class="home-toolbar-start"><button class="gallery-refresh">↻</button><div class="home-toolbar-left"><div class="selection-bar"></div></div></div><div class="home-toolbar-center"><h2>Album</h2></div><div class="home-toolbar-controls"></div>';
+    toolbar.innerHTML = '<div class="home-toolbar-start"><button class="gallery-refresh">Reload</button><div class="home-toolbar-left"><div class="selection-bar"></div></div></div><div class="home-toolbar-center"><h2>Album</h2></div><div class="home-toolbar-controls"></div>';
     const start = toolbar.firstElementChild;
     const center = toolbar.querySelector('.home-toolbar-center');
     const controls = toolbar.querySelector('.home-toolbar-controls');
     const button = start.firstElementChild;
+    expect(button.textContent).toBe('Reload');
     expect(button.closest('.selection-bar')).toBeNull();
     expect(getComputedStyle(button).flexShrink).toBe('0');
     expect(getComputedStyle(start).gridColumn).toBe('1');

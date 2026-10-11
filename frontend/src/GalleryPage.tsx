@@ -1077,6 +1077,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     })}</div>;
   }
 
+  const refreshDescription = t('photos.refresh');
+  const refreshShortcut = shortcut.label('homeRefreshPhotos');
+  const refreshTooltip = refreshShortcut ? `${refreshDescription} [${refreshShortcut}]` : refreshDescription;
+
   return (
     <main className="home-page" ref={pageRef}>
       <header className="app-header">
@@ -1119,12 +1123,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         <div className="home-toolbar-start">
           <button type="button" className="gallery-refresh" onClick={refreshPhotos}
             disabled={!canRefreshPhotos || refreshing}
-            aria-busy={refreshing} aria-label={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}
-            title={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25"
-              strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
-              <path d="M21 12a9 9 0 1 0-4.5 7.8M15 12h6V6" />
-            </svg>
+            aria-busy={refreshing} aria-label={refreshTooltip}
+            title={refreshTooltip}>
+            {t('photos.refreshButton')}
           </button>
         {photoView && <div className="home-toolbar-left">
           <PhotoSelectionBar count={activeSelectedAssetIds.length}

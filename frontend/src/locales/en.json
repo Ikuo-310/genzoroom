@@ -146,6 +146,7 @@
   },
   "photos": {
     "refresh": "Refresh photos",
+    "refreshButton": "Reload",
     "refreshFailed": "Could not refresh photos. The previous view has been kept. Try again.",
     "openStacks": "Manage Stacks",
     "stackFilterLabel": "Stack",
