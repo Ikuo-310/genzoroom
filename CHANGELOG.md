@@ -6,7 +6,11 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
-- The default host port remains `3190`; the frontend container's exposed port and nginx listen port change from `8080` to `3190`. Users with custom Compose mappings must update the container target from `8080` to `3190`.
+## [0.1.1] - 2026-10-11
+
+### Changed
+
+- GenzoRoom's frontend container and nginx listen port now use `3190` instead of `8080`, matching the existing default host port. Official Compose deployments therefore use `3190:3190`; users with custom v0.1.0 mappings targeting container port `8080` must update the target to `3190`.
 
 ## [0.1.0] - 2026-10-10
 
