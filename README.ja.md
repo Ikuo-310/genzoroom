@@ -2,6 +2,9 @@
 
 [English](README.md) | 日本語
 
+![JPEG写真の現像前後を表示するGenzoRoom Anshitsuワークスペース](docs/images/Anshitsu_Sakura.jpg)  
+*デスクトップ版Anshitsuワークスペースで編集したJPEGの現像前後の比較。*
+
 GenzoRoom（現像室）は、写真管理アプリ Immich と連携する、セルフホスト型の写真現像Webアプリです。
 
 Immichでは扱いが難しいJPEGとRAWのペアを自動検出してスタック化するほか、手動でのスタックの組み換えや代表写真（カバー）の変更にも対応しています。
@@ -14,23 +17,23 @@ Immichとの連携に特化しているため、外部からの写真の取り�
 
 現在はJPEG現像のみ対応していますが、将来的にはRAW現像への対応も予定しています。
 
-![JPEG写真の現像前後を表示するGenzoRoom Anshitsuワークスペース](docs/images/Anshitsu_Sakura.jpg)  
-*デスクトップ版Anshitsuワークスペースで編集したJPEGの現像前後の比較。*
-
 ## 現在の機能
 
 ### 〇 写真の閲覧と選択 〇
+
+![GenzoRoomのギャラリー（カレンダーの日付別写真一覧）](docs/images/Gallery_calendar_ja.png)  
+*写真の形式やスタック情報を確認できるギャラリー画面。*
+
 
 ギャラリーでは「最近の写真」「アルバム」「カレンダー」「お気に入り」の各タブから写真を閲覧・選択できます。選んだ写真はSTACK管理や暗室（現像）で使用でき、現像済みの写真は出力管理からImmichへ書き戻せます。  
 
 写真の一覧には、JPEG・RAWなどのファイル形式やスタック内の写真枚数がバッジで表示されます。また、写真の絞り込み、サムネイルサイズの変更、複数の写真の選択にも対応しています。
 
-Galleryのツールバー左端にある「リロード」、または `Shift+R` で、現在のRecent / Albums / Calendar / FavoritesをImmichの最新状態へ更新できます。ブラウザー全体を再読み込みせず、開いているアルバム・日付・年/月、絞り込み、サムネイルサイズ、残っている写真の選択とスクロール位置を保ちます。`R` は引き続き「最近の写真」へ移動し、Ctrl+R / Command+R はブラウザー標準の再読み込みとして使えます。
-
-![GenzoRoomのギャラリー（カレンダーの日付別写真一覧）](docs/images/Gallery_calendar_ja.png)  
-*写真の形式やスタック情報を確認できるギャラリー画面。*
-
 ### 〇 STACK管理 〇
+
+![GenzoRoomのSTACK管理タブ](docs/images/Stack_ja.png)  
+*既存STACKの確認、自動候補の検出、手動での組み換え、カバー変更、不要写真のゴミ箱予約に対応したSTACK管理画面。*
+
 
 RAW+JPEGのペアなどを自動検出してSTACK候補を作成できるほか、手動での組み換えやカバー写真の変更にも対応しています。
 
@@ -41,9 +44,6 @@ RAW+JPEGのペアなどを自動検出してSTACK候補を作成できるほか�
 不要な写真はImmichのゴミ箱へ移動予約し、確認後にまとめて送信できます。  
 
 GenzoRoomが元素材ファイルを直接変更・削除することはありません。
-
-![GenzoRoomのSTACK管理タブ](docs/images/Stack_ja.png)  
-*既存STACKの確認、自動候補の検出、手動での組み換え、カバー変更、不要写真のゴミ箱予約に対応したSTACK管理画面。*
 
 ### 〇 暗室(現像ワークスペース) 〇
 
@@ -69,7 +69,7 @@ HistoryによるUndo / Redoに対応。不要な中間履歴を整理する圧�
 
 編集内容と履歴は自動保存され、元のJPEGを変更することなく、後から再編集できます。
 
-#### WebGPUによる高速化について
+#### ※WebGPUによる高速化について
 
 WebGPUに対応したGPU・ドライバー・ブラウザーを使用することで、編集結果を高速に表示できます。  
 対応環境ではフル解像度のオリジナル画像を使ったリアルタイム編集も可能です。
@@ -97,77 +97,86 @@ WebGPUが利用できない場合もCPUによる編集が可能です。
 
 ### 〇 出力管理 〇
 
-- Homeタブまたは`E`でExport / 出力管理を開きます。Galleryのビュー状態を保ったまま、同じHeader / Tabs / Toolbar / Contentシェルを使用します。
-- 永続化されたExport Queueは、個別の写真カードとして表示されます。同じImmich Stackに属するQueueアセットが2つ以上ある場合はグループ化され、Queueに入っているメンバーだけが表示されます。グループは最初のQueueメンバーから始まり、メンバー順を維持します。メンバーが1つだけになると単独カードになります。サムネイルサイズはHomeと共通です。
-- Exportカードには現在、Queueアセットを識別するためにImmichのソースサムネイルが表示されます。GenzoRoomのRecipeで描画したプレビューではありません。
-- 通常クリック、Primary+クリック、Shift+クリック、チェックボックス、Select All / `Primary+A`でカードを選択します。Shift範囲は表示されたグループ順に沿います。ClearとEscapeで選択を解除します。
-- `W`を押すと、選択された変更可能なカードを明示的にExport待機状態にします。状態が混在する選択では待機をONにし、すべて待機中の場合はOFFにします。選択解除やHomeタブの切り替え後も待機状態を維持しますが、一時的な状態であり、再読み込み後には保存されません。永続的なQueueメンバーシップやRuntime状態`waiting`とは別の状態です。
-- 待機中のカードでは、サムネイル下端に幅いっぱいで高さ28pxのステータスバーを重ねて**Ready to export / 出力待機中**と表示します。
-- 失敗したExportの再試行中は、失敗したカードだけを操作できます。他のQueueカードは内部の待機状態を保持しますが、待機バッジは一時的に非表示となり、選択と削除が無効になります。この制限はタブバーに表示されます。失敗項目のない状態でRetryが終わると、通常の操作に戻ります。
-- `Q`またはRemove from Queueでは、選択された`queued` / `failed`アセットを順次削除します。削除に成功したアセットはすぐに消えます。失敗した場合も成功済みの処理は保持し、ローカライズされたアラートとともに一覧を更新します。`waiting`、`encoding`、`registering`のカードは選択、待機状態変更、削除がロックされます。GalleryとAnshitsuでは、各画面固有のQueue切り替え動作を維持します。
-- Exportで`Primary+Z`（Ctrl+Z / ⌘Z）を押すと、直近のWによる待機状態変更またはQによる削除を1回Undoできます。選択は復元されず、Redoもありません。
-- **Export to Immich / Immichへ出力**で確認すると、待機中の`queued`アセットをQueue順に、保存済みRecipeを使用して開始します。出力はフル解像度JPEGで、ファイル名は系列に基づく`GenzoNN`形式です。GenzoRoomタグを付け、元StackのCoverに設定します。Exportのキャンセルを確認すると、現在の写真の処理後に停止します。失敗項目がある場合、**Retry export / 出力を再試行**で確認すると、それらの項目だけを最新の保存済みRecipeで開始します。開始、キャンセル、Retry、成功したExportはW/Q Undoの対象外です。
-- Backend再起動後は、中断された処理が再開します。登録が途中で止まるとアップロード済みアセットが残ることがあり、まれに出力が重複する可能性があります。
+![GenzoRoomのSTACK管理タブ](docs/images/Export_ja.png)  
+*出力素材の予約や出力Qの取り消しを行う出力管理画面。*
 
-#### 現在の制限事項
+出力素材の予約や出力キューの取り消しを行う出力管理画面。
 
-- 対応画像形式：  
+暗室で編集した写真を出力キューで管理し、出力する写真の選択・待機予約・キューからの取り消しができます。  
+
+出力形式は元画像と同じ解像度の高画質JPEG(sRGB)固定です。  
+撮影日時・カメラ・GPSなどのEXIF情報も引き継ぎます。
+
+出力した写真はImmichに新しい素材として登録され、元素材と同じSTACKに追加されます。  
+元素材がSTACKに属していない場合は、新しいSTACKを作成します。いずれの場合も、現像した写真がカバーに設定され、元素材はそのまま保持されます。
+
+出力ファイル名には -Genzo01、-Genzo02 のような連番が付与され、Immichの GenzoRoom タグが設定されます。  
+ギャラリーでは出力済み写真に「現」バッジが表示されます。
+
+## 現在の制限事項
+
+- **対応画像形式：**  
 現在、現像できるのはJPEG画像のみです。RAW(DNGを含む)、HEIC、PNGなどの現像には対応していません。
-- 色空間：  
+- **色空間：**  
 画像処理は8-bit sRGBで行われます。広色域やHDRでの現像には対応していません。
-- 編集内容の保存：  
+- **編集内容の保存：**  
 編集内容は自動保存されますが、保存完了前にブラウザーを閉じたり再読み込みした場合、直近の変更が失われる可能性があります。
-- ギャラリー：  
+- **ギャラリー：**  
 最近の写真は50～500枚の範囲で表示できます。現在、検索機能や追加読み込みには対応していません。
-- モバイル対応：  
+- **モバイル対応：**  
 暗室とSTACK管理はデスクトップブラウザー向けに設計されています。STACK管理のタッチ操作によるドラッグ＆ドロップには対応していません。
-- STACK管理：  
+- **STACK管理：**  
 STACKやグループ自体の並べ替えには対応していません。
 
 
-## 未実装
+## 今後の機能候補
 
-- RAW現像パイプライン。
-- GenzoRoom Export以外で再インポートされたアセットをImmich Stackへ自動的に追加する機能。
-- Drag & DropによるStack/グループの並べ替え。
-- STACK管理でのタッチ操作によるDrag & Drop。
-- Color GradingのPoint / Widthコントロール。現在、3つのトーン範囲には固定ウェイトを使用します。
-- Waveform Monitor (WFM)、RGB Parade、Vectorscope。HistogramはScope領域に実装されています。
-- マスキングまたは部分調整。
-- Cropまたは回転ツール。
-- AI支援による調整。
-- ノイズ除去。
+現在、以下の機能を将来的な拡張候補として検討しています。
 
-これらは現在の対応範囲を示すものであり、リリースの約束や確定したロードマップではありません。
+- RAW現像
+- クロップ・回転・傾き補正
+- ノイズ除去・シャープネス
+- マスキング・部分補正
+- Waveform Monitor(WFM)、RGB Parade、Vectorscopeなどのスコープ機能
+
+これらは検討段階の機能であり、実装やリリース時期を約束するものではありません。
 
 ## セキュリティとデータの取り扱い
 
-- 通常の写真アクセスにはImmichの読み取りエンドポイントを使用します。専用APIキーには`user.read`、`asset.read`、`asset.view`、`asset.download`、`album.read`、`tag.read`、`asset.upload`、`tag.create`、`tag.asset`、`asset.delete`、`stack.read`、`stack.create`、`stack.update`、`stack.delete`が必要です。これらはHome閲覧、JPEGオリジナル取得、Exportのアップロード/タグ付け、タグ修復、確認後のStack書き込み、確認後のImmichゴミ箱への移動（`force: false`）をカバーします。STACK管理はアセットを完全削除せず、画像オリジナルも変更しません。`server.about`は任意で、Settingsおよび診断出力にImmichのバージョン/ビルド情報を表示するために使います。
-- Immich APIキーは環境変数を通じてバックエンドに渡します。フロントエンドへ送られることも、フロントエンドイメージに埋め込まれることもありません。
-- ブラウザーからのリクエストには同一オリジンの`/api/`ルートを使います。提供するCompose設定では、バックエンドのポートをホストに公開しません。
-- HTTPSのImmich URLでは、TLS証明書の検証を引き続き有効にします。上流のレスポンス本文、認証情報、内部例外の詳細はブラウザーに公開しません。
-- 提供するコンテナは非rootユーザーで動作し、Linux capabilitiesを削除して権限昇格を無効にします。
-- GenzoRoomは画像オリジナルを変更しません。SQLiteの編集状態APIが保存するのはGenzoRoomのRecipeとHistoryのみです。Stackメンバーシップの書き込みは、明示的に確認されたSTACK管理操作に限定されます。
+GenzoRoomはImmichのAPIを通じて写真にアクセスします。  
+ImmichのAPIキーはバックエンド側で管理され、ブラウザーには送信されません。
 
-実際のAPIキーをコミットしたり、コンテナイメージに埋め込んだりしないでください。設定とネットワークの選択肢については[導入ガイド](docs/deployment.md)を参照してください。
+写真の編集内容や履歴はGenzoRoom側に保存され、Immichの元画像を直接変更することはありません。
+
+STACKの変更や写真のゴミ箱への移動は、ユーザーが確認してImmichへ送信した場合に実行されます。  
+ゴミ箱への移動はImmichの通常のゴミ箱機能を使用し、写真を完全削除するものではありません。
+
+ImmichのAPIキーには必要なアクセス権限を設定してください。  
+具体的な権限や接続設定については[導入ガイド](docs/deployment.md)を参照してください。
 
 ## 必要条件
 
-- Docker Compose v2を備えたDocker Engine、またはDocker Standalone環境に接続したPortainer。
-- 現在GHCR配布イメージで動作確認済みのLinux `amd64` Dockerホスト。Arm64はサポート対象として案内していません。
-- GenzoRoomのバックエンドコンテナから接続できる既存のImmichサーバー。
-- 「[セキュリティとデータの取り扱い](#セキュリティとデータの取り扱い)」に記載した権限を持つ専用Immich APIキー。`server.about`は任意です。
-- GenzoRoomフロントエンドに接続できるブラウザー。ホストポートの初期値は`3190`で、`GENZOROOM_PORT`で変更できます。
+- Docker Compose v2に対応したDocker環境、またはPortainer(Docker Standalone環境)
+- Linux amd64(x86-64)のDockerホスト。現在、Arm64は動作確認・サポート対象外です。
+- GenzoRoomから接続できるImmichサーバー
+- 必要なアクセス権限を設定したImmich APIキー
+- GenzoRoomにアクセスするためのWebブラウザー。GenzoRoomの標準ポートは 3190 です。
 
-正式版GHCRイメージには固定の`vMAJOR.MINOR.PATCH`タグを使用し、`latest`は最新の正式版を指します。変更可能な`alpha`タグは検証ビルド用であり、正式版ではありません。配布Composeでは公開済みイメージタグの明示が必要で、`latest`を暗黙に選択しません。正式なGitタグをPushすると、イメージ検査の成功後、そのバージョンの確定済みCHANGELOG節から公開GitHub Releaseを作成します。[導入ガイド](docs/deployment.md)と[リリース検証ノート](docs/release-validation.md)を参照してください。
+DockerイメージはGitHub Container Registry(GHCR)で公開しています。
+
+詳しい導入方法やImmich APIキーに必要な権限については、[導入ガイド](docs/deployment.md)を参照してください。
 
 ## クイックスタート
 
-GenzoRoomは単一のGHCRイメージとして配布されます。通常の利用者はソースコードのチェックアウト、Node.js、Pythonを用意する必要はありません。配布版が対応するのはLinux `amd64`です。リポジトリのReleasesまたはパッケージページで公開済みと表示されているタグだけを使用してください。
+GenzoRoomは単一のDockerイメージとして配布しています。ソースコードの取得やNode.js、Pythonなどの開発環境は必要ありません。
 
-1. 上記に記載した必要権限を持つ専用Immich APIキーを作成します。`server.about`は任意です。
-2. このリポジトリから[`compose.release.yml`](compose.release.yml)と[`.env.example`](.env.example)をダウンロードします。`GENZOROOM_IMAGE_TAG`には公開済みの固定バージョンタグを、`GENZOROOM_PERSIST_ROOT`には事前に作成したホスト側の親ディレクトリを設定します。`IMMICH_URL` / `IMMICH_API_KEY`も設定します。UID/GID `10001:10001`に、その親ディレクトリへの書き込み/通過権限を付与してください。SQLiteはそのディレクトリ配下の`data/genzoroom.db`に保持されます。LAN/HTTPS接続と同一ホスト上のImmichへの接続方法は[導入ガイド](docs/deployment.md)を参照してください。
-3. Docker Composeで設定を検証し、公開済みイメージを起動します。
+1. **Immich APIキーの作成**  
+GenzoRoom専用のImmich APIキーを作成します。必要なアクセス権限は[導入ガイド](docs/deployment.md)を参照してください。
+2. **設定ファイルの準備**  
+このリポジトリから[`compose.release.yml`](compose.release.yml)と[`.env.example`](.env.example)を取得し、Immichの接続情報、使用するイメージタグ、データの保存先を設定します。  
+保存先ディレクトリには、コンテナが書き込めるよう適切な権限を設定してください。
+3. **GenzoRoomの起動**  
+設定したディレクトリで、以下のコマンドを実行します。
 
    ```sh
    docker compose -f compose.release.yml config --quiet
@@ -175,15 +184,17 @@ GenzoRoomは単一のGHCRイメージとして配布されます。通常の利�
    docker compose -f compose.release.yml up -d
    ```
 
-   Portainerでは**Web editor**を使い、`compose.release.yml`全体を貼り付けて、Stackの環境設定に同じ変数を設定します。同一Dockerホスト上のImmichを使う場合は、導入ガイドに記載された単独Composeの例を使用してください。
-4. 設定したアドレスを開きます。利用できる場合はHTTPSを使用してください。ホストポートの初期値は`3190`です。通常のHTTPでは接続は暗号化されません。
+4. **ブラウザーからアクセス**  
+ブラウザーで `http://<ホストIP>:3190`  にアクセスします。公開ポートを変更した場合は、そのポートを指定してください。
+
+より詳しい設定方法やImmichとの接続方法は、[導入ガイド](docs/deployment.md)を参照してください。
 
 ## アーキテクチャとドキュメント
 
-- [アーキテクチャ](docs/architecture.md) — リクエストの流れ、コンテナ境界、編集モデル、現在の技術的な制限事項。
-- [導入](docs/deployment.md) — Docker Compose、Portainer、Immichへのネットワーク経路、検証、トラブルシューティング、削除。
-- [開発ノート（日本語）](docs/development-notes.ja.md) — 実装履歴と設計上の判断。
-- [導入ノート（日本語）](docs/deployment-notes.ja.md) — 現在検証済みの導入方法に関するメモ。確認されたQNAPのネットワーク問題を1件含みます。
+- **[アーキテクチャ](docs/architecture.md)** — GenzoRoomの技術構成と設計仕様。
+- **[導入](docs/deployment.md)** — Docker環境への導入、設定、トラブルシューティング。
+- **[開発ノート（日本語）](docs/development-notes.ja.md)** — 開発履歴と設計上の判断。
+- **[導入ノート（日本語）](docs/deployment-notes.ja.md)** — 導入時の検証記録と補足情報。
 
 ## 開発について
 
