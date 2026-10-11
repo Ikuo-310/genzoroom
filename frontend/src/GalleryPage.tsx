@@ -1121,8 +1121,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
             disabled={!canRefreshPhotos || refreshing}
             aria-busy={refreshing} aria-label={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}
             title={shortcut.title(t('photos.refresh'), 'homeRefreshPhotos')}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M20 7v5h-5M4 17v-5h5M5.2 8a7.5 7.5 0 0 1 12.4-3L20 8M4 16l2.4 3A7.5 7.5 0 0 0 18.8 16" />
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25"
+              strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+              <path d="M21 12a9 9 0 1 0-4.5 7.8M15 12h6V6" />
             </svg>
           </button>
         {photoView && <div className="home-toolbar-left">
