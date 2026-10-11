@@ -97,8 +97,7 @@ WebGPUが利用できない場合もCPUによる編集が可能です。
 
 ### 〇 出力管理 〇
 
-![GenzoRoomのSTACK管理タブ](docs/images/Export_ja.png)  
-*出力素材の予約や出力Qの取り消しを行う出力管理画面。*
+![GenzoRoomの出力管理タブ](docs/images/Export_ja.png)  
 
 出力素材の予約や出力キューの取り消しを行う出力管理画面。
 
