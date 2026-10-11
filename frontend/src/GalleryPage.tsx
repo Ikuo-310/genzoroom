@@ -83,6 +83,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       position: homeReturn, waitingForData: true } : null);
   const [scrollRestoreRevision, setScrollRestoreRevision] = useState(0);
   const [refreshRevisions, setRefreshRevisions] = useState<Record<GalleryLoader, number>>({ recent: 0, favorites: 0, albums: 0, album: 0, heatmap: 0, day: 0 });
+  const [calendarDataRevision, setCalendarDataRevision] = useState(0);
+  const calendarDataRevisionRef = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const refreshOperation = useRef<GalleryRefresh | null>(null);
@@ -165,7 +167,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const showingAlbumPhotos = !showExport && activeTab === 'albums' && selectedAlbum !== null;
   const showingCalendarPhotos = !showExport && activeTab === 'calendar' && selectedCalendarDate !== null;
   const adjacentCalendarDates = useAdjacentCalendarDates(
-    showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear, refreshRevisions.day);
+    showingCalendarPhotos && calendarMinYearReady ? selectedCalendarDate : null, calendarMinYear, currentYear, calendarDataRevision);
   const photoView: PhotoView | null = showExport ? null : activeTab === 'recent'
     ? { kind: 'recent', assets, state: assetState, selection: recentSelection }
     : activeTab === 'favorites'
@@ -241,20 +243,34 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const loader: GalleryLoader = activeTab === 'recent' ? 'recent' : activeTab === 'favorites' ? 'favorites'
       : activeTab === 'albums' ? selectedAlbum ? 'album' : 'albums' : selectedCalendarDate ? 'day' : 'heatmap';
     // Lock before scheduling React state: a click and shortcut in one turn must share one request.
+    const calendarRevision = activeTab === 'calendar' ? ++calendarDataRevisionRef.current : calendarDataRevisionRef.current;
     const operation: GalleryRefresh = { key: refreshContext, loader, id: ++refreshId.current,
-      pending: activeTab === 'calendar' ? 2 : 1, failed: false, controllers: new Set() };
+      pending: activeTab === 'calendar' ? selectedCalendarDate ? 3 : 2 : 1, failed: false, controllers: new Set() };
     refreshOperation.current = operation;
     setRefreshing(true);
     setRefreshFailed(false);
     logRefresh(operation, 'started');
     if (activeTab === 'calendar') {
+      setCalendarDataRevision(calendarRevision);
       const controller = new AbortController();
       operation.controllers.add(controller);
       void fetchCalendarMinYear(controller.signal).then(minYear => {
-        if (!ownsRefresh(operation)) return;
+        if (!ownsRefresh(operation)) return null;
         // Imported historical photos may extend navigation, without moving the period being viewed.
-        setCalendarMinYear(minYear !== null && minYear >= 1 && minYear <= currentYear ? minYear : currentYear);
-      }).catch(() => failRefresh(operation)).finally(() => finishRefresh(operation));
+        const refreshedMinYear = minYear !== null && minYear >= 1 && minYear <= currentYear ? minYear : currentYear;
+        setCalendarMinYear(refreshedMinYear);
+        return refreshedMinYear;
+      }, () => {
+        failRefresh(operation);
+        return calendarMinYear;
+      }).then(refreshedMinYear => {
+        if (refreshedMinYear !== null && selectedCalendarDate && ownsRefresh(operation)) {
+          const adjacentController = new AbortController();
+          operation.controllers.add(adjacentController);
+          void adjacentCalendarDates.refresh(selectedCalendarDate, calendarRevision, refreshedMinYear, adjacentController.signal)
+            .catch(() => failRefresh(operation)).finally(() => finishRefresh(operation));
+        }
+      }).finally(() => finishRefresh(operation));
     }
     setRefreshRevisions(current => ({ ...current, [loader]: current[loader] + 1 }));
     return true;

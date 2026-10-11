@@ -1,33 +1,37 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchCalendarHeatmap } from './api';
+
+type AdjacentDates = { previous: string | null; next: string | null };
+type AdjacentResult = AdjacentDates & { date: string | null; revision: number };
 
 export function useAdjacentCalendarDates(date: string | null, minYear: number, maxYear: number, refreshRevision = 0) {
   const years = useRef(new Map<number, string[]>());
   const cacheRevision = useRef(refreshRevision);
-  const [result, setResult] = useState<{ date: string | null; revision: number; previous: string | null; next: string | null }>(
-    { date: null, revision: refreshRevision, previous: null, next: null });
+  const manualRefreshContext = useRef<{ date: string; revision: number; minYear: number } | null>(null);
+  const latestDate = useRef(date);
+  latestDate.current = date;
+  const [result, setResult] = useState<AdjacentResult>({ date: null, revision: refreshRevision, previous: null, next: null });
 
   useEffect(() => {
     if (cacheRevision.current !== refreshRevision) {
-      // A manual refresh invalidates every cached year, including cross-year navigation candidates.
+      // Calendar refreshes invalidate candidates across dates, including cross-year navigation.
       years.current.clear();
       cacheRevision.current = refreshRevision;
     }
-    if (!date) return;
-    const selectedDate = date;
-    const controller = new AbortController();
-    let active = true;
-    setResult({ date, revision: refreshRevision, previous: null, next: null });
-    // Both directions share in-flight years; only successful, still-owned results enter the session cache.
+  }, [refreshRevision]);
+
+  const loadAdjacent = useCallback(async (selectedDate: string, firstYear: number, min: number, max: number,
+    signal: AbortSignal, cache: Map<number, string[]>, isCurrent: () => boolean,
+    onCandidate?: (direction: keyof AdjacentDates, date: string | null) => void): Promise<AdjacentDates> => {
     const requests = new Map<number, Promise<string[]>>();
     function loadYear(year: number): Promise<string[]> {
-      const cached = years.current.get(year);
+      const cached = cache.get(year);
       if (cached) return Promise.resolve(cached);
       let request = requests.get(year);
       if (!request) {
-        request = fetchCalendarHeatmap(year, null, controller.signal).then(data => {
+        request = fetchCalendarHeatmap(year, null, signal).then(data => {
           const days = data.days.filter(day => day.hasAssets === true).map(day => day.date).sort();
-          if (active) years.current.set(year, days);
+          if (!signal.aborted && isCurrent()) cache.set(year, days);
           return days;
         });
         requests.set(year, request);
@@ -36,26 +40,61 @@ export function useAdjacentCalendarDates(date: string | null, minYear: number, m
     }
     async function find(direction: -1 | 1): Promise<string | null> {
       // A retained empty date may now precede Immich's minimum year after photos were removed.
-      const selectedYear = Number(selectedDate.slice(0, 4));
-      const firstYear = direction === -1 ? Math.min(selectedYear, maxYear) : Math.max(selectedYear, minYear);
-      for (let year = firstYear; year >= minYear && year <= maxYear; year += direction) {
-        const days = await loadYear(year);
-        if (!active) return null;
+      const year = Number(selectedDate.slice(0, 4));
+      const start = direction === -1 ? Math.min(year, max) : Math.max(year, min);
+      for (let candidateYear = start; candidateYear >= min && candidateYear <= max; candidateYear += direction) {
+        const days = await loadYear(candidateYear);
+        if (signal.aborted || !isCurrent()) return null;
         const candidate = direction === -1 ? days.filter(day => day < selectedDate).at(-1) : days.find(day => day > selectedDate);
         if (candidate) return candidate;
       }
       return null;
     }
-    for (const [direction, field] of [[-1, 'previous'], [1, 'next']] as const) {
-      void find(direction).then(candidate => {
-        if (active) setResult(current => ({ ...current, [field]: candidate }));
+    const lookup = (direction: -1 | 1, field: keyof AdjacentDates) => find(direction).then(candidate => {
+      if (isCurrent()) onCandidate?.(field, candidate);
+      return candidate;
+    });
+    const settled = await Promise.allSettled([lookup(-1, 'previous'), lookup(1, 'next')]);
+    const failure = settled.find(outcome => outcome.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    return { previous: (settled[0] as PromiseFulfilledResult<string | null>).value,
+      next: (settled[1] as PromiseFulfilledResult<string | null>).value };
+  }, []);
+
+  const refresh = useCallback(async (selectedDate: string, revision: number, refreshedMinYear: number, signal: AbortSignal) => {
+    manualRefreshContext.current = { date: selectedDate, revision, minYear: refreshedMinYear };
+    cacheRevision.current = revision;
+    years.current.clear();
+    setResult({ date: selectedDate, revision, previous: null, next: null });
+    const result = await loadAdjacent(selectedDate, Number(selectedDate.slice(0, 4)), refreshedMinYear, maxYear,
+      signal, years.current, () => latestDate.current === selectedDate);
+    if (!signal.aborted && latestDate.current === selectedDate) setResult({ date: selectedDate, revision, ...result });
+  }, [loadAdjacent, maxYear]);
+
+  useEffect(() => {
+    const manual = manualRefreshContext.current;
+    if (manual?.date === date && manual.revision === refreshRevision && manual.minYear === minYear) return;
+    if (manual && (manual.date !== date || manual.revision !== refreshRevision)) manualRefreshContext.current = null;
+    if (!date) return;
+    const selectedDate = date;
+    const revision = refreshRevision;
+    const controller = new AbortController();
+    let active = true;
+    setResult({ date, revision, previous: null, next: null });
+    void loadAdjacent(selectedDate, Number(selectedDate.slice(0, 4)), minYear, maxYear, controller.signal,
+      years.current, () => active && latestDate.current === selectedDate && cacheRevision.current === revision,
+      (direction, candidate) => setResult(current => current.date === selectedDate && current.revision === revision
+        ? { ...current, [direction]: candidate } : current))
+      .then(adjacent => {
+        if (active) setResult({ date: selectedDate, revision, ...adjacent });
       }).catch(() => {
-        // A failed year cannot establish adjacency; keep that direction unavailable rather than skipping it.
+        // Ordinary navigation keeps the existing unavailable-candidate behavior on a failed lookup.
       });
-    }
     return () => { active = false; controller.abort(); };
-  }, [date, minYear, maxYear, refreshRevision]);
+  }, [date, minYear, maxYear, loadAdjacent]);
 
   // Render-time ownership prevents old candidates from being actionable before effect cleanup runs.
-  return result.date === date && result.revision === refreshRevision ? result : { date, previous: null, next: null };
+  const dates = result.date === date && result.revision === refreshRevision
+    ? result : { date, revision: refreshRevision, previous: null, next: null };
+  return { ...dates, refresh };
 }

@@ -19,7 +19,7 @@ describe('Home and thumbnail layout', () => {
   it('keeps the common refresh outside selection and preserves center tracks at existing breakpoints', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');
-    toolbar.innerHTML = '<div class="home-toolbar-start"><button class="gallery-refresh">Reload</button><div class="home-toolbar-left"><div class="selection-bar"></div></div></div><div class="home-toolbar-center"><h2>Album</h2></div><div class="home-toolbar-controls"></div>';
+    toolbar.innerHTML = '<div class="home-toolbar-start"><button class="gallery-refresh">Reload</button><div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">0 selected</strong><div class="selection-actions"><button>Select all</button><button>Clear selection</button></div></div></div></div><div class="home-toolbar-center"><h2>Album</h2></div><div class="home-toolbar-controls"></div>';
     const start = toolbar.firstElementChild;
     const center = toolbar.querySelector('.home-toolbar-center');
     const controls = toolbar.querySelector('.home-toolbar-controls');
@@ -33,6 +33,8 @@ describe('Home and thumbnail layout', () => {
     expect(getComputedStyle(button).height).toBe('34px');
     expect(getComputedStyle(start).gridColumn).toBe('1');
     expect(getComputedStyle(start).gridRow).toBe('1');
+    expect(getComputedStyle(start).flexWrap).toBe('wrap');
+    expect(getComputedStyle(toolbar.querySelector('.home-toolbar-left')).flexBasis).toBe('max-content');
     expect(getComputedStyle(center).gridColumn).toBe('2');
     expect(getComputedStyle(controls).gridColumn).toBe('3');
     const rules = Array.from(stylesheet.sheet.cssRules);
@@ -49,6 +51,34 @@ describe('Home and thumbnail layout', () => {
       expect(getComputedStyle(center).gridRow).toBe('2');
       responsive.remove();
     }
+  });
+  it.each([
+    ['ja', '0枚選択中', 'すべて選択', '選択解除', 'アルバム名', '日付'],
+    ['en', '0 selected', 'Select all', 'Clear selection', 'Album name', 'Date'],
+  ])('wraps Reload before intact %s Selection controls in narrow detail toolbars', (language, count, selectAll, clear, album, date) => {
+    const toolbar = host.querySelector('.home-toolbar');
+    toolbar.style.width = '320px';
+    const rules = Array.from(stylesheet.sheet.cssRules);
+    const narrowRules = ['(max-width: 76rem)', '(max-width: 760px)']
+      .flatMap(breakpoint => Array.from(rules.find(rule => rule.conditionText === breakpoint).cssRules));
+    const responsive = document.createElement('style');
+    responsive.textContent = narrowRules.map(rule => rule.cssText).join('\n');
+    document.head.append(responsive);
+    for (const detail of ['album', 'calendar']) {
+      toolbar.className = `home-toolbar home-toolbar-centered ${detail === 'calendar' ? 'home-toolbar-calendar' : ''}`;
+      toolbar.innerHTML = `<div class="home-toolbar-start"><button class="gallery-refresh">${language === 'ja' ? 'リロード' : 'Reload'}</button><div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">${count}</strong><div class="selection-actions"><button>${selectAll}</button><button>${clear}</button></div></div><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">${detail === 'album' ? album : date}</h2></div><div class="home-toolbar-controls"><button>Filter</button></div>`;
+      const start = toolbar.querySelector('.home-toolbar-start');
+      const refresh = toolbar.querySelector('.gallery-refresh');
+      const selection = toolbar.querySelector('.selection-bar');
+      expect(getComputedStyle(start).flexWrap).toBe('wrap');
+      expect(getComputedStyle(toolbar.querySelector('.home-toolbar-left')).flexBasis).toBe('max-content');
+      expect(getComputedStyle(selection).minWidth).toBe('max-content');
+      expect(getComputedStyle(selection.querySelector('.selection-actions')).display).toBe('flex');
+      expect(getComputedStyle(refresh).whiteSpace).toBe('nowrap');
+      expect(getComputedStyle(toolbar.querySelector('.home-toolbar-center')).gridColumn).toBe('1');
+      expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).gridColumn).toBe('1');
+    }
+    responsive.remove();
   });
   it('uses a neutral Export group frame and shared column sizing without changing the Home scroll owner', () => {
     const content = host.querySelector('.home-content');

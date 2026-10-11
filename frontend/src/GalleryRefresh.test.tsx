@@ -174,6 +174,79 @@ describe('Gallery manual refresh', () => {
     expect(api.day).toHaveBeenLastCalledWith('2024-02-02', expect.any(AbortSignal));
   });
 
+  it('invalidates adjacent-date candidates after a parent Calendar refresh and skips removed photo days', async () => {
+    let photoDays = [1, 3, 5];
+    api.heatmap.mockImplementation(async (year: number, month: number | null) => ({ year, month, days: photoDays.map(day => ({
+      date: `2026-09-${String(day).padStart(2, '0')}`, hasAssets: true, count: 1,
+    })) }));
+    await mount(); await openView('calendar-month');
+    await click('[aria-label^="2026-09-01,"]');
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(false);
+    await click('.album-back');
+
+    photoDays = [1, 2, 5];
+    await click('.gallery-refresh');
+    await click('[aria-label^="2026-09-01,"]');
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(false);
+    await click('.calendar-detail-next');
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-02', expect.any(AbortSignal));
+    await click('.album-back'); await click('[aria-label^="2026-09-05,"]');
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-previous')?.disabled).toBe(false);
+    await click('.calendar-detail-previous');
+    expect(api.day).toHaveBeenLastCalledWith('2026-09-02', expect.any(AbortSignal));
+  });
+
+  it('keeps a day refresh busy through adjacent Heatmap completion and rejects duplicate refresh', async () => {
+    await mount(); await openView('calendar-day');
+    const pending = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const original = api.heatmap.getMockImplementation()!;
+    api.heatmap.mockImplementation((year, month, signal) => month === null ? pending.promise : original(year, month, signal));
+    const dayCalls = api.day.mock.calls.length;
+    await click('.gallery-refresh');
+    expect(refreshButton().disabled).toBe(true);
+    expect(api.day).toHaveBeenCalledTimes(dayCalls + 1);
+    await press();
+    expect(api.day).toHaveBeenCalledTimes(dayCalls + 1);
+    expect(refreshButton().disabled).toBe(true);
+    await act(async () => pending.resolve({ year: 2026, month: null, days: [
+      { date: '2026-09-01', hasAssets: true, count: 1 }, { date: '2026-09-03', hasAssets: true, count: 1 },
+    ] }));
+    expect(refreshButton().disabled).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(false);
+  });
+
+  it('reports adjacent Heatmap failure and clears old candidates while retaining day photos', async () => {
+    await mount(); await openView('calendar-day');
+    const before = filenames();
+    api.heatmap.mockRejectedValueOnce(new Error('Heatmap unavailable'));
+    await click('.gallery-refresh');
+    expect(refreshButton().disabled).toBe(false);
+    expect(host.textContent).toContain('Could not refresh photos');
+    expect(filenames()).toEqual(before);
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-previous')?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(true);
+  });
+
+  it.each(['parent Calendar', 'another date'])('aborts a day refresh and ignores its adjacent result after moving to %s', async destination => {
+    await mount(); await openView('calendar-day');
+    const pending = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const original = api.heatmap.getMockImplementation()!;
+    api.heatmap.mockImplementation((year, month, signal) => month === null ? pending.promise : original(year, month, signal));
+    await click('.gallery-refresh');
+    const signal = api.heatmap.mock.calls.at(-1)!.at(-1) as AbortSignal;
+    await click('.album-back');
+    if (destination === 'another date') await click('[aria-label^="2026-09-03,"]');
+    const title = host.querySelector('.home-toolbar-title')?.textContent;
+    expect(signal.aborted).toBe(true);
+    await act(async () => pending.resolve({ year: 2026, month: null, days: [
+      { date: '2026-09-01', hasAssets: true, count: 1 }, { date: '2026-09-02', hasAssets: true, count: 1 },
+    ] }));
+    expect(host.querySelector('.home-toolbar-title')?.textContent).toBe(title);
+    if (destination === 'parent Calendar') expect(host.querySelector('.calendar-month')).not.toBeNull();
+    else expect(host.querySelector('.home-toolbar-title')?.textContent).toContain('3');
+    expect(refreshButton().disabled).toBe(false);
+  });
+
   it.each(['recent', 'favorites', 'album-detail', 'calendar-month', 'calendar-day'])
     ('rejects a stale %s refresh after navigation even when transport ignores cancellation', async view => {
       await mount(); await openView(view);
