@@ -176,6 +176,13 @@ describe('shared Settings modal', () => {
   });
   it('shows independent connection and safe server information', async () => {
     await click(host.querySelector('button')!);
+    const groups = dialog().querySelectorAll<HTMLElement>('.settings-connection-group');
+    expect(groups).toHaveLength(2);
+    expect(groups[0].querySelector('h4')?.textContent).toBe('GenzoRoom');
+    expect(groups[0].textContent).toContain('Backend: Connected');
+    expect(groups[1].querySelector('h4')?.textContent).toBe('Immich');
+    expect(groups[1].querySelector('dl')?.textContent).toContain('v3.0.0');
+    expect(groups[1].querySelector('button')?.textContent).toBe('Check again');
     expect(dialog().textContent).toContain('Development build');
     expect(dialog().textContent).not.toContain('v0.1.0');
     expect(dialog().textContent).toContain('Backend: Connected');

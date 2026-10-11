@@ -70,14 +70,21 @@ function ConnectionInformation() {
     return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
   }, [attempt]);
   return <>
-    <h4>{BUILD_INFO.name}</h4>
-    <p>{applicationBuildLabel(BUILD_INFO, t)}</p>
-    <p role="status">Backend: {t(`connection.${backend}`)}</p>
-    <h4>Immich</h4><p role="status">{t(`connection.${immich}`)}</p>
-    {about ? about.error_code ? <p className="error-text" role="status">{t(about.error_code === 'authentication_failed' ? 'settings.aboutPermission' : 'settings.aboutFailed')}</p>
-      : <dl>{(['version', 'build', 'sourceRef'] as const).map(key => typeof about[key] === 'string' && <div key={key}><dt>{t(`settings.${key}`)}</dt><dd>{about[key]}</dd></div>)}</dl>
-      : <p role="status">{t('connection.checking')}</p>}
-    <button type="button" className="tool-button" onClick={() => setAttempt(value => value + 1)}>{t('settings.refresh')}</button>
+    <div className="settings-connection-groups">
+      <div className="settings-connection-group">
+        <h4>{BUILD_INFO.name}</h4>
+        <p>{applicationBuildLabel(BUILD_INFO, t)}</p>
+        <p role="status">Backend: {t(`connection.${backend}`)}</p>
+      </div>
+      <div className="settings-connection-group">
+        <h4>Immich</h4>
+        <p role="status">{t(`connection.${immich}`)}</p>
+        {about ? about.error_code ? <p className="error-text" role="status">{t(about.error_code === 'authentication_failed' ? 'settings.aboutPermission' : 'settings.aboutFailed')}</p>
+          : <dl>{(['version', 'build', 'sourceRef'] as const).map(key => typeof about[key] === 'string' && <div key={key}><dt>{t(`settings.${key}`)}</dt><dd>{about[key]}</dd></div>)}</dl>
+          : <p role="status">{t('connection.checking')}</p>}
+        <button type="button" className="tool-button" onClick={() => setAttempt(value => value + 1)}>{t('settings.refresh')}</button>
+      </div>
+    </div>
   </>;
 }
 export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClose: () => void }) {
