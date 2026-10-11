@@ -61,12 +61,12 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 ## Testing
 
 - Add or update regression tests for new behavior and bug fixes. Test interactions between related features, not only isolated functions.
-- During incremental implementation and small fixes, run focused tests covering changed code, affected dependencies, and relevant integration points. Do not run the full test suite by default.
-- Expand regression testing according to the scope and risk of changes. Run the full suite during implementation when cross-cutting or high-risk changes justify it.
-- At feature completion and final code audit, run the full Frontend and Backend test suites, along with applicable TypeScript checks, production builds, and `git diff --check`.
-- For long-running development, perform broader regression testing at appropriate phase boundaries rather than postponing it until the entire feature is complete.
+- During implementation, run focused tests for changed code, affected dependencies, and relevant integration points. Do not run all Frontend and Backend tests for each small fix; expand coverage early when a change is broad or high risk.
+- At the first completion audit for a feature or bug fix, run all Frontend and Backend tests once, regardless of change size. The audit may use full-suite results already run against the same code state; do not repeat them. Also run applicable TypeScript checks, production builds, and `git diff --check`, and report test results separately from audit findings.
+- When fixing audit findings, run focused tests for the fix and its dependent integration points. A limited re-audit may rely on existing test results and static code review when those provide enough evidence. Do not repeat all Frontend and Backend tests for every finding; expand verification, including to all tests when needed, if the fix affects broad areas or important shared code.
+- When preparing a release, review existing test and audit results alongside the scope of changes made since. Run additional checks only when needed; do not repeat all tests solely because a release is being prepared.
 - Keep test output concise. Report test counts, failures, skips, and relevant warnings without unnecessarily displaying verbose output from successful tests.
-- Never skip relevant tests solely to reduce execution time or token consumption. Never claim that a test or manual verification passed unless it was actually performed. Report any tests that could not be run.
+- Do not omit necessary tests to save time or tokens. Respect a user's explicit test scope and report any verification gap. Never claim an unrun test or manual check passed; report tests that could not be run.
 
 ## Development workflow
 

@@ -67,6 +67,7 @@ This is not yet a RAW development pipeline. RAW files can be browsed and filtere
 
 - Open Export / 出力管理 with its Home tab or `E`, keeping the Gallery view state while using the same Header / Tabs / Toolbar / Content shell.
 - The persistent Export Queue is displayed as individual photo cards. Two or more queued assets from the same Immich Stack share a group; only queued members appear. Groups start at their first Queue member, preserve member order, and become standalone cards when only one member remains. Thumbnail sizing is shared with Home.
+- Photos whose details cannot be retrieved from Immich are hidden from Export management, while their persistent Queue records are retained. Re-enter the tab to fetch details again; a photo becomes visible with its original Queue state when it can be retrieved. Hidden failed photos do not block exports or Retry priority for visible photos.
 - Export cards currently show Immich source thumbnails to identify Queue assets; they are not previews rendered with the GenzoRoom Recipe.
 - Select cards with normal click, Primary+click, Shift+click, checkboxes, or Select All / `Primary+A`; Shift ranges follow the displayed group order. Clear and Escape clear selection.
 - `W` explicitly marks selected mutable cards ready to export. Mixed selections turn readiness ON; an entirely ready selection turns it OFF. Readiness survives clearing selection and switching Home tabs, but is temporary and is not saved across reloads. It is separate from persistent Queue membership and the runtime status `waiting`.

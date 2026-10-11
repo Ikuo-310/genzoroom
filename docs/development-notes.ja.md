@@ -2,6 +2,30 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 出力管理の取得不能Asset除外・監査修正完了（2026-10-11）
+
+### 発生状況
+
+過去に出力失敗した写真がImmichの鍵付きフォルダへ移動され、GenzoRoomの永続Queueには`failed`記録が残っていた。出力管理の個別Asset詳細取得がHTTP 400になると、取得できる写真も含めてタブ全体が読み込み失敗になっていた。利用者によるNAS / Immich実機確認では、写真を鍵付きフォルダから戻して出力管理タブへ再入場すると、詳細が再取得されて表示へ復帰することを確認した。
+
+### 修正内容
+
+取得に成功したAssetだけをQueue順で表示し、選択・Arm・Queue除外・Start・Retry・Retry優先判定の対象とする。取得不能AssetはUIから除外し、永続Queue・Recipe・Historyには干渉しない。非表示の`failed`はRetry優先を発動しないため、表示可能な写真の出力を妨げない。タブ再入場で詳細を再取得し、取得可能になったAssetは元のQueue状態で再表示する。
+
+再入場後のmetadata取得中とStack情報の一括取得失敗時はQueue ID・statusを基準に選択・Arm・Arm Undo記録を保持し、Arm Undoを消費しない。取得成功が確定した時点で、選択・Arm・Undo対象を成功Assetに整理する。既存のOne-shot Undo、Abort、generation、Stack結合、canonical制御は維持する。
+
+### 検証・監査
+
+初回実装時のFrontend全テストは2,687件成功・2件skip、Backendは997件成功・322 subtests成功。NAS / Immich実機で取得不能Assetの非表示と、取得可能になった後の復帰を確認した。
+
+初回Focused Auditは**High 0 / Medium 2 / Low 0**。Medium ①はmetadata再取得中にArm Undo記録を消費する問題、Medium ②はStack取得失敗時に選択・Arm・Undo記録が失われる問題だった。2件を修正し、Focused Tests 5ファイル・94件成功、TypeScriptチェック、production build、`git diff --check`も成功した。buildでは既存の500 kB超チャンク警告が出た。
+
+最終限定再監査は静的確認で2件の修正成立を確認し、**High 0 / Medium 0 / Low 0**。Medium修正後のNAS / Immich実機再確認は未実施。最終再監査では全テストとbuildを再実行していない。
+
+### 別課題
+
+外部ライブラリのROマウント環境における現像出力失敗への対応は、この修正と分離する。現像結果をImmich管理ライブラリへ登録し、元のStackに追加する方式は今後検討する。ROマウントが過去の出力失敗の直接原因であるとは断定しない。
+
 ## Gallery Reload機能の完了記録（v0.1.2、2026-10-11）
 
 Immich側の変更を反映するにはブラウザー全体のReloadが必要だったが、それではGalleryの閲覧位置やSPA状態が失われるため、現在表示中のGalleryだけを再取得するmanual Reloadを追加した。対象はRecent、Favorites、Album一覧／詳細、Calendar年／月／日付詳細。Toolbar最左に日本語「リロード」／英語`Reload`を置く。shortcut explanation設定がONの場合、Tooltipとaria-labelに「写真を再読み込み [Shift+R]」／`Refresh photos [Shift+R]`を表示する。`Shift+R`で実行し、`R`はRecent、Ctrl+R／Command+Rはブラウザー標準Reloadのまま。STACK管理、出力管理、Anshitsuは対象外。

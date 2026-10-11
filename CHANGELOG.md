@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Fixed
+
+- Export management no longer fails as a whole when Immich cannot provide details for queued photos. Only available photos are shown and can be managed, so unavailable failed photos do not block exports of available photos. Queue records remain intact, and photos reappear with their original Queue state when details become available after re-entering the tab.
+
 ## [0.1.2] - 2026-10-11
 
 ### Added
