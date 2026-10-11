@@ -73,5 +73,8 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Do not commit or push changes unless explicitly requested. The user performs Git operations, deployment, and NAS/Firefox verification.
 - Do not deploy to the NAS or claim to have performed manual browser testing.
 - Do not update README, CHANGELOG, or other project documentation unless the task requests it or the implementation makes an update necessary.
-- Treat `README.md` as the canonical English README and keep `README.ja.md` as its complete Japanese translation; update both when README features or behavior change, without adding Japanese-only specifications.
+- Keep README content for general users: describe features, operation, and limitations, not internal implementation or development history. Normally leave README unchanged during implementation, audit, and fix work. Once a feature is confirmed complete, update README for changes that affect users. Before completion, update it only when explicitly requested or when correcting a serious error or misleading instruction.
+- Keep `README.md` and `README.ja.md` aligned and update both in the same change, using natural wording in each language rather than a literal translation. Keep feature descriptions concise; put technical specifications in `docs/architecture.md` and deployment information in the English and Japanese deployment guides.
+- Maintain CHANGELOG as a user-facing change history. Finalize entries for a release only when explicitly instructed to prepare or publish that release.
+- If it is unclear whether a completed feature warrants a README update, do not add content speculatively; report whether an update appears necessary in the task summary.
 - At the end of each task, report changed files, key design decisions, test results, and any remaining risks or manual verification requirements.

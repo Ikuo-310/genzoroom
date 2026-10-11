@@ -7,6 +7,8 @@ English | [日本語](README.ja.md)
 
 GenzoRoom is a self-hosted photo development web application designed to work with [Immich](https://immich.app/).
 
+The name **GenzoRoom** comes from the Japanese word *現像室* (genzōshitsu), meaning "photo developing room." It combines *genzō* (photo development) with the English word "room," and is pronounced "Genzo Room."
+
 It helps manage RAW+JPEG pairs that can be difficult to organize in Immich by automatically detecting stack candidates. You can also manually reorganize stacks and change their cover photos.
 
 GenzoRoom also provides non-destructive JPEG editing for adjusting exposure and color. Developed photos are exported back to Immich without replacing the originals, automatically grouped into stacks with their source photos, and set as the new stack covers.  
