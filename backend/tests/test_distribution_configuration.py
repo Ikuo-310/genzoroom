@@ -311,7 +311,7 @@ def compose(tmp_path):
     empty_env.write_text("")
 
     def config(files, **overrides):
-        env = {**os.environ, "GENZOROOM_IMAGE_TAG": "sha-" + "a" * 40 + "-run42-attempt1",
+        env = {**os.environ,
                "GENZOROOM_PERSIST_ROOT": tmp_path.as_posix(), "GENZOROOM_PORT": "",
                "IMMICH_DOCKER_NETWORK": "existing-immich", "IMMICH_URL": "http://immich:2283",
                "IMMICH_API_KEY": "test-key-not-a-real-secret", **overrides}
@@ -328,13 +328,15 @@ def resolved(result):
     return json.loads(result.stdout)
 
 
-@pytest.mark.parametrize("port", ["", "3191"])
-def test_distribution_compose_preserves_storage_security_and_explicit_image(compose, port):
-    service = resolved(compose(["compose.release.yml"], GENZOROOM_PORT=port))["services"]["genzoroom"]
+@pytest.mark.parametrize("tag,expected", [("", "latest"), ("v1.2.3", "v1.2.3")])
+@pytest.mark.parametrize("port,expected_port", [("", "3190"), ("3191", "3191")])
+def test_distribution_compose_defaults_to_latest_and_allows_release_tag(compose, tag, expected, port, expected_port):
+    service = resolved(compose(["compose.release.yml"], GENZOROOM_IMAGE_TAG=tag,
+                               GENZOROOM_PORT=port))["services"]["genzoroom"]
     assert "build" not in service
-    assert service["image"] == "ghcr.io/ikuo-310/genzoroom:sha-" + "a" * 40 + "-run42-attempt1"
+    assert service["image"] == f"ghcr.io/ikuo-310/genzoroom:{expected}"
     assert len(service["ports"]) == 1
-    assert str(service["ports"][0]["published"]) == (port or "3190")
+    assert str(service["ports"][0]["published"]) == expected_port
     assert service["ports"][0]["target"] == 3190
     assert service["restart"] == "unless-stopped"
     assert service["stop_grace_period"] == "1m15s"
@@ -343,22 +345,22 @@ def test_distribution_compose_preserves_storage_security_and_explicit_image(comp
     assert service["volumes"][0]["target"] == "/genzoroom"
     assert service["volumes"][0]["type"] == "bind"
     assert service["volumes"][0]["bind"]["create_host_path"] is False
+    assert service["networks"] == {"default": None}
     assert service["environment"] == {"IMMICH_API_KEY": "test-key-not-a-real-secret",
                                        "IMMICH_URL": "http://immich:2283"}
 
 
-def test_portainer_complete_file_matches_cli_base_and_override(compose):
+def test_optional_immich_network_override_uses_existing_external_network(compose):
     combined = resolved(compose(["compose.release.yml", "compose.release.immich-network.yml"]))
-    standalone = resolved(compose(["compose.release.immich-standalone.yml"]))
-    assert standalone == combined
+    assert set(combined["services"]["genzoroom"]["networks"]) == {"default", "immich"}
     assert combined["networks"]["immich"]["name"] == "existing-immich"
     assert combined["networks"]["immich"]["external"] is True
+    assert "outbound" not in combined["networks"]
 
 
 @pytest.mark.parametrize("variable,files", [
-    ("GENZOROOM_IMAGE_TAG", ["compose.release.yml"]),
     ("GENZOROOM_PERSIST_ROOT", ["compose.release.yml"]),
-    ("IMMICH_DOCKER_NETWORK", ["compose.release.immich-standalone.yml"]),
+    ("IMMICH_DOCKER_NETWORK", ["compose.release.yml", "compose.release.immich-network.yml"]),
 ])
 def test_distribution_compose_refuses_missing_required_values(compose, variable, files):
     result = compose(files, **{variable: ""})

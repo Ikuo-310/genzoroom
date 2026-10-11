@@ -161,7 +161,7 @@ See the [Deployment Guide](docs/deployment.md) for the necessary permissions and
 
 ## Requirements
 
-- A Docker environment supporting Docker Compose v2, or Portainer connected to Docker Standalone
+- A Docker environment supporting Docker Compose v2
 - A Linux `amd64` (x86-64) Docker host. Arm64 is not currently verified or supported.
 - An existing Immich server accessible from GenzoRoom
 - An Immich API key with the required permissions

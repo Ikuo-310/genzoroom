@@ -1,7 +1,6 @@
 services:
   genzoroom:
-    # Require an explicitly published validation or stable tag; never fall back to latest.
-    image: ghcr.io/ikuo-310/genzoroom:${GENZOROOM_IMAGE_TAG:?Set GENZOROOM_IMAGE_TAG to a published tag}
+    image: ghcr.io/ikuo-310/genzoroom:${GENZOROOM_IMAGE_TAG:-latest}
     ports:
       - "${GENZOROOM_PORT:-3190}:3190"
     volumes:
@@ -21,8 +20,3 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    networks:
-      outbound:
-
-networks:
-  outbound:

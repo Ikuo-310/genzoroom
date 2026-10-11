@@ -1,6 +1,7 @@
 services:
   genzoroom:
     networks:
+      default: {}
       immich:
 
 networks:
