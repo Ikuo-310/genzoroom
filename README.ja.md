@@ -151,10 +151,10 @@ STACKの変更や写真のゴミ箱への移動は、ユーザーが確認して
 ゴミ箱への移動はImmichの通常のゴミ箱機能を使用し、写真を完全削除するものではありません。
 
 ImmichのAPIキーには必要なアクセス権限を設定してください。  
-具体的な権限や接続設定については[導入ガイド](docs/deployment.md)を参照してください。
+具体的な権限や接続設定については[導入ガイド](docs/deployment.ja.md)を参照してください。
 
 ## 必要条件
-
+docs/deployment.ja.mdk
 - Docker Compose v2に対応したDocker環境、またはPortainer(Docker Standalone環境)
 - Linux amd64(x86-64)のDockerホスト。現在、Arm64は動作確認・サポート対象外です。
 - GenzoRoomから接続できるImmichサーバー
@@ -163,14 +163,14 @@ ImmichのAPIキーには必要なアクセス権限を設定してください�
 
 DockerイメージはGitHub Container Registry(GHCR)で公開しています。
 
-詳しい導入方法やImmich APIキーに必要な権限については、[導入ガイド](docs/deployment.md)を参照してください。
+詳しい導入方法やImmich APIキーに必要な権限については、[導入ガイド](docs/deployment.ja.md)を参照してください。
 
 ## クイックスタート
 
 GenzoRoomは単一のDockerイメージとして配布しています。ソースコードの取得やNode.js、Pythonなどの開発環境は必要ありません。
 
 1. **Immich APIキーの作成**  
-GenzoRoom専用のImmich APIキーを作成します。必要なアクセス権限は[導入ガイド](docs/deployment.md)を参照してください。
+GenzoRoom専用のImmich APIキーを作成します。必要なアクセス権限は[導入ガイド](docs/deployment.ja.md)を参照してください。
 2. **設定ファイルの準備**  
 このリポジトリから[`compose.release.yml`](compose.release.yml)と[`.env.example`](.env.example)を取得し、Immichの接続情報、使用するイメージタグ、データの保存先を設定します。  
 保存先ディレクトリには、コンテナが書き込めるよう適切な権限を設定してください。
@@ -186,12 +186,12 @@ GenzoRoom専用のImmich APIキーを作成します。必要なアクセス権�
 4. **ブラウザーからアクセス**  
 ブラウザーで `http://<ホストIP>:3190`  にアクセスします。公開ポートを変更した場合は、そのポートを指定してください。
 
-より詳しい設定方法やImmichとの接続方法は、[導入ガイド](docs/deployment.md)を参照してください。
+より詳しい設定方法やImmichとの接続方法は、[導入ガイド](docs/deployment.ja.md)を参照してください。
 
 ## アーキテクチャとドキュメント
 
 - **[アーキテクチャ](docs/architecture.md)** — GenzoRoomの技術構成と設計仕様。
-- **[導入](docs/deployment.md)** — Docker環境への導入、設定、トラブルシューティング。
+- **[導入](docs/deployment.ja.md)** — Docker環境への導入、設定、トラブルシューティング。
 - **[開発ノート（日本語）](docs/development-notes.ja.md)** — 開発履歴と設計上の判断。
 - **[導入ノート（日本語）](docs/deployment-notes.ja.md)** — 導入時の検証記録と補足情報。
 
