@@ -2,17 +2,19 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
-## Gallery「写真を再読み込み」（v0.1.2予定、2026-10-11）
+## Gallery Reload機能の完了記録（v0.1.2、2026-10-11）
 
-Gallery系4タブのToolbar左端に、Selection groupから独立したRefreshアイコンを追加した。Recent、Favorites、Album一覧／詳細、Calendar年／月／日付詳細の現在表示だけを再取得する。中央タイトル・Calendar navigationと右側controlsは既存のGrid trackとresponsive breakpointを保つ。STACK管理、Export管理、暗室は対象外。
+Immich側の変更を反映するにはブラウザー全体のReloadが必要だったが、それではGalleryの閲覧位置やSPA状態が失われるため、現在表示中のGalleryだけを再取得するmanual Reloadを追加した。対象はRecent、Favorites、Album一覧／詳細、Calendar年／月／日付詳細。Toolbar最左に日本語「リロード」／英語`Reload`を置く。shortcut explanation設定がONの場合、Tooltipとaria-labelに「写真を再読み込み [Shift+R]」／`Refresh photos [Shift+R]`を表示する。`Shift+R`で実行し、`R`はRecent、Ctrl+R／Command+Rはブラウザー標準Reloadのまま。STACK管理、出力管理、Anshitsuは対象外。
 
-`editShortcuts.ts`の`homeRefreshPhotos`にShift+Rを登録し、HomeのIME、repeat、native editing、dialog／menu、defaultPreventedのガードと共通shortcut表示helperを再利用した。R単独はRecent、Ctrl+R／Command+Rはブラウザー標準Reloadとして維持する。
+Refreshは現在のtab、Album／Calendar階層、年・月・選択日、filter、Thumbnail size、Recent表示件数、存在する写真Selection、scroll位置、他タブのSPA状態を維持する。Selectionは通常取得と同じ`retainAvailable()`で現存Assetを残す。Refresh中も正常表示済みのデータを保ち、失敗時も写真表示を可能な限り維持する。ビュー遷移用のscroll restorationは開始しない。狭幅ToolbarではReloadとSelection groupの間で折り返し、Selection groupの内容幅を保つ。
 
-取得処理は既存useEffectを各loaderのrevisionで再実行し、Favorites／Album一覧の通常cacheだけ手動Refresh時にバイパスする。同期refのoperation lock、context key、AbortControllerで重複実行と古い応答の適用を防ぐ。ビュー遷移時はReactのcommit前にoperation所有権を破棄する。正常表示中のデータはLoadingで置換せず、失敗時も保持して再試行できる。ログはoperation ID、view type、結果だけを共通loggerへ記録し、診断失敗で本処理を止めない。
+Recent、Favorites、Album一覧／詳細、Calendar heatmap／日付の既存取得経路を再利用する。manual ReloadだけFavorites／Album一覧の通常cacheをバイパスする。同期operation lockで重複実行を拒み、view context、AbortController、request／operation ownershipで古い応答を拒否する。Calendar日付詳細Reloadはday assets、minimum year、隣接日Heatmapを同一Refresh operationとして管理し、すべての取得が終わるまでbusyを維持する。Calendar Reloadは共有generationを進めて隣接日cacheを失効させるが、通常navigationではgenerationを進めない。通常の隣接日取得とmanual Reloadには別々のrequest ownerを割り当て、current ownerだけがdate候補を更新する。manual Reload開始前の通常取得はAbortし、Abortを無視する遅延応答もowner／date／generation確認で拒否する。Reload成功後・失敗後に旧取得が遅れて完了する競合を別Promiseで再現する回帰テストを追加した。
 
-取得後の写真は通常loadと同じStack snapshot更新と`retainAvailable()`を通す。存在する選択を保持し、消えたAssetだけ選択から除く。タブ、Album、Calendar階層、filter、Thumbnail size、Recent件数、他タブのSPA状態を維持する。Refresh自体は`prepareScrollTransition()`やスクロール復元を呼ばず、同じscroll ownerを残す。実ブラウザーでのカード減少時のclampはブラウザーに任せる。
+監査履歴: 初回focused auditはHigh 0／Medium 3／Low 1。MediumはCalendar親Reload後の隣接日cache失効、日付詳細Reloadの隣接Heatmap operation管理、狭幅Toolbarの折り返し不足。Lowは最終UIと文書のボタン名称・説明の不一致だった。Medium 3件の修正後の再監査では、通常の隣接日取得がmanual Reload結果を上書きするMedium 1件を追加確認した。request owner、旧取得のAbortとowner check、成功・失敗後の遅延応答テストを追加して修正した。最終focused re-auditでは前回Mediumの修正を確認し、High 0／Medium 0／Low 0、Release blockerなし。
 
-Calendarではminimum yearも更新するが、表示年／月をclampしない。日付詳細では隣接日の年別Heatmap cacheと結果revisionを無効化し、新しい写真のある日を検索する。保持している日付が新minimum yearより古くなった場合も、次の日はminimum year以降から探索する。Album詳細APIは写真配列だけを返すため、summary／Album名は一覧から取得した値を保持し、一覧Refresh後の再入場で更新する。詳細Refreshで全Album一覧を追加取得しない。
+利用者から、実ブラウザーでReloadを操作して動作上問題がないこと、ボタン表示が文字「リロード」／`Reload`であることを確認したとの報告を受けた。狭幅layoutについて全viewportの厳密な実測確認までは行っていない。
+
+検証記録: 初回実装時はFrontend 2,671 tests成功・2 skip、Backend 997 testsと322 subtests成功。focused修正段階では関連Frontend 19 files／464 tests成功、Calendar Reload最終関連テストは82 tests成功。`npx tsc --noEmit`、production build、`git diff --check`も成功した。buildには500 kB超chunkのwarningがある。
 
 ## 暗室フィルムストリップ写真除外・復帰の完了記録（2026-10-10）
 
