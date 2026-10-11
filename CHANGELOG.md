@@ -6,6 +6,8 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+- The default host port remains `3190`; the frontend container's exposed port and nginx listen port change from `8080` to `3190`. Users with custom Compose mappings must update the container target from `8080` to `3190`.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

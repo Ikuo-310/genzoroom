@@ -292,6 +292,8 @@ def test_alpha_publish_run_block_has_valid_bash_syntax(bash, tmp_path):
 
 def test_release_smoke_checks_frontend_backend_and_oci_build_identity():
     smoke = (ROOT / "release/smoke-test.sh").read_text()
+    assert "-p 127.0.0.1::3190" in smoke
+    assert 'docker port "$container" 3190/tcp' in smoke
     assert '"${GENZOROOM_CHANNEL:?Set GENZOROOM_CHANNEL}"' in smoke
     assert '"${GENZOROOM_VERSION:?Set GENZOROOM_VERSION}"' in smoke
     assert '"${GENZOROOM_COMMIT:?Set GENZOROOM_COMMIT}"' in smoke
@@ -333,7 +335,7 @@ def test_distribution_compose_preserves_storage_security_and_explicit_image(comp
     assert service["image"] == "ghcr.io/ikuo-310/genzoroom:sha-" + "a" * 40 + "-run42-attempt1"
     assert len(service["ports"]) == 1
     assert str(service["ports"][0]["published"]) == (port or "3190")
-    assert service["ports"][0]["target"] == 8080
+    assert service["ports"][0]["target"] == 3190
     assert service["restart"] == "unless-stopped"
     assert service["stop_grace_period"] == "1m15s"
     assert service["cap_drop"] == ["ALL"]

@@ -2,7 +2,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "${GENZOROOM_PORT:-3190}:8080"
+      - "${GENZOROOM_PORT:-3190}:3190"
     depends_on:
       - backend
     restart: unless-stopped

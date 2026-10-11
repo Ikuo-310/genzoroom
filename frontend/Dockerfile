@@ -9,6 +9,6 @@ FROM nginx:stable-alpine
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 USER nginx
-EXPOSE 8080
+EXPOSE 3190
 ENTRYPOINT ["nginx"]
 CMD ["-g", "daemon off;"]

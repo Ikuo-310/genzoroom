@@ -19,7 +19,7 @@ Gallery-to-Develop target selection (Phase 2) is a pure function in `galleryAsse
 ```text
 Browser: http://<HOSTNAME-OR-IP>:3190
   ↓
-Frontend: nginx on container port 8080
+Frontend: nginx on container port 3190
   ├─ /             → built React / TypeScript frontend
   ├─ /api/health         → internal Docker network
   ├─ /api/immich/status  → internal Docker network
@@ -224,7 +224,7 @@ The publishing workflow accepts only main-history commits, uses SHA/run/attempt 
 
 | Service | Container port | Host exposure | Role |
 | --- | --- | --- | --- |
-| `frontend` | `8080` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
+| `frontend` | `3190` | `${GENZOROOM_PORT:-3190}` | Static file serving and API proxying. |
 | `backend` | `8000` | None | Immich proxying and SQLite edit-state API. |
 
 Only the frontend publishes a host port. Both services join a project-scoped `api` network marked `internal: true`. The frontend also joins a `web` bridge network for its published entry point, while the backend joins a separate `outbound` bridge network for LAN, routed, and HTTPS connections. Joining `outbound` does not publish backend port 8000. The backend bind-mounts the host application parent at `/genzoroom`; no host networking, GPU, or privileged mode is used.

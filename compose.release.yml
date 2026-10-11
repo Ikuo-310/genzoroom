@@ -3,7 +3,7 @@ services:
     # Require an explicitly published validation or stable tag; never fall back to latest.
     image: ghcr.io/ikuo-310/genzoroom:${GENZOROOM_IMAGE_TAG:?Set GENZOROOM_IMAGE_TAG to a published tag}
     ports:
-      - "${GENZOROOM_PORT:-3190}:8080"
+      - "${GENZOROOM_PORT:-3190}:3190"
     volumes:
       # SQLite needs directory write access, including WAL/SHM creation.
       - type: bind

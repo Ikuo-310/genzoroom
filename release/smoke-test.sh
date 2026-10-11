@@ -20,9 +20,9 @@ trap cleanup EXIT
 
 # No Immich credentials or host user data are supplied to this disposable startup check.
 container=$(docker run -d --cap-drop ALL --security-opt no-new-privileges:true \
-  --stop-timeout 75 -p 127.0.0.1::8080 \
+  --stop-timeout 75 -p 127.0.0.1::3190 \
   --mount "type=bind,source=$storage_root,target=/genzoroom" "$IMAGE_REF")
-port=$(docker port "$container" 8080/tcp | sed 's/.*://')
+port=$(docker port "$container" 3190/tcp | sed 's/.*://')
 healthy=false
 for _ in $(seq 1 60); do
   if [[ $(curl --fail --silent --max-time 2 "http://127.0.0.1:$port/api/health" || true) == '{"status":"ok"}' ]]; then

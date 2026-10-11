@@ -3,7 +3,7 @@ services:
   genzoroom:
     image: ghcr.io/ikuo-310/genzoroom:${GENZOROOM_IMAGE_TAG:?Set GENZOROOM_IMAGE_TAG to a published tag}
     ports:
-      - "${GENZOROOM_PORT:-3190}:8080"
+      - "${GENZOROOM_PORT:-3190}:3190"
     volumes:
       - type: bind
         source: ${GENZOROOM_PERSIST_ROOT:?Set GENZOROOM_PERSIST_ROOT}

@@ -2,7 +2,7 @@
 
 This guide covers the single-container GHCR distribution for ordinary users and the separate two-container source-build workflow for development. Exact host, network, and container names depend on the deployment. Distribution images must first be published and made Public by the maintainer; this change does not publish `v0.1.0` or any other image. A formal `vMAJOR.MINOR.PATCH` tag publishes a fixed image and may advance `latest`; `latest` tracks the newest formal version, while `alpha` remains a mutable validation channel. A formal tag also creates a GitHub Release from that version's finalized CHANGELOG section after the image checks pass. See [release-validation.md](release-validation.md#maintainer-publishing-workflow).
 
-GenzoRoom exposes only nginx on container port `8080`, mapped by default to host port `3190`. nginx serves the built frontend and forwards same-origin `/api/` requests to Uvicorn: loopback `127.0.0.1:8000` in the distribution container, or the internal Docker network in development. Backend port `8000` is not published to the host, and the frontend does not receive the Immich API key.
+GenzoRoom exposes only nginx on container port `3190`, mapped by default to host port `3190`. nginx serves the built frontend and forwards same-origin `/api/` requests to Uvicorn: loopback `127.0.0.1:8000` in the distribution container, or the internal Docker network in development. Backend port `8000` is not published to the host, and the frontend does not receive the Immich API key.
 
 ## Requirements
 
@@ -274,7 +274,7 @@ To check failure recovery, stop the backend, use **Check again** in the UI, rest
 
 ## Security and host isolation
 
-- Only nginx port `8080` is published. Backend `8000` is loopback in distribution or on the internal Docker network in development.
+- Only nginx port `3190` is published. Backend `8000` is loopback in distribution or on the internal Docker network in development.
 - The Immich API key is supplied only to the backend and must not be stored in the repository.
 - The development same-host override attaches only Backend to Immich. Distribution attaches the combined nginx/Backend container; both processes share that network namespace, while Uvicorn still binds only loopback.
 - Both containers run as non-root users, drop Linux capabilities, and disable privilege escalation.
