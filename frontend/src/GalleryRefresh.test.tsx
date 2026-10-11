@@ -215,6 +215,87 @@ describe('Gallery manual refresh', () => {
     expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(false);
   });
 
+  it.each([
+    ['previous', '2026-09-02'],
+    ['next', '2026-09-04'],
+  ] as const)('keeps the manual Reload %s candidate when an older ordinary Heatmap completes last', async (direction, expectedDate) => {
+    const ordinary = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const manual = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const original = api.heatmap.getMockImplementation()!;
+    let annualRequest = 0;
+    api.heatmap.mockImplementation((year, month, signal) => {
+      if (month !== null) return original(year, month, signal);
+      annualRequest += 1;
+      return annualRequest === 1 ? ordinary.promise : manual.promise;
+    });
+    await mount(); await click('#home-calendar-tab'); await click('[aria-label^="2026-09-03,"]');
+    expect(annualRequest).toBe(1);
+
+    await click('.gallery-refresh');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(annualRequest).toBe(2);
+    expect(refreshButton().disabled).toBe(true);
+
+    await act(async () => {
+      manual.resolve({ year: 2026, month: null, days: [
+        { date: '2026-09-02', hasAssets: true, count: 1 }, { date: '2026-09-03', hasAssets: true, count: 1 },
+        { date: '2026-09-04', hasAssets: true, count: 1 },
+      ] });
+      await manual.promise;
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(refreshButton().disabled).toBe(false);
+    const selector = `.calendar-detail-${direction}`;
+    expect(host.querySelector<HTMLButtonElement>(selector)?.disabled).toBe(false);
+
+    await act(async () => {
+      ordinary.resolve({ year: 2026, month: null, days: [
+        { date: '2026-09-01', hasAssets: true, count: 1 }, { date: '2026-09-03', hasAssets: true, count: 1 },
+        { date: '2026-09-05', hasAssets: true, count: 1 },
+      ] });
+      await ordinary.promise;
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLButtonElement>(selector)?.disabled).toBe(false);
+    await click(selector);
+    expect(api.day).toHaveBeenLastCalledWith(expectedDate, expect.any(AbortSignal));
+  });
+
+  it('does not restore ordinary candidates when a manual Reload fails before the old request completes', async () => {
+    const ordinary = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const manual = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
+    const original = api.heatmap.getMockImplementation()!;
+    let annualRequest = 0;
+    api.heatmap.mockImplementation((year, month, signal) => {
+      if (month !== null) return original(year, month, signal);
+      annualRequest += 1;
+      return annualRequest === 1 ? ordinary.promise : manual.promise;
+    });
+    await mount(); await click('#home-calendar-tab'); await click('[aria-label^="2026-09-03,"]');
+    await click('.gallery-refresh');
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(annualRequest).toBe(2);
+
+    await act(async () => {
+      manual.reject(new Error('Latest Heatmap unavailable'));
+      await manual.promise.catch(() => {});
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(refreshButton().disabled).toBe(false);
+    expect(host.textContent).toContain('Could not refresh photos');
+
+    await act(async () => {
+      ordinary.resolve({ year: 2026, month: null, days: [
+        { date: '2026-09-01', hasAssets: true, count: 1 }, { date: '2026-09-03', hasAssets: true, count: 1 },
+        { date: '2026-09-05', hasAssets: true, count: 1 },
+      ] });
+      await ordinary.promise;
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-previous')?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('.calendar-detail-next')?.disabled).toBe(true);
+  });
+
   it('reports adjacent Heatmap failure and clears old candidates while retaining day photos', async () => {
     await mount(); await openView('calendar-day');
     const before = filenames();
@@ -231,7 +312,11 @@ describe('Gallery manual refresh', () => {
     await mount(); await openView('calendar-day');
     const pending = deferred<{ year: number; month: null; days: { date: string; hasAssets: boolean; count: number }[] }>();
     const original = api.heatmap.getMockImplementation()!;
-    api.heatmap.mockImplementation((year, month, signal) => month === null ? pending.promise : original(year, month, signal));
+    let delayedRequestUsed = false;
+    api.heatmap.mockImplementation((year, month, signal) => {
+      if (month === null && !delayedRequestUsed) { delayedRequestUsed = true; return pending.promise; }
+      return original(year, month, signal);
+    });
     await click('.gallery-refresh');
     const signal = api.heatmap.mock.calls.at(-1)!.at(-1) as AbortSignal;
     await click('.album-back');

@@ -3,13 +3,19 @@ import { fetchCalendarHeatmap } from './api';
 
 type AdjacentDates = { previous: string | null; next: string | null };
 type AdjacentResult = AdjacentDates & { date: string | null; revision: number };
+type AdjacentRequestOwner = { date: string; revision: number; id: number; controller: AbortController; active: boolean };
 
 export function useAdjacentCalendarDates(date: string | null, minYear: number, maxYear: number, refreshRevision = 0) {
   const years = useRef(new Map<number, string[]>());
   const cacheRevision = useRef(refreshRevision);
   const manualRefreshContext = useRef<{ date: string; revision: number; minYear: number } | null>(null);
   const latestDate = useRef(date);
+  const latestRevision = useRef(refreshRevision);
+  const requestId = useRef(0);
+  // Abort is best effort; owner identity also rejects late responses from transports that ignore it.
+  const requestOwner = useRef<AdjacentRequestOwner | null>(null);
   latestDate.current = date;
+  latestRevision.current = refreshRevision;
   const [result, setResult] = useState<AdjacentResult>({ date: null, revision: refreshRevision, previous: null, next: null });
 
   useEffect(() => {
@@ -65,10 +71,28 @@ export function useAdjacentCalendarDates(date: string | null, minYear: number, m
     manualRefreshContext.current = { date: selectedDate, revision, minYear: refreshedMinYear };
     cacheRevision.current = revision;
     years.current.clear();
+    const previousOwner = requestOwner.current;
+    if (previousOwner) {
+      previousOwner.active = false;
+      previousOwner.controller.abort();
+    }
+    const controller = new AbortController();
+    const abortManualRequest = () => controller.abort();
+    signal.addEventListener('abort', abortManualRequest, { once: true });
+    if (signal.aborted) controller.abort();
+    const owner: AdjacentRequestOwner = { date: selectedDate, revision, id: ++requestId.current, controller, active: true };
+    requestOwner.current = owner;
+    const ownsRequest = () => requestOwner.current?.id === owner.id && owner.active && !controller.signal.aborted
+      && !signal.aborted && latestDate.current === selectedDate && latestRevision.current === revision;
     setResult({ date: selectedDate, revision, previous: null, next: null });
-    const result = await loadAdjacent(selectedDate, Number(selectedDate.slice(0, 4)), refreshedMinYear, maxYear,
-      signal, years.current, () => latestDate.current === selectedDate);
-    if (!signal.aborted && latestDate.current === selectedDate) setResult({ date: selectedDate, revision, ...result });
+    try {
+      const result = await loadAdjacent(selectedDate, Number(selectedDate.slice(0, 4)), refreshedMinYear, maxYear,
+        controller.signal, years.current, ownsRequest);
+      if (ownsRequest()) setResult({ date: selectedDate, revision, ...result });
+    } finally {
+      signal.removeEventListener('abort', abortManualRequest);
+      if (requestOwner.current === owner) owner.active = false;
+    }
   }, [loadAdjacent, maxYear]);
 
   useEffect(() => {
@@ -79,18 +103,25 @@ export function useAdjacentCalendarDates(date: string | null, minYear: number, m
     const selectedDate = date;
     const revision = refreshRevision;
     const controller = new AbortController();
-    let active = true;
+    const owner: AdjacentRequestOwner = { date: selectedDate, revision, id: ++requestId.current, controller, active: true };
+    requestOwner.current = owner;
+    const ownsRequest = () => requestOwner.current?.id === owner.id && owner.active && !controller.signal.aborted
+      && latestDate.current === selectedDate && latestRevision.current === revision && cacheRevision.current === revision;
     setResult({ date, revision, previous: null, next: null });
     void loadAdjacent(selectedDate, Number(selectedDate.slice(0, 4)), minYear, maxYear, controller.signal,
-      years.current, () => active && latestDate.current === selectedDate && cacheRevision.current === revision,
-      (direction, candidate) => setResult(current => current.date === selectedDate && current.revision === revision
+      years.current, ownsRequest,
+      (direction, candidate) => setResult(current => ownsRequest() && current.date === selectedDate && current.revision === revision
         ? { ...current, [direction]: candidate } : current))
       .then(adjacent => {
-        if (active) setResult({ date: selectedDate, revision, ...adjacent });
+        if (ownsRequest()) setResult({ date: selectedDate, revision, ...adjacent });
       }).catch(() => {
         // Ordinary navigation keeps the existing unavailable-candidate behavior on a failed lookup.
       });
-    return () => { active = false; controller.abort(); };
+    return () => {
+      owner.active = false;
+      controller.abort();
+      if (requestOwner.current === owner) requestOwner.current = null;
+    };
   }, [date, minYear, maxYear, loadAdjacent]);
 
   // Render-time ownership prevents old candidates from being actionable before effect cleanup runs.
