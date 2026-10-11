@@ -6,10 +6,16 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-11
+
+### Changed
+
+- Made the Settings dialog more compact, grouped connection details by GenzoRoom and Immich, and unified the WebGPU ON/OFF switch and status display.
+
 ### Fixed
 
 - Export management no longer fails as a whole when Immich cannot provide details for queued photos. Only available photos are shown and can be managed, so unavailable failed photos do not block exports of available photos. Queue records remain intact, and photos reappear with their original Queue state when details become available after re-entering the tab.
-- Made the Settings dialog more compact, grouped connection details by GenzoRoom and Immich, and aligned the WebGPU status beside its label with the shared ON/OFF switch.
+- Fixed Export for JPEG images recognized as MPO by using the first frame.
 
 ## [0.1.2] - 2026-10-11
 

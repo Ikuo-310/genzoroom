@@ -2,6 +2,38 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## MPO形式JPEGのExport対応完了（v0.1.3、2026-10-11）
+
+### 発生状況
+
+古いデジタルカメラで撮影されたJPEG画像が、暗室では表示・色編集できる一方、Exportでは`not_jpeg`で失敗した。構造化JSONログの比較では、ImmichからのAsset詳細取得とoriginal取得は成功し、Exportはencoding段階で停止していた。暗室にはブラウザーの画像デコーダーを使う経路があり、ExportはBackendのPillowを使うため、形式判定が異なる。暗室ログには実際にoriginalとpreviewのどちらを使用したかが記録されておらず、編集元は確定していない。
+
+### 原因調査
+
+提供された元画像をPillow 12.3.0で検証すると、通常のJPEGではなく2フレームを持つ有効なMPO形式として認識された。現行codecへ入力するとExportログと同じ`not_jpeg`を再現した。修正前の`decode_jpeg()`は`image.format == "JPEG"`だけを許可し、画素デコード前にMPOを拒否していた。この形式判定が直接原因であり、ROマウントによる書き込み失敗ではなかった。
+
+### 修正内容
+
+- `backend/jpeg_codec.py`でPillowが認識する`JPEG`と有効な`MPO`を許可し、`decode_jpeg()`と`inspect_jpeg_source()`の判定を統一。MPOではフレーム0を明示的に選択する。
+- 既存の画像サイズ制限、ICC検証、EXIF方向補正、色空間処理を維持。JPEG以外の形式と破損した主フレームは引き続き拒否する。
+- 出力は追加フレームやMPF情報を含まない単一のsRGB JPEGとし、元画像のバイト列は変更しない。元写真はリポジトリのテストfixtureに追加していない。
+
+### 検証・監査
+
+**実ファイルによる検証**では、従来の`not_jpeg`を再現し、修正後に第一フレームをデコードした。入力バイト列の不変性を確認し、3648×2736の単一sRGB JPEGを生成してMPF情報が含まれないことを確認した。
+
+**NAS / Immich実機確認**は利用者が実際の写真で行い、Export成功、出力JPEGのImmich書き込み可能な管理ライブラリへの登録、RO外部ライブラリの元画像とのStack構築成功を確認した。これは利用者による確認であり、Codexが実機操作したものではない。
+
+**初回完成監査**の全テストはFrontend 2,691 passed / 2 skipped、Backend 1,002 passed / 322 subtests passed。Frontend typecheckとproduction build、Backend `compileall`、`git diff --check`も成功した。監査FindingはHigh 0 / Medium 0 / Low 1。LowはMPO fixtureの2フレームが同じ寸法で、`inspect_jpeg_source()`による第二フレーム誤選択を検出できない点だった。
+
+Low修正ではfixtureを第一フレーム11×7、第二フレーム5×3に分け、寸法assertを追加した。Focused Testsは13 passed / 19 subtests passed。第二フレームを選択する仮の誤実装で寸法assertが失敗することも確認し、指摘を解消した。修正範囲はテストfixtureのみでcodec本体は変更しておらず、この修正後に全テストは再実行していない。
+
+Windows sandboxでのイベントループ初期化停止は、制限外実行で正常完走し、今回のMPO修正が原因ではないことを確認した。FrontendにはReact `act()`等の警告、buildには既存の500 kB超チャンク警告があった。実WebGPU環境を必要とする比較テスト2件はskipされた。
+
+### RO外部ライブラリ
+
+今回のExport失敗原因はMPO形式の判定であり、ROマウントではなかった。利用者による修正後のNAS / Immich実機確認では、RO外部ライブラリを出力元としても、現行の登録処理でJPEGをImmich管理ライブラリへ登録し、元AssetとのStack構築が成立した。元ライブラリへの書き込みや外部ライブラリ専用の新規実装は必要なかった。
+
 ## 出力管理の取得不能Asset除外・監査修正完了（2026-10-11）
 
 ### 発生状況

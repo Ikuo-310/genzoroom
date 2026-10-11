@@ -53,7 +53,7 @@ def jpeg(*, mode="RGB", profile=None, orientation=None):
 def mpo():
     output = BytesIO()
     with Image.new("RGB", (11, 7), (180, 40, 80)) as primary, \
-            Image.new("RGB", (11, 7), (10, 30, 220)) as companion:
+            Image.new("RGB", (5, 3), (10, 30, 220)) as companion:
         primary.putpixel((0, 0), (0, 255, 0))
         primary.save(output, "MPO", save_all=True, append_images=[companion], quality=95, subsampling=0)
     return output.getvalue()
@@ -118,10 +118,12 @@ class JpegCodecTests(unittest.TestCase):
             self.assertEqual(image.format, "MPO")
             self.assertEqual(image.n_frames, 2)
             image.seek(0)
+            self.assertEqual(image.size, (11, 7))
             expected = image.convert("RGB")
             with expected:
                 expected_pixels = expected.tobytes()
             image.seek(1)
+            self.assertEqual(image.size, (5, 3))
             companion = image.convert("RGB")
             with companion:
                 companion_pixels = companion.tobytes()
