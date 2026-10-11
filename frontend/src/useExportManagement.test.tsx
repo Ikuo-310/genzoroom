@@ -26,6 +26,57 @@ beforeEach(() => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+it('preserves one-shot Arm Undo when invoked during metadata refetch', async () => {
+  const fetchDetail = api.detail.getMockImplementation()!;
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a')); await act(async () => current.toggleArmed());
+  await render(queue.items, false);
+  let finish!: () => void;
+  api.detail.mockImplementation((id: string) => new Promise(resolve => { finish = () => resolve(fetchDetail(id)); }));
+  await render(queue.items, true);
+  expect(current.message).toBe('metadataLoading'); expect(current.undo()).toBe(false);
+  expect([...current.armedIds]).toEqual(['a']);
+  await act(async () => finish());
+  expect(current.selectedIds).toEqual(['a']);
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect(current.armedIds.size).toBe(0); expect(current.undo()).toBe(false);
+});
+it('retains selection, Arm and Undo across Stack failure while blocking operations until recovery', async () => {
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = vi.fn(); queue.retry = vi.fn();
+  await render([item('a')]);
+  await act(async () => current.selectOnly('a')); await act(async () => current.toggleArmed());
+  await render(queue.items, false); api.stacks.mockRejectedValue(new Error('Stack refresh failed'));
+  await render(queue.items, true);
+  expect(current.message).toBe('metadataLoadFailed'); expect([...current.armedIds]).toEqual(['a']);
+  expect(current.selectedIds).toEqual([]); expect(current.selectAll()).toBe(false);
+  expect(current.toggleArmed()).toBe(false); expect(current.removeSelected()).toBe(false);
+  expect(current.requestStart()).toBe(false); expect(current.requestRetryFailed()).toBe(false);
+  expect(current.undo()).toBe(false);
+  expect(queue.enqueue).not.toHaveBeenCalled(); expect(queue.dequeue).not.toHaveBeenCalled();
+  expect(queue.startRuntime).not.toHaveBeenCalled(); expect(queue.retry).not.toHaveBeenCalled();
+  await render(queue.items, false); api.stacks.mockResolvedValue([]); await render(queue.items, true);
+  expect(current.message).toBeNull(); expect(current.selectedIds).toEqual(['a']);
+  expect([...current.armedIds]).toEqual(['a']); expect(current.canStart).toBe(true);
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect(current.armedIds.size).toBe(0); expect(current.undo()).toBe(false);
+});
+it('limits retained state and Arm Undo to successful details after partial refetch failure', async () => {
+  const fetchDetail = api.detail.getMockImplementation()!;
+  await render([item('a'), item('b')]);
+  await act(async () => current.selectAll()); await act(async () => current.toggleArmed());
+  await act(async () => current.toggleArmed());
+  await render(queue.items, false);
+  api.detail.mockImplementation((id: string) => id === 'a' ? Promise.reject(new Error('HTTP 400')) : fetchDetail(id));
+  await render(queue.items, true);
+  expect(current.message).toBeNull(); expect(current.selectedIds).toEqual(['b']);
+  await act(async () => { current.selectOnly('a'); current.toggleSelection('a'); current.extendRange('a'); });
+  expect(current.selectedIds).toEqual(['b']);
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect([...current.armedIds]).toEqual(['b']); expect(current.undo()).toBe(false);
+  expect(queue.items).toEqual([item('a'), item('b')]);
+  expect(queue.enqueue).not.toHaveBeenCalled(); expect(queue.dequeue).not.toHaveBeenCalled();
+});
 it('treats hidden failed items as empty without changing persistent Queue records', async () => {
   const original = [item('hidden', 'failed')];
   api.detail.mockRejectedValue(new Error('HTTP 400'));

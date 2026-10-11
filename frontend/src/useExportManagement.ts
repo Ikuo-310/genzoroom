@@ -68,17 +68,16 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const retryRunActive = !!retryRunId && (queue.runtime == null
     || queue.runtime.status === 'active' && queue.runtime.runId === retryRunId);
   const retryPriority = failedIds.length > 0 || confirmation?.kind === 'retry' || retryStarting || retryRunActive || retryStartUncertain;
-  // Preserve local intent during refetch; only a completed result can establish unavailable IDs.
-  const retainedItems = metadata.status === 'loading' ? items : visibleItems;
+  // A Stack resolution error cannot establish which Asset details are unavailable.
+  const retainedItems = metadata.status === 'ready' ? visibleItems : items;
   const armedAvailableIds = retainedItems.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
   const armedAvailableKey = JSON.stringify(armedAvailableIds);
   const mutableIds = visibleItems.filter(item => retryPriority ? item.status === 'failed' : isMutableExportStatus(item.status))
     .map(item => item.assetId.toLowerCase());
   const mutableKey = JSON.stringify(mutableIds);
   useEffect(() => {
-    const available = new Set<string>(JSON.parse(mutableKey));
     const armedAvailable = new Set<string>(JSON.parse(armedAvailableKey));
-    if (metadata.status !== 'loading') selection.retainAvailable(available);
+    selection.retainAvailable(metadata.status === 'ready' ? new Set<string>(JSON.parse(mutableKey)) : armedAvailable);
     setArmedIds(previous => {
       const next = new Set([...previous].filter(id => armedAvailable.has(id)));
       return next.size === previous.size ? previous : next;
@@ -268,6 +267,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     if (record.kind === 'queueRemoval' && !queueRef.current.canonical) return false;
     const currentItems = queueRef.current.items;
     if (record.kind === 'armed') {
+      // Refetch and Stack errors must not consume an intent before visible targets are known.
+      if (metadata.status !== 'ready') return false;
       const valid = record.changes.filter(change => assetsById.has(change.assetId) && isMutableExportStatus(
         currentItems.find(item => item.assetId.toLowerCase() === change.assetId)?.status,
       ) && !queueRef.current.mutationFor(change.assetId).operation);
