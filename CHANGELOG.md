@@ -9,6 +9,7 @@ Internal changes are omitted unless they affect users.
 ### Fixed
 
 - Export management no longer fails as a whole when Immich cannot provide details for queued photos. Only available photos are shown and can be managed, so unavailable failed photos do not block exports of available photos. Queue records remain intact, and photos reappear with their original Queue state when details become available after re-entering the tab.
+- Made the Settings dialog more compact, grouped connection details by GenzoRoom and Immich, and aligned the WebGPU status beside its label with the shared ON/OFF switch.
 
 ## [0.1.2] - 2026-10-11
 
