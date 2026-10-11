@@ -12,9 +12,9 @@ import pytest
 
 import export_engine_diagnostics as engine
 from backend_logging import backend_logger
-from jpeg_codec import JpegCodecError
+from jpeg_codec import JpegCodecError, decode_jpeg
 from main import app
-from tests.test_jpeg_codec import jpeg
+from tests.test_jpeg_codec import jpeg, mpo
 from tests.test_jpeg_renderer import recipe
 
 ASSET = UUID("12345678-1234-4234-9234-123456789abc")
@@ -100,6 +100,25 @@ def test_reuses_engine_saved_recipe_and_worker_with_private_jpeg_response(setup)
     assert saved == before
     with Image.open(BytesIO(response.content)) as output:
         assert output.size == (7, 11) and "icc_profile" in output.info
+
+
+def test_export_engine_diagnostics_accept_mpo_and_use_only_primary_frame():
+    source = bytearray(mpo())
+    original = bytes(source)
+    output, metadata = engine.generate_diagnostic(source, recipe(exposure=0.5))
+    assert source == bytearray()
+    assert metadata["sourceWidth"] == 11 and metadata["sourceHeight"] == 7
+    assert metadata["outputWidth"] == 11 and metadata["outputHeight"] == 7
+    with Image.open(BytesIO(output)) as image:
+        image.load()
+        assert image.format == "JPEG" and getattr(image, "n_frames", 1) == 1
+        assert image.size == (11, 7)
+
+    source = bytearray(original)
+    pixels, decode_metadata = engine.decode_diagnostic(source)
+    assert source == bytearray()
+    assert decode_metadata["width"] == 11 and decode_metadata["height"] == 7
+    assert pixels == decode_jpeg(original).pixels
 
 
 @pytest.mark.parametrize("body", [{**BODY, "recipe": {"PRIVATE": "secret"}}, {**BODY, "assetId": "PRIVATE_BAD_ID"},

@@ -33,8 +33,11 @@ def inspect_jpeg_source(source: bytes) -> dict:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(BytesIO(source)) as image:
-                if image.format != "JPEG":
+                if image.format not in ("JPEG", "MPO"):
                     raise JpegCodecError("not_jpeg")
+                if image.format == "MPO":
+                    # Companion frames are not separate edit targets; use the primary photograph.
+                    image.seek(0)
                 return {"sourceWidth": image.width, "sourceHeight": image.height,
                         "sourceIcc": "embedded" if "icc_profile" in image.info else "absent"}
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
@@ -49,8 +52,11 @@ def decode_jpeg(source: bytes) -> RenderedImage:
             # Resource-limit warnings are failures here, never implicit partial decodes.
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(BytesIO(source)) as image:
-                if image.format != "JPEG":
+                if image.format not in ("JPEG", "MPO"):
                     raise JpegCodecError("not_jpeg")
+                if image.format == "MPO":
+                    # Companion frames are not separate edit targets; use the primary photograph.
+                    image.seek(0)
                 image.load()
                 profile = image.info.get("icc_profile")
                 # A present but empty ICC marker is not equivalent to an untagged JPEG.

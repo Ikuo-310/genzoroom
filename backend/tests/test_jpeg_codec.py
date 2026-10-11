@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from PIL import Image, ImageCms, JpegImagePlugin
 
-from jpeg_codec import JpegCodecError, decode_jpeg, encode_jpeg
+from jpeg_codec import JpegCodecError, decode_jpeg, encode_jpeg, inspect_jpeg_source
 from rendered_image import RenderedImage
 from jpeg_renderer import JpegRenderer
 from tests.test_jpeg_renderer import recipe
@@ -47,6 +47,15 @@ def jpeg(*, mode="RGB", profile=None, orientation=None):
             exif[274] = orientation
             options["exif"] = exif
         image.save(output, "JPEG", **options)
+    return output.getvalue()
+
+
+def mpo():
+    output = BytesIO()
+    with Image.new("RGB", (11, 7), (180, 40, 80)) as primary, \
+            Image.new("RGB", (11, 7), (10, 30, 220)) as companion:
+        primary.putpixel((0, 0), (0, 255, 0))
+        primary.save(output, "MPO", save_all=True, append_images=[companion], quality=95, subsampling=0)
     return output.getvalue()
 
 
@@ -101,6 +110,42 @@ class JpegCodecTests(unittest.TestCase):
         for data in (b"", b"not an image", b"\xff\xd8garbage", jpeg()[:-20], png.getvalue()):
             with self.subTest(size=len(data)), self.assertRaises(JpegCodecError):
                 decode_jpeg(data)
+
+    def test_valid_mpo_inspection_and_decode_use_only_primary_frame(self):
+        source = bytearray(mpo())
+        original = bytes(source)
+        with Image.open(BytesIO(original)) as image:
+            self.assertEqual(image.format, "MPO")
+            self.assertEqual(image.n_frames, 2)
+            image.seek(0)
+            expected = image.convert("RGB")
+            with expected:
+                expected_pixels = expected.tobytes()
+            image.seek(1)
+            companion = image.convert("RGB")
+            with companion:
+                companion_pixels = companion.tobytes()
+
+        metadata = inspect_jpeg_source(source)
+        self.assertEqual(metadata["sourceWidth"], 11)
+        self.assertEqual(metadata["sourceHeight"], 7)
+        result = decode_jpeg(source)
+        self.assertEqual((result.width, result.height), (11, 7))
+        self.assertEqual(result.pixels, expected_pixels)
+        self.assertNotEqual(result.pixels, companion_pixels)
+        self.assertEqual(bytes(source), original)
+
+    def test_corrupt_primary_frame_in_recognized_mpo_is_rejected(self):
+        source = mpo()
+        with Image.open(BytesIO(source)) as image:
+            self.assertEqual(image.format, "MPO")
+            primary_size = image.mpinfo[0xB002][0]["Size"]
+        corrupted = source[:primary_size - 10] + source[primary_size:]
+        with Image.open(BytesIO(corrupted)) as image:
+            self.assertEqual(image.format, "MPO")
+        with self.assertRaises(JpegCodecError) as raised:
+            decode_jpeg(corrupted)
+        self.assertEqual(raised.exception.code, "invalid_jpeg")
 
     def test_invalid_and_unusable_profiles_fail(self):
         lab = ImageCms.ImageCmsProfile(ImageCms.createProfile("LAB")).tobytes()

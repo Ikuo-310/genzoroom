@@ -12,7 +12,7 @@ from export_artifact import create_export_artifact, filename_family, next_export
 from jpeg_codec import JpegCodecError, decode_jpeg, encode_jpeg
 from jpeg_metadata import DC, RDF, XMP, MAX_TEXT_BYTES, MAX_EXIF_BYTES, MAX_XMP_BYTES, _preserve_exif
 from rendered_image import RenderedImage
-from tests.test_jpeg_codec import swapped_primaries_profile
+from tests.test_jpeg_codec import mpo, swapped_primaries_profile
 
 
 B, G = ExifTags.Base, ExifTags.GPS
@@ -80,6 +80,19 @@ class FilenameTests(unittest.TestCase):
 
 
 class MetadataTests(unittest.TestCase):
+    def test_valid_mpo_creates_a_single_jpeg_artifact_from_its_primary_frame(self):
+        source = mpo()
+        rendered = decode_jpeg(source)
+        result = create_export_artifact(source, "DSC01421.JPG", [], rendered, timestamp=STAMP)
+
+        with Image.open(BytesIO(result.jpeg)) as image:
+            image.load()
+            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(getattr(image, "n_frames", 1), 1)
+            self.assertEqual(image.size, (rendered.width, rendered.height))
+            self.assertIn("icc_profile", image.info)
+        self.assertNotIn(b"MPF\x00", result.jpeg)
+
     def test_preserve_capture_camera_lens_exposure_user_and_gps(self):
         exif = Image.Exif()
         root = {B.Make: "Camera", B.Model: "Model", B.Artist: "Author",
