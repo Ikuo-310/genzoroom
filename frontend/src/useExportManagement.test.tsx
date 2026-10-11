@@ -26,6 +26,66 @@ beforeEach(() => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+it('treats hidden failed items as empty without changing persistent Queue records', async () => {
+  const original = [item('hidden', 'failed')];
+  api.detail.mockRejectedValue(new Error('HTTP 400'));
+  await render(original);
+  expect(current.message).toBe('empty'); expect(current.rows).toEqual([]);
+  expect(current.failedIds).toEqual([]); expect(current.retryPriority).toBe(false);
+  await act(async () => { current.selectOnly('hidden'); current.toggleSelection('hidden'); current.extendRange('hidden'); });
+  expect(current.selectedIds).toEqual([]); expect(current.selectAll()).toBe(false);
+  expect(current.toggleArmed()).toBe(false); expect(current.removeSelected()).toBe(false);
+  expect(current.requestRetryFailed()).toBe(false); expect(current.requestStart()).toBe(false);
+  expect(queue.items).toEqual(original);
+  expect(queue.enqueue).not.toHaveBeenCalled(); expect(queue.dequeue).not.toHaveBeenCalled();
+  expect(queue.refresh).not.toHaveBeenCalled();
+});
+it('starts visible queued items despite hidden failures and excludes hidden queued items from selection and removal', async () => {
+  const fetchDetail = api.detail.getMockImplementation()!;
+  api.detail.mockImplementation((id: string) => id.startsWith('hidden') ? Promise.reject(new Error('HTTP 400')) : fetchDetail(id));
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = vi.fn().mockResolvedValue(undefined); queue.retry = vi.fn();
+  const original = [item('hidden-failed', 'failed'), item('b'), item('hidden-queued'), item('a')];
+  await render(original);
+  expect(current.failedIds).toEqual([]); expect(current.retryPriority).toBe(false); expect(current.message).toBeNull();
+  await act(async () => current.selectAll()); expect(current.selectedIds).toEqual(['b', 'a']);
+  await act(async () => current.toggleArmed()); expect([...current.armedIds]).toEqual(['b', 'a']);
+  expect(current.canStart).toBe(true);
+  await act(async () => current.requestStart()); expect(current.confirmation).toEqual({ kind: 'start', assetIds: ['b', 'a'] });
+  await settle(() => current.confirmExport()); expect(queue.startRuntime).toHaveBeenCalledWith(['b', 'a']);
+  expect(queue.retry).not.toHaveBeenCalled();
+  await settle(() => current.removeSelected());
+  expect(vi.mocked(queue.dequeue).mock.calls).toEqual([['b'], ['a']]); expect(queue.items).toEqual(original);
+});
+it('retries only visible failed items and retains their priority over visible queued items', async () => {
+  const fetchDetail = api.detail.getMockImplementation()!;
+  api.detail.mockImplementation((id: string) => id === 'hidden' ? Promise.reject(new Error('HTTP 400')) : fetchDetail(id));
+  queue.runtime = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null };
+  queue.startRuntime = vi.fn().mockResolvedValue(undefined); queue.retry = vi.fn();
+  await render([item('hidden', 'failed'), item('queued'), item('b', 'failed'), item('a', 'failed')]);
+  expect(current.retryPriority).toBe(true); expect(current.failedIds).toEqual(['b', 'a']);
+  await act(async () => current.selectAll()); expect(current.selectedIds).toEqual(['b', 'a']);
+  await act(async () => current.requestRetryFailed()); expect(current.confirmation).toEqual({ kind: 'retry', assetIds: ['b', 'a'] });
+  await settle(() => current.confirmExport());
+  expect(queue.retry).toHaveBeenCalledWith(['b', 'a']); expect(queue.startRuntime).toHaveBeenCalledWith(['b', 'a']);
+});
+it('refetches on tab reentry, prunes unavailable local intent and Undo, and restores original Queue status on recovery', async () => {
+  const original = [item('a', 'failed')];
+  const fetchDetail = api.detail.getMockImplementation()!;
+  await render(original); await act(async () => current.selectOnly('a')); await act(async () => current.toggleArmed());
+  await act(async () => current.toggleArmed());
+  await render(original, false);
+  let reject!: (error: Error) => void;
+  api.detail.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+  await render(original, true);
+  expect(current.selectedIds).toEqual([]); expect(current.requestRetryFailed()).toBe(false);
+  await act(async () => reject(new Error('HTTP 400')));
+  expect(current.message).toBe('empty'); expect(current.armedIds.size).toBe(0); expect(current.undo()).toBe(false);
+  expect(queue.items).toEqual(original); expect(queue.enqueue).not.toHaveBeenCalled(); expect(queue.dequeue).not.toHaveBeenCalled();
+  await render(original, false); api.detail.mockImplementation(fetchDetail); await render(original, true);
+  expect(api.detail).toHaveBeenCalledTimes(3); expect(current.message).toBeNull();
+  expect(current.failedIds).toEqual(['a']); expect(current.retryPriority).toBe(true); expect(queue.items).toEqual(original);
+});
 it('confirms and retries every failed item in Queue order, then starts exactly those IDs without replacing W Undo', async () => {
   const starts = vi.fn(async (ids: readonly string[]) => ({ runId: 'run', status: 'active' as const,
     stopRequested: false, stopAllowed: true, currentAssetId: ids[0] }));

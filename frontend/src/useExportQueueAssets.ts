@@ -30,7 +30,7 @@ export function useExportQueueAssets(items: readonly ExportQueueItem[], loaded: 
     }
     setSnapshot({ key: idsKey, status: 'loading', assets: [] });
     log({ level: 'debug', event: 'resolve.started', context: { generation, count: ids.length, concurrency: DETAIL_CONCURRENCY } });
-    const assets = new Array<RecentAsset>(ids.length);
+    const assets = new Array<RecentAsset | undefined>(ids.length);
     let nextIndex = 0;
     let failureCount = 0;
     const worker = async () => {
@@ -63,12 +63,12 @@ export function useExportQueueAssets(items: readonly ExportQueueItem[], loaded: 
       const stackByMemberId = new Map(stacks.flatMap(stack => stack.assets.map(member => [member.id.toLowerCase(), {
         stackId: stack.id, primaryAssetId: stack.primaryAssetId, stackAssetCount: stack.assets.length,
       }] as const)));
-      const joinedAssets = assets.map(asset => {
+      const joinedAssets = assets.filter((asset): asset is RecentAsset => asset !== undefined).map(asset => {
         const membership = stackByMemberId.get(asset.id.toLowerCase());
         return membership ? { ...asset, ...membership } : asset;
       });
-      setSnapshot({ key: idsKey, status: failureCount ? 'error' : 'ready', assets: failureCount ? [] : joinedAssets });
-      log({ level: failureCount ? 'error' : 'info', event: failureCount ? 'resolve.failed' : 'resolve.completed',
+      setSnapshot({ key: idsKey, status: 'ready', assets: joinedAssets });
+      log({ level: failureCount ? 'warn' : 'info', event: 'resolve.completed',
         context: { generation, count: ids.length, failureCount } });
     }).catch(error => {
       if (!isCurrent()) return;

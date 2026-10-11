@@ -89,11 +89,25 @@ it('aborts unmount and does not start remaining workers', async () => {
   await act(async () => requests.forEach(p => p.resolve(detail(p.id)))); expect(api.fetchDetail).toHaveBeenCalledTimes(4);
   root = createRoot(host);
 });
-it.each(['failure', 'mismatch'])('shows explicit metadata error for %s without silently dropping items', async kind => {
+it.each(['failure', 'mismatch'])('omits unavailable details for %s and keeps successful items in Queue order', async kind => {
   await render(['a', 'b']);
   await act(async () => { if (kind === 'failure') pending[0].reject(); else pending[0].resolve(detail('wrong'));
     pending[1].resolve(detail('b')); });
-  expect(snapshot.status).toBe('error'); expect(snapshot.assets).toEqual([]);
+  expect(snapshot.status).toBe('ready'); expect(snapshot.assets.map(asset => asset.id)).toEqual(['b']);
+});
+it('returns a ready empty result when every detail fails', async () => {
+  await render(['a', 'b']);
+  await act(async () => pending.forEach(request => request.reject()));
+  expect(snapshot.status).toBe('ready'); expect(snapshot.assets).toEqual([]);
+});
+it('joins Stack metadata only to successful details without changing Queue order', async () => {
+  api.refreshStacks.mockResolvedValue([stack(['a', 'b', 'c'])]);
+  await render(['a', 'b', 'c', 'd', 'e']);
+  await act(async () => { pending[2].resolve(detail('c')); pending[1].reject(); pending[3].reject(); });
+  await act(async () => { pending[4].resolve(detail('e')); pending[0].resolve(detail('a')); });
+  expect(snapshot.status).toBe('ready'); expect(snapshot.assets.map(asset => asset.id)).toEqual(['a', 'c', 'e']);
+  expect(snapshot.assets[0].stackId).toBe('stack-x'); expect(snapshot.assets[1].stackId).toBe('stack-x');
+  expect(snapshot.assets[2]).not.toHaveProperty('stackId');
 });
 it('fails metadata resolution when Stack refresh fails instead of treating members as unstacked', async () => {
   api.refreshStacks.mockRejectedValue(new Error('refresh failed'));

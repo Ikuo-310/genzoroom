@@ -72,7 +72,7 @@ it('shows Stop requested only for later waiting items, not the current processin
   expect(host.querySelector('[data-asset-id="registering"] .export-status-registering')?.textContent).toBe(i18n.t('exportManagement.registering'));
   expect(host.querySelector('[data-asset-id="later"] .export-status-stop')?.textContent).toBe(i18n.t('exportManagement.stopping'));
 });
-it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata loading/error in %s', async language => {
+it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and hides unavailable details in %s', async language => {
   await i18n.changeLanguage(language);
   await render([], { loaded: false, loading: true }); expect(host.textContent).toBe(i18n.t('exportManagement.queueLoading'));
   await render([], { error: new Error('queue') }); expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportManagement.queueLoadFailed'));
@@ -81,7 +81,8 @@ it.each(['en', 'ja'])('distinguishes Queue loading/error/empty and metadata load
   api.fetchDetail.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
   await render([item('a')]); expect(host.querySelector('[role="status"]')?.textContent).toBe(i18n.t('exportManagement.metadataLoading'));
   await act(async () => reject(new Error('detail')));
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('exportManagement.metadataLoadFailed'));
+  expect(host.textContent).toBe(i18n.t('exportManagement.empty'));
+  expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(host.querySelector('.export-queue-card')).toBeNull();
 });
 it('renders all statuses, noninteractive Gallery cards, Stack groups and shared thumbnail sizing', async () => {

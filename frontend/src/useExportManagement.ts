@@ -57,25 +57,28 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   const assetsById = new Map(resolvedAssets.map(asset => [asset.id.toLowerCase(), asset]));
   const message = queue.error ? 'queueLoadFailed' : !queue.loaded || !queue.canonical && queue.loading ? 'queueLoading'
     : !queue.canonical ? 'queueLoadFailed' : !items.length ? 'empty'
-    : metadata.status === 'error' ? 'metadataLoadFailed' : resolvedAssets.length ? null : 'metadataLoading';
+    : metadata.status === 'error' ? 'metadataLoadFailed' : resolvedAssets.length ? null : metadata.status === 'ready' ? 'empty' : 'metadataLoading';
   const entries = items.flatMap(item => {
     const asset = assetsById.get(item.assetId.toLowerCase());
     return asset ? [{ item, asset }] : [];
   });
   const rows = groupExportQueueAssets(entries);
-  const failedIds = items.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
+  const visibleItems = entries.map(entry => entry.item);
+  const failedIds = visibleItems.filter(item => item.status === 'failed').map(item => item.assetId.toLowerCase());
   const retryRunActive = !!retryRunId && (queue.runtime == null
     || queue.runtime.status === 'active' && queue.runtime.runId === retryRunId);
   const retryPriority = failedIds.length > 0 || confirmation?.kind === 'retry' || retryStarting || retryRunActive || retryStartUncertain;
-  const armedAvailableIds = items.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
+  // Preserve local intent during refetch; only a completed result can establish unavailable IDs.
+  const retainedItems = metadata.status === 'loading' ? items : visibleItems;
+  const armedAvailableIds = retainedItems.filter(item => isMutableExportStatus(item.status)).map(item => item.assetId.toLowerCase());
   const armedAvailableKey = JSON.stringify(armedAvailableIds);
-  const mutableIds = items.filter(item => retryPriority ? item.status === 'failed' : isMutableExportStatus(item.status))
+  const mutableIds = visibleItems.filter(item => retryPriority ? item.status === 'failed' : isMutableExportStatus(item.status))
     .map(item => item.assetId.toLowerCase());
   const mutableKey = JSON.stringify(mutableIds);
   useEffect(() => {
     const available = new Set<string>(JSON.parse(mutableKey));
     const armedAvailable = new Set<string>(JSON.parse(armedAvailableKey));
-    selection.retainAvailable(available);
+    if (metadata.status !== 'loading') selection.retainAvailable(available);
     setArmedIds(previous => {
       const next = new Set([...previous].filter(id => armedAvailable.has(id)));
       return next.size === previous.size ? previous : next;
@@ -85,12 +88,12 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
       const record = undoRecord.current;
       const currentById = new Map(queueRef.current.items.map(item => [item.assetId.toLowerCase(), item]));
       const reconciled = record.kind === 'armed'
-        ? record.changes.filter(change => isMutableExportStatus(currentById.get(change.assetId)?.status))
+        ? record.changes.filter(change => armedAvailable.has(change.assetId))
         : record.removed.filter(change => !currentById.has(change.assetId));
       undoRecord.current = reconciled.length ? record.kind === 'armed'
         ? { kind: 'armed', changes: reconciled } : { kind: 'queueRemoval', removed: reconciled } : null;
     }
-  }, [mutableKey, armedAvailableKey, selection.retainAvailable, removing, undoing]);
+  }, [mutableKey, armedAvailableKey, metadata.status, selection.retainAvailable, removing, undoing]);
   const mutable = new Set(mutableIds);
   const selectedIds = selection.selectedIds.filter(id => mutable.has(id));
   const selectionMode = active && selectedIds.length > 0;
@@ -115,7 +118,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     confirmationRef.current = { kind: 'retry', assetIds: [...failedIds] };
     setConfirmation(confirmationRef.current); return true;
   };
-  const startTargets = items.filter(item => item.status === 'queued' && armedIds.has(item.assetId.toLowerCase())
+  const startTargets = visibleItems.filter(item => item.status === 'queued' && armedIds.has(item.assetId.toLowerCase())
     && !queue.mutationFor(item.assetId).operation).map(item => item.assetId.toLowerCase());
   const canStart = active && queue.loaded && queue.canonical && !queue.loading && !queue.error && !message && !removing && !undoing
     && !confirmation && !!queue.startRuntime && runtimeIdle && !queue.starting && !queue.cancelling
@@ -147,7 +150,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
         const latest = queueRef.current;
         if (intent.kind === 'start' || intent.kind === 'retry') {
           if (!latest.canonical || !latest.startRuntime || latest.runtime?.status !== null || latest.starting || latest.cancelling
-            || intent.assetIds.some(id => latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== (intent.kind === 'retry' ? 'failed' : 'queued')
+            || intent.assetIds.some(id => !assetsById.has(id) || latest.items.find(item => item.assetId.toLowerCase() === id)?.status !== (intent.kind === 'retry' ? 'failed' : 'queued')
               || latest.mutationFor(id).operation) || (intent.kind === 'retry' && !latest.retry)) throw new ExportQueueApiError('locked');
           if (intent.kind === 'retry') {
             // Retry and Start are one confirmed intent; any batch failure prevents a partial run.
@@ -265,7 +268,7 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     if (record.kind === 'queueRemoval' && !queueRef.current.canonical) return false;
     const currentItems = queueRef.current.items;
     if (record.kind === 'armed') {
-      const valid = record.changes.filter(change => isMutableExportStatus(
+      const valid = record.changes.filter(change => assetsById.has(change.assetId) && isMutableExportStatus(
         currentItems.find(item => item.assetId.toLowerCase() === change.assetId)?.status,
       ) && !queueRef.current.mutationFor(change.assetId).operation);
       undoRecord.current = null;
