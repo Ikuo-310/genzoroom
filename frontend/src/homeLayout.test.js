@@ -26,7 +26,11 @@ describe('Home and thumbnail layout', () => {
     const button = start.firstElementChild;
     expect(button.textContent).toBe('Reload');
     expect(button.closest('.selection-bar')).toBeNull();
+    const refreshRule = Array.from(stylesheet.sheet.cssRules).find(rule => rule.selectorText === '.gallery-refresh');
+    expect(refreshRule.style.getPropertyValue('border')).toBe('1px solid var(--border-subtle)');
+    expect(refreshRule.style.getPropertyValue('border-radius')).toBe('6px');
     expect(getComputedStyle(button).flexShrink).toBe('0');
+    expect(getComputedStyle(button).height).toBe('34px');
     expect(getComputedStyle(start).gridColumn).toBe('1');
     expect(getComputedStyle(start).gridRow).toBe('1');
     expect(getComputedStyle(center).gridColumn).toBe('2');
