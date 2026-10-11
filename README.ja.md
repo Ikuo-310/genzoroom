@@ -154,8 +154,8 @@ ImmichのAPIキーには必要なアクセス権限を設定してください�
 具体的な権限や接続設定については[導入ガイド](docs/deployment.ja.md)を参照してください。
 
 ## 必要条件
-docs/deployment.ja.mdk
-- Docker Compose v2に対応したDocker環境、またはPortainer(Docker Standalone環境)
+
+- Docker Engine / Docker Compose v2
 - Linux amd64(x86-64)のDockerホスト。現在、Arm64は動作確認・サポート対象外です。
 - GenzoRoomから接続できるImmichサーバー
 - 必要なアクセス権限を設定したImmich APIキー
