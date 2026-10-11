@@ -210,6 +210,22 @@ describe('shared Settings modal', () => {
     expect(dialog().textContent).not.toContain('GPU active');
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/original'))).toBe(false);
   });
+  it('places the status beside the WebGPU label and uses the accessible shared-style ON/OFF switch', async () => {
+    await click(host.querySelector('button')!);
+    const row = dialog().querySelector<HTMLElement>('.settings-webgpu-row')!;
+    const label = row.querySelector(':scope > span')!;
+    const status = row.querySelector<HTMLElement>('[role="status"]')!;
+    const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    expect(label.textContent).toBe('WebGPU');
+    expect(label.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle.className).toBe('webgpu-switch');
+    expect(toggle.getAttribute('aria-label')).toBe('Use WebGPU');
+    expect(toggle.getAttribute('aria-describedby')).toBe('webgpu-status');
+    expect(toggle.querySelector('.webgpu-switch-on')?.textContent).toBe('ON');
+    expect(toggle.querySelector('.webgpu-switch-off')?.textContent).toBe('OFF');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+  });
 });
 
 it.each([
