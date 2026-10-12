@@ -23,6 +23,7 @@ import { StackTrashMenu } from './StackTrashMenu';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 import { frontendLogger } from './frontendLogging';
+import { thumbnailUrl } from './thumbnailUrl';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 const DEFAULT_SPLIT_RATIO = 2 / 3;
@@ -60,6 +61,11 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
 } = {}) {
   const { t } = useTranslation();
   const location = useLocation();
+  const [editedPreview, setEditedPreview] = useState(false);
+  const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
+  useEffect(() => {
+    if (active) setThumbnailViewRevision(revision => revision + 1);
+  }, [active]);
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
   // Home owns Stack generations; routed Anshitsu changes must not invalidate that live session.
@@ -565,6 +571,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}{trashCount > 0 && ` — ${t('stackManagement.trashCount', { count: trashCount })}`}
       </span>}
       <div className="stack-control-actions">
+        <button type="button" className="stack-edited-preview" aria-pressed={editedPreview}
+          onClick={() => setEditedPreview(value => !value)}>{t('stackManagement.editedPreview')}</button>
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
         <button type="button" className="immich-action-button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
@@ -617,6 +625,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
+            editedPreview={editedPreview} thumbnailRefreshKey={String(thumbnailViewRevision)}
             selected={false} member trash={group.trashAssetIds?.includes(asset.id)}
             onContextMenu={event => { if (!canEdit || !canReserveStackTrash(group, asset.id)) return; event.preventDefault(); setTrashMenu({ groupId: group.id, assetId: asset.id, x: event.clientX, y: event.clientY }); }} cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)} toggleDisabled={!!group.trashAssetIds?.length} dragDisabled={!!group.trashAssetIds?.length}
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
@@ -651,6 +660,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         onDrop={event => acceptDrop(event, null)}>
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
         {displayed.unmatched.length ? <div className="stack-unmatched-grid">{displayed.unmatched.map(asset => <StackPhoto
+          editedPreview={editedPreview} thumbnailRefreshKey={String(thumbnailViewRevision)}
           key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
           dropTarget={dropTarget === `unmatched:${asset.id}`}
           onDropTargetDragOver={event => {
@@ -715,10 +725,11 @@ function StackEvidenceHeader({ group, result, retryAllowed }: { group: DraftStac
   })}</div>;
 }
 
-function StackPhoto({ asset, selected, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
+function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKey, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
   purgeDisabled = false, dragging = false, dropTarget = false,
   trash = false, onContextMenu, onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
   asset: RecentAsset; selected: boolean; trash?: boolean; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; cover?: boolean; member?: boolean; disabled?: boolean;
+  editedPreview?: boolean; thumbnailRefreshKey?: string;
   toggleDisabled?: boolean; dragDisabled?: boolean; purgeDisabled?: boolean;
   dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean;
   onDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
@@ -734,7 +745,7 @@ function StackPhoto({ asset, selected, cover = false, member = false, disabled =
     onDragStart={event => { suppressClick.current = onDragStart(event); }}
     onDragEnd={event => { onDragEnd(event); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } if (!toggleDisabled) onToggle(); }}>
-    <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={asset.thumbnail_url} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
+    <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={thumbnailUrl(asset, editedPreview, thumbnailRefreshKey)} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {trash && <span className="stack-trash-overlay" aria-label={t('stackManagement.trash')}><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></span>}
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>

@@ -868,6 +868,7 @@
     }
   },
   "stackManagement": {
+    "editedPreview": "Edited preview",
     "trashCount": "Move to trash: {{count}} assets",
     "trashIncomplete": "Stack updates completed, but moving photos to trash failed. Check the affected photos in Immich.",
     "trashUnknown": "Stack updates completed, but the trash outcome could not be confirmed. Check the affected photos in Immich.",

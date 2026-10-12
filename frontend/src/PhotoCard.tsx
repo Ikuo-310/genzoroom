@@ -13,6 +13,7 @@ import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { isGenzoRoomExported } from './photoFilters';
+import { thumbnailUrl } from './thumbnailUrl';
 
 export type { RecentAsset } from './assets';
 
@@ -26,6 +27,7 @@ function stackFormatList(asset: RecentAsset) {
 
 type PhotoCardProps = {
   asset: RecentAsset;
+  thumbnailRefreshKey?: string;
   language: AppLanguage;
   onSelect: () => void;
   onToggleSelection: () => void;
@@ -57,6 +59,7 @@ type PhotoCardProps = {
 
 export function PhotoCard({
   asset,
+  thumbnailRefreshKey,
   language,
   onSelect,
   onToggleSelection,
@@ -137,7 +140,7 @@ export function PhotoCard({
         aria-description={edited ? t('photos.edited') : undefined}
       >
         <div className="thumbnail">
-          <img src={asset.thumbnail_url} alt="" loading="lazy" />
+          <img src={thumbnailUrl(asset, true, thumbnailRefreshKey)} alt="" loading="lazy" />
           {!(asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1) &&
             <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>

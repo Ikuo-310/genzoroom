@@ -43,6 +43,7 @@ import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from '.
 import { rememberWorkspaceSession } from './workspaceResume';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { frontendLogger } from './frontendLogging';
+import { requestThumbnailGeneration } from './thumbnailApi';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -406,6 +407,7 @@ export function AnshitsuPage() {
           return;
         }
         if (result.clean) {
+          requestThumbnailGeneration(assetId, 'filmstrip');
           navigateToAsset(nextId);
           return;
         }
@@ -430,6 +432,7 @@ export function AnshitsuPage() {
         setExitSaving(false);
         return;
       }
+      for (const id of result.savedAssetIds) requestThumbnailGeneration(id, 'exit');
       returnToHome();
     } catch {
       setExitFailure({ assetId, error: 'unexpected' });

@@ -36,6 +36,74 @@ const first: AssetDetail = {
 const second: AssetDetail = { ...first, id: '87654321-4321-4321-8321-cba987654321', filename: 'second.jpg' };
 const third: AssetDetail = { ...first, id: 'abcdefab-1234-4234-9234-123456789abc', filename: 'third.jpg' };
 
+describe('immediate thumbnail reservation after saved navigation', () => {
+  const requests = () => vi.mocked(fetch).mock.calls.filter(([url, init]) =>
+    String(url).endsWith('/rendered-thumbnail') && init?.method === 'POST');
+  function network() {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+  it('waits for a clean save before requesting the departing Asset, without waiting for POST', async () => {
+    const fetchMock = network();
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    const saving = deferred<Awaited<ReturnType<typeof mocked.put>>>();
+    mocked.put.mockReturnValueOnce(saving.promise);
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(currentPhoto()).toBe('first.jpg'); expect(requests()).toHaveLength(0);
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    await act(async () => saving.resolve({ state: mocked.put.mock.calls[0][1], revision: 1,
+      updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] }));
+    await flush();
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(requests().map(([url]) => url)).toEqual([`/api/assets/${first.id}/rendered-thumbnail`]);
+  });
+  it('keeps save failure blocking navigation and sends no POST for blocked or same-Asset moves', async () => {
+    network(); await mount();
+    await click('.filmstrip-item[aria-label="first.jpg"]'); expect(requests()).toHaveLength(0);
+    await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('conflict'));
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    expect(currentPhoto()).toBe('first.jpg'); expect(requests()).toHaveLength(0);
+  });
+  it('continues moving when the reservation rejects', async () => {
+    const fetchMock = network(); await mount();
+    fetchMock.mockRejectedValue(new Error('network unavailable'));
+    await click('.filmstrip-item[aria-label="second.jpg"]'); await flush();
+    expect(currentPhoto()).toBe('second.jpg'); expect(requests()).toHaveLength(1);
+  });
+  it('requests all session-edited Assets on exit, including already autosaved state, but no unedited Assets', async () => {
+    network(); vi.useFakeTimers(); await mount([first, second, third]);
+    await click('button[aria-label="Disable Basic"]'); await advance(5000);
+    expect(requests()).toHaveLength(0);
+    await click('.filmstrip-item[aria-label="second.jpg"]');
+    await click('button[aria-label="Disable Color"]');
+    vi.mocked(fetch).mockClear();
+    await filmstripKey('g'); await flush();
+    expect(currentPhoto()).toBeUndefined();
+    expect(requests().map(([url]) => url).sort()).toEqual([first, second].map(asset => `/api/assets/${asset.id}/rendered-thumbnail`).sort());
+  });
+  it('sends no exit reservation for an unedited session or failed exit save', async () => {
+    network(); await mount(); await filmstripKey('g');
+    expect(requests()).toHaveLength(0);
+    await act(async () => root.unmount()); root = createRoot(container);
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await filmstripKey('g');
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(requests()).toHaveLength(0);
+  });
+  it('exits after confirmed saves even when thumbnail reservation fails', async () => {
+    const fetchMock = network(); await mount();
+    await click('button[aria-label="Disable Basic"]');
+    fetchMock.mockRejectedValue(new Error('reservation unavailable'));
+    await filmstripKey('g'); await flush();
+    expect(currentPhoto()).toBeUndefined();
+    expect(requests()).toHaveLength(1);
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
 let root: Root;
 let container: HTMLDivElement;
 async function flush() { await act(async () => { await Promise.resolve(); }); }

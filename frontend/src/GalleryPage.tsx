@@ -62,6 +62,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const settings = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
+  const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
+  useEffect(() => {
+    // Home retains cards while Anshitsu is open; a new URL reloads bytes on return without polling.
+    if (active) setThumbnailViewRevision(revision => revision + 1);
+  }, [active]);
   const exportQueue = useExportQueue();
   const stackSelections = useGalleryStackSelections();
   useEffect(() => () => clearGalleryStackSnapshots(), []);
@@ -387,6 +392,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         if (!manual) completeScrollRequest('recent');
         hasLoadedRecentAssets.current = true;
         setAssets(data);
+        setThumbnailViewRevision(revision => revision + 1);
         const availableIds = new Set(data.map(asset => asset.id));
         recentSelection.retainAvailable(availableIds);
         setAssetState('ready');
@@ -439,6 +445,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       hasLoadedFavorites.current = true;
       if (!manual) completeScrollRequest('favorites');
       setFavoriteAssets(data);
+      setThumbnailViewRevision(revision => revision + 1);
       favoriteSelection.retainAvailable(new Set(data.map(asset => asset.id)));
       setFavoriteState('ready');
     }).catch(() => {
@@ -463,6 +470,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       if (!manual) completeScrollRequest(`albums:${selectedAlbum.id}`);
       const availableIds = new Set(data.map(asset => asset.id));
       setAlbumAssets(data);
+      setThumbnailViewRevision(revision => revision + 1);
       albumSelection.retainAvailable(availableIds);
       setAlbumAssetState('ready');
     }).catch(() => {
@@ -529,6 +537,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       acceptGalleryStackSnapshots(data, stackSnapshotRequest);
       if (!manual) completeScrollRequest(`calendar:${selectedCalendarDate}`);
       setCalendarAssets(data);
+      setThumbnailViewRevision(revision => revision + 1);
       const availableIds = new Set(data.map(asset => asset.id));
       calendarSelection.retainAvailable(availableIds);
       setCalendarAssetState('ready');
@@ -1068,6 +1077,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       return (
         <PhotoCard
           asset={asset}
+          thumbnailRefreshKey={String(thumbnailViewRevision)}
           language={language}
           key={asset.id}
           selected={activeSelectedAssetIds.includes(asset.id)}

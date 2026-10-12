@@ -491,7 +491,7 @@ describe('Home stack display', () => {
   it.each(['recent', 'albums', 'calendar'] as const)('collapses the %s grid and looks up statuses for all fetched IDs', async tab => {
     await mount(tab);
     expect(filenames()).toEqual(['x.jpg', 'primary.jpg', 'y.jpg']);
-    expect(host.querySelectorAll('.photo-card img')[1].getAttribute('src')).toBe('/thumb/primary');
+    expect(host.querySelectorAll('.photo-card img')[1].getAttribute('src')).toContain('/api/assets/primary/rendered-thumbnail');
     expect(host.querySelector('.stack-asset-count')?.textContent).toBe('4');
     expect(host.querySelector('.stack-assets')?.getAttribute('aria-label')).toBe('Stack, 4 assets');
     expect(api.statuses).toHaveBeenCalledWith(photos.map(a => a.id), expect.any(AbortSignal));

@@ -10,6 +10,7 @@ import { isMutableExportStatus, type ExportManagementState } from './useExportMa
 import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
+import { thumbnailUrl } from './thumbnailUrl';
 
 export function ExportRetryPriorityNotice({ management }: { management: ExportManagementState }) {
   const { t } = useTranslation();
@@ -88,7 +89,7 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
     <button className="photo-card-button" type="button" disabled={disabled} onClick={handleCardClick}
       aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">
-      <img src={asset.thumbnail_url} alt="" loading="lazy" />
+      <img src={thumbnailUrl(asset)} alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {item.status !== 'queued' ? <span className={`export-status-bar export-status-${stopPending ? 'stop' : item.status}`}
         role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>

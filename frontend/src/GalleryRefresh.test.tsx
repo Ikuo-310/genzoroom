@@ -23,6 +23,19 @@ vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ onWriteComplet
 
 const photos: RecentAsset[] = ['one', 'two'].map(id => ({ id, filename: `${id}.jpg`, date: '2026-09-01',
   thumbnail_url: `/thumb/${id}`, format: 'JPEG', is_raw: false }));
+
+it.each(['recent', 'favorites', 'album-detail', 'calendar-day'])('uses rendered photo URLs and reloads retained images in %s', async view => {
+  await mount(); await openView(view);
+  const source = () => host.querySelector('.photo-card img')?.getAttribute('src');
+  expect(source()).toContain('/rendered-thumbnail');
+  const initial = source();
+  await click('.gallery-refresh');
+  expect(source()).not.toBe(initial);
+  const refreshed = source();
+  await mount(false); await mount(true);
+  expect(source()).not.toBe(refreshed);
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
 const album = { id: 'album-a', albumName: 'Original album', albumThumbnailAssetId: null, assetCount: 2, startDate: null, endDate: null };
 let host: HTMLDivElement;
 let root: Root;

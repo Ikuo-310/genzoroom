@@ -34,6 +34,13 @@ beforeEach(async () => {
   host = document.createElement('div'); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+it('uses rendered thumbnails for queued photos without issuing generation POSTs', async () => {
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  await render([item('a'), item('b')]);
+  expect([...host.querySelectorAll('.thumbnail img')].map(image => image.getAttribute('src')))
+    .toEqual(['a', 'b'].map(id => `/api/assets/${id}/rendered-thumbnail`));
+  expect(fetch).not.toHaveBeenCalled();
+});
 it('shows waiting/activity/failed bars while runtime cards remain locked', async () => {
   await render([item('a', 'waiting'), item('b', 'encoding'), item('c', 'registering'), item('d', 'failed')]);
   expect(host.querySelector('.export-status-waiting')?.textContent).toBe('Waiting');
@@ -96,7 +103,7 @@ it('renders all statuses, noninteractive Gallery cards, Stack groups and shared 
     .toEqual(['queued', 'encoding', 'registering', 'failed', 'waiting']);
   expect(host.querySelector('.photo-info p')?.textContent).toBe('0.dng');
   expect(host.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-01');
-  expect(host.querySelector('img')?.getAttribute('src')).toBe('/thumb/0');
+  expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/0/rendered-thumbnail');
   expect(host.querySelector('.format-badge.raw')?.textContent).toBe('DNG');
   expect(host.querySelectorAll('.photo-selection-input')).toHaveLength(5);
   expect(host.querySelector('[draggable="true"], .cover-badge, .stack-candidate-lights, .photo-card-badges')).toBeNull();

@@ -25,6 +25,19 @@ const interactionAsset: RecentAsset = {
   id: 'asset-id', filename: 'photo.jpg', date: '2026-09-08', thumbnail_url: '/thumbnail', format: 'JPEG', is_raw: false,
 };
 
+it('uses rendered thumbnails and refreshes the image URL without changing card selection', async () => {
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  const render = (key: string) => <PhotoCard asset={interactionAsset} thumbnailRefreshKey={key} language="en"
+    selected onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />;
+  await act(async () => root.render(render('first')));
+  const card = host.querySelector('.photo-card');
+  expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset-id/rendered-thumbnail?view=first');
+  await act(async () => root.render(render('second')));
+  expect(host.querySelector('.photo-card')).toBe(card);
+  expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset-id/rendered-thumbnail?view=second');
+  expect(fetch).not.toHaveBeenCalled();
+});
+
 function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string, stackAssetCount?: number | null,
   stackFormats?: RecentAsset['stackFormats']) {
   const asset: RecentAsset = {
@@ -362,7 +375,7 @@ describe('PhotoCard format badge', () => {
     ))}</div>);
 
     expect(markup.match(/<article/g)).toHaveLength(100);
-    expect(markup.match(/<img src="\/api\/assets\/asset-\d+\/thumbnail"/g)).toHaveLength(100);
+    expect(markup.match(/<img src="\/api\/assets\/asset-\d+\/rendered-thumbnail"/g)).toHaveLength(100);
     expect(markup.match(/class="format-badge"/g)).toHaveLength(100);
     expect(markup).toContain('photo-100.jpg');
   });

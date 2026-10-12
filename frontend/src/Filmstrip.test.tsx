@@ -8,6 +8,14 @@ import i18n from './i18n';
 
 const assets: RecentAsset[] = ['a', 'b', 'c'].map((id) => ({ id, filename: `${id}.jpg`, date: '2026-09-25',
   thumbnail_url: `/${id}`, format: 'JPEG', is_raw: false }));
+
+it('uses rendered thumbnail URLs without generation POSTs', async () => {
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  await act(async () => root.render(<Harness />));
+  expect([...host.querySelectorAll('.filmstrip-item img')].map(image => image.getAttribute('src')))
+    .toEqual(assets.map(asset => `/api/assets/${asset.id}/rendered-thumbnail`));
+  expect(fetch).not.toHaveBeenCalled();
+});
 let host: HTMLDivElement;
 let root: Root;
 let activate = vi.fn<(id: string) => void>();

@@ -6,6 +6,7 @@ import { FormatBadge } from './FormatBadge';
 import type { AssetEditStatuses } from './editStatus';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
+import { thumbnailUrl } from './thumbnailUrl';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 
@@ -64,7 +65,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, exclud
         aria-description={editStatuses[asset.id] ? t('photos.edited')
           : historyOnlyStatuses[asset.id] ? t('workspace.historyRetained') : undefined}
       >
-        <img src={asset.thumbnail_url} alt="" />
+        <img src={thumbnailUrl(asset)} alt="" />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       </button>
         {editStatuses[asset.id] !== true && historyOnlyStatuses[asset.id] === true

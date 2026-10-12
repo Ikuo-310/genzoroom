@@ -49,7 +49,7 @@ type AssetEditRecord = {
 
 export type SaveResult = { ok: true; clean: boolean } | { ok: false; error: EditStateApiError };
 export type ExitSaveResult =
-  | { ok: true; compactFallbackAssetIds: string[] }
+  | { ok: true; compactFallbackAssetIds: string[]; savedAssetIds: string[] }
   | { ok: false; assetId: string; error: EditStateApiError; compactFallbackAssetIds: string[] };
 export const EDIT_STATE_AUTOSAVE_DELAY_MS = 5000;
 
@@ -502,7 +502,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
         setRecord(id, { ...latest, needsCompaction: false });
       }
     }
-    return { ok: true, compactFallbackAssetIds };
+    return { ok: true, compactFallbackAssetIds, savedAssetIds: assetIds };
   }, [assetId, changed, getRecord, pauseAutosave, setRecord, snapshotFor, writeSnapshot]);
 
   const resumeAfterExitFailure = useCallback(() => {
