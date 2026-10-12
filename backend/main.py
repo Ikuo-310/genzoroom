@@ -674,7 +674,13 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
 @app.get("/assets/{asset_id}/rendered-thumbnail")
 async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     cache = getattr(request.app.state, "thumbnail_cache", None)
-    content = await run_in_threadpool(cache.read, asset_id) if cache is not None else None
+    try:
+        saved = await run_in_threadpool(get_edit_state, asset_id)
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+    state = saved["state"]
+    has_recipe = state is not None and has_non_default_recipe(state)
+    content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
         return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
     # A cache miss only reads Immich's original thumbnail; display never schedules generation.

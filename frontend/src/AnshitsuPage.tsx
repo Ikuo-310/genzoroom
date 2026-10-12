@@ -432,7 +432,7 @@ export function AnshitsuPage() {
         setExitSaving(false);
         return;
       }
-      for (const id of result.savedAssetIds) requestThumbnailGeneration(id, 'exit');
+      for (const id of result.thumbnailAssetIds) requestThumbnailGeneration(id, 'exit');
       returnToHome();
     } catch {
       setExitFailure({ assetId, error: 'unexpected' });

@@ -10,7 +10,7 @@ import {
   type EditStateSnapshot,
 } from './editState';
 import { createEditStateSaveId, EditStateApiError, getAssetEditState, putAssetEditState } from './editStateApi';
-import { defaultRecipe, recipesEqual, editSession, newSession, type EditAction, type EditSession } from './editing';
+import { defaultRecipe, recipesEqual, editSession, newSession, type EditAction, type EditRecipe, type EditSession } from './editing';
 import { hasEdits } from './editStatus';
 import { isNativeEditingTarget, undoShortcut } from './editShortcuts';
 
@@ -29,6 +29,7 @@ type AutosaveTimer = { timeout: number; generation: number };
 type LoadOperation = { controller: AbortController; generation: number; timeout: number; promise: Promise<void> };
 type AssetEditRecord = {
   session: EditSession;
+  sessionInitialRecipe: EditRecipe | null;
   loadStatus: LoadStatus;
   saveStatus: SaveStatus;
   revision: number;
@@ -49,13 +50,13 @@ type AssetEditRecord = {
 
 export type SaveResult = { ok: true; clean: boolean } | { ok: false; error: EditStateApiError };
 export type ExitSaveResult =
-  | { ok: true; compactFallbackAssetIds: string[]; savedAssetIds: string[] }
+  | { ok: true; compactFallbackAssetIds: string[]; savedAssetIds: string[]; thumbnailAssetIds: string[] }
   | { ok: false; assetId: string; error: EditStateApiError; compactFallbackAssetIds: string[] };
 export const EDIT_STATE_AUTOSAVE_DELAY_MS = 5000;
 
 function freshRecord(assetId: string): AssetEditRecord {
   return {
-    session: newSession(), loadStatus: 'unloaded', saveStatus: 'idle', revision: 0,
+    session: newSession(), sessionInitialRecipe: null, loadStatus: 'unloaded', saveStatus: 'idle', revision: 0,
     sourceIdentity: { provider: 'immich', assetId, inputKind: 'immich-preview' },
     savedFingerprint: null, editedThisSession: false, needsCompaction: false,
   };
@@ -158,6 +159,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
       const previous = getRecord(id);
       const next: AssetEditRecord = {
         ...freshRecord(id), editedThisSession: previous.editedThisSession, needsCompaction: previous.needsCompaction,
+        sessionInitialRecipe: previous.sessionInitialRecipe ?? structuredClone(restored.value.recipe),
         session: restored.value, loadStatus: 'ready', revision: response.revision ?? 0,
         updatedAt: response.updatedAt, lastSaveId: response.lastSaveId,
         sourceIdentity: response.state?.sourceIdentity ?? freshRecord(id).sourceIdentity,
@@ -502,7 +504,11 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
         setRecord(id, { ...latest, needsCompaction: false });
       }
     }
-    return { ok: true, compactFallbackAssetIds, savedAssetIds: assetIds };
+    const thumbnailAssetIds = assetIds.filter(id => {
+      const record = getRecord(id);
+      return record.sessionInitialRecipe !== null && !recipesEqual(record.sessionInitialRecipe, record.session.recipe);
+    });
+    return { ok: true, compactFallbackAssetIds, savedAssetIds: assetIds, thumbnailAssetIds };
   }, [assetId, changed, getRecord, pauseAutosave, setRecord, snapshotFor, writeSnapshot]);
 
   const resumeAfterExitFailure = useCallback(() => {

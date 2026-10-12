@@ -83,6 +83,37 @@ describe('immediate thumbnail reservation after saved navigation', () => {
     expect(currentPhoto()).toBeUndefined();
     expect(requests().map(([url]) => url).sort()).toEqual([first, second].map(asset => `/api/assets/${asset.id}/rendered-thumbnail`).sort());
   });
+  it('does not request generation when exiting after a History-only change to a non-default Recipe', async ({ onTestFinished }) => {
+    const show = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+    const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+    onTestFinished(() => {
+      if (show) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', show);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+      if (close) Object.defineProperty(HTMLDialogElement.prototype, 'close', close);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+    });
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+    const session = editSession(editSession(newSession(), { type: 'exposure', value: 1 }), { type: 'commit' });
+    const saved = editStateModule.createEditStateSnapshot(session, {
+      provider: 'immich', assetId: first.id, inputKind: 'immich-preview',
+    });
+    if (!saved.ok) throw new Error('Invalid edit-state fixture');
+    mocked.get.mockResolvedValue({ state: saved.value, revision: 1 });
+    network(); await mount();
+    await click('.history-menu-trigger');
+    const clear = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+      .find((button) => button.textContent === 'Clear all history')!;
+    await act(async () => clear.click());
+    const proceed = [...container.querySelectorAll<HTMLButtonElement>('dialog button')]
+      .find((button) => button.textContent === 'Continue')!;
+    await act(async () => proceed.click());
+    await filmstripKey('g');
+
+    expect(currentPhoto()).toBeUndefined();
+    expect(mocked.put).toHaveBeenCalled();
+    expect(requests()).toHaveLength(0);
+  });
   it('sends no exit reservation for an unedited session or failed exit save', async () => {
     network(); await mount(); await filmstripKey('g');
     expect(requests()).toHaveLength(0);

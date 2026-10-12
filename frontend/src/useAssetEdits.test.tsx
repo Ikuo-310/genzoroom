@@ -376,6 +376,63 @@ afterEach(() => {
 });
 
 describe('useAssetEdits persistence', () => {
+  it('does not request a rendered thumbnail when exit only saves History changes', async () => {
+    await loadHistory();
+    act(() => latest.organizeHistory('clearHistory'));
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, savedAssetIds: [first], thumbnailAssetIds: [] });
+    expect(api.put).toHaveBeenCalled();
+  });
+
+  it('requests a rendered thumbnail when the current Recipe changed during the session', async () => {
+    await loadHistory();
+    editTemperature(21); commitEdit();
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, thumbnailAssetIds: [first] });
+  });
+
+  it('keeps a Recipe change eligible for exit reservation after autosave', async () => {
+    vi.useFakeTimers();
+    await loadHistory();
+    editTemperature(21); commitEdit();
+    await advance(5000);
+    expect(api.put).toHaveBeenCalled();
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, thumbnailAssetIds: [first] });
+  });
+
+  it('does not request a rendered thumbnail when a Recipe is restored to its session-start value', async () => {
+    await loadHistory();
+    editTemperature(21); commitEdit();
+    editTemperature(20); commitEdit();
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, thumbnailAssetIds: [] });
+  });
+
+  it('selects only Recipe-changed Assets in a multi-Asset exit', async () => {
+    await loadHistory();
+    act(() => latest.organizeHistory('clearHistory'));
+    await mount(second); await flush();
+    editExposure(0.3); commitEdit();
+
+    let result: Awaited<ReturnType<typeof latest.saveEditedAssetsForExit>> | undefined;
+    await act(async () => { result = await latest.saveEditedAssetsForExit(); });
+
+    expect(result).toMatchObject({ ok: true, savedAssetIds: [first, second], thumbnailAssetIds: [second] });
+  });
+
   it('classifies pending edits, Redo-only History, clear and reset without treating dirty reset as edited', async () => {
     await mount();
     expect(latest.editStatusFor(second)).toBeUndefined();

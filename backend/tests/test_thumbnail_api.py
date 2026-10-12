@@ -103,10 +103,50 @@ def test_optional_maintenance_failure_does_not_fail_committed_save(setup, monkey
     asyncio.run(run())
 
 
+def test_default_recipe_after_delete_failure_falls_back_to_original(setup, monkeypatch):
+    cache, scheduler, _, generate, original = setup
+    def fail_delete(*args, **kwargs):
+        raise OSError("private failure")
+    async def run():
+        async with client() as api:
+            assert (await put(api, snapshot(1))).status_code == 200
+            cache.store(ASSET, b"stale rendered thumbnail")
+            monkeypatch.setattr(cache, "delete", fail_delete)
+            reset = await put(api, snapshot(0), 1)
+            assert reset.status_code == 200
+            assert edit_store.get_edit_state(ASSET)["state"]["currentRecipe"] == snapshot(0)["currentRecipe"]
+            assert cache.read(ASSET) == b"stale rendered thumbnail"
+            result = await api.get(PATH)
+            assert result.status_code == 200 and result.content == b"original"
+            assert result.headers["cache-control"] == "private, no-store"
+        assert original.await_count == 1
+        generate.assert_not_called()
+        assert not scheduler._pending and not scheduler._deadlines
+    asyncio.run(run())
+
+
+def test_recipe_lookup_failure_never_serves_cached_thumbnail(setup, monkeypatch):
+    cache, _, _, generate, original = setup
+    cache.store(ASSET, b"rendered")
+    def fail(*args):
+        raise StoreUnavailable()
+    monkeypatch.setattr(main, "get_edit_state", fail)
+    async def run():
+        async with client() as api:
+            result = await api.get(PATH)
+            assert result.status_code == 503
+            assert result.json()["detail"]["code"] == "persistence_unavailable"
+        original.assert_not_awaited()
+        generate.assert_not_called()
+    asyncio.run(run())
+
+
 def test_get_only_reads_cache_or_original_and_never_generates(setup):
     cache, scheduler, _, generate, original = setup
     async def run():
         async with client() as api:
+            assert (await put(api, snapshot(1))).status_code == 200
+            scheduler._deadlines.clear()
             result = await api.get(PATH)
             assert result.status_code == 200 and result.content == b"original"
             assert result.headers["cache-control"] == "private, no-store"
