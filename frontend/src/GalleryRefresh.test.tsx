@@ -47,6 +47,10 @@ function deferred<T>() {
 }
 async function mount(active = true) { await act(async () => root.render(<MemoryRouter><GalleryPage active={active} /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click()); }
+async function clickGridBlank(button = 0) {
+  const grid = host.querySelector<HTMLElement>('.photo-grid')!;
+  await act(async () => grid.dispatchEvent(new MouseEvent('click', { button, bubbles: true, cancelable: true })));
+}
 async function press(options: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key: 'R', shiftKey: true, bubbles: true, cancelable: true, ...options });
   await act(async () => target.dispatchEvent(event));
@@ -516,5 +520,56 @@ describe('Gallery manual refresh', () => {
     expect(snapshot.status).toBe('ready');
     expect([...snapshot.selectedAssetIds]).toEqual([newMember.id]);
     expect([...getManualGalleryStackSelection(oldStack.stackId!)!]).toEqual([newMember.id]);
+  });
+});
+
+describe('Gallery blank photo-grid selection clearing', () => {
+  it.each(['recent', 'favorites', 'album-detail', 'calendar-day'])('clears only the current %s selection from blank grid space', async view => {
+    await mount(); await openView(view); await click('.selection-all');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
+
+    await clickGridBlank();
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+  });
+
+  it('does not clear selection for card, checkbox, right-click, or an empty selection', async () => {
+    await mount(); await click('.selection-all');
+    await click('.photo-card-button');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    await click('.selection-all');
+    await click('.photo-selection-input');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
+    await click('.selection-all');
+    await clickGridBlank(2);
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
+
+    await click('.selection-clear');
+    await clickGridBlank();
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+  });
+
+  it('does not clear selection when a Stack format control is used', async () => {
+    const stackMembers = photos.map(member => ({ ...member, stackId: 'stack-a', primaryAssetId: 'one',
+      stackAssetCount: 2, stackMemberIds: ['one', 'two'], stackFormats: [{ format: 'JPEG', isRaw: false }, { format: 'RAW', isRaw: true }] }));
+    const stackPhotos = photos.map(photo => ({ ...photo, stackId: 'stack-a', primaryAssetId: 'one',
+      stackAssetCount: 2, stackMemberIds: ['one', 'two'],
+      stackFormats: [{ format: 'JPEG', isRaw: false }, { format: 'RAW', isRaw: true }],
+      stackMembers }));
+    api.recent.mockResolvedValueOnce(stackPhotos);
+    await mount(); await click('.selection-all');
+    const selectionCount = host.querySelector('.selection-count')?.textContent;
+    await click('.stack-format-switch');
+    expect(host.querySelector('.selection-count')?.textContent).toBe(selectionCount);
+  });
+
+  it('keeps another tab selection and selections outside Gallery untouched', async () => {
+    await mount(); await click('.selection-all');
+    await click('#home-favorites-tab'); await click('.selection-all'); await clickGridBlank();
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+    await click('#home-recent-tab');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
+
+    await click('#home-stacks-tab'); await click('#home-export-tab'); await click('#home-recent-tab');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
   });
 });

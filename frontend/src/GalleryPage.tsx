@@ -1066,7 +1066,13 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }
 
   function renderPhotoGrid() {
-    return <div className="photo-grid" style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
+    return <div className="photo-grid"
+      onClick={event => {
+        if (event.button === 0 && event.target === event.currentTarget && activeSelectedAssetIds.length > 0) {
+          clearPhotoSelection();
+        }
+      }}
+      style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
       const queue = queueStateFor(asset);
       const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
       const selectionCard = asset.stackId ? stackSelections.currentCard(asset) : asset;
