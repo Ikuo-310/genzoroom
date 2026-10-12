@@ -193,7 +193,6 @@ GenzoRoom専用のImmich APIキーを作成します。必要なアクセス権�
 - **[アーキテクチャ](docs/architecture.md)** — GenzoRoomの技術構成と設計仕様。
 - **[導入](docs/deployment.ja.md)** — Docker環境への導入、設定、トラブルシューティング。
 - **[開発ノート（日本語）](docs/development-notes.ja.md)** — 開発履歴と設計上の判断。
-- **[導入ノート（日本語）](docs/deployment-notes.ja.md)** — 導入時の検証記録と補足情報。
 
 ## 開発について
 

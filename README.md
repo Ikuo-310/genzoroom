@@ -203,7 +203,6 @@ For additional configuration options and Immich connectivity details, see the [D
 - **[Architecture](docs/architecture.md)** — Technical architecture and design specifications.
 - **[Deployment](docs/deployment.md)** — Docker installation, configuration, and troubleshooting.
 - **[Development Notes (Japanese)](docs/development-notes.ja.md)** — Development history and design decisions.
-- **[Deployment Notes (Japanese)](docs/deployment-notes.ja.md)** — Deployment verification records and additional notes.
 
 ## About Development
 
