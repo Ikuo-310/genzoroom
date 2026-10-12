@@ -48,6 +48,8 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr("main.initialize_storage", lambda: None)
     monkeypatch.setattr("main.validate_existing_database", lambda: None)
     monkeypatch.setattr("main.initialize_database", lambda: None)
+    from thumbnail_cache import ThumbnailCache
+    monkeypatch.setattr("main.ThumbnailCache", lambda: ThumbnailCache(tmp_path / "thumbnails"))
     path = tmp_path / "genzoroom.db"
     monkeypatch.setattr(edit_store, "DB_PATH", path)
     return path

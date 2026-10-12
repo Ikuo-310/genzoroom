@@ -253,6 +253,13 @@ def get_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool]:
 
 
 def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state: dict) -> dict:
+    return put_edit_state_with_recipe_change(asset_id, expected_revision, save_id, state)[0]
+
+
+def put_edit_state_with_recipe_change(
+    asset_id: UUID, expected_revision: int, save_id: UUID, state: dict,
+) -> tuple[dict, bool]:
+    """Report current Recipe changes from the same transaction without changing the API result."""
     validate_snapshot(state, asset_id)
     now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     fields = (
@@ -268,7 +275,9 @@ def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state:
                 if expected_revision != row["revision"] - 1 or _snapshot(row, asset_id) != state:
                     raise StoreConflict("save_id_reused")
                 connection.commit()
-                return _result(row, asset_id)
+                return _result(row, asset_id), False
+            # Compare persisted Recipes, not History or caller revision guesses; replays stay inert.
+            recipe_changed = row is None or _snapshot(row, asset_id)["currentRecipe"] != state["currentRecipe"]
             if row is None:
                 if expected_revision != 0:
                     raise StoreConflict()
@@ -298,7 +307,7 @@ def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state:
             connection.commit()
             if removed:
                 _queue_log("removedNoEdits", assetId=str(asset_id), revision=result["revision"], count=removed)
-            return _result(result, asset_id)
+            return _result(result, asset_id), recipe_changed
         except Exception:
             connection.rollback()
             raise

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend_logging import LogLevel, backend_logger
 from storage import (StorageInitializationError, initialize_storage, log_storage_failure,
                      validate_existing_database)
-from edit_state import InvalidEditState, validate_snapshot
+from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from edit_state import _recipe
 from export_engine_diagnostics import ExportEngineError, diagnostic_failure, generate_diagnostic, generate_roundtrip_diagnostic, decode_diagnostic
 from export_runtime import ExportRuntime, ImmichExportSource
@@ -29,7 +29,11 @@ from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
     list_export_queue, enqueue_export_assets, dequeue_export_asset, initialize_database,
+    put_edit_state_with_recipe_change,
 )
+from thumbnail_cache import ThumbnailCache, thumbnail_log
+from thumbnail_generator import generate_thumbnail
+from thumbnail_scheduler import ThumbnailScheduler
 
 from immich import (
     ImmichAbout,
@@ -72,14 +76,22 @@ async def lifespan(app: FastAPI):
                             registrar=ImmichExportRegistrar(url, key)) if (url or '').strip() and (key or '').strip() else ExportRuntime()
     app.state.export_runtime = runtime
     app.state.tag_repair = GenzoRoomTagRepair(url, key)
+    cache = ThumbnailCache()
+    async def generate(asset_id):
+        return await generate_thumbnail(asset_id, immich_url=url, api_key=key)
+    scheduler = ThumbnailScheduler(cache, generate)
+    app.state.thumbnail_cache = cache
+    app.state.thumbnail_scheduler = scheduler
     try:
         await runtime.recover()
     except StoreUnavailable as error:
         # Persistence failure must not prevent unrelated read-only Immich routes from starting.
         runtime_log("recovery.readFailed", level="error", errorCode=error.code)
     try:
+        await scheduler.start()
         yield
     finally:
+        await scheduler.close()
         await app.state.tag_repair.close()
         await runtime.wait()
 
@@ -462,7 +474,23 @@ async def save_asset_edit_state(asset_id: UUID, request: Request) -> dict:
     except InvalidEditState as error:
         raise _edit_error(422, error.code) from error
     try:
-        return await run_in_threadpool(put_edit_state, asset_id, revision, save_id, payload)
+        scheduler = getattr(request.app.state, "thumbnail_scheduler", None)
+        if scheduler is None:
+            return await run_in_threadpool(put_edit_state, asset_id, revision, save_id, payload)
+        async with scheduler.mutation_lock:
+            result, recipe_changed = await run_in_threadpool(
+                put_edit_state_with_recipe_change, asset_id, revision, save_id, payload)
+            try:
+                if recipe_changed:
+                    if has_non_default_recipe(result["state"]):
+                        scheduler.schedule(asset_id)
+                    else:
+                        await scheduler.reset(asset_id)
+            except Exception:
+                # The DB commit is authoritative; optional thumbnail maintenance cannot fail a save.
+                thumbnail_log("saveNotification.failed", level="warn", component="thumbnail_scheduler",
+                              assetId=str(asset_id), errorCode="thumbnail_maintenance_failed")
+            return result
     except StoreConflict as error:
         raise _edit_error(409, error.code) from error
     except StoreUnavailable as error:
@@ -616,6 +644,43 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
         media_type=thumbnail.media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+@app.post("/assets/{asset_id}/rendered-thumbnail", status_code=202)
+async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
+    scheduler = getattr(request.app.state, "thumbnail_scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail={"code": "thumbnail_scheduler_unavailable"})
+    async with scheduler.mutation_lock:
+        try:
+            state = (await run_in_threadpool(get_edit_state, asset_id))["state"]
+        except StoreUnavailable as error:
+            raise _store_error(error) from error
+        reason = "recipe_missing" if state is None else "recipe_default" if not has_non_default_recipe(state) else None
+        try:
+            if reason is not None:
+                await scheduler.reset(asset_id)
+            else:
+                scheduler.schedule(asset_id, immediate=True)
+        except Exception:
+            thumbnail_log("request.failed", level="warn", component="thumbnail_scheduler",
+                          assetId=str(asset_id), errorCode="thumbnail_maintenance_failed")
+            raise HTTPException(status_code=503, detail={"code": "thumbnail_scheduler_unavailable"}) from None
+    return JSONResponse(status_code=200 if reason else 202,
+                        content={"status": "skipped", "reason": reason} if reason else {"status": "queued"},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/assets/{asset_id}/rendered-thumbnail")
+async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
+    cache = getattr(request.app.state, "thumbnail_cache", None)
+    content = await run_in_threadpool(cache.read, asset_id) if cache is not None else None
+    if content is not None:
+        return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+    # A cache miss only reads Immich's original thumbnail; display never schedules generation.
+    response = await asset_thumbnail(asset_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.get(
