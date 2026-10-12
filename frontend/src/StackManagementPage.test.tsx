@@ -22,6 +22,10 @@ let navigateTest: (path: string, state?: unknown) => void = () => {};
 function NavigationProbe() { const navigate = useNavigate(); navigateTest = (path, state) => navigate(path, { state }); return null; }
 async function mount(path = '/', state?: unknown, onWriteComplete?: () => void) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><SettingsProvider><Routes><Route path="/stack" element={<StackManagementPage onWriteComplete={onWriteComplete} />} /><Route path="*" element={<App />} /></Routes></SettingsProvider><NavigationProbe /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLElement>(selector)!.click()); }
+async function clickBlankAt(selector: string, button = 0) {
+  const target = host.querySelector<HTMLElement>(selector)!;
+  await act(async () => target.dispatchEvent(new MouseEvent('click', { button, bubbles: true, cancelable: true })));
+}
 async function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
   await act(async () => { target.dispatchEvent(event); });
@@ -1557,6 +1561,53 @@ it('allows Stack members to drop anywhere in the lower frame while preserving ca
   const external = dragEvent('drop', dragTransfer(undefined, ['Files'], [new File(['x'], 'outside.jpg')]));
   const before = unmatched(); await act(async () => lower.dispatchEvent(external));
   expect(external.defaultPrevented).toBe(false); expect(unmatched()).toEqual(before);
+});
+
+it('clears only unmatched selection from lower-frame whitespace and preserves Stack edits and Undo', async () => {
+  await mount('/stack', { selectedAssets: [...photos, ...singles] });
+  expect(unmatched()).toEqual(['x.jpg', 'y.jpg']);
+  await click('[aria-label="Set selected.dng as COVER"]');
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
+
+  await click('.stack-unmatched-grid .stack-photo');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await clickBlankAt('.stack-candidate-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await clickBlankAt('.stack-unmatched-frame', 2);
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await act(async () => button('Detect again').click());
+  expect(host.querySelector('dialog[open]')).not.toBeNull();
+  await clickBlankAt('.stack-unmatched-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await act(async () => button('Cancel').click());
+
+  await click('.stack-unmatched-grid .stack-photo-wrapper:last-child .stack-photo');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(2);
+  await clickBlankAt('.stack-unmatched-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(0);
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
+  await press('z', { ctrlKey: true });
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+});
+
+it('does not clear unmatched selection while dragging or resizing the split', async () => {
+  await mount('/stack', { selectedAssets: [...photos, ...singles] });
+  await click('.stack-unmatched-grid .stack-photo');
+  const lower = host.querySelector<HTMLElement>('.stack-unmatched-frame')!;
+  const source = lower.querySelector<HTMLButtonElement>('.stack-photo')!;
+  const transfer = dragTransfer({ assetId: 'x', sourceGroupId: null });
+  await act(async () => source.dispatchEvent(dragEvent('dragstart', transfer)));
+  await clickBlankAt('.stack-unmatched-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await act(async () => source.dispatchEvent(dragEvent('dragend', transfer)));
+
+  const separator = host.querySelector<HTMLElement>('.stack-split-separator')!;
+  await act(async () => separator.dispatchEvent(pointerEvent('pointerdown', 9, 0)));
+  await clickBlankAt('.stack-unmatched-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(1);
+  await act(async () => separator.dispatchEvent(pointerEvent('pointercancel', 9, 0)));
+  await clickBlankAt('.stack-unmatched-frame');
+  expect(host.querySelectorAll('.stack-unmatched-grid .stack-selection-active')).toHaveLength(0);
 });
 
 it('uses the shared red Immich action style and keeps send disabled when the session is empty', async () => {

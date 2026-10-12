@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { isRecentAsset } from './api';
@@ -193,6 +193,16 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const canEdit = ready && !unknown && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && draft.groups.some(group => group.id === addTargetStackId && !isSingletonImmichStack(group)) && selectedUnmatched.length > 0;
   const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
+  const clearUnmatchedSelectionFromBlankArea = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || !active || !canEdit || !selectedIds.size || dragging || draggingRef.current
+      || resizingPointer.current !== null || trashMenu || settingsOpen
+      || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')
+      || !(event.target instanceof Element)
+      || event.target.closest('.stack-photo, button, a, input, select, textarea, summary, #stack-unmatched-heading, .stack-empty, [role="button"], [role="menu"], [role="menuitem"], [contenteditable="true"]')) {
+      return;
+    }
+    dispatch({ type: 'clearSelection' });
+  };
   const payloadFrom = (transfer: DataTransfer) => {
     const payload = readStackDragPayload(transfer);
     if (payload) return payload;
@@ -663,6 +673,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         onPointerCancel={() => { resizingPointer.current = null; }}
         onLostPointerCapture={() => { resizingPointer.current = null; }} />
       <section aria-labelledby="stack-unmatched-heading" className={`stack-frame stack-unmatched-frame${displayed.unmatched.length ? '' : ' stack-unmatched-empty'}${dropTarget === 'unmatched' ? ' stack-unmatched-drop-target' : ''}`}
+        onClick={clearUnmatchedSelectionFromBlankArea}
         onDragOver={event => { if (handleDragOver(event, { targetKind: 'unmatched-area', targetGroupId: null }, null)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget('unmatched'); } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === 'unmatched') setDropTarget(null); }}
         onDrop={event => acceptDrop(event, null)}>

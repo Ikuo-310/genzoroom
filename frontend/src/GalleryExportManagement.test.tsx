@@ -45,6 +45,10 @@ async function click(selector: string) {
   expect(element).not.toBeNull();
   await act(async () => element.click());
 }
+async function clickBlankAt(selector: string, button = 0) {
+  const target = host.querySelector<HTMLElement>(selector)!;
+  await act(async () => target.dispatchEvent(new MouseEvent('click', { button, bubbles: true, cancelable: true })));
+}
 async function key(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
   await act(async () => target.dispatchEvent(event));
@@ -240,6 +244,45 @@ const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-
   .filter(card => card.querySelector('.photo-card-button')?.getAttribute('aria-description') === i18n.t('exportManagement.armed')).map(card => card.dataset.assetId);
 
 describe('Export selection, readiness and Queue removal', () => {
+  it('clears only Export selection from blank Queue space while preserving armed state and Queue items', async () => {
+    await openQueue([queued('a'), queued('b')]);
+    await click('.export-selection .selection-all');
+    await click('.export-arm-toggle');
+    expect(exportSelected()).toEqual(['a', 'b']); expect(exportArmed()).toEqual(['a', 'b']);
+
+    await clickBlankAt('.export-queue-grid');
+    expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual(['a', 'b']);
+    expect(api.remove).not.toHaveBeenCalled();
+
+    await click('.export-selection .selection-all');
+    await clickBlankAt('.home-content');
+    expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual(['a', 'b']);
+    expect(host.querySelectorAll('.export-queue-card')).toHaveLength(2);
+  });
+
+  it('does not clear Export selection for cards, checkboxes, right-click, Toolbar actions, or a confirmation dialog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/export/runtime'
+      ? { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null } : {}))));
+    await openQueue([queued('a'), queued('b')]);
+    await click('.export-selection .selection-all');
+    await cardClick('a');
+    expect(exportSelected()).toEqual(['a']);
+    await click('.export-selection .selection-all');
+    await cardClick('a', {}, true);
+    expect(exportSelected()).toEqual(['b']);
+    await click('.export-selection .selection-all');
+    await click('.export-arm-toggle');
+    expect(exportSelected()).toEqual(['a', 'b']);
+    await clickBlankAt('.export-queue-grid', 2);
+    expect(exportSelected()).toEqual(['a', 'b']);
+
+    await click('.immich-action-button');
+    expect(host.querySelector('dialog[open]')).not.toBeNull();
+    await clickBlankAt('.home-content');
+    expect(exportSelected()).toEqual(['a', 'b']);
+    expect(api.remove).not.toHaveBeenCalled();
+  });
+
   it('shares Gallery selection semantics in grouped visual order and excludes every locked status', async () => {
     await openQueue([queued('a'), queued('b'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')]);
     expect(exportSelected()).toEqual([]); expect(exportArmed()).toEqual([]);

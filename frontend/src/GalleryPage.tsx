@@ -788,12 +788,13 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const photoListActive = activeTab === 'recent' || activeTab === 'favorites'
       || activeTab === 'albums' && selectedAlbum !== null
       || activeTab === 'calendar' && selectedCalendarDate !== null;
-    if (event.button !== 0 || !photoListActive || showExport || activeSelectedAssetIds.length === 0
+    if (event.button !== 0 || showStacks || !(showExport ? exportManagement.selectedIds.length : photoListActive && activeSelectedAssetIds.length)
       || !(event.target instanceof Element)
-      || event.target.closest('.photo-card, button, a, input, select, textarea, summary, [role="button"], [role="menu"], [role="menuitem"], [contenteditable="true"]')) {
+      || event.target.closest('.photo-card, button, a, input, select, textarea, summary, dialog, [role="button"], [role="menu"], [role="menuitem"], [role="dialog"], [role="alertdialog"], [role="status"], [role="alert"], [contenteditable="true"]')) {
       return;
     }
-    clearPhotoSelection();
+    if (showExport) exportManagement.clear();
+    else clearPhotoSelection();
   }
 
   function openAlbum(album: AlbumSummary) {
