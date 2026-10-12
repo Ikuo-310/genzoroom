@@ -30,6 +30,8 @@ Browse and select photos from the Recent, Albums, Calendar, and Favorites tabs. 
 
 Photo thumbnails display badges indicating file formats such as JPEG and RAW, as well as the number of photos in each stack. The Gallery also supports filtering, adjustable thumbnail sizes, and multiple photo selection.
 
+Gallery photo lists, the Develop filmstrip, and Export Management can show thumbnails rendered with a saved JPEG editing recipe. This lets you review the result before export without changing the source photo or sending a developed image to Immich. Until a rendered thumbnail is available, GenzoRoom shows the Immich thumbnail. Album representative images and Calendar month thumbnails keep their existing display.
+
 ### 〇 Stack Management 〇
 
 ![GenzoRoom Stack Management](docs/images/Stack_en.png)  
@@ -44,6 +46,8 @@ The NAME, TIME, CAM, and GPS badges at the top of each stack indicate the eviden
 Unwanted photos can be marked for Immich's trash and submitted together with other stack changes after confirmation.
 
 GenzoRoom does not directly modify or delete the original image files.
+
+Stack Management shows Immich thumbnails by default. Turn on the Toolbar's **Edited preview** switch, or press `\` (Backslash), to show rendered thumbnails; turn it off or press the key again to return to Immich thumbnails. In Develop, `\` keeps its existing hold-to-view-before behavior.
 
 ### 〇 Develop Workspace 〇
 

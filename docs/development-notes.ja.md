@@ -2,6 +2,41 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 現像済みサムネイル機能の実装・監査完了（2026-10-12）
+
+### 実装経過
+
+- **Phase 1 — Thumbnail Generator：** Immich Previewと保存済みRecipeから、最大辺1024pxの現像済みJPEGを生成する独立Backend処理を追加した。
+- **Phase 2 — Backend予約・キャッシュ・API：** 60秒デバウンスとAsset ID単位の逐次キュー、1GiBのディスクキャッシュ、現像済みサムネイルの取得・即時予約APIを実装した。
+- **Phase 3 — Frontend統合：** Gallery写真一覧、暗室Filmstrip、出力管理で現像済みサムネイルを利用し、STACK管理に表示切り替えを追加した。
+- STACK管理の表示切り替えは、状態がわかる「補正済み表示」ON/OFFスイッチへ改善した。
+- 共通ショートカットレジストリにBackslashを登録し、STACK管理では押すたびに表示を切り替える。暗室では既存どおり押している間だけ補正前を表示する。
+
+### 利用者によるNAS・Immich実機確認
+
+利用者は保存済みRecipeを適用したサムネイルの生成・表示に成功し、GenzoRoom生成サムネイルの画質を確認した。特定の写真での実測例は約350KBであり、固定サイズや平均値を示すものではない。暗室とSTACK管理のBackslash操作、およびSTACK管理の表示切り替えも正常に動作することを確認した。これは利用者による実機確認であり、Codexによるテストとは別である。
+
+### 初回静的横断監査と指摘修正
+
+初回の静的横断監査は**High 0 / Medium 1 / Low 1**だった。Mediumは、デフォルトRecipeへの復帰時にキャッシュ削除が失敗すると旧画像が配信される問題。Lowは、Historyだけを変更した暗室セッションの離脱時にも即時生成を予約する問題だった。
+
+両方を修正した。GET配信前に保存済みcurrent Recipeを確認し、デフォルトRecipeまたは未登録なら残存キャッシュを配信しない。暗室離脱時の即時生成対象を、セッション中にcurrent Recipeが変更されたAssetだけに限定した。History保存・compactionとFilmstrip移動時の保存・予約経路は維持している。
+
+この修正箇所の限定再確認では**High 0 / Medium 0 / Low 0**。初回の全体横断監査と限定再確認は別の確認段階である。
+
+### Codexによる自動テストとチェック
+
+各段階で報告されたテスト結果は次のとおり。値は各段階の個別結果であり、重複分を合算していない。
+
+- Phase 1：関連Backendテスト103件・186 subtests成功。
+- Phase 2：新規テスト28件成功、関連テスト355件・56 subtests成功。
+- Phase 3：Frontend 2,721件成功・2件skip。
+- STACK管理UI改善：関連テスト118件成功。
+- STACK管理Backslash追加：関連テスト147件成功。
+- 最終監査指摘の修正：Backend 41件・41 subtests成功、Frontend 170件成功。
+
+該当段階でのtypecheck、production build、Python構文チェック、`git diff --check`も成功した。Frontend buildには既存の500 kB超chunk size警告が残る。これらはCodexの自動検証記録であり、利用者によるNAS・Immich実機確認とは区別する。
+
 ## MPO形式JPEGのExport対応完了（v0.1.3、2026-10-11）
 
 ### 発生状況

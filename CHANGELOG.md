@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added saved-Recipe JPEG thumbnail previews to Gallery photo lists, the Develop filmstrip, and Export Management, so you can review corrections before export without changing the source photo.
+- Added an Edited preview toggle and `\` (Backslash) shortcut in Stack Management to switch between rendered thumbnails and Immich thumbnails.
 - Returning to Gallery after sending Stack changes to Immich now automatically reloads the currently displayed photo view.
 
 ## [0.1.3] - 2026-10-11

@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state and Export Queue are implemented. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. RAW development remains unimplemented.**
+**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. RAW development remains unimplemented.**
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -701,6 +701,46 @@ Home cards and Filmstrip use proxied thumbnails. Home Shift+click selects the in
 ### Save outcomes and edit indicators
 
 When PUT may have committed but its result is unknown (including HTTP 408 or 5xx and an unreadable or invalid success response), the frontend retains and retries the identical snapshot, expected revision, and save ID before attempting later edits. A confirmed retry advances the revision and allows newer edits to save. A genuine 409 remains a conflict and is not automatically merged. After a failed-save discard, the UI keeps confirmed persisted edit status when known; if persistence cannot be determined, it invalidates the earlier batch result and treats the marker as unknown until refreshed. Browser Back, reload, and tab close still have no forced-save interception.
+
+## Recipe-rendered JPEG thumbnails
+
+### Generator
+
+`backend/thumbnail_generator.py` is independent of production Export. It loads and validates the latest saved current Recipe for the Asset, fetches the Immich Preview, checks its actual Content-Type, and accepts only `image/jpeg`. The existing JPEG decoder handles JPEG/MPO input, applies EXIF orientation and an embedded ICC profile, and returns sRGB RGB8 pixels. The image is reduced with aspect ratio preserved to a maximum edge of 1024 pixels; smaller images are not enlarged. Resizing occurs before Recipe rendering and is intentionally an approximation of full-resolution Export.
+
+The existing `JpegRenderer` applies the Recipe and `encode_jpeg()` produces the result at quality 95 with 4:4:4 chroma sampling and an sRGB ICC profile. Saved v17 Recipes are validated and copied, then upgraded to the renderer's v18 in-memory shape for this invocation; SQLite is not changed. A missing or default current Recipe is not renderable, even if History exists. Preview fetch, unsupported format, decode, Recipe, and encode failures are reported as distinct generation errors. The Generator owns neither scheduling nor cache storage.
+
+### Scheduler and queue
+
+After a successfully committed non-default Recipe change, the Backend schedules that Asset for generation after 60 seconds. A later Recipe change for the same Asset resets its deadline; other Assets keep independent deadlines. History-only saves and idempotent Save ID replays do not create a new normal reservation. A default Recipe save clears pending work and attempts to delete that Asset's cache.
+
+The immediate `POST /assets/{asset_id}/rendered-thumbnail` path is used after a clean Filmstrip save and when leaving Develop after successful saves. On exit, the frontend selects only Assets whose current Recipe differs from its session-start Recipe, so History-only changes do not trigger the request. The API checks that a saved non-default Recipe exists before queuing. The queue contains Asset IDs only, coalesces duplicate waiting requests, and runs one worker at a time. Each generation reads the latest saved Recipe when it starts; it does not retain a Recipe snapshot.
+
+The queue and debounce deadlines are process-local. They are not restored after a Backend restart. Generation failures are not retried automatically, and the frontend receives no completion notification or polling result. A cache already present can continue to be displayed while a replacement is being generated.
+
+### Disk cache
+
+Generated files are stored under `/genzoroom/cache/thumbnails/`, beneath the existing persistent `/genzoroom` storage mount; no additional Docker volume is used. The cache is identified by Asset ID and normally keeps one JPEG generation per Asset. New bytes are written to a temporary file and atomically replace the prior file only after a successful write. A failed generation or write leaves the previous completed cache intact.
+
+The total cache limit is fixed at 1 GiB (1,073,741,824 bytes). When the limit is exceeded, the cache removes the oldest generated JPEGs first, using file modification time. Reads do not update that time, and eviction does not trigger regeneration. Startup removes abandoned files from the cache's temporary-file namespace. Cache data is derived and managed separately from SQLite edit state. When no current Recipe exists or the saved Recipe is default, GET will not serve a leftover rendered file even if its deletion failed.
+
+### API and delivery
+
+The backend routes are:
+
+- `POST /assets/{asset_id}/rendered-thumbnail` queues immediate generation and returns a skipped result when no non-default current Recipe is saved. It does not wait for rendering to finish.
+- `GET /assets/{asset_id}/rendered-thumbnail` checks persisted Recipe eligibility, then returns the rendered cache when available or fetches the Immich thumbnail otherwise. GET never queues work or applies a Recipe. The response uses `Cache-Control: private, no-store`; a persistence lookup failure is an API error and is never treated as a default Recipe.
+- `GET /assets/{asset_id}/thumbnail` remains the original Immich-thumbnail route.
+
+The frontend accesses these routes through `/api`. Gallery photo lists (Recent, Favorites, Album photos, and Calendar date detail), the Develop Filmstrip, and Export Management use the rendered-thumbnail URL. Album representative images and Calendar month thumbnails retain their existing original-thumbnail paths. Stack Management defaults to the original URL and switches only its displayed URL through the page-local Edited preview control. Its `Backslash` shortcut toggles that state; in Develop, `Backslash` remains the hold-to-view-before command. Neither display path starts generation.
+
+The URL helper can append a view revision so a Gallery Reload or entry into Stack Management requests a fresh image URL. Returning from Develop uses the existing Gallery refresh path, and Filmstrip images use the rendered-thumbnail URL for each Asset. There is no new timer, completion polling, or notification system.
+
+### Diagnostics and limits
+
+Scheduler, Generator, cache, and frontend reservation events use the existing Developer Logs facilities. They record safe operational metadata such as Asset ID, duration, payload size, result, and error code. Image bytes, Recipe/History contents, credentials, and full filesystem paths are excluded; diagnostic failures do not change the underlying operation.
+
+This preview pipeline currently supports Immich JPEG Preview responses only. It is a small JPEG preview path, not RAW development, and is not required to match production Export pixel-for-pixel. Decoder, renderer, and encoder responsibilities remain behind the Generator boundary so future LightCraft integration can replace that pipeline without moving queue or cache ownership.
 
 ## Future direction (not implemented)
 
