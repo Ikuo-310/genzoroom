@@ -46,6 +46,7 @@ describe('shortcut binding display', () => {
     expect(formatShortcut('redo', 'other')).toBe('Ctrl+Shift+Z / Ctrl+Y');
     expect(formatShortcut('viewerFitRestore', 'other')).toBe('Shift+Z');
     expect(formatShortcut('viewerBefore', 'other')).toBe('\\');
+    expect(formatShortcut('stackEditedPreviewToggle', 'other')).toBe('\\');
     expect(formatShortcut('viewerOriginal', 'other')).toBe(']');
     expect(formatShortcut('scopeRed', 'other')).toBe('Numpad 1');
     expect(formatShortcut('scopeGreen', 'other')).toBe('Numpad 2');

@@ -94,6 +94,7 @@ describe('command shortcut bindings', () => {
   it.each([
     ['viewerOriginal', ']', 'BracketRight'],
     ['viewerBefore', '\\', 'Backslash'],
+    ['stackEditedPreviewToggle', '\\', 'Backslash'],
     ['scopeRed', 'End', 'Numpad1'],
     ['scopeGreen', 'ArrowDown', 'Numpad2'],
     ['scopeBlue', 'PageDown', 'Numpad3'],
@@ -103,7 +104,7 @@ describe('command shortcut bindings', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
       const ctrlKey = !!(mask & 1), metaKey = !!(mask & 2), altKey = !!(mask & 4), shiftKey = !!(mask & 8);
       expect(matchesShortcut(event(key, { code, ctrlKey, metaKey, altKey, shiftKey }), id, platform))
-        .toBe(!ctrlKey && !metaKey && !altKey && (id.startsWith('viewer') || !shiftKey));
+        .toBe(!ctrlKey && !metaKey && !altKey && (id.startsWith('viewer') || id === 'stackEditedPreviewToggle' || !shiftKey));
     }
   });
 
@@ -126,7 +127,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(36);
+    expect(Object.keys(shortcutBindings)).toHaveLength(37);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -159,7 +160,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(36);
+    expect(Object.keys(shortcutBindings)).toHaveLength(37);
   });
   it('matches Export Queue only for unmodified Q regardless of case', () => {
     for (const platform of ['other', 'mac'] as const) {
@@ -168,7 +169,7 @@ describe('command shortcut bindings', () => {
         { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true },
       ]) expect(matchesShortcut(event('Q', options), 'exportQueueToggle', platform)).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(36);
+    expect(Object.keys(shortcutBindings)).toHaveLength(37);
   });
 
   it('binds thumbnail sizing to unmodified physical numpad add/subtract keys', () => {

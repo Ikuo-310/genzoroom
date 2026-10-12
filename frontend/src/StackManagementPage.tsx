@@ -538,6 +538,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
         || confirmRedetect || confirmSend) return;
       if (!sessionAssets && matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
+      else if (matchesShortcut(event, 'stackEditedPreviewToggle')) { event.preventDefault(); setEditedPreview(value => !value); }
       else if (matchesShortcut(event, 'undo') && canEdit && draft.undoSnapshot) { event.preventDefault(); dispatch({ type: 'undo' }); }
       else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
       // Escape dismisses local page selection and Add targeting rather than an application command.
@@ -575,6 +576,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           <span>{t('stackManagement.editedPreview')}</span>
           <button type="button" className="stack-edited-preview-switch" role="switch"
             aria-label={t('stackManagement.editedPreview')} aria-checked={editedPreview}
+            title={shortcut.title(t('stackManagement.editedPreview'), 'stackEditedPreviewToggle')}
             onClick={() => setEditedPreview(value => !value)}>
             <span className="stack-edited-preview-thumb">{t(editedPreview ? 'settings.on' : 'settings.off')}</span>
           </button>

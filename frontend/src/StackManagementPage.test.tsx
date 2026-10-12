@@ -23,7 +23,9 @@ function NavigationProbe() { const navigate = useNavigate(); navigateTest = (pat
 async function mount(path = '/', state?: unknown, onWriteComplete?: () => void) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><SettingsProvider><Routes><Route path="/stack" element={<StackManagementPage onWriteComplete={onWriteComplete} />} /><Route path="*" element={<App />} /></Routes></SettingsProvider><NavigationProbe /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLElement>(selector)!.click()); }
 async function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
-  await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options })); });
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+  await act(async () => { target.dispatchEvent(event); });
+  return event;
 }
 beforeEach(async () => {
   frontendLogger.setLevel('off'); frontendLogger.clear();
@@ -47,6 +49,7 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(toggle.getAttribute('role')).toBe('switch');
   expect(toggle.getAttribute('aria-checked')).toBe('false');
   expect(toggle.getAttribute('aria-label')).toBe('Edited preview');
+  expect(toggle.title).toBe('Edited preview (\\)');
   expect(toggle.textContent).toBe('OFF');
   expect(toggle.parentElement?.firstElementChild?.textContent).toBe('Edited preview');
   expect(toggle.parentElement?.nextElementSibling?.classList.contains('thumbnail-size-control')).toBe(true);
@@ -65,6 +68,13 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(toggle.getAttribute('aria-checked')).toBe('false');
   expect(toggle.textContent).toBe('OFF');
   expect(images()).toEqual(original);
+  const firstShortcut = await press('\\', { code: 'Backslash' });
+  expect(firstShortcut.defaultPrevented).toBe(true);
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+  expect(images().every(url => url?.includes('/rendered-thumbnail'))).toBe(true);
+  await press('\\', { code: 'Backslash' });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(images()).toEqual(original);
   expect(covers()).toEqual(before);
   expect(JSON.stringify(localStorage)).toBe(storage);
   await press('z', { ctrlKey: true });
@@ -72,6 +82,25 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   await act(async () => i18n.changeLanguage('ja'));
   expect(toggle.parentElement?.firstElementChild?.textContent).toBe('補正済み表示');
+});
+it('guards the edited-preview shortcut against repeat, editing targets, dialogs, Settings, and inactive pages', async () => {
+  await mount('/stack', { selectedAssets: photos });
+  const toggle = () => host.querySelector<HTMLButtonElement>('.stack-edited-preview-switch')!;
+  await press('\\', { code: 'Backslash', repeat: true });
+  expect(toggle().getAttribute('aria-checked')).toBe('false');
+  const input = document.createElement('textarea'); host.append(input);
+  await press('\\', { code: 'Backslash' }, input);
+  expect(toggle().getAttribute('aria-checked')).toBe('false'); input.remove();
+  const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); host.append(dialog);
+  await press('\\', { code: 'Backslash' });
+  expect(toggle().getAttribute('aria-checked')).toBe('false'); dialog.remove();
+  await click('.settings-button');
+  await press('\\', { code: 'Backslash' });
+  expect(toggle().getAttribute('aria-checked')).toBe('false');
+
+  await act(async () => root.render(<MemoryRouter initialEntries={['/stack']}><SettingsProvider><StackManagementPage sessionAssets={photos} active={false} /></SettingsProvider></MemoryRouter>));
+  await press('\\', { code: 'Backslash' });
+  expect(toggle().getAttribute('aria-checked')).toBe('false');
 });
 it('preserves D and adds the Stack selection callback', async () => {
   const open = vi.fn(), stacks = vi.fn();
