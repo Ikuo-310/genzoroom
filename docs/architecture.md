@@ -742,6 +742,12 @@ Scheduler, Generator, cache, and frontend reservation events use the existing De
 
 This preview pipeline currently supports Immich JPEG Preview responses only. It is a small JPEG preview path, not RAW development, and is not required to match production Export pixel-for-pixel. Decoder, renderer, and encoder responsibilities remain behind the Generator boundary so future LightCraft integration can replace that pipeline without moving queue or cache ownership.
 
+## Blank-area selection clearing
+
+Gallery photo views (Recent, Favorites, Album photo detail, and Calendar date detail) clear the active view's selection on a left click in blank space across the `.home-content` area below the Toolbar. The handler runs only when a photo view is active and has a selection. Cards and their controls, links, menus, dialogs, and other interactive elements are excluded. It clears only the active view's selection; the other tabs retain theirs. Escape and the existing Clear selection control remain available. The same area handles Export Management blank clicks through `useExportManagement.clear()`. Its existing operation guard blocks clearing during a confirmation or an active operation, and clearing affects selection only, leaving Queue, Arm, Undo, Retry, and Export Runtime state intact.
+
+Stack Management applies the same behavior only inside the lower `.stack-unmatched-frame`; blank space in the upper Stack candidate frame is excluded. It uses the existing reducer `clearSelection` action, which clears unmatched selection while preserving Stack structure, COVER, Add target, Undo, and the send plan. Card and control clicks are excluded, as are right clicks and interaction states such as dragging, splitter resizing, dialogs, and other edit-disabled states.
+
 ## Future direction (not implemented)
 
 The current Immich access path is:

@@ -2,6 +2,25 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 余白クリックによる選択解除の改善（2026-10-12）
+
+### 実装経過
+
+- Galleryは当初`.photo-grid`自身のクリックで選択を解除していたが、最終行より下の余白を受け取れなかったため、判定をToolbarより下の`.home-content`へ移した。
+- 出力管理も同じ写真表示領域の判定を利用し、既存の`useExportManagement.clear()`で選択だけを解除する。
+- STACK管理は下段の`.stack-unmatched-frame`だけに判定を追加し、上段のSTACK候補領域には適用しない。
+- 選択解除には既存の選択管理処理を使い、新しい選択stateは追加していない。
+
+### 検証
+
+各段階の関連Frontendテストは成功した。最終追加段階ではGallery 62件、出力管理33件、STACK管理114件が成功した。TypeScriptチェック、production build、`git diff --check`も成功した。buildには既存の500 kB超chunk size警告が残る。
+
+利用者はNAS・実ブラウザーで動作を確認した。これは利用者による実機確認であり、Codexによる自動テストとは区別する。
+
+### Focused Static Audit
+
+Gallery・出力管理・STACK候補外のクリックイベント、選択管理、既存操作との干渉を静的に確認した。High 0件、Medium 0件、Low 0件で、具体的なFindingはなかった。この監査ではテスト・build・typecheckを再実行しておらず、実ブラウザーでの座標・レイアウト確認とも区別する。
+
 ## 現像済みサムネイル機能の実装・監査完了（2026-10-12）
 
 ### 実装経過

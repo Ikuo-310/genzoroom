@@ -4,13 +4,14 @@ Meaningful user-facing changes to GenzoRoom will be documented here in English, 
 
 Internal changes are omitted unless they affect users.
 
-## [Unreleased]
+## [0.1.4] - 2026-10-12
 
 ### Added
 
 - Added saved-Recipe JPEG thumbnail previews to Gallery photo lists, the Develop filmstrip, and Export Management, so you can review corrections before export without changing the source photo.
 - Added an Edited preview toggle and `\` (Backslash) shortcut in Stack Management to switch between rendered thumbnails and Immich thumbnails.
 - Returning to Gallery after sending Stack changes to Immich now automatically reloads the currently displayed photo view.
+- Added blank-area selection clearing to Gallery photo lists, Export Management, and the Unmatched area in Stack Management. Photo cards and their usual controls continue to work normally.
 
 ## [0.1.3] - 2026-10-11
 
