@@ -3,7 +3,7 @@ import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, f
 import { SettingsButton } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
 import { frontendLogger } from './frontendLogging';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type CalendarViewMode, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
@@ -784,6 +784,18 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     photoView?.selection.clear();
   }
 
+  function clearPhotoSelectionFromBlankArea(event: ReactMouseEvent<HTMLElement>) {
+    const photoListActive = activeTab === 'recent' || activeTab === 'favorites'
+      || activeTab === 'albums' && selectedAlbum !== null
+      || activeTab === 'calendar' && selectedCalendarDate !== null;
+    if (event.button !== 0 || !photoListActive || showExport || activeSelectedAssetIds.length === 0
+      || !(event.target instanceof Element)
+      || event.target.closest('.photo-card, button, a, input, select, textarea, summary, [role="button"], [role="menu"], [role="menuitem"], [contenteditable="true"]')) {
+      return;
+    }
+    clearPhotoSelection();
+  }
+
   function openAlbum(album: AlbumSummary) {
     prepareScrollTransition(`albums:${album.id}`);
     // Invalidate the previous request before React runs its effect cleanup.
@@ -1067,11 +1079,6 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function renderPhotoGrid() {
     return <div className="photo-grid"
-      onClick={event => {
-        if (event.button === 0 && event.target === event.currentTarget && activeSelectedAssetIds.length > 0) {
-          clearPhotoSelection();
-        }
-      }}
       style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
       const queue = queueStateFor(asset);
       const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
@@ -1236,7 +1243,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           </div>}
         </div>
       </div>}
-      <section hidden={showStacks} className="home-content" aria-label={t('home.sections')}>
+      <section hidden={showStacks} className="home-content" aria-label={t('home.sections')} onClick={clearPhotoSelectionFromBlankArea}>
         {showExport ? <ExportManagementContent management={exportManagement} /> : <>
         {refreshFailed && <p className="gallery-message error-text" role="alert">{t('photos.refreshFailed')}</p>}
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">

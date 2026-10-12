@@ -47,9 +47,9 @@ function deferred<T>() {
 }
 async function mount(active = true) { await act(async () => root.render(<MemoryRouter><GalleryPage active={active} /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click()); }
-async function clickGridBlank(button = 0) {
-  const grid = host.querySelector<HTMLElement>('.photo-grid')!;
-  await act(async () => grid.dispatchEvent(new MouseEvent('click', { button, bubbles: true, cancelable: true })));
+async function clickBlankAt(selector: string, button = 0) {
+  const target = host.querySelector<HTMLElement>(selector)!;
+  await act(async () => target.dispatchEvent(new MouseEvent('click', { button, bubbles: true, cancelable: true })));
 }
 async function press(options: KeyboardEventInit = {}, target: EventTarget = window) {
   const event = new KeyboardEvent('keydown', { key: 'R', shiftKey: true, bubbles: true, cancelable: true, ...options });
@@ -528,7 +528,15 @@ describe('Gallery blank photo-grid selection clearing', () => {
     await mount(); await openView(view); await click('.selection-all');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
 
-    await clickGridBlank();
+    await clickBlankAt('.photo-grid');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+
+    await click('.selection-all');
+    await clickBlankAt('.home-tab-panel');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
+
+    await click('.selection-all');
+    await clickBlankAt('.home-content');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
   });
 
@@ -540,11 +548,11 @@ describe('Gallery blank photo-grid selection clearing', () => {
     await click('.photo-selection-input');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(1);
     await click('.selection-all');
-    await clickGridBlank(2);
+    await clickBlankAt('.photo-grid', 2);
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
 
     await click('.selection-clear');
-    await clickGridBlank();
+    await clickBlankAt('.home-content');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
   });
 
@@ -564,12 +572,21 @@ describe('Gallery blank photo-grid selection clearing', () => {
 
   it('keeps another tab selection and selections outside Gallery untouched', async () => {
     await mount(); await click('.selection-all');
-    await click('#home-favorites-tab'); await click('.selection-all'); await clickGridBlank();
+    await click('#home-favorites-tab'); await click('.selection-all'); await clickBlankAt('.home-content');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(0);
     await click('#home-recent-tab');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
 
     await click('#home-stacks-tab'); await click('#home-export-tab'); await click('#home-recent-tab');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
+  });
+
+  it('does not clear selection when the Toolbar or Gallery tab is clicked', async () => {
+    await mount(); await click('.selection-all');
+    await click('.gallery-refresh');
+    expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
+    await click('#home-favorites-tab');
+    await click('#home-recent-tab');
     expect(host.querySelectorAll('.photo-card.selected')).toHaveLength(2);
   });
 });
