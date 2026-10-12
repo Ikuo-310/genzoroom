@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- Returning to Gallery after sending Stack changes to Immich now automatically reloads the currently displayed photo view.
+
 ## [0.1.3] - 2026-10-11
 
 ### Changed
