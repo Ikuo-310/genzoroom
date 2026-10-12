@@ -42,21 +42,28 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en'); });
 it('toggles edited previews locally without changing cover, selection, draft, or posting generation', async () => {
   await mount('/stack', { selectedAssets: photos });
-  const toggle = host.querySelector<HTMLButtonElement>('.stack-edited-preview')!;
-  expect(toggle.getAttribute('aria-pressed')).toBe('false');
-  expect(toggle.textContent).toBe('Edited preview');
-  expect(toggle.nextElementSibling?.classList.contains('thumbnail-size-control')).toBe(true);
+  const toggle = host.querySelector<HTMLButtonElement>('.stack-edited-preview-switch')!;
+  expect(toggle.type).toBe('button');
+  expect(toggle.getAttribute('role')).toBe('switch');
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(toggle.getAttribute('aria-label')).toBe('Edited preview');
+  expect(toggle.textContent).toBe('OFF');
+  expect(toggle.parentElement?.firstElementChild?.textContent).toBe('Edited preview');
+  expect(toggle.parentElement?.nextElementSibling?.classList.contains('thumbnail-size-control')).toBe(true);
   const images = () => [...host.querySelectorAll('.stack-thumbnail img')].map(image => image.getAttribute('src'));
   const original = images();
   await click('[aria-label="Set selected.dng as COVER"]');
   const covers = () => [...host.querySelectorAll('.stack-photo')].map(button => button.getAttribute('aria-pressed'));
   const before = covers();
   const storage = JSON.stringify(localStorage);
-  await click('.stack-edited-preview');
-  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  await click('.stack-edited-preview-switch');
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+  expect(toggle.textContent).toBe('ON');
   expect(images().every(url => url?.includes('/rendered-thumbnail'))).toBe(true);
   expect(covers()).toEqual(before);
-  await click('.stack-edited-preview');
+  await click('.stack-edited-preview-switch');
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(toggle.textContent).toBe('OFF');
   expect(images()).toEqual(original);
   expect(covers()).toEqual(before);
   expect(JSON.stringify(localStorage)).toBe(storage);
@@ -64,7 +71,7 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   await act(async () => i18n.changeLanguage('ja'));
-  expect(toggle.textContent).toBe('補正表示');
+  expect(toggle.parentElement?.firstElementChild?.textContent).toBe('補正済み表示');
 });
 it('preserves D and adds the Stack selection callback', async () => {
   const open = vi.fn(), stacks = vi.fn();

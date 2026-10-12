@@ -140,3 +140,27 @@ it('keeps Gallery and Stack trash menu hover and keyboard focus dark above the g
   expect(rule('.stack-photo-context-menu .workspace-menu-item:disabled')?.color).toBe('#777');
   expect(rule('.stack-trash-context-menu .stack-trash-menu-item:disabled')?.color).toBe('#777');
 });
+
+it('keeps the edited-preview switch legible on and off while hovered and focused', () => {
+  const rules = [...document.styleSheets].flatMap(sheet => {
+    try { return [...sheet.cssRules] as CSSStyleRule[]; } catch { return []; }
+  });
+  const rule = (selector: string) => rules.find(item => typeof item.selectorText === 'string'
+    && item.selectorText.split(',').map(part => part.trim()).includes(selector))?.style;
+  for (const selector of [
+    '.stack-management-page .stack-edited-preview-switch',
+    '.stack-management-page .stack-edited-preview-switch:hover:not(:disabled)',
+  ]) {
+    expect(rule(selector)?.background).toBe('#49494d');
+    expect(rule(selector)?.color).toBe('#fff');
+  }
+  for (const selector of [
+    '.stack-management-page .stack-edited-preview-switch[aria-checked="true"]',
+    '.stack-management-page .stack-edited-preview-switch[aria-checked="true"]:hover:not(:disabled)',
+  ]) {
+    expect(rule(selector)?.background).toBe('#638a53');
+    expect(rule(selector)?.color).toBe('#fff');
+  }
+  expect(rule('.stack-edited-preview-thumb')?.color).toBe('#181818');
+  expect(rule('.stack-management-page .stack-edited-preview-switch:focus-visible')?.outline).toContain('var(--accent)');
+});

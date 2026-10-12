@@ -858,7 +858,7 @@
     }
   },
   "stackManagement": {
-    "editedPreview": "補正表示",
+    "editedPreview": "補正済み表示",
     "trashCount": "ゴミ箱移動予約: {{count}}枚",
     "trashIncomplete": "STACKの更新は完了しましたが、ゴミ箱への移動に失敗しました。Immich側で対象の写真の状態を確認してください。",
     "trashUnknown": "STACKの更新は完了しましたが、ゴミ箱への移動結果を確認できませんでした。Immich側で対象の写真の状態を確認してください。",

@@ -571,8 +571,14 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         {t('stackManagement.pendingSummary', { create: createCount, update: updateCount, delete: deleteCount })}{trashCount > 0 && ` — ${t('stackManagement.trashCount', { count: trashCount })}`}
       </span>}
       <div className="stack-control-actions">
-        <button type="button" className="stack-edited-preview" aria-pressed={editedPreview}
-          onClick={() => setEditedPreview(value => !value)}>{t('stackManagement.editedPreview')}</button>
+        <div className="stack-edited-preview-control">
+          <span>{t('stackManagement.editedPreview')}</span>
+          <button type="button" className="stack-edited-preview-switch" role="switch"
+            aria-label={t('stackManagement.editedPreview')} aria-checked={editedPreview}
+            onClick={() => setEditedPreview(value => !value)}>
+            <span className="stack-edited-preview-thumb">{t(editedPreview ? 'settings.on' : 'settings.off')}</span>
+          </button>
+        </div>
         <HomeThumbnailSizeControl />
         <button type="button" disabled={busy || sending || confirmSend || (!ready && !immich.error) || confirmRedetect || !assets.length} aria-busy={busy} onClick={redetect}>{t('stackManagement.detect')}</button>
         <button type="button" className="immich-action-button" disabled={!canSend || confirmSend} aria-busy={sending} onClick={() => setConfirmSend(true)}>{t('stackManagement.send')}</button>
