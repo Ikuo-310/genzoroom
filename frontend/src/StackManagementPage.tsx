@@ -54,8 +54,9 @@ function readNavigation(value: unknown): StackNavigationState | null {
   return { selectedAssets: [...new Map(state.selectedAssets.map(asset => [asset.id, asset])).values()], ...(homeReturn ? { homeReturn } : {}) };
 }
 
-export function StackManagementPage({ sessionAssets, active = true, splitRatio, onSplitRatioChange }: {
+export function StackManagementPage({ sessionAssets, active = true, splitRatio, onSplitRatioChange, onWriteComplete }: {
   sessionAssets?: RecentAsset[]; active?: boolean; splitRatio?: number; onSplitRatioChange?: (ratio: number) => void;
+  onWriteComplete?: () => void;
 } = {}) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -179,6 +180,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         : results.some(result => result.trashStatus === 'unknown') ? 'trashUnknown'
           : results.some(result => result.trashStatus === 'failed' || result.trashStatus === 'blocked') ? 'trashIncomplete'
             : plan.operations.length ? 'sendSuccess' : 'sendNoChanges');
+    if (plan.operations.length > 0) onWriteComplete?.();
     sendRequest.current = null; setSending(false);
   };
   const selectedUnmatched = draft.unmatched.filter(asset => selectedIds.has(asset.id));

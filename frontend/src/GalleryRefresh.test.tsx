@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,8 @@ vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(
   fetchAlbumAssets: api.album, fetchCalendarDayAssets: api.day, fetchCalendarHeatmap: api.heatmap, fetchCalendarMinYear: api.minYear }));
 vi.mock('./useEditStatuses', () => ({ useEditStatusesSnapshot: () => ({ statuses: {}, state: 'ready' }) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(), listExportQueue: async () => [] }));
-vi.mock('./StackManagementPage', () => ({ StackManagementPage: () => null }));
+vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ onWriteComplete }: { onWriteComplete?: () => void }) =>
+  createElement('button', { type: 'button', id: 'test-stack-write-complete', onClick: onWriteComplete }, 'Complete Stack write') }));
 
 const photos: RecentAsset[] = ['one', 'two'].map(id => ({ id, filename: `${id}.jpg`, date: '2026-09-01',
   thumbnail_url: `/thumb/${id}`, format: 'JPEG', is_raw: false }));
@@ -82,6 +83,61 @@ afterEach(() => {
 });
 
 describe('Gallery manual refresh', () => {
+  it.each(['recent', 'favorites', 'album-list', 'album-detail', 'calendar-year', 'calendar-month', 'calendar-day'])
+    ('reloads only the current %s view after a Stack write', async view => {
+      await mount(); await openView(view);
+      const loader = view === 'album-list' ? 'albums' : view === 'album-detail' ? 'album'
+        : view === 'calendar-day' ? 'day' : view.startsWith('calendar') ? 'heatmap' : view;
+      const before = Object.fromEntries(Object.entries(api).map(([key, mock]) => [key, mock.mock.calls.length]));
+      await click('#home-stacks-tab');
+      await click('#test-stack-write-complete');
+      expect(api[loader as keyof typeof api].mock.calls.length).toBe(before[loader]);
+      await click(`#home-${view.startsWith('album') ? 'albums' : view.startsWith('calendar') ? 'calendar' : view}-tab`);
+      expect(api[loader as keyof typeof api].mock.calls.length).toBe(before[loader] + 1);
+      for (const name of ['recent', 'favorites', 'albums', 'album', 'day', 'heatmap'] as const) {
+        if (view === 'calendar-day' && name === 'heatmap') continue;
+        if (name !== loader) expect(api[name].mock.calls.length).toBe(before[name]);
+      }
+    });
+
+  it('coalesces multiple Stack writes and keeps cached Gallery data when none completed', async () => {
+    await mount();
+    const recentCalls = api.recent.mock.calls.length;
+    await click('#home-stacks-tab');
+    await click('#test-stack-write-complete'); await click('#test-stack-write-complete');
+    expect(api.recent).toHaveBeenCalledTimes(recentCalls);
+    await click('#home-recent-tab');
+    expect(api.recent).toHaveBeenCalledTimes(recentCalls + 1);
+
+    await click('#home-stacks-tab'); await click('#home-recent-tab');
+    expect(api.recent).toHaveBeenCalledTimes(recentCalls + 1);
+  });
+
+  it('waits for the active Gallery data load and preserves selection, filter and scroll on return', async () => {
+    const pending = deferred<RecentAsset[]>(); api.recent.mockReturnValueOnce(pending.promise);
+    await mount();
+    await click('#home-stacks-tab'); await click('#test-stack-write-complete');
+    expect(api.recent).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve(photos));
+    expect(api.recent).toHaveBeenCalledOnce();
+    await click('#home-recent-tab');
+    expect(api.recent).toHaveBeenCalledTimes(2);
+    await click('.selection-all'); await change('.develop-status-filter-control select', 'undeveloped');
+    const page = host.querySelector<HTMLElement>('.home-page')!; const content = homeScrollContent(page)!;
+    page.scrollTop = 35; content.scrollTop = 240;
+    await click('#home-stacks-tab'); await click('#test-stack-write-complete'); await click('#home-recent-tab');
+    expect(host.querySelector('.selection-count')?.textContent).toBe('2 selected');
+    expect((host.querySelector('.develop-status-filter-control select') as HTMLSelectElement).value).toBe('undeveloped');
+    expect(page.scrollTop).toBe(0); expect(content.scrollTop).toBe(240);
+  });
+
+  it('does not reload Gallery when returning from Export after a Stack write', async () => {
+    await mount(); const recentCalls = api.recent.mock.calls.length;
+    await click('#home-stacks-tab'); await click('#test-stack-write-complete');
+    await click('#home-export-tab'); await click('#home-recent-tab');
+    expect(api.recent).toHaveBeenCalledTimes(recentCalls);
+  });
+
   it.each(['recent', 'favorites', 'album-list', 'album-detail', 'calendar-year', 'calendar-month', 'calendar-day'])
     ('owns the leftmost toolbar position and updates only %s without changing its hierarchy', async view => {
       await mount(); await openView(view);

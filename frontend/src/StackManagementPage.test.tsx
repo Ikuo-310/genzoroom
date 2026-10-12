@@ -20,7 +20,7 @@ const photos = [
 let host: HTMLDivElement, root: Root;
 let navigateTest: (path: string, state?: unknown) => void = () => {};
 function NavigationProbe() { const navigate = useNavigate(); navigateTest = (path, state) => navigate(path, { state }); return null; }
-async function mount(path = '/', state?: unknown) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><SettingsProvider><Routes><Route path="/stack" element={<StackManagementPage />} /><Route path="*" element={<App />} /></Routes></SettingsProvider><NavigationProbe /></MemoryRouter>)); }
+async function mount(path = '/', state?: unknown, onWriteComplete?: () => void) { await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state }]}><SettingsProvider><Routes><Route path="/stack" element={<StackManagementPage onWriteComplete={onWriteComplete} />} /><Route path="*" element={<App />} /></Routes></SettingsProvider><NavigationProbe /></MemoryRouter>)); }
 async function click(selector: string) { await act(async () => host.querySelector<HTMLElement>(selector)!.click()); }
 async function press(key: string, options: KeyboardEventInit = {}, target: EventTarget = window) {
   await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options })); });
@@ -668,6 +668,18 @@ it('confirms sending with counts, Cancel focus and Escape dismissal',async()=>{
  await press('Escape',{},document.activeElement!);expect(host.querySelector('dialog')).toBeNull();
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
 });
+it('notifies the parent only after a current send with write operations completes', async () => {
+ const completed=vi.fn(); await mount('/stack',{selectedAssets:photos},completed);
+ await act(async()=>button('Send to Immich').click());
+ await act(async()=>button('Cancel').click());
+ expect(completed).not.toHaveBeenCalled();
+
+ const fetch=vi.fn(async()=>new Response(JSON.stringify({results:[{operationId:'draft:auto:selected',status:'failed'}]})));
+ vi.stubGlobal('fetch',fetch);
+ await act(async()=>button('Send to Immich').click()); await act(async()=>button('Continue').click());
+ expect(completed).toHaveBeenCalledOnce();
+ expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendFailure'));
+});
 it('sends only once, disables editing, cleans candidates and preserves unmatched for further work',async()=>{
  let finish!:(value:Response)=>void;
  const fetch=vi.fn((_url: string, _init: RequestInit)=>new Promise<Response>(resolve=>{finish=resolve;}));vi.stubGlobal('fetch',fetch);
@@ -684,10 +696,10 @@ it('sends only once, disables editing, cleans candidates and preserves unmatched
  await act(async()=>button('New Stack').click());expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
 });
 it('removes unchanged without writes and exposes delete failure with a safe manual retry',async()=>{
- api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]});
+ const completed=vi.fn();api.resolve.mockResolvedValue([existingStack]);await mount('/stack',{selectedAssets:[existingMembers[1]]},completed);
  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
- expect(fetch).not.toHaveBeenCalled();expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
+ expect(fetch).not.toHaveBeenCalled();expect(completed).not.toHaveBeenCalled();expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0);
  expect(button('Send to Immich').disabled).toBe(true);
  await act(async()=>button('Detect again').click());await click('.stack-purge-group');
  fetch.mockImplementation(async(_url:string,init:RequestInit)=>new Response(JSON.stringify({results:JSON.parse(init.body as string).operations.map((op:{operationId:string})=>({operationId:op.operationId,status:'failed',errorCode:'authentication_failed'}))})));
@@ -700,9 +712,10 @@ it('removes unchanged without writes and exposes delete failure with a safe manu
  expect(host.querySelector('.stack-pending-summary')).toBeNull();expect(unmatched()).toHaveLength(3);
 });
 it('retains unknown work, labels outcome uncertainty and requires redetection before resend',async()=>{
- await mount('/stack',{selectedAssets:photos});
+ const completed=vi.fn();await mount('/stack',{selectedAssets:photos},completed);
  const fetch=vi.fn().mockRejectedValue(new Error('lost'));vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(completed).toHaveBeenCalledOnce();
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
  expect(host.querySelector('.stack-evidence.error')?.getAttribute('title')).toContain('outcomes could not be confirmed');
  expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toBe(i18n.t('stackManagement.sendUnknown'));
@@ -725,12 +738,13 @@ it('retains failed candidate with accessible red status and retries only on expl
 it('applies a partial batch by removing only successes and marking failed work',async()=>{
  const more=photos.map(asset=>({...asset,id:'second-'+asset.id,filename:'second.'+(asset.is_raw?'dng':'jpg')}));
  api.detail.mockImplementation(async(id:string)=>({id,exif:{}}));
- await mount('/stack',{selectedAssets:[...photos,...more,...singles]});
+ const completed=vi.fn();await mount('/stack',{selectedAssets:[...photos,...more,...singles]},completed);
  const fetch=vi.fn(async(_url:string,init:RequestInit)=>{
   const operations=JSON.parse(init.body as string).operations;
   return new Response(JSON.stringify({results:operations.map((op:{operationId:string},index:number)=>({operationId:op.operationId,status:index?'failed':'success',...(index?{}:{stackId:existingStackId})}))}));
  });vi.stubGlobal('fetch',fetch);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ expect(completed).toHaveBeenCalledOnce();
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);expect(unmatched()).toEqual(['x.jpg','y.jpg']);
  expect(host.querySelector('.stack-evidence.error')).not.toBeNull();expect(host.querySelector('.stack-section-heading .stack-send-status')?.textContent).toContain('could not be applied');
 });
@@ -742,6 +756,7 @@ it('aborts the frontend wait on Home navigation without resending the write',asy
  expect(signal?.aborted).toBe(false);await press('G');expect(signal?.aborted).toBe(true);expect(fetch.mock.calls.filter(call=>call[0]==='/api/stacks/apply')).toHaveLength(1);
 });
 it('aborts and ignores a successful send result after same-route navigation changes the selection',async()=>{
+ const completed=vi.fn();
  api.resolve.mockResolvedValue([existingStack]);
  const next=[
   {...photos[0],id:'next-raw',filename:'next.dng'},
@@ -750,18 +765,20 @@ it('aborts and ignores a successful send result after same-route navigation chan
  api.detail.mockImplementation(async(id:string)=>({id,filename:id==='next-raw'?'next.dng':'next.jpg',format:id.endsWith('raw')?'DNG':'JPEG',is_raw:id.endsWith('raw'),date:'2026-09-01',thumbnail_url:'/next',exif:{},preview_url:'/preview'}));
  const finishes:Array<(response:Response)=>void>=[],signals:AbortSignal[]=[];
  const fetch=vi.fn((_url:string,init:RequestInit)=>{signals.push(init.signal as AbortSignal);return new Promise<Response>(resolve=>{finishes.push(resolve);});});vi.stubGlobal('fetch',fetch);
- await mount('/stack',{selectedAssets:[...photos,existingMembers[1]]});await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
+ await mount('/stack',{selectedAssets:[...photos,existingMembers[1]]},completed);await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(signals[0].aborted).toBe(false);
  await act(async()=>navigateTest('/stack',{selectedAssets:[...next,existingMembers[1]]}));
  expect(signals[0].aborted).toBe(true);
  await act(async()=>button('Send to Immich').click());await act(async()=>button('Continue').click());
  expect(signals[1].aborted).toBe(false);expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');
  await act(async()=>finishes[0](new Response(JSON.stringify({results:[{operationId:'draft:auto:selected',status:'success',stackId:existingStackId}]}))));
+ expect(completed).not.toHaveBeenCalled();
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(2);
  expect(host.textContent).toContain('next.dng');
  expect(button('Send to Immich').getAttribute('aria-busy')).toBe('true');expect(signals[1].aborted).toBe(false);
  expect(host.textContent).not.toContain('Applied to Immich.');
  await act(async()=>finishes[1](new Response(JSON.stringify({results:[{operationId:'draft:auto:next',status:'success',stackId:existingStackId}]}))));
+ expect(completed).toHaveBeenCalledOnce();
  expect(button('Send to Immich').getAttribute('aria-busy')).not.toBe('true');
 });
 it('refreshes latest membership after unknown create without relying on old Stack IDs',async()=>{

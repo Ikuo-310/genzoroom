@@ -105,11 +105,15 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   // Management navigation preserves the browsing tab without entering photo filters or route state.
   const [showExport, setShowExport] = useState(false);
   const [showStacks, setShowStacks] = useState(false);
+  const galleryReloadPending = useRef(false);
+  const [stackWriteRevision, setStackWriteRevision] = useState(0);
   const [stackSession, setStackSession] = useState<{ assets: RecentAsset[]; generation: number } | null>(null);
   // Keep the ratio above the keyed editor so a new asset session retains the SPA layout preference.
   const [stackSplitRatio, setStackSplitRatio] = useState(2 / 3);
   const showStacksRef = useRef(showStacks);
   showStacksRef.current = showStacks;
+  const showExportRef = useRef(showExport);
+  showExportRef.current = showExport;
   const exportManagement = useExportManagement(exportQueue, showExport && active);
   const exportManagementRef = useRef({ active: showExport && active, state: exportManagement });
   exportManagementRef.current = { active: showExport && active, state: exportManagement };
@@ -276,6 +280,18 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     return true;
   }
   refreshPhotosRef.current = refreshPhotos;
+
+  useEffect(() => {
+    if (!galleryReloadPending.current || !active || showStacks || showExport) return;
+    if (!canRefreshPhotos) return;
+    const operation = refreshOperation.current;
+    if (operation) {
+      // A manual refresh of this exact view already fulfills the deferred Stack reload.
+      if (operation.key === refreshContext) galleryReloadPending.current = false;
+      return;
+    }
+    if (refreshPhotosRef.current()) galleryReloadPending.current = false;
+  }, [active, showStacks, showExport, viewKey, canRefreshPhotos, galleryViewState, refreshContext, refreshing, stackWriteRevision]);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
   useLayoutEffect(() => {
@@ -858,6 +874,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   function handleTabClick(tab: HomeNavigationTab) {
     if (tab === 'stacks') { openStacks(); return; }
     if (tab === 'export') {
+      if (showStacks) galleryReloadPending.current = false;
       prepareScrollTransition('export');
       setShowStacks(false);
       setShowExport(true);
@@ -1256,7 +1273,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       </section>
       {stackSession && <div id="home-stacks-panel" className="home-stacks-panel" role="tabpanel" aria-labelledby="home-stacks-tab" hidden={!showStacks}>
         <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={active && showStacks}
-          splitRatio={stackSplitRatio} onSplitRatioChange={setStackSplitRatio} />
+          splitRatio={stackSplitRatio} onSplitRatioChange={setStackSplitRatio} onWriteComplete={() => {
+            if (showExportRef.current) return;
+            galleryReloadPending.current = true;
+            setStackWriteRevision(revision => revision + 1);
+          }} />
       </div>}
     </main>
   );
