@@ -24,6 +24,8 @@ function mount(overrides: Partial<ImmersivePreviewProps> = {}) {
 const image = () => host.querySelector('img')!;
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!;
 const press = (key: string) => act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+const clickPhoto = (clientX: number, target: HTMLElement = host.querySelector<HTMLElement>('.immersive-preview-photo')!, buttonCode = 0) =>
+  act(() => target.dispatchEvent(new MouseEvent('click', { clientX, button: buttonCode, bubbles: true, cancelable: true })));
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -35,8 +37,8 @@ afterEach(() => {
 });
 
 describe('ImmersivePreview', () => {
-  it('fits the image, starts with both bars, and toggles bars only from the photo area', () => {
-    mount();
+  it('fits the image and keeps both toolbars visible when the photo area is clicked', () => {
+    const { handlers } = mount();
     expect(image().getAttribute('src')).toBe('/api/assets/b/immersive-preview');
     const photo = host.querySelector<HTMLElement>('.immersive-preview-photo')!;
     const fitStyle = () => ({
@@ -53,13 +55,45 @@ describe('ImmersivePreview', () => {
     expect(host.querySelector('.immersive-preview-topbar')).not.toBeNull();
     expect(host.querySelector('.immersive-preview-bottombar')).not.toBeNull();
     act(() => button('Selection').click());
+    expect(handlers.onToggleSelection).toHaveBeenCalledWith(b.id);
+    clickPhoto(window.innerWidth / 2);
+    expect(image().alt).toBe(b.filename);
+    expect(host.querySelector('.immersive-preview-topbar')).not.toBeNull();
     expect(host.querySelector('.immersive-preview-bottombar')).not.toBeNull();
-    act(() => photo.click());
-    expect(host.querySelector('.immersive-preview-bottombar')).toBeNull();
     expect(fitStyle().objectFit).toBe('contain');
-    act(() => photo.click());
+    act(() => button('Export Queue').click());
+    expect(handlers.onToggleQueue).toHaveBeenCalledWith(b.id);
+  });
+
+  it('uses the viewport outer 20 percent for photo-area navigation, including its black margins', () => {
+    mount();
+    const width = window.innerWidth;
+    clickPhoto(width * 0.2);
+    expect(image().alt).toBe(b.filename);
+    clickPhoto(width * 0.2 - 1);
+    expect(image().alt).toBe(a.filename);
+    clickPhoto(width * 0.2);
+    expect(image().alt).toBe(a.filename);
+    clickPhoto(width * 0.8 - 1);
+    expect(image().alt).toBe(a.filename);
+    clickPhoto(width * 0.8);
+    expect(image().alt).toBe(b.filename);
+    clickPhoto(width, image());
+    expect(image().alt).toBe(c.filename);
+    clickPhoto(width);
+    expect(image().alt).toBe(c.filename);
+  });
+
+  it('ignores right clicks and photo clicks never toggle selection or Queue', () => {
+    const { handlers } = mount();
+    clickPhoto(window.innerWidth * 0.8, undefined, 2);
+    expect(image().alt).toBe(b.filename);
+    clickPhoto(0);
+    expect(image().alt).toBe(a.filename);
+    expect(handlers.onToggleSelection).not.toHaveBeenCalled();
+    expect(handlers.onToggleQueue).not.toHaveBeenCalled();
+    expect(host.querySelector('.immersive-preview-topbar')).not.toBeNull();
     expect(host.querySelector('.immersive-preview-bottombar')).not.toBeNull();
-    expect(fitStyle().objectFit).toBe('contain');
   });
 
   it('shows the existing GenzoRoom export badge without shifting the centered filename', () => {

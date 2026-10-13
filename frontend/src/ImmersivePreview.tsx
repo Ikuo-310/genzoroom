@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { canToggleEditedQueue, type EditedQueueControlState } from './EditedBadge';
@@ -36,13 +36,21 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   // Queue and selection updates from the parent must not change the sequence being browsed.
   const [viewAssets] = useState(() => [...assets]);
   const [index, setIndex] = useState(() => Math.max(0, assets.findIndex(asset => asset.id.toLowerCase() === startAssetId.toLowerCase())));
-  const [barsVisible, setBarsVisible] = useState(true);
   const asset = viewAssets[index];
   const isMac = shortcutPlatform() === 'mac';
   const hasArm = source === 'exportManagement' && onToggleArmed !== undefined;
   const queueControl = asset ? queueControlByAssetId?.get(asset.id.toLowerCase()) : undefined;
   const queueEnabled = queueControlByAssetId === undefined || (queueControl !== undefined
     && canToggleEditedQueue(queueControl, true));
+  const move = useCallback((direction: -1 | 1) => {
+    setIndex(current => Math.max(0, Math.min(viewAssets.length - 1, current + direction)));
+  }, [viewAssets.length]);
+  const handlePhotoClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || window.innerWidth <= 0) return;
+    const position = event.clientX / window.innerWidth;
+    if (position < 0.2) move(-1);
+    else if (position >= 0.8) move(1);
+  };
 
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -71,9 +79,9 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
       if (event.defaultPrevented || event.isComposing || event.repeat || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
       if (matchesShortcut(event, 'immersivePrevious')) {
-        consume(event); setIndex(current => Math.max(0, current - 1));
+        consume(event); move(-1);
       } else if (matchesShortcut(event, 'immersiveNext')) {
-        consume(event); setIndex(current => Math.min(viewAssets.length - 1, current + 1));
+        consume(event); move(1);
       } else if (matchesShortcut(event, 'immersiveSelectionToggle')) {
         if (!asset) return;
         consume(event); onToggleSelection(asset.id);
@@ -90,7 +98,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
     // Capture prevents the underlying Gallery or Workspace from also handling shared Q/W commands.
     window.addEventListener('keydown', keydown, true);
     return () => window.removeEventListener('keydown', keydown, true);
-  }, [asset, hasArm, onClose, onToggleArmed, onToggleQueue, onToggleSelection, queueEnabled, viewAssets.length]);
+  }, [asset, hasArm, move, onClose, onToggleArmed, onToggleQueue, onToggleSelection, queueEnabled, viewAssets.length]);
 
   if (!asset) return null;
   const selected = includes(selectedAssetIds, asset.id);
@@ -102,7 +110,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   const position = <span className="immersive-preview-position" aria-label={t('immersivePreview.position', { current: index + 1, total: viewAssets.length })}>{index + 1} / {viewAssets.length}</span>;
 
   return <section ref={rootRef} tabIndex={-1} className={`immersive-preview${isMac ? ' immersive-preview-mac' : ''}`} data-platform={isMac ? 'mac' : 'other'} aria-label={t('immersivePreview.title')}>
-    {barsVisible && <header className="immersive-preview-topbar">
+    <header className="immersive-preview-topbar">
       {isMac ? closeButton : position}
       <div className="immersive-preview-title">
         <span className="immersive-preview-title-side immersive-preview-title-badge">
@@ -112,11 +120,11 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
         <span className="immersive-preview-title-side" aria-hidden="true" />
       </div>
       {isMac ? position : closeButton}
-    </header>}
-    <main className="immersive-preview-photo" onClick={() => setBarsVisible(visible => !visible)}>
+    </header>
+    <main className="immersive-preview-photo" onClick={handlePhotoClick}>
       <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false} />
     </main>
-    {barsVisible && <footer className="immersive-preview-bottombar" onClick={event => event.stopPropagation()}>
+    <footer className="immersive-preview-bottombar">
       <button type="button" aria-pressed={selected} onClick={() => onToggleSelection(asset.id)}>
         {t('immersivePreview.selection', { state: t(selected ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('immersiveSelectionToggle') && <kbd>{shortcut.label('immersiveSelectionToggle')}</kbd>}
       </button>
@@ -127,6 +135,6 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
       {hasArm && <button type="button" aria-pressed={armed} onClick={() => onToggleArmed?.(asset.id)}>
         {t('immersivePreview.arm', { state: t(armed ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportArmToggle') && <kbd>{shortcut.label('exportArmToggle')}</kbd>}
       </button>}
-    </footer>}
+    </footer>
   </section>;
 }
