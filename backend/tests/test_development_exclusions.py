@@ -126,13 +126,56 @@ def test_actual_stack_fetch_hook_and_failures(db, family):
         assert conn.execute('SELECT count(*) FROM development_exclusions').fetchone()[0] == 0
 
 
-def test_single_is_not_invalidated_by_stack_changes(db, family):
-    p = path('asset', family['primaryAssetId'])
+def test_single_is_invalidated_when_it_joins_confirmed_stack(db, family):
+    asset_id = family['assets'][0]['id']
+    p = path('asset', asset_id)
     with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
         assert request('PUT', p).status_code == 200
     with configure([family]):
         item = request('GET', p).json()['items'][0]
-        assert item['excluded'] and item['configuration'] == 'stacked'
+        assert not item['excluded'] and item['configuration'] == 'stacked'
+
+
+def test_single_survives_unrelated_stack_and_incomplete_snapshot(db, family):
+    asset_id = str(uuid4())
+    p = path('asset', asset_id)
+    with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', p).status_code == 200
+    with configure([family]):
+        assert request('GET', p).json()['items'][0]['excluded']
+    with configure([{}]):
+        item = request('GET', p).json()['items'][0]
+        assert item['excluded'] and item['configuration'] == 'unknown'
+
+
+def test_single_invalidates_with_unrelated_invalid_stack_information(db, family):
+    asset_id = family['assets'][0]['id']
+    p = path('asset', asset_id)
+    with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', p).status_code == 200
+    with configure([family, {}]):
+        item = request('GET', p).json()['items'][0]
+        assert not item['excluded'] and item['configuration'] == 'stacked'
+
+
+def test_single_survives_conflicting_stack_ownership(db, family):
+    asset_id = family['assets'][0]['id']
+    p = path('asset', asset_id)
+    second_stack = {**copy.deepcopy(family), 'id': str(uuid4())}
+    with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', p).status_code == 200
+    with configure([family, second_stack]):
+        item = request('GET', p).json()['items'][0]
+        assert item['excluded'] and item['configuration'] == 'unknown'
+
+
+def test_old_stack_observation_does_not_remove_new_single_exclusion(db, family):
+    asset_id = family['assets'][0]['id']
+    stale_started_at = ex._now()
+    with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', path('asset', asset_id)).status_code == 200
+    ex.reconcile(_parse_stack_snapshot([family], require_primary=True), stale_started_at)
+    assert request('GET', path('asset', asset_id)).json()['items'][0]['excluded']
 
 
 def test_v4_migration_adds_only_exclusion_table(db):

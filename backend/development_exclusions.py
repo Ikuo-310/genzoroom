@@ -51,8 +51,19 @@ def reconcile(snapshot, observed_at):
     with edit_store._connection() as db:
         db.execute("BEGIN IMMEDIATE")
         try:
-            rows = db.execute("SELECT * FROM development_exclusions WHERE kind='stack' AND registered_at<=?", (observed_at,)).fetchall()
+            rows = db.execute("SELECT * FROM development_exclusions WHERE registered_at<=?", (observed_at,)).fetchall()
+            confirmed_members = {
+                UUID(member["id"])
+                for stack in snapshot.stacks
+                for member in stack["assets"]
+            }
             for row in rows:
+                if row["kind"] == "asset":
+                    asset_id = UUID(row["target_id"])
+                    if asset_id in confirmed_members:
+                        db.execute("DELETE FROM development_exclusions WHERE kind='asset' AND target_id=?", (row["target_id"],))
+                        _log("exclusion.invalidated", assetId=row["target_id"])
+                    continue
                 try:
                     saved_members = json.loads(row["member_ids_json"])
                     if not isinstance(saved_members, list) or not saved_members:
