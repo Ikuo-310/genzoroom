@@ -111,6 +111,8 @@ def test_primary_presence_rule_remains_context_dependent(logger):
     assert summary(logger)['reasonCounts'] == {}
     strict = _parse_stack_snapshot(body, require_primary=True)
     assert not strict.complete and not strict.stacks
+    assert strict.membership_identifiable
+    assert summary(logger)['membershipIdentifiable'] is True
     assert summary(logger)['reasonCounts'] == {'primary_not_member': 1}
 
 

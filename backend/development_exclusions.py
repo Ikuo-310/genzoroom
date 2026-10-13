@@ -42,9 +42,12 @@ def configuration(snapshot, kind, target_id):
             return "confirmed", str(UUID(stack["primaryAssetId"])), sorted(str(UUID(m["id"])) for m in stack["assets"])
         # An unidentified malformed entry can hide any missing Stack or membership.
         return ("absent" if snapshot.complete else "unknown"), None, None
+    if target_id in snapshot.quarantined_member_ids:
+        return "unknown", None, None
     if any(target_id == UUID(m["id"]) for s in snapshot.stacks for m in s["assets"]):
         return "stacked", None, None
-    return ("single" if snapshot.complete else "unknown"), None, None
+    # Localized Stack uncertainty must not block unrelated Assets; incomplete identities still block them.
+    return ("single" if snapshot.complete or snapshot.membership_identifiable else "unknown"), None, None
 
 
 def reconcile(snapshot, observed_at):

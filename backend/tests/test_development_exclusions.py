@@ -2,7 +2,7 @@ import asyncio
 import copy
 import sqlite3
 from unittest.mock import patch, AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 import httpx
 import pytest
 import edit_store
@@ -201,3 +201,131 @@ def test_corrupt_snapshot_is_retained_and_logged_without_breaking_gallery(db, fa
     ex.observe([], ex._now())
     with edit_store._connection() as conn:
         assert conn.execute('SELECT count(*) FROM development_exclusions').fetchone()[0] == 1
+
+
+def test_missing_primary_member_does_not_block_unrelated_single_asset(db, family):
+    incomplete = {**copy.deepcopy(family), 'primaryAssetId': str(uuid4())}
+    unrelated = uuid4()
+    snapshot = _parse_stack_snapshot([incomplete], require_primary=True)
+    assert not snapshot.complete and not snapshot.stacks
+    assert ex.configuration(snapshot, 'asset', unrelated)[0] == 'single'
+    with configure([incomplete]), patch.object(ex, 'get_asset_detail', new=AsyncMock()) as detail:
+        response = request('PUT', path('asset', unrelated))
+        assert response.status_code == 200
+        item = request('GET', path('asset', unrelated)).json()['items'][0]
+        assert item['excluded'] and item['configuration'] == 'single'
+        detail.assert_awaited_once()
+
+
+@pytest.mark.parametrize('related', ['cover', 'member'])
+def test_incomplete_stack_related_assets_remain_unknown(db, family, related):
+    incomplete = {**copy.deepcopy(family), 'primaryAssetId': str(uuid4())}
+    target_id = incomplete['primaryAssetId'] if related == 'cover' else incomplete['assets'][0]['id']
+    with configure([incomplete]), patch.object(ex, 'get_asset_detail', new=AsyncMock()) as detail:
+        item = request('GET', path('asset', target_id)).json()['items'][0]
+        assert item['configuration'] == 'unknown'
+        assert request('PUT', path('asset', target_id)).status_code == 409
+        detail.assert_not_awaited()
+
+
+def test_valid_stack_operations_survive_unrelated_incomplete_stack(db, family):
+    incomplete = {'id': str(uuid4()), 'primaryAssetId': str(uuid4()), 'assets': [{'id': str(uuid4())}]}
+    snapshot = _parse_stack_snapshot([family, incomplete], require_primary=True)
+    assert ex.configuration(snapshot, 'asset', UUID(family['primaryAssetId']))[0] == 'stacked'
+    with configure([family, incomplete]):
+        p = path('stack', family['id'])
+        assert request('PUT', p).status_code == 200
+        assert request('GET', p).json()['items'][0]['excluded']
+        assert request('DELETE', p).status_code == 204
+        assert not request('GET', p).json()['items'][0]['excluded']
+
+
+@pytest.mark.parametrize('damage', ['stack_id', 'cover_id', 'members_missing', 'members_wrong_type', 'members_empty', 'member_id', 'duplicate_member'])
+def test_unidentifiable_membership_keeps_unrelated_assets_unknown(db, family, damage):
+    damaged = copy.deepcopy(family)
+    if damage == 'stack_id': damaged.pop('id')
+    elif damage == 'cover_id': damaged.pop('primaryAssetId')
+    elif damage == 'members_missing': damaged.pop('assets')
+    elif damage == 'members_wrong_type': damaged['assets'] = {}
+    elif damage == 'members_empty': damaged['assets'] = []
+    elif damage == 'member_id': damaged['assets'].append({'id': 'invalid'})
+    else: damaged['assets'].append(damaged['assets'][0])
+    with configure([damaged]), patch.object(ex, 'get_asset_detail', new=AsyncMock()) as detail:
+        unrelated = uuid4()
+        assert request('GET', path('asset', unrelated)).json()['items'][0]['configuration'] == 'unknown'
+        assert request('PUT', path('asset', unrelated)).status_code == 409
+        detail.assert_not_awaited()
+
+
+@pytest.mark.parametrize('conflict', ['duplicate_stack', 'shared_member'])
+def test_ambiguous_membership_is_quarantined_per_asset(db, family, conflict):
+    other = copy.deepcopy(family)
+    if conflict == 'shared_member': other['id'] = str(uuid4())
+    snapshot = _parse_stack_snapshot([family, other], require_primary=True)
+    assert not snapshot.complete and not snapshot.stacks
+    for member in family['assets']:
+        assert ex.configuration(snapshot, 'asset', UUID(member['id']))[0] == 'unknown'
+    assert ex.configuration(snapshot, 'asset', uuid4())[0] == 'single'
+    assert ex.configuration(snapshot, 'stack', UUID(family['id']))[0] == 'unknown'
+
+
+def test_partial_stack_observation_never_invalidates_existing_exclusions(db, family):
+    singleton = uuid4()
+    with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', path('asset', singleton)).status_code == 200
+    with configure([family]):
+        assert request('PUT', path('stack', family['id'])).status_code == 200
+    incomplete = copy.deepcopy(family)
+    incomplete['assets'] = [{'id': str(singleton)}]
+    with configure([incomplete]):
+        stack_item = request('GET', path('stack', family['id'])).json()['items'][0]
+        single_item = request('GET', path('asset', singleton)).json()['items'][0]
+        assert stack_item['excluded'] and stack_item['configuration'] == 'unknown'
+        assert single_item['excluded'] and single_item['configuration'] == 'unknown'
+    with edit_store._connection() as connection:
+        assert connection.execute('SELECT count(*) FROM development_exclusions').fetchone()[0] == 2
+
+
+def test_unrelated_stack_absence_is_not_proven_by_partial_snapshot(db, family):
+    with configure([family]):
+        assert request('PUT', path('stack', family['id'])).status_code == 200
+    partial = {'id': str(uuid4()), 'primaryAssetId': str(uuid4()), 'assets': [{'id': str(uuid4())}]}
+    with configure([partial]):
+        item = request('GET', path('stack', family['id'])).json()['items'][0]
+        assert item['excluded'] and item['configuration'] == 'unknown'
+
+
+def test_complete_snapshot_keeps_single_and_stacked_classification(family):
+    snapshot = _parse_stack_snapshot([family], require_primary=True)
+    assert snapshot.complete and snapshot.membership_identifiable
+    assert ex.configuration(snapshot, 'asset', uuid4())[0] == 'single'
+    assert ex.configuration(snapshot, 'asset', UUID(family['primaryAssetId']))[0] == 'stacked'
+
+
+def test_missing_primary_member_snapshot_bounds_uncertainty_to_known_uuids(family):
+    partial = {**copy.deepcopy(family), 'primaryAssetId': str(uuid4())}
+    snapshot = _parse_stack_snapshot([partial], require_primary=True)
+    assert not snapshot.complete and snapshot.membership_identifiable
+    assert snapshot.invalid_stack_ids == {UUID(partial['id'])}
+    assert snapshot.quarantined_member_ids == {UUID(partial['primaryAssetId']), *(UUID(member['id']) for member in partial['assets'])}
+
+
+def test_716_stack_reproduction_allows_unrelated_single_without_relaxing_partial_stacks(db):
+    valid = [{'id': str(UUID(int=10000+i)), 'primaryAssetId': str(UUID(int=20000+2*i)),
+              'assets': [{'id': str(UUID(int=20000+2*i))}, {'id': str(UUID(int=20001+2*i))}]} for i in range(711)]
+    partial = [{'id': str(UUID(int=30000+i)), 'primaryAssetId': str(UUID(int=40000+i)),
+                'assets': [{'id': str(UUID(int=50000+i))}]} for i in range(5)]
+    body = valid + partial
+    snapshot = _parse_stack_snapshot(body, require_primary=True)
+    assert len(snapshot.stacks) == 711 and len(snapshot.invalid_stack_ids) == 5
+    assert not snapshot.complete and snapshot.membership_identifiable
+    unrelated = UUID(int=90000)
+    with configure(body), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
+        assert request('PUT', path('asset', unrelated)).status_code == 200
+        item = request('GET', path('asset', unrelated)).json()['items'][0]
+        assert item['excluded'] and item['configuration'] == 'single'
+        for stack in partial:
+            assert request('GET', path('stack', stack['id'])).json()['items'][0]['configuration'] == 'unknown'
+    with edit_store._connection() as connection:
+        for table in ('asset_edit_states', 'export_queue', 'export_runs', 'export_run_items'):
+            assert connection.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0

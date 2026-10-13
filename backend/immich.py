@@ -649,6 +649,8 @@ class StackSnapshot:
     invalid_stack_ids: set[UUID]
     quarantined_member_ids: set[UUID]
     complete: bool = True
+    # Structural ownership evidence is separate from a valid, complete Stack configuration.
+    membership_identifiable: bool = False
 
 
 def _stack_uuid(value: object) -> UUID | None:
@@ -727,7 +729,7 @@ def _log_stack_snapshot(snapshot, entries, stack_id_counts, member_owners, *, re
         _immich_log(level="debug", component="immich", event="stack.snapshot.parsed", context={
             "snapshotId": snapshot_id, "requirePrimary": require_primary,
             "stackCount": len(entries), "validStackCount": len(snapshot.stacks), "invalidEntryCount": invalid_count,
-            "complete": snapshot.complete, "reasonCounts": reason_counts,
+            "complete": snapshot.complete, "membershipIdentifiable": snapshot.membership_identifiable, "reasonCounts": reason_counts,
             "detailEntryCount": len(details), "detailsOmittedCount": max(0, invalid_count - len(details)),
         })
         for context in details:
@@ -739,6 +741,7 @@ def _log_stack_snapshot(snapshot, entries, stack_id_counts, member_owners, *, re
 
 def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> StackSnapshot:
     entries = []
+    membership_identifiable = True
     stack_id_counts: dict[UUID, int] = {}
     member_owners: dict[UUID, set[int]] = {}
     for index, raw in enumerate(body):
@@ -754,6 +757,10 @@ def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> Stack
                 valid = False
             if member_id is not None:
                 members.add(member_id)
+        # Filtered lists can omit the COVER while still identifying the affected UUIDs.
+        # Missing identities, partial member data, and duplicate members cannot establish unrelated singles.
+        if not valid:
+            membership_identifiable = False
         # Home must recognize surviving children even when a deleted primary is absent; edits cannot trust that snapshot.
         if require_primary and primary_id not in members:
             valid = False
@@ -765,7 +772,7 @@ def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> Stack
     ambiguous_entries = {
         index for owners in member_owners.values() if len(owners) > 1 for index in owners
     }
-    snapshot = StackSnapshot([], set(), set())
+    snapshot = StackSnapshot([], set(), set(), membership_identifiable=membership_identifiable)
     for index, (stack, stack_id, primary_id, members, valid) in enumerate(entries):
         if valid and stack_id_counts[stack_id] == 1 and index not in ambiguous_entries:
             snapshot.stacks.append(stack)
