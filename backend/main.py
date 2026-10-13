@@ -25,6 +25,7 @@ from export_runtime import ExportRuntime, ImmichExportSource
 from immich_export import ImmichFamilyFilenameProvider, ImmichExportRegistrar
 from genzoroom_tag_repair import GenzoRoomTagRepair
 from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets, get_export_run
+from development_exclusions import ExclusionTarget, ExclusionStatusRequest, statuses, register, remove
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -741,3 +742,41 @@ async def asset_preview(asset_id: UUID) -> Response:
         media_type=preview.media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+
+@app.post("/development-exclusions/status")
+async def development_exclusion_status(payload: ExclusionStatusRequest) -> dict:
+    if len({(t.kind, t.id) for t in payload.targets}) != len(payload.targets):
+        raise _edit_error(422, "duplicate_targets")
+    try:
+        return await statuses(payload.targets, os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.get("/development-exclusions/{kind}/{target_id}")
+async def development_exclusion(kind: Literal["asset", "stack"], target_id: UUID) -> dict:
+    return await development_exclusion_status(ExclusionStatusRequest(targets=[ExclusionTarget(kind=kind, id=target_id)]))
+
+
+@app.put("/development-exclusions/{kind}/{target_id}")
+async def register_development_exclusion(kind: Literal["asset", "stack"], target_id: UUID) -> dict:
+    try:
+        status = await register(kind, target_id, os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+        if status not in ("confirmed", "single"):
+            raise _edit_error(404 if status == "absent" else 409, "exclusion_target_" + status)
+        return {"kind": kind, "id": str(target_id), "excluded": True, "configuration": status}
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+
+
+@app.delete("/development-exclusions/{kind}/{target_id}", status_code=204)
+def remove_development_exclusion(kind: Literal["asset", "stack"], target_id: UUID) -> Response:
+    try:
+        remove(kind, target_id)
+        return Response(status_code=204)
+    except StoreUnavailable as error:
+        raise _store_error(error) from error

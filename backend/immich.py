@@ -617,6 +617,9 @@ async def _get_asset_stacks(
     url: str, key: str,
     *, transport: httpx.AsyncBaseTransport | None = None, batch_id: str | None = None,
 ) -> list[object]:
+    from development_exclusions import _now, observe
+    # A slow pre-registration request must not invalidate a newer exclusion.
+    observed_at = _now()
     try:
         async with httpx.AsyncClient(
             timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
@@ -636,6 +639,7 @@ async def _get_asset_stacks(
     except (KeyError, TypeError, ValueError):
         _log_response_failure(response, "unexpected_response")
         raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.") from None
+    observe(body, observed_at)
     return body
 
 
@@ -644,6 +648,7 @@ class StackSnapshot:
     stacks: list[Mapping]
     invalid_stack_ids: set[UUID]
     quarantined_member_ids: set[UUID]
+    complete: bool = True
 
 
 def _stack_uuid(value: object) -> UUID | None:
@@ -686,6 +691,7 @@ def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> Stack
         if valid and stack_id_counts[stack_id] == 1 and index not in ambiguous_entries:
             snapshot.stacks.append(stack)
         else:
+            snapshot.complete = False
             # Invalid entries still establish possible ownership; never reclassify their assets as unstacked.
             if stack_id is not None:
                 snapshot.invalid_stack_ids.add(stack_id)

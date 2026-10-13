@@ -65,7 +65,7 @@ def test_v3_migration_preserves_every_row_and_marks_existing_current(db, status)
     assert run.run_id == run_id and run.worker_id == owner
     assert not run.stop_requested and run.current_position == (None if status == 'waiting' else 0)
     with database(db) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 5
         for table, rows in before.items():
             after = connection.execute(f'SELECT * FROM {table}').fetchall()
             assert ([row[:5] for row in after] if table == 'export_runs' else after) == rows

@@ -126,7 +126,7 @@ def test_existing_database_edit_history_queue_and_runtime_survive_initialization
     assert recoverable_export_run() == original_run
     assert original_run.stop_requested
     with edit_store._connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION == 5
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert storage.DB_PATH.with_name("genzoroom.db-wal").exists()
         assert storage.DB_PATH.with_name("genzoroom.db-shm").exists()
@@ -181,7 +181,7 @@ def test_lifespan_initializes_missing_database_for_new_install(mounted_storage, 
     assert not storage.DB_PATH.exists()
     start_lifespan()
     with edit_store._connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert connection.execute("SELECT count(*) FROM asset_edit_states").fetchone()[0] == 0
 
 

@@ -11,7 +11,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from storage import DB_PATH, StorageInitializationError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -133,7 +133,20 @@ def _create_v4(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE UNIQUE INDEX export_one_active_asset ON export_run_items(asset_id) WHERE status IN ('waiting','encoding','registering')")
 
 
-MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4}
+def _create_v5(connection: sqlite3.Connection) -> None:
+    connection.execute("""CREATE TABLE development_exclusions (
+        kind TEXT NOT NULL CHECK (kind IN ('asset', 'stack')),
+        target_id TEXT NOT NULL,
+        primary_asset_id TEXT,
+        member_ids_json TEXT,
+        registered_at TEXT NOT NULL,
+        PRIMARY KEY (kind, target_id),
+        CHECK ((kind='asset' AND primary_asset_id IS NULL AND member_ids_json IS NULL)
+            OR (kind='stack' AND primary_asset_id IS NOT NULL AND member_ids_json IS NOT NULL))
+    )""")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:
