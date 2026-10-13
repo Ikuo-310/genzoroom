@@ -46,7 +46,8 @@ export function useExportQueueAssets(items: readonly ExportQueueItem[], loaded: 
           }
           // Keep only card metadata; preview and EXIF remain owned by the detail/workspace path.
           assets[index] = { id: detail.id, filename: detail.filename, date: detail.date,
-            thumbnail_url: detail.thumbnail_url, format: detail.format, is_raw: detail.is_raw };
+            thumbnail_url: detail.thumbnail_url, format: detail.format, is_raw: detail.is_raw,
+            ...(typeof detail.isGenzoRoomExport === 'boolean' ? { isGenzoRoomExport: detail.isGenzoRoomExport } : {}) };
         } catch {
           if (!isCurrent()) return;
           failureCount++;

@@ -226,6 +226,21 @@ describe('ImmersivePreview', () => {
     window.removeEventListener('keydown', background);
   });
 
+  it.each(['gallery', 'exportManagement', 'stackManagement'] as const)(
+    'stops registered background shortcuts and repeats in %s mode', source => {
+      const background = vi.fn();
+      window.addEventListener('keydown', background);
+      mount({ source });
+      for (const repeat of [false, true]) {
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: '+', code: 'NumpadAdd', bubbles: true, cancelable: true, repeat,
+        }));
+      }
+      expect(background).not.toHaveBeenCalled();
+      window.removeEventListener('keydown', background);
+    },
+  );
+
   it('keeps the target list when selection and Queue membership change, and hides W in Gallery', () => {
     const { props, handlers } = mount({ source: 'gallery', armedAssetIds: new Set([b.id]) });
     expect(button('Export readiness')).toBeUndefined();
@@ -259,5 +274,19 @@ describe('ImmersivePreview', () => {
     expect(getComputedStyle(filename).textAlign).toBe('center');
     expect(getComputedStyle(host.querySelector('.immersive-preview-topbar')!).paddingLeft)
       .toBe(getComputedStyle(host.querySelector('.immersive-preview-topbar')!).paddingRight);
+  });
+
+  it('uses equal header side tracks at narrow widths while keeping the title in the center track', () => {
+    const styles = [...document.querySelectorAll('style')].map(style => style.textContent ?? '').join('\n');
+    expect(styles).toMatch(/@media\s*\(max-width:\s*560px\)\s*\{\s*\.immersive-preview-topbar\s*\{[^}]*grid-template-columns:\s*minmax\(48px,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(48px,\s*1fr\)/);
+    expect(styles).toMatch(/@media\s*\(max-width:\s*560px\)\s*\{\s*\.immersive-preview-topbar\s*\{[^}]*padding-inline:\s*10px/);
+    const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+    mount();
+    const topbar = host.querySelector('.immersive-preview-topbar')!;
+    expect(topbar.children[1].classList.contains('immersive-preview-title')).toBe(true);
+    expect(topbar.children[0].matches('button')).toBe(isMac);
+    expect(topbar.children[2].matches('button')).toBe(!isMac);
+    expect(getComputedStyle(host.querySelector('.immersive-preview-filename')!).textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(host.querySelector('.immersive-preview-title')!).columnGap).toBe('8px');
   });
 });

@@ -190,6 +190,7 @@ class AssetDetail(BaseModel):
     thumbnail_url: str
     format: str
     is_raw: bool
+    isGenzoRoomExport: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     is_favorite: bool = Field(exclude=True)
     exif: AssetExif
 
@@ -1249,6 +1250,7 @@ async def get_asset_detail(
         thumbnail_url=f"/api/assets/{asset_id}/thumbnail",
         format=image_format,
         is_raw=is_raw,
+        isGenzoRoomExport=_home_export_tag(body.get("tags")),
         is_favorite=is_favorite,
         exif=AssetExif(
             date_time_original=_optional_string(exif.get("dateTimeOriginal")),

@@ -9,8 +9,8 @@ const api = vi.hoisted(() => ({ fetchDetail: vi.fn(), refreshStacks: vi.fn() }))
 vi.mock('./api', () => ({ fetchAssetDetail: api.fetchDetail, refreshSelectedImmichStacks: api.refreshStacks }));
 vi.mock('./frontendLogging', () => ({ frontendLogger: { add: vi.fn() } }));
 const item = (assetId: string): ExportQueueItem => ({ assetId, status: 'queued', queuedAt: '', updatedAt: '' });
-const detail = (id: string): AssetDetail => ({ id, filename: id, date: '', thumbnail_url: '', format: 'JPEG',
-  is_raw: false, preview_url: '', exif: {} });
+const detail = (id: string, isGenzoRoomExport?: boolean): AssetDetail => ({ id, filename: id, date: '', thumbnail_url: '', format: 'JPEG',
+  is_raw: false, preview_url: '', exif: {}, ...(isGenzoRoomExport === undefined ? {} : { isGenzoRoomExport }) });
 const stack = (memberIds: string[]): ImmichStack => ({ id: 'stack-x', primaryAssetId: memberIds[0], assets: memberIds.map(id => ({
   id, filename: id, date: '', thumbnail_url: '', format: 'JPEG', is_raw: false,
   stackId: 'stack-x', primaryAssetId: memberIds[0], stackAssetCount: memberIds.length,
@@ -48,6 +48,14 @@ it('limits concurrency to four and restores Queue order after out-of-order respo
   expect(snapshot.assets.map(asset => asset.id)).not.toContain('outside');
   await render(['a', 'b', 'c', 'd', 'e', 'f'], true, 'failed');
   expect(api.fetchDetail).toHaveBeenCalledTimes(6); expect(snapshot.status).toBe('ready');
+});
+it('retains positive and negative export identity while leaving unavailable identity unknown', async () => {
+  await render(['exported', 'not-exported', 'unknown']);
+  await act(async () => {
+    pending[0].resolve(detail('exported', true)); pending[1].resolve(detail('not-exported', false));
+    pending[2].resolve(detail('unknown'));
+  });
+  expect(snapshot.assets.map(asset => asset.isGenzoRoomExport)).toEqual([true, false, undefined]);
 });
 it('joins only queued assets and leaves unstacked Queue items without Stack metadata', async () => {
   api.refreshStacks.mockResolvedValue([stack(['a', 'b', 'outside'])]);

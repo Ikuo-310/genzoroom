@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { canToggleEditedQueue, type EditedQueueControlState } from './EditedBadge';
 import { GenzoRoomExportBadge } from './GenzoRoomExportBadge';
-import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { isNativeEditingTarget, matchesShortcut, shortcutBindings, type ShortcutId } from './editShortcuts';
 import { isGenzoRoomExported } from './photoFilters';
 import { shortcutPlatform } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
@@ -28,6 +28,10 @@ export type ImmersivePreviewProps = {
 
 function includes(ids: ReadonlySet<string>, assetId: string) {
   return ids.has(assetId) || ids.has(assetId.toLowerCase());
+}
+
+function matchesRegisteredShortcut(event: KeyboardEvent) {
+  return (Object.keys(shortcutBindings) as ShortcutId[]).some(id => matchesShortcut(event, id));
 }
 
 export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new Set(), queuedAssetIds = new Set(), armedAssetIds = new Set(),
@@ -94,7 +98,11 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       if (source === 'exportManagement' && matchesShortcut(event, 'immersiveSelectionToggle')) {
         consume(event); return;
       }
-      if (event.repeat) return;
+      if (event.repeat) {
+        if (matchesShortcut(event, 'immersiveSelectionToggle')) consume(event);
+        else if (matchesRegisteredShortcut(event)) event.stopImmediatePropagation();
+        return;
+      }
       if (matchesShortcut(event, 'immersivePrevious')) {
         consume(event); move(-1);
       } else if (matchesShortcut(event, 'immersiveNext')) {
@@ -111,6 +119,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       } else if (matchesShortcut(event, 'immersiveClose') || event.key === 'Escape') {
         consume(event); onClose();
       }
+      if (!event.defaultPrevented && matchesRegisteredShortcut(event)) event.stopImmediatePropagation();
     };
     // Capture prevents the underlying Gallery or Workspace from also handling shared Q/W commands.
     window.addEventListener('keydown', keydown, true);

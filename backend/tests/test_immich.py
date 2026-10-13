@@ -364,6 +364,7 @@ class ImmichAssetTests(unittest.TestCase):
                     "originalFileName": "capture.DNG",
                     "fileCreatedAt": "2026-09-01T12:00:00.000Z",
                     "isFavorite": True,
+                    "tags": [{"value": "GenzoRoom"}],
                     "exifInfo": {
                         "dateTimeOriginal": "2026-09-01T12:00:00.000Z",
                         "make": "Example Camera Co.",
@@ -394,6 +395,7 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(detail.format, "DNG")
         self.assertTrue(detail.is_raw)
         self.assertTrue(detail.is_favorite)
+        self.assertTrue(detail.isGenzoRoomExport)
         self.assertEqual(detail.exif.focal_length, 35)
         self.assertEqual(detail.exif.width, 6000)
         self.assertEqual(detail.exif.latitude, 35.0)
@@ -416,6 +418,17 @@ class ImmichAssetTests(unittest.TestCase):
         ))
 
         self.assertEqual(detail.exif.model_dump(exclude_none=True), {})
+        self.assertIsNone(detail.isGenzoRoomExport)
+
+    def test_asset_detail_reports_existing_tag_membership_without_extra_lookup(self):
+        calls = []
+        response = {"id": str(ASSET_ID), "type": "IMAGE", "originalFileName": "photo.jpg",
+            "fileCreatedAt": "2026-09-01T12:00:00.000Z", "isFavorite": False,
+            "tags": [{"value": "Other"}]}
+        detail = asyncio.run(get_asset_detail(IMMICH_URL, API_KEY, ASSET_ID, transport=httpx.MockTransport(
+            lambda request: (calls.append(request.url.path) or httpx.Response(200, json=response)))))
+        self.assertEqual(calls, [f"/api/assets/{ASSET_ID}"])
+        self.assertFalse(detail.isGenzoRoomExport)
 
     def test_asset_detail_rejects_missing_or_non_boolean_favorite(self):
         for value in (None, 0, 1, "true", {}):

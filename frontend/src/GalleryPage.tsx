@@ -1,6 +1,6 @@
 import { StackManagementPage } from './StackManagementPage';
 import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, filterImmichStacksByEditStatus, stackEditStatusIds } from './immichStacks';
-import { SettingsButton } from './SettingsDialog';
+import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
 import { frontendLogger } from './frontendLogging';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
@@ -83,6 +83,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const [immersiveSession, setImmersiveSession] = useState<ImmersiveSession | null>(null);
   const immersiveSessionRef = useRef(immersiveSession);
   immersiveSessionRef.current = immersiveSession;
+  const { isOpen: settingsOpen } = useSettingsDialog();
+  const activeRef = useRef(active);
+  const settingsOpenRef = useRef(settingsOpen);
+  activeRef.current = active;
+  settingsOpenRef.current = settingsOpen;
   function cancelDeferredPhotoSelection() {
     if (!pendingPhotoSelection.current) return;
     window.clearTimeout(pendingPhotoSelection.current.timer);
@@ -92,11 +97,16 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     cancelDeferredPhotoSelection();
     const timer = window.setTimeout(() => {
       pendingPhotoSelection.current = null;
+      if (!activeRef.current || settingsOpenRef.current || immersiveSessionRef.current
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       select();
     }, 400);
     pendingPhotoSelection.current = { timer, select };
   }
   useEffect(() => () => cancelDeferredPhotoSelection(), []);
+  useLayoutEffect(() => {
+    if (!active || settingsOpen) cancelDeferredPhotoSelection();
+  }, [active, settingsOpen]);
   useEffect(() => {
     queueMounted.current = true;
     return () => { queueMounted.current = false; };

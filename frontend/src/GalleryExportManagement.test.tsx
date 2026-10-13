@@ -34,11 +34,11 @@ function Probe() {
   const location = useLocation();
   return <output data-path={location.pathname}>{useAppSettings().homeThumbnailColumns}</output>;
 }
-async function mount(tab: HomeTab = 'recent', contentScrollTop = 0) {
+async function mount(tab: HomeTab = 'recent', contentScrollTop = 0, active = true) {
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn: {
     tab, album: tab === 'albums' ? album : null, year: 2026, month: 9,
     date: tab === 'calendar' ? '2026-09-01' : null, pageScrollTop: 0, contentScrollTop,
-  } } }]}><SettingsProvider><GalleryPage /><Probe /></SettingsProvider></MemoryRouter>));
+  } } }]}><SettingsProvider><GalleryPage active={active} /><Probe /></SettingsProvider></MemoryRouter>));
 }
 async function click(selector: string) {
   const element = host.querySelector<HTMLButtonElement>(selector)!;
@@ -338,6 +338,25 @@ describe('Export immersive Preview', () => {
     await cardClick('b', { detail: 1, ctrlKey: true });
     expect(exportSelected()).toEqual(['a']);
     await act(async () => vi.advanceTimersByTime(400)); expect(exportSelected()).toEqual(['a']);
+  });
+
+  it('cancels pending selection when Settings opens or Home becomes inactive', async () => {
+    await openQueue([queued('a'), queued('b'), queued('c')]);
+    await click('.export-selection .selection-all');
+    const before = exportSelected();
+    vi.useFakeTimers();
+
+    await cardClick('b', { detail: 1 });
+    await click('.settings-button');
+    await act(async () => vi.advanceTimersByTime(400));
+    expect(exportSelected()).toEqual(before);
+    const settingsControl = host.querySelector<HTMLButtonElement>('dialog button')!;
+    await key('Escape', {}, settingsControl);
+
+    await cardClick('b', { detail: 1 });
+    await mount('recent', 0, false);
+    await act(async () => vi.advanceTimersByTime(400));
+    expect(exportSelected()).toEqual(before);
   });
 
   it('handles Command-click immediately on macOS', async () => {
