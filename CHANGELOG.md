@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added persistent Gallery development exclusions for standalone photos and whole Stacks, toggled with `X`; excluded thumbnails and filenames are dimmed, and Queue entries are removed before exclusion is saved.
 - Added Immersive Preview to Gallery, Export management, and Stack management, with browsing based on the visible photo list, selected photos, or Stack candidate group.
 - Added bounded photo navigation and context-specific selection, Queue, and export-readiness controls to Immersive Preview.
 
@@ -18,6 +19,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Fixed unrelated standalone photos becoming unavailable for exclusion when trashed Immich Stack members made the Stack snapshot incomplete.
 - Fixed stale rendered thumbnails in Export management when reopening the tab by refreshing their image URLs on each entry.
 - Prevented application shortcuts behind Immersive Preview from changing controls such as thumbnail size.
 - Restored the 「現」 badge for GenzoRoom exports opened from Export management.

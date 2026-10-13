@@ -2,6 +2,32 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Gallery現像対象外（X）Phase 1〜2 完了記録（2026-10-13）
+
+### 実装経過
+
+- **Phase 1 — Backend：** 既存SQLiteのschema v5へ`development_exclusions`を追加し、STACK単位・単独Asset単位の永続状態と、個別GET／PUT／DELETEおよび最大100件のstatus取得APIを実装した。COVERとメンバー集合を保存し、GalleryのSTACK snapshotで構成変更・確定解体・単独AssetのSTACK編入を確認する。取得失敗や不完全・曖昧なsnapshotから誤った失効は行わない。
+- **Phase 2 — Gallery：** Xキーによる登録・解除、除外中のサムネイルとファイル名の減光、既存Export Queueの解除連携を実装した。STACKは1対象として全メンバーをQueue確認・解除し、必要な解除がすべて成功した場合だけ除外を保存する。`waiting`／`encoding`／`registering`や処理中・canonical状態不明のQueueを操作しない。Recipe・History・Immich写真・STACKは変更しない。
+- 複数選択時の世代・状態確認競合を修正し、現在の選択を参照する経路と、混在状態では未除外対象だけを登録する方向判定を確認した。
+- 単独写真のX操作が状態不明で止まる再現に対し、既存Backend／FrontendログへSTACK snapshot解析診断と状態取得・mutation診断を追加し、実機ログを採取した。
+- Phase 3の暗室・STACK管理・Queue投入・没入プレビューへの入口制限は未実装である。
+
+### 原因調査
+
+実機ログ`genzoroom-all-logs-20261013T101617Z.json`では、Immichの`GET /stacks`から716件を取得し、711件が正常、5件が`primary_not_member`として不完全だった。5件についてSTACK ID、COVER ID、メンバーIDは取得され、重複STACK IDやメンバー所属競合は記録されていない。単独写真のX登録は`configuration_unknown`で止まり、正常STACKの登録・解除は成功していた。
+
+利用者はImmichのごみ箱から少なくとも1件を一時復元し、そのAssetが含まれるSTACK構成が残っていることを確認した。また、ごみ箱内に見えるSTACKが5件あると報告した。ただし、5件すべてについて個別のAPI状態やごみ箱内Assetとの対応を確証したわけではない。
+
+Immich v3.3.1のSTACK repositoryではSTACKレコードの取得とメンバーAssetの取得条件が異なり、後者は削除状態・表示条件で絞られる。したがって、ごみ箱内Assetなどがメンバー配列から除外され、`primaryAssetId`が`assets`に含まれない応答が起こり得る。この形は記録された5件の`primary_not_member`と整合するが、ログだけから各不完全STACKの原因を断定はしない。
+
+### 修正と検証
+
+従来はsnapshot全体の`complete=false`だけで、既知STACKと無関係な単独Assetも一律`unknown`となっていた。`membership_identifiable`を追加してsnapshot全体の完全性とAsset所属の識別可能性を分離した。所属関係を識別できる場合、正常STACKのメンバーは`stacked`、不完全STACKのCOVER・既知メンバーは`unknown`として保護し、それらに関係しないAssetは`single`と判定する。IDやメンバー情報が不十分な場合の安全側判定、不完全STACKを正常扱いしない規則、STACK除外の失効判定は維持した。個別Assetへの追加API呼び出しも加えていない。
+
+716件中711件正常・5件がCOVER不在の不完全STACKという再現テストを追加し、無関係な単独Assetの登録と不完全STACK関連Assetの保護を確認した。Codexによる最終Backend全体テストは**1,123 passed、322 subtests passed**。これは自動テストの結果であり、実機確認とは別である。
+
+利用者によるNAS・Immich実機確認では、Galleryの警告表示が消え、X操作も期待どおりに動作した。これは利用者の実機確認であり、Codexは今回NAS・ブラウザー確認を行っていない。
+
 ## 出力管理入場時の現像済みサムネイルURL更新（2026-10-13）
 
 ### 発生状況と原因
