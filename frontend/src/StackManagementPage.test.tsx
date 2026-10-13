@@ -84,6 +84,37 @@ it('opens the whole candidate group at COVER from blank space, retains three-pho
   await press('Escape'); expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe(cover);
 });
 
+it('opens from either side of the header indicator whitespace but not from badge contents or controls', async () => {
+  await mountPreviewFixtures();
+  const group = host.querySelector<HTMLElement>(`[data-stack-id="draft:immich:${existingStackId}"]`)!;
+  const indicators = group.querySelector<HTMLElement>('.stack-group-indicators')!;
+  const evidence = indicators.querySelector<HTMLElement>('.stack-evidence')!;
+  const cover = group.querySelector('.stack-cover .stack-filename')!.textContent;
+  const doubleClick = async (target: Element, clientX: number) => {
+    await act(async () => target.dispatchEvent(new MouseEvent('dblclick', {
+      bubbles: true, cancelable: true, button: 0, clientX,
+    })));
+  };
+
+  // Empty space in the grid cell targets its container, while badge text targets the evidence element.
+  await doubleClick(indicators, 0);
+  expect(previewImage().alt).toBe(cover);
+  await press('Escape');
+  await doubleClick(indicators, 1000);
+  expect(previewImage().alt).toBe(cover);
+  await press('Escape');
+
+  await doubleClick(evidence.querySelector('[aria-hidden="true"]')!, 500);
+  expect(host.querySelector('.immersive-preview')).toBeNull();
+  for (const control of group.querySelectorAll('.stack-icon-button')) {
+    await doubleClick(control, 500);
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+  }
+
+  await doubleClickPhoto(stackPhotoNamed('hidden.jpg'));
+  expect(previewImage().alt).toBe('hidden.jpg');
+});
+
 it('delays pointer COVER changes for 400ms, preserves Undo and cancels COVER on photo double-click', async () => {
   await mountPreviewFixtures(); vi.useFakeTimers();
   const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest('.stack-candidate-group')!;
@@ -118,7 +149,7 @@ it('cancels pending COVER on drag start and ignores the drag-ending click/double
 it('does not open from operation buttons, and cancels pending COVER for Settings, restructuring and navigation', async () => {
   await mountPreviewFixtures(); vi.useFakeTimers();
   const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest('.stack-candidate-group')!;
-  for (const control of group.querySelectorAll('.stack-icon-button, .stack-group-indicators')) {
+  for (const control of group.querySelectorAll('.stack-icon-button, .stack-evidence')) {
     await act(async () => control.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));
     expect(host.querySelector('.immersive-preview')).toBeNull();
   }

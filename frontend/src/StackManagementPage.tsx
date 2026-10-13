@@ -679,7 +679,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           onClickCapture={cancelPendingClick}
           onDoubleClick={event => {
             if (event.button !== 0 || !(event.target instanceof Element)
-              || event.target.closest('button, input, a, select, textarea, summary, [role="button"], .stack-group-indicators')) return;
+              || event.target.closest('button, input, a, select, textarea, summary, [role="button"], .stack-evidence')) return;
             openPreview(group.members, group.coverAssetId);
           }}
           key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
