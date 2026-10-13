@@ -41,6 +41,7 @@ export const shortcutBindings = {
   immersiveNext: [{ key: 'ArrowRight', ...commandModifiers, shift: false, alt: false }],
   immersiveSelectionToggle: [{ key: ' ', ...commandModifiers, shift: false, alt: false }],
   immersiveClose: [{ key: 'v', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  galleryOpenImmersivePreview: [{ key: 'v', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeOpenSelected: [{ key: 'd', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeOpenPreview: [{ key: 'p', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   homeOpenStackManager: [{ key: 's', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],

@@ -127,7 +127,7 @@ describe('command shortcut bindings', () => {
     const value = event(']', { repeat: true, isComposing: true });
     Object.defineProperty(value, 'defaultPrevented', { value: true });
     expect(matchesShortcut(value, 'viewerOriginal', 'other')).toBe(true);
-    expect(Object.keys(shortcutBindings)).toHaveLength(41);
+    expect(Object.keys(shortcutBindings)).toHaveLength(42);
   });
 
   it('matches Gallery return only for unmodified G', () => {
@@ -160,7 +160,7 @@ describe('command shortcut bindings', () => {
       expect(matchesShortcut(event('D'), 'homeOpenSelected', platform)).toBe(true);
       expect(matchesShortcut(event('d'), 'homeOpenSelected', platform)).toBe(true);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(41);
+    expect(Object.keys(shortcutBindings)).toHaveLength(42);
   });
   it('matches Export Queue only for unmodified Q regardless of case', () => {
     for (const platform of ['other', 'mac'] as const) {
@@ -169,7 +169,7 @@ describe('command shortcut bindings', () => {
         { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true },
       ]) expect(matchesShortcut(event('Q', options), 'exportQueueToggle', platform)).toBe(false);
     }
-    expect(Object.keys(shortcutBindings)).toHaveLength(41);
+    expect(Object.keys(shortcutBindings)).toHaveLength(42);
   });
 
   it('binds thumbnail sizing to unmodified physical numpad add/subtract keys', () => {

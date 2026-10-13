@@ -33,6 +33,9 @@ type PhotoCardProps = {
   onToggleSelection: () => void;
   onExtendSelection: () => void;
   onPreviewRequest?: () => void;
+  deferSelectionClick?: boolean;
+  onDeferSelectionClick?: (select: () => void) => void;
+  onCancelDeferredSelection?: () => void;
   selected?: boolean;
   selectionMode?: boolean;
   edited?: boolean;
@@ -65,6 +68,9 @@ export function PhotoCard({
   onToggleSelection,
   onExtendSelection,
   onPreviewRequest,
+  deferSelectionClick = false,
+  onDeferSelectionClick,
+  onCancelDeferredSelection,
   selected = false,
   selectionMode = false,
   edited,
@@ -88,12 +94,25 @@ export function PhotoCard({
   const selectionLabel = t(selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename });
 
   function handleCardClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (event.detail > 1) {
+      onCancelDeferredSelection?.();
+      return;
+    }
     if (event.shiftKey) {
+      onCancelDeferredSelection?.();
       onExtendSelection();
       return;
     }
-    if (isPrimaryModifier(event.nativeEvent)) onToggleSelection();
-    else onSelect();
+    if (isPrimaryModifier(event.nativeEvent)) {
+      onCancelDeferredSelection?.();
+      onToggleSelection();
+    } else if (deferSelectionClick && event.detail === 1 && onDeferSelectionClick) {
+      // A second click may open Preview, so preserve multi-selection until the browser resolves the click sequence.
+      onDeferSelectionClick(onSelect);
+    } else {
+      onCancelDeferredSelection?.();
+      onSelect();
+    }
   }
 
   function handleCheckboxClick(event: ReactMouseEvent<HTMLInputElement>) {
@@ -114,6 +133,7 @@ export function PhotoCard({
 
   return (
     <article className={`photo-card${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
+      onClickCapture={onCancelDeferredSelection}
       onContextMenu={event => {
         if (!asset.stackId || !stackMenu) return;
         event.preventDefault(); event.stopPropagation();
@@ -134,7 +154,7 @@ export function PhotoCard({
         className="photo-card-button"
         type="button"
         onClick={handleCardClick}
-        onDoubleClick={onPreviewRequest}
+        onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(); }}
         aria-label={selectionLabel}
         aria-pressed={selected}
         aria-description={edited ? t('photos.edited') : undefined}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
@@ -26,6 +26,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
+  const rootRef = useRef<HTMLElement>(null);
   // Queue and selection updates from the parent must not change the sequence being browsed.
   const [viewAssets] = useState(() => [...assets]);
   const [index, setIndex] = useState(() => Math.max(0, assets.findIndex(asset => asset.id.toLowerCase() === startAssetId.toLowerCase())));
@@ -35,11 +36,29 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   const hasArm = source === 'exportManagement' && onToggleArmed !== undefined;
 
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    rootRef.current?.focus({ preventScroll: true });
+    return () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); };
+  }, []);
+
+  useEffect(() => {
     const consume = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
     };
     const keydown = (event: KeyboardEvent) => {
+      if (!event.defaultPrevented && event.key === 'Tab') {
+        const root = rootRef.current;
+        const focusable = root ? [...root.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')] : [];
+        const first = focusable[0], last = focusable.at(-1), focused = document.activeElement;
+        if (root && focusable.length && (!root.contains(focused)
+          || event.shiftKey && (focused === first || focused === root)
+          || !event.shiftKey && focused === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+          return;
+        }
+      }
       if (event.defaultPrevented || event.isComposing || event.repeat || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
       if (matchesShortcut(event, 'immersivePrevious')) {
@@ -73,7 +92,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
     title={shortcut.title(closeLabel, 'immersiveClose')}>×</button>;
   const position = <span className="immersive-preview-position" aria-label={t('immersivePreview.position', { current: index + 1, total: viewAssets.length })}>{index + 1} / {viewAssets.length}</span>;
 
-  return <section className={`immersive-preview${isMac ? ' immersive-preview-mac' : ''}`} data-platform={isMac ? 'mac' : 'other'} aria-label={t('immersivePreview.title')}>
+  return <section ref={rootRef} tabIndex={-1} className={`immersive-preview${isMac ? ' immersive-preview-mac' : ''}`} data-platform={isMac ? 'mac' : 'other'} aria-label={t('immersivePreview.title')}>
     {barsVisible && <header className="immersive-preview-topbar">
       {isMac ? closeButton : position}
       <span className="immersive-preview-filename" title={asset.filename}>{asset.filename}</span>

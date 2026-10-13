@@ -13,6 +13,7 @@ import { AlbumCard } from './AlbumCard';
 import type { RecentAsset } from './assets';
 import { type AppLanguage } from './i18n';
 import { PhotoCard } from './PhotoCard';
+import { ImmersivePreview } from './ImmersivePreview';
 import { selectGalleryAssetTargets } from './galleryAssetSelection';
 import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
 import { useEditStatusesSnapshot } from './useEditStatuses';
@@ -54,6 +55,7 @@ type PhotoView = {
 };
 type GalleryLoader = 'recent' | 'favorites' | 'albums' | 'album' | 'heatmap' | 'day';
 type GalleryRefresh = { key: string; loader: GalleryLoader; id: number; pending: number; failed: boolean; controllers: Set<AbortController> };
+type ImmersiveGallerySession = { assets: RecentAsset[]; startAssetId: string };
 
 export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const { t, i18n } = useTranslation();
@@ -76,6 +78,22 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const queueBatchBusy = useRef(false);
   const [queueBatchBusyState, setQueueBatchBusyState] = useState(false);
   const queueMounted = useRef(true);
+  const pendingPhotoSelection = useRef<{ timer: number; select: () => void } | null>(null);
+  const [immersiveGallerySession, setImmersiveGallerySession] = useState<ImmersiveGallerySession | null>(null);
+  function cancelDeferredPhotoSelection() {
+    if (!pendingPhotoSelection.current) return;
+    window.clearTimeout(pendingPhotoSelection.current.timer);
+    pendingPhotoSelection.current = null;
+  }
+  function deferPhotoSelection(select: () => void) {
+    cancelDeferredPhotoSelection();
+    const timer = window.setTimeout(() => {
+      pendingPhotoSelection.current = null;
+      select();
+    }, 400);
+    pendingPhotoSelection.current = { timer, select };
+  }
+  useEffect(() => () => cancelDeferredPhotoSelection(), []);
   useEffect(() => {
     queueMounted.current = true;
     return () => { queueMounted.current = false; };
@@ -158,6 +176,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const openStacksRef = useRef<() => void>(() => {});
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const queueSelectedRef = useRef<() => boolean>(() => false);
+  const openImmersivePreviewRef = useRef<() => void>(() => {});
   const homeTabClickRef = useRef<(tab: HomeNavigationTab) => void>(() => {});
   const selectAllVisibleRef = useRef<() => boolean>(() => false);
   const navigateCalendarRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
@@ -555,6 +574,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const currentAssets = photoView?.assets ?? [];
   const cardEditStatuses = aggregateStackEditStatuses(currentAssets, editStatuses);
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
+  useEffect(() => cancelDeferredPhotoSelection(), [activeSelectedAssetIds]);
   const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, 'both');
   const editFilteredAssets = activeTab === 'favorites'
     ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], aggregateStackEditStatuses(stackAssets, editStatuses))
@@ -593,6 +613,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       if (event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      if (matchesShortcut(event, 'galleryOpenImmersivePreview')) {
+        openImmersivePreviewRef.current();
+        return;
+      }
       if (matchesShortcut(event, 'homeRefreshPhotos')) {
         if (refreshPhotosRef.current()) event.preventDefault();
         return;
@@ -748,6 +772,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function prepareScrollTransition(nextKey: string, waitingForData?: boolean) {
     if (nextKey === viewKey) return;
+    cancelDeferredPhotoSelection();
     // Revoke ownership synchronously, before React commits the next view or runs effect cleanup.
     cancelRefresh();
     // A view left before restoration completes must retain its intended offset, not the loading DOM's offset.
@@ -771,6 +796,33 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   function selectPhoto(assetId: string) {
     photoView?.selection.selectOnly(assetId);
   }
+
+  function canOpenImmersivePreview() {
+    return active && !showExport && !showStacks && photoView?.state === 'ready';
+  }
+
+  function openImmersivePreviewFromSelection() {
+    if (!canOpenImmersivePreview()) return;
+    const selected = new Set(activeSelectedAssetIds.map(id => id.toLowerCase()));
+    const selectedVisible = visibleAssets.filter(asset => selected.has(asset.id.toLowerCase()));
+    if (!selectedVisible.length) return;
+    const targets = activeSelectedAssetIds.length > 1 ? selectedVisible : visibleAssets;
+    if (targets.length) setImmersiveGallerySession({ assets: [...targets], startAssetId: selectedVisible[0].id });
+  }
+
+  function openImmersivePreviewFromCard(asset: RecentAsset) {
+    if (!canOpenImmersivePreview() || !photoView) return;
+    const selected = new Set(photoView.selection.selectedIds.map(id => id.toLowerCase()));
+    if (photoView.selection.selectedIds.length > 1 && !selected.has(asset.id.toLowerCase())) {
+      photoView.selection.toggle(asset.id);
+      selected.add(asset.id.toLowerCase());
+    }
+    const targets = photoView.selection.selectedIds.length > 1
+      ? visibleAssets.filter(candidate => selected.has(candidate.id.toLowerCase()))
+      : visibleAssets;
+    if (targets.length) setImmersiveGallerySession({ assets: [...targets], startAssetId: asset.id });
+  }
+  openImmersivePreviewRef.current = openImmersivePreviewFromSelection;
 
   function togglePhotoSelection(assetId: string) {
     photoView?.selection.toggle(assetId);
@@ -1129,6 +1181,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           onSelect={() => selectPhoto(asset.id)}
           onToggleSelection={() => togglePhotoSelection(asset.id)}
           onExtendSelection={() => extendPhotoSelection(asset.id)}
+          deferSelectionClick={activeSelectedAssetIds.length > 1}
+          onDeferSelectionClick={deferPhotoSelection}
+          onCancelDeferredSelection={cancelDeferredPhotoSelection}
+          onPreviewRequest={() => openImmersivePreviewFromCard(asset)}
         />
       );
     })}</div>;
@@ -1303,6 +1359,18 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
             setStackWriteRevision(revision => revision + 1);
           }} />
       </div>}
+      {immersiveGallerySession && <ImmersivePreview
+        assets={immersiveGallerySession.assets}
+        startAssetId={immersiveGallerySession.startAssetId}
+        selectedAssetIds={new Set(activeSelectedAssetIds.map(id => id.toLowerCase()))}
+        queuedAssetIds={new Set(visibleAssets.filter(asset => queueStateFor(asset).status !== undefined).map(asset => asset.id.toLowerCase()))}
+        source="gallery"
+        onToggleSelection={assetId => photoView?.selection.toggle(assetId)}
+        onToggleQueue={assetId => {
+          const asset = currentAssets.find(candidate => candidate.id.toLowerCase() === assetId.toLowerCase());
+          if (asset) void toggleQueue(asset);
+        }}
+        onClose={() => setImmersiveGallerySession(null)} />}
     </main>
   );
 }

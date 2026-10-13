@@ -75,10 +75,24 @@ const card = (index = 0) => [...host.querySelectorAll<HTMLElement>('.photo-card'
   .find(node => node.querySelector('.photo-info p')?.textContent === photos[index].filename)!;
 const badge = (index = 0) => card(index).querySelector<HTMLButtonElement>('.edited-badge')!;
 async function click(target: HTMLElement) { await act(async () => target.click()); }
+async function clickSelector(selector: string) { await click(host.querySelector<HTMLElement>(selector)!); }
 async function pressQ(target: EventTarget = window, modifiers: KeyboardEventInit = {}) {
   const event = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true, ...modifiers });
   await act(async () => target.dispatchEvent(event));
   return event;
+}
+async function pressV(target: EventTarget = window, modifiers: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true, ...modifiers });
+  await act(async () => target.dispatchEvent(event));
+  return event;
+}
+async function doubleClickPhoto(index: number) {
+  const photo = card(index).querySelector<HTMLButtonElement>('.photo-card-button')!;
+  await act(async () => {
+    photo.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true }));
+    photo.dispatchEvent(new MouseEvent('click', { detail: 2, bubbles: true, cancelable: true }));
+    photo.dispatchEvent(new MouseEvent('dblclick', { detail: 2, bubbles: true, cancelable: true }));
+  });
 }
 async function flushQueueRefresh() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
@@ -107,6 +121,125 @@ describe('Home Export Queue', () => {
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(api.editState).not.toHaveBeenCalled();
     expect(host.querySelector('.workspace-probe')).toBeNull();
+  });
+
+  it.each(tabs)('opens the immersive preview with V from the %s photo list only after selection', async tab => {
+    await mount(tab);
+    await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await click(card(2).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressV();
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(photos[2].filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('3 / 4');
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+  });
+
+  it('does not open V while the current Gallery photo list is loading', async () => {
+    const pending = deferred<RecentAsset[]>(); api.photos.mockReturnValueOnce(pending.promise);
+    await mount(); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await act(async () => pending.resolve(photos));
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressV();
+    expect(host.querySelector('.immersive-preview')).not.toBeNull();
+  });
+
+  it('uses displayed-order selected cards for V and keeps that target fixed through Space and Q', async () => {
+    await mount();
+    await click(card(1).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressV();
+    const preview = () => host.querySelector('.immersive-preview')!;
+    const previewImage = () => preview().querySelector('img')!;
+    const displayed = [...host.querySelectorAll('.photo-card .photo-info p')].map(node => node.textContent);
+    const selectedInDisplayOrder = [photos[0], photos[1]].sort((left, right) => displayed.indexOf(left.filename) - displayed.indexOf(right.filename));
+    const start = selectedInDisplayOrder[0], next = selectedInDisplayOrder[1];
+    expect(previewImage().alt).toBe(start.filename);
+    expect(preview().querySelector('.immersive-preview-position')?.textContent).toBe('1 / 2');
+    const page = host.querySelector<HTMLElement>('.home-page')!;
+    const content = page.querySelector<HTMLElement>('.home-content')!;
+    page.scrollTop = 31; content.scrollTop = 127;
+    const photoLoadCount = api.photos.mock.calls.length;
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })));
+    expect(host.querySelector('.selection-count')?.textContent).toContain('1 selected');
+    expect(preview().querySelector('.immersive-preview-position')?.textContent).toBe('1 / 2');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+    expect(previewImage().alt).toBe(next.filename);
+    await pressQ();
+    expect(api.enqueue).toHaveBeenCalledOnce();
+    expect(api.enqueue).toHaveBeenCalledWith([next.id], expect.any(AbortSignal));
+    expect(api.enqueue.mock.calls[0][0]).not.toContain(start.id);
+    const previewQueueButton = [...preview().querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent?.includes('Export Queue'));
+    expect(previewQueueButton?.getAttribute('aria-pressed')).toBe('true');
+    expect(previewQueueButton?.textContent).toContain('Export Queue: On');
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    expect(page.scrollTop).toBe(31); expect(content.scrollTop).toBe(127);
+    expect(api.photos).toHaveBeenCalledTimes(photoLoadCount);
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('home-recent-tab');
+    await pressV();
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe(`${displayed.indexOf(next.filename) + 1} / 4`);
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(next.filename);
+  });
+
+  it('preserves and extends multi-selection on double-click while plain multi-selection clicks still select one card', async () => {
+    await mount();
+    await doubleClickPhoto(2);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('1 selected');
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(photos[2].filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe(`${[...host.querySelectorAll('.photo-info p')].findIndex(node => node.textContent === photos[2].filename) + 1} / 4`);
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    await doubleClickPhoto(0);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('1 selected');
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(photos[0].filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe(`${[...host.querySelectorAll('.photo-card .photo-info p')].findIndex(node => node.textContent === photos[0].filename) + 1} / 4`);
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    await click(host.querySelector<HTMLButtonElement>('.selection-clear')!);
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(1).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await doubleClickPhoto(1);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('2 selected');
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(photos[1].filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('2 / 2');
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    await doubleClickPhoto(2);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('3 selected');
+    expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(photos[2].filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('3 / 3');
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+    await act(async () => card(3).querySelector<HTMLButtonElement>('.photo-card-button')!.dispatchEvent(
+      new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true })));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 425)); });
+    expect(host.querySelector('.selection-count')?.textContent).toContain('1 selected');
+    expect(card(3).querySelector<HTMLInputElement>('.photo-selection-input')?.checked).toBe(true);
+  });
+
+  it('keeps Primary and Shift selection actions immediate during a pending Preview click', async () => {
+    await mount();
+    await click(card(0).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await click(card(1).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    const photo = card(2).querySelector<HTMLButtonElement>('.photo-card-button')!;
+    await act(async () => photo.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true, ctrlKey: true })));
+    expect(card(2).querySelector<HTMLInputElement>('.photo-selection-input')?.checked).toBe(true);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('3 selected');
+    await act(async () => photo.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true, shiftKey: true })));
+    expect(card(2).querySelector<HTMLInputElement>('.photo-selection-input')?.checked).toBe(true);
+    expect(host.querySelector('.selection-count')?.textContent).toContain('3 selected');
+  });
+
+  it('does not open from Album list, Calendar month/year, Stack management, or Export management', async () => {
+    await mount();
+    await clickSelector('#home-albums-tab'); await clickSelector('#home-albums-tab'); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await clickSelector('#home-calendar-tab'); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await clickSelector('.calendar-view-toggle'); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await clickSelector('#home-stacks-tab'); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+    await clickSelector('#home-export-tab'); await pressV();
+    expect(host.querySelector('.immersive-preview')).toBeNull();
   });
 
   it('keeps membership unknown and disabled until the initial list succeeds', async () => {
