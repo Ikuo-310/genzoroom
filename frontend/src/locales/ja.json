@@ -159,6 +159,10 @@
     "unstackedOnly": "STACKなし",
     "edited": "GenzoRoomで編集済み",
     "genzoRoomExport": "GenzoRoomで出力",
+    "exclusion": {
+      "loadFailed": "現像対象外の状態を確認できませんでした。写真をReloadして再確認してください。",
+      "saveFailed": "現像対象外の状態を保存できませんでした。写真をReloadして結果を確認してください。"
+    },
     "exportQueue": {
       "addFailed": "写真を出力キューへ追加できませんでした。",
       "removeFailed": "写真を出力キューから削除できませんでした。",

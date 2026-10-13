@@ -17,6 +17,8 @@ import { ImmersivePreview } from './ImmersivePreview';
 import { selectGalleryAssetTargets } from './galleryAssetSelection';
 import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
 import { useEditStatusesSnapshot } from './useEditStatuses';
+import { useDevelopmentExclusions } from './useDevelopmentExclusions';
+import { exclusionKey, exclusionLog } from './developmentExclusionsApi';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
 import { flattenExportQueueDisplay } from './exportQueueDisplay';
@@ -189,6 +191,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const openStacksRef = useRef<() => void>(() => {});
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
+  const toggleExclusionsRef = useRef<() => boolean>(() => false);
+  const exclusionOperations = useRef(new Set<string>());
+  const latestQueueRef = useRef(exportQueue);
+  latestQueueRef.current = exportQueue;
   const queueSelectedRef = useRef<() => boolean>(() => false);
   const openImmersivePreviewRef = useRef<() => boolean>(() => false);
   const homeTabClickRef = useRef<(tab: HomeNavigationTab) => void>(() => {});
@@ -598,6 +604,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
   const collapsedAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
   const visibleAssets = filterPhotosByDevelopStatus(collapsedAssets, developStatusFilterModes[activeTab]);
+  const exclusions = useDevelopmentExclusions(active && !showStacks && !showExport && photoView?.state === 'ready' ? visibleAssets : [],
+    `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}`, photoView?.assets);
+  const exclusionViewRef = useRef('');
+  exclusionViewRef.current = `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}:${exclusions.generation}`;
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
@@ -672,6 +682,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         // Checkboxes and sliders allow S/D, but Primary+A must remain native for all inputs.
         if (event.target instanceof Element && event.target.closest('input')) return;
         if (selectAllVisibleRef.current()) event.preventDefault();
+        return;
+      }
+      if (!showStacksRef.current && !exportView.active && matchesShortcut(event, 'galleryExclusionToggle')) {
+        if (toggleExclusionsRef.current()) event.preventDefault();
         return;
       }
       if (!showStacksRef.current && matchesShortcut(event, 'exportQueueToggle')) {
@@ -1015,11 +1029,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     else if (tab === 'calendar' && selectedCalendarDate !== null) closeCalendarDay();
   }
 
-  function queueStateFor(asset: RecentAsset) {
+  function queueStateFor(asset: RecentAsset, queueSnapshot = exportQueue) {
     const memberIds = stackEditStatusIds([asset]);
     const status = (['encoding', 'registering', 'waiting', 'failed', 'queued'] as const)
-      .find(status => memberIds.some(id => exportQueue.getStatus(id) === status));
-    return { memberIds, status, busy: queueBatchBusyState || memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!exportQueue.mutationFor(id).operation) };
+      .find(status => memberIds.some(id => queueSnapshot.getStatus(id) === status));
+    return { memberIds, status, locked: status === 'waiting' || status === 'encoding' || status === 'registering', busy: queueBatchBusyState || memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!queueSnapshot.mutationFor(id).operation) };
   }
 
   function uniqueQueueMemberIds(memberIds: readonly string[]): string[] {
@@ -1052,7 +1066,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const cards = selectedAssets.map(asset => ({ asset, ...queueStateFor(asset) }))
       .filter(card => card.status !== undefined || cardEditStatuses[card.asset.id] === true);
     if (cards.length === 0) return false;
-    if (cards.some(card => card.status === 'waiting' || card.status === 'encoding' || card.status === 'registering')) {
+    if (cards.some(card => card.locked)) {
       setQueueFailure('locked');
       return true;
     }
@@ -1105,10 +1119,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   async function toggleQueue(asset: RecentAsset) {
     if (queueBatchBusy.current || !exportQueue.loaded || !exportQueue.canonical) return;
-    const { memberIds, status } = queueStateFor(asset);
+    const { memberIds, status, locked } = queueStateFor(asset);
     const keys = memberIds.map(id => id.toLowerCase());
     if (memberIds.some((id, index) => queueOperations.current.has(keys[index]) || exportQueue.mutationFor(id).operation)) return;
-    if (status === 'waiting' || status === 'encoding' || status === 'registering') {
+    if (locked) {
       setQueueFailure('locked');
       return;
     }
@@ -1176,6 +1190,68 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
+  function toggleExclusions(): boolean {
+    if (!active || showStacks || showExport || !photoView || photoView.state !== 'ready' || refreshing || selectedAssets.length === 0) return false;
+    const states = selectedAssets.map(asset => ({ asset, ...exclusions.stateFor(asset) }));
+    if (states.some(state => !state.known || !state.target)) return true;
+    const cards = [...new Map(states.map(state => [exclusionKey(state.target!), state])).values()];
+    const excluded = cards.some(card => !card.excluded);
+    const available = cards.filter(card => !exclusionOperations.current.has(exclusionKey(card.target!)));
+    const context = exclusionViewRef.current;
+    let lockedTarget = false;
+    const reserved = available.filter(card => {
+      const queue = queueStateFor(card.asset);
+      if (card.target!.memberIds.some(id => queueOperations.current.has(id) || !!exportQueue.mutationFor(id).operation)) return false;
+      if (excluded && (!exportQueue.loaded || !exportQueue.canonical || exportQueue.starting)) return false;
+      if (excluded && queue.locked) { lockedTarget = true; setQueueFailure('locked'); return false; }
+      return true;
+    });
+    // Reserve all members synchronously so Q and repeated X cannot interleave within a Stack.
+    reserved.forEach(card => {
+      exclusionOperations.current.add(exclusionKey(card.target!));
+      card.target!.memberIds.forEach(id => queueOperations.current.add(id));
+    });
+    setQueueBusy(new Set(queueOperations.current));
+    if (reserved.length && !lockedTarget) setQueueFailure(null);
+    void (async () => {
+      for (const card of reserved) {
+        const target = card.target!;
+        try {
+          if (!queueMounted.current || exclusionViewRef.current !== context) continue;
+          if (excluded) {
+            const latest = latestQueueRef.current;
+            if (!latest.loaded || !latest.canonical || latest.starting) throw new ExportQueueApiError('locked');
+            const queue = queueStateFor(card.asset, latest);
+            if (queue.locked) throw new ExportQueueApiError('locked');
+            for (const id of target.memberIds) {
+              if (!queueMounted.current || exclusionViewRef.current !== context) throw new ExportQueueApiError('locked');
+              const current = latestQueueRef.current;
+              if (!current.canonical || current.mutationFor(id).operation) throw new ExportQueueApiError('locked');
+              if (current.hasAsset(id)) await current.dequeue(id);
+            }
+          }
+          if (!queueMounted.current || exclusionViewRef.current !== context) continue;
+          if (excluded && (!latestQueueRef.current.canonical || queueStateFor(card.asset, latestQueueRef.current).locked)) {
+            throw new ExportQueueApiError('locked');
+          }
+          await exclusions.setExcluded(target, excluded);
+        } catch (cause) {
+          if (queueMounted.current && exclusionViewRef.current === context && cause instanceof ExportQueueApiError) {
+            setQueueFailure(cause.kind === 'locked' ? 'locked' : 'removeFailed');
+            exclusionLog('queueRemoval.failed', 'error', { targetId: target.id, errorCode: cause.kind });
+            if (!isExportQueueMutationOutcomeUnknown(cause)) void latestQueueRef.current.refresh();
+          }
+        } finally {
+          exclusionOperations.current.delete(exclusionKey(target));
+          target.memberIds.forEach(id => queueOperations.current.delete(id));
+          if (queueMounted.current) setQueueBusy(new Set(queueOperations.current));
+        }
+      }
+    })();
+    return true;
+  }
+  toggleExclusionsRef.current = toggleExclusions;
+
   function renderPhotoGrid() {
     return <div className="photo-grid"
       style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
@@ -1194,6 +1270,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           key={asset.id}
           selected={activeSelectedAssetIds.includes(asset.id)}
           selectionMode={selectionMode}
+          excluded={exclusions.stateFor(asset).excluded}
           edited={cardEditStatuses[asset.id]}
           queueKnown={exportQueue.loaded}
           queueCurrent={exportQueue.canonical}
@@ -1355,6 +1432,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
         </p>}
         {workspaceOpenError && <p className="gallery-message error-text" role="alert">{t(workspaceOpenError === 'unavailable' ? 'photos.workspaceUnavailable' : 'photos.workspaceEmpty')}</p>}
+        {exclusions.failure && !showStacks && !showExport && <p className="gallery-message error-text" role="alert">{t(`photos.exclusion.${exclusions.failure}`)}</p>}
         {activeTab === 'recent' ? <div id="home-recent-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-recent-tab">
         {assetState === 'loading' ? <p className="gallery-message" role="status">{t('photos.loading')}</p>
           : assetState === 'error' ? <p className="gallery-message error-text" role="alert">{t('photos.loadFailed')}</p>

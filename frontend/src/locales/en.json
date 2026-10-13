@@ -165,6 +165,10 @@
     "unstackedOnly": "Without STACK",
     "edited": "Edited in GenzoRoom",
     "genzoRoomExport": "Exported by GenzoRoom",
+    "exclusion": {
+      "loadFailed": "Could not confirm development exclusion status. Reload photos to retry.",
+      "saveFailed": "Could not save development exclusion. Reload photos to confirm the result."
+    },
     "exportQueue": {
       "addFailed": "Could not add the photo to Export Queue.",
       "removeFailed": "Could not remove the photo from Export Queue.",

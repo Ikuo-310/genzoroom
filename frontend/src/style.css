@@ -865,3 +865,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .immersive-preview-bottombar button.immersive-preview-queue-disabled { color: #9a9a9a; background: #171717; opacity: .58; cursor: not-allowed; }
 .immersive-preview-bottombar kbd { color: #c4c4c4; font: inherit; font-size: 0.82em; }
 @media (max-width: 560px) { .immersive-preview-topbar { grid-template-columns: minmax(48px, 1fr) minmax(0, 1fr) minmax(48px, 1fr); padding-inline: 10px; } .immersive-preview-bottombar { gap: 6px; padding-inline: 6px; } .immersive-preview-bottombar button { gap: 4px; padding: 7px 8px; font-size: 0.82rem; } }
+
+.photo-card.development-excluded .thumbnail > img,
+.photo-card.development-excluded .photo-info > p {
+  opacity: 0.25;
+}

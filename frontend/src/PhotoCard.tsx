@@ -38,6 +38,7 @@ type PhotoCardProps = {
   onCancelDeferredSelection?: () => void;
   selected?: boolean;
   selectionMode?: boolean;
+  excluded?: boolean;
   edited?: boolean;
   queueKnown?: boolean;
   queueCurrent?: boolean;
@@ -73,6 +74,7 @@ export function PhotoCard({
   onCancelDeferredSelection,
   selected = false,
   selectionMode = false,
+  excluded = false,
   edited,
   queueKnown,
   queueCurrent,
@@ -132,7 +134,7 @@ export function PhotoCard({
   }
 
   return (
-    <article className={`photo-card${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
+    <article className={`photo-card${excluded ? ' development-excluded' : ''}${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
       onClickCapture={onCancelDeferredSelection}
       onContextMenu={event => {
         if (!asset.stackId || !stackMenu) return;
