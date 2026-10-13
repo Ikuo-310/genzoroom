@@ -50,7 +50,8 @@ assert bundles and all(value in "".join(path.read_text() for path in bundles)
 assert Path("/genzoroom/data/genzoroom.db").is_file()
 with sqlite3.connect("file:/genzoroom/data/genzoroom.db?mode=rw", uri=True) as connection:
     assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
-    assert connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='development_exclusions'").fetchone()
+    assert connection.execute("SELECT 1 FROM sqlite_master WHERE type=? AND name=?",
+                              ("table", "development_exclusions")).fetchone()
     assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     connection.execute("BEGIN IMMEDIATE")
     connection.rollback()
