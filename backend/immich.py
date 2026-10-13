@@ -658,6 +658,85 @@ def _stack_uuid(value: object) -> UUID | None:
         return None
 
 
+def _log_stack_snapshot(snapshot, entries, stack_id_counts, member_owners, *, require_primary):
+    try:
+        if backend_logger.get_level() != "debug":
+            return
+        snapshot_id = uuid4().hex
+        reason_counts: dict[str, int] = {}
+        invalid_count = len(entries) - len(snapshot.stacks)
+        details = []
+        stack_indices: dict[UUID, set[int]] = {}
+        for index, entry in enumerate(entries):
+            if entry[1] is not None:
+                stack_indices.setdefault(entry[1], set()).add(index)
+        for index, (stack, stack_id, primary_id, members, valid) in enumerate(entries):
+            reasons = []
+            if stack_id is None:
+                reasons.append("invalid_stack_id")
+            if primary_id is None:
+                reasons.append("invalid_primary_id")
+            raw_members = stack.get("assets")
+            if not isinstance(raw_members, list):
+                reasons.append("invalid_member_array")
+            elif not raw_members:
+                reasons.append("empty_member_array")
+            else:
+                seen = set()
+                invalid_member = duplicate_member = False
+                for member in raw_members:
+                    member_id = _stack_uuid(member.get("id")) if isinstance(member, Mapping) else None
+                    invalid_member |= member_id is None
+                    duplicate_member |= member_id is not None and member_id in seen
+                    if member_id is not None:
+                        seen.add(member_id)
+                if invalid_member:
+                    reasons.append("invalid_member_id")
+                if duplicate_member:
+                    reasons.append("duplicate_member_id")
+            if require_primary and primary_id is not None and primary_id not in members:
+                reasons.append("primary_not_member")
+            duplicate_stack = stack_id is not None and stack_id_counts[stack_id] > 1
+            if duplicate_stack:
+                reasons.append("duplicate_stack_id")
+            # Use the parser's ownership index, which includes possible ownership from invalid entries.
+            owned_ids = members | ({primary_id} if not valid and primary_id is not None else set())
+            ownership_conflict = any(len(member_owners[member]) > 1 for member in owned_ids)
+            if ownership_conflict:
+                reasons.append("member_ownership_conflict")
+            if not reasons:
+                continue
+            for reason in reasons:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            # UUID lists and entry count are bounded to fit the existing context and ring-buffer limits.
+            if len(details) < 100:
+                duplicate_indices = stack_indices[stack_id] - {index} if duplicate_stack else set()
+                conflict_indices = set().union(*(member_owners[member] for member in owned_ids)) - {index} if ownership_conflict else set()
+                related_indices = sorted(duplicate_indices | conflict_indices)
+                related_ids = sorted({str(entries[other][1]) for other in related_indices if entries[other][1] is not None})
+                member_ids = sorted(str(member) for member in members)
+                details.append({
+                    "snapshotId": snapshot_id, "requirePrimary": require_primary, "entryIndex": index,
+                    "stackId": str(stack_id) if stack_id is not None else None,
+                    "primaryAssetId": str(primary_id) if primary_id is not None else None,
+                    "reasons": reasons, "memberCount": len(member_ids), "memberIds": member_ids[:16],
+                    "memberIdsOmittedCount": max(0, len(member_ids) - 16),
+                    "relatedStackIds": related_ids[:8], "relatedStackIdsOmittedCount": max(0, len(related_ids) - 8),
+                    "relatedEntryIndices": related_indices[:8], "relatedEntryIndicesOmittedCount": max(0, len(related_indices) - 8),
+                })
+        _immich_log(level="debug", component="immich", event="stack.snapshot.parsed", context={
+            "snapshotId": snapshot_id, "requirePrimary": require_primary,
+            "stackCount": len(entries), "validStackCount": len(snapshot.stacks), "invalidEntryCount": invalid_count,
+            "complete": snapshot.complete, "reasonCounts": reason_counts,
+            "detailEntryCount": len(details), "detailsOmittedCount": max(0, invalid_count - len(details)),
+        })
+        for context in details:
+            _immich_log(level="debug", component="immich", event="stack.snapshot.invalid", context=context)
+    except Exception:
+        # Diagnostics must not alter validation, Gallery availability, or exclusion reconciliation.
+        pass
+
+
 def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> StackSnapshot:
     entries = []
     stack_id_counts: dict[UUID, int] = {}
@@ -698,6 +777,7 @@ def _parse_stack_snapshot(body: list[object], *, require_primary: bool) -> Stack
             snapshot.quarantined_member_ids.update(members)
             if primary_id is not None:
                 snapshot.quarantined_member_ids.add(primary_id)
+    _log_stack_snapshot(snapshot, entries, stack_id_counts, member_owners, require_primary=require_primary)
     return snapshot
 
 

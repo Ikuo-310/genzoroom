@@ -140,7 +140,12 @@ def test_post_two_members_and_immediate_verify_members_are_distinguishable(logge
     assert entries[2]["level"] == ("debug" if matches else "warn")
     assert final["status"] == "success"
     batch_id = final["batchId"]
-    assert all(entry["context"]["batchId"] == batch_id for entry in report_entries)
+    # Snapshot diagnostics have their own correlation; existing write events remain batch-scoped.
+    snapshot_entries = [entry for entry in report_entries if entry["event"].startswith("stack.snapshot.")]
+    batch_entries = [entry for entry in report_entries if not entry["event"].startswith("stack.snapshot.")]
+    assert all(entry["context"]["batchId"] == batch_id for entry in batch_entries)
+    snapshot_ids = {entry["context"]["snapshotId"] for entry in snapshot_entries if entry["event"] == "stack.snapshot.parsed"}
+    assert all(entry["context"]["snapshotId"] in snapshot_ids for entry in snapshot_entries)
     assert report_entries[-1]["event"] == "batch.result" and report_entries[-1]["context"]["overallResult"] == "success"
 
 
