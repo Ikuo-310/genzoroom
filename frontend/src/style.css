@@ -847,11 +847,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .immersive-preview { position: fixed; z-index: 1000; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; color: #f2f2f2; background: #090909; }
 .immersive-preview-topbar, .immersive-preview-bottombar { display: flex; align-items: center; min-width: 0; padding: 10px 18px; background: rgb(18 18 18 / 94%); }
 .immersive-preview-topbar { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr) minmax(100px, 1fr); gap: 14px; min-height: 56px; }
-.immersive-preview-title { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.immersive-preview-title { display: flex; align-items: center; justify-content: center; column-gap: 8px; min-width: 0; }
 .immersive-preview-title-side { flex: 0 0 28px; width: 28px; height: 28px; }
 .immersive-preview-title-badge { display: grid; place-items: center; }
 .immersive-preview-title-badge .genzoroom-export-badge { position: static; transform: none; width: 28px; height: 28px; }
-.immersive-preview-filename { min-width: 0; max-width: calc(100% - 56px); overflow: hidden; flex: 0 1 auto; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.immersive-preview-filename { min-width: 0; max-width: calc(100% - 72px); overflow: hidden; flex: 0 1 auto; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .immersive-preview-position { color: #c4c4c4; font-variant-numeric: tabular-nums; }
 .immersive-preview-topbar > :last-child { justify-self: end; }
 .immersive-preview-mac .immersive-preview-topbar > :first-child { justify-self: start; }

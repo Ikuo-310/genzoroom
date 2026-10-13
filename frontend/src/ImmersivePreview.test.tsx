@@ -105,6 +105,8 @@ describe('ImmersivePreview', () => {
     expect(filename().textContent).toBe(exported.filename);
     expect(getComputedStyle(filename()).textAlign).toBe('center');
     expect(getComputedStyle(filename()).textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(title()).columnGap).toBe('8px');
+    expect(getComputedStyle(filename()).maxWidth).toBe('calc(100% - 72px)');
     expect(getComputedStyle(title().firstElementChild!).flexBasis).toBe(getComputedStyle(title().lastElementChild!).flexBasis);
     press('ArrowRight');
     expect(title().querySelector('.genzoroom-export-badge')).toBeNull();
