@@ -67,6 +67,9 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - When preparing a release, review existing test and audit results alongside the scope of changes made since. Run additional checks only when needed; do not repeat all tests solely because a release is being prepared.
 - Keep test output concise. Report test counts, failures, skips, and relevant warnings without unnecessarily displaying verbose output from successful tests.
 - Do not omit necessary tests to save time or tokens. Respect a user's explicit test scope and report any verification gap. Never claim an unrun test or manual check passed; report tests that could not be run.
+- When changing database schemas, migrations, container startup behavior, runtime dependencies, ports, storage paths, or other properties verified by the release Smoke Test, review `release/smoke-test.sh` and update its expectations when necessary.
+- Validate modified Smoke Test assertions with focused executable checks where practical. Shell syntax checks alone are insufficient for embedded Python or SQL.
+- Do not run the full Docker release Smoke Test for routine development changes. GitHub Actions performs it during distribution-image builds. Report any remaining verification gap.
 
 ## Development workflow
 
