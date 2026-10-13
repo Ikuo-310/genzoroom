@@ -99,8 +99,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
       {isMac ? position : closeButton}
     </header>}
     <main className="immersive-preview-photo" onClick={() => setBarsVisible(visible => !visible)}>
-      <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false}
-        style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+      <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false} />
     </main>
     {barsVisible && <footer className="immersive-preview-bottombar" onClick={event => event.stopPropagation()}>
       <button type="button" aria-pressed={selected} onClick={() => onToggleSelection(asset.id)}>
