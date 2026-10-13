@@ -10,6 +10,7 @@ import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import { updateSetting } from './appSettings';
 import i18n from './i18n';
+import { frontendLogger } from './frontendLogging';
 
 const api = vi.hoisted(() => ({ photos: vi.fn(), albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(),
   statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), exclusions: vi.fn(), save: vi.fn() }));
@@ -68,7 +69,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/health'
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); resetFilters(); vi.unstubAllGlobals(); });
+afterEach(() => { frontendLogger.setLevel('off'); frontendLogger.clear(); act(() => root.unmount()); host.remove(); resetFilters(); vi.unstubAllGlobals(); });
 async function mount(tab: HomeTab = 'recent', strict = false) {
   const homeReturn = { tab, album: tab === 'albums' ? album : null, year: 2026, month: 10,
     date: tab === 'calendar' ? '2026-10-06' : null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0 };
@@ -356,4 +357,84 @@ it('resolves a pending plain click before X without retaining the previous multi
   });
   expect(api.save.mock.calls.map(([target, on]) => [target.id, on])).toEqual([[ids[0], true], [ids[2], true]]);
   expect(card(2).classList.contains('selected')).toBe(true); expect(card(1).classList.contains('selected')).toBe(false);
+});
+
+
+function librarySamples(stacked: number, total = 10): RecentAsset[] {
+  return Array.from({ length: total }, (_, index) => {
+    const id = `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`;
+    const base = { ...photos[0], id, filename: `sample-${index}.jpg`, stackId: null, primaryAssetId: null, stackAssetCount: null, stackMembers: null };
+    return index < stacked ? { ...base, stackId: `11111111-1111-4111-8111-${index.toString(16).padStart(12, '0')}`,
+      primaryAssetId: id, stackAssetCount: 2, stackMemberIds: [id, `22222222-2222-4222-8222-${index.toString(16).padStart(12, '0')}`] } : base;
+  });
+}
+async function selectSample(photo: RecentAsset) {
+  const node = [...host.querySelectorAll<HTMLElement>('.photo-card')].find(card => card.querySelector('.photo-info p')?.textContent === photo.filename)!;
+  await click(node.querySelector<HTMLButtonElement>('.photo-card-button')!);
+}
+
+it.each([0, 10])('keeps ten %s-Stack targets confirmed through delayed initial reads, saves and rerenders', async stacked => {
+  const samples = librarySamples(stacked);
+  const read = deferred<any>(); api.photos.mockResolvedValue(samples); api.exclusions.mockReturnValue(read.promise);
+  await mount('recent', true);
+  await act(async () => updateSetting('showKeyboardShortcuts', false));
+  await act(async () => read.resolve(samples.map(photo => ({ kind: photo.stackId ? 'stack' : 'asset', id: photo.stackId ?? photo.id, excluded: false, configuration: photo.stackId ? 'confirmed' : 'single' }))));
+  for (const photo of samples) {
+    const write = deferred<void>(); api.save.mockImplementationOnce(async (target, on) => { await write.promise; if (on) excluded.add(target.id); });
+    await selectSample(photo); await pressX();
+    await act(async () => updateSetting('showKeyboardShortcuts', true));
+    await act(async () => write.resolve());
+    await act(async () => updateSetting('showKeyboardShortcuts', false));
+  }
+  expect(api.save.mock.calls.map(([target]) => target.id)).toEqual(samples.map(photo => photo.stackId ?? photo.id));
+});
+
+it('matches four Stack successes and six single-Asset blocks when the Backend returns unknown for singles', async () => {
+  const samples = librarySamples(4); api.photos.mockResolvedValue(samples);
+  api.exclusions.mockImplementation(async targets => targets.map((target: {kind: string; id: string}) => ({ ...target, excluded: false, configuration: target.kind === 'stack' ? 'confirmed' : 'unknown' })));
+  await mount();
+  for (const photo of samples) { await selectSample(photo); await pressX(); }
+  expect(api.save.mock.calls.map(([target]) => target.id)).toEqual(samples.slice(0, 4).map(photo => photo.stackId));
+  api.save.mockClear();
+  for (const photo of samples.slice(0, 4)) { await selectSample(photo); await pressX(); }
+  expect(api.save.mock.calls.map(([, on]) => on)).toEqual([false, false, false, false]);
+});
+
+
+it('logs unknown configuration separately from missing target resolution with bounded evidence', async () => {
+  frontendLogger.clear(); frontendLogger.setLevel('debug');
+  api.exclusions.mockImplementation(async targets => targets.map((target: {kind: string; id: string}) => ({ ...target, excluded: false, configuration: 'unknown' })));
+  await mount(); await select(); await pressX();
+  const blocked = frontendLogger.getEntries().find(entry => entry.event === 'mutation.blocked')!;
+  expect(blocked.context).toMatchObject({ blockedCount: 1, targets: [{ assetId: ids[0], kind: 'asset', reason: 'configuration_unknown',
+    configuration: 'unknown', loadPhase: 'completed', pending: false }] });
+  expect(JSON.stringify(blocked)).not.toContain('photo-0');
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it('records a locally unresolved Stack without pretending it is a single Asset', async () => {
+  frontendLogger.clear(); frontendLogger.setLevel('debug'); const stackId = family();
+  api.photos.mockResolvedValue([{ ...photos[0], stackId, primaryAssetId: ids[0], stackAssetCount: 2 }]);
+  await mount(); await select(); await pressX();
+  const blocked = frontendLogger.getEntries().find(entry => entry.event === 'mutation.blocked')!;
+  expect(blocked.context).toMatchObject({ targets: [{ reason: 'target_unresolved', kind: 'stack', targetId: stackId }] });
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it('distinguishes a missing loading entry from a received unknown configuration', async () => {
+  frontendLogger.clear(); frontendLogger.setLevel('debug'); const read = deferred<any>(); api.exclusions.mockReturnValueOnce(read.promise);
+  await mount(); await select(); await pressX();
+  const blocked = frontendLogger.getEntries().find(entry => entry.event === 'mutation.blocked')!;
+  expect(blocked.context).toMatchObject({ targets: [{ reason: 'loading', entryGeneration: null, configuration: null, loadPhase: 'loading' }] });
+  await act(async () => read.resolve(photos.map(photo => ({ kind: 'asset', id: photo.id, excluded: false, configuration: 'single' }))));
+  await pressX(); expect(api.save).toHaveBeenCalledTimes(1);
+});
+
+it('logs the generation mismatch when a new Reload view is waiting for status', async () => {
+  frontendLogger.clear(); frontendLogger.setLevel('debug'); await mount(); await select();
+  const read = deferred<any>(); api.exclusions.mockReturnValueOnce(read.promise); await clickSelector('.gallery-refresh'); await pressX();
+  const blocked = frontendLogger.getEntries().find(entry => entry.event === 'mutation.blocked')!;
+  expect(blocked.context).toMatchObject({ targets: [{ reason: 'generation_mismatch', loadPhase: 'loading' }] });
+  expect(api.save).not.toHaveBeenCalled();
+  await act(async () => read.resolve(photos.map(photo => ({ kind: 'asset', id: photo.id, excluded: false, configuration: 'single' }))));
 });

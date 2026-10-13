@@ -1203,7 +1203,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     if (selected.length === 0) return false;
     const states = selected.map(asset => ({ asset, ...exclusions.stateFor(asset) }));
     if (states.some(state => !state.known || !state.target)) {
-      exclusionLog('mutation.blocked', 'debug', { errorCode: 'unconfirmed_state', count: states.length });
+      const blocked = states.filter(state => !state.known || !state.target);
+      // Bound per-attempt evidence; do not dump selections, member sets, or scope signatures.
+      exclusionLog('mutation.blocked', 'debug', { errorCode: 'unconfirmed_state', count: states.length,
+        blockedCount: blocked.length, viewType: photoView.kind, samplesTruncated: blocked.length > 3,
+        targets: blocked.slice(0, 3).map(state => state.diagnostic) });
       return true;
     }
     const cards = [...new Map(states.map(state => [exclusionKey(state.target!), state])).values()];

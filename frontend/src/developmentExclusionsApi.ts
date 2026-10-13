@@ -1,9 +1,10 @@
 import type { RecentAsset } from './assets';
-import { frontendLogger, type LogEntryLevel } from './frontendLogging';
+import { frontendLogger, type LogEntryLevel, type LogContextValue } from './frontendLogging';
 
 export type ExclusionTarget = { kind: 'asset' | 'stack'; id: string; memberIds: string[]; signature: string };
 export type ExclusionStatus = { kind: 'asset' | 'stack'; id: string; excluded: boolean; configuration: 'confirmed' | 'absent' | 'single' | 'stacked' | 'unknown' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const exclusionDiagnosticId = (value: string) => UUID.test(value) ? value.toLowerCase() : null;
 export const exclusionKey = (target: Pick<ExclusionTarget, 'kind' | 'id'>) => `${target.kind}:${target.id.toLowerCase()}`;
 
 export function exclusionTarget(asset: RecentAsset): ExclusionTarget | null {
@@ -25,7 +26,7 @@ export function exclusionTarget(asset: RecentAsset): ExclusionTarget | null {
   return { kind: 'stack', id, memberIds: members, signature: JSON.stringify([primary, members]) };
 }
 
-export function exclusionLog(event: string, level: LogEntryLevel, context: Record<string, string | number | boolean> = {}) {
+export function exclusionLog(event: string, level: LogEntryLevel, context: Record<string, LogContextValue> = {}) {
   try { frontendLogger.add({ component: 'developmentExclusions', event, level, context }); }
   catch { /* Diagnostics cannot change Gallery operations. */ }
 }
