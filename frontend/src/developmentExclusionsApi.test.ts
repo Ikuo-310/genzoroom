@@ -37,6 +37,19 @@ describe('development exclusion API boundary', () => {
     expect(exclusionTarget({ ...stack, stackAssetCount: 3 })).toBeNull();
     expect(exclusionTarget({ ...stack, primaryAssetId: null })).toBeNull();
   });
+  it('sends the exact Queue-checked Stack snapshot on PUT, but not on DELETE or single PUT', async () => {
+    const stackTarget = exclusionTarget({ ...photo, stackId: other, primaryAssetId: id, stackAssetCount: 2, stackMemberIds: [other, id] })!;
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ kind: 'stack', id: other, excluded: true, configuration: 'confirmed' })))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ kind: 'asset', id, excluded: true, configuration: 'single' })));
+    vi.stubGlobal('fetch', fetcher);
+    await saveExclusion(stackTarget, true, new AbortController().signal);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ expectedPrimaryAssetId: id, expectedMemberIds: [id, other].sort() });
+    await saveExclusion(stackTarget, false, new AbortController().signal);
+    await saveExclusion(target, true, new AbortController().signal);
+    expect(fetcher.mock.calls[1][1].body).toBeUndefined();
+    expect(fetcher.mock.calls[2][1].body).toBeUndefined();
+  });
   it('dims only image and filename, leaving card controls and badges visible', () => {
     expect(css).toMatch(/\.photo-card\.development-excluded \.thumbnail > img,\s*\.photo-card\.development-excluded \.photo-info > p\s*\{\s*opacity: 0\.25;/);
     expect(css).not.toMatch(/\.photo-card\.development-excluded\s*\{/);

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import edit_store
 from backend_logging import backend_logger
 from immich import (_get_asset_stacks, _parse_stack_snapshot, _require_configuration,
@@ -20,6 +20,18 @@ class ExclusionTarget(BaseModel):
 class ExclusionStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     targets: list[ExclusionTarget] = Field(max_length=100)
+
+
+class ExclusionStackConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedPrimaryAssetId: UUID
+    expectedMemberIds: list[UUID] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_members(self):
+        if len(set(self.expectedMemberIds)) != len(self.expectedMemberIds) or self.expectedPrimaryAssetId not in self.expectedMemberIds:
+            raise ValueError("Expected members must be unique and include the primary Asset.")
+        return self
 
 
 def _log(event: str, *, level: str = "info", **context) -> None:
@@ -122,11 +134,15 @@ async def statuses(targets, url, key):
                       for t in targets]}
 
 
-async def _register(kind, target_id, url, key):
+async def _register(kind, target_id, url, key, expected=None):
     snapshot = await snapshot_for(url, key)
     status, primary, members = configuration(snapshot, kind, target_id)
     if status not in ("confirmed", "single"):
         return status
+    # The exclusion must cover exactly the members whose Queue state the caller checked.
+    if kind == "stack" and (expected is None or str(expected.expectedPrimaryAssetId) != primary
+                            or sorted(map(str, expected.expectedMemberIds)) != members):
+        return "configuration_changed"
     if kind == "asset":
         await get_asset_detail(url, key, target_id)
     with edit_store._connection() as db:
@@ -137,9 +153,9 @@ async def _register(kind, target_id, url, key):
     return status
 
 
-async def register(kind, target_id, url, key):
+async def register(kind, target_id, url, key, expected=None):
     try:
-        status = await _register(kind, target_id, url, key)
+        status = await _register(kind, target_id, url, key, expected)
         if status not in ("confirmed", "single"):
             _log("exclusion.registration.failed", level="error", errorCode="exclusion_target_" + status)
         return status

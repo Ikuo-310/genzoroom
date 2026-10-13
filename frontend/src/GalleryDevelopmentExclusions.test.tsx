@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
@@ -11,6 +11,7 @@ import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode }
 import { updateSetting } from './appSettings';
 import i18n from './i18n';
 import { frontendLogger } from './frontendLogging';
+import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 
 const api = vi.hoisted(() => ({ photos: vi.fn(), albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(),
   statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), exclusions: vi.fn(), save: vi.fn() }));
@@ -23,8 +24,15 @@ vi.mock('./editStateApi', async original => ({ ...await original<typeof import('
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: api.list, enqueueExportAssets: api.enqueue, dequeueExportAsset: api.dequeue }));
 
-vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ sessionAssets }: { sessionAssets: RecentAsset[] }) =>
-  <div data-testid="stack-session">{sessionAssets.map(asset => asset.id).join(',')}</div> }));
+vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ sessionAssets, onWriteComplete }: {
+  sessionAssets: RecentAsset[]; onWriteComplete: () => void;
+}) => {
+  const [members] = useState(() => sessionAssets.flatMap(asset => asset.stackMembers ?? [asset]));
+  const [draftMarker, setDraftMarker] = useState('original');
+  return <><div data-testid="stack-session" data-members={members.map(asset => asset.id).join(',')} data-draft={draftMarker}>
+    {sessionAssets.map(asset => asset.id).join(',')}</div><button className="stack-test-edit" onClick={() => setDraftMarker('edited')}>Edit</button>
+    <button className="stack-test-write" onClick={onWriteComplete}>Write</button></>;
+} }));
 vi.mock('./developmentExclusionsApi', async original => ({ ...await original<typeof import('./developmentExclusionsApi')>(),
   getExclusionStatuses: api.exclusions, saveExclusion: api.save }));
 const ids = ['12345678-1234-4234-9234-123456789abc', '87654321-4321-4321-8321-cba987654321',
@@ -42,8 +50,17 @@ let host: HTMLDivElement;
 let root: Root;
 function WorkspaceProbe() {
   const location = useLocation();
+  const navigate = useNavigate();
   const selected = (location.state as { selectedAssets?: RecentAsset[] } | null)?.selectedAssets ?? [];
-  return <p className="workspace-probe" data-assets={selected.map(asset => asset.id).join(',')}>Develop</p>;
+  return <p className="workspace-probe" data-assets={selected.map(asset => asset.id).join(',')}>Develop
+    <button className="workspace-test-return" onClick={() => {
+      rememberWorkspaceSession({ selectedAssets: selected, activeAssetId: selected[0].id }); navigate('/');
+    }}>Return</button></p>;
+}
+function RetainedGallery() {
+  const location = useLocation();
+  return <><div hidden={location.pathname !== '/'}><GalleryPage active={location.pathname === '/'} /></div>
+    <Routes><Route path="/" element={null} /><Route path="/anshitsu/:assetId" element={<WorkspaceProbe />} /></Routes></>;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -58,7 +75,7 @@ function resetFilters() {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-  await i18n.changeLanguage('en'); resetFilters(); updateSetting('showKeyboardShortcuts', true);
+  await i18n.changeLanguage('en'); resetFilters(); clearWorkspaceSession(); updateSetting('showKeyboardShortcuts', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   Object.values(api).forEach(mock => mock.mockReset()); items = []; excluded = new Set();
   api.exclusions.mockImplementation(async (targets: { kind: string; id: string }[]) => targets.map(t => ({ ...t, excluded: excluded.has(t.id), configuration: t.kind === 'stack' ? 'confirmed' : 'single' })));
@@ -76,12 +93,12 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => { frontendLogger.setLevel('off'); frontendLogger.clear(); act(() => root.unmount()); host.remove(); resetFilters(); vi.unstubAllGlobals(); });
-async function mount(tab: HomeTab = 'recent', strict = false) {
+async function mount(tab: HomeTab = 'recent', strict = false, retained = false) {
   const homeReturn = { tab, album: tab === 'albums' ? album : null, year: 2026, month: 10,
     date: tab === 'calendar' ? '2026-10-06' : null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0 };
   const page = <MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn } }]}>
-    <Routes><Route path="/" element={<GalleryPage />} />
-      <Route path="/anshitsu/:assetId" element={<WorkspaceProbe />} /></Routes>
+    {retained ? <RetainedGallery /> : <Routes><Route path="/" element={<GalleryPage />} />
+      <Route path="/anshitsu/:assetId" element={<WorkspaceProbe />} /></Routes>}
   </MemoryRouter>;
   await act(async () => root.render(strict ? <StrictMode>{page}</StrictMode> : page));
 }
@@ -120,6 +137,108 @@ function family() {
   api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
   return stackId;
 }
+
+function expandedFamily() {
+  const stackId = family();
+  // Immich supplies expanded Filmstrip members without Gallery-level member IDs.
+  const members = photos.slice(0, 2).map(asset => ({ ...asset, isGenzoRoomExport: false,
+    stackId, primaryAssetId: ids[0], stackAssetCount: 2 }));
+  const primary = { ...members[0], stackMemberIds: ids.slice(0, 2), stackMembers: members };
+  api.photos.mockResolvedValue([primary, photos[2], photos[3]]);
+  return { stackId, primary, members };
+}
+
+describe('cross-phase exclusion session regressions', () => {
+  it('replaces a dissolved Stack draft with the latest singles and does not reintroduce an excluded member', async () => {
+    expandedFamily(); await mount(); await select(); await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-members')).toBe(ids.slice(0, 2).join(','));
+    api.photos.mockResolvedValue(photos); await clickSelector('.stack-test-write'); await clickSelector('#home-recent-tab');
+    await select(); await select(1); await pressX(); await select(1); await select();
+    await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-members')).toBe(ids[0]);
+  });
+  it('preserves a draft on ordinary tab round trips with unchanged Stack membership', async () => {
+    const { primary } = expandedFamily(); await mount(); await select(); await clickSelector('#home-stacks-tab'); await clickSelector('.stack-test-edit');
+    await clickSelector('#home-recent-tab');
+    api.photos.mockResolvedValue([{ ...primary, stackMemberIds: [...primary.stackMemberIds].reverse() }, photos[2], photos[3]]);
+    await clickSelector('.gallery-refresh'); await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-draft')).toBe('edited');
+  });
+  it('resumes expanded Stack members after clearing Gallery selection', async () => {
+    expandedFamily(); updateSetting('anshitsuInitialSelection', 'both'); await mount('recent', false, true); await select(); await pressD();
+    const previous = host.querySelector('.workspace-probe')?.getAttribute('data-assets');
+    expect(previous).toBe(ids.slice(0, 2).join(','));
+    await clickSelector('.workspace-test-return'); await select(); await pressD();
+    expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(previous);
+    expect(host.querySelector('.workspace-probe')).not.toBeNull();
+    updateSetting('anshitsuInitialSelection', 'nonRaw');
+  });
+  it('filters an excluded owning Stack from a mixed flattened resume without reapplying Stack presets', async () => {
+    const { stackId, members } = expandedFamily();
+    rememberWorkspaceSession({ selectedAssets: [...members, photos[2]], activeAssetId: members[0].id });
+    excluded.add(stackId); await mount(); await pressD();
+    expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(ids[2]);
+  });
+  it('keeps flattened allowed members when another resume Asset is excluded', async () => {
+    const { members } = expandedFamily();
+    rememberWorkspaceSession({ selectedAssets: [photos[2], members[1]], activeAssetId: ids[2] });
+    excluded.add(ids[2]); await mount(); await pressD();
+    expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(ids[1]);
+  });
+  it('queries the latest darkroom session outside the displayed Gallery after returning', async () => {
+    await mount('recent', false, true); await select(); await pressD(); await clickSelector('.workspace-test-return');
+    await select(); api.photos.mockResolvedValue([photos[2]]); await clickSelector('#home-favorites-tab');
+    api.exclusions.mockClear(); await clickSelector('#home-export-tab');
+    expect(api.exclusions.mock.calls.some(([targets]) => targets.some((target: { id: string }) => target.id === ids[0]))).toBe(true);
+    await pressD(); expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(ids[0]);
+  });
+  it('rechecks a retained Stack session outside the current Gallery and allows entry from Export', async () => {
+    await mount(); await select(); await clickSelector('#home-stacks-tab'); await clickSelector('.stack-test-edit');
+    await clickSelector('#home-recent-tab'); await select(); api.photos.mockResolvedValue([photos[2]]);
+    await clickSelector('#home-favorites-tab'); await clickSelector('#home-export-tab'); await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-draft')).toBe('edited');
+  });
+  it.each(['excluded', 'unknown'])('does not resume an outside session whose newly fetched status is %s', async status => {
+    rememberWorkspaceSession({ selectedAssets: [photos[0]], activeAssetId: ids[0] });
+    api.photos.mockResolvedValue([photos[2]]); await mount();
+    api.exclusions.mockImplementation(async targets => targets.map((target: { id: string }) => ({ ...target,
+      excluded: target.id === ids[0] && status === 'excluded', configuration: target.id === ids[0] && status === 'unknown' ? 'unknown' : 'single' })));
+    await clickSelector('#home-export-tab'); await pressD(); expect(host.querySelector('.workspace-probe')).toBeNull();
+  });
+  it.each(['excluded', 'unknown'])('does not reenter a retained Stack session whose fresh status is %s', async status => {
+    await mount(); await select(); await clickSelector('#home-stacks-tab'); await clickSelector('#home-recent-tab'); await select();
+    api.photos.mockResolvedValue([photos[2]]); await clickSelector('#home-favorites-tab');
+    api.exclusions.mockImplementation(async targets => targets.map((target: { id: string }) => ({ ...target,
+      excluded: target.id === ids[0] && status === 'excluded', configuration: target.id === ids[0] && status === 'unknown' ? 'unknown' : 'single' })));
+    await clickSelector('#home-export-tab'); await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('false');
+  });
+  it('does not apply an old Export read over the new Gallery session state', async () => {
+    rememberWorkspaceSession({ selectedAssets: [photos[0]], activeAssetId: ids[0] }); await mount();
+    const pending = deferred<any>(); api.exclusions.mockReturnValueOnce(pending.promise); await clickSelector('#home-export-tab');
+    excluded.add(ids[0]); await clickSelector('#home-recent-tab');
+    await act(async () => pending.resolve([{ kind: 'asset', id: ids[0], excluded: false, configuration: 'single' }]));
+    await pressD(); expect(host.querySelector('.workspace-probe')).toBeNull();
+  });
+  it('does not resume a member removed from its owning Stack', async () => {
+    const { primary, members } = expandedFamily();
+    rememberWorkspaceSession({ selectedAssets: [members[1]], activeAssetId: members[1].id });
+    const newMember = { ...members[1], ...photos[2], isGenzoRoomExport: false };
+    api.photos.mockResolvedValue([{ ...primary, stackMemberIds: [ids[0], ids[2]], stackMembers: [members[0], newMember] }]);
+    await mount(); await pressD(); expect(host.querySelector('.workspace-probe')).toBeNull();
+  });
+  it('leaves added-member Queue entries intact and displays failure when Backend rejects a changed Stack snapshot', async () => {
+    const stackId = family(); items = ids.slice(0, 3).map(id => item(id));
+    api.save.mockRejectedValue(new Error('exclusion_target_configuration_changed'));
+    await mount(); await select(); await pressX();
+    expect(api.dequeue.mock.calls.map(([id]) => id)).toEqual(ids.slice(0, 2).sort());
+    expect(items.map(value => value.assetId)).toEqual([ids[2]]);
+    expect(excluded.has(stackId)).toBe(false);
+    expect(card().classList.contains('development-excluded')).toBe(false);
+    expect(host.textContent).toContain('Reload photos to confirm the result');
+  });
+});
 
 describe('Gallery development exclusions', () => {
   it('toggles a single card without changing selection, scroll or restoring Queue', async () => {

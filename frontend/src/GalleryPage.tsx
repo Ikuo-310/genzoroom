@@ -18,7 +18,7 @@ import { selectGalleryAssetTargets } from './galleryAssetSelection';
 import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, clearGalleryStackSnapshots, useGalleryStackSelections } from './useGalleryStackSelections';
 import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useDevelopmentExclusions } from './useDevelopmentExclusions';
-import { exclusionKey, exclusionLog } from './developmentExclusionsApi';
+import { exclusionKey, exclusionLog, exclusionTarget } from './developmentExclusionsApi';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
 import { flattenExportQueueDisplay } from './exportQueueDisplay';
@@ -67,7 +67,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const settings = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
-  const [workspaceSessionAtMount] = useState(() => readWorkspaceSession());
+  const workspaceSession = useMemo(() => readWorkspaceSession(), [active, location.key]);
   const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
   const [exportThumbnailRevision, setExportThumbnailRevision] = useState(0);
   useEffect(() => {
@@ -606,12 +606,31 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const collapsedAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
   const visibleAssets = filterPhotosByDevelopStatus(collapsedAssets, developStatusFilterModes[activeTab]);
   const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
-  // D can resume assets outside the current view, so their exclusions share the view's status snapshot.
-  const exclusionSource = useMemo(() => [...currentAssets, ...(workspaceSessionAtMount?.selectedAssets ?? [])],
-    [currentAssets, workspaceSessionAtMount]);
-  const exclusionAssets = [...new Map([...visibleAssets, ...selectedAssets, ...(workspaceSessionAtMount?.selectedAssets ?? [])]
+  const retainedAssets = useMemo(() => activeTab === 'recent' ? assets : activeTab === 'favorites' ? favoriteAssets
+    : activeTab === 'albums' && selectedAlbum ? albumAssets
+      : activeTab === 'calendar' && selectedCalendarDate ? calendarAssets : [],
+  [activeTab, assets, favoriteAssets, selectedAlbum, albumAssets, selectedCalendarDate, calendarAssets]);
+  function sessionExclusionOwner(asset: RecentAsset) {
+    // Filmstrip members are not Gallery cards; use the shared accepted owner snapshot.
+    const current = retainedAssets.find(candidate => candidate.id.toLowerCase() === asset.id.toLowerCase());
+    if (current) return current;
+    const owner = stackSelections.currentCard(asset);
+    // A refreshed owner that no longer contains this member cannot authorize its old session entry.
+    return asset.stackId && owner.stackMemberIds && !owner.stackMemberIds.some(id => id.toLowerCase() === asset.id.toLowerCase())
+      ? { ...asset, stackMemberIds: null, stackMembers: null } : owner;
+  }
+  const sessionExclusionAssets = useMemo(() => [...(workspaceSession?.selectedAssets ?? []), ...(stackSession?.assets ?? [])]
+    .map(sessionExclusionOwner), [workspaceSession, stackSession, retainedAssets, stackSelections.revision]);
+  const sessionExclusionKey = JSON.stringify(sessionExclusionAssets.map(asset => [asset.id, asset.stackId ?? null, exclusionTarget(asset)?.signature ?? null]));
+  // Manual Stack-selection notifications must not restart reads of the same owner configuration.
+  const exclusionSource = useMemo(() => {
+    const currentKeys = new Set(retainedAssets.map(asset => exclusionKey({ kind: asset.stackId ? 'stack' : 'asset', id: asset.stackId ?? asset.id })));
+    return [...retainedAssets, ...sessionExclusionAssets.filter(asset => !currentKeys.has(exclusionKey({
+      kind: asset.stackId ? 'stack' : 'asset', id: asset.stackId ?? asset.id })))];
+  }, [retainedAssets, sessionExclusionKey]);
+  const exclusionAssets = [...new Map([...(photoView?.state === 'ready' ? [...visibleAssets, ...selectedAssets] : []), ...sessionExclusionAssets]
     .map(asset => [asset.id.toLowerCase(), asset])).values()];
-  const exclusions = useDevelopmentExclusions(active && !showStacks && !showExport && photoView?.state === 'ready' ? exclusionAssets : [],
+  const exclusions = useDevelopmentExclusions(active && !showStacks && (!photoView || photoView.state === 'ready') ? exclusionAssets : [],
     `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}`, exclusionSource);
   const exclusionViewRef = useRef('');
   exclusionViewRef.current = `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}:${exclusions.generation}`;
@@ -732,13 +751,15 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function openStacks() {
     if (showStacks) return;
-    const candidates = activeSelectedAssetIds.length ? selectedAssets : stackSession?.assets ?? [];
+    const candidates = activeSelectedAssetIds.length ? selectedAssets : (stackSession?.assets ?? []).map(sessionExclusionOwner);
     // Compare only on entry: browsing changes must not mutate a retained editing session.
     const nextAssets = [...new Map(candidates.filter(galleryAssetAllowed).map(asset => [asset.id, asset])).values()];
     if (candidates.length > 0 && nextAssets.length === 0) return;
-    const previousIds = new Set(stackSession?.assets.map(asset => asset.id));
-    if (!showExport && nextAssets.length && (!stackSession
-      || nextAssets.length !== previousIds.size || nextAssets.some(asset => !previousIds.has(asset.id)))) {
+    const sessionSignature = (asset: RecentAsset) => JSON.stringify([asset.id.toLowerCase(), asset.stackId?.toLowerCase() ?? null,
+      asset.primaryAssetId?.toLowerCase() ?? null, asset.stackMemberIds?.map(id => id.toLowerCase()).sort() ?? null]);
+    const previousSignatures = new Set(stackSession?.assets.map(sessionSignature));
+    if (nextAssets.length && (!stackSession
+      || nextAssets.length !== previousSignatures.size || nextAssets.some(asset => !previousSignatures.has(sessionSignature(asset))))) {
       // Remounting invalidates loader generations and aborts the previous send wait.
       setStackSession({ assets: nextAssets, generation: (stackSession?.generation ?? 0) + 1 });
     } else if (!stackSession) setStackSession({ assets: [], generation: 0 });
@@ -759,18 +780,17 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       openSelectedAssets();
       return true;
     }
-    const resume = readWorkspaceSession();
+    const resume = workspaceSession;
     if (!resume) return false;
-    const eligibleResumeAssets = resume.selectedAssets.filter(galleryAssetAllowed);
+    const eligibleResumeAssets = resume.selectedAssets.filter(asset => galleryAssetAllowed(sessionExclusionOwner(asset)));
     if (eligibleResumeAssets.length === 0) return false;
-    if (eligibleResumeAssets.length !== resume.selectedAssets.length) {
-      openWorkspaceAssets(eligibleResumeAssets);
-      return true;
-    }
+    // A resume session is already expanded; filtering must not apply Gallery Stack presets again.
+    const resumed = { ...resume, selectedAssets: eligibleResumeAssets,
+      activeAssetId: eligibleResumeAssets.some(asset => asset.id === resume.activeAssetId) ? resume.activeAssetId : eligibleResumeAssets[0].id };
     workspaceNavigating.current = true;
     setWorkspaceOpenError(null);
-    navigate(workspacePath(resume.activeAssetId), {
-      state: { ...resume, homeReturn: captureHomeReturnRef.current() },
+    navigate(workspacePath(resumed.activeAssetId), {
+      state: { ...resumed, homeReturn: captureHomeReturnRef.current() },
     });
     return true;
   }

@@ -65,7 +65,10 @@ export async function getExclusionStatuses(targets: ExclusionTarget[], signal: A
   return statuses;
 }
 export async function saveExclusion(target: ExclusionTarget, excluded: boolean, signal: AbortSignal): Promise<void> {
-  const response = await request(`/api/development-exclusions/${target.kind}/${target.id}`, { method: excluded ? 'PUT' : 'DELETE', signal });
+  const expected = excluded && target.kind === 'stack'
+    ? { expectedPrimaryAssetId: (JSON.parse(target.signature) as [string, string[]])[0], expectedMemberIds: target.memberIds } : null;
+  const response = await request(`/api/development-exclusions/${target.kind}/${target.id}`, { method: excluded ? 'PUT' : 'DELETE', signal,
+    ...(expected ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(expected) } : {}) });
   if (!excluded) {
     if (response.status !== 204) throw new Error('invalid_exclusion_response');
   } else {

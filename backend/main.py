@@ -25,7 +25,7 @@ from export_runtime import ExportRuntime, ImmichExportSource
 from immich_export import ImmichFamilyFilenameProvider, ImmichExportRegistrar
 from genzoroom_tag_repair import GenzoRoomTagRepair
 from export_runtime_store import runtime_log, RuntimeRejected, recoverable_export_run, request_export_stop, retry_export_assets, get_export_run
-from development_exclusions import ExclusionTarget, ExclusionStatusRequest, statuses, register, remove
+from development_exclusions import ExclusionTarget, ExclusionStatusRequest, ExclusionStackConfiguration, statuses, register, remove
 from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
@@ -761,9 +761,12 @@ async def development_exclusion(kind: Literal["asset", "stack"], target_id: UUID
 
 
 @app.put("/development-exclusions/{kind}/{target_id}")
-async def register_development_exclusion(kind: Literal["asset", "stack"], target_id: UUID) -> dict:
+async def register_development_exclusion(kind: Literal["asset", "stack"], target_id: UUID,
+                                         payload: ExclusionStackConfiguration | None = None) -> dict:
+    if kind == "stack" and payload is None:
+        raise _edit_error(422, "expected_stack_configuration_required")
     try:
-        status = await register(kind, target_id, os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
+        status = await register(kind, target_id, os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), payload)
         if status not in ("confirmed", "single"):
             raise _edit_error(404 if status == "absent" else 409, "exclusion_target_" + status)
         return {"kind": kind, "id": str(target_id), "excluded": True, "configuration": status}

@@ -37,6 +37,31 @@ def configure(body):
 def path(kind, target):
     return f'/development-exclusions/{kind}/{target}'
 
+def expected(family):
+    return {'expectedPrimaryAssetId': family['primaryAssetId'], 'expectedMemberIds': [member['id'] for member in family['assets']]}
+
+@pytest.mark.parametrize('change', ['cover', 'add', 'remove'])
+def test_registration_rejects_configuration_not_checked_for_queue(db, family, change):
+    changed = copy.deepcopy(family)
+    if change == 'cover': changed['primaryAssetId'] = changed['assets'][1]['id']
+    elif change == 'add': changed['assets'].append({'id': str(uuid4())})
+    else: changed['assets'].pop()
+    with configure([changed]):
+        response = request('PUT', path('stack', family['id']), expected(family))
+        assert response.status_code == 409
+        assert response.json()['detail']['code'] == 'exclusion_target_configuration_changed'
+        assert not request('GET', path('stack', family['id'])).json()['items'][0]['excluded']
+
+def test_registration_requires_valid_expected_stack_configuration(db, family):
+    with configure([family]):
+        target = path('stack', family['id'])
+        assert request('PUT', target).status_code == 422
+        payload = expected(family)
+        assert request('PUT', target, {**payload, 'expectedMemberIds': payload['expectedMemberIds'] * 2}).status_code == 422
+        assert request('PUT', target, {**payload, 'expectedPrimaryAssetId': str(uuid4())}).status_code == 422
+        payload['expectedMemberIds'].reverse()
+        assert request('PUT', target, payload).status_code == 200
+
 def test_single_persistence_remove_no_other_state(db):
     p = path('asset', uuid4())
     with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
@@ -55,7 +80,7 @@ def test_single_persistence_remove_no_other_state(db):
 def test_stack_changes(db, family, change):
     p = path('stack', family['id'])
     with configure([family]):
-        assert request('PUT', p).status_code == 200
+        assert request('PUT', p, expected(family)).status_code == 200
         assert request('GET', p).json()['items'][0]['excluded']
     changed = copy.deepcopy(family)
     if change == 'cover': changed['primaryAssetId'] = changed['assets'][1]['id']
@@ -68,7 +93,7 @@ def test_stack_changes(db, family, change):
 @pytest.mark.parametrize('case', ['failure', 'missing_cover', 'duplicate', 'unidentified', 'overlap'])
 def test_uncertainty_retains_state(db, family, case):
     p = path('stack', family['id'])
-    with configure([family]): assert request('PUT', p).status_code == 200
+    with configure([family]): assert request('PUT', p, expected(family)).status_code == 200
     changed = copy.deepcopy(family)
     if case == 'missing_cover':
         changed.pop('primaryAssetId'); body = [changed]
@@ -79,14 +104,14 @@ def test_uncertainty_retains_state(db, family, case):
     with context:
         item = request('GET', p).json()['items'][0]
         assert item['excluded'] and item['configuration'] == 'unknown'
-        assert request('PUT', p).status_code >= 400
+        assert request('PUT', p, expected(family)).status_code >= 400
         assert request('GET', p).json()['items'][0]['excluded']
 
 def test_validation_batch_unknown_and_unavailable(db, family):
     with configure([family]):
         assert request('PUT', path('asset', family['primaryAssetId'])).status_code == 409
-        assert request('PUT', path('stack', uuid4())).status_code == 404
-        assert request('PUT', path('stack', family['id'])).status_code == 200
+        assert request('PUT', path('stack', uuid4()), expected(family)).status_code == 404
+        assert request('PUT', path('stack', family['id']), expected(family)).status_code == 200
         targets = [{'kind': 'stack', 'id': family['id']}, {'kind': 'asset', 'id': family['primaryAssetId']}]
         assert [i['excluded'] for i in request('POST', '/development-exclusions/status', {'targets': targets}).json()['items']] == [True, False]
         assert request('POST', '/development-exclusions/status', {'targets': targets * 2}).status_code == 422
@@ -102,7 +127,7 @@ def test_validation_batch_unknown_and_unavailable(db, family):
 
 def test_gallery_observation_and_stale_response(db, family):
     started = ex._now()
-    with configure([family]): request('PUT', path('stack', family['id']))
+    with configure([family]): request('PUT', path('stack', family['id']), expected(family))
     ex.observe([], started)
     ex.observe([{}], ex._now())
     with edit_store._connection() as conn:
@@ -113,7 +138,7 @@ def test_gallery_observation_and_stale_response(db, family):
 
 def test_actual_stack_fetch_hook_and_failures(db, family):
     from immich import _get_asset_stacks
-    with configure([family]): request('PUT', path('stack', family['id']))
+    with configure([family]): request('PUT', path('stack', family['id']), expected(family))
     def fetch(body, status=200):
         transport = httpx.MockTransport(lambda req: httpx.Response(status, json=body))
         return asyncio.run(_get_asset_stacks('http://immich/api', 'test-key', transport=transport))
@@ -195,7 +220,7 @@ def test_unknown_without_saved_row_is_not_confirmed_single(db):
 
 
 def test_corrupt_snapshot_is_retained_and_logged_without_breaking_gallery(db, family):
-    with configure([family]): request('PUT', path('stack', family['id']))
+    with configure([family]): request('PUT', path('stack', family['id']), expected(family))
     with edit_store._connection() as conn:
         conn.execute("UPDATE development_exclusions SET member_ids_json='{}'")
     ex.observe([], ex._now())
@@ -234,7 +259,7 @@ def test_valid_stack_operations_survive_unrelated_incomplete_stack(db, family):
     assert ex.configuration(snapshot, 'asset', UUID(family['primaryAssetId']))[0] == 'stacked'
     with configure([family, incomplete]):
         p = path('stack', family['id'])
-        assert request('PUT', p).status_code == 200
+        assert request('PUT', p, expected(family)).status_code == 200
         assert request('GET', p).json()['items'][0]['excluded']
         assert request('DELETE', p).status_code == 204
         assert not request('GET', p).json()['items'][0]['excluded']
@@ -274,7 +299,7 @@ def test_partial_stack_observation_never_invalidates_existing_exclusions(db, fam
     with configure([]), patch.object(ex, 'get_asset_detail', new=AsyncMock()):
         assert request('PUT', path('asset', singleton)).status_code == 200
     with configure([family]):
-        assert request('PUT', path('stack', family['id'])).status_code == 200
+        assert request('PUT', path('stack', family['id']), expected(family)).status_code == 200
     incomplete = copy.deepcopy(family)
     incomplete['assets'] = [{'id': str(singleton)}]
     with configure([incomplete]):
@@ -288,7 +313,7 @@ def test_partial_stack_observation_never_invalidates_existing_exclusions(db, fam
 
 def test_unrelated_stack_absence_is_not_proven_by_partial_snapshot(db, family):
     with configure([family]):
-        assert request('PUT', path('stack', family['id'])).status_code == 200
+        assert request('PUT', path('stack', family['id']), expected(family)).status_code == 200
     partial = {'id': str(uuid4()), 'primaryAssetId': str(uuid4()), 'assets': [{'id': str(uuid4())}]}
     with configure([partial]):
         item = request('GET', path('stack', family['id'])).json()['items'][0]
