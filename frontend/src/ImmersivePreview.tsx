@@ -13,12 +13,13 @@ export type ImmersiveQueueControlState = EditedQueueControlState;
 export type ImmersivePreviewProps = {
   assets: readonly RecentAsset[];
   startAssetId: string;
-  selectedAssetIds: ReadonlySet<string>;
+  selectedAssetIds?: ReadonlySet<string>;
   queuedAssetIds: ReadonlySet<string>;
   queueControlByAssetId?: ReadonlyMap<string, ImmersiveQueueControlState>;
   armedAssetIds?: ReadonlySet<string>;
+  exportControlByAssetId?: ReadonlyMap<string, { queueEnabled: boolean; armEnabled: boolean }>;
   source: 'gallery' | 'exportManagement';
-  onToggleSelection: (assetId: string) => void;
+  onToggleSelection?: (assetId: string) => void;
   onToggleQueue: (assetId: string) => void;
   onToggleArmed?: (assetId: string) => void;
   onClose: () => void;
@@ -28,8 +29,8 @@ function includes(ids: ReadonlySet<string>, assetId: string) {
   return ids.has(assetId) || ids.has(assetId.toLowerCase());
 }
 
-export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queuedAssetIds, armedAssetIds = new Set(),
-  queueControlByAssetId, source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
+export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new Set(), queuedAssetIds, armedAssetIds = new Set(),
+  queueControlByAssetId, exportControlByAssetId, source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const rootRef = useRef<HTMLElement>(null);
@@ -40,8 +41,10 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   const isMac = shortcutPlatform() === 'mac';
   const hasArm = source === 'exportManagement' && onToggleArmed !== undefined;
   const queueControl = asset ? queueControlByAssetId?.get(asset.id.toLowerCase()) : undefined;
-  const queueEnabled = queueControlByAssetId === undefined || (queueControl !== undefined
-    && canToggleEditedQueue(queueControl, true));
+  const exportControl = asset ? exportControlByAssetId?.get(asset.id.toLowerCase()) : undefined;
+  const queueEnabled = source === 'exportManagement' ? exportControl?.queueEnabled === true
+    : queueControlByAssetId === undefined || (queueControl !== undefined && canToggleEditedQueue(queueControl, true));
+  const armEnabled = hasArm && exportControl?.armEnabled === true;
   const move = useCallback((direction: -1 | 1) => {
     setIndex(current => Math.max(0, Math.min(viewAssets.length - 1, current + direction)));
   }, [viewAssets.length]);
@@ -76,21 +79,26 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
           return;
         }
       }
-      if (event.defaultPrevented || event.isComposing || event.repeat || isNativeEditingTarget(event.target)
+      if (event.defaultPrevented || event.isComposing || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      // Export never uses Space, including repeats that could activate a focused Q/W button natively.
+      if (source === 'exportManagement' && matchesShortcut(event, 'immersiveSelectionToggle')) {
+        consume(event); return;
+      }
+      if (event.repeat) return;
       if (matchesShortcut(event, 'immersivePrevious')) {
         consume(event); move(-1);
       } else if (matchesShortcut(event, 'immersiveNext')) {
         consume(event); move(1);
       } else if (matchesShortcut(event, 'immersiveSelectionToggle')) {
         if (!asset) return;
-        consume(event); onToggleSelection(asset.id);
+        consume(event); if (source === 'gallery') onToggleSelection?.(asset.id);
       } else if (matchesShortcut(event, 'exportQueueToggle')) {
         if (!asset) return;
         consume(event); if (queueEnabled) onToggleQueue(asset.id);
       } else if (hasArm && matchesShortcut(event, 'exportArmToggle')) {
         if (!asset) return;
-        consume(event); onToggleArmed?.(asset.id);
+        consume(event); if (armEnabled) onToggleArmed?.(asset.id);
       } else if (matchesShortcut(event, 'immersiveClose') || event.key === 'Escape') {
         consume(event); onClose();
       }
@@ -98,7 +106,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
     // Capture prevents the underlying Gallery or Workspace from also handling shared Q/W commands.
     window.addEventListener('keydown', keydown, true);
     return () => window.removeEventListener('keydown', keydown, true);
-  }, [asset, hasArm, move, onClose, onToggleArmed, onToggleQueue, onToggleSelection, queueEnabled, viewAssets.length]);
+  }, [asset, armEnabled, hasArm, move, onClose, onToggleArmed, onToggleQueue, onToggleSelection, queueEnabled, source, viewAssets.length]);
 
   if (!asset) return null;
   const selected = includes(selectedAssetIds, asset.id);
@@ -125,14 +133,15 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
       <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false} />
     </main>
     <footer className="immersive-preview-bottombar">
-      <button type="button" aria-pressed={selected} onClick={() => onToggleSelection(asset.id)}>
+      {source === 'gallery' && <button type="button" aria-pressed={selected} onClick={() => onToggleSelection?.(asset.id)}>
         {t('immersivePreview.selection', { state: t(selected ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('immersiveSelectionToggle') && <kbd>{shortcut.label('immersiveSelectionToggle')}</kbd>}
-      </button>
+      </button>}
       <button type="button" className={!queueEnabled ? 'immersive-preview-queue-disabled' : undefined}
         aria-pressed={queued} disabled={!queueEnabled} onClick={() => onToggleQueue(asset.id)}>
         {t('immersivePreview.queue', { state: t(queued ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportQueueToggle') && <kbd>{shortcut.label('exportQueueToggle')}</kbd>}
       </button>
-      {hasArm && <button type="button" aria-pressed={armed} onClick={() => onToggleArmed?.(asset.id)}>
+      {hasArm && <button type="button" className={!armEnabled ? 'immersive-preview-queue-disabled' : undefined}
+        aria-pressed={armed} disabled={!armEnabled} onClick={() => onToggleArmed?.(asset.id)}>
         {t('immersivePreview.arm', { state: t(armed ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportArmToggle') && <kbd>{shortcut.label('exportArmToggle')}</kbd>}
       </button>}
     </footer>

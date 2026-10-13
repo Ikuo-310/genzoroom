@@ -146,8 +146,9 @@ describe('command shortcut bindings', () => {
   it('separates focus mode and Fit restore from Primary commands and Redo', () => {
     for (const platform of ['other', 'mac'] as const) for (let mask = 0; mask < 16; mask++) {
       const ctrlKey = !!(mask & 1), metaKey = !!(mask & 2), altKey = !!(mask & 4), shiftKey = !!(mask & 8);
-      for (const key of ['f', 'F']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFocusMode', platform))
+      for (const key of ['v', 'V']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFocusMode', platform))
         .toBe(!ctrlKey && !metaKey && !altKey && !shiftKey);
+      for (const key of ['f', 'F']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFocusMode', platform)).toBe(false);
       for (const key of ['z', 'Z']) expect(matchesShortcut(event(key, { ctrlKey, metaKey, altKey, shiftKey }), 'viewerFitRestore', platform))
         .toBe(!ctrlKey && !metaKey && !altKey && shiftKey);
     }

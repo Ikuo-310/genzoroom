@@ -19,6 +19,7 @@ import { acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGa
 import { useEditStatusesSnapshot } from './useEditStatuses';
 import { useExportQueue } from './useExportQueue';
 import { useExportManagement } from './useExportManagement';
+import { flattenExportQueueDisplay } from './exportQueueDisplay';
 import { ExportQueueApiError, isExportQueueMutationOutcomeUnknown } from './exportQueueApi';
 import { usePhotoSelection } from './usePhotoSelection';
 import { useAdjacentCalendarDates } from './useAdjacentCalendarDates';
@@ -55,7 +56,7 @@ type PhotoView = {
 };
 type GalleryLoader = 'recent' | 'favorites' | 'albums' | 'album' | 'heatmap' | 'day';
 type GalleryRefresh = { key: string; loader: GalleryLoader; id: number; pending: number; failed: boolean; controllers: Set<AbortController> };
-type ImmersiveGallerySession = { assets: RecentAsset[]; startAssetId: string };
+type ImmersiveSession = { assets: RecentAsset[]; startAssetId: string; source: 'gallery' | 'exportManagement' };
 
 export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const { t, i18n } = useTranslation();
@@ -79,7 +80,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const [queueBatchBusyState, setQueueBatchBusyState] = useState(false);
   const queueMounted = useRef(true);
   const pendingPhotoSelection = useRef<{ timer: number; select: () => void } | null>(null);
-  const [immersiveGallerySession, setImmersiveGallerySession] = useState<ImmersiveGallerySession | null>(null);
+  const [immersiveSession, setImmersiveSession] = useState<ImmersiveSession | null>(null);
+  const immersiveSessionRef = useRef(immersiveSession);
+  immersiveSessionRef.current = immersiveSession;
   function cancelDeferredPhotoSelection() {
     if (!pendingPhotoSelection.current) return;
     window.clearTimeout(pendingPhotoSelection.current.timer);
@@ -176,7 +179,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const openStacksRef = useRef<() => void>(() => {});
   const openHomeWorkspaceRef = useRef<() => boolean>(() => false);
   const queueSelectedRef = useRef<() => boolean>(() => false);
-  const openImmersivePreviewRef = useRef<() => void>(() => {});
+  const openImmersivePreviewRef = useRef<() => boolean>(() => false);
   const homeTabClickRef = useRef<(tab: HomeNavigationTab) => void>(() => {});
   const selectAllVisibleRef = useRef<() => boolean>(() => false);
   const navigateCalendarRef = useRef<(direction: 'previous' | 'next') => boolean>(() => false);
@@ -574,7 +577,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const currentAssets = photoView?.assets ?? [];
   const cardEditStatuses = aggregateStackEditStatuses(currentAssets, editStatuses);
   const activeSelectedAssetIds = photoView?.selection.selectedIds ?? [];
-  useEffect(() => cancelDeferredPhotoSelection(), [activeSelectedAssetIds]);
+  const exportSelectionKey = JSON.stringify(exportManagement.selectedIds);
+  // Unrelated Export rerenders must not cancel a pending plain click via a new empty Gallery array.
+  useEffect(() => cancelDeferredPhotoSelection(), [photoView?.selection.selectedIds, exportSelectionKey]);
   const stackAssets = activeTab === 'favorites' ? currentAssets : filterImmichStacks(currentAssets, 'both');
   const editFilteredAssets = activeTab === 'favorites'
     ? filterPhotosByEditStatus(stackAssets, editStatusFilterModes[activeTab], aggregateStackEditStatuses(stackAssets, editStatuses))
@@ -598,7 +603,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (!active) return;
+      if (!active || immersiveSessionRef.current) return;
       const exportView = exportManagementRef.current;
       if (exportView.active && !event.isComposing && !event.repeat
         && !document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
@@ -614,7 +619,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       if (matchesShortcut(event, 'galleryOpenImmersivePreview')) {
-        openImmersivePreviewRef.current();
+        if (openImmersivePreviewRef.current()) event.preventDefault();
         return;
       }
       if (matchesShortcut(event, 'homeRefreshPhotos')) {
@@ -802,12 +807,41 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }
 
   function openImmersivePreviewFromSelection() {
-    if (!canOpenImmersivePreview()) return;
+    if (showExport) {
+      if (!active || showStacks || !exportManagement.canOpenPreview) return false;
+      const orderedAssets = flattenExportQueueDisplay(exportManagement.rows).map(entry => entry.asset);
+      const selected = new Set(exportManagement.selectedIds);
+      const selectedVisible = orderedAssets.filter(asset => selected.has(asset.id.toLowerCase()));
+      if (!selectedVisible.length || selectedVisible.some(asset => !exportManagement.canOperateAsset(asset.id))) return false;
+      cancelDeferredPhotoSelection();
+      setImmersiveSession({ assets: [...(selected.size > 1 ? selectedVisible : orderedAssets)],
+        startAssetId: selectedVisible[0].id, source: 'exportManagement' });
+      return true;
+    }
+    if (!canOpenImmersivePreview()) return false;
     const selected = new Set(activeSelectedAssetIds.map(id => id.toLowerCase()));
     const selectedVisible = visibleAssets.filter(asset => selected.has(asset.id.toLowerCase()));
-    if (!selectedVisible.length) return;
+    if (!selectedVisible.length) return false;
     const targets = activeSelectedAssetIds.length > 1 ? selectedVisible : visibleAssets;
-    if (targets.length) setImmersiveGallerySession({ assets: [...targets], startAssetId: selectedVisible[0].id });
+    if (targets.length) {
+      cancelDeferredPhotoSelection();
+      setImmersiveSession({ assets: [...targets], startAssetId: selectedVisible[0].id, source: 'gallery' });
+      return true;
+    }
+    return false;
+  }
+
+  function openExportImmersivePreviewFromCard(asset: RecentAsset) {
+    if (!active || !showExport || showStacks || !exportManagement.canOpenPreview || !exportManagement.canOperateAsset(asset.id)) return;
+    const selected = new Set(exportManagement.selectedIds);
+    const multiSelection = selected.size > 1;
+    if (multiSelection && !selected.has(asset.id.toLowerCase())) {
+      exportManagement.toggleSelection(asset.id);
+      selected.add(asset.id.toLowerCase());
+    } else if (!multiSelection) exportManagement.selectOnly(asset.id);
+    const orderedAssets = flattenExportQueueDisplay(exportManagement.rows).map(entry => entry.asset);
+    const targets = multiSelection ? orderedAssets.filter(candidate => selected.has(candidate.id.toLowerCase())) : orderedAssets;
+    if (targets.length) setImmersiveSession({ assets: [...targets], startAssetId: asset.id, source: 'exportManagement' });
   }
 
   function openImmersivePreviewFromCard(asset: RecentAsset) {
@@ -820,7 +854,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     const targets = photoView.selection.selectedIds.length > 1
       ? visibleAssets.filter(candidate => selected.has(candidate.id.toLowerCase()))
       : visibleAssets;
-    if (targets.length) setImmersiveGallerySession({ assets: [...targets], startAssetId: asset.id });
+    if (targets.length) setImmersiveSession({ assets: [...targets], startAssetId: asset.id, source: 'gallery' });
   }
   openImmersivePreviewRef.current = openImmersivePreviewFromSelection;
 
@@ -1301,7 +1335,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         </div>
       </div>}
       <section hidden={showStacks} className="home-content" aria-label={t('home.sections')} onClick={clearPhotoSelectionFromBlankArea}>
-        {showExport ? <ExportManagementContent management={exportManagement} /> : <>
+        {showExport ? <ExportManagementContent management={exportManagement}
+          onPreviewRequest={openExportImmersivePreviewFromCard} onDeferSelectionClick={deferPhotoSelection}
+          onCancelDeferredSelection={cancelDeferredPhotoSelection} /> : <>
         {refreshFailed && <p className="gallery-message error-text" role="alert">{t('photos.refreshFailed')}</p>}
         {(queueFailure || !!exportQueue.error) && <p className="home-queue-error gallery-message error-text" role="alert">
           {t(`photos.exportQueue.${queueFailure ?? 'loadFailed'}`)}
@@ -1359,9 +1395,19 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
             setStackWriteRevision(revision => revision + 1);
           }} />
       </div>}
-      {immersiveGallerySession && <ImmersivePreview
-        assets={immersiveGallerySession.assets}
-        startAssetId={immersiveGallerySession.startAssetId}
+      {immersiveSession?.source === 'exportManagement' && <ImmersivePreview
+        assets={immersiveSession.assets} startAssetId={immersiveSession.startAssetId} source="exportManagement"
+        queuedAssetIds={new Set(exportQueue.items.map(item => item.assetId.toLowerCase()))}
+        armedAssetIds={exportManagement.armedIds}
+        exportControlByAssetId={new Map(immersiveSession.assets.map(asset => {
+          const enabled = exportManagement.canOperateAsset(asset.id);
+          return [asset.id.toLowerCase(), { queueEnabled: enabled, armEnabled: enabled }] as const;
+        }))}
+        onToggleQueue={exportManagement.removeAsset} onToggleArmed={exportManagement.toggleAssetArmed}
+        onClose={() => setImmersiveSession(null)} />}
+      {immersiveSession?.source === 'gallery' && <ImmersivePreview
+        assets={immersiveSession.assets}
+        startAssetId={immersiveSession.startAssetId}
         selectedAssetIds={new Set(activeSelectedAssetIds.map(id => id.toLowerCase()))}
         queuedAssetIds={new Set(visibleAssets.filter(asset => queueStateFor(asset).status !== undefined).map(asset => asset.id.toLowerCase()))}
         queueControlByAssetId={new Map(visibleAssets.map(asset => {
@@ -1375,7 +1421,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           const asset = currentAssets.find(candidate => candidate.id.toLowerCase() === assetId.toLowerCase());
           if (asset) void toggleQueue(asset);
         }}
-        onClose={() => setImmersiveGallerySession(null)} />}
+        onClose={() => setImmersiveSession(null)} />}
     </main>
   );
 }

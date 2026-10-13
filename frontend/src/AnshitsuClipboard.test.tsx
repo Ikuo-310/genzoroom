@@ -533,13 +533,16 @@ describe('workspace full-settings clipboard', () => {
   it.each([
     { isComposing: true }, { repeat: true }, { altKey: true, shiftKey: true }, { metaKey: true },
     { shiftKey: true }, { ctrlKey: false },
-  ])('ignores unsupported clipboard key conditions %j', async (options) => {
+  ])('does not paste for unsupported clipboard key conditions %j', async (options) => {
     const recipe = defaultRecipe(); recipe.adjustments.tint = 10;
     rows.set(first.id, stored(first.id, recipe));
     copyEditSettings(defaultRecipe(), 'other', 'other.jpg');
     await mount(); const viewport = activatePreview();
     expect(key(viewport, 'c', options).defaultPrevented).toBe(false);
-    expect(key(viewport, 'v', options).defaultPrevented).toBe(false);
+    // Unmodified V belongs to Viewer focus mode even though it is not a clipboard command.
+    expect(key(viewport, 'v', options).defaultPrevented).toBe(options.ctrlKey === false);
+    expect(host.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(options.ctrlKey === false);
+    expect(rendered.recipe!.adjustments.tint).toBe(10);
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
   });
 

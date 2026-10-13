@@ -35,7 +35,7 @@ export const shortcutBindings = {
   pasteSelection: [{ key: 'v', ignoreCase: true, ...primaryModifiers, alternate: true, shift: false, excludeAltGraph: true }],
   viewerOriginal: [{ key: ']', ...commandModifiers, alt: false }],
   viewerBefore: [{ code: 'Backslash', ...commandModifiers, alt: false }],
-  viewerFocusMode: [{ key: 'f', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
+  viewerFocusMode: [{ key: 'v', ignoreCase: true, ...commandModifiers, shift: false, alt: false }],
   viewerFitRestore: [{ key: 'z', ignoreCase: true, ...commandModifiers, shift: true, alt: false }],
   immersivePrevious: [{ key: 'ArrowLeft', ...commandModifiers, shift: false, alt: false }],
   immersiveNext: [{ key: 'ArrowRight', ...commandModifiers, shift: false, alt: false }],

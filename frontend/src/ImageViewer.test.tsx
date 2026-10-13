@@ -883,7 +883,7 @@ describe('workspace Viewer focus mode', () => {
     await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/anshitsu/first', state: { selectedAssets, activeAssetId: 'first' } }]}>
       <SettingsProvider><Routes><Route path="/anshitsu/:assetId" element={<AnshitsuPage />} /></Routes></SettingsProvider></MemoryRouter>));
   }
-  const focusKey = (target: EventTarget = window, init: KeyboardEventInit = {}) => key('keydown', target, { key: 'f', code: 'KeyF', ...init });
+  const focusKey = (target: EventTarget = window, init: KeyboardEventInit = {}) => key('keydown', target, { key: 'v', code: 'KeyV', ...init });
   const page = () => host.querySelector('.workspace-page')!;
 
   it('preserves mounted UI, panel choices, focus, and hidden component shortcuts', async () => {
@@ -894,6 +894,8 @@ describe('workspace Viewer focus mode', () => {
     const filmstrip = host.querySelector('.filmstrip')!;
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
     act(() => viewport.focus());
+    expect(key('keydown', viewport, { key: 'f', code: 'KeyF' }).defaultPrevented).toBe(false);
+    expect(page().classList.contains('viewer-focus-mode')).toBe(false);
     focusKey(); expect(page().classList.contains('viewer-focus-mode')).toBe(true);
     expect(body.className).toBe('workspace-body right-open viewer-focus-mode');
     expect([...host.querySelectorAll('.workspace-side-panel')]).toEqual(panels);
@@ -924,7 +926,7 @@ describe('workspace Viewer focus mode', () => {
     for (const init of [{ repeat: true }, { isComposing: true }, { ctrlKey: true }, { shiftKey: true }, { metaKey: true }, { altKey: true }]) {
       expect(focusKey(window, init).defaultPrevented).toBe(false);
     }
-    const prevented = new KeyboardEvent('keydown', { key: 'f', cancelable: true });
+    const prevented = new KeyboardEvent('keydown', { key: 'v', cancelable: true });
     prevented.preventDefault(); act(() => window.dispatchEvent(prevented));
     for (const selector of ['input', 'textarea', 'select', '[contenteditable]', '[role="textbox"]']) {
       const container = document.createElement('div');

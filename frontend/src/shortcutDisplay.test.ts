@@ -22,7 +22,8 @@ describe('shortcut binding display', () => {
     expect(formatShortcut('homeOpenSelected', 'other')).toBe('D');
     expect(formatShortcut('stackAddSelected', 'other')).toBe('A');
     expect(formatShortcut('stackAddSelected', 'mac')).toBe('A');
-    expect(formatShortcut('viewerFocusMode', 'other')).toBe('F');
+    expect(formatShortcut('viewerFocusMode', 'other')).toBe('V');
+    expect(formatShortcut('viewerFocusMode', 'mac')).toBe('V');
     expect(formatShortcut('viewerFitRestore', 'other')).toBe('Shift+Z');
     expect(formatShortcut('copySettings', 'other')).toBe('Ctrl+C');
     expect(formatShortcut('copySelection', 'other')).toBe('Ctrl+Alt+C');

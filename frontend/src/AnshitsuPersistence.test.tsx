@@ -1078,6 +1078,12 @@ describe('Anshitsu Filmstrip persistence', () => {
     await mount();
     await click('button[aria-label="Disable Basic"]');
     await filmstripKey('f');
+    expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(false);
+    await filmstripKey('v');
+    expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(true);
+    await filmstripKey('V');
+    expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(false);
+    await filmstripKey('v');
     expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(true);
     expect((await filmstripKey('G')).defaultPrevented).toBe(true);
     expect(mocked.put).toHaveBeenCalledTimes(1);

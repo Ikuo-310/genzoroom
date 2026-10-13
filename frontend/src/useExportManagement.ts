@@ -191,8 +191,11 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     if (retryRunId && queue.runtime != null
       && (queue.runtime.status !== 'active' || queue.runtime.runId !== retryRunId)) setRetryRunId(null);
   }, [queue.runtime?.runId, queue.runtime?.status, retryRunId, retryStartUncertain]);
+  const canOpenPreview = active && queue.loaded && queue.canonical && !queue.loading && !queue.error && !message
+    && !removing && !undoing && !confirmation && !queue.starting && !queue.cancelling;
   const canOperate = (id: string) => queue.canonical && !operationRef.current && !message && mutable.has(id.toLowerCase())
     && !queue.mutationFor(id).operation;
+  const canOperateAsset = (id: string) => canOpenPreview && canOperate(id);
   const selectOnly = (id: string) => { if (canOperate(id)) selection.selectOnly(id.toLowerCase()); };
   const toggleSelection = (id: string) => { if (canOperate(id)) selection.toggle(id.toLowerCase()); };
   const extendRange = (id: string) => { if (canOperate(id)) selection.extendRange(id.toLowerCase(), visualIds); };
@@ -202,9 +205,9 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     selection.selectVisible(visualIds.filter(id => mutable.has(id) && !queue.mutationFor(id).operation));
     return true;
   };
-  const toggleArmed = () => {
-    if (operationRef.current || !selectedIds.length || message) return false;
-    const targets = selectedIds.filter(id => !queue.mutationFor(id).operation);
+  const toggleArmedTargets = (ids: readonly string[]) => {
+    if (!queue.canonical || operationRef.current || !ids.length || message) return false;
+    const targets = ids.filter(id => mutable.has(id) && !queue.mutationFor(id).operation);
     if (!targets.length) return false;
     const turnOn = targets.some(id => !armedIds.has(id));
     const changes = targets.filter(id => armedIds.has(id) !== turnOn)
@@ -218,11 +221,12 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     });
     return true;
   };
-  const removeSelected = () => {
-    if (!queueRef.current.canonical || operationRef.current || !selectedIds.length || message) return false;
-    const selected = new Set(selectedIds);
+  const removeTargets = (ids: readonly string[]) => {
+    if (!queueRef.current.canonical || operationRef.current || !ids.length || message) return false;
+    const selected = new Set(ids);
     // Snapshot IDs in Queue order; selection changes cannot expand an in-flight batch.
-    const targets = items.filter(item => selected.has(item.assetId.toLowerCase()) && !queue.mutationFor(item.assetId).operation)
+    const targets = items.filter(item => selected.has(item.assetId.toLowerCase()) && mutable.has(item.assetId.toLowerCase())
+      && !queue.mutationFor(item.assetId).operation)
       .map(item => item.assetId.toLowerCase());
     if (!targets.length) return false;
     operationRef.current = true;
@@ -261,6 +265,11 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
     })();
     return true;
   };
+  // Single-photo Preview commands share batch outcomes and Undo without changing the selection.
+  const toggleArmed = () => toggleArmedTargets(selectedIds);
+  const removeSelected = () => removeTargets(selectedIds);
+  const toggleAssetArmed = (id: string) => canOperateAsset(id) ? toggleArmedTargets([id.toLowerCase()]) : false;
+  const removeAsset = (id: string) => canOperateAsset(id) ? removeTargets([id.toLowerCase()]) : false;
   const undo = () => {
     if (operationRef.current || !undoRecord.current) return false;
     const record = undoRecord.current;
@@ -329,7 +338,8 @@ export function useExportManagement(queue: ExportManagementQueue, active: boolea
   return { queue, rows, message, selectedIds, armedIds, removing, removalError, allSelectedArmed,
     undoing, canRetryFailed, requestRetryFailed, failedIds, retryPriority, showArmedBadges: !retryPriority,
     cancelExport, canStart, requestStart, confirmation, cancelConfirmation, confirmExport,
-    hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo };
+    hasVisibleMutable: visualIds.length > 0, selectOnly, toggleSelection, extendRange, clear, selectAll, toggleArmed, removeSelected, undo,
+    canOpenPreview, canOperateAsset, toggleAssetArmed, removeAsset };
 }
 
 export type ExportManagementState = ReturnType<typeof useExportManagement>;

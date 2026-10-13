@@ -255,7 +255,7 @@ describe('Home Export Queue', () => {
     expect(host.querySelector('.selection-count')?.textContent).toContain('3 selected');
   });
 
-  it('does not open from Album list, Calendar month/year, Stack management, or Export management', async () => {
+  it('does not open from Album list, Calendar month/year, Stack management, or unselected Export management', async () => {
     await mount();
     await clickSelector('#home-albums-tab'); await clickSelector('#home-albums-tab'); await pressV();
     expect(host.querySelector('.immersive-preview')).toBeNull();

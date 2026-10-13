@@ -76,6 +76,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear(); clearWorkspaceSession(); vi.unstubAllGlobals();
+  vi.useRealTimers();
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 
@@ -230,7 +231,7 @@ async function openQueue(items = [queued('a'), queued('b', 'failed'), queued('c'
   api.queue.mockImplementation(async () => backendItems);
   api.remove.mockImplementation(async (assetId: string) => { backendItems = backendItems.filter(item => item.assetId !== assetId); });
   api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id, filename: `${id}.jpg`, preview_url: '', exif: {} }));
-  api.stackRefresh.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a', 'c', 'outside'].map(id => ({ ...photos[0], id })) }]);
+  api.stackRefresh.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a', 'c', 'outside'].map(id => ({ ...photos[0], id, filename: `${id}.jpg` })) }]);
   await mount(); await key('e');
   return { setItems: (next: ExportQueueItem[]) => { backendItems = next; }, getItems: () => backendItems };
 }
@@ -242,6 +243,177 @@ async function cardClick(id: string, options: MouseEventInit = {}, checkbox = fa
 const exportSelected = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card.selected')].map(card => card.dataset.assetId);
 const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-card')]
   .filter(card => card.querySelector('.photo-card-button')?.getAttribute('aria-description') === i18n.t('exportManagement.armed')).map(card => card.dataset.assetId);
+
+const previewImage = () => host.querySelector<HTMLImageElement>('.immersive-preview img')!;
+const previewPosition = () => host.querySelector('.immersive-preview-position')?.textContent;
+const previewButton = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.immersive-preview-bottombar button')]
+  .find(button => button.textContent?.includes(label))!;
+async function doubleClickExportCard(id: string) {
+  await cardClick(id, { detail: 1 });
+  await cardClick(id, { detail: 2 });
+  await act(async () => exportCard(id).querySelector('button')!.dispatchEvent(
+    new MouseEvent('dblclick', { detail: 2, bubbles: true, cancelable: true })));
+}
+
+describe('Export immersive Preview', () => {
+  it('opens with V only after selection, uses the Stack display order and preserves navigation boundaries', async () => {
+    await openQueue([queued('a'), queued('b'), queued('c')]);
+    await key('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    await cardClick('b'); expect((await key('v')).defaultPrevented).toBe(true);
+    expect(previewImage().alt).toBe('b.jpg'); expect(previewPosition()).toBe('3 / 3');
+    await key('ArrowRight'); expect(previewPosition()).toBe('3 / 3');
+    await key('ArrowLeft'); expect(previewImage().alt).toBe('c.jpg');
+    await key('ArrowLeft'); expect(previewImage().alt).toBe('a.jpg');
+    await key('ArrowLeft'); expect(previewPosition()).toBe('1 / 3');
+    const area = host.querySelector('.immersive-preview-photo')!;
+    await act(async () => area.dispatchEvent(new MouseEvent('click', { clientX: window.innerWidth * 0.8, bubbles: true })));
+    expect(previewImage().alt).toBe('c.jpg');
+    await act(async () => area.dispatchEvent(new MouseEvent('click', { clientX: 0, bubbles: true })));
+    expect(previewImage().alt).toBe('a.jpg');
+    expect(host.querySelector('.immersive-preview-topbar')).not.toBeNull();
+    expect(host.querySelector('.immersive-preview-bottombar')).not.toBeNull();
+    await key('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    expect(exportSelected()).toEqual(['b']);
+  });
+
+  it('uses only selected photos for multi-selection, operates on one photo and retains removed snapshots and Undo', async () => {
+    const backend = await openQueue([queued('a'), queued('b'), queued('c')]);
+    await cardClick('b', {}, true); await cardClick('c', {}, true);
+    const content = homeScrollContent(host.querySelector('.home-page')!)!; content.scrollTop = 720;
+    await key('v'); expect(previewImage().alt).toBe('c.jpg'); expect(previewPosition()).toBe('1 / 2');
+    expect(previewButton('Selection')).toBeUndefined();
+    const selectedBefore = exportSelected();
+    expect((await key(' ')).defaultPrevented).toBe(true); expect(exportSelected()).toEqual(selectedBefore);
+    await key('r'); await key('a', { ctrlKey: true }); await key('z', { ctrlKey: true });
+    expect(host.querySelector('#home-export-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(exportSelected()).toEqual(selectedBefore);
+    await key('w'); expect(exportArmed()).toEqual(['c']);
+    expect(previewButton('Export readiness').getAttribute('aria-pressed')).toBe('true');
+    await key('q'); expect(api.remove).toHaveBeenCalledExactlyOnceWith('c', expect.any(AbortSignal));
+    expect(backend.getItems().map(item => item.assetId)).toEqual(['a', 'b']);
+    expect(exportSelected()).toEqual(['b']); expect(previewImage().alt).toBe('c.jpg'); expect(previewPosition()).toBe('1 / 2');
+    expect(previewButton('Export Queue').getAttribute('aria-pressed')).toBe('false');
+    expect(previewButton('Export Queue').disabled).toBe(true); expect(previewButton('Export readiness').disabled).toBe(true);
+    await key('q'); await key('w'); expect(api.remove).toHaveBeenCalledTimes(1); expect(api.enqueue).not.toHaveBeenCalled();
+    await key('ArrowRight'); expect(previewImage().alt).toBe('b.jpg'); expect(previewPosition()).toBe('2 / 2');
+    await key('Escape'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    expect(content.scrollTop).toBe(720); expect(exportSelected()).toEqual(['b']);
+    api.enqueue.mockImplementation(async (ids: string[]) => {
+      const restored = [...backend.getItems(), ...ids.map(id => queued(id))]; backend.setItems(restored); return restored;
+    });
+    await key('z', { ctrlKey: true });
+    expect(api.enqueue).toHaveBeenCalledExactlyOnceWith(['c'], expect.any(AbortSignal));
+    expect(exportArmed()).toEqual(['c']); expect(exportSelected()).toEqual(['b']);
+    await key('z', { ctrlKey: true }); expect(api.enqueue).toHaveBeenCalledTimes(1);
+    await key('v'); expect(previewImage().alt).toBe('b.jpg'); expect(previewPosition()).toBe('3 / 3');
+    await click('.immersive-preview-close'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    expect(api.recent).toHaveBeenCalledTimes(1); expect(content.scrollTop).toBe(720);
+  });
+
+  it.each([
+    [[], 'c', ['c'], '2 / 3'],
+    [['b'], 'c', ['c'], '2 / 3'],
+    [['a', 'c'], 'c', ['a', 'c'], '2 / 2'],
+    [['a', 'b'], 'c', ['a', 'c', 'b'], '2 / 3'],
+  ] as const)('preserves the double-click selection rules for %j and starts at %s', async (selected, id, expected, position) => {
+    await openQueue([queued('a'), queued('b'), queued('c')]);
+    for (const selectedId of selected) await cardClick(selectedId, {}, true);
+    vi.useFakeTimers();
+    await doubleClickExportCard(id);
+    expect(exportSelected()).toEqual(expected); expect(previewImage().alt).toBe(`${id}.jpg`); expect(previewPosition()).toBe(position);
+    await act(async () => vi.advanceTimersByTime(400)); expect(exportSelected()).toEqual(expected);
+    await key('v'); expect(exportSelected()).toEqual(expected);
+  });
+
+  it('defers only plain multi-selection clicks for 400ms while Shift and Primary remain immediate', async () => {
+    await openQueue([queued('a'), queued('b'), queued('c')]);
+    await click('.export-selection .selection-all'); vi.useFakeTimers();
+    await cardClick('b', { detail: 1 }); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await act(async () => updateSetting('homeThumbnailColumns', 4));
+    await act(async () => vi.advanceTimersByTime(399)); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await act(async () => vi.advanceTimersByTime(1)); expect(exportSelected()).toEqual(['b']);
+    await cardClick('a', { detail: 1, shiftKey: true }); expect(exportSelected()).toEqual(['a', 'c', 'b']);
+    await cardClick('c', { detail: 1, ctrlKey: true }); expect(exportSelected()).toEqual(['a', 'b']);
+    await cardClick('a', { detail: 1 });
+    await cardClick('b', { detail: 1, ctrlKey: true });
+    expect(exportSelected()).toEqual(['a']);
+    await act(async () => vi.advanceTimersByTime(400)); expect(exportSelected()).toEqual(['a']);
+  });
+
+  it('handles Command-click immediately on macOS', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    try {
+      await openQueue([queued('a'), queued('b'), queued('c')]); await click('.export-selection .selection-all');
+      vi.useFakeTimers(); await cardClick('c', { detail: 1, metaKey: true });
+      expect(exportSelected()).toEqual(['a', 'b']);
+      await act(async () => vi.advanceTimersByTime(400)); expect(exportSelected()).toEqual(['a', 'b']);
+    } finally { platform.mockRestore(); }
+  });
+
+  it('blocks opening while metadata is loading and from locked cards', async () => {
+    let finish!: () => void;
+    api.queue.mockResolvedValue([queued('a')]);
+    api.detail.mockImplementation(() => new Promise(resolve => { finish = () => resolve({ ...photos[0], id: 'a', preview_url: '', exif: {} }); }));
+    await mount(); await key('e'); await key('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    await act(async () => finish());
+    await key('r'); api.queue.mockResolvedValue([queued('a', 'waiting')]);
+    // Queue reconciliation is covered by Hook tests; a fresh mount establishes locked cards.
+    await act(async () => root.unmount()); root = createRoot(host);
+    api.detail.mockResolvedValue({ ...photos[0], id: 'a', preview_url: '', exif: {} });
+    await mount(); await key('e'); await doubleClickExportCard('a'); await key('v');
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+  });
+
+  it('disables Q/W while removal is pending and preserves the Viewer after an uncertain failure', async () => {
+    await openQueue([queued('a'), queued('b')]); await cardClick('a'); await key('v');
+    let reject!: (error: Error) => void;
+    api.remove.mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+    await key('q');
+    expect(previewButton('Export Queue').disabled).toBe(true); expect(previewButton('Export readiness').disabled).toBe(true);
+    await key('q'); await key('w'); await click('.immersive-preview-bottombar button');
+    expect(api.remove).toHaveBeenCalledTimes(1); expect(exportArmed()).toEqual([]);
+    let finishRefresh!: () => void;
+    api.queue.mockImplementation(() => new Promise(resolve => { finishRefresh = () => resolve([queued('a'), queued('b')]); }));
+    await act(async () => reject(new ExportQueueApiError('network')));
+    expect(previewImage().alt).toBe('a.jpg'); expect(previewPosition()).toBe('1 / 2');
+    expect(previewButton('Export Queue').disabled).toBe(true); expect(previewButton('Export readiness').disabled).toBe(true);
+    await key('q'); await key('w'); expect(api.remove).toHaveBeenCalledTimes(1);
+    await act(async () => finishRefresh());
+    expect(previewButton('Export Queue').disabled).toBe(false); expect(exportSelected()).toEqual(['a']);
+    await act(async () => previewButton('Export readiness').click());
+    expect(exportArmed()).toEqual(['a']);
+    await click('.immersive-preview-close'); expect(exportSelected()).toEqual(['a']);
+  });
+
+  it('keeps the last removed photo visible until close when the Queue becomes empty', async () => {
+    await openQueue([queued('a')]); await cardClick('a'); await key('v');
+    await act(async () => previewButton('Export Queue').click());
+    expect(exportCard('a')).toBeNull(); expect(exportSelected()).toEqual([]);
+    expect(previewImage().alt).toBe('a.jpg'); expect(previewPosition()).toBe('1 / 1');
+    expect(previewButton('Export Queue').disabled).toBe(true); expect(previewButton('Export readiness').disabled).toBe(true);
+    await key('ArrowRight'); await key('ArrowLeft'); await key('q'); await key('w');
+    expect(previewPosition()).toBe('1 / 1'); expect(api.remove).toHaveBeenCalledTimes(1); expect(api.enqueue).not.toHaveBeenCalled();
+    await key('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+    await key('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+  });
+
+  it('retains prior W Undo after a known Q failure and blocks a freshly locked current photo', async () => {
+    const backend = await openQueue([queued('a'), queued('b')]);
+    await cardClick('a'); await key('v'); await key('w');
+    api.remove.mockRejectedValueOnce(new ExportQueueApiError('unavailable', 503, 'persistence_unavailable'));
+    await key('q'); expect(previewImage().alt).toBe('a.jpg'); expect(exportSelected()).toEqual(['a']);
+    expect(previewButton('Export readiness').getAttribute('aria-pressed')).toBe('true');
+    await key('Escape'); await key('z', { ctrlKey: true }); expect(exportArmed()).toEqual([]);
+    await key('v');
+    api.remove.mockImplementation(async () => { backend.setItems([queued('a', 'encoding'), queued('b')]); throw new ExportQueueApiError('locked', 409); });
+    await key('q');
+    expect(previewImage().alt).toBe('a.jpg'); expect(previewPosition()).toBe('1 / 2');
+    expect(exportSelected()).toEqual([]); expect(previewButton('Export Queue').disabled).toBe(true);
+    expect(previewButton('Export readiness').disabled).toBe(true);
+    await key('q'); await key('w'); expect(api.remove).toHaveBeenCalledTimes(2);
+    await key('ArrowRight'); expect(previewImage().alt).toBe('b.jpg'); expect(previewButton('Export Queue').disabled).toBe(false);
+  });
+});
 
 describe('Export selection, readiness and Queue removal', () => {
   it('clears only Export selection from blank Queue space while preserving armed state and Queue items', async () => {

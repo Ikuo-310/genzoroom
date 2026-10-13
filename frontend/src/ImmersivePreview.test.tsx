@@ -17,7 +17,7 @@ let root: Root;
 function mount(overrides: Partial<ImmersivePreviewProps> = {}) {
   const handlers = { onToggleSelection: vi.fn(), onToggleQueue: vi.fn(), onToggleArmed: vi.fn(), onClose: vi.fn() };
   const props: ImmersivePreviewProps = { assets: [a, b, c], startAssetId: 'b', selectedAssetIds: new Set(), queuedAssetIds: new Set(),
-    source: 'exportManagement', ...handlers, ...overrides };
+    source: 'gallery', ...handlers, ...overrides };
   act(() => root.render(<ImmersivePreview {...props} />));
   return { handlers, props };
 }
@@ -158,12 +158,13 @@ describe('ImmersivePreview', () => {
   });
 
   it('navigates only within the opening sequence and targets the displayed photo for callbacks', () => {
-    const { handlers, props } = mount();
+    const { handlers, props } = mount({ source: 'exportManagement', exportControlByAssetId: new Map(
+      [a, b, c].map(asset => [asset.id, { queueEnabled: true, armEnabled: true }])) });
     const backgroundShortcut = vi.fn(); window.addEventListener('keydown', backgroundShortcut);
     press('ArrowRight'); expect(image().alt).toBe(c.filename);
     press('ArrowRight'); expect(host.querySelector('.immersive-preview-position')!.textContent).toBe('3 / 3');
     press(' '); press('q'); press('w');
-    expect(handlers.onToggleSelection).toHaveBeenCalledWith(c.id);
+    expect(handlers.onToggleSelection).not.toHaveBeenCalled();
     expect(handlers.onToggleQueue).toHaveBeenCalledWith(c.id);
     expect(handlers.onToggleArmed).toHaveBeenCalledWith(c.id);
     expect(backgroundShortcut).not.toHaveBeenCalled();
@@ -171,6 +172,38 @@ describe('ImmersivePreview', () => {
     act(() => root.render(<ImmersivePreview {...props} assets={[a]} selectedAssetIds={new Set([c.id])} queuedAssetIds={new Set()} />));
     expect(image().alt).toBe(c.filename);
     press('ArrowLeft'); expect(image().alt).toBe(b.filename);
+  });
+
+  it('shows only Q/W in Export, consumes Space from focused buttons, and shares disabled guards with keys', () => {
+    const { handlers, props } = mount({ source: 'exportManagement', queuedAssetIds: new Set([b.id]),
+      exportControlByAssetId: new Map([[b.id, { queueEnabled: true, armEnabled: true }]]) });
+    expect(button('Selection')).toBeUndefined();
+    expect(host.querySelectorAll('.immersive-preview-bottombar button')).toHaveLength(2);
+    const background = vi.fn(); window.addEventListener('keydown', background);
+    const queueButton = button('Export Queue');
+    act(() => queueButton.focus());
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    act(() => queueButton.dispatchEvent(space));
+    expect(space.defaultPrevented).toBe(true);
+    const repeatedSpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true, repeat: true });
+    act(() => queueButton.dispatchEvent(repeatedSpace));
+    expect(repeatedSpace.defaultPrevented).toBe(true);
+    expect(background).not.toHaveBeenCalled();
+    expect(handlers.onToggleSelection).not.toHaveBeenCalled();
+    press('q'); press('w');
+    expect(handlers.onToggleQueue).toHaveBeenCalledExactlyOnceWith(b.id);
+    expect(handlers.onToggleArmed).toHaveBeenCalledExactlyOnceWith(b.id);
+    act(() => root.render(<ImmersivePreview {...props} queuedAssetIds={new Set()}
+      exportControlByAssetId={new Map([[b.id, { queueEnabled: false, armEnabled: false }]])} />));
+    expect(button('Export Queue').disabled).toBe(true);
+    expect(button('Export readiness').disabled).toBe(true);
+    act(() => { button('Export Queue').click(); button('Export readiness').click(); });
+    press('q'); press('w');
+    expect(handlers.onToggleQueue).toHaveBeenCalledTimes(1);
+    expect(handlers.onToggleArmed).toHaveBeenCalledTimes(1);
+    expect(image().alt).toBe(b.filename);
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('2 / 3');
+    window.removeEventListener('keydown', background);
   });
 
   it('keeps the target list when selection and Queue membership change, and hides W in Gallery', () => {

@@ -11,6 +11,13 @@ import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import { thumbnailUrl } from './thumbnailUrl';
+import type { RecentAsset } from './assets';
+
+type PreviewActions = {
+  onPreviewRequest?: (asset: RecentAsset) => void;
+  onDeferSelectionClick?: (select: () => void) => void;
+  onCancelDeferredSelection?: () => void;
+};
 
 export function ExportRetryPriorityNotice({ management }: { management: ExportManagementState }) {
   const { t } = useTranslation();
@@ -52,7 +59,8 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
         { count: management.confirmation.assetIds.length })} />}</>;
 }
 
-function ExportQueueCard({ entry: { item, asset }, management }: { entry: ExportQueueAsset; management: ExportManagementState }) {
+function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest, onDeferSelectionClick,
+  onCancelDeferredSelection }: { entry: ExportQueueAsset; management: ExportManagementState } & PreviewActions) {
   const { t } = useTranslation();
   const id = item.assetId.toLowerCase();
   const selected = management.selectedIds.includes(id);
@@ -66,8 +74,13 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
   const disabledReason = retryExcluded ? t('exportManagement.retryExcluded') : locked ? t('exportManagement.locked') : label;
   const rangeClickHandled = useRef(false);
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
+    if (event.detail > 1) { onCancelDeferredSelection?.(); return; }
     if (event.shiftKey) management.extendRange(id);
     else if (isPrimaryModifier(event.nativeEvent)) management.toggleSelection(id);
+    else if (management.selectedIds.length > 1 && event.detail === 1 && onDeferSelectionClick) {
+      // Preserve multi-selection until the browser resolves whether this starts a Preview double-click.
+      onDeferSelectionClick(() => management.selectOnly(id));
+    }
     else management.selectOnly(id);
   }
   function handleCheckboxClick(event: MouseEvent<HTMLInputElement>) {
@@ -81,12 +94,14 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
     management.toggleSelection(id);
   }
   return <article className={`photo-card export-queue-card${selected ? ' selected' : ''}${management.selectedIds.length ? ' selection-mode' : ''}`} aria-label={asset.filename}
-    data-asset-id={item.assetId} data-queue-status={item.status} aria-disabled={locked || retryExcluded || undefined}>
+    data-asset-id={item.assetId} data-queue-status={item.status} aria-disabled={locked || retryExcluded || undefined}
+    onClickCapture={onCancelDeferredSelection}>
     <label className="photo-selection-control" title={disabled ? disabledReason : label}>
       <input className="photo-selection-input" type="checkbox" checked={selected} disabled={disabled}
         onClick={handleCheckboxClick} onChange={handleCheckboxChange} aria-label={label} />
     </label>
     <button className="photo-card-button" type="button" disabled={disabled} onClick={handleCardClick}
+      onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(asset); }}
       aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">
       <img src={thumbnailUrl(asset)} alt="" loading="lazy" />
@@ -101,7 +116,7 @@ function ExportQueueCard({ entry: { item, asset }, management }: { entry: Export
   </article>;
 }
 
-export function ExportManagementContent({ management }: { management: ExportManagementState }) {
+export function ExportManagementContent({ management, ...previewActions }: { management: ExportManagementState } & PreviewActions) {
   const { t } = useTranslation();
   const columns = useAppSettings().homeThumbnailColumns;
   const { queue, message, rows } = management;
@@ -112,11 +127,11 @@ export function ExportManagementContent({ management }: { management: ExportMana
       {t(`exportManagement.${message}`)}</p>
       : <div className="export-queue-grid" style={{ '--export-columns': columns } as CSSProperties}>
         {rows.map(row => row.kind === 'asset'
-          ? <ExportQueueCard key={row.entry.item.assetId} entry={row.entry} management={management} />
+          ? <ExportQueueCard key={row.entry.item.assetId} entry={row.entry} management={management} {...previewActions} />
           : <section key={`stack-${row.stackId}`} className="export-stack-group" data-stack-id={row.stackId}
             aria-label={t('photos.stackAssets', { count: row.members.length })}
             style={{ '--export-member-count': row.members.length } as CSSProperties}>
-            <div className="export-stack-members">{row.members.map(entry => <ExportQueueCard key={entry.item.assetId} entry={entry} management={management} />)}</div>
+            <div className="export-stack-members">{row.members.map(entry => <ExportQueueCard key={entry.item.assetId} entry={entry} management={management} {...previewActions} />)}</div>
           </section>)}
       </div>}
   </div>;

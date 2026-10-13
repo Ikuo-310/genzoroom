@@ -337,3 +337,72 @@ it('does not duplicate-enqueue a Q Undo target already present in the latest Que
   expect(current.undo()).toBe(false);
   expect(queue.enqueue).not.toHaveBeenCalled();
 });
+
+it('targets one photo for Arm and removal without replacing multi-selection, and shares one-shot Undo', async () => {
+  queue.dequeue = vi.fn().mockResolvedValue(undefined);
+  queue.enqueue = vi.fn().mockResolvedValue(undefined);
+  await render([item('a'), item('b'), item('c')]);
+  await act(async () => current.selectAll());
+  await act(async () => { expect(current.toggleAssetArmed('B')).toBe(true); });
+  expect([...current.armedIds]).toEqual(['b']); expect(current.selectedIds).toEqual(['a', 'b', 'c']);
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect(current.armedIds.size).toBe(0); expect(current.undo()).toBe(false);
+  await act(async () => current.toggleAssetArmed('b'));
+  await settle(() => { expect(current.removeAsset('B')).toBe(true); });
+  await render([item('a'), item('c')]);
+  expect(queue.dequeue).toHaveBeenCalledExactlyOnceWith('b');
+  expect(current.selectedIds).toEqual(['a', 'c']); expect(current.armedIds.size).toBe(0);
+  expect(current.canOperateAsset('b')).toBe(false);
+  expect(current.removeAsset('b')).toBe(false); expect(current.toggleAssetArmed('b')).toBe(false);
+  await settle(() => { expect(current.undo()).toBe(true); });
+  await render([item('a'), item('c'), item('b')]);
+  expect(queue.enqueue).toHaveBeenCalledExactlyOnceWith(['b']);
+  expect([...current.armedIds]).toEqual(['b']); expect(current.selectedIds).toEqual(['a', 'c']);
+  expect(current.undo()).toBe(false);
+});
+
+it.each(['locked', 'unavailable', 'network'] as const)('uses the existing single removal failure and Undo semantics for %s', async kind => {
+  queue.dequeue = vi.fn(async () => { throw new ExportQueueApiError(kind, kind === 'locked' ? 409 : undefined,
+    kind === 'unavailable' ? 'persistence_unavailable' : undefined); });
+  await render([item('a'), item('b')]);
+  await act(async () => current.selectAll()); await act(async () => current.toggleAssetArmed('b'));
+  await settle(() => current.removeAsset('a'));
+  expect(queue.dequeue).toHaveBeenCalledExactlyOnceWith('a');
+  expect(current.selectedIds).toEqual(['a', 'b']); expect([...current.armedIds]).toEqual(['b']);
+  expect(current.removalError).toBe(kind === 'locked' ? 'locked' : 'removeFailed');
+  expect(queue.refresh).toHaveBeenCalledTimes(kind === 'network' ? 0 : 1);
+  await act(async () => { expect(current.undo()).toBe(true); });
+  expect(current.armedIds.size).toBe(0); expect(queue.enqueue).not.toHaveBeenCalled();
+});
+
+it('blocks single commands and Preview availability during an operation, and prevents duplicate removal', async () => {
+  let finish!: () => void;
+  queue.dequeue = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  await render([item('a'), item('b')]); await act(async () => current.selectAll());
+  await act(async () => {
+    expect(current.removeAsset('a')).toBe(true);
+    expect(current.removeAsset('a')).toBe(false);
+    expect(current.toggleAssetArmed('b')).toBe(false);
+  });
+  expect(current.canOpenPreview).toBe(false);
+  expect(current.canOperateAsset('b')).toBe(false);
+  await act(async () => finish());
+  expect(queue.dequeue).toHaveBeenCalledTimes(1);
+});
+
+it.each(['noncanonical', 'loading', 'error', 'mutation', 'waiting', 'encoding', 'registering', 'retryExcluded', 'inactive'] as const)(
+  'blocks single Q/W while %s', async condition => {
+    await render([item('a')]);
+    if (condition === 'noncanonical') queue.canonical = false;
+    if (condition === 'loading') queue.loading = true;
+    if (condition === 'error') queue.error = new Error('queue');
+    if (condition === 'mutation') queue.mutationFor = () => ({ operation: 'dequeue' });
+    const rows = ['waiting', 'encoding', 'registering'].includes(condition)
+      ? [item('a', condition as 'waiting' | 'encoding' | 'registering')]
+      : condition === 'retryExcluded' ? [item('a'), item('failed', 'failed')] : queue.items;
+    await render(rows, condition !== 'inactive');
+    expect(current.canOperateAsset('a')).toBe(false);
+    expect(current.removeAsset('a')).toBe(false); expect(current.toggleAssetArmed('a')).toBe(false);
+    expect(queue.dequeue).not.toHaveBeenCalled(); expect(current.armedIds.size).toBe(0);
+  },
+);
