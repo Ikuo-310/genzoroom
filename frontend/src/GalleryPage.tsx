@@ -1364,6 +1364,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         startAssetId={immersiveGallerySession.startAssetId}
         selectedAssetIds={new Set(activeSelectedAssetIds.map(id => id.toLowerCase()))}
         queuedAssetIds={new Set(visibleAssets.filter(asset => queueStateFor(asset).status !== undefined).map(asset => asset.id.toLowerCase()))}
+        queueControlByAssetId={new Map(visibleAssets.map(asset => {
+          const queue = queueStateFor(asset);
+          return [asset.id.toLowerCase(), { edited: cardEditStatuses[asset.id] === true,
+            queueKnown: exportQueue.loaded, queueCurrent: exportQueue.canonical, queueStatus: queue.status, busy: queue.busy }] as const;
+        }))}
         source="gallery"
         onToggleSelection={assetId => photoView?.selection.toggle(assetId)}
         onToggleQueue={assetId => {

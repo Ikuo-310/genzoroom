@@ -62,6 +62,65 @@ describe('ImmersivePreview', () => {
     expect(fitStyle().objectFit).toBe('contain');
   });
 
+  it('shows the existing GenzoRoom export badge without shifting the centered filename', () => {
+    const exported = { ...a, isGenzoRoomExport: true };
+    mount({ assets: [exported, b, c], startAssetId: exported.id });
+    const title = () => host.querySelector<HTMLElement>('.immersive-preview-title')!;
+    const filename = () => host.querySelector<HTMLElement>('.immersive-preview-filename')!;
+    expect(title().querySelector('.genzoroom-export-badge')).not.toBeNull();
+    expect(filename().textContent).toBe(exported.filename);
+    expect(getComputedStyle(filename()).textAlign).toBe('center');
+    expect(getComputedStyle(filename()).textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(title().firstElementChild!).flexBasis).toBe(getComputedStyle(title().lastElementChild!).flexBasis);
+    press('ArrowRight');
+    expect(title().querySelector('.genzoroom-export-badge')).toBeNull();
+    expect(filename().textContent).toBe(b.filename);
+    expect(getComputedStyle(filename()).textAlign).toBe('center');
+  });
+
+  it('disables Q for unedited Queue-out photos and updates availability while navigating', () => {
+    const onToggleQueue = vi.fn();
+    const queueControlByAssetId = new Map([
+      [a.id, { edited: false, queueKnown: true, queueCurrent: true }],
+      [b.id, { edited: true, queueKnown: true, queueCurrent: true }],
+      [c.id, { edited: false, queueKnown: true, queueCurrent: true, queueStatus: 'queued' as const }],
+    ]);
+    mount({ source: 'gallery', assets: [a, b, c], startAssetId: a.id, queueControlByAssetId,
+      queuedAssetIds: new Set([c.id]), onToggleQueue });
+    const queueButton = () => button('Export Queue');
+    expect(queueButton().disabled).toBe(true);
+    expect(queueButton().classList.contains('immersive-preview-queue-disabled')).toBe(true);
+    expect(queueButton().getAttribute('aria-pressed')).toBe('false');
+    act(() => queueButton().click());
+    press('q');
+    expect(onToggleQueue).not.toHaveBeenCalled();
+    press('ArrowRight');
+    expect(queueButton().disabled).toBe(false);
+    press('q');
+    expect(onToggleQueue).toHaveBeenLastCalledWith(b.id);
+    press('ArrowRight');
+    expect(queueButton().disabled).toBe(false);
+    expect(queueButton().getAttribute('aria-pressed')).toBe('true');
+    press('q');
+    expect(onToggleQueue).toHaveBeenLastCalledWith(c.id);
+    expect(onToggleQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { edited: true, queueKnown: false, queueCurrent: true },
+    { edited: true, queueKnown: true, queueCurrent: false },
+    { edited: true, queueKnown: true, queueCurrent: true, busy: true },
+    { edited: true, queueKnown: true, queueCurrent: true, queueStatus: 'waiting' as const },
+    { edited: true, queueKnown: true, queueCurrent: true, queueStatus: 'encoding' as const },
+    { edited: true, queueKnown: true, queueCurrent: true, queueStatus: 'registering' as const },
+  ])('keeps existing Queue guards disabled in the immersive preview (%j)', control => {
+    const onToggleQueue = vi.fn();
+    mount({ source: 'gallery', queueControlByAssetId: new Map([[b.id, control]]), onToggleQueue });
+    expect(button('Export Queue').disabled).toBe(true);
+    press('q');
+    expect(onToggleQueue).not.toHaveBeenCalled();
+  });
+
   it('navigates only within the opening sequence and targets the displayed photo for callbacks', () => {
     const { handlers, props } = mount();
     const backgroundShortcut = vi.fn(); window.addEventListener('keydown', backgroundShortcut);

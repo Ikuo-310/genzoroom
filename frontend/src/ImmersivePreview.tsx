@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
+import { canToggleEditedQueue, type EditedQueueControlState } from './EditedBadge';
+import { GenzoRoomExportBadge } from './GenzoRoomExportBadge';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { isGenzoRoomExported } from './photoFilters';
 import { shortcutPlatform } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
+
+export type ImmersiveQueueControlState = EditedQueueControlState;
 
 export type ImmersivePreviewProps = {
   assets: readonly RecentAsset[];
   startAssetId: string;
   selectedAssetIds: ReadonlySet<string>;
   queuedAssetIds: ReadonlySet<string>;
+  queueControlByAssetId?: ReadonlyMap<string, ImmersiveQueueControlState>;
   armedAssetIds?: ReadonlySet<string>;
   source: 'gallery' | 'exportManagement';
   onToggleSelection: (assetId: string) => void;
@@ -23,7 +29,7 @@ function includes(ids: ReadonlySet<string>, assetId: string) {
 }
 
 export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queuedAssetIds, armedAssetIds = new Set(),
-  source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
+  queueControlByAssetId, source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const rootRef = useRef<HTMLElement>(null);
@@ -34,6 +40,9 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   const asset = viewAssets[index];
   const isMac = shortcutPlatform() === 'mac';
   const hasArm = source === 'exportManagement' && onToggleArmed !== undefined;
+  const queueControl = asset ? queueControlByAssetId?.get(asset.id.toLowerCase()) : undefined;
+  const queueEnabled = queueControlByAssetId === undefined || (queueControl !== undefined
+    && canToggleEditedQueue(queueControl, true));
 
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -70,7 +79,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
         consume(event); onToggleSelection(asset.id);
       } else if (matchesShortcut(event, 'exportQueueToggle')) {
         if (!asset) return;
-        consume(event); onToggleQueue(asset.id);
+        consume(event); if (queueEnabled) onToggleQueue(asset.id);
       } else if (hasArm && matchesShortcut(event, 'exportArmToggle')) {
         if (!asset) return;
         consume(event); onToggleArmed?.(asset.id);
@@ -81,7 +90,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
     // Capture prevents the underlying Gallery or Workspace from also handling shared Q/W commands.
     window.addEventListener('keydown', keydown, true);
     return () => window.removeEventListener('keydown', keydown, true);
-  }, [asset, hasArm, onClose, onToggleArmed, onToggleQueue, onToggleSelection, viewAssets.length]);
+  }, [asset, hasArm, onClose, onToggleArmed, onToggleQueue, onToggleSelection, queueEnabled, viewAssets.length]);
 
   if (!asset) return null;
   const selected = includes(selectedAssetIds, asset.id);
@@ -95,7 +104,13 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
   return <section ref={rootRef} tabIndex={-1} className={`immersive-preview${isMac ? ' immersive-preview-mac' : ''}`} data-platform={isMac ? 'mac' : 'other'} aria-label={t('immersivePreview.title')}>
     {barsVisible && <header className="immersive-preview-topbar">
       {isMac ? closeButton : position}
-      <span className="immersive-preview-filename" title={asset.filename}>{asset.filename}</span>
+      <div className="immersive-preview-title">
+        <span className="immersive-preview-title-side immersive-preview-title-badge">
+          {isGenzoRoomExported(asset) && <GenzoRoomExportBadge />}
+        </span>
+        <span className="immersive-preview-filename" title={asset.filename}>{asset.filename}</span>
+        <span className="immersive-preview-title-side" aria-hidden="true" />
+      </div>
       {isMac ? position : closeButton}
     </header>}
     <main className="immersive-preview-photo" onClick={() => setBarsVisible(visible => !visible)}>
@@ -105,7 +120,8 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queue
       <button type="button" aria-pressed={selected} onClick={() => onToggleSelection(asset.id)}>
         {t('immersivePreview.selection', { state: t(selected ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('immersiveSelectionToggle') && <kbd>{shortcut.label('immersiveSelectionToggle')}</kbd>}
       </button>
-      <button type="button" aria-pressed={queued} onClick={() => onToggleQueue(asset.id)}>
+      <button type="button" className={!queueEnabled ? 'immersive-preview-queue-disabled' : undefined}
+        aria-pressed={queued} disabled={!queueEnabled} onClick={() => onToggleQueue(asset.id)}>
         {t('immersivePreview.queue', { state: t(queued ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportQueueToggle') && <kbd>{shortcut.label('exportQueueToggle')}</kbd>}
       </button>
       {hasArm && <button type="button" aria-pressed={armed} onClick={() => onToggleArmed?.(asset.id)}>

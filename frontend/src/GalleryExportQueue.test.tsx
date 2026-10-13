@@ -183,6 +183,33 @@ describe('Home Export Queue', () => {
     expect(host.querySelector<HTMLImageElement>('.immersive-preview img')?.alt).toBe(next.filename);
   });
 
+  it('disables immersive Q for unedited unqueued photos', async () => {
+    await mount();
+    await click(card(3).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressV();
+    const queueButton = () => [...host.querySelectorAll<HTMLButtonElement>('.immersive-preview-bottombar button')]
+      .find(button => button.textContent?.includes('Export Queue'))!;
+    expect(queueButton().disabled).toBe(true);
+    await click(queueButton());
+    await pressQ();
+    expect(api.enqueue).not.toHaveBeenCalled();
+    expect(api.dequeue).not.toHaveBeenCalled();
+    await click(host.querySelector<HTMLButtonElement>('.immersive-preview-close')!);
+  });
+
+  it('permits removing a confirmed Queue entry from an unedited immersive photo', async () => {
+    items = [item(ids[3])];
+    await mount();
+    await click(card(3).querySelector<HTMLInputElement>('.photo-selection-input')!);
+    await pressV();
+    const queueButton = () => [...host.querySelectorAll<HTMLButtonElement>('.immersive-preview-bottombar button')]
+      .find(button => button.textContent?.includes('Export Queue'))!;
+    expect(queueButton().disabled).toBe(false);
+    expect(queueButton().getAttribute('aria-pressed')).toBe('true');
+    await pressQ();
+    expect(api.dequeue).toHaveBeenCalledWith(ids[3], expect.any(AbortSignal));
+  });
+
   it('preserves and extends multi-selection on double-click while plain multi-selection clicks still select one card', async () => {
     await mount();
     await doubleClickPhoto(2);

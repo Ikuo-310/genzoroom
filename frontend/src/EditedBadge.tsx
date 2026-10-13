@@ -14,6 +14,17 @@ type EditedBadgeProps = {
   showQueueShortcut?: boolean;
 };
 
+export type EditedQueueControlState = Pick<EditedBadgeProps,
+  'edited' | 'queueKnown' | 'queueCurrent' | 'queueStatus' | 'busy' | 'disabled'>;
+
+export function canToggleEditedQueue(state: EditedQueueControlState, hasAction: boolean): boolean {
+  const known = state.queueKnown ?? state.queueStatus != null;
+  const queued = known && state.queueStatus != null;
+  const locked = state.queueStatus === 'waiting' || state.queueStatus === 'encoding' || state.queueStatus === 'registering';
+  return known && (state.queueCurrent ?? true) && hasAction && !state.busy && !state.disabled && !locked
+    && (state.edited === true || queued);
+}
+
 export function EditedBadgeIcon() {
   return <svg viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
     <path d="M3 5h14M3 10h14M3 15h14" />
@@ -28,7 +39,7 @@ export function EditedBadge({ edited, queueKnown, queueCurrent = true, queueStat
   const isQueued = known && queueStatus != null;
   if (edited !== true && !(showQueuedWhenUnedited && isQueued)) return null;
   const locked = queueStatus === 'waiting' || queueStatus === 'encoding' || queueStatus === 'registering';
-  const canToggle = known && queueCurrent && !!onQueueToggle && !busy && !disabled && !locked;
+  const canToggle = canToggleEditedQueue({ edited, queueKnown, queueCurrent, queueStatus, busy, disabled }, !!onQueueToggle);
   const withShortcut = (text: string) => showQueueShortcut ? shortcut.inline(`${text} `, 'exportQueueToggle').trimEnd() : text;
   const description = !queueCurrent ? t('photos.exportQueue.reconciling')
     : !known ? t('photos.edited')
