@@ -16,6 +16,7 @@ from tests.test_thumbnail_generator import ASSET, snapshot
 from tests.test_thumbnail_scheduler import until
 
 PATH = f"/assets/{ASSET}/rendered-thumbnail"
+IMMERSIVE_PATH = f"/assets/{ASSET}/immersive-preview"
 EDIT_PATH = f"/assets/{ASSET}/edit-state"
 
 
@@ -195,6 +196,53 @@ def test_fallback_failure_preserves_existing_upstream_error_contract(setup):
         async with client() as api:
             result = await api.get(PATH)
             assert result.status_code == 503
+        generate.assert_not_called()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("saved_state,cache_content,expected", [
+    ("edited", b"cached-jpeg", b"cached-jpeg"),
+    (None, b"unused-cache", b"immich-preview"),
+    ("default", b"unused-cache", b"immich-preview"),
+    ("edited", None, b"immich-preview"),
+])
+def test_immersive_preview_prefers_only_saved_edited_cache(setup, monkeypatch, saved_state, cache_content, expected):
+    cache, scheduler, _, generate, _ = setup
+    preview = AsyncMock(return_value=ImmichThumbnail(b"immich-preview", "image/jpeg"))
+    monkeypatch.setattr(main, "get_asset_preview", preview)
+    async def run():
+        async with client() as api:
+            if saved_state is not None:
+                state = snapshot(0) if saved_state == "default" else snapshot()
+                assert (await put(api, state)).status_code == 200
+            if cache_content is not None:
+                cache.store(ASSET, cache_content)
+            pending_before = dict(scheduler._pending)
+            deadlines_before = dict(scheduler._deadlines)
+            result = await api.get(IMMERSIVE_PATH)
+            assert result.status_code == 200 and result.content == expected
+            assert result.headers["cache-control"] == "private, no-store"
+            assert scheduler._pending == pending_before and scheduler._deadlines == deadlines_before
+            if expected == b"cached-jpeg": preview.assert_not_awaited()
+            else: preview.assert_awaited_once()
+            generate.assert_not_called()
+    asyncio.run(run())
+
+
+def test_immersive_preview_cache_read_failure_falls_back_and_preview_failure_maps_error(setup, monkeypatch):
+    cache, _, _, generate, _ = setup
+    monkeypatch.setattr(main, "get_asset_preview", AsyncMock(return_value=ImmichThumbnail(b"preview", "image/jpeg")))
+    class BrokenPath:
+        def read_bytes(self): raise OSError("private cache failure")
+    monkeypatch.setattr(cache, "_path", lambda _asset_id: BrokenPath())
+    async def run():
+        async with client() as api:
+            assert (await put(api)).status_code == 200
+            result = await api.get(IMMERSIVE_PATH)
+            assert result.status_code == 200 and result.content == b"preview"
+            monkeypatch.setattr(main, "get_asset_preview", AsyncMock(side_effect=ImmichRequestError("unreachable", "unreachable")))
+            failed = await api.get(IMMERSIVE_PATH)
+            assert failed.status_code == 503
         generate.assert_not_called()
     asyncio.run(run())
 

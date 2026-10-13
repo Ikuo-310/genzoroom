@@ -6,6 +6,7 @@ export { shortcutPlatform } from './shortcutModifiers';
 export type { ShortcutPlatform } from './shortcutModifiers';
 
 function displayKey(binding: ShortcutBinding) {
+  if (binding.key === ' ') return 'Space';
   if (binding.code === 'Backslash') return '\\';
   if (binding.code === 'NumpadSubtract') return 'Numpad -';
   if (binding.code === 'NumpadAdd') return 'Numpad +';

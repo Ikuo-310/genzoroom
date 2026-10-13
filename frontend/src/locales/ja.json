@@ -28,6 +28,16 @@
     "failedStatus": "接続に問題があります",
     "notConfiguredStatus": "Immich未設定"
   },
+  "immersivePreview": {
+    "title": "没入プレビュー",
+    "close": "プレビューを閉じる",
+    "position": "{{current}} / {{total}}",
+    "on": "ON",
+    "off": "OFF",
+    "selection": "選択：{{state}}",
+    "queue": "出力Q：{{state}}",
+    "arm": "出力予約：{{state}}"
+  },
   "home": {
     "stacksTab": "STACK管理",
     "exportTab": "出力管理",

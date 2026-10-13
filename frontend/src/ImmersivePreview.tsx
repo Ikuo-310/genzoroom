@@ -1,0 +1,98 @@
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { RecentAsset } from './assets';
+import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
+import { shortcutPlatform } from './shortcutModifiers';
+import { useShortcutDisplay } from './useShortcutDisplay';
+
+export type ImmersivePreviewProps = {
+  assets: readonly RecentAsset[];
+  startAssetId: string;
+  selectedAssetIds: ReadonlySet<string>;
+  queuedAssetIds: ReadonlySet<string>;
+  armedAssetIds?: ReadonlySet<string>;
+  source: 'gallery' | 'exportManagement';
+  onToggleSelection: (assetId: string) => void;
+  onToggleQueue: (assetId: string) => void;
+  onToggleArmed?: (assetId: string) => void;
+  onClose: () => void;
+};
+
+function includes(ids: ReadonlySet<string>, assetId: string) {
+  return ids.has(assetId) || ids.has(assetId.toLowerCase());
+}
+
+export function ImmersivePreview({ assets, startAssetId, selectedAssetIds, queuedAssetIds, armedAssetIds = new Set(),
+  source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
+  const { t } = useTranslation();
+  const shortcut = useShortcutDisplay();
+  // Queue and selection updates from the parent must not change the sequence being browsed.
+  const [viewAssets] = useState(() => [...assets]);
+  const [index, setIndex] = useState(() => Math.max(0, assets.findIndex(asset => asset.id.toLowerCase() === startAssetId.toLowerCase())));
+  const [barsVisible, setBarsVisible] = useState(true);
+  const asset = viewAssets[index];
+  const isMac = shortcutPlatform() === 'mac';
+  const hasArm = source === 'exportManagement' && onToggleArmed !== undefined;
+
+  useEffect(() => {
+    const consume = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat || isNativeEditingTarget(event.target)
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      if (matchesShortcut(event, 'immersivePrevious')) {
+        consume(event); setIndex(current => Math.max(0, current - 1));
+      } else if (matchesShortcut(event, 'immersiveNext')) {
+        consume(event); setIndex(current => Math.min(viewAssets.length - 1, current + 1));
+      } else if (matchesShortcut(event, 'immersiveSelectionToggle')) {
+        if (!asset) return;
+        consume(event); onToggleSelection(asset.id);
+      } else if (matchesShortcut(event, 'exportQueueToggle')) {
+        if (!asset) return;
+        consume(event); onToggleQueue(asset.id);
+      } else if (hasArm && matchesShortcut(event, 'exportArmToggle')) {
+        if (!asset) return;
+        consume(event); onToggleArmed?.(asset.id);
+      } else if (matchesShortcut(event, 'immersiveClose') || event.key === 'Escape') {
+        consume(event); onClose();
+      }
+    };
+    // Capture prevents the underlying Gallery or Workspace from also handling shared Q/W commands.
+    window.addEventListener('keydown', keydown, true);
+    return () => window.removeEventListener('keydown', keydown, true);
+  }, [asset, hasArm, onClose, onToggleArmed, onToggleQueue, onToggleSelection, viewAssets.length]);
+
+  if (!asset) return null;
+  const selected = includes(selectedAssetIds, asset.id);
+  const queued = includes(queuedAssetIds, asset.id);
+  const armed = includes(armedAssetIds, asset.id);
+  const closeLabel = t('immersivePreview.close');
+  const closeButton = <button className="immersive-preview-close" type="button" onClick={onClose} aria-label={closeLabel}
+    title={shortcut.title(closeLabel, 'immersiveClose')}>×</button>;
+  const position = <span className="immersive-preview-position" aria-label={t('immersivePreview.position', { current: index + 1, total: viewAssets.length })}>{index + 1} / {viewAssets.length}</span>;
+
+  return <section className={`immersive-preview${isMac ? ' immersive-preview-mac' : ''}`} data-platform={isMac ? 'mac' : 'other'} aria-label={t('immersivePreview.title')}>
+    {barsVisible && <header className="immersive-preview-topbar">
+      {isMac ? closeButton : position}
+      <span className="immersive-preview-filename" title={asset.filename}>{asset.filename}</span>
+      {isMac ? position : closeButton}
+    </header>}
+    <main className="immersive-preview-photo" onClick={() => setBarsVisible(visible => !visible)}>
+      <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false}
+        style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+    </main>
+    {barsVisible && <footer className="immersive-preview-bottombar" onClick={event => event.stopPropagation()}>
+      <button type="button" aria-pressed={selected} onClick={() => onToggleSelection(asset.id)}>
+        {t('immersivePreview.selection', { state: t(selected ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('immersiveSelectionToggle') && <kbd>{shortcut.label('immersiveSelectionToggle')}</kbd>}
+      </button>
+      <button type="button" aria-pressed={queued} onClick={() => onToggleQueue(asset.id)}>
+        {t('immersivePreview.queue', { state: t(queued ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportQueueToggle') && <kbd>{shortcut.label('exportQueueToggle')}</kbd>}
+      </button>
+      {hasArm && <button type="button" aria-pressed={armed} onClick={() => onToggleArmed?.(asset.id)}>
+        {t('immersivePreview.arm', { state: t(armed ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportArmToggle') && <kbd>{shortcut.label('exportArmToggle')}</kbd>}
+      </button>}
+    </footer>}
+  </section>;
+}

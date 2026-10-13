@@ -689,6 +689,26 @@ async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     return response
 
 
+@app.get("/assets/{asset_id}/immersive-preview")
+async def immersive_preview(asset_id: UUID, request: Request) -> Response:
+    cache = getattr(request.app.state, "thumbnail_cache", None)
+    try:
+        saved = await run_in_threadpool(get_edit_state, asset_id)
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+    state = saved["state"]
+    has_recipe = state is not None and has_non_default_recipe(state)
+    content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
+    if content is not None:
+        return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+    try:
+        preview = await get_asset_preview(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+    return Response(content=preview.content, media_type=preview.media_type,
+                    headers={"Cache-Control": "private, no-store"})
+
+
 @app.get(
     "/assets/{asset_id}",
     response_model=AssetDetail,

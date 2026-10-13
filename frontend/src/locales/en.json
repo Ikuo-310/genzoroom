@@ -11,6 +11,16 @@
   "app": {
     "title": "GenzoRoom"
   },
+  "immersivePreview": {
+    "title": "Immersive preview",
+    "close": "Close preview",
+    "position": "{{current}} of {{total}}",
+    "on": "On",
+    "off": "Off",
+    "selection": "Selection: {{state}}",
+    "queue": "Export Queue: {{state}}",
+    "arm": "Export readiness: {{state}}"
+  },
   "connection": {
     "sectionLabel": "Service connections",
     "backend": "Backend",
