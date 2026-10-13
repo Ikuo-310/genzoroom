@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -69,13 +69,14 @@ beforeEach(async () => {
     ? { status: 'ok' } : { configured: true, connected: true }))));
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); resetFilters(); vi.unstubAllGlobals(); });
-async function mount(tab: HomeTab = 'recent') {
+async function mount(tab: HomeTab = 'recent', strict = false) {
   const homeReturn = { tab, album: tab === 'albums' ? album : null, year: 2026, month: 10,
     date: tab === 'calendar' ? '2026-10-06' : null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0 };
-  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn } }]}>
+  const page = <MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn } }]}>
     <Routes><Route path="/" element={<GalleryPage />} />
       <Route path="/anshitsu/:assetId" element={<p className="workspace-probe">Develop</p>} /></Routes>
-  </MemoryRouter>));
+  </MemoryRouter>;
+  await act(async () => root.render(strict ? <StrictMode>{page}</StrictMode> : page));
 }
 const card = (index = 0) => [...host.querySelectorAll<HTMLElement>('.photo-card')]
   .find(node => node.querySelector('.photo-info p')?.textContent === photos[index].filename)!;
@@ -121,9 +122,9 @@ describe('Gallery development exclusions', () => {
     await pressX(); expect(card().classList.contains('development-excluded')).toBe(false);
     expect(api.enqueue).not.toHaveBeenCalled(); expect(api.dequeue).not.toHaveBeenCalled();
   });
-  it('unifies mixed selections to ON, then all excluded selections to OFF', async () => {
+  it('saves only unexcluded mixed selections, then turns all excluded selections OFF', async () => {
     excluded.add(ids[0]); await mount(); await select(); await select(2);
-    await pressX(); expect(api.save.mock.calls.map(([t, on]) => [t.id, on])).toEqual([[ids[0], true], [ids[2], true]]);
+    await pressX(); expect(api.save.mock.calls.map(([t, on]) => [t.id, on])).toEqual([[ids[2], true]]);
     api.save.mockClear(); await pressX(); expect(api.save.mock.calls.map(([t, on]) => [t.id, on])).toEqual([[ids[0], false], [ids[2], false]]);
   });
   it('removes queued and failed members before saving the whole Stack', async () => {
@@ -299,4 +300,60 @@ it('rejects conflicting Gallery Stack snapshots even when collapse hides one mem
     { ...photos[1], stackId, primaryAssetId: ids[0], stackAssetCount: 3, stackMemberIds: [ids[0], ids[1], ids[2]] },
   ]);
   await mount(); await select(); await pressX(); expect(api.save).not.toHaveBeenCalled();
+});
+
+
+it.each([false, true])('reproduces sequential A then B exclusions (StrictMode=%s)', async strict => {
+  await mount('recent', strict); await select(); await pressX();
+  await click(card(1).querySelector<HTMLButtonElement>('.photo-card-button')!); await pressX();
+  expect(api.save.mock.calls.map(([target, on]) => [target.id, on])).toEqual([[ids[0], true], [ids[1], true]]);
+  expect(card(1).classList.contains('development-excluded')).toBe(true);
+});
+
+it.each([false, true])('reproduces A exclusion followed by deselection and B/C batch (StrictMode=%s)', async strict => {
+  await mount('recent', strict); await select(); await pressX(); await select(); await select(1); await select(2); await pressX();
+  expect(api.save.mock.calls.map(([target]) => target.id)).toEqual([ids[0], ids[1], ids[2]]);
+  expect(card(1).classList.contains('development-excluded')).toBe(true); expect(card(2).classList.contains('development-excluded')).toBe(true);
+});
+
+
+it('uses the latest plain-click selection when X arrives before React commits', async () => {
+  await mount(); await select(); await pressX();
+  await act(async () => {
+    card(1).querySelector<HTMLButtonElement>('.photo-card-button')!.click();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
+  });
+  expect(api.save.mock.calls.map(([target, on]) => [target.id, on])).toEqual([[ids[0], true], [ids[1], true]]);
+});
+
+it('uses the latest deselection and multi-selection when X arrives before React commits', async () => {
+  await mount(); await select(); await pressX();
+  await act(async () => {
+    card(0).querySelector<HTMLInputElement>('.photo-selection-input')!.click();
+    card(1).querySelector<HTMLInputElement>('.photo-selection-input')!.click();
+    card(2).querySelector<HTMLInputElement>('.photo-selection-input')!.click();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
+  });
+  expect(api.save.mock.calls.map(([target, on]) => [target.id, on])).toEqual([[ids[0], true], [ids[1], true], [ids[2], true]]);
+});
+
+it('uses the latest initially-empty multi-selection when X arrives before React commits', async () => {
+  await mount();
+  await act(async () => {
+    card(1).querySelector<HTMLInputElement>('.photo-selection-input')!.click();
+    card(2).querySelector<HTMLInputElement>('.photo-selection-input')!.click();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
+  });
+  expect(api.save.mock.calls.map(([target]) => target.id)).toEqual([ids[1], ids[2]]);
+});
+
+
+it('resolves a pending plain click before X without retaining the previous multi-selection', async () => {
+  await mount(); await select(); await pressX(); await select(1);
+  await act(async () => {
+    card(2).querySelector<HTMLButtonElement>('.photo-card-button')!.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }));
+  });
+  expect(api.save.mock.calls.map(([target, on]) => [target.id, on])).toEqual([[ids[0], true], [ids[2], true]]);
+  expect(card(2).classList.contains('selected')).toBe(true); expect(card(1).classList.contains('selected')).toBe(false);
 });

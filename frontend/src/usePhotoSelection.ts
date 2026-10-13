@@ -28,6 +28,8 @@ export function usePhotoSelection() {
     if (rangedSelection) updateSelection(rangedSelection);
   }
 
+  const getSelectedIds = useCallback(() => selectedIdsRef.current, []);
+
   const clear = useCallback(() => {
     anchorId.current = null;
     updateSelection([]);
@@ -44,5 +46,5 @@ export function usePhotoSelection() {
     if (anchorId.current && !availableIds.has(anchorId.current)) anchorId.current = null;
   }, []);
 
-  return { selectedIds, selectOnly, toggle, extendRange, selectVisible, clear, retainAvailable };
+  return { selectedIds, getSelectedIds, selectOnly, toggle, extendRange, selectVisible, clear, retainAvailable };
 }

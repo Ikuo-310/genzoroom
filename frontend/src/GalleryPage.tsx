@@ -1191,12 +1191,24 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }
 
   function toggleExclusions(): boolean {
-    if (!active || showStacks || showExport || !photoView || photoView.state !== 'ready' || refreshing || selectedAssets.length === 0) return false;
-    const states = selectedAssets.map(asset => ({ asset, ...exclusions.stateFor(asset) }));
-    if (states.some(state => !state.known || !state.target)) return true;
+    if (!active || showStacks || showExport || !photoView || photoView.state !== 'ready' || refreshing) return false;
+    if (pendingPhotoSelection.current) {
+      // X resolves a pending plain click before choosing its targets; Preview still cancels it on double click.
+      const select = pendingPhotoSelection.current.select;
+      cancelDeferredPhotoSelection();
+      select();
+    }
+    // Native shortcut listeners can run before React commits the click's selection render.
+    const selected = resolveSelectedAssets(currentAssets, photoView.selection.getSelectedIds());
+    if (selected.length === 0) return false;
+    const states = selected.map(asset => ({ asset, ...exclusions.stateFor(asset) }));
+    if (states.some(state => !state.known || !state.target)) {
+      exclusionLog('mutation.blocked', 'debug', { errorCode: 'unconfirmed_state', count: states.length });
+      return true;
+    }
     const cards = [...new Map(states.map(state => [exclusionKey(state.target!), state])).values()];
     const excluded = cards.some(card => !card.excluded);
-    const available = cards.filter(card => !exclusionOperations.current.has(exclusionKey(card.target!)));
+    const available = cards.filter(card => card.excluded !== excluded && !exclusionOperations.current.has(exclusionKey(card.target!)));
     const context = exclusionViewRef.current;
     let lockedTarget = false;
     const reserved = available.filter(card => {
