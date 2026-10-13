@@ -37,6 +37,26 @@ afterEach(() => {
 });
 
 describe('ImmersivePreview', () => {
+  it.each([true, false])('uses a fixed image mode and read-only Stack controls (edited=%s)', preferEditedPreview => {
+    const { handlers, props } = mount({ source: 'stackManagement', preferEditedPreview });
+    const endpoint = preferEditedPreview ? 'immersive-preview' : 'preview';
+    expect(image().getAttribute('src')).toBe(`/api/assets/b/${endpoint}`);
+    expect(host.querySelectorAll('.immersive-preview-bottombar button')).toHaveLength(0);
+    const background = vi.fn(); window.addEventListener('keydown', background);
+    for (const key of [' ', 'q', 'w', 'g', 'a', 'z', '\\']) press(key);
+    expect(background).not.toHaveBeenCalled();
+    expect(handlers.onToggleSelection).not.toHaveBeenCalled();
+    expect(handlers.onToggleQueue).not.toHaveBeenCalled(); expect(handlers.onToggleArmed).not.toHaveBeenCalled();
+    act(() => root.render(<ImmersivePreview {...props} assets={[a]} preferEditedPreview={!preferEditedPreview} />));
+    press('ArrowRight'); expect(image().getAttribute('src')).toBe(`/api/assets/c/${endpoint}`);
+    press('ArrowRight'); expect(image().alt).toBe(c.filename);
+    clickPhoto(0); expect(image().alt).toBe(b.filename);
+    expect(host.querySelector('.immersive-preview-topbar')).not.toBeNull();
+    expect(host.querySelector('.immersive-preview-bottombar')).not.toBeNull();
+    press('v'); press('Escape'); act(() => button('×').click());
+    expect(handlers.onClose).toHaveBeenCalledTimes(3);
+    window.removeEventListener('keydown', background);
+  });
   it('fits the image and keeps both toolbars visible when the photo area is clicked', () => {
     const { handlers } = mount();
     expect(image().getAttribute('src')).toBe('/api/assets/b/immersive-preview');

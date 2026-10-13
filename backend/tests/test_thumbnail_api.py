@@ -1,6 +1,6 @@
 import asyncio
 from copy import deepcopy
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import httpx
@@ -244,6 +244,26 @@ def test_immersive_preview_cache_read_failure_falls_back_and_preview_failure_map
             failed = await api.get(IMMERSIVE_PATH)
             assert failed.status_code == 503
         generate.assert_not_called()
+    asyncio.run(run())
+
+
+def test_original_preview_bypasses_edited_cache_without_loading_recipe_or_scheduling(setup, monkeypatch):
+    cache, scheduler, _, generate, _ = setup
+    preview = AsyncMock(return_value=ImmichThumbnail(b"original-preview", "image/jpeg"))
+    monkeypatch.setattr(main, "get_asset_preview", preview)
+    async def run():
+        async with client() as api:
+            assert (await put(api)).status_code == 200
+            cache.store(ASSET, b"edited-cache")
+            pending_before = dict(scheduler._pending)
+            monkeypatch.setattr(main, "get_edit_state", Mock(side_effect=AssertionError("Recipe must not be read")))
+            monkeypatch.setattr(cache, "read", Mock(side_effect=AssertionError("Cache must not be read")))
+            result = await api.get(f"/assets/{ASSET}/preview")
+            assert result.status_code == 200 and result.content == b"original-preview"
+            assert result.headers["cache-control"] == "private, max-age=300"
+            assert scheduler._pending == pending_before
+            preview.assert_awaited_once()
+            generate.assert_not_called()
     asyncio.run(run())
 
 

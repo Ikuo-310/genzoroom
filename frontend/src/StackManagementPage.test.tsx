@@ -46,6 +46,189 @@ beforeEach(async () => {
   document.title = 'GenzoRoom'; host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); frontendLogger.setLevel('off'); frontendLogger.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en'); });
+const previewImage = () => host.querySelector<HTMLImageElement>('.immersive-preview img')!;
+const previewPosition = () => host.querySelector('.immersive-preview-position')?.textContent;
+const stackPhotoNamed = (name: string) => [...host.querySelectorAll('.stack-filename')].find(node => node.textContent === name)!
+  .closest('.stack-photo-wrapper')!.querySelector<HTMLButtonElement>('.stack-photo')!;
+const outsideSelected = () => [...host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')]
+  .filter(photo => photo.getAttribute('aria-pressed') === 'true').map(photo => photo.textContent);
+async function pointerClick(photo: HTMLElement, detail = 1, extra: MouseEventInit = {}) {
+  await act(async () => photo.dispatchEvent(new MouseEvent('click', { detail, bubbles: true, cancelable: true, ...extra })));
+}
+async function doubleClickPhoto(photo: HTMLElement) {
+  await pointerClick(photo); await pointerClick(photo, 2);
+  await act(async () => photo.dispatchEvent(new MouseEvent('dblclick', { detail: 2, bubbles: true, cancelable: true })));
+}
+async function mountPreviewFixtures() {
+  api.resolve.mockResolvedValue([existingStack]);
+  await mount('/stack', { selectedAssets: [existingMembers[1], ...photos, ...singles,
+    { ...photos[1], id: 'z', filename: 'z.jpg' }] });
+}
+
+it('opens the whole candidate group at COVER from blank space, retains three-photo order and stays inside the group', async () => {
+  await mountPreviewFixtures();
+  const group = host.querySelector<HTMLElement>(`[data-stack-id="draft:immich:${existingStackId}"]`)!;
+  const order = [...group.querySelectorAll('.stack-filename')].map(node => node.textContent);
+  const cover = group.querySelector('.stack-cover .stack-filename')!.textContent;
+  await act(async () => group.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));
+  expect(previewImage().alt).toBe(cover);
+  expect(previewPosition()).toBe(`${order.indexOf(cover) + 1} / 3`);
+  await press('ArrowLeft'); await press('ArrowLeft'); await press('ArrowLeft');
+  expect(previewImage().alt).toBe(order[0]); expect(previewPosition()).toBe('1 / 3');
+  for (const name of order.slice(1)) { await press('ArrowRight'); expect(previewImage().alt).toBe(name); }
+  await press('ArrowRight'); expect(previewPosition()).toBe('3 / 3');
+  const before = group.innerHTML;
+  for (const key of [' ', 'q', 'w', 'a', 'g', 'z', '\\']) await press(key);
+  expect(group.innerHTML).toBe(before); expect(host.querySelector('.stack-management-page')).not.toBeNull();
+  expect(host.querySelectorAll('.immersive-preview-bottombar button')).toHaveLength(0);
+  await press('Escape'); expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe(cover);
+});
+
+it('delays pointer COVER changes for 400ms, preserves Undo and cancels COVER on photo double-click', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest('.stack-candidate-group')!;
+  await pointerClick(photo);
+  await act(async () => vi.advanceTimersByTime(399));
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  await act(async () => vi.advanceTimersByTime(1));
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('hidden.jpg');
+  await press('z', { ctrlKey: true });
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  await doubleClickPhoto(photo);
+  expect(previewImage().alt).toBe('hidden.jpg'); await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  await click('.immersive-preview-close');
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+});
+
+it('cancels pending COVER on drag start and ignores the drag-ending click/double-click', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest<HTMLElement>('.stack-candidate-group')!;
+  await pointerClick(photo);
+  const transfer = dragTransfer({ assetId: existingMembers[0].id, sourceGroupId: group.dataset.stackId! });
+  await act(async () => photo.dispatchEvent(dragEvent('dragstart', transfer)));
+  await act(async () => photo.dispatchEvent(dragEvent('dragend', transfer)));
+  await doubleClickPhoto(photo);
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(host.querySelector('.immersive-preview')).toBeNull();
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  expect(document.querySelector('.stack-drag-preview')).toBeNull();
+});
+
+it('does not open from operation buttons, and cancels pending COVER for Settings, restructuring and navigation', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest('.stack-candidate-group')!;
+  for (const control of group.querySelectorAll('.stack-icon-button, .stack-group-indicators')) {
+    await act(async () => control.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));
+    expect(host.querySelector('.immersive-preview')).toBeNull();
+  }
+  await pointerClick(photo); await click('.settings-button');
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  await doubleClickPhoto(photo); expect(host.querySelector('.immersive-preview')).toBeNull();
+  await click('.settings-dialog header button');
+  await pointerClick(photo); await act(async () => group.querySelector<HTMLButtonElement>('.stack-purge-member')!.click());
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')!.textContent).toBe('primary.dng');
+  await pointerClick(stackPhotoNamed('hidden.png'));
+  await act(async () => navigateTest('/stack', { selectedAssets: photos }));
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(1);
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+});
+
+it.each([true, false])('captures the edited preview switch at opening (edited=%s)', async edited => {
+  await mountPreviewFixtures();
+  if (edited) await click('.stack-edited-preview-switch');
+  await doubleClickPhoto(stackPhotoNamed('primary.dng'));
+  const endpoint = edited ? 'immersive-preview' : 'preview';
+  expect(previewImage().getAttribute('src')).toBe(`/api/assets/${existingPrimary}/${endpoint}`);
+  await press('\\', { code: 'Backslash' });
+  expect(host.querySelector('.stack-edited-preview-switch')!.getAttribute('aria-checked')).toBe(String(edited));
+  await press('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+  await click('.stack-edited-preview-switch'); await doubleClickPhoto(stackPhotoNamed('primary.dng'));
+  expect(previewImage().getAttribute('src')).toBe(`/api/assets/${existingPrimary}/${edited ? 'preview' : 'immersive-preview'}`);
+});
+
+it('opens unselected/single/multiple unmatched V targets in display order and preserves selection on close', async () => {
+  await mountPreviewFixtures();
+  const outside = [...host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')];
+  const names = outside.map(photo => photo.querySelector('.stack-filename')!.textContent);
+  await press('v'); expect(host.querySelector('.immersive-preview')).toBeNull();
+  await act(async () => outside[1].click()); await press('v');
+  expect(previewImage().alt).toBe(names[1]); expect(previewPosition()).toBe('2 / 3');
+  const selected = outsideSelected(); await press(' '); await press('q'); await press('w');
+  await press('v'); expect(outsideSelected()).toEqual(selected);
+  await act(async () => outside[2].click()); await press('v');
+  expect(previewImage().alt).toBe(names[1]); expect(previewPosition()).toBe('1 / 2');
+  await press('ArrowRight'); expect(previewImage().alt).toBe(names[2]);
+  await press('Escape'); expect(outsideSelected()).toHaveLength(2);
+});
+
+it.each([
+  [[], 1, '2 / 3', 1], [[0], 1, '2 / 3', 1], [[0, 2], 2, '2 / 2', 2], [[0, 2], 1, '2 / 3', 3],
+] as const)('handles unmatched double-click selection %j at %s', async (selection, target, position, count) => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const outside = [...host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')];
+  for (const index of selection) await act(async () => outside[index].click());
+  await doubleClickPhoto(outside[target]);
+  expect(previewImage().alt).toBe(outside[target].querySelector('.stack-filename')!.textContent);
+  expect(previewPosition()).toBe(position);
+  await act(async () => vi.advanceTimersByTime(400)); expect(outsideSelected()).toHaveLength(count);
+  await press('v'); expect(outsideSelected()).toHaveLength(count);
+});
+
+it('defers plain unmatched multi-selection clicks only, retaining immediate Primary/Shift and canceling on unmount', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const outside = [...host.querySelectorAll<HTMLButtonElement>('.stack-unmatched-grid .stack-photo')];
+  await act(async () => { outside[0].click(); outside[1].click(); });
+  await pointerClick(outside[2]); await act(async () => vi.advanceTimersByTime(399)); expect(outsideSelected()).toHaveLength(2);
+  await act(async () => vi.advanceTimersByTime(1)); expect(outsideSelected()).toHaveLength(3);
+  await pointerClick(outside[0], 1, { ctrlKey: true }); expect(outsideSelected()).toHaveLength(2);
+  await pointerClick(outside[1], 1, { shiftKey: true }); expect(outsideSelected()).toHaveLength(1);
+  await pointerClick(stackPhotoNamed('hidden.jpg'));
+  await act(async () => root.unmount()); root = createRoot(host);
+  await act(async () => vi.advanceTimersByTime(400)); expect(host.children).toHaveLength(0);
+});
+
+it('allows viewing a singleton without changing its forbidden COVER or warning', async () => {
+  api.resolve.mockResolvedValue([singletonStack]); await mount('/stack', { selectedAssets: [singletonMember] });
+  const photo = host.querySelector<HTMLButtonElement>('.stack-photo')!;
+  const warning = host.querySelector('.singleton-warning')!.textContent;
+  await doubleClickPhoto(photo); expect(previewPosition()).toBe('1 / 1');
+  await press('v'); expect(host.querySelector('.singleton-warning')!.textContent).toBe(warning);
+  expect(host.querySelector('.stack-cover')).not.toBeNull();
+});
+
+it('cancels delayed COVER and blocks Preview while send/redetect dialogs are open', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const photo = stackPhotoNamed('hidden.jpg'); const group = photo.closest('.stack-candidate-group')!;
+  await pointerClick(photo); await act(async () => button('Send to Immich').click());
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('primary.dng');
+  await doubleClickPhoto(photo); expect(host.querySelector('.immersive-preview')).toBeNull();
+  await act(async () => button('Cancel').click());
+  await pointerClick(photo); await act(async () => vi.advanceTimersByTime(400));
+  await pointerClick(stackPhotoNamed('primary.dng')); await act(async () => button('Detect again').click());
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('hidden.jpg');
+  await doubleClickPhoto(photo); expect(host.querySelector('.immersive-preview')).toBeNull();
+});
+
+it('cancels pending COVER on leaving the retained Home Stack panel and restores scroll after Preview', async () => {
+  await mount(); await click('.photo-card:first-child input'); await click('.photo-card:last-child input'); await click('#home-stacks-tab');
+  vi.useFakeTimers();
+  const photo = stackPhotoNamed('selected.dng');
+  const pane = host.querySelector<HTMLElement>('.stack-candidate-frame')!; pane.scrollTop = 245;
+  await pointerClick(photo); await click('#home-recent-tab');
+  await act(async () => vi.advanceTimersByTime(400)); await click('#home-stacks-tab');
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+  await doubleClickPhoto(photo); expect(previewImage().alt).toBe('selected.dng');
+  await press('r'); expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+  await press('v'); expect(pane.scrollTop).toBe(245);
+  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.jpg');
+});
+
 it('toggles edited previews locally without changing cover, selection, draft, or posting generation', async () => {
   await mount('/stack', { selectedAssets: photos });
   const toggle = host.querySelector<HTMLButtonElement>('.stack-edited-preview-switch')!;
@@ -406,7 +589,9 @@ it('disables singleton Add and COVER, rejects drops, and permits Purge followed 
  await mount('/stack',{selectedAssets:[singletonMember,singles[0]]});
  const group=host.querySelector<HTMLElement>('.stack-singleton-warning')!;
  expect(group.querySelector('.stack-set-target')).toBeNull();
- expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.disabled).toBe(true);
+ expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.getAttribute('aria-disabled')).toBe('true');
+ await act(async () => group.querySelector<HTMLButtonElement>('.stack-photo')!.click());
+ expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe(singletonMember.filename);
  expect(group.querySelector<HTMLButtonElement>('.stack-photo')!.draggable).toBe(false);
  expect(group.querySelector<HTMLImageElement>('.stack-photo img')!.draggable).toBe(false);
  expect(group.querySelector('.stack-purge-member')).toBeNull();

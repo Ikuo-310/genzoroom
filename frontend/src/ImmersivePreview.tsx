@@ -14,13 +14,14 @@ export type ImmersivePreviewProps = {
   assets: readonly RecentAsset[];
   startAssetId: string;
   selectedAssetIds?: ReadonlySet<string>;
-  queuedAssetIds: ReadonlySet<string>;
+  queuedAssetIds?: ReadonlySet<string>;
   queueControlByAssetId?: ReadonlyMap<string, ImmersiveQueueControlState>;
   armedAssetIds?: ReadonlySet<string>;
   exportControlByAssetId?: ReadonlyMap<string, { queueEnabled: boolean; armEnabled: boolean }>;
-  source: 'gallery' | 'exportManagement';
+  source: 'gallery' | 'exportManagement' | 'stackManagement';
+  preferEditedPreview?: boolean;
   onToggleSelection?: (assetId: string) => void;
-  onToggleQueue: (assetId: string) => void;
+  onToggleQueue?: (assetId: string) => void;
   onToggleArmed?: (assetId: string) => void;
   onClose: () => void;
 };
@@ -29,13 +30,15 @@ function includes(ids: ReadonlySet<string>, assetId: string) {
   return ids.has(assetId) || ids.has(assetId.toLowerCase());
 }
 
-export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new Set(), queuedAssetIds, armedAssetIds = new Set(),
-  queueControlByAssetId, exportControlByAssetId, source, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
+export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new Set(), queuedAssetIds = new Set(), armedAssetIds = new Set(),
+  queueControlByAssetId, exportControlByAssetId, source, preferEditedPreview = true, onToggleSelection, onToggleQueue, onToggleArmed, onClose }: ImmersivePreviewProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const rootRef = useRef<HTMLElement>(null);
   // Queue and selection updates from the parent must not change the sequence being browsed.
   const [viewAssets] = useState(() => [...assets]);
+  // The opening switch chooses the image source for the entire browsing session.
+  const [useEditedPreview] = useState(preferEditedPreview);
   const [index, setIndex] = useState(() => Math.max(0, assets.findIndex(asset => asset.id.toLowerCase() === startAssetId.toLowerCase())));
   const asset = viewAssets[index];
   const isMac = shortcutPlatform() === 'mac';
@@ -81,6 +84,12 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       }
       if (event.defaultPrevented || event.isComposing || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      if (source === 'stackManagement') {
+        // Home and Stack listeners must not react to commands behind the read-only Preview.
+        event.stopImmediatePropagation();
+        if (matchesShortcut(event, 'immersiveSelectionToggle') || matchesShortcut(event, 'exportQueueToggle')
+          || matchesShortcut(event, 'exportArmToggle')) { consume(event); return; }
+      }
       // Export never uses Space, including repeats that could activate a focused Q/W button natively.
       if (source === 'exportManagement' && matchesShortcut(event, 'immersiveSelectionToggle')) {
         consume(event); return;
@@ -95,7 +104,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
         consume(event); if (source === 'gallery') onToggleSelection?.(asset.id);
       } else if (matchesShortcut(event, 'exportQueueToggle')) {
         if (!asset) return;
-        consume(event); if (queueEnabled) onToggleQueue(asset.id);
+        consume(event); if (queueEnabled) onToggleQueue?.(asset.id);
       } else if (hasArm && matchesShortcut(event, 'exportArmToggle')) {
         if (!asset) return;
         consume(event); if (armEnabled) onToggleArmed?.(asset.id);
@@ -130,16 +139,16 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       {isMac ? position : closeButton}
     </header>
     <main className="immersive-preview-photo" onClick={handlePhotoClick}>
-      <img src={`/api/assets/${encodeURIComponent(asset.id)}/immersive-preview`} alt={asset.filename} draggable={false} />
+      <img src={`/api/assets/${encodeURIComponent(asset.id)}/${useEditedPreview ? 'immersive-preview' : 'preview'}`} alt={asset.filename} draggable={false} />
     </main>
     <footer className="immersive-preview-bottombar">
       {source === 'gallery' && <button type="button" aria-pressed={selected} onClick={() => onToggleSelection?.(asset.id)}>
         {t('immersivePreview.selection', { state: t(selected ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('immersiveSelectionToggle') && <kbd>{shortcut.label('immersiveSelectionToggle')}</kbd>}
       </button>}
-      <button type="button" className={!queueEnabled ? 'immersive-preview-queue-disabled' : undefined}
-        aria-pressed={queued} disabled={!queueEnabled} onClick={() => onToggleQueue(asset.id)}>
+      {source !== 'stackManagement' && <button type="button" className={!queueEnabled ? 'immersive-preview-queue-disabled' : undefined}
+        aria-pressed={queued} disabled={!queueEnabled} onClick={() => onToggleQueue?.(asset.id)}>
         {t('immersivePreview.queue', { state: t(queued ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportQueueToggle') && <kbd>{shortcut.label('exportQueueToggle')}</kbd>}
-      </button>
+      </button>}
       {hasArm && <button type="button" className={!armEnabled ? 'immersive-preview-queue-disabled' : undefined}
         aria-pressed={armed} disabled={!armEnabled} onClick={() => onToggleArmed?.(asset.id)}>
         {t('immersivePreview.arm', { state: t(armed ? 'immersivePreview.on' : 'immersivePreview.off') })}{shortcut.label('exportArmToggle') && <kbd>{shortcut.label('exportArmToggle')}</kbd>}

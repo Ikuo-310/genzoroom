@@ -24,6 +24,8 @@ import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from '
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 import { frontendLogger } from './frontendLogging';
 import { thumbnailUrl } from './thumbnailUrl';
+import { ImmersivePreview } from './ImmersivePreview';
+import { isPrimaryModifier } from './shortcutModifiers';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 const DEFAULT_SPLIT_RATIO = 2 / 3;
@@ -62,6 +64,20 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const { t } = useTranslation();
   const location = useLocation();
   const [editedPreview, setEditedPreview] = useState(false);
+  const [previewSession, setPreviewSession] = useState<{ assets: RecentAsset[]; startAssetId: string; editedPreview: boolean } | null>(null);
+  const previewSessionRef = useRef(previewSession);
+  previewSessionRef.current = previewSession;
+  const pendingClick = useRef<number | null>(null);
+  const unmatchedClickSelection = useRef<Set<string> | null>(null);
+  const cancelPendingClick = useCallback(() => {
+    if (pendingClick.current !== null) window.clearTimeout(pendingClick.current);
+    pendingClick.current = null;
+  }, []);
+  const deferClick = (action: () => void) => {
+    cancelPendingClick();
+    pendingClick.current = window.setTimeout(() => { pendingClick.current = null; action(); }, 400);
+  };
+  useEffect(() => cancelPendingClick, [cancelPendingClick]);
   const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
   useEffect(() => {
     if (active) setThumbnailViewRevision(revision => revision + 1);
@@ -169,6 +185,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const canSend = ready && !sending && !confirmRedetect && !unknown && !oversized && (draft.groups.length > 0 || source.some(group => group.origin === 'immich'));
   const startSend = async () => {
     if (!canSend || sendRequest.current) return;
+    cancelPendingClick();
     dispatch({ type: 'clearUndo' });
     setTrashMenu(null); setConfirmSend(false); setSending(true); setSendStatus('sending');
     const controller = new AbortController();
@@ -193,6 +210,15 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const canEdit = ready && !unknown && !confirmRedetect && !confirmSend && !sending;
   const canAdd = canEdit && draft.groups.some(group => group.id === addTargetStackId && !isSingletonImmichStack(group)) && selectedUnmatched.length > 0;
   const displayed = ready || (redetecting && draft.sourceGroups !== null) ? draft : integration.source;
+  const canEditRef = useRef(canEdit);
+  canEditRef.current = canEdit;
+  useLayoutEffect(() => {
+    // A delayed click must never mutate an obsolete draft or outlive a modal/hidden panel.
+    cancelPendingClick();
+    unmatchedClickSelection.current = null;
+    if (!active || !ready || busy || sending || redetecting || confirmRedetect || confirmSend) setPreviewSession(null);
+  }, [active, sourceGeneration, draft.groups, draft.unmatched, ready, busy, sending, redetecting,
+    confirmRedetect, confirmSend, cancelPendingClick]);
   const clearUnmatchedSelectionFromBlankArea = (event: ReactMouseEvent<HTMLElement>) => {
     if (event.button !== 0 || !active || !canEdit || !selectedIds.size || dragging || draggingRef.current
       || resizingPointer.current !== null || trashMenu || settingsOpen
@@ -355,6 +381,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     });
   };
   const handleDragStart = (event: React.DragEvent, payload: StackDragPayload) => {
+    cancelPendingClick(); unmatchedClickSelection.current = null;
     dragDiagnosticSession.current = null;
     const sourceReserved = payload.sourceGroupId !== null && !!draft.groups.find(group => group.id === payload.sourceGroupId)?.trashAssetIds?.length;
     if (!canEdit || sourceReserved || event.dataTransfer.files.length) {
@@ -500,6 +527,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     if (canEdit && (targetGroupId ? selectedUnmatched.length > 0 : canAdd)) dispatch({ type: 'add', targetGroupId });
   }, [canEdit, canAdd, selectedUnmatched.length]);
   const runRedetect = () => {
+    cancelPendingClick();
     setSendStatus(null);
     setRedetecting(true);
     // Resolving a fresh membership list also supplies fresh auto-detection inputs.
@@ -507,6 +535,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   };
   const redetect = () => {
     if (busy || sending || confirmSend || (!ready && !immich.error)) return;
+    cancelPendingClick();
     if (draft.modified) setConfirmRedetect(true);
     else runRedetect();
   };
@@ -517,6 +546,9 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   const { homeThumbnailColumns } = useAppSettings();
   const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
   const { isOpen: settingsOpen } = useSettingsDialog();
+  useLayoutEffect(() => {
+    if (settingsOpen || trashMenu) cancelPendingClick();
+  }, [settingsOpen, trashMenu, cancelPendingClick]);
   const shortcut = useShortcutDisplay();
   const setCurrentSplitRatio = (ratio: number) => {
     const clamped = clampSplitRatio(ratio);
@@ -531,8 +563,34 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
   };
   useEffect(() => { if (ready && redetecting) setRedetecting(false); }, [ready, redetecting]);
   const returnHome = useCallback(() => {
+    cancelPendingClick();
     navigate('/', { state: navigation?.homeReturn ? { homeReturn: navigation.homeReturn } : null });
-  }, [navigate, navigation?.homeReturn]);
+  }, [navigate, navigation?.homeReturn, cancelPendingClick]);
+
+  const canOpenPreview = () => active && ready && !busy && !sending && !redetecting && !confirmSend && !confirmRedetect
+    && !settingsOpen && !trashMenu && !draggingRef.current && resizingPointer.current === null
+    && !document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]');
+  const openPreview = (photos: RecentAsset[], startAssetId: string) => {
+    if (!canOpenPreview() || !photos.length || !photos.some(asset => asset.id === startAssetId)) return;
+    cancelPendingClick(); clearDrag();
+    dragPayloadForEndLog.current = null; dragDiagnosticSession.current = null;
+    setPreviewSession({ assets: [...photos], startAssetId, editedPreview });
+  };
+  const openUnmatchedPreview = (asset?: RecentAsset) => {
+    if (!canOpenPreview()) return;
+    const selected = asset ? unmatchedClickSelection.current ?? selectedIds : selectedIds;
+    unmatchedClickSelection.current = null;
+    const multi = selected.size > 1;
+    const targets = displayed.unmatched.filter(photo => selected.has(photo.id));
+    if (asset) {
+      if (multi && !selected.has(asset.id) && canEdit) dispatch({ type: 'select', assetId: asset.id });
+      else if (!multi && canEdit) {
+        dispatch({ type: 'clearSelection' }); dispatch({ type: 'select', assetId: asset.id });
+      }
+      openPreview(multi ? displayed.unmatched.filter(photo => selected.has(photo.id) || photo.id === asset.id)
+        : displayed.unmatched, asset.id);
+    } else if (targets.length) openPreview(multi ? targets : displayed.unmatched, targets[0].id);
+  };
 
   useEffect(() => {
     if (sessionAssets || !active) return;
@@ -543,25 +601,31 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (!active || settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
+      if (!active || previewSessionRef.current || settingsOpen || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target)
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
         || confirmRedetect || confirmSend) return;
-      if (!sessionAssets && matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
+      if (matchesShortcut(event, 'galleryOpenImmersivePreview')) { if (selectedIds.size && canOpenPreview()) { event.preventDefault(); openUnmatchedPreview(); } }
+      else if (!sessionAssets && matchesShortcut(event, 'workspaceReturnHome')) { event.preventDefault(); returnHome(); }
       else if (matchesShortcut(event, 'stackEditedPreviewToggle')) { event.preventDefault(); setEditedPreview(value => !value); }
-      else if (matchesShortcut(event, 'undo') && canEdit && draft.undoSnapshot) { event.preventDefault(); dispatch({ type: 'undo' }); }
+      else if (matchesShortcut(event, 'undo')) {
+        cancelPendingClick();
+        if (canEdit && draft.undoSnapshot) { event.preventDefault(); dispatch({ type: 'undo' }); }
+      }
       else if (matchesShortcut(event, 'stackAddSelected') && canAdd) { event.preventDefault(); addSelected(); }
       // Escape dismisses local page selection and Add targeting rather than an application command.
       else if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-        event.preventDefault(); dispatch({ type: 'clear' });
+        cancelPendingClick(); event.preventDefault(); dispatch({ type: 'clear' });
       }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [active, sessionAssets, settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot]);
+  }, [active, sessionAssets, settingsOpen, returnHome, confirmRedetect, confirmSend, canAdd, addSelected, canEdit, draft.undoSnapshot,
+    selectedIds, displayed.unmatched, ready, busy, sending, redetecting, trashMenu, editedPreview]);
 
   const Container = sessionAssets ? 'div' : 'main';
   return <Container className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
+    onClickCapture={cancelPendingClick} onContextMenuCapture={cancelPendingClick}
     onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
     {!sessionAssets && <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
@@ -612,6 +676,12 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         </div>
         {/* Measure the grid's usable width after frame padding and scrollbar space. */}
         <div ref={contentRef} className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
+          onClickCapture={cancelPendingClick}
+          onDoubleClick={event => {
+            if (event.button !== 0 || !(event.target instanceof Element)
+              || event.target.closest('button, input, a, select, textarea, summary, [role="button"], .stack-group-indicators')) return;
+            openPreview(group.members, group.coverAssetId);
+          }}
           key={group.id} className={`stack-candidate-group${isSingletonImmichStack(group) ? ' stack-singleton-warning' : ''}${addTargetStackId === group.id ? ' stack-add-target' : ''}${dropTarget === group.id ? ' stack-drop-target' : ''}`} aria-label={t('stackManagement.group', { index: index + 1 })}
           onDragOver={event => {
             if (event.target instanceof Element && event.target.closest('.stack-group-indicators')) {
@@ -649,6 +719,10 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
             onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: group.id })} onDragEnd={handleDragEnd}
             onToggle={() => dispatch({ type: 'cover', groupId: group.id, assetId: asset.id })}
+            previewDisabled={!canOpenPreview()}
+            onPreviewRequest={() => openPreview(group.members, asset.id)}
+            onCancelPendingClick={cancelPendingClick}
+            onDeferClick={action => deferClick(() => { if (canEditRef.current) action(); })}
             onPurge={isSingletonImmichStack(group) ? undefined : () => dispatch({ type: 'purgeMember', groupId: group.id, assetId: asset.id })}
             purgeDisabled={!!group.trashAssetIds?.length} />)}</div>
         </section>) : <p className="stack-empty">{t('stackManagement.noCandidates')}</p>}</div>
@@ -658,6 +732,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         aria-valuenow={Math.round(currentSplitRatio * 100)} tabIndex={0}
         onPointerDown={event => {
           if (event.button !== 0) return;
+          cancelPendingClick();
           event.preventDefault(); event.stopPropagation();
           resizingPointer.current = event.pointerId;
           try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Pointer capture can be unavailable in embedded test browsers. */ }
@@ -701,7 +776,11 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           }}
           dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === null}
           onDragStart={event => handleDragStart(event, { assetId: asset.id, sourceGroupId: null })} onDragEnd={handleDragEnd}
-          onToggle={() => dispatch({ type: 'select', assetId: asset.id })} />)}</div>
+          onToggle={() => dispatch({ type: 'select', assetId: asset.id })}
+          previewDisabled={!canOpenPreview()} onPreviewRequest={() => openUnmatchedPreview(asset)}
+          onBeforeClick={() => { unmatchedClickSelection.current = new Set(selectedIds); }}
+          deferSelection={selectedIds.size > 1} onCancelPendingClick={cancelPendingClick}
+          onDeferClick={action => deferClick(() => { if (canEditRef.current) action(); })} />)}</div>
           : <p className="stack-empty">{t(assets.length ? 'stackManagement.noUnmatched' : 'stackManagement.empty')}</p>}
       </section>
       </div>
@@ -715,6 +794,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     {confirmSend && <StackRedetectDialog title={t('stackManagement.send')} body={t('stackManagement.sendConfirm', {
       create: createCount, update: updateCount, delete: deleteCount,
     }) + (trashCount ? ` ${t('stackManagement.trashCount', { count: trashCount })}` : '')} onConfirm={() => { void startSend(); }} onCancel={() => setConfirmSend(false)} />}
+    {previewSession && <ImmersivePreview assets={previewSession.assets} startAssetId={previewSession.startAssetId}
+      source="stackManagement" preferEditedPreview={previewSession.editedPreview} onClose={() => setPreviewSession(null)} />}
   </Container>;
 }
 
@@ -746,9 +827,12 @@ function StackEvidenceHeader({ group, result, retryAllowed }: { group: DraftStac
 
 function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKey, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
   purgeDisabled = false, dragging = false, dropTarget = false,
-  trash = false, onContextMenu, onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
+  trash = false, previewDisabled = true, deferSelection = false, onPreviewRequest, onBeforeClick, onCancelPendingClick, onDeferClick,
+  onContextMenu, onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
   asset: RecentAsset; selected: boolean; trash?: boolean; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; cover?: boolean; member?: boolean; disabled?: boolean;
   editedPreview?: boolean; thumbnailRefreshKey?: string;
+  previewDisabled?: boolean; deferSelection?: boolean; onPreviewRequest?: () => void; onBeforeClick?: () => void;
+  onCancelPendingClick?: () => void; onDeferClick?: (action: () => void) => void;
   toggleDisabled?: boolean; dragDisabled?: boolean; purgeDisabled?: boolean;
   dragging?: boolean; dropTarget?: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => boolean;
   onDragEnd: (event: React.DragEvent<HTMLButtonElement>) => void;
@@ -759,11 +843,30 @@ function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKe
 }) {
   const { t } = useTranslation();
   const suppressClick = useRef(false);
-  return <div className="stack-photo-wrapper" onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled} draggable={!disabled && !dragDisabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${toggleDisabled || dragDisabled ? ' stack-edit-disabled' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" onContextMenu={onContextMenu} aria-disabled={disabled || toggleDisabled || dragDisabled || undefined} title={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : undefined} aria-description={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : cover ? t('stackManagement.cover') : undefined} aria-pressed={member ? cover : selected}
+  const releaseSuppression = useRef<number | null>(null);
+  useEffect(() => () => { if (releaseSuppression.current !== null) window.clearTimeout(releaseSuppression.current); }, []);
+  // A read-only photo can still open Preview; editing and dragging keep their original guards.
+  return <div className="stack-photo-wrapper" onClickCapture={onCancelPendingClick} onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled && previewDisabled} draggable={!disabled && !dragDisabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${toggleDisabled || dragDisabled ? ' stack-edit-disabled' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" onContextMenu={onContextMenu} aria-disabled={disabled || toggleDisabled || dragDisabled || undefined} title={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : undefined} aria-description={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : cover ? t('stackManagement.cover') : undefined} aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
-    onDragStart={event => { suppressClick.current = onDragStart(event); }}
-    onDragEnd={event => { onDragEnd(event); window.setTimeout(() => { suppressClick.current = false; }, 0); }}
-    onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } if (!toggleDisabled) onToggle(); }}>
+    onDragStart={event => { onCancelPendingClick?.(); suppressClick.current = onDragStart(event); }}
+    onDragEnd={event => {
+      onDragEnd(event);
+      if (releaseSuppression.current !== null) window.clearTimeout(releaseSuppression.current);
+      releaseSuppression.current = window.setTimeout(() => { suppressClick.current = false; releaseSuppression.current = null; }, 0);
+    }}
+    onDoubleClick={event => {
+      event.stopPropagation(); onCancelPendingClick?.();
+      if (event.button === 0 && !suppressClick.current && !previewDisabled) onPreviewRequest?.();
+    }}
+    onClick={event => {
+      if (event.button !== 0 || suppressClick.current) return;
+      if (event.detail > 1) { onCancelPendingClick?.(); return; }
+      onBeforeClick?.();
+      if (disabled || toggleDisabled) return;
+      // Keyboard activation has no double-click sequence and retains the existing immediate action.
+      if (event.detail === 1 && (member || deferSelection && !event.shiftKey && !isPrimaryModifier(event.nativeEvent)) && onDeferClick) onDeferClick(onToggle);
+      else onToggle();
+    }}>
     <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<img src={thumbnailUrl(asset, editedPreview, thumbnailRefreshKey)} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {trash && <span className="stack-trash-overlay" aria-label={t('stackManagement.trash')}><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></span>}
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
