@@ -2,6 +2,41 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 没入プレビュー Phase 1〜4・Focused Audit Low修正（2026-10-13）
+
+### 実装
+
+- **Phase 1 — 共通Viewer・画像取得：** `ImmersivePreview`と`GET /assets/{id}/immersive-preview`を追加した。非デフォルトRecipeが保存され、現像済みJPEGキャッシュを読める場合はそれを返し、それ以外はImmich Previewへfallbackする。GETから生成予約・現像実行は行わない。Viewerの閲覧一覧と画像モードは起動時に固定する。
+- **Phase 2 — Gallery：** Recent、Favorites、Album詳細、Calendar日付詳細からVキーまたはカードのダブルクリックで開く。Vでは未選択なら開かず、単一選択なら表示中の一覧、複数選択なら表示順の選択写真だけを閲覧する。ダブルクリックの開始位置はクリックした写真。複数選択中の通常クリックは400ms保留し、Shift／Primary操作は即時。Spaceは現在写真だけの選択切替、Qは既存条件に従う現在写真だけのQueue操作。
+- **Phase 3 — 出力管理・暗室：** 出力管理ではQueueのflatten済み表示順をスナップショットとしてV／ダブルクリックで開く。Spaceによる選択は行わず、Qは表示写真1枚のQueue解除、Wは同じ写真1枚のArm切替を行い、既存のガード・エラー処理・Undo経路を共有する。暗室のViewer focus modeはFからVへ移行した。FavoritesタブのFは維持する。
+- **Phase 4 — STACK管理：** 候補グループの空白ダブルクリックはCoverから、グループ内写真のダブルクリックはその写真から始め、いずれもグループ内全写真を表示する。候補外写真はGalleryと同じV／ダブルクリック選択ルールを使う。STACKモードは閲覧専用で、選択／Q／W操作を表示・実行しない。補正済み表示スイッチは起動時に固定し、OFFでは現像済みキャッシュを使わない既存`preview` APIを選ぶ。
+
+共通Viewerは写真をアスペクト比を保ってFit表示し、左右20%クリックと←／→で境界内移動する。上下ツールバーは常時表示し、V／Esc／Xで閉じる。現像済み写真の「現」バッジ、ファイル名省略、OS別ヘッダー配置を使う。画像クリックによる選択やQueue変更は行わず、状態の所有は各親画面に残す。Viewer表示中は登録済みアプリ用ショートカットの背後への伝播を抑止する。
+
+### 実機で見つかった表示・操作修正
+
+利用者の実機確認で、現像済みJPEGが没入PVで上下に切れること、Windows/LinuxのX位置、バッジとファイル名の間隔、および写真クリック時の暗転が報告され、Fit用Grid計算とヘッダー配置を修正した。ツールバー切替を削除して常時表示にし、写真表示領域の左右20%クリックを前後移動にした。これらは利用者による実機確認で見つかった問題と、その後のコード修正であり、今回の文書更新時にCodexがブラウザー・NASで再確認したものではない。
+
+STACK候補グループのヘッダーでは、`.stack-group-indicators`全体を除外していたため、判定バッジの左右の空白もダブルクリック対象外になっていた。除外対象を実際の`.stack-evidence`バッジと操作部品に限定し、バッジ左右の空白ではCoverから開き、バッジ本体・削除／追加ボタンでは起動しないようにした。
+
+### Focused Static AuditとLow 4修正
+
+Phase 1〜4の初回Focused Static Auditは**High 0 / Medium 0 / Low 4**。Frontend 583件、Backend 28件の自動テストは成功した。Lowの限定差分レビュー後、次の4点を修正した。
+
+1. Gallery／出力管理Viewerで、Viewerが使わない登録済みキーが背後へ伝播し、テンキーの＋／－などを実行し得た。共通shortcut registryに基づきViewer表示中のアプリ用キー処理を止め、キーリピートも対象とした。Viewerのモード別操作と入力欄・ダイアログ等のガードは維持した。
+2. 出力管理のAssetDetail経路とViewer用Asset変換でGenzoRoom出力判定が欠落していた。既存のタグ判定を同じAssetDetail応答から渡し、未知状態をfalseに誤変換しないようにした。追加の個別タグ検索は行わない。
+3. Gallery／出力管理の400ms保留クリックは、Settings表示または画面非アクティブ後に遅れて選択を変更する余地があった。両状態への遷移時に取消し、タイマー実行時にも現在の操作可否を確認する。
+4. 560px以下でヘッダーの左右Grid列が内容幅により非対称になり、ファイル名中央がずれていた。狭幅時のみ左右対称列にし、通常幅、ellipsis、バッジ間隔を維持した。
+
+Push後に実施された限定差分レビューでは、このLow 4件の修正成立が確認された。監査後に全体横断監査を再実施したという記録ではない。
+
+### 検証
+
+- 初回Focused Auditの関連Frontendテスト：**583件成功**。関連Backendテスト：**28件成功**。
+- Low修正後の関連Frontendテスト：**601件成功**。Backend：**79 passed、72 subtests passed**。
+- TypeScriptチェックとFrontend本番ビルドは成功。buildには既存の500 kB超chunk警告がある。`git diff --check`も成功。
+- 自動テストと静的差分レビューは、利用者による実ブラウザー／NAS確認とは区別する。文書更新時点でCodexは実ブラウザー・NAS実機確認を行っていない。
+
 ## 余白クリックによる選択解除の改善（2026-10-12）
 
 ### 実装経過
@@ -557,7 +592,7 @@ Home構造の監査では、写真ビュー判定がasset・selection・edit sta
 
 `editShortcuts.ts`に`ShortcutId`、`shortcutBindings`、`matchesShortcut()`／`matchesShortcutKey()`を持つapplication command registryを整えた。binding判定はregistryへ集約し、actionの実行と状態はHome、Anshitsu、Viewer、Filmstrip、Scopeなど各機能のownerに残した。TabやEscape、slider Arrow、component内focus navigationなどのlocal/native操作まで一律にcommand化しない設計とした。`shortcutDisplay.ts`と`useShortcutDisplay.ts`を追加し、bindingからTooltip／Menu表示を生成して設定へ反映する。
 
-既存互換性として、JIS配列で`key=']'`となるphysical Backslashの優先判定、NumLock状態によらないNumpadのphysical `code`判定、AltGraph等のmodifier guardを維持した。Filmstripのhover／focus中の単独Arrow移動は廃止し、`Ctrl+Shift+←/→`による前後移動へ変更した。暗室では`F`がViewer集中表示、`Shift+Z`がFitと直前zoom/panの切替、`H`が既存の退出保存経路を通るHome復帰となる。Homeの`D`は選択中なら現在選択で暗室を開き、未選択なら直前の暗室へ復帰する。
+既存互換性として、JIS配列で`key=']'`となるphysical Backslashの優先判定、NumLock状態によらないNumpadのphysical `code`判定、AltGraph等のmodifier guardを維持した。Filmstripのhover／focus中の単独Arrow移動は廃止し、`Ctrl+Shift+←/→`による前後移動へ変更した。この2026-10-02時点の記録では暗室のViewer集中表示は`F`だったが、現行bindingは`V`である。`Shift+Z`はFitと直前zoom/panの切替、`H`は既存の退出保存経路を通るHome復帰となる。Homeの`D`は選択中なら現在選択で暗室を開き、未選択なら直前の暗室へ復帰する。
 
 Home未選択時の`D`復帰情報はSPA session内のmodule memoryだけに保持し、Storage APIへ書かない。選択写真の順序とactive photoを保ち、Homeから再入場するときの`homeReturn`はその時点のHome表示状態で更新する。Recipe、History、Viewer transform等は保持しない。
 

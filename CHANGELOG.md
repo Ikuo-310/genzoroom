@@ -4,6 +4,25 @@ Meaningful user-facing changes to GenzoRoom will be documented here in English, 
 
 Internal changes are omitted unless they affect users.
 
+## [Unreleased]
+
+### Added
+
+- Added Immersive Preview to Gallery, Export management, and Stack management, with browsing based on the visible photo list, selected photos, or Stack candidate group.
+- Added bounded photo navigation and context-specific selection, Queue, and export-readiness controls to Immersive Preview.
+
+### Changed
+
+- Changed Anshitsu's Viewer focus-mode shortcut from `F` to `V`; the Favorites tab remains on `F`.
+- Stack management's Edited Preview setting now also controls whether Immersive Preview prefers a rendered thumbnail or uses the Immich preview directly.
+
+### Fixed
+
+- Prevented application shortcuts behind Immersive Preview from changing controls such as thumbnail size.
+- Restored the 「現」 badge for GenzoRoom exports opened from Export management.
+- Prevented deferred photo clicks from changing selection after Settings opens or the screen becomes inactive.
+- Kept the filename centered in narrow Immersive Preview windows.
+
 ## [0.1.4] - 2026-10-12
 
 ### Added
