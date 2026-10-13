@@ -18,6 +18,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Fixed stale rendered thumbnails in Export management when reopening the tab by refreshing their image URLs on each entry.
 - Prevented application shortcuts behind Immersive Preview from changing controls such as thumbnail size.
 - Restored the 「現」 badge for GenzoRoom exports opened from Export management.
 - Prevented deferred photo clicks from changing selection after Settings opens or the screen becomes inactive.

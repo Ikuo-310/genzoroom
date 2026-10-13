@@ -2,6 +2,26 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 出力管理入場時の現像済みサムネイルURL更新（2026-10-13）
+
+### 発生状況と原因
+
+暗室でRecipeを変更・保存した後、GalleryではReloadで新しい現像済みサムネイルを確認できても、出力管理では以前の画像が表示される場合があった。ブラウザーページ全体を再読み込みすると更新される一方、出力管理タブの表示状態は維持されない。
+
+出力管理のカードは`thumbnailUrl(asset)`を使っており、画像の再取得に使う`refreshKey`をURLへ渡していなかった。同じAssetのURLが維持され、古いブラウザーキャッシュが再利用され得た。
+
+### 修正
+
+- 他タブから出力管理へ入るたび、Export専用の`exportThumbnailRevision`を更新し、既存の`thumbnailUrl(asset, true, refreshKey)`を介して`view`クエリを変える。
+- 通常カードとStackグループ内カードの両方へrevisionを適用する。同じタブ内の選択、Q/W、Undo、Queue更新では変えない。
+- Gallery側の`thumbnailViewRevision`とは独立させた。Queue取得、Queue内容、選択・Arm状態、Stack所属、スクロール位置、Backendの生成・キャッシュ・60秒デバウンスは変更しない。URLの再取得で既存キャッシュを読む仕組みであり、Recipeを再現像しない。
+
+### 検証
+
+関連Frontendテスト47件、TypeScriptチェック、本番ビルドが成功し、`git diff --check`も成功した。buildには既存の500 kB超chunk size警告が残る。これらは自動検証結果である。
+
+Push後のGitHub限定レビューで変更範囲とコードを確認した。今回のURL更新後に現像済みサムネイルが実機で再取得・表示されることを利用者が新たに確認した記録はないため、実機確認済みとは扱わない。過去のNAS・Immichでのサムネイル生成・画質確認とは区別する。
+
 ## 没入プレビュー Phase 1〜4・Focused Audit Low修正（2026-10-13）
 
 ### 実装
