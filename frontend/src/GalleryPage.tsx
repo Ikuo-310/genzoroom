@@ -66,6 +66,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
+  const [exportThumbnailRevision, setExportThumbnailRevision] = useState(0);
   useEffect(() => {
     // Home retains cards while Anshitsu is open; a new URL reloads bytes on return without polling.
     if (active) setThumbnailViewRevision(revision => revision + 1);
@@ -992,6 +993,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   function handleTabClick(tab: HomeNavigationTab) {
     if (tab === 'stacks') { openStacks(); return; }
     if (tab === 'export') {
+      if (!showExport) setExportThumbnailRevision(revision => revision + 1);
       if (showStacks) galleryReloadPending.current = false;
       prepareScrollTransition('export');
       setShowStacks(false);
@@ -1345,7 +1347,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         </div>
       </div>}
       <section hidden={showStacks} className="home-content" aria-label={t('home.sections')} onClick={clearPhotoSelectionFromBlankArea}>
-        {showExport ? <ExportManagementContent management={exportManagement}
+        {showExport ? <ExportManagementContent management={exportManagement} thumbnailRefreshKey={String(exportThumbnailRevision)}
           onPreviewRequest={openExportImmersivePreviewFromCard} onDeferSelectionClick={deferPhotoSelection}
           onCancelDeferredSelection={cancelDeferredPhotoSelection} /> : <>
         {refreshFailed && <p className="gallery-message error-text" role="alert">{t('photos.refreshFailed')}</p>}

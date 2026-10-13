@@ -60,7 +60,8 @@ export function ExportManagementToolbar({ management }: { management: ExportMana
 }
 
 function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest, onDeferSelectionClick,
-  onCancelDeferredSelection }: { entry: ExportQueueAsset; management: ExportManagementState } & PreviewActions) {
+  onCancelDeferredSelection, thumbnailRefreshKey }: { entry: ExportQueueAsset; management: ExportManagementState;
+    thumbnailRefreshKey?: string } & PreviewActions) {
   const { t } = useTranslation();
   const id = item.assetId.toLowerCase();
   const selected = management.selectedIds.includes(id);
@@ -104,7 +105,7 @@ function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest,
       onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(asset); }}
       aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">
-      <img src={thumbnailUrl(asset)} alt="" loading="lazy" />
+      <img src={thumbnailUrl(asset, true, thumbnailRefreshKey)} alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {item.status !== 'queued' ? <span className={`export-status-bar export-status-${stopPending ? 'stop' : item.status}`}
         role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>
@@ -116,7 +117,8 @@ function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest,
   </article>;
 }
 
-export function ExportManagementContent({ management, ...previewActions }: { management: ExportManagementState } & PreviewActions) {
+export function ExportManagementContent({ management, thumbnailRefreshKey, ...previewActions }:
+  { management: ExportManagementState; thumbnailRefreshKey?: string } & PreviewActions) {
   const { t } = useTranslation();
   const columns = useAppSettings().homeThumbnailColumns;
   const { queue, message, rows } = management;
@@ -127,11 +129,12 @@ export function ExportManagementContent({ management, ...previewActions }: { man
       {t(`exportManagement.${message}`)}</p>
       : <div className="export-queue-grid" style={{ '--export-columns': columns } as CSSProperties}>
         {rows.map(row => row.kind === 'asset'
-          ? <ExportQueueCard key={row.entry.item.assetId} entry={row.entry} management={management} {...previewActions} />
+          ? <ExportQueueCard key={row.entry.item.assetId} entry={row.entry} management={management} thumbnailRefreshKey={thumbnailRefreshKey} {...previewActions} />
           : <section key={`stack-${row.stackId}`} className="export-stack-group" data-stack-id={row.stackId}
             aria-label={t('photos.stackAssets', { count: row.members.length })}
             style={{ '--export-member-count': row.members.length } as CSSProperties}>
-            <div className="export-stack-members">{row.members.map(entry => <ExportQueueCard key={entry.item.assetId} entry={entry} management={management} {...previewActions} />)}</div>
+            <div className="export-stack-members">{row.members.map(entry => <ExportQueueCard key={entry.item.assetId} entry={entry} management={management}
+              thumbnailRefreshKey={thumbnailRefreshKey} {...previewActions} />)}</div>
           </section>)}
       </div>}
   </div>;

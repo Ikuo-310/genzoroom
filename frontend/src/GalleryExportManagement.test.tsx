@@ -81,6 +81,33 @@ afterEach(() => {
 });
 
 describe('Home Export management', () => {
+  it('refreshes rendered thumbnail URLs only on Export entry, preserving Gallery URLs and Queue UI state', async () => {
+    await openQueue([queued('a'), queued('b')]);
+    expect(exportCard('a').querySelector('img')?.getAttribute('src'))
+      .toBe('/api/assets/a/rendered-thumbnail?view=1');
+
+    const queueReads = api.queue.mock.calls.length;
+    const firstExportUrl = exportCard('b').querySelector('img')?.getAttribute('src');
+    await cardClick('a');
+    await key('w');
+    await key('z', { ctrlKey: true });
+    expect(exportCard('b').querySelector('img')?.getAttribute('src')).toBe(firstExportUrl);
+    expect(api.queue).toHaveBeenCalledTimes(queueReads);
+
+    await key('q');
+    expect(api.remove).toHaveBeenCalledExactlyOnceWith('a', expect.any(AbortSignal));
+    expect(exportCard('b').querySelector('img')?.getAttribute('src')).toBe(firstExportUrl);
+
+    await key('r');
+    const galleryUrl = host.querySelector('.photo-card img')?.getAttribute('src');
+    expect(galleryUrl).toContain('/rendered-thumbnail?view=');
+    await key('e');
+    expect(exportCard('b').querySelector('img')?.getAttribute('src'))
+      .toBe('/api/assets/b/rendered-thumbnail?view=2');
+    await key('r');
+    expect(host.querySelector('.photo-card img')?.getAttribute('src')).toBe(galleryUrl);
+  });
+
   it('places the Retry priority explanation beside the tabs and keeps it out of the action toolbar', async () => {
     api.queue.mockResolvedValue([{ assetId: 'failed-a', status: 'failed', queuedAt: 'q', updatedAt: 'u' }]);
     await mount(); expect(host.querySelector('.home-tabs-bar .export-retry-notice')).toBeNull();
