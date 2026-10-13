@@ -6,6 +6,9 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import i18n from './i18n';
 import type { ExportQueueItem } from './exportQueueApi';
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const queueApi = vi.hoisted(() => ({ list: vi.fn(async () => [] as ExportQueueItem[]) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: queueApi.list }));

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
 import type { RecentAsset } from './assets';
@@ -23,7 +23,8 @@ vi.mock('./editStateApi', async original => ({ ...await original<typeof import('
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: api.list, enqueueExportAssets: api.enqueue, dequeueExportAsset: api.dequeue }));
 
-vi.mock('./StackManagementPage', () => ({ StackManagementPage: () => null }));
+vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ sessionAssets }: { sessionAssets: RecentAsset[] }) =>
+  <div data-testid="stack-session">{sessionAssets.map(asset => asset.id).join(',')}</div> }));
 vi.mock('./developmentExclusionsApi', async original => ({ ...await original<typeof import('./developmentExclusionsApi')>(),
   getExclusionStatuses: api.exclusions, saveExclusion: api.save }));
 const ids = ['12345678-1234-4234-9234-123456789abc', '87654321-4321-4321-8321-cba987654321',
@@ -39,6 +40,11 @@ let items: ExportQueueItem[];
 let excluded: Set<string>;
 let host: HTMLDivElement;
 let root: Root;
+function WorkspaceProbe() {
+  const location = useLocation();
+  const selected = (location.state as { selectedAssets?: RecentAsset[] } | null)?.selectedAssets ?? [];
+  return <p className="workspace-probe" data-assets={selected.map(asset => asset.id).join(',')}>Develop</p>;
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(yes => { resolve = yes; });
@@ -75,7 +81,7 @@ async function mount(tab: HomeTab = 'recent', strict = false) {
     date: tab === 'calendar' ? '2026-10-06' : null, calendarMode: 'month', pageScrollTop: 0, contentScrollTop: 0 };
   const page = <MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn } }]}>
     <Routes><Route path="/" element={<GalleryPage />} />
-      <Route path="/anshitsu/:assetId" element={<p className="workspace-probe">Develop</p>} /></Routes>
+      <Route path="/anshitsu/:assetId" element={<WorkspaceProbe />} /></Routes>
   </MemoryRouter>;
   await act(async () => root.render(strict ? <StrictMode>{page}</StrictMode> : page));
 }
@@ -92,6 +98,9 @@ async function pressV(target: EventTarget = window, modifiers: KeyboardEventInit
   const event = new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true, ...modifiers });
   await act(async () => target.dispatchEvent(event));
   return event;
+}
+async function pressD(target: EventTarget = window) {
+  await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true })));
 }
 async function doubleClickPhoto(index: number) {
   const photo = card(index).querySelector<HTMLButtonElement>('.photo-card-button')!;
@@ -179,9 +188,112 @@ describe('Gallery development exclusions', () => {
     await pressV(); expect(host.querySelector('.immersive-preview')).not.toBeNull(); await pressX();
     expect(api.save).not.toHaveBeenCalled();
   });
-  it('preserves double click preview and selection when excluded', async () => {
+  it('does not open Immersive Preview from an excluded card', async () => {
     excluded.add(ids[0]); await mount(); await select(); await doubleClickPhoto(0);
-    expect(host.querySelector('.immersive-preview')).not.toBeNull(); expect(card().classList.contains('selected')).toBe(true);
+    expect(host.querySelector('.immersive-preview')).toBeNull(); expect(card().classList.contains('selected')).toBe(true);
+  });
+  it('filters excluded and unconfirmed cards from mixed D selections', async () => {
+    const stackId = family(); excluded.add(stackId);
+    api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({
+      ...target, excluded: excluded.has(target.id), configuration: target.id === ids[3] ? 'unknown'
+        : target.kind === 'stack' ? 'confirmed' : 'single',
+    })));
+    await mount(); await select(); await select(2); await select(3); await pressD();
+    expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(ids[2]);
+  });
+  it('filters an excluded whole Stack from S while passing selected standalone photos', async () => {
+    const stackId = family(); excluded.add(stackId);
+    await mount(); await select(); await select(2); await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')?.textContent).toBe(ids[2]);
+  });
+  it('does nothing when every selected card is excluded for D and S', async () => {
+    const stackId = family(); excluded.add(stackId); excluded.add(ids[2]);
+    await mount(); await select(); await select(2); await pressD();
+    expect(host.querySelector('.workspace-probe')).toBeNull();
+    await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')).toBeNull();
+  });
+  it('filters excluded targets from selected and individual Queue additions', async () => {
+    excluded.add(ids[0]); await mount(); await select(); await select(2); await pressQ();
+    expect(api.enqueue).toHaveBeenCalledTimes(1);
+    expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
+    api.enqueue.mockClear(); await click(card(0).querySelector<HTMLButtonElement>('.edited-badge')!);
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+  it('filters an unknown exclusion state from Queue additions without blocking known cards', async () => {
+    api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({
+      ...target, excluded: false, configuration: target.id === ids[0] ? 'unknown' : 'single',
+    })));
+    await mount(); await select(); await select(2); await pressQ();
+    expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
+    expect(api.enqueue).not.toHaveBeenCalledWith(expect.arrayContaining([ids[0]]), expect.any(AbortSignal));
+  });
+  it('disables the card Queue control while its exclusion state is unknown', async () => {
+    api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({
+      ...target, excluded: false, configuration: 'unknown',
+    })));
+    await mount(); await select(); await pressQ();
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(true);
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+  it('does not queue members from an excluded Stack card', async () => {
+    const stackId = family(); excluded.add(stackId); await mount(); await select(); await pressQ();
+    expect(api.enqueue).not.toHaveBeenCalled();
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(true);
+  });
+  it('does not expose excluded Stack members through the card context menu', async () => {
+    const stackId = family(); excluded.add(stackId);
+    const members = ids.slice(0, 2).map((id, index) => ({ ...photos[index], stackId, primaryAssetId: ids[0],
+      stackAssetCount: 2, stackMemberIds: ids.slice(0, 2) }));
+    api.photos.mockResolvedValue([{ ...members[0], stackMembers: members }]);
+    await mount();
+    await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
+    const menu = document.querySelector('.stack-photo-context-menu');
+    expect(menu).not.toBeNull();
+    expect(menu?.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+  it('keeps eligible Stack-member Queue additions in the context menu', async () => {
+    const stackId = family();
+    const members = ids.slice(0, 2).map((id, index) => ({ ...photos[index], stackId, primaryAssetId: ids[0],
+      stackAssetCount: 2, stackMemberIds: ids.slice(0, 2), isGenzoRoomExport: false }));
+    api.photos.mockResolvedValue([{ ...photos[0], stackId, primaryAssetId: ids[0], stackAssetCount: 2,
+      stackMemberIds: ids.slice(0, 2), stackMembers: members }]);
+    await mount();
+    await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
+    const queue = document.querySelector('[aria-labelledby="stack-queue-heading"]');
+    const firstMember = queue?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(firstMember).not.toBeNull();
+    await click(firstMember!);
+    expect(api.enqueue).toHaveBeenCalledWith([ids[0]], expect.any(AbortSignal));
+  });
+  it('opens preview with confirmed eligible cards only and skips exclusions during navigation', async () => {
+    excluded.add(ids[0]); await mount(); await select(); await select(1); await select(2); await pressV();
+    const preview = host.querySelector('.immersive-preview')!;
+    expect(preview.querySelector('.immersive-preview-position')?.textContent).toBe('1 / 2');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+    expect(preview.querySelector('.immersive-preview-position')?.textContent).toBe('2 / 2');
+    expect(preview.querySelector('img')?.getAttribute('alt')).toBe(photos[2].filename);
+  });
+  it('skips every member of an excluded Stack in the preview sequence', async () => {
+    const stackId = family(); excluded.add(stackId); await mount(); await select(2); await pressV();
+    const preview = host.querySelector('.immersive-preview')!;
+    expect(preview.querySelector('.immersive-preview-position')?.textContent).toBe('1 / 2');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })));
+    expect(preview.querySelector('img')?.getAttribute('alt')).toBe(photos[2].filename);
+  });
+  it('allows D again after the exclusion is removed', async () => {
+    excluded.add(ids[0]); await mount(); await select(); await pressX();
+    await pressD();
+    expect(host.querySelector('.workspace-probe')?.getAttribute('data-assets')).toBe(ids[0]);
+  });
+  it('allows Queue and Immersive Preview after exclusion is removed', async () => {
+    excluded.add(ids[0]); await mount(); await select(); await pressX(); await pressQ();
+    expect(api.enqueue).toHaveBeenCalledWith([ids[0]], expect.any(AbortSignal));
+    await click(card().querySelector<HTMLButtonElement>('.edited-badge')!);
+    excluded.delete(ids[0]); await click(card().querySelector('.photo-selection-input')!);
+    await doubleClickPhoto(0);
+    expect(host.querySelector('.immersive-preview')).not.toBeNull();
   });
   it('ignores stale status responses after Reload', async () => {
     const pending = deferred<any>(); api.exclusions.mockReturnValueOnce(pending.promise);

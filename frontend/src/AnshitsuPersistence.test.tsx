@@ -16,6 +16,9 @@ import { getManualGalleryStackSelection, restoreGalleryStackSelectionsFromSessio
 import { editSession, newSession } from './editing';
 import { copyEditSettings } from './editClipboard';
 
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const mocked = vi.hoisted(() => ({ detail: vi.fn(), get: vi.fn(), put: vi.fn(), statuses: vi.fn(), recent: vi.fn() }));
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()), fetchAssetDetail: mocked.detail, fetchRecentAssets: mocked.recent,

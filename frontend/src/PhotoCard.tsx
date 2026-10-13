@@ -44,6 +44,7 @@ type PhotoCardProps = {
   queueCurrent?: boolean;
   queueStatus?: ExportQueueStatus;
   queueBusy?: boolean;
+  queueDisabled?: boolean;
   queueVisible?: boolean;
   onQueueToggle?: () => void;
   stackMenu?: {
@@ -80,6 +81,7 @@ export function PhotoCard({
   queueCurrent,
   queueStatus,
   queueBusy,
+  queueDisabled = false,
   queueVisible = false,
   onQueueToggle,
   stackMenu,
@@ -181,7 +183,7 @@ export function PhotoCard({
         {isGenzoRoomExported(asset) && <GenzoRoomExportBadge />}
         <EditedBadge edited={edited === true || queueVisible} queueKnown={queueKnown} queueCurrent={queueCurrent} queueStatus={queueStatus}
           showQueuedWhenUnedited
-          busy={queueBusy} onQueueToggle={onQueueToggle} showQueueShortcut={false} />
+          busy={queueBusy} disabled={queueDisabled} onQueueToggle={onQueueToggle} showQueueShortcut={false} />
       </div>
       {menuPoint && stackMenu && <StackContextMenu point={menuPoint} members={stackMenu.members}
         selectedIds={stackMenu.selectedIds} selectionAvailable={stackMenu.selectionAvailable}

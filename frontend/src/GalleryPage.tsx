@@ -3,7 +3,7 @@ import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacks, f
 import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { resolveWorkspaceAssets } from './workspaceAssetResolver';
 import { frontendLogger } from './frontendLogging';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { homeScrollContent, homeViewKey, readHomeReturn, restoreHomeScroll, type CalendarViewMode, type HomeReturnContext, type HomeScrollPosition, type HomeTab } from './homeReturn';
@@ -67,6 +67,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const settings = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
+  const [workspaceSessionAtMount] = useState(() => readWorkspaceSession());
   const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
   const [exportThumbnailRevision, setExportThumbnailRevision] = useState(0);
   useEffect(() => {
@@ -604,11 +605,20 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const typedAssets = filterPhotos(editFilteredAssets, photoFilters);
   const collapsedAssets = activeTab !== 'favorites' ? collapseImmichStacks(typedAssets) : typedAssets;
   const visibleAssets = filterPhotosByDevelopStatus(collapsedAssets, developStatusFilterModes[activeTab]);
-  const exclusions = useDevelopmentExclusions(active && !showStacks && !showExport && photoView?.state === 'ready' ? visibleAssets : [],
-    `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}`, photoView?.assets);
+  const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
+  // D can resume assets outside the current view, so their exclusions share the view's status snapshot.
+  const exclusionSource = useMemo(() => [...currentAssets, ...(workspaceSessionAtMount?.selectedAssets ?? [])],
+    [currentAssets, workspaceSessionAtMount]);
+  const exclusionAssets = [...new Map([...visibleAssets, ...selectedAssets, ...(workspaceSessionAtMount?.selectedAssets ?? [])]
+    .map(asset => [asset.id.toLowerCase(), asset])).values()];
+  const exclusions = useDevelopmentExclusions(active && !showStacks && !showExport && photoView?.state === 'ready' ? exclusionAssets : [],
+    `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}`, exclusionSource);
   const exclusionViewRef = useRef('');
   exclusionViewRef.current = `${viewKey}:${active}:${JSON.stringify(refreshRevisions)}:${stackWriteRevision}:${exclusions.generation}`;
-  const selectedAssets = resolveSelectedAssets(currentAssets, activeSelectedAssetIds);
+  const galleryAssetAllowed = (asset: RecentAsset) => {
+    const state = exclusions.stateFor(asset);
+    return state.known && !state.excluded;
+  };
   const selectionMode = photoView !== null && (photoView.kind === 'recent' || photoView.state === 'ready')
     && activeSelectedAssetIds.length > 0;
   const previousSelectionMode = useRef(selectionMode);
@@ -722,8 +732,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function openStacks() {
     if (showStacks) return;
+    const candidates = activeSelectedAssetIds.length ? selectedAssets : stackSession?.assets ?? [];
     // Compare only on entry: browsing changes must not mutate a retained editing session.
-    const nextAssets = [...new Map(selectedAssets.map(asset => [asset.id, asset])).values()];
+    const nextAssets = [...new Map(candidates.filter(galleryAssetAllowed).map(asset => [asset.id, asset])).values()];
+    if (candidates.length > 0 && nextAssets.length === 0) return;
     const previousIds = new Set(stackSession?.assets.map(asset => asset.id));
     if (!showExport && nextAssets.length && (!stackSession
       || nextAssets.length !== previousIds.size || nextAssets.some(asset => !previousIds.has(asset.id)))) {
@@ -749,6 +761,12 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     }
     const resume = readWorkspaceSession();
     if (!resume) return false;
+    const eligibleResumeAssets = resume.selectedAssets.filter(galleryAssetAllowed);
+    if (eligibleResumeAssets.length === 0) return false;
+    if (eligibleResumeAssets.length !== resume.selectedAssets.length) {
+      openWorkspaceAssets(eligibleResumeAssets);
+      return true;
+    }
     workspaceNavigating.current = true;
     setWorkspaceOpenError(null);
     navigate(workspacePath(resume.activeAssetId), {
@@ -759,12 +777,14 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function openWorkspaceAssets(assetsToOpen: RecentAsset[]) {
     if (workspaceNavigating.current) return;
-    const resolution = resolveWorkspaceAssets(assetsToOpen, settings.anshitsuInitialSelection);
+    const eligibleAssets = assetsToOpen.filter(galleryAssetAllowed);
+    if (eligibleAssets.length === 0) return;
+    const resolution = resolveWorkspaceAssets(eligibleAssets, settings.anshitsuInitialSelection);
     try {
       frontendLogger.add({ level: resolution.status === 'unavailable' ? 'error' : resolution.status === 'empty' ? 'info' : 'debug',
         component: 'gallery', event: 'workspace.resolve', context: {
-          result: resolution.status, selectedCardCount: assetsToOpen.length,
-          stackCount: assetsToOpen.filter(asset => asset.stackId != null).length,
+          result: resolution.status, selectedCardCount: eligibleAssets.length,
+          stackCount: eligibleAssets.filter(asset => asset.stackId != null).length,
           targetAssetCount: resolution.status === 'resolved' ? resolution.assets.length : 0,
         } });
     } catch { /* Diagnostics must not change navigation outcomes. */ }
@@ -845,9 +865,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     }
     if (!canOpenImmersivePreview()) return false;
     const selected = new Set(activeSelectedAssetIds.map(id => id.toLowerCase()));
-    const selectedVisible = visibleAssets.filter(asset => selected.has(asset.id.toLowerCase()));
+    const selectedVisible = visibleAssets.filter(asset => selected.has(asset.id.toLowerCase()) && galleryAssetAllowed(asset));
     if (!selectedVisible.length) return false;
-    const targets = activeSelectedAssetIds.length > 1 ? selectedVisible : visibleAssets;
+    const targets = activeSelectedAssetIds.length > 1 ? selectedVisible : visibleAssets.filter(galleryAssetAllowed);
     if (targets.length) {
       cancelDeferredPhotoSelection();
       setImmersiveSession({ assets: [...targets], startAssetId: selectedVisible[0].id, source: 'gallery' });
@@ -871,14 +891,15 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function openImmersivePreviewFromCard(asset: RecentAsset) {
     if (!canOpenImmersivePreview() || !photoView) return;
+    if (!galleryAssetAllowed(asset)) return;
     const selected = new Set(photoView.selection.selectedIds.map(id => id.toLowerCase()));
     if (photoView.selection.selectedIds.length > 1 && !selected.has(asset.id.toLowerCase())) {
       photoView.selection.toggle(asset.id);
       selected.add(asset.id.toLowerCase());
     }
     const targets = photoView.selection.selectedIds.length > 1
-      ? visibleAssets.filter(candidate => selected.has(candidate.id.toLowerCase()))
-      : visibleAssets;
+      ? visibleAssets.filter(candidate => selected.has(candidate.id.toLowerCase()) && galleryAssetAllowed(candidate))
+      : visibleAssets.filter(galleryAssetAllowed);
     if (targets.length) setImmersiveSession({ assets: [...targets], startAssetId: asset.id, source: 'gallery' });
   }
   openImmersivePreviewRef.current = openImmersivePreviewFromSelection;
@@ -1063,9 +1084,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     if (queueBatchBusy.current) return true;
     if (!exportQueue.loaded || !exportQueue.canonical) return true;
 
-    const cards = selectedAssets.map(asset => ({ asset, ...queueStateFor(asset) }))
+    const cards = selectedAssets.filter(galleryAssetAllowed).map(asset => ({ asset, ...queueStateFor(asset) }))
       .filter(card => card.status !== undefined || cardEditStatuses[card.asset.id] === true);
-    if (cards.length === 0) return false;
+    if (cards.length === 0) return selectedAssets.length > 0;
     if (cards.some(card => card.locked)) {
       setQueueFailure('locked');
       return true;
@@ -1118,6 +1139,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   queueSelectedRef.current = queueSelectedAssets;
 
   async function toggleQueue(asset: RecentAsset) {
+    if (!galleryAssetAllowed(asset)) return;
     if (queueBatchBusy.current || !exportQueue.loaded || !exportQueue.canonical) return;
     const { memberIds, status, locked } = queueStateFor(asset);
     const keys = memberIds.map(id => id.toLowerCase());
@@ -1159,7 +1181,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
-  async function toggleQueueMember(asset: RecentAsset, checked: boolean) {
+  async function toggleQueueMember(asset: RecentAsset, checked: boolean, exclusionOwner: RecentAsset = asset) {
+    if (!galleryAssetAllowed(exclusionOwner)) return;
     const id = asset.id;
     const key = id.toLowerCase();
     if (queueBatchBusy.current || !exportQueue.loaded || !exportQueue.canonical || queueOperations.current.has(key)
@@ -1278,6 +1301,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       const resolvedStack = selectionCard.stackId ? selectGalleryAssetTargets(selectionCard, settings.anshitsuInitialSelection, manual) : null;
       const stackMembers = resolvedStack?.status === 'ready' ? selectionCard.stackMembers ?? null : null;
       const selectedStackIds = resolvedStack?.status === 'ready' ? resolvedStack.selectedAssetIds : new Set<string>();
+      const exclusionState = exclusions.stateFor(asset);
+      const exclusionAllowed = exclusionState.known && !exclusionState.excluded;
       return (
         <PhotoCard
           asset={asset}
@@ -1286,18 +1311,19 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           key={asset.id}
           selected={activeSelectedAssetIds.includes(asset.id)}
           selectionMode={selectionMode}
-          excluded={exclusions.stateFor(asset).excluded}
+          excluded={exclusionState.excluded}
           edited={cardEditStatuses[asset.id]}
           queueKnown={exportQueue.loaded}
           queueCurrent={exportQueue.canonical}
           queueStatus={queue.status}
           queueBusy={queue.busy}
+          queueDisabled={!exclusionAllowed}
           queueVisible={queueVisible}
           onQueueToggle={() => { void toggleQueue(asset); }}
           stackMenu={asset.stackId ? {
-            members: stackMembers,
+            members: !exclusionState.known ? null : exclusionState.excluded ? [] : stackMembers,
             selectedIds: selectedStackIds,
-            selectionAvailable: resolvedStack?.status === 'ready',
+            selectionAvailable: exclusionState.known && (exclusionState.excluded || resolvedStack?.status === 'ready'),
             editStatuses,
             editStatusState: editStatusSnapshot.state,
             queueLoaded: exportQueue.loaded,
@@ -1307,7 +1333,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
               known: exportQueue.hasAsset(assetId) !== undefined,
               busy: queueBatchBusyState || queueBusy.has(assetId.toLowerCase()) || !!exportQueue.mutationFor(assetId).operation }),
             onDarkroomToggle: (member: RecentAsset, checked: boolean) => {
-              if (!selectionCard.stackId) return;
+              if (!selectionCard.stackId || !exclusionAllowed) return;
               const latestCard = stackSelections.currentCard(asset);
               const latest = stackSelections.resolve(latestCard, settings.anshitsuInitialSelection);
               if (latest.status !== 'ready') return;
@@ -1315,7 +1341,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
               if (checked) current.add(member.id.toLowerCase()); else current.delete(member.id.toLowerCase());
               stackSelections.setManualSelection(latestCard, current);
             },
-            onQueueToggle: (member: RecentAsset, checked: boolean) => { void toggleQueueMember(member, checked); },
+            onQueueToggle: (member: RecentAsset, checked: boolean) => { void toggleQueueMember(member, checked, asset); },
           } : undefined}
           onSelect={() => selectPhoto(asset.id)}
           onToggleSelection={() => togglePhotoSelection(asset.id)}
@@ -1519,7 +1545,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
         queueControlByAssetId={new Map(visibleAssets.map(asset => {
           const queue = queueStateFor(asset);
           return [asset.id.toLowerCase(), { edited: cardEditStatuses[asset.id] === true,
-            queueKnown: exportQueue.loaded, queueCurrent: exportQueue.canonical, queueStatus: queue.status, busy: queue.busy }] as const;
+            queueKnown: exportQueue.loaded, queueCurrent: exportQueue.canonical, queueStatus: queue.status, busy: queue.busy,
+            disabled: !galleryAssetAllowed(asset) }] as const;
         }))}
         source="gallery"
         onToggleSelection={assetId => photoView?.selection.toggle(assetId)}

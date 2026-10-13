@@ -12,6 +12,9 @@ import i18n from './i18n';
 import { ExportQueueApiError, type ExportQueueItem } from './exportQueueApi';
 import { DEVELOP_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeDevelopStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), albums: vi.fn(), album: vi.fn(),
   day: vi.fn(), heatmap: vi.fn(), minYear: vi.fn(), statuses: vi.fn(), queue: vi.fn(), detail: vi.fn(), stackRefresh: vi.fn(), remove: vi.fn(), enqueue: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),

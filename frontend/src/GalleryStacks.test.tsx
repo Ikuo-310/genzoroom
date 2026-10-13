@@ -13,6 +13,9 @@ import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResu
 import { restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
 import { updateSetting } from './appSettings';
 import type { ExportQueueItem } from './exportQueueApi';
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const queueApi = vi.hoisted(() => ({ list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), items: [] as ExportQueueItem[] }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: queueApi.list, enqueueExportAssets: queueApi.enqueue, dequeueExportAsset: queueApi.dequeue }));

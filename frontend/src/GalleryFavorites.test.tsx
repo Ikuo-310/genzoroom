@@ -14,6 +14,9 @@ import i18n from './i18n';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites }));

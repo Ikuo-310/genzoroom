@@ -10,6 +10,9 @@ import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
 import { frontendLogger } from './frontendLogging';
 import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn(), detail: vi.fn(), resolve: vi.fn(), refresh: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites, fetchAssetDetail: api.detail, fetchSelectedImmichStacks: api.resolve, refreshSelectedImmichStacks: api.refresh }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getAssetEditStatuses: api.statuses }));

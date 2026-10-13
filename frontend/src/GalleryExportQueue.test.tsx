@@ -11,6 +11,9 @@ import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode }
 import { updateSetting } from './appSettings';
 import i18n from './i18n';
 
+vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
+  stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
+}) }));
 const api = vi.hoisted(() => ({ photos: vi.fn(), albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(),
   statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
