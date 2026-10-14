@@ -87,7 +87,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, exclud
           title={asset.id === activeAssetId
             ? shortcut.title(t('workspace.excludePhoto', { filename: asset.filename }), 'filmstripExclude')
             : t('workspace.excludePhoto', { filename: asset.filename })}
-          onClick={() => onExclude(asset.id)}><XIcon /></button>}
+          onClick={() => onExclude(asset.id)}><XIcon size={14} /></button>}
       </div>)}
     </div>
   </section>;
