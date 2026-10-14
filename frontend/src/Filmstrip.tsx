@@ -10,8 +10,9 @@ import { thumbnailUrl } from './thumbnailUrl';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
+export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, viewerFocusMode = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
+  viewerFocusMode?: boolean;
   onExclude?: (id: string) => void;
   excludeDisabled?: boolean;
   excludeBusyFor?: (id: string) => boolean;
@@ -26,17 +27,20 @@ export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, exclud
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const scroll = useRef<HTMLDivElement>(null);
-  const latest = useRef({ assets, activeAssetId, onActivate, disabled, keyboardBlocked });
-  latest.current = { assets, activeAssetId, onActivate, disabled, keyboardBlocked };
+  const latest = useRef({ assets, activeAssetId, onActivate, disabled, keyboardBlocked, viewerFocusMode });
+  latest.current = { assets, activeAssetId, onActivate, disabled, keyboardBlocked, viewerFocusMode };
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     const current = latest.current;
     const region = scroll.current;
     if (!region || current.disabled || current.keyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
       || isNativeEditingTarget(event.target)) return;
-    const direction = matchesShortcut(event, 'filmstripPrevious') ? -1
-      : matchesShortcut(event, 'filmstripNext') ? 1 : 0;
+    const direction = current.viewerFocusMode && matchesShortcut(event, 'immersivePrevious') ? -1
+      : current.viewerFocusMode && matchesShortcut(event, 'immersiveNext') ? 1
+        : matchesShortcut(event, 'filmstripPrevious') ? -1
+          : matchesShortcut(event, 'filmstripNext') ? 1 : 0;
     if (!direction) return;
     if (region.ownerDocument.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+    // Capture must cancel the range input's native arrow adjustment before its target handler runs.
     event.preventDefault();
     const index = current.assets.findIndex((asset) => asset.id === current.activeAssetId);
     const destination = index < 0 ? undefined : current.assets[index + direction];

@@ -19,11 +19,13 @@ it('uses rendered thumbnail URLs without generation POSTs', async () => {
 let host: HTMLDivElement;
 let root: Root;
 let activate = vi.fn<(id: string) => void>();
-function Harness({ disabled = false, blocked = false, items = assets }: { disabled?: boolean; blocked?: boolean; items?: RecentAsset[] }) {
+function Harness({ disabled = false, blocked = false, immersive = false, items = assets }: { disabled?: boolean; blocked?: boolean; immersive?: boolean; items?: RecentAsset[] }) {
   const [active, setActive] = useState('a');
-  return <><Filmstrip assets={items} activeAssetId={active} disabled={disabled} keyboardBlocked={blocked}
+  return <><Filmstrip assets={items} activeAssetId={active} disabled={disabled} keyboardBlocked={blocked} viewerFocusMode={immersive}
     onActivate={(id) => { activate(id); setActive(id); }} />
-    <input type="range" /><input type="number" /><input type="text" /><textarea /><select><option>one</option></select>
+    <input type="range" defaultValue={5} onKeyDown={event => {
+      if (!event.defaultPrevented && event.key === 'ArrowRight') event.currentTarget.value = String(Number(event.currentTarget.value) + 1);
+    }} /><input type="number" /><input type="text" /><textarea /><select><option>one</option></select>
     <div contentEditable /><div role="textbox" /><button className="other">Other</button></>;
 }
 const scroll = () => host.querySelector<HTMLElement>('.filmstrip-scroll')!;
@@ -46,6 +48,40 @@ beforeEach(() => {
 afterEach(async () => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await i18n.changeLanguage('en'); });
 
 describe('Filmstrip keyboard navigation', () => {
+  it('uses standalone arrows only in immersive mode and prevents range changes through navigation and at either end', () => {
+    const range = host.querySelector<HTMLInputElement>('input[type="range"]')!;
+    expect(key('ArrowRight', range).defaultPrevented).toBe(false);
+    expect(range.value).toBe('6');
+    expect(current()).toBe('a.jpg');
+
+    act(() => root.render(<Harness immersive />));
+    expect(key('ArrowRight', range).defaultPrevented).toBe(true);
+    expect(current()).toBe('b.jpg');
+    expect(range.value).toBe('6');
+    expect(key('ArrowRight', range).defaultPrevented).toBe(true);
+    expect(current()).toBe('c.jpg');
+    expect(range.value).toBe('6');
+    expect(key('ArrowRight', range).defaultPrevented).toBe(true);
+    expect(current()).toBe('c.jpg');
+    expect(range.value).toBe('6');
+    expect(key('ArrowLeft', range).defaultPrevented).toBe(true);
+    expect(current()).toBe('b.jpg');
+    expect(range.value).toBe('6');
+
+    act(() => root.render(<Harness />));
+    expect(key('ArrowRight', range).defaultPrevented).toBe(false);
+    expect(range.value).toBe('7');
+    expect(current()).toBe('b.jpg');
+  });
+
+  it.each([false, true])('keeps Primary+Shift arrows as photo navigation when immersive=%s', immersive => {
+    act(() => root.render(<Harness immersive={immersive} />));
+    expect(move('next').defaultPrevented).toBe(true);
+    expect(current()).toBe('b.jpg');
+    expect(move('previous').defaultPrevented).toBe(true);
+    expect(current()).toBe('a.jpg');
+  });
+
   it('moves globally in both directions without hover or Filmstrip focus', () => {
     expect(move('next').defaultPrevented).toBe(true);
     expect(current()).toBe('b.jpg');
@@ -77,6 +113,9 @@ describe('Filmstrip keyboard navigation', () => {
   });
 
   it('ignores repeated, composing, and already prevented commands', () => {
+    act(() => root.render(<Harness immersive />));
+    expect(key('ArrowRight', window, { repeat: true }).defaultPrevented).toBe(false);
+    expect(key('ArrowRight', window, { isComposing: true }).defaultPrevented).toBe(false);
     expect(move('next', window, { repeat: true }).defaultPrevented).toBe(false);
     expect(move('next', window, { isComposing: true }).defaultPrevented).toBe(false);
     const prevented = new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, shiftKey: true, cancelable: true });
@@ -87,17 +126,19 @@ describe('Filmstrip keyboard navigation', () => {
 
   it.each(['input[type="number"]', 'input[type="text"]', 'textarea', 'select', '[contenteditable]', '[role="textbox"]'])
     ('preserves native editing in %s', (selector) => {
+      act(() => root.render(<Harness immersive />));
       const target = host.querySelector<HTMLElement>(selector)!;
       act(() => target.focus());
+      expect(key('ArrowRight', target).defaultPrevented).toBe(false);
       expect(move('next', target).defaultPrevented).toBe(false);
       expect(activate).not.toHaveBeenCalled();
     });
 
   it('ignores blocked and disabled filmstrips', () => {
-    act(() => root.render(<Harness blocked />));
+    act(() => root.render(<Harness blocked immersive />));
     expect(move('next').defaultPrevented).toBe(false);
     expect(activate).not.toHaveBeenCalled();
-    act(() => root.render(<Harness disabled />));
+    act(() => root.render(<Harness disabled immersive />));
     expect(move('next').defaultPrevented).toBe(false);
     expect(activate).not.toHaveBeenCalled();
   });
@@ -108,7 +149,8 @@ describe('Filmstrip keyboard navigation', () => {
     else overlay.setAttribute('role', role);
     document.body.append(overlay);
     try {
-      expect(move('next').defaultPrevented).toBe(false);
+      act(() => root.render(<Harness immersive />));
+      expect(key('ArrowRight').defaultPrevented).toBe(false);
       expect(activate).not.toHaveBeenCalled();
     } finally { overlay.remove(); }
   });
@@ -116,7 +158,7 @@ describe('Filmstrip keyboard navigation', () => {
   it('ignores the edit settings menu and preserves active thumbnail reveal', () => {
     const menu = document.createElement('details'); menu.className = 'edit-settings-menu'; menu.open = true;
     document.body.append(menu);
-    try { expect(move('next').defaultPrevented).toBe(false); } finally { menu.remove(); }
+    try { act(() => root.render(<Harness immersive />)); expect(key('ArrowRight').defaultPrevented).toBe(false); } finally { menu.remove(); }
 
     Object.defineProperty(scroll(), 'clientWidth', { configurable: true, value: 200 });
     vi.spyOn(scroll(), 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);

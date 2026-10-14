@@ -757,6 +757,7 @@ export function AnshitsuPage() {
         excludeDisabled={canEdit && !editable}
         excludeBusyFor={id => !!localStateFor(id).saving || queueBusy.has(id)}
         keyboardBlocked={workspaceKeyboardBlocked}
+        viewerFocusMode={viewerFocusMode}
         queueKnown={exportQueue.loaded}
         queueCurrent={exportQueue.canonical}
         queueStatusFor={exportQueue.getStatus}

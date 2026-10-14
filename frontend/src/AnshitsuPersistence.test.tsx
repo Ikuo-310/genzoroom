@@ -829,6 +829,32 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe('second.jpg');
   });
 
+  it('uses immersive arrows through the existing save-and-switch flow and restores slider arrows on exit', async () => {
+    await mount();
+    let range = container.querySelector<HTMLInputElement>('.adjustment-range[data-adjustment-id="exposure"]')!;
+    await act(async () => range.focus());
+    expect((await filmstripKey('ArrowRight', {}, range)).defaultPrevented).toBe(true);
+    expect(Number(range.value)).toBeGreaterThan(0);
+    expect(currentPhoto()).toBe('first.jpg');
+
+    await filmstripKey('v');
+    expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(true);
+    expect((await filmstripKey('ArrowRight', {}, range)).defaultPrevented).toBe(true);
+    expect(currentPhoto()).toBe('second.jpg');
+    expect(mocked.put).toHaveBeenCalledTimes(1);
+    expect(mocked.put.mock.calls[0][1].currentRecipe.adjustments.exposure).toBeGreaterThan(0);
+
+    expect((await filmstripKey('ArrowRight')).defaultPrevented).toBe(true);
+    expect(currentPhoto()).toBe('second.jpg');
+    await filmstripKey('v');
+    expect(container.querySelector('.workspace-page')?.classList.contains('viewer-focus-mode')).toBe(false);
+    range = container.querySelector<HTMLInputElement>('.adjustment-range[data-adjustment-id="exposure"]')!;
+    await act(async () => range.focus());
+    const before = Number(range.value);
+    expect((await filmstripKey('ArrowRight', {}, range)).defaultPrevented).toBe(true);
+    expect(Number(range.value)).toBeGreaterThan(before);
+  });
+
   it('blocks Filmstrip keys while a History menu or confirmation dialog is open', async ({ onTestFinished }) => {
     const show = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
     const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
