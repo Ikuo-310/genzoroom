@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { frontendLogger } from './frontendLogging';
 import type { RecentAsset } from './assets';
 import { exclusionConfirmed, exclusionDiagnosticId, exclusionKey, exclusionLog, exclusionTarget, getExclusionStatuses, saveExclusion, type ExclusionTarget, type ExclusionStatus } from './developmentExclusionsApi';
 
@@ -49,6 +50,8 @@ export function useDevelopmentExclusions(assets: readonly RecentAsset[], context
   const versions = useRef(new Map<string, number>());
   const mounted = useRef(true);
   const nextRequestId = useRef(0);
+  const diagnosticResponses = useRef<Array<{ requestId: number; generation: number; offset: number; batch: ExclusionTarget[]; statuses: ExclusionStatus[] }>>([]);
+  const diagnosticStates = useRef(new Map<string, string>());
   const loadEvidence = useRef(new Map<string, LoadEvidence>());
   useEffect(() => {
     mounted.current = true;
@@ -86,16 +89,16 @@ export function useDevelopmentExclusions(assets: readonly RecentAsset[], context
           const statuses = await getExclusionStatuses(batch, controller.signal);
           if (controller.signal.aborted || !mounted.current || generation !== scope.current.generation) {
             exclusionLog('status.discarded', 'debug', { requestId, generation, currentGeneration: scope.current.generation,
-              errorCode: controller.signal.aborted ? 'aborted' : 'stale' });
+              offset, count: batch.length, phase: 'response', errorCode: controller.signal.aborted ? 'aborted' : 'stale' });
             return;
           }
           for (const target of batch) {
             const evidence = loadEvidence.current.get(exclusionKey(target));
             if (evidence?.generation === generation && evidence.requestId === requestId) evidence.phase = 'completed';
           }
-          exclusionLog('status.received', 'debug', { requestId, generation, count: statuses.length,
-            confirmedCount: statuses.filter((status, index) => exclusionConfirmed(batch[index], status)).length,
-            unknownCount: statuses.filter(status => status.configuration === 'unknown').length });
+          try {
+            if (frontendLogger.getLevel() === 'debug') diagnosticResponses.current.push({ requestId, generation, offset, batch, statuses });
+          } catch { /* Logging failures cannot turn a successful status read into a load failure. */ }
           if (statuses.some((status, index) => !exclusionConfirmed(batch[index], status))) setFailure({ generation, kind: 'loadFailed' });
           setEntries(previous => {
             if (generation !== scope.current.generation) return previous;
@@ -112,7 +115,11 @@ export function useDevelopmentExclusions(assets: readonly RecentAsset[], context
             return next;
           });
         } catch {
-          if (controller.signal.aborted || !mounted.current || generation !== scope.current.generation) return;
+          if (controller.signal.aborted || !mounted.current || generation !== scope.current.generation) {
+            exclusionLog('status.discarded', 'debug', { requestId, generation, currentGeneration: scope.current.generation,
+              offset, count: batch.length, errorCode: controller.signal.aborted ? 'aborted' : 'stale', phase: 'request_failed' });
+            return;
+          }
           for (const target of batch) {
             const evidence = loadEvidence.current.get(exclusionKey(target));
             if (evidence?.generation === generation && evidence.requestId === requestId) evidence.phase = 'failed';
@@ -156,6 +163,66 @@ export function useDevelopmentExclusions(assets: readonly RecentAsset[], context
         signatureMatches: entry ? same : null, pending: pendingMutation,
         version: versions.current.get(key) ?? 0, requestStartVersion: evidence?.startVersion ?? null } };
   }
+  // Observe committed state outside React updaters, which StrictMode may replay.
+  useEffect(() => {
+    const responses = diagnosticResponses.current.splice(0);
+    try {
+      if (frontendLogger.getLevel() !== 'debug') { diagnosticStates.current.clear(); return; }
+      const visible = new Map<string, RecentAsset>();
+      for (const asset of assets) {
+        const key = exclusionKey({ kind: asset.stackId ? 'stack' : 'asset', id: asset.stackId ?? asset.id });
+        if (!visible.has(key)) visible.set(key, asset);
+      }
+      for (const response of responses) {
+        const { requestId, generation: receivedGeneration, offset, batch, statuses } = response;
+        if (receivedGeneration !== generation) {
+          exclusionLog('status.discarded', 'debug', { requestId, generation: receivedGeneration,
+            currentGeneration: generation, offset, errorCode: 'stale', phase: 'state_observation' });
+          continue;
+        }
+        const backendConfigurationCounts: Record<string, number> = { confirmed: 0, absent: 0, single: 0, stacked: 0, unknown: 0 };
+        const byKey = new Map(batch.map((target, index) => [exclusionKey(target), statuses[index]]));
+        for (const status of statuses) backendConfigurationCounts[status.configuration]++;
+        // Include targets omitted by local validation once, without implying a Backend response.
+        const observed = [...visible].filter(([key]) => byKey.has(key) || (offset === 0 && !targets.has(key)))
+          .map(([key, asset]) => ({ state: stateFor(asset), status: byKey.get(key) }));
+        const unconfirmed = observed.filter(({ state }) => !state.known);
+        const unconfirmedReasonCounts: Record<string, number> = {};
+        for (const { state } of unconfirmed) {
+          const reason = state.diagnostic.reason;
+          unconfirmedReasonCounts[reason] = (unconfirmedReasonCounts[reason] ?? 0) + 1;
+        }
+        for (const { state, status } of unconfirmed.slice(0, 100)) exclusionLog('status.unconfirmed', 'debug', {
+          ...state.diagnostic, requestId, generation: receivedGeneration,
+          backendConfiguration: status?.configuration ?? null, backendExcluded: status?.excluded ?? null,
+          requested: status !== undefined, frontendKnown: state.known,
+        });
+        exclusionLog('status.received', 'debug', { requestId, generation: receivedGeneration, offset,
+          count: statuses.length, targetCount: batch.length, observedTargetCount: observed.length, backendConfigurationCounts,
+          mutationPendingCount: observed.filter(({ state }) => state.diagnostic.pending).length,
+          requestVersionChangedCount: observed.filter(({ state }) => state.diagnostic.requestStartVersion !== null
+            && state.diagnostic.version !== state.diagnostic.requestStartVersion).length,
+          backendConfirmedCount: statuses.filter((status, index) => exclusionConfirmed(batch[index], status)).length,
+          frontendConfirmedCount: observed.length - unconfirmed.length, unconfirmedCount: unconfirmed.length,
+          unconfirmedReasonCounts, unconfirmedLoggedCount: Math.min(100, unconfirmed.length),
+          unconfirmedOmittedCount: Math.max(0, unconfirmed.length - 100),
+        });
+      }
+      const next = new Map<string, string>();
+      let logged = 0, omitted = 0;
+      for (const [key, asset] of visible) {
+        const state = stateFor(asset);
+        if (state.known) continue;
+        const fingerprint = JSON.stringify(state.diagnostic);
+        next.set(key, fingerprint);
+        if (diagnosticStates.current.get(key) === fingerprint) continue;
+        if (logged++ < 100) exclusionLog('state.unconfirmed', 'debug', { ...state.diagnostic, frontendKnown: false });
+        else omitted++;
+      }
+      if (omitted) exclusionLog('state.unconfirmed.omitted', 'debug', { generation, omittedCount: omitted });
+      diagnosticStates.current = next;
+    } catch { /* Diagnostic observation cannot affect exclusion state or warnings. */ }
+  });
   async function setExcluded(target: ExclusionTarget, excluded: boolean) {
     const key = exclusionKey(target), started = generation;
     pending.current.add(key);
