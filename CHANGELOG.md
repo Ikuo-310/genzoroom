@@ -6,6 +6,17 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-14
+
+### Changed
+
+- Expanded X exclusion Debug logs to distinguish Backend configuration from Frontend confirmation and identify unconfirmed targets.
+
+### Fixed
+
+- Fixed stale Gallery Stack ownership after Stack writes, which could show X exclusion status warnings or block re-entry to Stack management from Calendar.
+- Refresh Gallery views after Stack writes so cached photo membership is updated across Recent, Favorites, Albums, and Calendar.
+
 ## [0.2.0] - 2026-10-13
 
 ### Added

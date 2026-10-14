@@ -2,6 +2,26 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## STACK作成後のGallery所属情報と再取得（2026-10-14）
+
+### 現象と診断結果
+
+Calendarの日付詳細で単独写真をまとめてSTACK化し、Immichへ送信すると、Gallery復帰後にX現像対象外の状態確認警告が発生した。同じ日付の写真を再びSTACK管理へ送ろうとしても遷移できず、別日へ移動すると復旧する場合があった。Firefoxのスーパーリロードで復旧した例も報告された。
+
+利用者提供の統合診断ログでは、STACK作成11件がすべて成功した後、23件の旧単独Assetに対する状態照会へBackendが`stacked`を返し、Frontendに`configuration_mismatch`が発生した。その後、11 STACKと12 Assetで`ownership_conflict`が記録された。Galleryの通常Reloadは完了扱いだったが、保持中のSTACK管理セッションには送信前の単独Asset情報が残っていた。Recentにも旧所属の照会が残り、別日のSTACK管理へ入った後は保持セッションが別日素材へ置き換わった。後半のresolve成功だけではX除外状態の正常化を示さないため、先行するGallery status応答も照合した。
+
+### 原因と修正
+
+保持セッションの所有者解決はCoverのAsset IDを中心に行い、Cover以外のメンバーについて新しい所属先を特定できなかった。そこで、表示中のAsset、Coverの`stackMemberIds`、共有の受理済みSTACK snapshotの順に所有者を解決し、受理済みsnapshotがAssetの一意な所属を示す場合だけ採用する。新しい応答が旧メンバーを別STACKまたは単独Assetとして示し、旧STACKのreplacement snapshotが応答にない場合は旧snapshotを無効化する。所属を確定できない、または複数候補が残る場合は従来の安全判定を維持する。
+
+STACK送信後のGallery再取得予約をビュー別に保持するよう変更した。通常のビュー読込が送信後に開始されればその読込で予約を満たし、それ以外は既存Reload経路を使う。送信前に開始した同一ビューの読込はwrite revisionが一致しないため予約を消費しない。未表示のRecent、Favorites、Albums、Calendar各ビューの予約は、そのビューを開いたときに消費する。Export経由で戻る場合も予約を保持する。既存の選択・日付・スクロール復元とD/S/Q/V入口ガードは維持した。
+
+### 検証
+
+修正前はCalendar Reload後にも旧単独Assetと新STACKの競合が残る回帰テストが失敗し、修正後は通過した。Calendarの日付詳細からの再入場、Recentなどのキャッシュ再取得、別日への移動と復帰、送信前の遅延応答、送信完了とReloadの競合、矛盾した所属情報の無効化も回帰確認した。
+
+Frontend全体テストは2,928件成功・2件スキップ。監査修正後の関連テストは374件成功。Backend全体は1,127件と322 subtestsが成功した。TypeScriptチェック、本番build、`git diff --check`も成功し、buildには既存の500 kB超chunk警告が残った。利用者報告によるNAS・Firefox実機確認はPASS。これは利用者の実機確認であり、Codexは今回の作業でNASやFirefoxを操作していない。
+
 ## Gallery現像対象外（X）Phase 1〜2 完了時の記録（2026-10-13）
 
 ### 実装経過
