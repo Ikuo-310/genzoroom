@@ -6,6 +6,11 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Changed
+
+- Anshitsu Immersive Preview now moves between photos with unmodified Left / Right arrows; normal slider arrows and Primary+Shift photo navigation remain available.
+- Unified the X icons for Anshitsu Filmstrip exclusion and Stack group/member removal as centered shared SVGs.
+
 ## [0.2.1] - 2026-10-14
 
 ### Changed

@@ -2,6 +2,27 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 暗室ショートカットとXアイコン表示の改善（2026-10-15）
+
+### 暗室没入プレビューの左右キー操作
+
+- 従来のPrimary+Shift+左右キーに加え、没入プレビュー中だけ左右キー単独で前後の写真へ移動できるようにした。通常の暗室ではスライダーの左右キー操作を維持する。
+- Filmstripの既存キーボード処理を拡張し、`viewerFocusMode`を参照する。captureフェーズで`preventDefault()`を行い、スライダーにフォーカスが残る場合や写真の先頭・末尾でも調整値が変わらないようにした。
+- 写真切替には既存の`onActivate`経路を使用し、Recipe保存などの切替処理は変更していない。IME、入力欄、ダイアログ、メニュー、キーリピート、切替中などの既存ガードも維持した。
+- 利用者によるFirefox実機確認はPASS。
+
+### Xボタンの表示統一
+
+- FilmstripとSTACK管理のX文字に視覚的な位置ずれがあったため、フォントに依存しない共通インラインSVG（`frontend/src/XIcon.tsx`）へ置き換えた。Filmstrip除外、STACKグループ解除、STACKメンバー除外の3ボタンで共用する。
+- FilmstripのXは当初16pxで実装したが、実機で大きく見えたため14pxに調整した。STACK管理も14px。既存のボタン寸法、位置、操作、disabled状態、`aria-label`、`title`は維持した。
+- 利用者による最終表示確認で受け入れられた。
+
+### 検証
+
+- 没入プレビュー操作の関連Frontendテストは103件成功し、そのうちFilmstripテストは33件成功。Frontend全体実行は2,934件成功・2件skip・1件タイムアウトで、該当テストの単独再実行は成功した。Backend全体テストは長時間終了せず中断し、結果未確認。
+- Xアイコン共通化時の関連Frontendテストは170件成功。TypeScriptチェック、Frontend build、`git diff --check`も成功し、buildには既存の500 kB超JSチャンク警告が残った。
+- その後のFilmstripアイコン14px調整ではFilmstripテスト33件が成功し、`git diff --check`も成功した。この調整後はTypeScript/buildとFrontend・Backend全体テストを再実行していない。
+
 ## STACK作成後のGallery所属情報と再取得（2026-10-14）
 
 ### 現象と診断結果
