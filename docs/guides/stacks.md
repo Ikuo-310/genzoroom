@@ -111,3 +111,7 @@ You can navigate between photos within that stack using the **Left / Right Arrow
 Press **Esc** or **V** to close the immersive preview.
 
 Photos in the Outside Stack Candidates area can also be opened in immersive preview. Double-click a photo, or select it and press **V**.
+
+---
+
+[← Back to README](../../README.md)
