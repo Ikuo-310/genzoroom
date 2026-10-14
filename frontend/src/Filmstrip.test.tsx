@@ -193,6 +193,13 @@ describe('Filmstrip exclusion buttons', () => {
     expect(buttons).toHaveLength(3);
     expect(buttons[0].getAttribute('aria-label')).toBe(language === 'en'
       ? 'Exclude a.jpg from Filmstrip' : 'a.jpgをフィルムストリップから除外');
+    const icon = buttons[0].querySelector('svg')!;
+    expect(icon.getAttribute('width')).toBe('16');
+    expect(icon.getAttribute('height')).toBe('16');
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect([...icon.querySelectorAll('path')].map(path => path.getAttribute('d')))
+      .toEqual(['M18 6 6 18', 'm6 6 12 12']);
+    expect(buttons[0].title).toContain(language === 'en' ? 'Exclude a.jpg from Filmstrip' : 'a.jpgをフィルムストリップから除外');
     expect(item(0).querySelector('.format-badge')?.textContent).toBe('JPEG');
     expect(item(1).querySelector('.format-badge.raw')?.textContent).toBe('DNG');
     expect(host.querySelector('button button')).toBeNull();

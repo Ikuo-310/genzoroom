@@ -26,6 +26,7 @@ import { frontendLogger } from './frontendLogging';
 import { thumbnailUrl } from './thumbnailUrl';
 import { ImmersivePreview } from './ImmersivePreview';
 import { isPrimaryModifier } from './shortcutModifiers';
+import { XIcon } from './XIcon';
 
 const EMPTY_ASSETS: RecentAsset[] = [];
 const DEFAULT_SPLIT_RATIO = 2 / 3;
@@ -703,7 +704,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           <header className="stack-group-header">
             <button type="button" className="stack-icon-button stack-purge-group" disabled={!canEdit || !!group.trashAssetIds?.length}
               title={t(group.trashAssetIds?.length ? 'stackManagement.cancelTrashBeforeEdit' : 'stackManagement.purgeGroup')} aria-label={t('stackManagement.purgeGroup')}
-              onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}>×</button>
+              onClick={() => dispatch({ type: 'purgeGroup', groupId: group.id })}><XIcon size={14} /></button>
             <StackEvidenceHeader group={group} result={draft.writeResults[group.id]} retryAllowed={!unknown} />
             {!isSingletonImmichStack(group) && <button type="button" className="stack-icon-button stack-set-target" disabled={!canEdit} aria-pressed={addTargetStackId === group.id}
               title={t('stackManagement.addTarget')} aria-label={t('stackManagement.addTarget')}
@@ -874,5 +875,5 @@ function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKe
     <span className="stack-filename"><FilenameDisplay filename={asset.filename} /></span>
   </button>{onPurge && <button className="stack-icon-button stack-purge-member" type="button" disabled={disabled || purgeDisabled}
     title={t(purgeDisabled ? 'stackManagement.cancelTrashBeforeEdit' : 'stackManagement.purgeMember', { filename: asset.filename })} aria-label={t('stackManagement.purgeMember', { filename: asset.filename })}
-    onClick={event => { event.stopPropagation(); onPurge(); }}>×</button>}</div>;
+    onClick={event => { event.stopPropagation(); onPurge(); }}><XIcon size={14} /></button>}</div>;
 }

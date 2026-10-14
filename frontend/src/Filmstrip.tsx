@@ -9,6 +9,7 @@ import { revealFilmstripItem } from './filmstripNavigation';
 import { thumbnailUrl } from './thumbnailUrl';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
+import { XIcon } from './XIcon';
 
 export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, viewerFocusMode = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
@@ -86,7 +87,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, exclud
           title={asset.id === activeAssetId
             ? shortcut.title(t('workspace.excludePhoto', { filename: asset.filename }), 'filmstripExclude')
             : t('workspace.excludePhoto', { filename: asset.filename })}
-          onClick={() => onExclude(asset.id)}><span aria-hidden="true">×</span></button>}
+          onClick={() => onExclude(asset.id)}><XIcon /></button>}
       </div>)}
     </div>
   </section>;

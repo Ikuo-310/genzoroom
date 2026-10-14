@@ -7,11 +7,11 @@ afterEach(() => { document.body.replaceChildren(); });
 it('keeps Stack group and photo close/add controls at their compact icon dimensions', () => {
   document.body.innerHTML = `<main class="stack-management-page">
     <header class="stack-group-header">
-      <button class="stack-icon-button stack-purge-group">×</button>
+      <button class="stack-icon-button stack-purge-group"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
       <button class="stack-icon-button stack-set-target">+</button>
     </header>
     <div class="stack-photo-wrapper"><button class="stack-photo"></button>
-      <button class="stack-icon-button stack-purge-member">×</button>
+      <button class="stack-icon-button stack-purge-member"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
     </div>
   </main>`;
 
@@ -26,6 +26,13 @@ it('keeps Stack group and photo close/add controls at their compact icon dimensi
   expect(getComputedStyle(photoClose).position).toBe('absolute');
   expect(getComputedStyle(photoClose).left).toBe('4px');
   expect(getComputedStyle(photoClose).top).toBe('4px');
+  for (const selector of ['.stack-purge-group', '.stack-purge-member']) {
+    const button = document.querySelector<HTMLElement>(selector)!;
+    expect(getComputedStyle(button).display).toBe('grid');
+    expect(getComputedStyle(button).placeItems).toBe('center');
+    expect(button.querySelector('svg')?.getAttribute('width')).toBe('14');
+    expect(button.querySelector('svg')?.getAttribute('height')).toBe('14');
+  }
 });
 
 it('matches Gallery spacing and gives independent Stack frames contained scrollbars', () => {

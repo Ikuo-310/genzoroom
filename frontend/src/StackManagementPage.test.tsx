@@ -770,6 +770,20 @@ it('confirms before redetection and restores the latest Immich primary on Contin
 
 it('changes Cover only on member click and keeps evidence; member Purge does not toggle selection', async () => {
  await mount('/stack', {selectedAssets: [...photos, ...singles]});
+ const groupPurge=host.querySelector<HTMLButtonElement>('.stack-purge-group')!;
+ const memberPurge=host.querySelector<HTMLButtonElement>('.stack-purge-member')!;
+ for (const [purge, label, title] of [
+  [groupPurge, i18n.t('stackManagement.purgeGroup'), i18n.t('stackManagement.purgeGroup')],
+  [memberPurge, i18n.t('stackManagement.purgeMember', { filename: 'selected.dng' }), i18n.t('stackManagement.purgeMember', { filename: 'selected.dng' })],
+ ] as const) {
+  expect(purge.getAttribute('aria-label')).toBe(label);
+  expect(purge.title).toBe(title);
+  expect(purge.disabled).toBe(false);
+  expect(purge.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+  expect(purge.querySelector('svg')?.querySelectorAll('path')).toHaveLength(2);
+ }
+ expect(groupPurge.querySelector('svg')?.getAttribute('width')).toBe('14');
+ expect(memberPurge.querySelector('svg')?.getAttribute('width')).toBe('14');
  expect(host.querySelector('[aria-label="Current COVER: selected.jpg"]')).not.toBeNull();
  await click('[aria-label="Set selected.dng as COVER"]');
  expect(host.querySelector('.stack-cover .stack-filename')?.textContent).toBe('selected.dng');
