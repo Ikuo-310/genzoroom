@@ -31,6 +31,8 @@ Immichとの連携に特化しているため、外部からの写真の取り�
 
 ### 〇 STACK管理 〇
 
+詳しい操作方法は[STACK管理ガイド](docs/guides/stacks.ja.md)を参照してください。
+
 ![GenzoRoomのSTACK管理タブ](docs/images/Stack_ja.png)  
 *既存STACKの確認、自動候補の検出、手動での組み換え、カバー変更、不要写真のゴミ箱予約に対応したSTACK管理画面。*
 

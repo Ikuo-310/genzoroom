@@ -32,6 +32,8 @@ Photo thumbnails display badges indicating file formats such as JPEG and RAW, as
 
 ### 〇 Stack Management 〇
 
+For detailed instructions, see the [Stack Management Guide](docs/guides/stacks.md).
+
 ![GenzoRoom Stack Management](docs/images/Stack_en.png)  
 *Stack Management workspace showing existing stacks, automatically detected candidates, manual reorganization, cover changes, and photos marked for trash.*
 
