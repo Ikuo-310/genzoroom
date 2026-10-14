@@ -57,7 +57,7 @@ type PhotoView = {
   selection: ReturnType<typeof usePhotoSelection>;
 };
 type GalleryLoader = 'recent' | 'favorites' | 'albums' | 'album' | 'heatmap' | 'day';
-type GalleryRefresh = { key: string; loader: GalleryLoader; id: number; pending: number; failed: boolean; controllers: Set<AbortController> };
+type GalleryRefresh = { key: string; loader: GalleryLoader; id: number; writeRevision: number; pending: number; failed: boolean; controllers: Set<AbortController> };
 type ImmersiveSession = { assets: RecentAsset[]; startAssetId: string; source: 'gallery' | 'exportManagement' };
 
 export function GalleryPage({ active = true }: { active?: boolean } = {}) {
@@ -145,7 +145,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   // Management navigation preserves the browsing tab without entering photo filters or route state.
   const [showExport, setShowExport] = useState(false);
   const [showStacks, setShowStacks] = useState(false);
-  const galleryReloadPending = useRef(false);
+  const galleryReloadPending = useRef(new Set<GalleryLoader>());
   const [stackWriteRevision, setStackWriteRevision] = useState(0);
   const [stackSession, setStackSession] = useState<{ assets: RecentAsset[]; generation: number } | null>(null);
   // Keep the ratio above the keyed editor so a new asset session retains the SPA layout preference.
@@ -294,7 +294,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     // Lock before scheduling React state: a click and shortcut in one turn must share one request.
     const calendarRevision = activeTab === 'calendar' ? ++calendarDataRevisionRef.current : calendarDataRevisionRef.current;
     const operation: GalleryRefresh = { key: refreshContext, loader, id: ++refreshId.current,
-      pending: activeTab === 'calendar' ? selectedCalendarDate ? 3 : 2 : 1, failed: false, controllers: new Set() };
+      writeRevision: stackWriteRevision, pending: activeTab === 'calendar' ? selectedCalendarDate ? 3 : 2 : 1, failed: false, controllers: new Set() };
     refreshOperation.current = operation;
     setRefreshing(true);
     setRefreshFailed(false);
@@ -325,18 +325,6 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     return true;
   }
   refreshPhotosRef.current = refreshPhotos;
-
-  useEffect(() => {
-    if (!galleryReloadPending.current || !active || showStacks || showExport) return;
-    if (!canRefreshPhotos) return;
-    const operation = refreshOperation.current;
-    if (operation) {
-      // A manual refresh of this exact view already fulfills the deferred Stack reload.
-      if (operation.key === refreshContext) galleryReloadPending.current = false;
-      return;
-    }
-    if (refreshPhotosRef.current()) galleryReloadPending.current = false;
-  }, [active, showStacks, showExport, viewKey, canRefreshPhotos, galleryViewState, refreshContext, refreshing, stackWriteRevision]);
 
   useEffect(() => { setWorkspaceOpenError(null); }, [viewKey]);
   useLayoutEffect(() => {
@@ -421,6 +409,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }, [connectionAttempt]);
 
   useEffect(() => {
+    galleryReloadPending.current.delete('recent');
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
@@ -451,6 +440,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   useEffect(() => {
     // Returning from an album detail should reuse the already loaded list.
     if (activeTab !== 'albums' || (hasLoadedAlbums.current && refreshOperation.current?.loader !== 'albums')) return;
+    galleryReloadPending.current.delete('albums');
     const controller = new AbortController();
     let active = true;
     const manual = refreshFor('albums', controller);
@@ -474,6 +464,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   useEffect(() => {
     if (activeTab !== 'favorites' || (hasLoadedFavorites.current && refreshOperation.current?.loader !== 'favorites')) return;
+    galleryReloadPending.current.delete('favorites');
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
@@ -499,6 +490,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   useEffect(() => {
     if (activeTab !== 'albums' || selectedAlbum === null) return;
+    galleryReloadPending.current.delete('album');
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
@@ -545,6 +537,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   useEffect(() => {
     if (!calendarMinYearReady) return;
     if (activeTab !== 'calendar' || selectedCalendarDate !== null) return;
+    galleryReloadPending.current.delete('heatmap');
     const controller = new AbortController();
     let active = true;
     const requestId = ++calendarHeatmapRequestId.current;
@@ -567,6 +560,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   useEffect(() => {
     if (activeTab !== 'calendar' || selectedCalendarDate === null) return;
+    galleryReloadPending.current.delete('day');
     const controller = new AbortController();
     let active = true;
     const stackSnapshotRequest = beginGalleryStackSnapshotRequest();
@@ -591,6 +585,22 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     return () => { active = false; controller.abort(); finishGalleryStackSnapshotRequest(stackSnapshotRequest); };
   }, [activeTab, selectedCalendarDate, refreshRevisions.day]);
 
+  // Ordinary view-transition loads run first and also fulfill post-write freshness.
+  // Scheduling a second load in the same commit would share a refresh operation and finish it twice.
+  useEffect(() => {
+    if (!active || showStacks || showExport || !canRefreshPhotos) return;
+    const loader: GalleryLoader = activeTab === 'recent' ? 'recent' : activeTab === 'favorites' ? 'favorites'
+      : activeTab === 'albums' ? selectedAlbum ? 'album' : 'albums' : selectedCalendarDate ? 'day' : 'heatmap';
+    if (!galleryReloadPending.current.has(loader)) return;
+    const operation = refreshOperation.current;
+    if (operation) {
+      // A read started before the write cannot establish post-write ownership.
+      if (operation.key === refreshContext && operation.writeRevision === stackWriteRevision) galleryReloadPending.current.delete(loader);
+      return;
+    }
+    if (refreshPhotosRef.current()) galleryReloadPending.current.delete(loader);
+  }, [active, showStacks, showExport, viewKey, canRefreshPhotos, galleryViewState, refreshContext, refreshing, stackWriteRevision]);
+
   // The active view owns its selection; shared asset IDs never carry selection across views.
   const currentAssets = photoView?.assets ?? [];
   const cardEditStatuses = aggregateStackEditStatuses(currentAssets, editStatuses);
@@ -612,9 +622,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   [activeTab, assets, favoriteAssets, selectedAlbum, albumAssets, selectedCalendarDate, calendarAssets]);
   function sessionExclusionOwner(asset: RecentAsset) {
     // Filmstrip members are not Gallery cards; use the shared accepted owner snapshot.
-    const current = retainedAssets.find(candidate => candidate.id.toLowerCase() === asset.id.toLowerCase());
+    const current = retainedAssets.find(candidate => candidate.id.toLowerCase() === asset.id.toLowerCase())
+      // Home returns Stack covers only; an old single or Filmstrip member now belongs to its cover.
+      ?? retainedAssets.find(candidate => candidate.stackMemberIds?.some(id => id.toLowerCase() === asset.id.toLowerCase()));
     if (current) return current;
-    const owner = stackSelections.currentCard(asset);
+    const owner = stackSelections.currentOwner(asset);
     // A refreshed owner that no longer contains this member cannot authorize its old session entry.
     return asset.stackId && owner.stackMemberIds && !owner.stackMemberIds.some(id => id.toLowerCase() === asset.id.toLowerCase())
       ? { ...asset, stackMemberIds: null, stackMembers: null } : owner;
@@ -1049,7 +1061,6 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     if (tab === 'stacks') { openStacks(); return; }
     if (tab === 'export') {
       if (!showExport) setExportThumbnailRevision(revision => revision + 1);
-      if (showStacks) galleryReloadPending.current = false;
       prepareScrollTransition('export');
       setShowStacks(false);
       setShowExport(true);
@@ -1542,8 +1553,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       {stackSession && <div id="home-stacks-panel" className="home-stacks-panel" role="tabpanel" aria-labelledby="home-stacks-tab" hidden={!showStacks}>
         <StackManagementPage key={stackSession.generation} sessionAssets={stackSession.assets} active={active && showStacks}
           splitRatio={stackSplitRatio} onSplitRatioChange={setStackSplitRatio} onWriteComplete={() => {
-            if (showExportRef.current) return;
-            galleryReloadPending.current = true;
+            // Every retained browsing cache may contain pre-write ownership, not just the return view.
+            galleryReloadPending.current = new Set(['recent', 'favorites', 'albums', 'album', 'day', 'heatmap']);
             setStackWriteRevision(revision => revision + 1);
           }} />
       </div>}

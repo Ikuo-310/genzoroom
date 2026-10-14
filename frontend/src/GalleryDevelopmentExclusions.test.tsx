@@ -149,6 +149,40 @@ function expandedFamily() {
 }
 
 describe('cross-phase exclusion session regressions', () => {
+  it('reconciles newly stacked session members after Calendar Reload and on entering cached Recent', async () => {
+    frontendLogger.setLevel('debug');
+    await mount('calendar'); await select(); await select(1);
+    const stale = deferred<RecentAsset[]>(); api.photos.mockReturnValueOnce(stale.promise);
+    await clickSelector('.gallery-refresh'); await clickSelector('#home-stacks-tab');
+    const { stackId } = expandedFamily();
+    api.exclusions.mockImplementation(async (targets: { kind: string; id: string }[]) => targets.map(target => ({ ...target,
+      excluded: false, configuration: target.kind === 'stack' ? 'confirmed' : ids.slice(0, 2).includes(target.id) ? 'stacked' : 'single' })));
+    await clickSelector('.stack-test-write'); await clickSelector('#home-calendar-tab');
+    await clickSelector('.gallery-refresh');
+    await act(async () => stale.resolve(photos));
+    expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.textContent).not.toContain('Could not confirm development exclusion status');
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
+    expect(frontendLogger.getEntries().filter(entry => entry.event === 'state.unconfirmed'
+      && entry.context?.reason === 'ownership_conflict')).toHaveLength(0);
+    api.heatmap.mockResolvedValue({ year: 2026, month: 10, days: [6, 7].map(day => ({ date: `2026-10-0${day}`, hasAssets: true, count: 4 })) });
+    const latest = api.photos.getMockImplementation()!;
+    api.photos.mockImplementation((...args) => args[0] === '2026-10-07' ? Promise.resolve([photos[2]]) : latest(...args));
+    await clickSelector('.album-back');
+    const dayButton = (day: string) => [...host.querySelectorAll<HTMLButtonElement>('.calendar-day.has-assets')]
+      .find(button => button.getAttribute('aria-label')?.includes(day))!;
+    await click(dayButton('2026-10-07'));
+    expect(host.textContent).not.toContain('Could not confirm development exclusion status');
+    await clickSelector('.album-back'); await click(dayButton('2026-10-06'));
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
+    await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('#home-stacks-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-members')).toContain(ids[0]);
+    await clickSelector('#home-recent-tab');
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
+    expect(api.exclusions.mock.calls.at(-1)?.[0]).toEqual(expect.arrayContaining([expect.objectContaining({ id: stackId, kind: 'stack' })]));
+    expect(api.exclusions.mock.calls.at(-1)?.[0].some((target: { id: string; kind: string }) => target.kind === 'asset' && ids.slice(0, 2).includes(target.id))).toBe(false);
+  });
   it('replaces a dissolved Stack draft with the latest singles and does not reintroduce an excluded member', async () => {
     expandedFamily(); await mount(); await select(); await clickSelector('#home-stacks-tab');
     expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-members')).toBe(ids.slice(0, 2).join(','));

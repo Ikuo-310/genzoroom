@@ -151,11 +151,42 @@ describe('Gallery manual refresh', () => {
     expect(page.scrollTop).toBe(0); expect(content.scrollTop).toBe(240);
   });
 
-  it('does not reload Gallery when returning from Export after a Stack write', async () => {
+  it('preserves the Stack-write reload requirement when returning through Export', async () => {
     await mount(); const recentCalls = api.recent.mock.calls.length;
     await click('#home-stacks-tab'); await click('#test-stack-write-complete');
     await click('#home-export-tab'); await click('#home-recent-tab');
-    expect(api.recent).toHaveBeenCalledTimes(recentCalls);
+    expect(api.recent).toHaveBeenCalledTimes(recentCalls + 1);
+  });
+
+  it('reloads each previously cached browsing view once after a Stack write', async () => {
+    await mount(); await openView('favorites'); await openView('calendar-day');
+    const beforeRecent = api.recent.mock.calls.length, beforeFavorites = api.favorites.mock.calls.length;
+    await click('#home-stacks-tab'); await click('#test-stack-write-complete'); await click('#home-calendar-tab');
+    expect(api.recent).toHaveBeenCalledTimes(beforeRecent);
+    expect(api.favorites).toHaveBeenCalledTimes(beforeFavorites);
+    await click('#home-recent-tab'); expect(api.recent).toHaveBeenCalledTimes(beforeRecent + 1);
+    await click('#home-favorites-tab'); expect(api.favorites).toHaveBeenCalledTimes(beforeFavorites + 1);
+    await click('#home-recent-tab'); expect(api.recent).toHaveBeenCalledTimes(beforeRecent + 1);
+    await click('#home-favorites-tab'); expect(api.favorites).toHaveBeenCalledTimes(beforeFavorites + 1);
+  });
+
+  it('records a send completing while Export is visible and reloads only after returning to Gallery', async () => {
+    await mount(); const before = api.recent.mock.calls.length;
+    await click('#home-stacks-tab'); await click('#home-export-tab'); await click('#test-stack-write-complete');
+    expect(api.recent).toHaveBeenCalledTimes(before);
+    await click('#home-recent-tab'); expect(api.recent).toHaveBeenCalledTimes(before + 1);
+  });
+
+  it('does not let a read started before a late Stack-write completion fulfill its reload', async () => {
+    await mount(); await click('#home-stacks-tab'); await click('#home-recent-tab');
+    const old = deferred<RecentAsset[]>(); api.recent.mockReturnValueOnce(old.promise);
+    await click('.gallery-refresh');
+    // The retained manager can finish its send while Gallery is already visible.
+    await click('#test-stack-write-complete');
+    const before = api.recent.mock.calls.length;
+    await act(async () => old.resolve(photos));
+    expect(api.recent).toHaveBeenCalledTimes(before + 1);
+    expect(refreshButton().disabled).toBe(false);
   });
 
   it.each(['recent', 'favorites', 'album-list', 'album-detail', 'calendar-year', 'calendar-month', 'calendar-day'])

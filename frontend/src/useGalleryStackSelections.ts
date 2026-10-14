@@ -79,8 +79,9 @@ export function acceptGalleryStackSnapshots(assets: readonly RecentAsset[], requ
     grouped.set(key, selectGalleryAssetTargets(asset, 'both').status === 'ready' ? asset : null);
   }
   for (const [stackId, snapshot] of currentStackSnapshots) {
-    const primaryId = snapshot.card?.id.toLowerCase();
-    if (primaryId && returnedStackByAssetId.has(primaryId) && returnedStackByAssetId.get(primaryId) !== stackId) {
+    const memberIds = snapshot.card?.stackMemberIds ?? (snapshot.card ? [snapshot.card.id] : []);
+    // Partial Gallery views can establish that a hidden session member moved without returning its old cover.
+    if (!grouped.has(stackId) && memberIds.some(id => returnedStackByAssetId.has(id.toLowerCase()) && returnedStackByAssetId.get(id.toLowerCase()) !== stackId)) {
       grouped.set(stackId, null);
     }
   }
@@ -101,6 +102,13 @@ function currentCardFor(card: RecentAsset): RecentAsset {
   if (!current) return card;
   // A newer tab response is the shared candidate source even while another tab keeps older display data.
   return current.card ?? { ...card, stackMembers: null };
+}
+
+export function currentGalleryStackOwner(asset: RecentAsset): RecentAsset {
+  const owners = [...currentStackSnapshots.values()].flatMap(snapshot => snapshot.card?.stackMemberIds
+    ?.some(id => id.toLowerCase() === asset.id.toLowerCase()) ? [snapshot.card] : []);
+  // Session singles can become hidden members. Only unique accepted ownership may replace them.
+  return owners.length === 1 ? owners[0] : currentCardFor(asset);
 }
 
 function canReconcile(card: RecentAsset): boolean {
@@ -161,5 +169,5 @@ export function useGalleryStackSelections() {
   const selectionRevision = useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => revision, () => revision);
   return { revision: selectionRevision, resolve: resolveGalleryStackSelection, setManualSelection: setManualGalleryStackSelection,
     clearManualSelection: clearManualGalleryStackSelection, getManualSelection: getManualGalleryStackSelection,
-    currentCard: currentCardFor };
+    currentCard: currentCardFor, currentOwner: currentGalleryStackOwner };
 }

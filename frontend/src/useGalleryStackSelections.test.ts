@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
 import { resolveGalleryStackSelection, restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection,
-  acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
+  acceptGalleryStackSnapshots, beginGalleryStackSnapshotRequest, finishGalleryStackSnapshotRequest, currentGalleryStackOwner, GALLERY_STACK_SELECTION_SESSION_KEY } from './useGalleryStackSelections';
 
 const ids = Array.from({ length: 4 }, (_, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
 const stackId = '10000000-0000-4000-8000-000000000001';
@@ -17,6 +17,57 @@ beforeEach(() => { sessionStorage.clear(); restoreGalleryStackSelectionsFromSess
 afterEach(() => { sessionStorage.clear(); restoreGalleryStackSelectionsFromSession(); });
 
 describe('Gallery Stack session selections', () => {
+  it('resolves old session singles to unique accepted owners without changing the retained assets', () => {
+    const cover = stack();
+    const single = { ...cover.stackMembers![1], stackId: null, primaryAssetId: null, stackAssetCount: null };
+    expect(currentGalleryStackOwner(single)).toBe(single);
+    acceptGalleryStackSnapshots([cover], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(cover);
+    expect(single.stackId).toBeNull();
+    const incomplete = { ...cover, stackMembers: null };
+    acceptGalleryStackSnapshots([incomplete], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(single);
+  });
+
+  it('does not select an arbitrary owner from conflicting accepted snapshots', () => {
+    const cover = stack();
+    const otherId = '10000000-0000-4000-8000-000000000002';
+    const otherMembers = cover.stackMembers!.map(asset => ({ ...asset, stackId: otherId, primaryAssetId: ids[1] }));
+    const other = { ...otherMembers[1], stackMembers: otherMembers, stackMemberIds: ids.slice(0, 3) };
+    const single = { ...cover.stackMembers![2], stackId: null, primaryAssetId: null, stackAssetCount: null };
+    acceptGalleryStackSnapshots([cover, other], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(single);
+  });
+
+  it('does not reuse a cached owner contradicted by a newer member-only Gallery response', () => {
+    const cover = stack();
+    const single = { ...cover.stackMembers![1], stackId: null, primaryAssetId: null, stackAssetCount: null };
+    acceptGalleryStackSnapshots([cover], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(cover);
+    acceptGalleryStackSnapshots([single], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(single);
+    expect(resolveGalleryStackSelection(cover, 'both').status).toBe('unavailable');
+  });
+
+  it('keeps a complete replacement cover when the same response returns a removed member as single', () => {
+    const cover = stack();
+    const single = { ...cover.stackMembers![2], stackId: null, primaryAssetId: null, stackAssetCount: null };
+    acceptGalleryStackSnapshots([cover], beginGalleryStackSnapshotRequest());
+    const replacement = stack([], ids.slice(0, 2));
+    acceptGalleryStackSnapshots([replacement, single], beginGalleryStackSnapshotRequest());
+    expect(currentGalleryStackOwner(single)).toBe(single);
+    expect(resolveGalleryStackSelection(cover, 'both').assets?.map(asset => asset.id)).toEqual(ids.slice(0, 2));
+  });
+
+  it('ignores a cancelled old single response after a newer Stack owner was accepted', () => {
+    const oldRequest = beginGalleryStackSnapshotRequest();
+    const cover = stack();
+    const single = { ...cover, stackId: null, primaryAssetId: null, stackMemberIds: null, stackMembers: null, stackAssetCount: null };
+    acceptGalleryStackSnapshots([cover], beginGalleryStackSnapshotRequest());
+    finishGalleryStackSnapshotRequest(oldRequest);
+    acceptGalleryStackSnapshots([single], oldRequest);
+    expect(currentGalleryStackOwner(single)).toBe(cover);
+  });
   it('stores only manual choices and retains an empty manual choice', () => {
     const cover = stack();
     expect(setManualGalleryStackSelection(cover, new Set([ids[1]]))).toBe(true);
