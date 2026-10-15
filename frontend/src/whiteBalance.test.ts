@@ -23,30 +23,30 @@ describe('Temperature preview', () => {
     expect(output).not.toBe(pixels);
     expect(pixels).toEqual(original);
   });
-  it.each([25, 50, 100])('warms negative and cools positive %s with reciprocal gains', (value) => {
+  it.each([25, 50, 100])('cools negative and warms positive %s with reciprocal gains', (value) => {
     const source = new Uint8ClampedArray([100, 100, 100, 17]);
-    const warm = renderAdjustments(source, recipe(-value));
-    const cool = renderAdjustments(source, recipe(value));
-    expect(warm[0]).toBeGreaterThan(100);
-    expect(warm[2]).toBeLessThan(100);
+    const cool = renderAdjustments(source, recipe(-value));
+    const warm = renderAdjustments(source, recipe(value));
     expect(cool[0]).toBeLessThan(100);
     expect(cool[2]).toBeGreaterThan(100);
-    expect(warm[0]).toBe(cool[2]);
-    expect(warm[2]).toBe(cool[0]);
-    expect(warm[1]).toBe(100);
+    expect(warm[0]).toBeGreaterThan(100);
+    expect(warm[2]).toBeLessThan(100);
+    expect(cool[0]).toBe(warm[2]);
+    expect(cool[2]).toBe(warm[0]);
     expect(cool[1]).toBe(100);
+    expect(warm[1]).toBe(100);
     const positive = temperatureGains(value);
     const negative = temperatureGains(-value);
     expect(positive.red * negative.red).toBeCloseTo(1, 12);
     expect(positive.blue * negative.blue).toBeCloseTo(1, 12);
     expect(positive.green).toBe(1);
     // Check the rendered linear-light gain, allowing for final 8-bit quantization.
-    expect(decode(cool[0]) / decode(100)).toBeCloseTo(positive.red, 1);
-    expect(decode(cool[2]) / decode(100)).toBeCloseTo(positive.blue, 1);
+    expect(decode(warm[0]) / decode(100)).toBeCloseTo(positive.red, 1);
+    expect(decode(warm[2]) / decode(100)).toBeCloseTo(positive.blue, 1);
   });
   it('uses moderate endpoint gains', () => {
-    expect(temperatureGains(100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
-    expect(temperatureGains(-100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
+    expect(temperatureGains(100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
+    expect(temperatureGains(-100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
   });
   it.each([-100, 100])('clips safely and preserves Green and alpha at %s', (value) => {
     const source = new Uint8ClampedArray([...pixels, 0, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 1, 0, 0, 255, 254]);
@@ -59,7 +59,7 @@ describe('Temperature preview', () => {
       expect(output[i + 2]).toBeLessThanOrEqual(255);
     }
     expect(output.slice(pixels.length, pixels.length + 4)).toEqual(new Uint8ClampedArray([0, 0, 0, 0]));
-    expect(output[pixels.length + (value < 0 ? 4 : 6)]).toBe(255);
+    expect(output[pixels.length + (value < 0 ? 6 : 4)]).toBe(255);
     expect(source).toEqual(original);
   });
   it.each([NaN, Infinity, -Infinity])('treats non-finite %s as neutral', (value) => {

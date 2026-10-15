@@ -97,14 +97,14 @@ describe('Highlights Tint pixel stage', () => {
 });
 
 describe('Highlights Temperature pixel stage', () => {
-  it('is byte-identical at zero and uses the existing warm/cool endpoint gains', () => {
+  it('is byte-identical at zero and uses cool-negative, warm-positive endpoint gains', () => {
     const source = new Uint8ClampedArray([210, 210, 210, 91, 140, 140, 140, 213]);
     expect(defaultRecipe().adjustments.highlightsTemperature).toBe(0);
     expect(renderAdjustments(source, withHighlightsTemperature(0))).toEqual(source);
-    expect(temperatureGains(-100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
-    expect(temperatureGains(100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
-    const warm = renderAdjustments(source, withHighlightsTemperature(-100));
-    const cool = renderAdjustments(source, withHighlightsTemperature(100));
+    expect(temperatureGains(-100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
+    expect(temperatureGains(100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
+    const cool = renderAdjustments(source, withHighlightsTemperature(-100));
+    const warm = renderAdjustments(source, withHighlightsTemperature(100));
     expect(warm[0]).toBeGreaterThan(source[0]);
     expect(warm[2]).toBeLessThan(source[2]);
     expect(cool[0]).toBeLessThan(source[0]);
@@ -227,10 +227,10 @@ describe('Midtones Temperature pixel stage', () => {
     const source = new Uint8ClampedArray([127, 127, 127, 91, 255, 255, 255, 213]);
     expect(defaultRecipe().adjustments.midtonesTemperature).toBe(0);
     expect(renderAdjustments(source, withMidtonesTemperature(0))).toEqual(source);
-    const warm = renderAdjustments(source, withMidtonesTemperature(-100));
-    const cool = renderAdjustments(source, withMidtonesTemperature(100));
-    expect(temperatureGains(-100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
-    expect(temperatureGains(100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
+    const cool = renderAdjustments(source, withMidtonesTemperature(-100));
+    const warm = renderAdjustments(source, withMidtonesTemperature(100));
+    expect(temperatureGains(-100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
+    expect(temperatureGains(100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
     expect(warm[0]).toBeGreaterThan(127);
     expect(warm[2]).toBeLessThan(127);
     expect(cool[0]).toBeLessThan(127);
@@ -295,12 +295,12 @@ describe('Shadows Temperature pixel stage', () => {
     expect(renderAdjustments(source, defaultRecipe())).toEqual(source);
   });
 
-  it('uses the same warm/cool direction and endpoint gains as global Temperature', () => {
+  it('uses the same cool-negative, warm-positive direction as global Temperature', () => {
     const source = new Uint8ClampedArray([45, 45, 45, 123]);
-    const warm = renderAdjustments(source, withShadowsTemperature(-100));
-    const cool = renderAdjustments(source, withShadowsTemperature(100));
-    expect(temperatureGains(-100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
-    expect(temperatureGains(100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
+    const cool = renderAdjustments(source, withShadowsTemperature(-100));
+    const warm = renderAdjustments(source, withShadowsTemperature(100));
+    expect(temperatureGains(-100)).toEqual({ red: 2 / 3, green: 1, blue: 1.5 });
+    expect(temperatureGains(100)).toEqual({ red: 1.5, green: 1, blue: 2 / 3 });
     expect(warm[0]).toBeGreaterThan(source[0]);
     expect(warm[2]).toBeLessThan(source[2]);
     expect(cool[0]).toBeLessThan(source[0]);

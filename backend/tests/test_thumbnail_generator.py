@@ -131,6 +131,13 @@ def test_reads_latest_recipe_and_supports_v17(db):
     assert edit_store.get_edit_state(ASSET) == saved
 
 
+def test_thumbnail_preview_renderer_uses_warm_positive_white_balance():
+    recipe = snapshot(exposure=0)["currentRecipe"]
+    recipe["adjustments"]["temperature"] = 100
+    rendered = decode_jpeg(generator._render_preview(jpeg(), recipe))
+    assert rendered.pixels[0] > rendered.pixels[2]
+
+
 def test_resize_precedes_renderer(db, monkeypatch):
     save(snapshot())
     original = generator.JpegRenderer.render

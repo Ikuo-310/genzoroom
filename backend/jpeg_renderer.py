@@ -93,7 +93,7 @@ def _grade(pixels, scope, temperature, tint):
     active = weight > 0
     # Both members of a pair use the pre-Temperature weight, even after byte clipping.
     if temperature:
-        for channel, sign in ((0, -1), (2, 1)):
+        for channel, sign in ((0, 1), (2, -1)):
             gain = (1.5 ** (sign * temperature / 100)) ** weight
             pixels[active, channel] = _gain(pixels[active, channel], gain[active])
     if tint:
@@ -130,8 +130,8 @@ class JpegRenderer:
         luts = np.tile(channels, (3, 1))
         temperature, tint = adjustments["temperature"], adjustments["tint"]
         if temperature:
-            luts[0] = _gain(luts[0], 1.5 ** (-temperature / 100))
-            luts[2] = _gain(luts[2], 1.5 ** (temperature / 100))
+            luts[0] = _gain(luts[0], 1.5 ** (temperature / 100))
+            luts[2] = _gain(luts[2], 1.5 ** (-temperature / 100))
         if tint:
             for channel, sign in ((0, 1), (1, -1), (2, 1)):
                 luts[channel] = _gain(luts[channel], 1.3 ** (sign * tint / 100))

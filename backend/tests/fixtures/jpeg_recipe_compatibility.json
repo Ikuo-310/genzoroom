@@ -1,5 +1,5 @@
 {
-  "source": "frontend/src/adjustmentPipeline.test.ts compatibilityCases (unchanged frozen SHA-256 outputs)",
+  "source": "frontend/src/adjustmentPipeline.test.ts compatibilityCases (frozen SHA-256 outputs for current Temperature direction)",
   "cases": [
     {
       "name": "global Temperature/Tint endpoints",
@@ -7,7 +7,7 @@
         "temperature": 100,
         "tint": -100
       },
-      "hash": "fd3a6939bce3efbc07ec0d521440240e409aeb4ceab99f1c9ca7f7e6f95d5125"
+      "hash": "1928d706e493501db6a7899a7a035f735940a443aa7db758f5bda8ef706c58c5"
     },
     {
       "name": "all three grading pairs",
@@ -19,7 +19,7 @@
         "highlightsTemperature": -100,
         "highlightsTint": 100
       },
-      "hash": "507131fed025d623d64d882e5e5149201e5407c7f5e3afa451950424e5fba584"
+      "hash": "f6dd9338e7b46e1b4b0cb460604fb91e021e95032d9bb92611dd54ece9803275"
     },
     {
       "name": "all sixteen adjustments",
@@ -41,7 +41,7 @@
         "vibrance": 25,
         "saturation": 15
       },
-      "hash": "992c0c018728d043f04e930266518f8b8a4565cc6117be241ffe5eb93414af4e"
+      "hash": "7490830e8fe640b4f812d8386ec3e5056981a5eff8e4268b82a4dc4fc6e51427"
     },
     {
       "name": "grading -100/-100",
@@ -49,7 +49,7 @@
         "shadowsTemperature": -100,
         "shadowsTint": -100
       },
-      "hash": "c13c74cb8b2d1f107d52e25aaec856d892b90e633a690966e1882838c39d4c2c"
+      "hash": "7af1b415bd96968e81b389f0609353a40eeef4e64e4fc80c0ef068b8a0d5c6b1"
     },
     {
       "name": "grading -100/0",
@@ -57,7 +57,7 @@
         "shadowsTemperature": -100,
         "shadowsTint": 0
       },
-      "hash": "8f032e6bdf0d4e05798d76016116493a2dd02d7d48a10264522cfb94e3e44df9"
+      "hash": "ba7b21717337846349b548ac7cc0851029bcea1618dcdad28e6690754ff8c07e"
     },
     {
       "name": "grading -100/100",
@@ -65,7 +65,7 @@
         "shadowsTemperature": -100,
         "shadowsTint": 100
       },
-      "hash": "6d09adf6c097b5b7fe25d2c54edad80509777382c483985ee7fda9e49163e218"
+      "hash": "456d2e6839c7975f731752eb862a35e183687a4eb04a5b186f3261a02dde459c"
     },
     {
       "name": "grading 0/-100",
@@ -89,7 +89,7 @@
         "shadowsTemperature": 100,
         "shadowsTint": -100
       },
-      "hash": "7af1b415bd96968e81b389f0609353a40eeef4e64e4fc80c0ef068b8a0d5c6b1"
+      "hash": "c13c74cb8b2d1f107d52e25aaec856d892b90e633a690966e1882838c39d4c2c"
     },
     {
       "name": "grading 100/0",
@@ -97,7 +97,7 @@
         "shadowsTemperature": 100,
         "shadowsTint": 0
       },
-      "hash": "ba7b21717337846349b548ac7cc0851029bcea1618dcdad28e6690754ff8c07e"
+      "hash": "8f032e6bdf0d4e05798d76016116493a2dd02d7d48a10264522cfb94e3e44df9"
     },
     {
       "name": "grading 100/100",
@@ -105,7 +105,7 @@
         "shadowsTemperature": 100,
         "shadowsTint": 100
       },
-      "hash": "456d2e6839c7975f731752eb862a35e183687a4eb04a5b186f3261a02dde459c"
+      "hash": "6d09adf6c097b5b7fe25d2c54edad80509777382c483985ee7fda9e49163e218"
     },
     {
       "name": "identity",

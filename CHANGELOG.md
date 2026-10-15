@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Standardized White Balance and 3WAY Color Grading Temperature so negative values cool toward blue and positive values warm toward red.
 - Anshitsu Immersive Preview now moves between photos with unmodified Left / Right arrows; normal slider arrows and Primary+Shift photo navigation remain available.
 - Unified the X icons for Anshitsu Filmstrip exclusion and Stack group/member removal as centered shared SVGs.
 
@@ -147,9 +148,9 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 - A backend SQLite edit-state store and GET/PUT API with versioned snapshot validation, optimistic revision checks, and idempotent last-save-ID retries. When a response is lost, the frontend replays the exact snapshot, expected revision, and save ID before sending newer edits; genuine revision conflicts are not merged.
 - Before / After comparison in the Anshitsu viewer, including a hold-Backslash shortcut. It switches the displayed preview without changing the recipe or History.
 - Separate Shadows, Midtones, and Highlights ON/OFF switches within Color Grading. Each bypasses its own Temperature and Tint while retaining both values; the parent Color Grading switch still bypasses all three. Switching is undoable.
-- 3WAY Color Grading with Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta) for Shadows, Midtones, and Highlights. The six controls use integer steps, default to zero, and share each range's luminance weight. Category bypass, value resets, localized History, Undo/Redo, and per-photo session state are supported.
+- 3WAY Color Grading with Temperature and Tint for Shadows, Midtones, and Highlights. The six controls use integer steps, default to zero, and share each range's luminance weight. Category bypass, value resets, localized History, Undo/Redo, and per-photo session state are supported.
 - Worker-based JPEG preview rendering with one in-flight request and only the latest pending recipe, stale-result rejection, and a main-thread fallback.
-- A White Balance category above Basic with relative JPEG preview Temperature (−100 warm to +100 cool) and Tint (−100 green to +100 magenta), both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
+- A White Balance category above Basic with relative JPEG preview Temperature and Tint, both step 1 and default 0. Directional gradient tracks, independent collapse and bypass, individual/category Reset, and localized History with Undo/Redo are included. Temperature and Tint use reciprocal linear-RGB gains before Exposure while preserving alpha.
 - A Color category below Basic with global JPEG preview Vibrance and Saturation (−100 to +100, step 1, default 0). It has independent collapse, bypass, individual/category Reset, localized History, and Undo/Redo. After Color Grading, low-saturation-priority Vibrance runs before Saturation while preserving alpha.
 
 - Non-destructive JPEG Exposure adjustment (−5 to +5 EV, 0.01 EV steps) in Anshitsu, with per-asset in-memory recipes and a Canvas linear-light preview pipeline. This initial version uses Immich previews as a temporary source.

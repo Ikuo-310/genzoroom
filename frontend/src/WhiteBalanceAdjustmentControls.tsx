@@ -2,8 +2,8 @@ import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider, type OpenAdjustmentSliderMenu } from './AdjustmentSlider';
 import { TEMPERATURE, TINT, formatTemperature, formatTint, type EditAction, type EditRecipe } from './editing';
 
-// Negative values warm the preview; positive values cool it.
-export const TEMPERATURE_TRACK_GRADIENT = 'linear-gradient(to right, #d86943 0%, #b6b6b6 50%, #4e8ed9 100%)';
+// The temperature track follows the same cool-left, warm-right direction as its numeric values.
+export const TEMPERATURE_TRACK_GRADIENT = 'linear-gradient(to right, #4e8ed9 0%, #b6b6b6 50%, #d86943 100%)';
 export const TINT_TRACK_GRADIENT = 'linear-gradient(to right, #4f9b62 0%, #b6b6b6 50%, #b05aa0 100%)';
 
 export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch, onOpenContextMenu }: {

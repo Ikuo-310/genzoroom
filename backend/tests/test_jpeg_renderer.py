@@ -54,6 +54,19 @@ class JpegRendererTests(unittest.TestCase):
                 self.assertEqual(settings, original)
                 self.assertEqual((result.width, result.height), (256, 17))
 
+    def test_temperature_direction_is_cool_negative_neutral_zero_warm_positive(self):
+        for scope, source_value in (("global", 100), ("shadows", 60),
+                                    ("midtones", 127), ("highlights", 210)):
+            key = "temperature" if scope == "global" else f"{scope}Temperature"
+            source = RenderedImage(1, 1, bytes((source_value,) * 3))
+            neutral = self.renderer.render(source, recipe(**{key: 0}))
+            cool = self.renderer.render(source, recipe(**{key: -100}))
+            warm = self.renderer.render(source, recipe(**{key: 100}))
+            with self.subTest(scope=scope):
+                self.assertEqual(neutral.pixels, source.pixels)
+                self.assertLess(cool.pixels[0], cool.pixels[2])
+                self.assertGreater(warm.pixels[0], warm.pixels[2])
+
     def test_each_group_bypasses_only_its_members(self):
         groups = {
             "whiteBalanceEnabled": ("temperature", "tint"),

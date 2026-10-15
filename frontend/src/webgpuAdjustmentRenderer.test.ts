@@ -114,7 +114,19 @@ describe('G2 CPU-derived tables and arithmetic models (not GPU execution)', () =
       expect(packed.getUint32(40, true)).toBe(1 << index);
       const offset = 48 + Math.floor(index / 2) * 16;
       expect(packed.getFloat32(offset + (index % 2 ? 8 : 0), true))
-        .toBe(Math.fround(index % 2 ? 1.3 : 1 / 1.5));
+        .toBe(Math.fround(index % 2 ? 1.3 : 1.5));
+    }
+  });
+
+  it.each([-100, 100])('packs cool-negative and warm-positive 3WAY Temperature gains at %s', (value) => {
+    const scopes = ['shadows', 'midtones', 'highlights'] as const;
+    for (const [index, scope] of scopes.entries()) {
+      const recipe = defaultRecipe();
+      recipe.adjustments[`${scope}Temperature`] = value;
+      const data = new DataView(prepareGpuRecipe(recipe).parameters);
+      const offset = 48 + index * 16;
+      expect(data.getFloat32(offset, true)).toBe(Math.fround(value < 0 ? 1 / 1.5 : 1.5));
+      expect(data.getFloat32(offset + 4, true)).toBe(Math.fround(value < 0 ? 1.5 : 1 / 1.5));
     }
   });
 });

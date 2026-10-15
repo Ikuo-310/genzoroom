@@ -17,10 +17,10 @@ export const MIDTONES_GRADING_FADE_OUT_END = 0.78;
 export const HIGHLIGHTS_GRADING_FADE_IN_START = 0.55;
 export const HIGHLIGHTS_GRADING_FULL_STRENGTH_START = 0.75;
 
-// Relative JPEG preview white balance: reciprocal gains, with Green as reference.
+// Relative JPEG preview white balance: positive values warm toward red, with Green as reference.
 export function temperatureGains(value: number) {
   const shift = normalizeTemperature(value) / 100;
-  return { red: 1.5 ** -shift, green: 1, blue: 1.5 ** shift };
+  return { red: 1.5 ** shift, green: 1, blue: 1.5 ** -shift };
 }
 
 // Reciprocal gains keep equal positive/negative Tint magnitudes perceptually balanced.

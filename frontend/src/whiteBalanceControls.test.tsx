@@ -559,6 +559,8 @@ describe('production White Balance controls', () => {
   });
 
   it('places White Balance above Basic with unitless Temperature and Tint gradients', () => {
+    expect(TEMPERATURE_TRACK_GRADIENT).toContain('#4e8ed9 0%');
+    expect(TEMPERATURE_TRACK_GRADIENT).toContain('#d86943 100%');
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), item => item.textContent)).toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
     expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
     expect(category().querySelectorAll('.adjustment-category-actions > button')).toHaveLength(2);
