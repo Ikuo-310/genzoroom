@@ -70,6 +70,8 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
   workspaceActionsRef.current = workspaceActions;
   const retainedLoads = useRef(new Set<string>());
   const records = useRef<Record<string, AssetEditRecord>>({});
+  // Persisted revisions also advance on saves, so Filmstrip needs this edit-only signal.
+  const recipeChangeRevision = useRef(0);
   // Presence also represents unknown: discarded assets must not fall back to an old bulk result.
   const discardedEditStatuses = useRef(new Map<string, {
     edited?: boolean; nonDefaultRecipe?: boolean; historyOnly?: boolean;
@@ -221,10 +223,12 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
     // All edit entry points share dispatch; late gesture commits must not expire workspace Undo.
     if (action.type !== 'commit') workspaceActionsRef.current.onEdit?.();
     if (action.type === 'undo' && current.organizationUndo) {
+      if (!recipesEqual(current.session.recipe, current.organizationUndo.recipe)) recipeChangeRevision.current += 1;
       updateSession(current, current.organizationUndo);
       return;
     }
     const session = editSession(current.session, action);
+    if (!recipesEqual(current.session.recipe, session.recipe)) recipeChangeRevision.current += 1;
     const organizing = action.type === 'clearHistory' || action.type === 'trimHistory';
     const historyChanged = organizing && session.history.length !== current.session.history.length;
     // User edit intentions invalidate restoration even when their value is a
@@ -544,7 +548,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
   const dirty = current.loadStatus === 'ready'
     && (current.retrySave !== undefined || fingerprintFor(current) !== current.savedFingerprint);
   return {
-    session: current.session, dispatch, organizeHistory,
+    session: current.session, dispatch, organizeHistory, recipeChangeRevision: recipeChangeRevision.current,
     localStateFor: (id: string, bulkStatus?: boolean) => {
       const record = records.current[id];
       // Unvisited or unvalidated sessions must not masquerade as known default Recipes.

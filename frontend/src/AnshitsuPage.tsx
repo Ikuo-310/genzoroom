@@ -125,6 +125,7 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
+    recipeChangeRevision,
     saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor, retainForUndo } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked, {
       onEdit: clearExclusionUndo, undo: () => undoExclusionRef.current(),
     });
@@ -752,6 +753,7 @@ export function AnshitsuPage() {
         editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
         historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id).historyOnly]))}
         activeAssetId={assetId}
+        recipeChangeRevision={recipeChangeRevision}
         disabled={switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null}
         onExclude={id => { void excludeRef.current(id); }}
         excludeDisabled={canEdit && !editable}

@@ -19,9 +19,13 @@ it('uses rendered thumbnail URLs without generation POSTs', async () => {
 let host: HTMLDivElement;
 let root: Root;
 let activate = vi.fn<(id: string) => void>();
-function Harness({ disabled = false, blocked = false, immersive = false, items = assets }: { disabled?: boolean; blocked?: boolean; immersive?: boolean; items?: RecentAsset[] }) {
+function Harness({ disabled = false, blocked = false, immersive = false, items = assets, activeAssetId, recipeChangeRevision = 0,
+  edited = false }: { disabled?: boolean; blocked?: boolean; immersive?: boolean; items?: RecentAsset[]; activeAssetId?: string;
+  recipeChangeRevision?: number; edited?: boolean }) {
   const [active, setActive] = useState('a');
-  return <><Filmstrip assets={items} activeAssetId={active} disabled={disabled} keyboardBlocked={blocked} viewerFocusMode={immersive}
+  const current = activeAssetId ?? active;
+  return <><Filmstrip assets={items} activeAssetId={current} recipeChangeRevision={recipeChangeRevision} disabled={disabled}
+    keyboardBlocked={blocked} viewerFocusMode={immersive} editStatuses={edited ? { [current]: true } : {}}
     onActivate={(id) => { activate(id); setActive(id); }} />
     <input type="range" defaultValue={5} onKeyDown={event => {
       if (!event.defaultPrevented && event.key === 'ArrowRight') event.currentTarget.value = String(Number(event.currentTarget.value) + 1);
@@ -179,6 +183,44 @@ describe('Filmstrip keyboard navigation', () => {
     vi.spyOn(item(1), 'getBoundingClientRect').mockReturnValue({ left: 260, right: 352 } as DOMRect);
     act(() => item(1).click());
     expect(scroll().scrollLeft).toBe(52);
+  });
+
+  it('preserves manual scrolling across asset, status, disabled, and keyboard state rerenders', () => {
+    const region = scroll();
+    Object.defineProperty(region, 'clientWidth', { configurable: true, value: 200 });
+    vi.spyOn(region, 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
+    const activeBounds = vi.spyOn(item(0), 'getBoundingClientRect').mockReturnValue({ left: 260, right: 352 } as DOMRect);
+    region.scrollLeft = 37;
+    act(() => item(1).focus());
+
+    act(() => root.render(<Harness items={[...assets]} disabled blocked edited />));
+
+    expect(region.scrollLeft).toBe(37);
+    expect(activeBounds).not.toHaveBeenCalled();
+  });
+
+  it('reveals the active item when an actual Recipe change is reported', () => {
+    const region = scroll();
+    Object.defineProperty(region, 'clientWidth', { configurable: true, value: 200 });
+    vi.spyOn(region, 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
+    vi.spyOn(item(0), 'getBoundingClientRect').mockReturnValue({ left: 260, right: 352 } as DOMRect);
+    region.scrollLeft = 37;
+
+    act(() => root.render(<Harness recipeChangeRevision={1} />));
+
+    expect(region.scrollLeft).toBe(89);
+  });
+
+  it('reveals the new active item when the visible photo set excludes the current photo', () => {
+    const region = scroll();
+    Object.defineProperty(region, 'clientWidth', { configurable: true, value: 200 });
+    vi.spyOn(region, 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect);
+    vi.spyOn(item(2), 'getBoundingClientRect').mockReturnValue({ left: 260, right: 352 } as DOMRect);
+
+    act(() => root.render(<Harness items={[assets[0], assets[2]]} activeAssetId="c" />));
+
+    expect(current()).toBe('c.jpg');
+    expect(region.scrollLeft).toBe(52);
   });
 });
 

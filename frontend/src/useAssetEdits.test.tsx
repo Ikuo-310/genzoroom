@@ -375,6 +375,44 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('Recipe change notification', () => {
+  it('advances only for successful Recipe changes from edit operations', async () => {
+    await mount();
+    expect(latest.recipeChangeRevision).toBe(0);
+
+    editTemperature(10);
+    expect(latest.recipeChangeRevision).toBe(1);
+    commitEdit();
+    expect(latest.recipeChangeRevision).toBe(1);
+    editTemperature(10);
+    expect(latest.recipeChangeRevision).toBe(1);
+
+    await act(async () => { await latest.save(first); });
+    expect(latest.recipeChangeRevision).toBe(1);
+
+    act(() => latest.dispatch({ type: 'undo' }));
+    expect(latest.recipeChangeRevision).toBe(2);
+    act(() => latest.dispatch({ type: 'redo' }));
+    expect(latest.recipeChangeRevision).toBe(3);
+    act(() => latest.dispatch({ type: 'temperatureReset' }));
+    expect(latest.recipeChangeRevision).toBe(4);
+  });
+
+  it('ignores loaded Recipes and History-only changes', async () => {
+    const loaded = editSession(editSession(newSession(), { type: 'temperature', value: 25 }), { type: 'commit' });
+    const snapshot = createEditStateSnapshot(loaded, source(first));
+    if (!snapshot.ok) throw new Error('Invalid edit fixture');
+    api.get.mockResolvedValue(response(snapshot.value, 4));
+    await mount();
+    expect(latest.session.recipe.adjustments.temperature).toBe(25);
+    expect(latest.recipeChangeRevision).toBe(0);
+
+    act(() => latest.organizeHistory('clearHistory'));
+    expect(latest.session.recipe.adjustments.temperature).toBe(25);
+    expect(latest.recipeChangeRevision).toBe(0);
+  });
+});
+
 describe('useAssetEdits persistence', () => {
   it('does not request a rendered thumbnail when exit only saves History changes', async () => {
     await loadHistory();

@@ -11,8 +11,9 @@ import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { XIcon } from './XIcon';
 
-export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, viewerFocusMode = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
+export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onActivate, onExclude, excludeDisabled = false, excludeBusyFor, disabled = false, keyboardBlocked = false, viewerFocusMode = false, editStatuses = {}, historyOnlyStatuses = {}, queueKnown, queueCurrent, queueStatusFor, queueBusyFor, onQueueToggle }: {
   assets: RecentAsset[]; activeAssetId: string; onActivate: (id: string) => void; disabled?: boolean; keyboardBlocked?: boolean;
+  recipeChangeRevision?: number;
   viewerFocusMode?: boolean;
   onExclude?: (id: string) => void;
   excludeDisabled?: boolean;
@@ -57,7 +58,7 @@ export function Filmstrip({ assets, activeAssetId, onActivate, onExclude, exclud
     const active = region?.querySelector<HTMLButtonElement>('[aria-current="true"]');
     if (!region || !active) return;
     revealFilmstripItem(region, active);
-  }, [activeAssetId, assets, disabled, keyboardBlocked]);
+  }, [activeAssetId, recipeChangeRevision]);
   return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
     <div ref={scroll} className="filmstrip-scroll">
       {assets.map((asset) => <div key={asset.id} className="filmstrip-entry"><button
