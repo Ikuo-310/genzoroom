@@ -55,6 +55,22 @@ export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onA
   }, [handleKeyDown]);
   useEffect(() => {
     const region = scroll.current;
+    if (!region) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaX !== 0 || event.deltaY === 0) return;
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? region.clientWidth : 1;
+      const delta = event.deltaY * unit;
+      const maxScrollLeft = Math.max(0, region.scrollWidth - region.clientWidth);
+      region.scrollLeft = Math.min(maxScrollLeft, Math.max(0, region.scrollLeft + delta));
+      // Cancel converted deltas even at either edge so they cannot scroll the page.
+      event.preventDefault();
+    };
+    region.addEventListener('wheel', handleWheel, { passive: false });
+    return () => region.removeEventListener('wheel', handleWheel);
+  }, []);
+  useEffect(() => {
+    const region = scroll.current;
     const active = region?.querySelector<HTMLButtonElement>('[aria-current="true"]');
     if (!region || !active) return;
     revealFilmstripItem(region, active);

@@ -535,7 +535,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .viewer-message { position: relative; }
 .viewer-message > p { align-self: center; justify-self: center; color: #aaa; }
 .filmstrip { min-width: 0; min-height: 0; padding: 10px 12px; border-top: 1px solid #353537; background: #151517; }
-.filmstrip-scroll { display: flex; height: 100%; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 2px; scrollbar-color: #555 #202023; }
+.filmstrip-scroll { display: flex; height: 100%; gap: 10px; overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain; padding: 2px; scrollbar-color: #555 #202023; }
 .filmstrip-entry { position: relative; flex: 0 0 92px; height: 100%; }
 .filmstrip-exclude { position: absolute; top: 5px; left: 5px; z-index: 2; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid #777; border-radius: 4px; background: rgb(28 28 30 / 88%); color: #eee; cursor: pointer; }
 .filmstrip-exclude:hover:not(:disabled) { background: #49494c; }

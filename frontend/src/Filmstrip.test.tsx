@@ -44,6 +44,11 @@ function move(direction: 'previous' | 'next', target: EventTarget = window, init
   return key(direction === 'previous' ? 'ArrowLeft' : 'ArrowRight', target,
     { ctrlKey: true, shiftKey: true, ...init });
 }
+function wheel(deltaY: number, target: EventTarget = scroll(), init: WheelEventInit = {}) {
+  const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); activate = vi.fn();
@@ -221,6 +226,74 @@ describe('Filmstrip keyboard navigation', () => {
 
     expect(current()).toBe('c.jpg');
     expect(region.scrollLeft).toBe(52);
+  });
+});
+
+describe('Filmstrip wheel scrolling', () => {
+  function setOverflow(width = 600, viewport = 200) {
+    Object.defineProperty(scroll(), 'scrollWidth', { configurable: true, value: width });
+    Object.defineProperty(scroll(), 'clientWidth', { configurable: true, value: viewport });
+  }
+
+  it('maps vertical wheel direction to horizontal scrolling without changing photo selection', () => {
+    setOverflow();
+    expect(wheel(35).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(35);
+    expect(wheel(-12).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(23);
+    expect(current()).toBe('a.jpg');
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('clamps converted input at both horizontal edges', () => {
+    setOverflow();
+    expect(wheel(-20).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(0);
+    scroll().scrollLeft = 400;
+    expect(wheel(40).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(400);
+  });
+
+  it('keeps the position unchanged when there is no horizontal overflow', () => {
+    setOverflow(120, 200);
+    expect(wheel(40).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(0);
+  });
+
+  it('leaves native horizontal wheel and touchpad input unconverted', () => {
+    setOverflow();
+    scroll().scrollLeft = 18;
+    const event = wheel(40, scroll(), { deltaX: 25 });
+    expect(event.defaultPrevented).toBe(false);
+    // jsdom does not perform native scrolling; unchanged position proves there was no second custom scroll.
+    expect(scroll().scrollLeft).toBe(18);
+  });
+
+  it.each([
+    [WheelEvent.DOM_DELTA_LINE, 2, 32],
+    [WheelEvent.DOM_DELTA_PAGE, 1, 200],
+  ])('converts deltaMode %s using the corresponding scroll unit', (deltaMode, deltaY, expected) => {
+    setOverflow();
+    expect(wheel(deltaY, scroll(), { deltaMode }).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(expected);
+  });
+
+  it('handles wheel events from thumbnails and exclusion controls and prevents vertical page propagation', () => {
+    setOverflow();
+    const exclude = vi.fn();
+    act(() => root.render(<Filmstrip assets={assets} activeAssetId="a" onActivate={activate} onExclude={exclude}
+      editStatuses={{ a: true }} />));
+    setOverflow();
+    expect(wheel(24, item(1)).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(24);
+    const badge = host.querySelector<HTMLElement>('.edited-badge')!;
+    expect(wheel(12, badge).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(36);
+    const excludeButton = host.querySelector<HTMLButtonElement>('.filmstrip-exclude')!;
+    expect(wheel(16, excludeButton).defaultPrevented).toBe(true);
+    expect(scroll().scrollLeft).toBe(52);
+    expect(activate).not.toHaveBeenCalled();
+    expect(exclude).not.toHaveBeenCalled();
   });
 });
 
