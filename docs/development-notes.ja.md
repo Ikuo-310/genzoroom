@@ -39,6 +39,27 @@ Temperatureスライダーのグラデーションを、低温から高温を表
 - Xアイコン共通化時の関連Frontendテストは170件成功。TypeScriptチェック、Frontend build、`git diff --check`も成功し、buildには既存の500 kB超JSチャンク警告が残った。
 - その後のFilmstripアイコン14px調整ではFilmstripテスト33件が成功し、`git diff --check`も成功した。この調整後はTypeScript/buildとFrontend・Backend全体テストを再実行していない。
 
+### Filmstripのスクロール操作改善
+
+#### 手動スクロール位置の維持
+
+従来は、Filmstripを手動スクロールして別の写真を探していても、非同期処理などで`assets`、`disabled`、`keyboardBlocked`が更新されると、現在の写真へ自動的に戻っていた。修正後は写真IDの切替または実際のRecipe変更時だけ自動追従し、それ以外では手動スクロール位置を維持する。
+
+`useAssetEdits`にRecipe変更専用のrevisionを設け、編集dispatchの前後でRecipeを比較して、実際にRecipeが変わった場合だけrevisionを進める。保存完了、データ読込、Historyだけの変更、フォーカス移動は自動追従のきっかけにしない。写真除外でactive写真が切り替わった場合は新しい写真へ追従する。Recipe、History、Undo／Redo、永続化の既存仕様は維持する。
+
+#### ホイール横スクロール
+
+- Filmstrip上の縦方向ホイール入力を横スクロールへ変換し、上方向で左、下方向で右へ移動する。
+- 水平入力はブラウザー標準処理を維持し、独自の二重スクロールを行わない。
+- スクロール範囲内に位置を制限し、左右端で停止する。変換した縦入力は端でもキャンセルし、CSSのoverscroll containmentと併せて意図しないスクロール連鎖を抑える。
+- サムネイル、バッジ、除外ボタン上でも操作できる。ホイールでは写真選択・切替やRecipe編集を行わず、既存の写真切替・編集時の自動追従にも影響しない。
+
+#### 検証
+
+- スクロール位置維持の関連Frontendテスト139件成功。TypeScriptチェック、Frontend build、`git diff --check`成功。最初の並列テスト実行は一時領域のファイル参照エラーで失敗したが、単一workerで再実行して全件成功した。Firefox／NASでのユーザー実機確認はPASS。
+- ホイール横スクロールの関連Frontendテスト146件成功。TypeScriptチェック、Frontend build、`git diff --check`成功。Frontend buildには既存のJSチャンクサイズ警告があった。Firefox／NASでのユーザー実機確認はPASS。
+- Firefox／NASでの結果は利用者による実機確認であり、CodexがブラウザーやNASを操作したものではない。
+
 ## STACK作成後のGallery所属情報と再取得（2026-10-14）
 
 ### 現象と診断結果
