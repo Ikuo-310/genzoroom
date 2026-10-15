@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
-- Standardized White Balance and 3WAY Color Grading Temperature so negative values cool toward blue and positive values warm toward red.
+- Standardized White Balance and 3WAY Color Grading Temperature correction: negative values cool the image toward blue, zero is neutral, and positive values warm it toward red. The shared slider gradient follows that direction from cool blue through neutral to warm red/orange.
 - Anshitsu Immersive Preview now moves between photos with unmodified Left / Right arrows; normal slider arrows and Primary+Shift photo navigation remain available.
 - Unified the X icons for Anshitsu Filmstrip exclusion and Stack group/member removal as centered shared SVGs.
 

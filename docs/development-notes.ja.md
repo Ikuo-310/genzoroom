@@ -2,6 +2,22 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## 色温度補正方向とスライダー表示の統一（2026-10-15）
+
+旧仕様ではTemperatureの正値が青方向、負値が赤方向へ画像を補正していたため、一般的な現像ソフトの補正方向と逆だった。White BalanceとShadows／Midtones／Highlightsの3WAY Temperatureを共通のRGBゲイン方向へ修正し、負値は青・寒色、0は無補正、正値は赤・暖色とした。JPEGのTemperatureは引き続き−100〜+100の相対補正であり、数値をKelvin値として表示・解釈しない。
+
+スライダーのグラデーションは補正後の色ではなく、色温度の低高を表す。そのためWhite Balanceと3WAYで共有する配色を、低温側の赤橙 `#d86943` → 0のニュートラル `#b6b6b6` → 高温側の青 `#4e8ed9` に戻した。将来RAW現像で絶対色温度（K）を扱う際も、低Kの暖色から高Kの青色という軸に揃える設計意図である。RAW色温度補正自体は未実装。
+
+Recipe形式・schema versionは変更せず、保存済みRecipeのTemperature数値移行も行わない。保存値はそのまま保持し、新方向の意味で適用する。Tint、処理順、History／Undo/Redo、Backend出力とサムネイル経路は変更していない。
+
+検証：色温度補正実装時のFrontend CPU・3WAY・WebGPU関連Focusedテストは311件成功、1件skip。実WebGPUランタイムが必要な比較テストはskipされた。BackendのJPEGレンダラーとサムネイルJPEGプレビュー描画のFocusedテストは10件成功。非同期`generate_thumbnail()`全体の統合テストは実行中に停止したため完了未確認。今回のグラデーション更新ではWhite Balance／Color Grading UIの関連テスト72件、TypeScriptチェック、本番build、`git diff --check`が成功し、本番buildには既存の500 kB超chunk警告があった。実WebGPU・非同期サムネイル統合・実ブラウザー・NASでの確認は未実施。
+
+## 色温度スライダーの補正方向表示へ再調整（2026-10-15）
+
+Temperatureスライダーのグラデーションを、低温から高温を表す配色ではなく、JPEGの相対補正方向に合わせて青・寒色（左／負値）→ニュートラル（中央／0）→赤橙・暖色（右／正値）へ戻した。White Balanceと3WAYは同じ配色を共有する。色温度の画素補正式やRecipe数値は変更していない。JPEGは引き続き−100〜+100の相対値で、Kelvin表示は行わない。将来RAWで絶対K値を使う場合のスケール対応は別途定義が必要。
+
+検証：White Balanceと3WAYの関連表示テスト72件が成功。TypeScriptチェック、本番build、`git diff --check`も成功し、本番buildには既存の500 kB超chunk警告があった。実ブラウザーとNASでの表示確認は行っていない。
+
 ## 暗室ショートカットとXアイコン表示の改善（2026-10-15）
 
 ### 暗室没入プレビューの左右キー操作
