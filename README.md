@@ -118,6 +118,10 @@ If a source photo is not already part of a stack, GenzoRoom creates a new one. I
 Exported filenames receive sequential suffixes such as `-Genzo01` and `-Genzo02`, and the `GenzoRoom` tag is applied in Immich.  
 In the Gallery, exported photos are identified by a 「現」 badge.
 
+### 〇 Keyboard Shortcuts 〇
+
+**[Keyboard Shortcuts](docs/guides/keyboard-shortcuts.md)** — Keyboard shortcuts and actions for each workspace.
+
 ## Current Limitations
 
 - **Supported image formats:**  
