@@ -16,6 +16,22 @@ beforeEach(() => {
 afterEach(() => { stylesheet.remove(); host.remove(); });
 
 describe('Home and thumbnail layout', () => {
+  it('adds 10px to Filmstrip height while keeping thumbnail width and image fit', () => {
+    const rules = Array.from(stylesheet.sheet.cssRules);
+    const workspace = rules.find(rule => rule.selectorText === '.workspace-body');
+    const filmstrip = rules.find(rule => rule.selectorText === '.filmstrip' && rule.style.getPropertyValue('padding') === '10px 12px');
+    const entry = rules.find(rule => rule.selectorText === '.filmstrip-entry');
+    const image = rules.find(rule => rule.selectorText === '.filmstrip-item img');
+    const narrowLayout = rules.find(rule => rule.conditionText?.includes('max-width: 760px'));
+    const narrowFilmstrip = Array.from(narrowLayout.cssRules).find(rule => rule.selectorText === '.filmstrip');
+
+    expect(workspace.style.getPropertyValue('grid-template-rows')).toContain('136px');
+    expect(filmstrip.style.getPropertyValue('padding')).toBe('10px 12px');
+    expect(entry.style.getPropertyValue('flex')).toBe('0 0 92px');
+    expect(narrowFilmstrip.style.getPropertyValue('flex')).toBe('0 0 122px');
+    expect(image.style.getPropertyValue('object-fit')).toBe('contain');
+  });
+
   it('keeps the common refresh outside selection and preserves center tracks at existing breakpoints', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');

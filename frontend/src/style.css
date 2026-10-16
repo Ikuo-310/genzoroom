@@ -288,7 +288,7 @@ button.photo-card-button:hover:not(:disabled) { background: var(--bg-elevated); 
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 .language-control.compact { display: flex; align-items: center; gap: 7px; color: #aaa; }
 .language-control.compact select { min-width: 100px; color: #eee; background: #252527; border-color: #4b4b4e; padding-block: 5px; }
-.workspace-body { --left-panel: 0px; --left-resizer: 0px; --right-panel: 0px; --right-resizer: 0px; display: grid; grid-template-areas: 'left left-resizer viewer right-resizer right' 'filmstrip filmstrip filmstrip right-resizer right'; grid-template-rows: minmax(0, 1fr) 126px; grid-template-columns: var(--left-panel) var(--left-resizer) minmax(0, 1fr) var(--right-resizer) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-body { --left-panel: 0px; --left-resizer: 0px; --right-panel: 0px; --right-resizer: 0px; display: grid; grid-template-areas: 'left left-resizer viewer right-resizer right' 'filmstrip filmstrip filmstrip right-resizer right'; grid-template-rows: minmax(0, 1fr) 136px; grid-template-columns: var(--left-panel) var(--left-resizer) minmax(0, 1fr) var(--right-resizer) var(--right-panel); min-width: 0; min-height: 0; overflow: hidden; }
 .workspace-body:not(.right-open) { grid-template-areas: 'left left-resizer viewer right-resizer right' 'filmstrip filmstrip filmstrip filmstrip filmstrip'; }
 .workspace-body.left-open { --left-panel: clamp(210px, 18vw, 270px); }
 .workspace-body.right-open { --right-panel: clamp(230px, 20vw, 300px); }
@@ -620,7 +620,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   .panel-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .zoom-controls { justify-content: center; }
   .zoom-controls .tool-button:first-child { padding-inline: 7px; }
-  .filmstrip { position: sticky; order: 4; flex: 0 0 112px; bottom: 0; z-index: 5; grid-area: auto; }
+  .filmstrip { position: sticky; order: 4; flex: 0 0 122px; bottom: 0; z-index: 5; grid-area: auto; }
 }
 
 @media (max-width: 520px) {
