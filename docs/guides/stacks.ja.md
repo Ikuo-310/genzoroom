@@ -93,5 +93,6 @@ STACK外候補の写真も没入プレビュー可能です。
 同じくダブルクリックをするか、写真を選択し「V」キーを押してください。
 
 ---
+[STACK管理のキーボードショートカット](keyboard-shortcuts.ja.md#stack管理)  
 
 [← READMEに戻る](../../README.ja.md)

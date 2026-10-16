@@ -114,4 +114,6 @@ Photos in the Outside Stack Candidates area can also be opened in immersive prev
 
 ---
 
+[Stack Management Keyboard Shortcuts](keyboard-shortcuts.md#stack-management)
+
 [← Back to README](../../README.md)
