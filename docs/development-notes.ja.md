@@ -1319,3 +1319,15 @@ StackPhotoにもGallery／Exportと同じ`FilenameDisplay`を適用し、長い�
 手動スクロール位置の維持、ホイールによる横スクロール、写真切替・Recipe変更時の自動追従、写真切替などの操作仕様も変更していない。利用者による実ブラウザー表示確認が完了し、調整後のサイズが受け入れられた。
 
 実装時の検証はFilmstripレイアウト関連テスト29件成功、TypeScriptチェックとFrontend build成功、`git diff --check`成功。buildでは既存の500 kB超JavaScriptチャンク警告があった。Frontend／Backend全体テストは実施していない。
+
+## v0.2.2 リリース文書確定（2026-10-17）
+
+v0.2.1以降のUnreleased 6項目に、Galleryの詳細画面から戻るボタンのテキスト化を加え、v0.2.2としてCHANGELOGへ確定した。収録内容は、JPEG TemperatureのWhite Balance／3WAY補正方向とグラデーションの統一、Filmstripの手動スクロール位置維持・ホイール横スクロール・高さ10px拡大、没入プレビュー中の左右キー写真移動、Filmstrip／STACK管理Xアイコン共通化、Calendar／Album詳細の戻るボタン改善。Temperatureは負値が青・寒色、0が無補正、正値が赤・暖色の相対JPEG補正で、Kelvin絶対値ではない。
+
+Galleryの戻るボタンはカレンダー日付詳細で「カレンダーに戻る」／“Back to Calendar”、アルバム詳細で「アルバム一覧に戻る」／“Back to Albums”を表示する。矢印だけの表示をテキストへ置き換え、既存Toolbarボタンのスタイルを共有した。`closeCalendarDay`／`closeAlbum`による戻り処理と、同一タブ再クリック、選択・スクロール状態の復帰経路は変更していない。関連Frontendテスト82件、TypeScriptチェック、本番buildは成功し、buildには既存の500 kB超チャンク警告があった。実ブラウザー／NASでのこの変更の確認報告はない。
+
+実装時に記録された検証は、Temperature CPU／3WAY／WebGPU関連Frontend 311件成功・1件skip、Backend JPEGレンダラー等10件成功、最終スライダー表示テスト72件成功。非同期`generate_thumbnail()`統合テストは停止し結果未確認。実WebGPUとTemperatureの実ブラウザー／NAS確認は未実施。Filmstrip手動スクロール関連139件、ホイール横スクロール関連146件が成功し、利用者のFirefox／NAS実機確認はPASS。高さ調整の関連テスト29件、TypeScript、本番build、`git diff --check`が成功し、利用者が実ブラウザーで調整後サイズを受け入れた。没入プレビュー操作テスト103件成功、Frontend全体実行は2,934件成功・2件skip・1件timeoutで、timeoutしたテスト単独再実行は成功。Backend全体テストは中断され結果未確認。利用者のFirefox実機確認はPASS。Xアイコン共通化時の関連Frontendテスト170件、TypeScript、本番build、`git diff --check`が成功し、後続の14px調整はFilmstrip関連33件と`git diff --check`が成功したが、その後のTypeScript/buildは未実施。利用者の最終表示確認は受け入れ済み。これら複数のbuildでは500 kB超JavaScriptチャンク警告が記録されている。
+
+既存のCalendar date-detail限定監査はHigh 0／Medium 0／Low 1で、唯一のLow（disabled日付矢印のcursor表示）は修正済み。今回照合したリリース対象の記録に未解決のHigh／Medium指摘はない一方、全項目に独立したseverity集計が残っているわけではなく、今回新たなコード監査は行っていない。温度補正の実ブラウザー／WebGPU、`generate_thumbnail()`統合、Backend全体テスト、Gallery戻るボタンの実機確認が未検証として残る。
+
+安定版のバージョンは`vMAJOR.MINOR.PATCH`タグから配布workflowへ渡されるため、`frontend/package.json`の`0.0.0`などを手動変更していない。v0.2.2のGitタグ、コンテナイメージ、GitHub Releaseはまだ作成・公開されておらず、CHANGELOG・設計文書の確定までを記録する。

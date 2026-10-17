@@ -6,14 +6,23 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-17
+
+### Added
+
+- Anshitsu Filmstrip now scrolls horizontally with vertical mouse-wheel input: up moves left, down moves right, and scrolling stops at either end. Native horizontal touchpad scrolling remains available.
+- Anshitsu Immersive Preview now moves between photos with unmodified Left / Right arrows. Normal darkroom slider arrows and Primary+Shift photo navigation remain available.
+
 ### Changed
 
-- Standardized White Balance and 3WAY Color Grading Temperature correction: negative values cool the image toward blue, zero is neutral, and positive values warm it toward red. The shared slider gradient follows that direction from cool blue through neutral to warm red/orange.
-- Fixed Anshitsu Filmstrip returning to the active photo after unrelated state updates while manually browsing; it now follows photo switches and actual Recipe edits only.
-- Anshitsu Filmstrip now scrolls horizontally with vertical mouse-wheel input; horizontal touchpad scrolling remains available.
-- Increased the Anshitsu Filmstrip height by 10px to give photo thumbnails more vertical viewing area.
-- Anshitsu Immersive Preview now moves between photos with unmodified Left / Right arrows; normal slider arrows and Primary+Shift photo navigation remain available.
-- Unified the X icons for Anshitsu Filmstrip exclusion and Stack group/member removal as centered shared SVGs.
+- Standardized JPEG Temperature correction in White Balance and 3WAY Color Grading: negative values cool toward blue, zero is neutral, and positive values warm toward red. The shared slider gradient runs from cool blue through neutral to warm red/orange. This remains a relative adjustment, not an absolute Kelvin temperature.
+- Increased the Anshitsu Filmstrip height by 10px to give thumbnails more vertical viewing area; thumbnail width is unchanged.
+- Replaced the arrow-only back buttons in Calendar date and Album detail views with localized text buttons: “カレンダーに戻る” / “Back to Calendar” and “アルバム一覧に戻る” / “Back to Albums”. Their existing return behavior remains unchanged.
+- Unified the Anshitsu Filmstrip and Stack management X icons as centered 14px SVGs, improving their alignment and visibility.
+
+### Fixed
+
+- Anshitsu Filmstrip now preserves manual browsing position during unrelated state updates and follows the active photo only after a photo switch or an actual Recipe change.
 
 ## [0.2.1] - 2026-10-14
 
