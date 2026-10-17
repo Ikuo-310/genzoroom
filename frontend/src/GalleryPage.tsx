@@ -1442,11 +1442,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           onSelectAll={selectAllVisible}
           onClear={clearPhotoSelection} />
           {activeTab === 'albums' && selectedAlbum && <div className="home-toolbar-context">
-              <button type="button" className="album-back" aria-label={t('albums.backToList')} title={t('albums.backToList')} onClick={closeAlbum}>←</button>
+              <button type="button" className="album-back gallery-refresh" aria-label={t('albums.backToList')} title={t('albums.backToList')} onClick={closeAlbum}>{t('albums.backToList')}</button>
             </div>}
           {activeTab === 'calendar' && selectedCalendarDate && <div className="home-toolbar-context">
-              <button type="button" className="album-back" aria-label={t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')}
-                title={t(calendarMode === 'year' ? 'calendar.backToYear' : 'calendar.backToMonth')} onClick={closeCalendarDay}>←</button>
+              <button type="button" className="album-back gallery-refresh" aria-label={t('calendar.backToCalendar')}
+                title={t('calendar.backToCalendar')} onClick={closeCalendarDay}>{t('calendar.backToCalendar')}</button>
             </div>}
         </div>}
         </div>

@@ -82,7 +82,7 @@ describe('Home and thumbnail layout', () => {
     document.head.append(responsive);
     for (const detail of ['album', 'calendar']) {
       toolbar.className = `home-toolbar home-toolbar-centered ${detail === 'calendar' ? 'home-toolbar-calendar' : ''}`;
-      toolbar.innerHTML = `<div class="home-toolbar-start"><button class="gallery-refresh">${language === 'ja' ? 'リロード' : 'Reload'}</button><div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">${count}</strong><div class="selection-actions"><button>${selectAll}</button><button>${clear}</button></div></div><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">${detail === 'album' ? album : date}</h2></div><div class="home-toolbar-controls"><button>Filter</button></div>`;
+      toolbar.innerHTML = `<div class="home-toolbar-start"><button class="gallery-refresh">${language === 'ja' ? 'リロード' : 'Reload'}</button><div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">${count}</strong><div class="selection-actions"><button>${selectAll}</button><button>${clear}</button></div></div><button class="album-back gallery-refresh">${detail === 'album' ? 'Back to Albums' : 'Back to Calendar'}</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">${detail === 'album' ? album : date}</h2></div><div class="home-toolbar-controls"><button>Filter</button></div>`;
       const start = toolbar.querySelector('.home-toolbar-start');
       const refresh = toolbar.querySelector('.gallery-refresh');
       const selection = toolbar.querySelector('.selection-bar');
@@ -91,6 +91,11 @@ describe('Home and thumbnail layout', () => {
       expect(getComputedStyle(selection).minWidth).toBe('max-content');
       expect(getComputedStyle(selection.querySelector('.selection-actions')).display).toBe('flex');
       expect(getComputedStyle(refresh).whiteSpace).toBe('nowrap');
+      const back = toolbar.querySelector('.album-back');
+      expect(getComputedStyle(back).height).toBe(getComputedStyle(refresh).height);
+      expect(getComputedStyle(back).width).toBe('auto');
+      expect(getComputedStyle(back).padding).toBe(getComputedStyle(refresh).padding);
+      expect(getComputedStyle(back).borderRadius).toBe(getComputedStyle(refresh).borderRadius);
       expect(getComputedStyle(toolbar.querySelector('.home-toolbar-center')).gridColumn).toBe('1');
       expect(getComputedStyle(toolbar.querySelector('.home-toolbar-controls')).gridColumn).toBe('1');
     }
@@ -137,7 +142,7 @@ describe('Home and thumbnail layout', () => {
   it('protects selection segments and moves detail titles to a separate row at intermediate widths', () => {
     const toolbar = host.querySelector('.home-toolbar');
     toolbar.classList.add('home-toolbar-centered');
-    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">0 selected</strong><div class="selection-actions"><button>Select all</button><button>Clear</button><button>Stacks[S]</button><button>Anshitsu[D]</button></div></div><div class="home-toolbar-context"><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">A long album name</h2></div><div class="home-toolbar-controls"><label class="home-control"><span>Type</span><select></select></label></div>';
+    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"><strong class="selection-count">0 selected</strong><div class="selection-actions"><button>Select all</button><button>Clear</button><button>Stacks[S]</button><button>Anshitsu[D]</button></div></div><div class="home-toolbar-context"><button class="album-back gallery-refresh">Back to Albums</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">A long album name</h2></div><div class="home-toolbar-controls"><label class="home-control"><span>Type</span><select></select></label></div>';
     const left = toolbar.querySelector('.home-toolbar-left');
     const center = toolbar.querySelector('.home-toolbar-center');
     const controls = toolbar.querySelector('.home-toolbar-controls');
@@ -217,7 +222,7 @@ describe('Home and thumbnail layout', () => {
   });
   it('centers toolbar regions vertically while keeping each control label above its input', () => {
     const toolbar = host.querySelector('.home-toolbar');
-    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"></div><div class="home-toolbar-context"><button class="album-back">←</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">Album</h2></div><div class="home-toolbar-controls"><label class="home-control"><span class="home-control-label">Type</span><select></select></label></div>';
+    toolbar.innerHTML = '<div class="home-toolbar-left"><div class="selection-bar"></div><div class="home-toolbar-context"><button class="album-back gallery-refresh">Back to Albums</button></div></div><div class="home-toolbar-center"><h2 class="home-toolbar-title">Album</h2></div><div class="home-toolbar-controls"><label class="home-control"><span class="home-control-label">Type</span><select></select></label></div>';
     expect(getComputedStyle(toolbar).alignItems).toBe('center');
     expect(getComputedStyle(toolbar.querySelector('.home-toolbar-left')).alignItems).toBe('center');
     expect(getComputedStyle(toolbar.querySelector('.home-toolbar-context')).alignItems).toBe('center');

@@ -103,6 +103,7 @@
     "dayLabel": "{{date}}",
     "dayWithAssets": "{{date}}、写真あり",
     "backToMonth": "カレンダーへ戻る",
+    "backToCalendar": "カレンダーに戻る",
     "previousPhotoDay": "前の写真がある日",
     "nextPhotoDay": "次の写真がある日",
     "loading": "カレンダーを読み込んでいます…",
@@ -136,7 +137,7 @@
   },
   "albums": {
     "open": "アルバム「{{name}}」を開く",
-    "backToList": "アルバム一覧へ",
+    "backToList": "アルバム一覧に戻る",
     "photosLoading": "アルバム内の写真を読み込んでいます…",
     "photosLoadFailed": "アルバム内の写真を読み込めませんでした。",
     "photosEmpty": "このアルバムに写真はありません",

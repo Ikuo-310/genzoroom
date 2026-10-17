@@ -556,8 +556,16 @@ describe('Home calendar', () => {
     expect(host.querySelector('.home-toolbar .selection-bar')).not.toBeNull();
     const left = host.querySelector('.home-toolbar-left')!;
     expect([...left.children].map(element => element.className)).toEqual(['selection-bar', 'home-toolbar-context']);
-    expect(left.querySelector('.home-toolbar-context')?.firstElementChild?.className).toBe('album-back');
-    expect(left.querySelector<HTMLButtonElement>('.album-back')?.textContent).toBe('←');
+    expect(left.querySelector('.home-toolbar-context')?.firstElementChild?.className).toBe('album-back gallery-refresh');
+    const backButton = left.querySelector<HTMLButtonElement>('.album-back')!;
+    expect(backButton.classList.contains('gallery-refresh')).toBe(true);
+    expect(backButton.textContent).toBe('Back to Calendar');
+    expect(backButton.getAttribute('aria-label')).toBe('Back to Calendar');
+    expect(backButton.querySelector('svg')).toBeNull();
+    await act(async () => { await i18n.changeLanguage('ja'); });
+    expect(backButton.textContent).toBe('カレンダーに戻る');
+    expect(backButton.getAttribute('aria-label')).toBe('カレンダーに戻る');
+    await act(async () => { await i18n.changeLanguage('en'); });
     expect(host.querySelector('.home-toolbar-center .home-toolbar-title')).not.toBeNull();
     expect(host.querySelector('.home-toolbar-context h2')).toBeNull();
     expect(host.querySelector('.calendar-navigation')).toBeNull();
