@@ -1311,3 +1311,11 @@ STACK管理の表示を常時表示の上下2フレームに分けた。上がST
 StackPhotoにもGallery／Exportと同じ`FilenameDisplay`を適用し、長いファイル名は中央を省略しながら末尾と拡張子を保つ。短い名前はそのまま表示する。「Immichへ送信」は出力管理のImmich actionと共通の赤色classを使う。
 
 監査と実機確認は別々に記録する。上下フレームUIの最終限定監査時点では**High 0 / Medium 0 / Low 1**だった。唯一のLowは空の下フレームの200px最小高さであり、直後にCSSから削除し、空・通常状態の関連テスト2件と`git diff --check`を通した。Firefox・Chromeで発生していた外側スクロールとスクロールバーの重なりは、利用者によるNAS実機確認で解消が確認された。コード上の関連Frontendテスト、TypeScript check、buildも実装段階で成功している。文書更新作業ではブラウザーやNASを操作していない。
+
+## Filmstripの高さ調整（2026-10-17）
+
+暗室のFilmstripがやや小さかったため、高さを10px拡大し、サムネイルの縦方向の表示領域も広げた。デスクトップのFilmstrip行は126pxから136px、狭幅レイアウトのflex基準サイズは112pxから122pxになった。サムネイル横幅92px、間隔、既存の上下パディング、Xボタン・形式・Edited／Queueバッジのサイズと配置は変更していない。ViewerはFilmstrip上部に残る高さを引き続き使用する。
+
+手動スクロール位置の維持、ホイールによる横スクロール、写真切替・Recipe変更時の自動追従、写真切替などの操作仕様も変更していない。利用者による実ブラウザー表示確認が完了し、調整後のサイズが受け入れられた。
+
+実装時の検証はFilmstripレイアウト関連テスト29件成功、TypeScriptチェックとFrontend build成功、`git diff --check`成功。buildでは既存の500 kB超JavaScriptチャンク警告があった。Frontend／Backend全体テストは実施していない。
