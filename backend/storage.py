@@ -1,8 +1,9 @@
-"""Container storage layout shared by persistence features."""
+"""Explicit runtime storage layout shared by persistence features."""
 
 import os
 import sqlite3
 import stat
+import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
@@ -13,11 +14,30 @@ from backend_logging import backend_logger
 # Host paths belong to Compose; application paths stay identical in both images.
 STORAGE_ROOT = Path("/genzoroom")
 DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
+WINDOWS_STORAGE = False
+
+
+def configure_windows_storage() -> None:
+    """Select the PoC's isolated user directory before importing persistence consumers."""
+    global STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE
+    if "edit_store" in sys.modules or "main" in sys.modules:
+        # edit_store intentionally binds DB_PATH at import; never split DB/cache ownership.
+        raise RuntimeError("windows_storage_configuration_too_late")
+    base = Path(os.environ.get("LOCALAPPDATA", ""))
+    if not base.is_absolute() or base.drive.startswith("\\\\"):
+        raise StorageInitializationError("windows_storage_location_invalid")
+    root = (base / "GenzoRoom" / "WindowsPoC").resolve()
+    if root.drive.startswith("\\\\"):
+        raise StorageInitializationError("windows_storage_location_invalid")
+    STORAGE_ROOT, DB_PATH = root, root / "data" / "genzoroom.db"
+    WINDOWS_STORAGE = True
 
 
 class StorageInitializationError(RuntimeError):
     MESSAGES = {
         "storage_root_not_mounted": "storage root is not mounted; check GENZOROOM_PERSIST_ROOT",
+        "windows_storage_location_invalid": "LOCALAPPDATA must identify a local absolute user directory",
+        "windows_storage_not_writable": "Windows PoC user storage is not writable",
         "storage_root_may_be_data_directory":
             "a database exists at the mount root; check GENZOROOM_PERSIST_ROOT points to its parent",
         "storage_data_not_writable": "storage data directory is not writable by UID/GID 10001:10001",
@@ -45,20 +65,21 @@ def storage_root_is_mounted() -> bool:
 
 def initialize_storage() -> None:
     try:
-        if not storage_root_is_mounted():
+        if not WINDOWS_STORAGE and not storage_root_is_mounted():
             raise StorageInitializationError("storage_root_not_mounted")
         try:
             data = STORAGE_ROOT / "data"
             if not DB_PATH.exists() and (STORAGE_ROOT / "genzoroom.db").is_file():
                 raise StorageInitializationError("storage_root_may_be_data_directory")
-            data.mkdir(exist_ok=True)
+            data.mkdir(parents=WINDOWS_STORAGE, exist_ok=True)
             # A disposable file leaves the DB untouched; explicit unlink verifies deletion rights too.
             with tempfile.NamedTemporaryFile(dir=data, delete_on_close=False) as probe:
                 probe.write(b"genzoroom")
                 probe.flush()
                 os.fsync(probe.fileno())
         except OSError:
-            raise StorageInitializationError("storage_data_not_writable") from None
+            code = "windows_storage_not_writable" if WINDOWS_STORAGE else "storage_data_not_writable"
+            raise StorageInitializationError(code) from None
     except StorageInitializationError:
         raise
 

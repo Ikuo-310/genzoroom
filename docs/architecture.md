@@ -824,7 +824,22 @@ These are provisional directions, not available functionality or delivery commit
 
 ## Portability and validation
 
-The Windows workspace is only a development directory. Application code and deployment files must not depend on its absolute path or Windows-specific runtime behavior. Deployment must not modify Docker host OS settings or install application files into host system directories. Persistent data uses the explicitly declared application-parent bind at `/genzoroom`, with SQLite under `data`.
+Docker application code and deployment files must not depend on the Windows development workspace's absolute path or Windows-specific runtime behavior. Deployment must not modify Docker host OS settings or install application files into host system directories. Docker persistent data uses the explicitly declared application-parent bind at `/genzoroom`, with SQLite under `data`.
+
+### Windows local PoC (Phase 1A)
+
+`backend/windows_local.py` is an opt-in Windows-only executable entry point, separate from Docker's `main:app`. It reserves an exclusive loopback listener before storage initialization or Export recovery, then calls `storage.configure_windows_storage()` before importing persistence consumers. The shared root is `%LOCALAPPDATA%/GenzoRoom/WindowsPoC`; both SQLite and thumbnail cache derive from it. Default imports still select Docker's `/genzoroom` and require its Linux mount validation. No saved-data version, database migration, Docker startup command or release configuration is changed. See [Windows local PoC operations](windows-local-poc.md).
+
+The local host mounts existing FastAPI routes at `/api` before the built React static files. It explicitly runs the original app's lifespan so its state, thumbnail workers and Export recovery remain owned by that app. Only HTML navigations missing a static file receive the SPA shell; API errors and missing assets retain their status. All private responses require an HttpOnly, SameSite=Strict session cookie, with exact Host/Origin checks and cross-site fetch rejection. Public bootstrap HTML/JS contain no secret. A per-start, one-use random URL-fragment credential is removed from navigation history before JSON exchange; successful exchange consumes it without yielding. The cookie is a separate per-start random value, and no credential or bootstrap URL is logged. Local responses are no-store and no-referrer. Loopback authentication does not protect against malicious processes with the same user privileges.
+
+| Shared state | Owner, updates and invariants |
+| --- | --- |
+| Storage root / DB path / runtime selection | `storage`; Windows launcher configures once before `edit_store` or `main` import. Docker defaults stay unchanged. No runtime switching or DB copying. |
+| Bootstrap credential / session cookie value | One `LocalHost` instance per process start; bootstrap is consumed once, session remains only in memory and the browser cookie. Neither value enters logs or disk configuration. Restart invalidates prior cookies. |
+| Immich configuration | Existing process environment; fixed for the process lifetime. The PoC has no runtime settings mutation or connection-profile switching. |
+| Export and thumbnail state | Existing Backend lifespan and stores, unchanged. Closing a browser does not stop the host. Ctrl+C waits for existing shutdown; it does not request Export Stop. Users Cancel and wait in the UI before stopping. |
+
+The host uses one worker and disables proxy-header trust and HTTP access logs. The fixed default port is 3191; conflicts fail explicitly without changing origin. A manually selected different port also changes browser UI-settings storage. This phase has no Tauri, packaging, LightCraft, native close interception, credential vault or support for concurrently running hosts against the same local DB.
 
 The validation workflow is to develop locally, copy or deploy the required files to the target Docker host, start them with Docker Compose (or Portainer when used), and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 
