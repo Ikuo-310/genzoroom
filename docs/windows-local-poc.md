@@ -2,6 +2,8 @@
 
 既存React UIとFastAPIをWindows PCで実行する開発用の起動方法です。Tauri、Python同梱、インストーラー、LightCraft、RAW現像は含みません。Docker版のCompose・nginx・起動入口は従来どおりです。
 
+Phase 1BのTauriウィンドウから利用する場合は[Windows Tauri起動PoC](windows-tauri-poc.md)を参照してください。その場合は通常ブラウザーを開く起動方法に代えて`--desktop`を明示し、既存認証をWebView2内で行います。
+
 ## 前提
 
 - Windows、リポジトリのPython 3.14仮想環境（`.venv`）、既存のBackend依存関係。

@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import hmac
+import json
 import os
 from pathlib import Path
 import signal
@@ -316,19 +319,23 @@ def test_cli_port_conflict_does_not_initialize_storage(tmp_path):
     assert not (tmp_path / "GenzoRoom").exists()
 
 
-def test_windows_cli_build_startup_and_graceful_shutdown(tmp_path):
+@pytest.mark.parametrize("mode", ["--no-browser", "--desktop"])
+def test_windows_cli_build_startup_and_graceful_shutdown(tmp_path, mode):
     if sys.platform != "win32" or not (FRONTEND_DIST / "index.html").is_file():
         pytest.skip("Windows and built frontend required")
     with reserve_listener(0) as probe:
         port = probe.getsockname()[1]
     # A no-op outer handler permits observing Uvicorn's completed SIGBREAK drain and exit code.
     command = """
-import signal, sys
+import os, signal, sys
 signal.signal(signal.SIGBREAK, lambda *_: None)
+if os.environ.get('GENZOROOM_WEBVIEW_SMOKE') == '1':
+    from tests.windows_desktop_fixture import start
+    start()
 from windows_local import main
-raise SystemExit(main(['--no-browser', '--port', sys.argv[1]]))
+raise SystemExit(main([sys.argv[2], '--port', sys.argv[1]]))
 """
-    process = subprocess.Popen([sys.executable, "-c", command, str(port)],
+    process = subprocess.Popen([sys.executable, "-c", command, str(port), mode],
                                env={**os.environ, "LOCALAPPDATA": str(tmp_path),
                                     "IMMICH_URL": "", "IMMICH_API_KEY": ""},
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
@@ -349,11 +356,55 @@ raise SystemExit(main(['--no-browser', '--port', sys.argv[1]]))
         root = tmp_path / "GenzoRoom" / "WindowsPoC"
         assert (root / "data" / "genzoroom.db").is_file()
         assert (root / "cache" / "thumbnails").is_dir()
+        if mode == "--desktop":
+            from windows_desktop_handoff import protect_for_current_user
+            encrypted = (root / "desktop-session.dpapi").read_bytes()
+            payload = json.loads(protect_for_current_user(encrypted, decrypt=True))
+            assert set(payload) == {"version", "port", "bootstrapToken", "probeKey"}
+            assert payload["port"] == port
+            assert payload["bootstrapToken"].encode() not in encrypted
+            assert payload["probeKey"].encode() not in encrypted
+            native = Path(__file__).resolve().parents[2] / "desktop" / "target" / "debug" / "genzoroom-desktop.exe"
+            if native.is_file():
+                check = subprocess.run([str(native), "--check-backend"],
+                                       env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
+                                       capture_output=True, text=True, timeout=15)
+                assert check.returncode == 0, check.stderr
+                assert "backend_verified" in check.stdout
+                assert payload["bootstrapToken"] not in check.stdout + check.stderr
+                if os.environ.get("GENZOROOM_WEBVIEW_SMOKE") == "1":
+                    smoke = subprocess.run([str(native), "--webview-smoke"],
+                                           env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
+                                           capture_output=True, text=True, timeout=50)
+                    assert smoke.returncode == 0, smoke.stdout + smoke.stderr
+                    assert '"sharedCookie":true' in smoke.stdout
+                    assert '"image":true' in smoke.stdout
+                    assert payload["bootstrapToken"] not in smoke.stdout + smoke.stderr
+                    assert payload["probeKey"] not in smoke.stdout + smoke.stderr
+                    for line in smoke.stdout.splitlines():
+                        if line.startswith("GenzoRoom WebView2 smoke: {"):
+                            print(line)
+                    # The WebView performed the normal one-time exchange; this test must not replay it.
+                    payload["bootstrapToken"] = None
+            with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=2) as http:
+                proof = http.get("/__local/desktop-ready", params={"challenge": "01" * 32})
+                expected = hmac.new(bytes.fromhex(payload["probeKey"]),
+                                    b"GenzoRoom desktop probe v1:" + b"01" * 32, hashlib.sha256).hexdigest()
+                if payload["bootstrapToken"] is None:
+                    assert proof.status_code == 409
+                else:
+                    assert proof.json() == {"version": 1, "proof": expected}
+                assert http.get("/api/health").status_code == 401
+                if payload["bootstrapToken"] is not None:
+                    assert http.post("/__local/session", json={"token": payload["bootstrapToken"]},
+                                     headers={"Origin": str(http.base_url).rstrip("/")}).status_code == 204
+                    assert http.get("/api/health").json() == {"status": "ok"}
         process.send_signal(signal.CTRL_BREAK_EVENT)
         stdout, stderr = process.communicate(timeout=15)
         assert process.returncode == 0, stderr
         assert "Windows PoC ready" in stdout
         assert "/__local/bootstrap#" not in stdout
+        assert not (root / "desktop-session.dpapi").exists()
     finally:
         if process.poll() is None:
             process.kill()
@@ -361,3 +412,47 @@ raise SystemExit(main(['--no-browser', '--port', sys.argv[1]]))
     # The process did not leave a child server or a reserved listener behind.
     with reserve_listener(port):
         pass
+
+
+def test_desktop_probe_proves_instance_without_consuming_bootstrap(local):
+    local.desktop_probe_key = "ab" * 32
+    token = local.bootstrap_token
+
+    async def exercise():
+        async with client(local) as http:
+            for challenge in ("01" * 32, "02" * 32):
+                response = await http.get("/__local/desktop-ready", params={"challenge": challenge})
+                assert response.status_code == 200
+                expected = hmac.new(bytes.fromhex(local.desktop_probe_key),
+                                    b"GenzoRoom desktop probe v1:" + challenge.encode(), hashlib.sha256).hexdigest()
+                assert response.json() == {"version": 1, "proof": expected}
+                assert token not in response.text and local.desktop_probe_key not in response.text
+            assert local.bootstrap_token == token
+            assert (await http.get("/api/health")).status_code == 401
+            assert (await http.get("/__local/desktop-ready?challenge=wrong")).status_code == 400
+            assert (await http.get("/__local/desktop-ready", params={"challenge": "01" * 32},
+                                   headers={"Origin": "http://evil.example"})).status_code == 403
+            await authenticate(http, local)
+            assert (await http.get("/__local/desktop-ready", params={"challenge": "01" * 32})).status_code == 409
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DPAPI")
+def test_desktop_handoff_is_encrypted_atomic_and_owned(tmp_path):
+    from windows_desktop_handoff import DesktopHandoff, protect_for_current_user
+    first = DesktopHandoff(tmp_path)
+    first.publish(port=3191, bootstrap_token="bootstrap-secret", probe_key="probe-secret")
+    content = first.path.read_bytes()
+    assert b"bootstrap-secret" not in content and b"probe-secret" not in content
+    assert json.loads(protect_for_current_user(content, decrypt=True))["bootstrapToken"] == "bootstrap-secret"
+    corrupt = bytearray(content)
+    corrupt[-1] ^= 1
+    with pytest.raises(RuntimeError, match="desktop_handoff_crypto_failed"):
+        protect_for_current_user(bytes(corrupt), decrypt=True)
+    second = DesktopHandoff(tmp_path)
+    second.publish(port=3192, bootstrap_token="new-secret", probe_key="new-probe")
+    first.close()
+    assert second.path.is_file()
+    second.close()
+    assert not second.path.exists()
+    assert list(tmp_path.glob("desktop-session-*.tmp")) == []

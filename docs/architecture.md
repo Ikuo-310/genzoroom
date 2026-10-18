@@ -839,7 +839,24 @@ The local host mounts existing FastAPI routes at `/api` before the built React s
 | Immich configuration | Existing process environment; fixed for the process lifetime. The PoC has no runtime settings mutation or connection-profile switching. |
 | Export and thumbnail state | Existing Backend lifespan and stores, unchanged. Closing a browser does not stop the host. Ctrl+C waits for existing shutdown; it does not request Export Stop. Users Cancel and wait in the UI before stopping. |
 
-The host uses one worker and disables proxy-header trust and HTTP access logs. The fixed default port is 3191; conflicts fail explicitly without changing origin. A manually selected different port also changes browser UI-settings storage. This phase has no Tauri, packaging, LightCraft, native close interception, credential vault or support for concurrently running hosts against the same local DB.
+The host uses one worker and disables proxy-header trust and HTTP access logs. The fixed default port is 3191; conflicts fail explicitly without changing origin. A manually selected different port also changes browser UI-settings storage. Phase 1A itself has no Tauri, packaging, LightCraft, native close interception, credential vault or support for concurrently running hosts against the same local DB.
+
+### Tauri compatibility host (Phase 1B)
+
+`desktop/` adds a Windows Tauri 2 host with no frontend framework, plugins, custom invoke commands or remote capabilities. Python remains manually started with `windows_local.py --desktop`. Only that explicit mode publishes a current-user DPAPI-encrypted `desktop-session.dpapi` after Backend startup. `windows_desktop_handoff.py` atomically publishes ciphertext, never a plaintext temporary file. It contains only version, port, bootstrap token and an independent probe key, never an Immich credential or cookie. Normal shutdown removes only the publisher's own ciphertext. A crashed publisher may leave stale ciphertext, which cannot validate a different HTTP instance.
+
+Before creating any WebView, Rust decrypts the bounded handoff, validates its schema and fixed-loopback parameters, and verifies a fresh random-challenge HMAC from `/__local/desktop-ready` without sending either secret. The native HTTP client uses neither proxy nor redirects. This proves readiness and instance identity without consuming bootstrap authentication. Already-consumed bootstrap and wrong listeners fail closed. The WebView then loads the original fragment bootstrap and performs the existing Origin-checked JSON exchange. No cookie is injected by Rust, no Host/Origin checks are disabled, and `/api`, images and SPA routing remain unchanged. The Phase 1A protection against other origins is preserved; same-user malware remains outside this isolation boundary.
+
+Both main and Diagnostics windows use one dedicated `webview2` profile under the PoC user root and disable native drag/drop handling, preserving HTML DnD. Navigation is restricted to the exact verified loopback origin. Only `/developer` popup requests create a Diagnostics window; the handler schedules creation off the synchronous WebView2 callback to avoid deadlock. Native menus expose Diagnostics and fullscreen with no new keyboard accelerators. Window closure does not save edits or control Backend lifetime. See [Tauri PoC operations and manual compatibility checklist](windows-tauri-poc.md).
+
+| Desktop state | Owner and invariants |
+| --- | --- |
+| Encrypted handoff | Backend `LocalServer` / `DesktopHandoff`; publish only after ready, current Windows user scope, clean up owned ciphertext on shutdown. Opt-in only; Docker never creates it. |
+| Probe key / bootstrap ownership | One `LocalHost` startup; native probe proves identity without credentials in the request. WebView alone consumes bootstrap; relaunch requires a new Backend startup. |
+| Verified connection / navigation origin | Rust `Connection`; strict schema and port validation, bounded reads, HMAC verification before navigation, no arbitrary origin or redirect fallback. |
+| WebView cookie / UI preferences | WebView2 profile; both windows share it, separate from ordinary browser profiles. Per-start cookie invalidation and per-origin preferences stay unchanged. |
+
+Optional Cargo feature `webview-smoke` compiles test-only page observers. The smoke reports only allowlisted booleans for real WebView authentication, React, API errors, generated JPEG/Canvas, Diagnostics sharing and existing GPU diagnostics. Normal builds exclude these scripts. React processing/interaction code and Docker startup/distribution remain unchanged.
 
 The validation workflow is to develop locally, copy or deploy the required files to the target Docker host, start them with Docker Compose (or Portainer when used), and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GenzoRoom Windows PoC",
+  "version": "0.1.0",
+  "identifier": "com.genzoroom.windows-poc",
+  "build": {
+    "frontendDist": "assets"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "capabilities": [],
+      "csp": "default-src 'none'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "GenzoRoom Windows PoC",
+        "width": 1280,
+        "height": 850,
+        "dragDropEnabled": false,
+        "devtools": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"]
+  }
+}
