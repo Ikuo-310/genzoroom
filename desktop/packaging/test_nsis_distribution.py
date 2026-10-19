@@ -95,6 +95,22 @@ class NsisDistributionTests(unittest.TestCase):
                 self.assertTrue(references.issubset(values.keys()), f"missing strings: {references - values.keys()}")
                 self.assertTrue(all(value.strip() for value in values.values()), "language strings must not be blank")
 
+    def test_same_version_uninstall_quits_parent_only_after_success(self):
+        template = (ROOT / "desktop/nsis/installer.nsi").read_text(encoding="utf-8")
+        function = template.split("Function PageLeaveReinstall", 1)[1].split("FunctionEnd", 1)[0]
+        same_version = function.split("${If} $R0 = 0 ; Same version, proceed", 1)[1].split("${ElseIf} $R0 = 1", 1)[0]
+        self.assertIn("Goto reinst_done", same_version)
+        self.assertIn("StrCpy $UninstallOnly 1", same_version)
+        self.assertIn("Goto reinst_uninstall", same_version)
+
+        success_guard = function.index('${If} $0 <> 0')
+        quit_guard = function.index('${If} $UninstallOnly = 1')
+        done_label = function.index("reinst_done:")
+        self.assertLess(success_guard, quit_guard)
+        self.assertLess(quit_guard, done_label)
+        self.assertIn("Quit", function[quit_guard:done_label])
+        self.assertEqual(function.count("Quit"), 1, "only the same-version uninstall success path may quit")
+
 
 if __name__ == "__main__":
     unittest.main()

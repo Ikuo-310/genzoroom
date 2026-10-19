@@ -187,6 +187,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; 4. Custom page to ask user if he wants to reinstall/uninstall
 ;    only if a previous installation was detected
 Var ReinstallPageCheck
+Var UninstallOnly
 Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
   ; Uninstall previous WiX installation if exists.
@@ -311,6 +312,7 @@ Function PageReinstallUpdateSelection
 FunctionEnd
 Function PageLeaveReinstall
   ${NSD_GetState} $R2 $R1
+  StrCpy $UninstallOnly 0
 
   ; If migrating from Wix, always uninstall
   ${If} $WixMode = 1
@@ -330,6 +332,8 @@ Function PageLeaveReinstall
     ${If} $R1 = 1              ; User chose to add/reinstall
       Goto reinst_done
     ${Else}                    ; User chose to uninstall
+      ; Only this maintenance choice should close the parent installer.
+      StrCpy $UninstallOnly 1
       Goto reinst_uninstall
     ${EndIf}
   ${ElseIf} $R0 = 1 ; Upgrading
@@ -382,6 +386,9 @@ Function PageLeaveReinstall
       ; Other errors? show generic error message and return to select un/reinstall page
       MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
       Abort
+    ${EndIf}
+    ${If} $UninstallOnly = 1
+      Quit
     ${EndIf}
   reinst_done:
 FunctionEnd
