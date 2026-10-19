@@ -42,7 +42,13 @@ Enable the following permissions when creating the key.
 
 The `server.about` permission is optional. When enabled, GenzoRoom can display Immich version information in Settings and related diagnostics.
 
-Export also requires the configured user to own each source Album or have Editor access. If Album inheritance fails, Export stops before stacking; an uploaded JPEG may remain for a later retry.
+When exporting an Asset that belongs to Albums, GenzoRoom looks up those Albums and adds the developed JPEG to each one before creating or updating its Stack. This keeps the Album's visible Stack COVER in the Album after Reload. Assets with no Album membership follow the existing Export flow. If even one Album addition fails, Export stops before stacking; the uploaded JPEG and any successful earlier Album additions may remain for a later Retry. The Retry reuses the same Export timestamp when the saved edits are unchanged to avoid creating another output Asset.
+
+Album membership lookup needs `album.read`. Adding the JPEG needs `albumAsset.create`; `album.create` does not grant this operation. The configured Immich user must own each source Album or have Editor access. A failed membership lookup stops before upload. A missing `albumAsset.create` permission or insufficient Album access makes the addition fail and stops Export before Stack creation.
+
+The Immich v3.3.3 native Album screen may not show a Stack icon for the exported photo even when the Album membership and Stack are correct. GenzoRoom does not change this Immich display behavior.
+
+After upgrading to a version with database schema v6, an older GenzoRoom version cannot open the migrated database. To roll back, restore the complete data-directory backup made before the upgrade; there is no downgrade migration.
 
 GenzoRoom uses Immich's regular Trash mechanism when moving assets to Trash. It does not permanently delete photos.
 

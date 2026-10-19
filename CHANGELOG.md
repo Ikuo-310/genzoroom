@@ -6,6 +6,11 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Album photos disappearing after Export and Stack creation by adding each developed JPEG to all of its source Asset's Albums before making it the Stack COVER.
+- Prevented duplicate output Assets on Retry after a partial Album addition failure by retaining the Export timestamp for unchanged saved edits.
+
 ## [0.2.2] - 2026-10-17
 
 ### Added
