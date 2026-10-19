@@ -81,3 +81,8 @@ temp/
 ._*
 Thumbs.db
 Desktop.ini
+
+# Windows desktop distribution build outputs
+/desktop/target/
+/desktop/packaging/.venv/
+/desktop/gen/
