@@ -237,7 +237,7 @@ class ExportRuntime:
                     "encoding": "encoding_failed", "registration": "registration_failed"}[phase]
             if isinstance(error, JpegCodecError) and error.code in FAILURE_CODES:
                 code = error.code
-            # An item failure continues the run; explicit Retry creates fresh Queue intent later.
+            # Retry snapshots current edits again, but unchanged registration failures retain their upload identity.
             await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, code)
         finally:
             source.clear()

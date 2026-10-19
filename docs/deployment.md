@@ -30,7 +30,8 @@ Enable the following permissions when creating the key.
 | `asset.download` | Download original JPEG files |
 | `asset.upload` | Upload developed JPEG files |
 | `asset.delete` | Move explicitly confirmed assets to Trash |
-| `album.read` | Browse albums |
+| `album.read` | Browse albums and retrieve source Album membership for Export |
+| `albumAsset.create` | Add exported JPEG files to the source Albums |
 | `tag.read` | Retrieve tag information |
 | `tag.create` | Create the GenzoRoom tag |
 | `tag.asset` | Apply and repair asset tags |
@@ -40,6 +41,8 @@ Enable the following permissions when creating the key.
 | `stack.delete` | Remove or dissolve Stacks |
 
 The `server.about` permission is optional. When enabled, GenzoRoom can display Immich version information in Settings and related diagnostics.
+
+Export also requires the configured user to own each source Album or have Editor access. If Album inheritance fails, Export stops before stacking; an uploaded JPEG may remain for a later retry.
 
 GenzoRoom uses Immich's regular Trash mechanism when moving assets to Trash. It does not permanently delete photos.
 

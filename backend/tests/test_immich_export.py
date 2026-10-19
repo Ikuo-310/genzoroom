@@ -53,6 +53,8 @@ class Remote:
         self.tags = set()
         self.failure = None
         self.gate = None
+        self.source_albums = []
+        self.album_members = {}
 
     async def handle(self, request):
         assert request.headers['x-api-key'] == 'private-key'
@@ -60,6 +62,19 @@ class Remote:
         self.calls.append((request.method, path))
         if self.failure == path:
             return httpx.Response(503, json={'error': 'private body'})
+        if path == '/albums':
+            assert request.method == 'GET' and set(request.url.params) == {'assetId'}
+            UUID(request.url.params['assetId'])
+            return httpx.Response(200, json=[{'id': str(album_id)} for album_id in self.source_albums])
+        if path.startswith('/albums/') and path.endswith('/assets'):
+            assert request.method == 'PUT' and json.loads(request.content) == {'ids': [str(OUT)]}
+            album_id = UUID(path.split('/')[2])
+            members = self.album_members.setdefault(album_id, set())
+            if OUT in members:
+                return httpx.Response(200, json=[{'id': str(OUT), 'success': False, 'error': 'duplicate'}])
+            members.add(OUT)
+            if self.gate == 'album': await asyncio.Event().wait()
+            return httpx.Response(200, json=[{'id': str(OUT), 'success': True}])
         if path == '/search/metadata':
             body = json.loads(request.content)
             assert body['filter'] == {'type': {'eq': 'IMAGE'}, 'trashedAt': {'eq': None}, 'originalFileName': {'startsWith': 'IMG'}}
@@ -255,6 +270,7 @@ def test_registration_rejects_target_quarantine_before_stack_mutation(target, de
     assert failure['outputQuarantined'] is (target == OUT)
     assert failure['invalidStackCount'] >= 1 and failure['quarantinedMemberCount'] >= 2
     assert set(failure) == {'level', 'runId', 'assetId', 'position', 'phase', 'errorCode',
+                           'sourceAssetId', 'registeredAssetId', 'stackStarted',
                            'sourceQuarantined', 'outputQuarantined', 'validStackCount', 'invalidStackCount', 'quarantinedMemberCount'}
 
 
@@ -278,15 +294,17 @@ def test_upload_strict_status_uuid_shape_and_http_failure(status, body):
     calls = []
     def handle(request):
         calls.append(request.url.path)
+        if request.url.path == '/api/albums':
+            return httpx.Response(200, json=[])
         return httpx.Response(status, json=body)
     remote = ImmichExportRegistrar('http://immich.example', 'key', transport=httpx.MockTransport(handle))
     with pytest.raises(ExportRegistrationError) as error:
         asyncio.run(remote.register(detail(), ExportArtifact('IMG-Genzo01.jpg', b'jpeg'), context()))
     assert str(error.value) == '' and error.value.code == 'registration_failed'
-    assert calls == ['/api/assets']
+    assert calls == ['/api/albums', '/api/assets']
 
 
-@pytest.mark.parametrize('path', ['/tags', '/tags/assets', '/stacks'])
+@pytest.mark.parametrize('path', ['/albums', '/tags', '/tags/assets', '/stacks'])
 def test_registration_write_failure_keeps_queue_failed(db, path):
     queued(A)
     remote = Remote(); remote.failure = path
@@ -298,14 +316,16 @@ def test_registration_write_failure_keeps_queue_failed(db, path):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('stage', ['upload', 'tag', 'stack'])
+@pytest.mark.parametrize('stage', ['upload', 'tag', 'album', 'stack'])
 def test_interrupted_registration_recovery_has_identical_jpeg_and_converges_without_duplicate(db, stage):
     queued(A, B)
     remote = Remote(); remote.gate = stage
+    if stage == 'album': remote.source_albums = [OTHER]
     async def scenario():
         worker = runtime(remote); run_id = await worker.start([A, B])
         for _ in range(300):
-            ready = bool(remote.outputs) if stage == 'upload' else bool(remote.tags) if stage == 'tag' else bool(remote.stacks)
+            ready = bool(remote.outputs) if stage == 'upload' else bool(remote.tags) if stage == 'tag' else (
+                OUT in remote.album_members.get(OTHER, set()) if stage == 'album' else bool(remote.stacks))
             if ready: break
             await asyncio.sleep(0.005)
         assert ready
@@ -367,6 +387,7 @@ def test_upload_timeout_network_failure_and_logging_privacy(monkeypatch):
     encoded = json.dumps(entries)
     assert all(value not in encoded for value in ('private-key', 'private-filename', 'private-output', 'secret JPEG bytes', 'immich.example'))
     def failing(request):
+        if request.url.path == '/api/albums': return httpx.Response(200, json=[])
         assert request.extensions['timeout']['read'] == 120 and request.extensions['timeout']['write'] == 120
         raise httpx.WriteTimeout('private exception')
     adapter = ImmichExportRegistrar('http://immich.example', 'key', transport=httpx.MockTransport(failing))

@@ -90,7 +90,8 @@ The current calls were checked against Immich **v3.2.4** controller permission d
 | `asset.read` | `GET /assets/{id}`, `POST /search/metadata`, `GET /timeline/bucket`; browsing, family discovery, registration verification |
 | `asset.view` | `GET /assets/{id}/thumbnail`; thumbnails and previews |
 | `asset.download` | `GET /assets/{id}/original`; JPEG originals |
-| `album.read` | `GET /albums`; Home albums (album members use metadata search) |
+| `album.read` | `GET /albums`; Home albums and Export source membership via `assetId` (album members use metadata search) |
+| `albumAsset.create` | `PUT /albums/{id}/assets`; inherit source Album memberships before Export stacking |
 | `tag.read` | `GET /tags`; Home GenzoRoom filtering |
 | `asset.upload` | `POST /assets`; generated JPEG including inherited Favorite |
 | `tag.create` | `PUT /tags`; GenzoRoom tag upsert |
@@ -104,7 +105,7 @@ The current calls were checked against Immich **v3.2.4** controller permission d
 
 Upstream definitions: [User](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/user.controller.ts), [Search](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/search.controller.ts), [Timeline](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/timeline.controller.ts), [Asset](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/asset.controller.ts), [Asset media](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/asset-media.controller.ts), [Album](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/album.controller.ts), [Tag](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/tag.controller.ts), [Stack](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/stack.controller.ts), [Server](https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/server.controller.ts).
 
-Current code does not call Asset update/copy, Tag update/delete, album writes or permanent asset deletion. Do not grant their extra scopes for these features. `asset.delete` itself can authorize broader deletion in Immich; GenzoRoom limits its current request to Trash. Verify the same mapping against the deployed Immich version if different.
+Current code does not call Asset update/copy, Tag update/delete or permanent asset deletion. Album writes add only the exported JPEG to its source's Albums and require the configured user to own the Album or have Editor access. Do not grant unrelated extra scopes for these features. `asset.delete` itself can authorize broader deletion in Immich; GenzoRoom limits its current request to Trash. Verify the same mapping against the deployed Immich version if different.
 
 ## NAS acceptance checks
 

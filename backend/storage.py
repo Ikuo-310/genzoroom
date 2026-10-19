@@ -103,7 +103,7 @@ def validate_existing_database(database_path: Path | None = None) -> None:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version <= 0:
             raise StorageInitializationError("storage_database_uninitialized")
-        if version > 5:
+        if version > 6:
             raise StorageInitializationError("unsupported_db_schema")
         required = {
             0: {},
@@ -132,8 +132,10 @@ def validate_existing_database(database_path: Path | None = None) -> None:
                                      "recipe_version", "processing_version", "frozen_recipe_json", "status",
                                      "error_code", "registered_asset_id", "updated_at")},
         }[min(version, 4)]
-        if version == 5:
+        if version >= 5:
             required["development_exclusions"] = ("kind", "target_id", "primary_asset_id", "member_ids_json", "registered_at")
+        if version >= 6:
+            required["export_run_items"] += ("export_timestamp",)
         for table, columns in required.items():
             # SQLite can interpret missing double-quoted identifiers as string literals.
             projection = ", ".join(f'[{column}]' for column in columns)

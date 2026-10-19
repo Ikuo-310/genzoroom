@@ -11,7 +11,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from storage import DB_PATH, StorageInitializationError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -146,7 +146,16 @@ def _create_v5(connection: sqlite3.Connection) -> None:
     )""")
 
 
-MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5}
+def _create_v6(connection: sqlite3.Connection) -> None:
+    # Preserve pre-upgrade recovery bytes; only new retries may reuse an earlier attempt's timestamp.
+    connection.execute("ALTER TABLE export_run_items ADD COLUMN export_timestamp TEXT NOT NULL DEFAULT ''")
+    connection.execute("""UPDATE export_run_items SET export_timestamp=(
+        SELECT created_at FROM export_runs WHERE export_runs.run_id=export_run_items.run_id)""")
+    connection.execute("""CREATE INDEX export_registration_retries ON export_run_items(queue_id, frozen_revision)
+        WHERE status='failed' AND error_code='registration_failed'""")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5, 5: _create_v6}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:

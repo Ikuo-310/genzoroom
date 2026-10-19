@@ -29,7 +29,8 @@ Immichにログインし、「アカウント設定」→「APIキー」からGe
 | `asset.download` | JPEGオリジナルの取得 |
 | `asset.upload` | 現像済みJPEGの登録 |
 | `asset.delete` | 確認済みのゴミ箱移動 |
-| `album.read` | アルバムの閲覧 |
+| `album.read` | アルバムの閲覧・出力元の所属アルバム取得 |
+| `albumAsset.create` | 現像済みJPEGを出力元の所属アルバムへ追加 |
 | `tag.read` | タグ情報の取得 |
 | `tag.create` | GenzoRoomタグの作成 |
 | `tag.asset` | 写真へのタグ設定・修復 |
@@ -39,6 +40,8 @@ Immichにログインし、「アカウント設定」→「APIキー」からGe
 | `stack.delete` | STACKの解除・削除 |
 
 `server.about` は任意です。許可すると、設定画面などでImmichのバージョン情報を表示できます。
+
+出力には、設定したユーザーが元写真の各アルバムを所有しているか、編集者権限を持っている必要があります。アルバム所属の継承に失敗するとSTACK化前に出力を停止します。アップロード済みのJPEGは残る場合があり、再試行で利用します。
 
 GenzoRoomが行うゴミ箱移動は、Immichの通常のゴミ箱機能を使用します。写真の完全削除は行いません。
 

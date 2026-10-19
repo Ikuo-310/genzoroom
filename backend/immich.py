@@ -421,6 +421,56 @@ def _album_date(value: object) -> str | None:
     return value
 
 
+class ImmichAlbumError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+async def get_asset_album_ids(client, url: str, headers: dict, asset_id: UUID) -> list[UUID]:
+    response = await _immich_request(client, "GET", url, "/albums", headers=headers,
+                                     params={"assetId": str(asset_id)})
+    if response.status_code != 200:
+        raise ImmichAlbumError("album_lookup_failed")
+    try:
+        body = response.json()
+        if not isinstance(body, list):
+            raise ValueError
+        ids = []
+        for album in body:
+            if not isinstance(album, Mapping) or type(album.get("id")) is not str:
+                raise ValueError
+            ids.append(UUID(album["id"]))
+        return list(dict.fromkeys(ids))
+    except (ValueError, TypeError, KeyError):
+        _log_response_failure(response, "invalid_album_response")
+        raise ImmichAlbumError("invalid_album_response") from None
+
+
+async def add_asset_to_album(client, url: str, headers: dict, album_id: UUID, asset_id: UUID) -> str:
+    response = await _immich_request(client, "PUT", url, f"/albums/{album_id}/assets", headers=headers,
+                                     json={"ids": [str(asset_id)]})
+    if response.status_code != 200:
+        raise ImmichAlbumError("album_permission_denied" if response.status_code in (401, 403) else "album_add_failed")
+    try:
+        body = response.json()
+        if not isinstance(body, list) or len(body) != 1 or not isinstance(body[0], Mapping):
+            raise ValueError
+        result = body[0]
+        if type(result.get("id")) is not str or UUID(result["id"]) != asset_id or type(result.get("success")) is not bool:
+            raise ValueError
+        if result["success"] and result.get("error") is None:
+            return "added"
+        # Immich reports an existing association as a failed insertion, even though membership is satisfied.
+        if not result["success"] and result.get("error") == "duplicate":
+            return "duplicate"
+    except (ValueError, TypeError, KeyError):
+        _log_response_failure(response, "invalid_album_add_response")
+        raise ImmichAlbumError("invalid_album_add_response") from None
+    _log_response_failure(response, "album_add_failed")
+    raise ImmichAlbumError("album_permission_denied" if result.get("error") == "no_permission" else "album_add_failed")
+
+
 async def get_albums(
     immich_url: str | None,
     api_key: str | None,

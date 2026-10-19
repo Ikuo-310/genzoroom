@@ -93,7 +93,7 @@ def _read_run(connection, run_id):
                                        item["frozen_revision"], item["recipe_version"], item["processing_version"],
                                        recipe, item["status"], item["error_code"],
                                        UUID(item["registered_asset_id"]) if item["registered_asset_id"] else None,
-                                       _timestamp(item["updated_at"]), _timestamp(row["created_at"])))
+                                       _timestamp(item["updated_at"]), _timestamp(item["export_timestamp"])))
         if not 1 <= len(items) <= 100 or len({item.asset_id for item in items}) != len(items):
             raise ValueError()
         active = any(item.status in ACTIVE_ITEM_STATUSES for item in items)
@@ -191,10 +191,21 @@ def create_export_run(asset_ids: list[UUID], *, worker_id: UUID | None = None) -
                                    (str(run_id), str(worker_id) if worker_id else None, now, now))
                 # Targets, frozen recipes and waiting locks become visible at one commit.
                 for position, (queue, saved, state) in enumerate(snapshots):
+                    # A failed registration may have uploaded already. Reuse its checksum identity
+                    # only for this Queue entry and frozen snapshot; edits/re-enqueues are new exports.
+                    previous = connection.execute("""SELECT item.export_timestamp FROM export_run_items AS item
+                        JOIN export_runs AS run ON run.run_id=item.run_id
+                        WHERE item.queue_id=? AND item.asset_id=? AND item.frozen_revision=?
+                            AND item.recipe_version=? AND item.processing_version=? AND item.frozen_recipe_json=?
+                            AND item.status='failed' AND item.error_code='registration_failed'
+                        ORDER BY run.created_at DESC LIMIT 1""",
+                        (queue["id"], queue["asset_id"], saved["revision"], state["recipeVersion"],
+                         state["processingVersion"], _json(state["currentRecipe"]))).fetchone()
+                    export_timestamp = _timestamp(previous["export_timestamp"]) if previous else now
                     inserted = connection.execute("""INSERT INTO export_run_items
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, NULL, ?)""",
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, NULL, ?, ?)""",
                         (str(run_id), position, queue["asset_id"], queue["id"], saved["revision"],
-                         state["recipeVersion"], state["processingVersion"], _json(state["currentRecipe"]), now)).rowcount
+                         state["recipeVersion"], state["processingVersion"], _json(state["currentRecipe"]), now, export_timestamp)).rowcount
                     locked = connection.execute("UPDATE export_queue SET status='waiting', updated_at=? WHERE id=? AND status='queued'",
                                                 (now, queue["id"])).rowcount
                     if inserted != 1 or locked != 1:
