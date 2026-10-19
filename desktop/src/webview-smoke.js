@@ -8,6 +8,7 @@
       await new Promise(resolve => setTimeout(resolve, 50));
     }
   };
+  let stage = 'init';
   try {
     await wait(() => document.querySelector('#root')?.childElementCount > 0);
     const health = await fetch('/api/health', { cache: 'no-store' });
@@ -89,8 +90,46 @@
     await wait(() => !run.disabled, 20000);
     const rows = [...document.querySelectorAll('#webgpu-panel tbody tr')];
     result.gpuResults = rows.length > 0 && rows.every(row => Number.isFinite(Number(row.cells[2].textContent)));
+    if (window.__GENZOROOM_JSON_SMOKE__) {
+      const mode = window.__GENZOROOM_JSON_SMOKE__;
+      const originalCreate = URL.createObjectURL.bind(URL);
+      const originalClick = HTMLAnchorElement.prototype.click;
+      const blobs = new Map(), hashes = [];
+      URL.createObjectURL = blob => { const url = originalCreate(blob); blobs.set(url, blob); return url; };
+      let current;
+      HTMLAnchorElement.prototype.click = function () { current = { name: this.download, url: this.href }; originalClick.call(this); };
+      try {
+        for (const selector of ['.developer-section .developer-actions button', '#jpeg-panel .developer-actions button:last-child', '#webgpu-panel .developer-actions button:last-child']) {
+          stage = ['full', 'jpeg', 'webgpu'][hashes.length];
+          current = null;
+          let outcome;
+          const finished = event => { if (event.detail?.url === current?.url) outcome = event.detail.status; };
+          window.addEventListener('genzoroom:report-download', finished);
+          try {
+            document.querySelector(selector).click();
+            await wait(() => outcome !== undefined);
+            if (mode !== 'save') {
+              await new Promise(resolve => setTimeout(resolve, 100));
+              const handled = mode === 'cancel' ? outcome === 'cancelled' && !document.querySelector('[role=alert]')
+                : outcome === 'failed' && !!document.querySelector('[role=alert]');
+              document.title = 'GenzoRoom-json-outcome:' + JSON.stringify({ handled });
+              break;
+            }
+            if (outcome !== 'saved') throw new Error('download_failed');
+            const bytes = await blobs.get(current.url).arrayBuffer();
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            hashes.push({ name: current.name, sha256: [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('') });
+            await new Promise(resolve => setTimeout(resolve, 50));
+          } finally { window.removeEventListener('genzoroom:report-download', finished); }
+        }
+      } finally { URL.createObjectURL = originalCreate; HTMLAnchorElement.prototype.click = originalClick; }
+      if (mode === 'save') document.title = 'GenzoRoom-json:' + JSON.stringify(hashes);
+      await wait(() => typeof window.__genzoroomJsonPassed === 'boolean');
+      if (!window.__genzoroomJsonPassed) throw new Error('json_roundtrip_failed');
+    }
     document.title = 'GenzoRoom-smoke:' + JSON.stringify(result);
   } catch {
+    if (window.__GENZOROOM_JSON_SMOKE__) { document.title = 'GenzoRoom-download-failed:' + stage; return; }
     document.title = 'GenzoRoom-smoke:' + JSON.stringify({});
   }
 })();

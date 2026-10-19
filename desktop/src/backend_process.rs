@@ -38,6 +38,13 @@ pub struct BackendProcess {
 }
 
 impl BackendProcess {
+    #[cfg(feature = "webview-smoke")]
+    pub fn startup_timeout_smoke() -> Result<(), &'static str> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("repository_missing")?;
+        Self::start_at(root, Duration::ZERO, false, false).map(|_| ())
+    }
     pub fn start() -> Result<(Self, Connection), &'static str> {
         Self::start_mode(false, false)
     }
@@ -82,6 +89,19 @@ impl BackendProcess {
         #[cfg(windows)]
         command.creation_flags(0x00000004 | 0x08000000); // CREATE_SUSPENDED | CREATE_NO_WINDOW
         let mut child = command.spawn().map_err(|_| "backend_spawn_failed")?;
+        #[cfg(feature = "webview-smoke")]
+        if std::env::args().any(|value| {
+            matches!(
+                value.as_str(),
+                "--startup-timeout-smoke"
+                    | "--backend-crash-smoke"
+                    | "--backend-crash-hold-smoke"
+                    | "--frontend-unready-smoke"
+                    | "--bootstrap-failure-smoke"
+            )
+        }) {
+            println!("GenzoRoom child smoke: {}", child.id());
+        }
         #[cfg(windows)]
         if assign_and_resume(&job, &child).is_err() {
             // This process is still suspended, so no persistence or Export work has started.

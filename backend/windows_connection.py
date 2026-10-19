@@ -198,6 +198,14 @@ class WindowsConnection:
         return url, key
 
     def metadata(self):
+        if self.source == "environment":
+            try:
+                active_url = normalize_url(os.environ.get("IMMICH_URL", ""))
+            except ConnectionSettingsError:
+                active_url = ""
+            return {"url": active_url, "keyConfigured": bool(os.environ.get("IMMICH_API_KEY")),
+                    "source": self.source, "error": self.error, "managed": self.managed,
+                    "pendingRestart": False, "cleanupPending": False}
         data = self.store.read()
         selected = data["selected"]
         return {"url": selected["url"] if selected else "", "keyConfigured": selected is not None,

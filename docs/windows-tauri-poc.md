@@ -31,7 +31,7 @@ Rustは固定したPythonパスと引数を直接起動し、シェル経由の�
 - Windows資格情報マネージャー：現在ユーザーのGeneric Credential。参照名は`GenzoRoom/WindowsPoC/Immich/<ランダムID>`、同じPCの次回ログオンでも利用できます。利用不能時に平文へフォールバックしません。
 - `profiles/<profile ID>/data/genzoroom.db`と`profiles/<profile ID>/cache/thumbnails`：Recipe、History、Queue、Export履歴、サムネイルを接続プロファイルごとに分離します。正規化URLと認証済みユーザーIDが現在の保存済み接続と一致すればprofile IDを維持し、APIキーだけの変更でもデータを引き継ぎます。URLまたはユーザーIDが異なる場合は新しいprofile IDを発行します。同一の資格情報・接続設定を保存した場合は既存資格情報を再利用し、Backendを再起動しません。過去プロファイルを推測で選択・移行・統合せず、そのファイルは保持します。
 - 通常の再起動では保存済みprofileを使いますが、先にCredential ManagerのキーでユーザーIDを再検証します。別ユーザー、認証失敗、接続不能などでは旧profileを開かず、`profiles/unconfigured`でSettingsを利用可能にします。旧WindowsPoC直下のDBは自動移行しません。
-- 保存後に新Backendを起動できなかった場合は、接続未設定の回復Backendを起動します。保存済み設定と以前のprofileは保持し、Settingsで修正・新規登録または再起動再試行できます。保存先DBの破損や新しいスキーマ等が原因なら、そのファイルを保全してから設定を再保存すると空のprofileで復帰できます。回復Backendも起動できない場合は表示されたエラーを確認し、ポート競合・Python環境・保存先アクセスを解消してTauriを再起動してください。
+- 保存後の再起動、または通常起動で選択済みDBを開けずBackend起動に失敗した場合は、接続未設定の回復Backendを起動します。保存済み設定と以前のprofileは保持し、Settingsで修正または再起動再試行できます。DBのロック・アクセス権・対応アプリ版を確認し、DBを保全してから復旧してください。同じURL／ユーザーの再保存では空のprofileへ切り替わりません。空のprofileからやり直す場合は、明示的に接続設定を削除してから再登録します（旧DB・キャッシュは残ります）。通常起動のポート競合・タイムアウトは回復起動へ進まず固定エラーで終了します。回復Backendも起動できない場合はポート・Python環境・保存ルートへのアクセスを解消してTauriを再起動してください。
 - 資格情報の更新は新参照へ書き込み、JSON参照を原子的に切り替えた後で旧資格情報を削除します。書き込み失敗時は旧参照と選択設定を維持します。削除失敗はcleanupとして保持・表示し、接続削除の再試行で回収します。接続設定の削除は資格情報だけを削除し、DBやキャッシュは保持します。JSONが破損している場合は上書きせず、停止後に`connection.json`を退避して再登録してください。資格情報マネージャーに残る不要なGenzoRoom参照は所有者が確認して削除できます。
 
 環境変数を使う自動起動の診断モードは`cargo run --manifest-path desktop/Cargo.toml --locked -- --environment-backend`です。保存済み設定とは混用せず、接続設定欄は読み取り専用になります。診断モードと手動起動は毎回`profiles/environment-<ランダムID>`を作成し、過去のRecipe／Queueを再利用しません。Docker版は従来どおり環境変数と`/genzoroom`を使います。
@@ -88,7 +88,7 @@ cargo run --manifest-path desktop/Cargo.toml --locked -- --check-backend
 - SettingsのPrimary修飾クリックによる`window.open('/developer')`は、同じWebView2プロファイルのDiagnosticsウィンドウを開きます。ネイティブメニューの`Window > Developer Diagnostics`からも開けます。
 - `Window > Full screen`で全画面を切り替えます。新しいキーボードアクセラレーターは登録していません。同じメニューから戻ります。
 - 両ウィンドウは検証済みBackendと同じオリジンへの遷移だけを許可し、Diagnostics以外のポップアップは拒否します。WebViewの開発者ツールは利用可能です。
-- DiagnosticsのJSONダウンロードは既存のブラウザー経路です。保存ダイアログ／保存先は実機確認対象です。
+- DiagnosticsのJSONは既存のBlob／`<a download>`経路を使い、Windowsホストがネイティブの保存先選択を表示します。Full／JPEG-only／WebGPU-onlyと既存ログJSONの命名・UTF-8内容を維持し、キャンセルは正常終了、保存失敗は既存UIのエラー表示になります。通常ブラウザーでは従来どおりブラウザー標準ダウンロードです。
 
 保存ルートはPhase 1Aと同じですが、DB・キャッシュは上記の接続プロファイル配下です。WebView2の専用プロファイルは`%LOCALAPPDATA%\GenzoRoom\WindowsPoC\webview2`です。通常ブラウザーとはCookie・UI設定が別になります。ポートを変えるとオリジン単位のUI設定も変わります。
 
@@ -149,3 +149,44 @@ try {
 | 終了・再起動 | 未保存編集の保存待ち・保存失敗と再試行、Export現在項目だけの完了待ち、正常終了後の子Backend消滅、異常終了後の復旧、手動モードでBackendを残すこと、新しい認証での再起動 |
 
 自動スモークで成立した項目と、この表の人による実機確認は区別して記録してください。
+
+## Phase 1・2 完了判定と検証範囲（2026-10-19）
+
+Phase 1A〜2Cの実装、Phase 1・2横断監査、および監査Finding修正を完了した。初回監査はHigh 0／Medium 2／Low 1。M1（Backend異常終了と終了要求ID）、M2（Frontend初期化失敗時の終了不能）、L1（診断モードの接続先表示）は修正済みで、限定再監査はHigh 0／Medium 0／Low 0。これまでに記録されたWindows基本動作の実機確認結果を採用し、以下の自動検証結果と合わせて開発工程をクローズする。この完了記録の作成にあたり、新たな動的確認や障害注入は行っていない。記載する手動未確認事項は保証範囲の記録であり、Phase完了の阻害条件ではない。
+
+| 遷移・境界 | 実装と自動検証 |
+| --- | --- |
+| 起動 → Backend → HMAC照合 → Cookie認証 → React | `backend_process.rs` / `windows_local.py`、実WebView2のAPI・画像・別窓Cookie共有smoke |
+| 初回設定 → テスト → 保存 → 再起動 | `windows_connection.py` / `WindowsConnectionSettings`、認証再実行・保存・既存終了handshakeのテスト |
+| 同一接続の再保存／キー更新 | 不変設定は再起動不要、キー更新は同じprofileで再起動。Recipe・History・Queue保持と別ユーザー／別URL分離をnative fixtureで検証 |
+| 通常終了／Tauri強制終了 | 自分の子PIDとJobだけを所有。正常終了とkill-on-job-close、子消滅、3191再利用をnativeテストで検証 |
+| 未保存編集 → 終了 | `AnshitsuPersistence.test.tsx`で保存待ち、失敗時中止、再試行、フォーカス・ショートカット復帰。色はCSS回帰テスト |
+| Export中 → 終了 → 次回復旧 | `test_windows_managed.py` / Export runtime・recoveryテストでStart抑止、永続Stop、現在項目完了、次項目非開始、登録済み項目の再処理抑止 |
+| Backend異常終了 | nativeテストで固定エラー表示・画面への復帰・終了を検証。未保存編集の回収を自動成功とは扱わない |
+| Backend異常終了と終了保存の競合 | Rustのpending request IDを正とし、Backend終了はGuarding状態の一致IDだけを解決。遅延closeResult／cancelイベントと重複通知を状態遷移テストで検証 |
+| Frontend初期化失敗 | 未Ready初回文書は既存ManagedControlのprepare／shutdownをホストが実行。React ready失敗・bootstrap認証失敗を隔離WebView smokeで検証 |
+| Ready後の再読み込み | Ready→Reloadingを区別し、終了ガード中の遷移はそのIDだけ取消。Reloading中の終了では未保存編集が失われる可能性をWindows確認ダイアログで明示し、キャンセルは継続、確認時のみBackendを正常停止。新文書のReady後は保存ガードへ戻る |
+| Backend停止後に旧WebViewが残る場合 | 同じWindowsセッションの単一インスタンスMutexをBackend起動前に取得。旧WebView保持中の2つ目のTauri起動を一時LOCALAPPDATA fixtureで拒否し、Backendを生成しない |
+| 環境変数診断モード | Settings metadataは保存済みdescriptorを表示せず、実際の環境変数URLとキー設定有無のみを返す。秘密値と保存先情報は返さない |
+| 起動タイムアウト／ポート競合／照合不整合 | 所有子の回収と外部listener非再利用、起動ID・HMAC・Host・Origin・Cookie検証。タイムアウトはsmoke専用の0秒待ち注入で検証 |
+| 資格情報不読／Immich停止 | 接続・資格情報テストで回復状態へ移行し、保存済み設定を保持。平文保存・環境変数への暗黙fallbackなし |
+| SQLite不使用／再起動失敗 | 初回起動の新スキーマDB・実writer lock、設定変更後の起動失敗をnativeテストで注入。選択済みDB／Recipe／Queue／資格情報を保全し、別のunconfigured DBでSettingsを表示 |
+| JSON保存 | 実WebView2の3形式を一時フォルダーへ保存し、再読込みしたUTF-8バイト列と元BlobのSHA-256一致を検証。キャンセルと実書き込み失敗時のUIも検証 |
+
+保存処理は`report_download.rs`のWebViewイベントだけで処理します。検証済みOriginの`/developer`、main／diagnosticsウィンドウ、同OriginのBlob、既知JSONファイル名に限定します。Chromiumの連続自動ダウンロード許可も同画面に限定し、各ファイルの検証と保存先選択を省略しません。ローカルHTTPクライアント向け保存APIや任意パス指定IPC、包括的filesystem権限はありません。通常ビルドはsmoke用保存先指定を含みません。
+
+Tauriの名前付きMutexは通常のUI／manual起動でプロセス終了まで保持します。これにより、Backendだけが予期せず停止して旧WebViewが生きている間、同じWebView2 user-data directoryとCookie originを使う2個目のホストはBackendを起動する前に拒否されます。`--check-backend`とBackend単体の`--process-smoke`はUIホストではないためロック対象外です。初回Frontend未準備ではReact rootを`inert`に保ち、暗室が編集可能になる前にBackendの`prepare`／`shutdown`でExport停止と処理中項目の完了を待って終了できます。一度Readyになった後のReloading中に閉じる場合は、未保存内容を失う可能性を示すネイティブ確認を出します。キャンセル時は開いたままにし、確認時だけReact保存ガードを使わずにBackendの正常終了を待ちます。新しい文書がReadyになった後は通常の保存ガードへ戻ります。
+
+初回横断監査でのM1・M2・L1はすべて修正済みであり、上表の自動テストで状態遷移を再確認した。Phase 2Cの既報結果はBackend全体1213件＋326 subtests、managed／recovery関連61件、Frontend関連121件および終了保存・Settings・Developer関連144件、Rust／WebView2 native 14件の成功。今回の限定修正後はRust17件、Backend接続・managed・export関連115件、Frontend persistence／History／lifecycle関連182件、初回Frontend未準備・旧WebView隔離smoke3件が成功した。TypeScript／Vite build、Clippy、Rust fmt、通常／smoke Cargo build、`git diff --check`も成功した。最初のFrontend全体並列実行で発生した2件のタイムアウトは関連単独実行で成功し、閾値は変更していない。Node環境のWebGPU skip、既存Vite 500 kB chunk警告、Cargo incremental hard-link不可によるcopy警告は既知の検証環境上の事項として記録する。
+
+以下は未実施または直接保証していない事項であり、検証済みとは扱わない。開発工程の完了判定はこれらを必須条件とせず、必要になった段階で再評価する。
+
+- 未保存編集を含む終了操作の最終実機確認、再読み込み中のWindows確認ダイアログの手動操作、保存失敗の実機障害注入。
+- Export実行中の終了操作の最終実機確認、Windowsログオフ／シャットダウン通知への応答。
+- 旧WebViewから、後から起動した別BackendへのCookie送信の直接試験。隔離テストでは名前付きMutexが二つ目のTauri／Backend起動を拒否し、その接続経路を成立させないことを確認した。
+- 可視保存ダイアログの操作、日本語パス・上書き確認、OS実キー／IME、DnD、DPI、全画面、最小化復帰、実写真WebGPU／Export。実Immichへの書き込みを伴う試験は自動実行していない。
+- Docker release Smoke TestとNASデプロイ検証。
+
+既知の共通Export課題として、外部ライブラリ由来のシングル素材をExportした場合、出力JPEGのSTACK COVER設定またはGallery表示が期待と異なる問題がWindows版・Docker版の双方で確認されている。一方、Immichライブラリ内のシングル素材はDocker版で正常にCOVER設定されることが確認済み。この問題は共通Export処理の別課題として扱い、今回のPhase 1・2完了判定およびFinding件数には含めない。
+
+Backendが失われた状態で暗室保存は成功しません。ウィンドウに編集が残っている間は、強制終了で未保存内容が失われる点に注意してください。DBを開けない回復画面では元DBの修復・ロック解除・対応版への復帰後に再起動を再試行します。Pythonや保存ルート自体が使用不能なら回復Backendも起動できないため、ウィンドウ外で原因を解消して再起動します。資格情報削除・DB初期化を自動復旧手段には使いません。

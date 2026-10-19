@@ -35,6 +35,7 @@
     "waiting": "Waiting for the current export and Backend to finish…",
     "failed": "Closing was cancelled. Check the save or export state, then close the window again to retry.",
     "backendFailed": "The local Backend stopped unexpectedly. This window retains your edits; saving cannot finish until the Backend is available.",
+    "startupFailed": "GenzoRoom could not finish starting. The workspace is locked; close the window to stop safely.",
     "back": "Return to GenzoRoom"
   },
   "webgpu": {

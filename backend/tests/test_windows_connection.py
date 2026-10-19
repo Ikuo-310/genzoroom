@@ -205,6 +205,27 @@ def test_saved_source_overrides_environment_and_checks_user_before_profile_open(
     assert settings.read()["selected"] == entry
 
 
+def test_environment_diagnostic_metadata_reports_only_the_active_environment_target(settings, monkeypatch):
+    saved_key = secrets.token_urlsafe(32)
+    settings.save("http://saved.invalid", str(uuid4()), saved_key)
+    active_key = secrets.token_urlsafe(32)
+    monkeypatch.setenv("IMMICH_URL", " HTTP://active.invalid:80/api/ ")
+    monkeypatch.setenv("IMMICH_API_KEY", active_key)
+    connection, profile, error = asyncio.run(load_windows_connection(environment=True, store=settings, managed=True))
+
+    metadata = connection.metadata()
+    assert profile == "environment" and error is None
+    assert metadata == {"url": "http://active.invalid", "keyConfigured": True, "source": "environment",
+                        "error": None, "managed": True, "pendingRestart": False, "cleanupPending": False}
+    assert saved_key not in json.dumps(metadata) and active_key not in json.dumps(metadata)
+
+    monkeypatch.setenv("IMMICH_URL", "invalid://url")
+    monkeypatch.delenv("IMMICH_API_KEY")
+    metadata = connection.metadata()
+    assert metadata["url"] == "" and not metadata["keyConfigured"]
+    assert not metadata["pendingRestart"] and not metadata["cleanupPending"]
+
+
 def test_recovery_never_opens_selected_profile_and_retains_retry_settings(settings, monkeypatch):
     entry = settings.save("http://saved.invalid", str(uuid4()), secrets.token_urlsafe(32))
     monkeypatch.setenv("IMMICH_API_KEY", secrets.token_urlsafe(32))

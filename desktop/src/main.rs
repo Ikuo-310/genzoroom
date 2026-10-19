@@ -1,6 +1,8 @@
 mod backend_process;
 mod connection;
 mod lifecycle;
+mod report_download;
+mod single_instance;
 #[cfg(feature = "webview-smoke")]
 mod smoke;
 
@@ -23,12 +25,18 @@ fn open_diagnostics(app: &tauri::AppHandle, port: u16) {
         let url = format!("http://127.0.0.1:{port}/developer")
             .parse()
             .unwrap();
+        let downloads = report_download::Downloads::default();
         let result = WebviewWindowBuilder::new(&app, "diagnostics", WebviewUrl::External(url))
             .title("GenzoRoom Developer Diagnostics")
             .inner_size(1280.0, 850.0)
             .data_directory(root.join("webview2"))
             .disable_drag_drop_handler()
             .devtools(true)
+            .initialization_script(report_download::bridge())
+            .on_download(move |webview, event| downloads.handle(webview, event, port))
+            .on_permission_request(move |webview, kind| {
+                report_download::permission(webview, kind, port)
+            })
             .on_navigation(move |url| allowed_navigation(url, port))
             .on_new_window(|_, _| NewWindowResponse::Deny)
             .on_page_load(observe_page)
@@ -48,7 +56,20 @@ fn run() -> Result<(), &'static str> {
     let check_backend = arguments == ["--check-backend"];
     let smoke = cfg!(feature = "webview-smoke") && arguments == ["--webview-smoke"];
     let auto_smoke = cfg!(feature = "webview-smoke") && arguments == ["--auto-smoke"];
+    let unready_smoke =
+        cfg!(feature = "webview-smoke") && arguments == ["--frontend-unready-smoke"];
+    let bootstrap_failure_smoke =
+        cfg!(feature = "webview-smoke") && arguments == ["--bootstrap-failure-smoke"];
     let process_smoke = cfg!(feature = "webview-smoke") && arguments == ["--process-smoke"];
+    let crash_smoke = cfg!(feature = "webview-smoke")
+        && matches!(arguments.as_slice(), [mode] if mode == "--backend-crash-smoke" || mode == "--backend-crash-hold-smoke");
+    let recovery_smoke =
+        cfg!(feature = "webview-smoke") && arguments == ["--startup-recovery-smoke"];
+    #[cfg(feature = "webview-smoke")]
+    if arguments == ["--startup-timeout-smoke"] {
+        backend_process::BackendProcess::startup_timeout_smoke()?;
+        return Err("smoke_timeout_missing");
+    }
     let restart_smoke = cfg!(feature = "webview-smoke")
         && (arguments == ["--restart-smoke"] || arguments == ["--restart-failure-smoke"]);
     let environment = arguments == ["--environment-backend"];
@@ -56,12 +77,21 @@ fn run() -> Result<(), &'static str> {
     if !arguments.is_empty()
         && !manual
         && !auto_smoke
+        && !unready_smoke
+        && !bootstrap_failure_smoke
         && !process_smoke
         && !environment
         && !restart_smoke
+        && !crash_smoke
+        && !recovery_smoke
     {
         return Err("unsupported_arguments");
     }
+    let _instance_lock = if check_backend || process_smoke {
+        None
+    } else {
+        Some(single_instance::acquire()?)
+    };
     let (owner, connection) = if manual {
         let connection = Connection::load()?;
         if connection.launch_id.is_some() {
@@ -73,7 +103,15 @@ fn run() -> Result<(), &'static str> {
         let (owner, connection) = if environment || auto_smoke {
             backend_process::BackendProcess::start_mode(true, false)?
         } else {
-            backend_process::BackendProcess::start()?
+            backend_process::BackendProcess::start().or_else(|code| {
+                // The selected profile may be inaccessible; recover without opening or replacing it.
+                // Conflict and timeout retain their explicit startup errors, never adopting a listener.
+                if code == "backend_startup_failed" {
+                    backend_process::BackendProcess::start_mode(false, true)
+                } else {
+                    Err(code)
+                }
+            })?
         };
         (Some(owner), connection)
     };
@@ -86,7 +124,10 @@ fn run() -> Result<(), &'static str> {
         return owner.unwrap().process_smoke();
     }
     let port = connection.port;
-    let bootstrap = connection.bootstrap_url();
+    let mut bootstrap = connection.bootstrap_url();
+    if bootstrap_failure_smoke {
+        bootstrap.set_fragment(Some("invalid-isolated-smoke-token"));
+    }
     let state = lifecycle::Lifecycle::new(owner);
     let exit_state = state.clone();
     let application = tauri::Builder::default()
@@ -131,8 +172,14 @@ fn run() -> Result<(), &'static str> {
             let mut config = app.config().app.windows[0].clone();
             config.url = WebviewUrl::External(bootstrap.clone());
             let handle = app.handle().clone();
+            let downloads = report_download::Downloads::default();
             WebviewWindowBuilder::from_config(app, &config)?
-                .initialization_script(lifecycle::BRIDGE)
+                .initialization_script(lifecycle::bridge(unready_smoke))
+                .initialization_script(report_download::bridge())
+                .on_download(move |webview, event| downloads.handle(webview, event, port))
+                .on_permission_request(move |webview, kind| {
+                    report_download::permission(webview, kind, port)
+                })
                 .data_directory(user_root().map_err(std::io::Error::other)?.join("webview2"))
                 .on_navigation(move |url| allowed_navigation(url, port))
                 .on_new_window(move |url, _| {
@@ -176,7 +223,7 @@ fn run() -> Result<(), &'static str> {
                         .exit_code
                         .store(code, std::sync::atomic::Ordering::SeqCst);
                 }
-                exit_state.request_close(app);
+                exit_state.request_exit(app);
             }
         }
     });
@@ -188,8 +235,7 @@ fn observe_page(window: tauri::WebviewWindow, payload: tauri::webview::PageLoadP
         // A reloaded document must register its own save guard before accepting Close.
         window
             .state::<std::sync::Arc<lifecycle::Lifecycle>>()
-            .frontend_ready
-            .store(false, std::sync::atomic::Ordering::SeqCst);
+            .page_started(window.app_handle());
     }
     #[cfg(feature = "webview-smoke")]
     smoke::page_loaded(window, payload);

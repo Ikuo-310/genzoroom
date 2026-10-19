@@ -2,6 +2,26 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Windows Phase 1・2 完了記録（2026-10-19）
+
+起動・HMAC/Cookie認証、設定保存・profile再利用・Backend再起動、編集保存失敗後の再試行、Export Stop／復旧、Job Objectの正常／異常終了を横断検証した。既存Backend全体回帰は1213件＋326 subtests成功、8件のOpt-in nativeテストskip（追加nativeケースは別実行）。Frontend全体初回は2964件成功・2件skip・9件失敗で、7件は`DesktopLifecycleProvider`の静的描画時`window`参照を修正し、2件は並列実行時のGalleryタイムアウトで関連単独実行では再現しなかった。修正後のAnshitsu／Gallery／JSONの関連121件、終了保存・Settings・Developer関連144件は成功。全体suiteを不必要に繰り返さず、修正境界を再検証した。
+
+Medium FindingはDeveloper JSON保存（保存先なし・連続自動ダウンロード抑止・完了通知なし）、キャンセル後の`Finished(false)`二重通知、通常起動で選択済みDBが使用不能な場合の回復経路不足。WebView2標準Blobダウンロードに検証済みDeveloper画面だけのnative保存先選択・自動ダウンロード許可・完了通知を接続し、取消／拒否後のFinishedは受理済みURL集合で除外する。初回Backend起動失敗は既存のunconfigured回復起動を再利用し、固定ポート競合／タイムアウトは元の明示エラーを維持する。High Findingはなし。Lowの静的描画参照は修正、並列テストの時間制限は既知事項として保持する。
+
+実WebView2の3種類JSONは一時保存後に再読込みし、元BlobとSHA-256・UTF-8 JSONの一致を検証する。取消、書き込み不能な保存先、新スキーマSQLite、実writer lock、Backend強制終了、起動待ち0秒の注入もsmoke専用ビルドで検証する。テストは生成JPEGとローカルImmich fixtureだけを使い、実写真・NASへの書き込みは行わない。通常ビルドには保存先注入を含めない。
+
+最終native／WebView2 14件、Rust7件成功。停止完了後に新Runtimeで復旧しても登録済みAssetを再登録しないことと未処理Queueの保持を追加検証し、managed／recovery関連61件が成功。TypeScript／Vite、通常／smoke Cargo build、Clippy、Rust fmt、`git diff --check`成功。既存Vite chunkサイズ警告とCargo incremental cacheのhard-link不可によるcopy警告は残る。今回の横断監査は初回High 0／Medium 2／Low 1で、M1・M2・L1を修正後の限定再監査はHigh 0／Medium 0／Low 0。自動検証と過去の基本動作確認をもってPhase 1・2開発工程をクローズした。実機で未実施・保証範囲が限定される項目は、完了を妨げない確認事項として[Windows PoC運用記録](windows-tauri-poc.md)にまとめた。
+
+可視保存ダイアログ、日本語パス・上書き確認、OS実キー／IME、STACK DnD、Slider・Viewerの手触り、全画面・DPI・最小化復帰、実写真Exportは、必要になった段階で再評価する未確認事項であり、今回のPhase完了を妨げない。[状態遷移と手動復旧](windows-tauri-poc.md)を参照。Dockerの環境変数・保存先・Export／JPEG経路、README、アイコン、配布構成は変更しない。
+
+## Windows Phase 1・2監査Findingの修正（2026-10-19）
+
+終了要求の正本をRustのmutex保護状態へまとめ、Frontend準備状態を未起動・Ready・Reloadingに分けた。Backend異常終了時は保留中の一致request IDだけを解除してReactへ通知し、遅延応答・古い通知・重複終了通知を状態遷移テストで確認する。終了保存中に文書遷移が起きた場合もGuarding中の該当要求だけを取消し、BackendのExport受付を戻す。Drainingへ移った終了は既存Backend待機側の所有を維持する。
+
+初回FrontendがReadyにならない場合は、React rootを`inert`に保ったまま、ホストが既存ManagedControlのprepare／graceful shutdownを実行して終了できる。Ready後の再読み込み中に終了する場合は、未保存内容が失われる可能性をWindows確認ダイアログで示し、拒否すれば継続、確認すればBackendの正常停止を待つ。実WebView2隔離smokeはbootstrap認証失敗・React ready応答失敗からの終了とBackend子プロセス消滅を確認する。Backend停止後に旧画面が残るケースは使い捨てLOCALAPPDATAで再現し、旧Tauriが生存する間の2つ目のホストを名前付きMutexで拒否してBackendを起動しない。旧画面のCookieを別Backendへ直接送る試験は行わず、二重起動を成立させない経路を確認した。
+
+`--environment-backend`のSettings metadataは環境変数の有効URLとキー設定有無だけを表示する。保存済みURLや保存済み資格情報状態は診断接続先として返さない。通常の保存済み接続管理とDockerの環境変数経路は維持する。限定再検証ではRust17件、Backend接続・managed・export関連115件、Frontend lifecycle／Recipe保存／History編集182件、初回Frontend未準備・旧WebView隔離WebView2 smoke3件が成功し、TypeScript／Vite build、Clippy、Rust fmt、通常／smoke build、`git diff --check`も成功した。未保存編集終了の最終実機確認、Reloading確認ダイアログの手動操作、保存失敗の実機注入、Export終了、OSログオフ／終了通知、Cookieの別Backend送信直接試験は未実施事項として記録し、Phase完了を妨げない。外部ライブラリ由来シングル素材のSTACK COVER／Gallery表示不具合はWindows・Docker共通Exportの既知別課題で、今回の完了判定に含めない。
+
 ## 色温度補正方向とスライダー表示の統一（2026-10-15）
 
 旧仕様ではTemperatureの正値が青方向、負値が赤方向へ画像を補正していたため、一般的な現像ソフトの補正方向と逆だった。White BalanceとShadows／Midtones／Highlightsの3WAY Temperatureを共通のRGBゲイン方向へ修正し、負値は青・寒色、0は無補正、正値は赤・暖色とした。JPEGのTemperatureは引き続き−100〜+100の相対補正であり、数値をKelvin値として表示・解釈しない。

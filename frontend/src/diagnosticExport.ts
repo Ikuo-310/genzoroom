@@ -84,7 +84,7 @@ export async function downloadDiagnosticJson<T extends { generatedAt: string }>(
     const environment = snapshot.environment as DiagnosticsEnvironment | undefined;
     const browser = options.includeBrowser === false ? undefined
       : environment ? createBrowserDiagnosticsInfo(environment) : collectBrowserDiagnosticsInfo();
-    downloadJsonReport({ ...snapshot, schemaVersion: 2, application: { ...BUILD_INFO }, immich,
+    await downloadJsonReport({ ...snapshot, schemaVersion: 2, application: { ...BUILD_INFO }, immich,
       ...(browser ? { browser } : {}) }, prefix);
   } finally { exportInFlight = false; }
 }

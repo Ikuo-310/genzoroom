@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from edit_store import list_export_queue
 
 from export_runtime import ExportRuntime
 from export_runtime_store import RuntimeRejected, create_export_run, get_export_run, recoverable_export_run
@@ -55,7 +56,17 @@ def test_shutdown_persists_stop_waits_current_and_does_not_dispatch_next(db):
         assert server.should_exit
         assert events[-1][0] == "drained"
         assert source.started == [A]
-        assert get_export_run(run_id).status == "stopped"
+        stopped = get_export_run(run_id)
+        assert stopped.status == "stopped"
+        assert stopped.items[0].status == "succeeded" and stopped.items[0].registered_asset_id is not None
+        remaining = list_export_queue()
+        assert [(item["assetId"], item["status"]) for item in remaining] == [(str(B), "queued")]
+        # A fresh lifespan must not reclaim or register the already completed current item again.
+        fresh_source, fresh_registrar = Source(), Registrar()
+        fresh = ExportRuntime(source=fresh_source, family=Family(), registrar=fresh_registrar)
+        assert await fresh.recover() is None
+        await fresh.wait()
+        assert not fresh_source.started and not fresh_registrar.calls
         await runtime.resume_after_shutdown_cancelled()
         await runtime.start([B])
         await runtime.wait()

@@ -98,9 +98,11 @@ it('removes the saved connection before requesting the same guarded restart', as
   expect(respond).toHaveBeenCalledWith({ kind: 'restart' });
 });
 it('makes explicit environment mode read-only instead of mixing configuration sources', async () => {
-  current = { ...current, source: 'environment', url: 'http://saved.invalid', keyConfigured: true };
+  current = { ...current, source: 'environment', url: 'http://active.invalid', keyConfigured: true, pendingRestart: false };
   await mount();
   expect(host.querySelector<HTMLInputElement>('input[type="url"]')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe('http://active.invalid');
+  expect(host.textContent).toContain(i18n.t('windowsConnection.keySet'));
   expect(button('Test connection').disabled).toBe(true);
   expect(button('Remove saved connection').disabled).toBe(true);
 });
