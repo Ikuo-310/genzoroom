@@ -20,6 +20,7 @@ Internal changes are omitted unless they affect users.
 ### Changed
 
 - Windows desktop now has a bilingual per-user NSIS installer with app shortcuts, bundled Backend and WebView2 setup, and prompts users to close GenzoRoom before installing or uninstalling. Choosing uninstall from the same-version setup flow exits the installer after removal succeeds.
+- Windows distribution builds now use the GenzoRoom release tag for their stable version, while development and validation builds remain clearly marked as validation builds.
 
 ## [0.2.2] - 2026-10-17
 

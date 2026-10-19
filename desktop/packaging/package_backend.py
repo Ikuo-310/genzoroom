@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -23,9 +22,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--commit', required=True)
+    parser.add_argument('--channel', choices=('validation', 'stable'), required=True)
+    parser.add_argument('--version', required=True)
     args = parser.parse_args()
-    if not re.fullmatch('[0-9a-f]{40}', args.commit) or sys.version_info[:2] != (3, 14) or platform.machine().lower() not in ('amd64', 'x86_64'):
+    if sys.version_info[:2] != (3, 14) or platform.machine().lower() not in ('amd64', 'x86_64'):
         raise RuntimeError('unsupported_build_environment')
+    backend_source = ROOT.parent / 'backend'
+    sys.path.insert(0, str(backend_source))
+    os.environ.update({
+        'GENZOROOM_CHANNEL': args.channel,
+        'GENZOROOM_VERSION': args.version,
+        'GENZOROOM_COMMIT': args.commit,
+    })
+    try:
+        from build_info import read_build_info
+        build_info = read_build_info()
+        if (build_info['channel'], build_info['version'], build_info['commit']) != (
+                args.channel, args.version, args.commit):
+            raise ValueError()
+    except (ImportError, RuntimeError, ValueError):
+        raise RuntimeError('invalid_build_metadata') from None
     output = args.output.resolve()
     # A new output directory prevents an interrupted build from looking like a completed package.
     output.mkdir(parents=True, exist_ok=False)
@@ -36,7 +52,7 @@ def main():
         distribution = metadata.distribution(name)
         packages.append({'name': distribution.metadata['Name'], 'version': distribution.version,
                          'license': distribution.metadata.get('License-Expression') or distribution.metadata.get('License', 'review required')})
-    manifest = {'formatVersion': 1, 'channel': 'validation', 'version': '0.0.0-validation', 'commit': args.commit,
+    manifest = {'formatVersion': 1, 'channel': args.channel, 'version': args.version, 'commit': args.commit,
                 'target': 'x86_64-pc-windows-msvc', 'python': platform.python_version(), 'runtime': packages,
                 'tools': {name: metadata.version(name) for name in ('pyinstaller', 'pyinstaller-hooks-contrib')},
                 'licenseReview': 'pending-public-distribution-review'}

@@ -21,6 +21,16 @@ class NsisDistributionTests(unittest.TestCase):
         self.assertEqual(config["bundle"]["windows"]["nsis"]["uninstallerIcon"], "icons/icon.ico")
         self.assertEqual(config["bundle"]["windows"]["nsis"]["template"], "nsis/installer.nsi")
 
+    def test_release_package_version_flows_into_nsis_comparison_and_registry(self):
+        config = json.loads((ROOT / "desktop/tauri.bundle.conf.json").read_text(encoding="utf-8"))
+        build = (ROOT / "desktop/packaging/build.ps1").read_text(encoding="utf-8")
+        template = (ROOT / "desktop/nsis/installer.nsi").read_text(encoding="utf-8")
+        self.assertEqual(config["bundle"]["windows"]["allowDowngrades"], False)
+        self.assertIn("$versionConfig = @{ version = $tauriVersion }", build)
+        self.assertIn("'--config',$versionConfig", build)
+        self.assertIn('nsis_tauri_utils::SemverCompare "${VERSION}" $R0', template)
+        self.assertIn('WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"', template)
+
     def test_custom_template_keeps_data_cleanup_and_non_terminating_launch(self):
         template = (ROOT / "desktop/nsis/installer.nsi").read_text(encoding="utf-8")
         hooks = (ROOT / "desktop/nsis/installer-hooks.nsh").read_text(encoding="utf-8")

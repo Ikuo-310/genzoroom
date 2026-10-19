@@ -1,13 +1,22 @@
 param(
     [string]$PythonPath,
-    [switch]$Smoke
+    [switch]$Smoke,
+    [switch]$Release
 )
 $ErrorActionPreference = 'Stop'
 $tauriCliVersion = '2.12.2'
-$distributionVersion = '0.0.0-validation'
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (-not $PythonPath) { $PythonPath = Join-Path $repository '.venv/Scripts/python.exe' }
 $PythonPath = (Resolve-Path $PythonPath).Path
+$metadataArguments = @((Join-Path $PSScriptRoot 'resolve_build_metadata.py'), '--repository', $repository)
+if ($Release) { $metadataArguments += '--require-release' }
+$metadataJson = & $PythonPath @metadataArguments
+if ($LASTEXITCODE -ne 0) { throw 'Build metadata resolution failed' }
+$buildMetadata = $metadataJson | ConvertFrom-Json
+$distributionChannel = [string]$buildMetadata.channel
+$distributionVersion = [string]$buildMetadata.version
+$distributionCommit = [string]$buildMetadata.commit
+$tauriVersion = [string]$buildMetadata.packageVersion
 $outputRoot = Join-Path $PSScriptRoot 'out'
 $run = Join-Path $outputRoot ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 $packagePython = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'
@@ -24,18 +33,18 @@ foreach ($name in $variables) { $previous[$name] = [Environment]::GetEnvironment
 Push-Location $repository
 try {
     $env:TAURI_CONFIG = $null
-    $commit = (& git rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0) { throw 'Git identity unavailable' }
+    $commit = $distributionCommit
     Invoke-Checked 'uv' @('venv','--allow-existing','--python',$PythonPath,(Join-Path $PSScriptRoot '.venv'))
     Invoke-Checked 'uv' @('pip','sync','--python',$packagePython,'--require-hashes',(Join-Path $PSScriptRoot 'runtime.lock'),(Join-Path $PSScriptRoot 'build.lock'))
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'generate_icons.py'))
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'test_icons.py'))
-    $env:VITE_GENZOROOM_CHANNEL = 'validation'
+    $env:VITE_GENZOROOM_CHANNEL = $distributionChannel
     $env:VITE_GENZOROOM_VERSION = $distributionVersion
     $env:VITE_GENZOROOM_COMMIT = $commit
     Push-Location (Join-Path $repository 'frontend')
     try { Invoke-Checked 'npm' @('ci'); Invoke-Checked 'npm' @('run','build') } finally { Pop-Location }
-    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'package_backend.py'),'--output',$run,'--commit',$commit)
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'package_backend.py'),'--output',$run,'--commit',$commit,
+        '--channel',$distributionChannel,'--version',$distributionVersion)
     $backend = Join-Path $run 'dist/genzoroom-backend'
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_bundle.py'),$backend,'--frontend',(Join-Path $repository 'frontend/dist'))
     Invoke-Checked (Join-Path $backend 'genzoroom-backend.exe') @('--check-runtime')
@@ -67,10 +76,12 @@ try {
     if (Test-Path $installerDirectory) { Remove-Item -LiteralPath $installerDirectory -Recurse -Force }
     Invoke-Checked 'cargo' @('clean','--manifest-path',(Join-Path $repository 'desktop/Cargo.toml'),'--package','genzoroom-desktop','--release','--target','x86_64-pc-windows-msvc')
     $features = if ($Smoke) { 'bundled-backend,webview-smoke' } else { 'bundled-backend' }
+    # NSIS compares the package SemVer, while app metadata retains Docker's v-prefixed tag.
+    $versionConfig = @{ version = $tauriVersion } | ConvertTo-Json -Compress
     Push-Location (Join-Path $repository 'desktop')
     try {
         # Resolve and compile locked Rust crates before collecting their license metadata.
-        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--no-bundle','--config','tauri.bundle.conf.json','--','--locked')
+        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--no-bundle','--config','tauri.bundle.conf.json','--config',$versionConfig,'--','--locked')
     } finally { Pop-Location }
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'collect_distribution_materials.py'),'--stage',$stage)
     # Cargo resources are additive; remove the preliminary build's license staging before final bundling.
@@ -79,7 +90,7 @@ try {
     }
     Push-Location (Join-Path $repository 'desktop')
     try {
-        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--bundles','nsis','--config','tauri.bundle.conf.json','--','--locked')
+        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--bundles','nsis','--config','tauri.bundle.conf.json','--config',$versionConfig,'--','--locked')
     } finally { Pop-Location }
     # Validate Tauri's resources output, not a separate copy that could hide a broken merge config.
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_bundle.py'),$resourceBackend,'--host',(Join-Path $tauriOutput 'genzoroom-desktop.exe'))
@@ -111,7 +122,7 @@ try {
             $artifactFiles += @{ path=$relative; bytes=$file.Length; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash }
         }
     }
-    @{ formatVersion=2; product='GenzoRoom'; version=$distributionVersion; application=$application; installer=$installerCopy; smoke=[bool]$Smoke; manifest=$manifest; tools=$tools;
+    @{ formatVersion=2; product='GenzoRoom'; channel=$distributionChannel; version=$distributionVersion; packageVersion=$tauriVersion; commit=$commit; application=$application; installer=$installerCopy; smoke=[bool]$Smoke; manifest=$manifest; tools=$tools;
        hostSha256=(Get-FileHash -LiteralPath (Join-Path $application 'genzoroom-desktop.exe') -Algorithm SHA256).Hash;
        installerSha256=(Get-FileHash -LiteralPath $installerCopy -Algorithm SHA256).Hash;
        installerBytes=(Get-Item -LiteralPath $installerCopy).Length; artifacts=$artifactFiles } |

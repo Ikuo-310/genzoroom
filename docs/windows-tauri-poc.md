@@ -45,7 +45,7 @@ application/
 
 実際のPyInstaller成果物をリポジトリ外へコピーし、私有パイプ・DPAPI/HMAC・Cookie、API/SPA/JPEG、接続変更再起動、正常終了・異常終了のJob回収、ポート競合、SQLite障害回復、JSON保存を生成画像とloopback Immich fixtureで確認しました。正式版用のランダム資格情報参照だけを作成・後始末し、実ユーザーの設定・DB・NASは使っていません。PoC sentinelが保持されることもfixtureで検証します。単体の`--check-runtime`はPillow ICC、JPEG decode/render/encode、NumPy、SQLite、certifi CA読込みをオフラインで検証し、ユーザーデータを作成しません。CA読込み成功は実サーバーへのTLS疎通成功を意味しません。
 
-配布manifestにはvalidation版、commit、working-tree dirty、source digest、Python／依存バージョンを記録し、完了manifestにはNode/npm/Rust/Cargo/uvとホストSHA-256も記録します。コード署名と自動更新はありません。開発環境なしのクリーンWindows 11 VM、実ImmichとのHTTPS、実写真Export、GUI保存ダイアログやOS入力の最終手動確認は未実施で、配布アプリ全体の受入確認に残っています。
+配布manifestには選択されたchannel・version・commit、working-tree dirty、source digest、Python／依存バージョンを記録し、完了manifestにはNode/npm/Rust/Cargo/uvとホストSHA-256も記録します。コード署名と自動更新はありません。開発環境なしのクリーンWindows 11 VM、実ImmichとのHTTPS、実写真Export、GUI保存ダイアログやOS入力の最終手動確認は未実施で、配布アプリ全体の受入確認に残っています。
 
 ライセンス一覧は基礎資料で、適合保証ではありません。GenzoRoomのAGPL-3.0-only対応ソースとビルド手順の提供、Python／PyInstaller bootloader例外、NumPy同梱GCC runtime等のソース条件、Pillow各codec、certifi MPL、Microsoft runtime、Rust/FrontendのNOTICEをPhase 3Cの正式配布前に確認してください。標準NumPy hookが拡張内部からの参照用に収集する`_multiarray_tests`は保持していますが、プロジェクトのtests/fixture・pytest・開発ツールは同梱していません。
 
@@ -247,7 +247,15 @@ Set-Location I:\code\genzoroom
 ./desktop/packaging/build.ps1
 ```
 
-成果物は`desktop/packaging/out/<日時-ID>/`へ出力し、`application/`はPhase 3B同様に実行可能な完全フォルダー、`GenzoRoom_0.0.0-validation_x64-setup.exe`はNSIS配布物です。2026-10-19のローカル検証ビルドではセットアップEXEが255,708,267 bytes（243.86 MiB）、アプリフォルダーが約100.8 MiBでした。容量にはWebView2 Evergreen offline installerが含まれます。`0.0.0-validation`はインストーラー検証用の仮番号で、正式な公開版番号ではありません。タグと既存配布版番号を確認して公開版番号を決定してください。ダウングレードは現在無効です。同一版のメンテナンス画面からは再インストールまたはアンインストールを選べます。
+成果物は`desktop/packaging/out/<日時-ID>/`へ出力し、`application/`はPhase 3B同様に実行可能な完全フォルダー、NSISセットアップ名にはTauriのパッケージバージョンを使用します。2026-10-19のローカル検証ビルドではvalidation版セットアップEXEが255,708,267 bytes（243.86 MiB）、アプリフォルダーが約100.8 MiBでした。容量にはWebView2 Evergreen offline installerが含まれます。ダウングレードは現在無効です。同一版のメンテナンス画面からは再インストールまたはアンインストールを選べます。
+
+### 配布バージョン管理共通化
+
+従来、Windows配布ビルドは`0.0.0-validation`を固定使用し、Docker正式リリースのGit TAGと連動していませんでした。現在は`desktop/packaging/build.ps1`が`resolve_build_metadata.py`でHEADと作業ツリーを確認し、HEADが単一の正式TAG `vMAJOR.MINOR.PATCH`を指すクリーンな状態なら`stable`とTAG由来のversionを選びます。それ以外の通常ビルドは`validation`／`0.0.0-validation`と現在の40桁commit SHAを使います。`-Release`を指定すると正式TAGとクリーンな作業ツリーを必須にし、条件不一致ではパッケージ処理の前に失敗します。
+
+FrontendとBackend manifestはDocker版と同じ`channel`・`version`・`commit`形式を使用します。`package_backend.py`は既存のBackend `build_info.read_build_info()`で値を検証し、同じ値をBackend manifestに記録します。Tauri設定では`tauri.bundle.conf.json`を基礎に、ビルドスクリプトがTauri CLIの設定overlayでパッケージバージョンを渡します。正式版はTAGの`v`を除いたSemVer、検証版は`0.0.0-validation`です。NSISの既存バージョン比較とダウングレード禁止設定は維持しています。Dockerのリリース経路は変更していません。
+
+今回の軽量検証では、配布・NSIS関連テスト16件と2 subtests、Backend build infoテスト8件が成功しました。Python構文チェック、PowerShell構文チェック、`git diff --check`も成功しました。正式TAGからのNSISフルビルド、正式版セットアップの表示バージョン、および`0.0.0-validation`から正式版への実インストール／アップグレードは未検証です。
 
 正式アイコンは`desktop/packaging/generate_icons.py`で生成します。16/24/32/48 pxは`frontend/src/GenzoRoomExportBadge.tsx`の既存字形を使い、64/128/256 pxは`design/genzo_icon_fix.svg`（SHA-256 `323c57f85ff3f619cb732312c75146de89115bee2058eac88c384883d50cda3a`）をそのまま解釈します。元SVG、個別PNG、`desktop/icons/icon.ico`の対応は`desktop/icons/manifest.json`に記録し、`test_icons.py`と`verify_icons.py`がICO frame、ホストPE、セットアップPEを検査します。Gallery内のバッジは変更していません。
 
