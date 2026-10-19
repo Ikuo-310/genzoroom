@@ -4,9 +4,36 @@
   "version": "0.0.0-validation",
   "identifier": "com.genzoroom.desktop",
   "bundle": {
-    "active": false,
+    "active": true,
+    "license": "AGPL-3.0-only",
+    "licenseFile": "../LICENSE",
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
     "resources": {
-      "packaging/out/staged/backend/": "backend/"
+      "packaging/out/staged/backend/": "backend/",
+      "packaging/out/staged/licenses/": "licenses/",
+      "packaging/out/staged/source/": "source/"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "languages": ["English", "Japanese"],
+        "startMenuFolder": "GenzoRoom",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "nsis/installer-hooks.nsh",
+        "template": "nsis/installer.nsi",
+        "customLanguageFiles": {
+          "English": "nsis/languages/English.nsh",
+          "Japanese": "nsis/languages/Japanese.nsh"
+        }
+      }
     }
   }
 }

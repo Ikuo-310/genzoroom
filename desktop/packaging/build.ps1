@@ -3,6 +3,8 @@ param(
     [switch]$Smoke
 )
 $ErrorActionPreference = 'Stop'
+$tauriCliVersion = '2.12.2'
+$distributionVersion = '0.0.0-validation'
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (-not $PythonPath) { $PythonPath = Join-Path $repository '.venv/Scripts/python.exe' }
 $PythonPath = (Resolve-Path $PythonPath).Path
@@ -21,12 +23,15 @@ $previous = @{}
 foreach ($name in $variables) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 Push-Location $repository
 try {
+    $env:TAURI_CONFIG = $null
     $commit = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Git identity unavailable' }
     Invoke-Checked 'uv' @('venv','--allow-existing','--python',$PythonPath,(Join-Path $PSScriptRoot '.venv'))
     Invoke-Checked 'uv' @('pip','sync','--python',$packagePython,'--require-hashes',(Join-Path $PSScriptRoot 'runtime.lock'),(Join-Path $PSScriptRoot 'build.lock'))
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'generate_icons.py'))
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'test_icons.py'))
     $env:VITE_GENZOROOM_CHANNEL = 'validation'
-    $env:VITE_GENZOROOM_VERSION = '0.0.0-validation'
+    $env:VITE_GENZOROOM_VERSION = $distributionVersion
     $env:VITE_GENZOROOM_COMMIT = $commit
     Push-Location (Join-Path $repository 'frontend')
     try { Invoke-Checked 'npm' @('ci'); Invoke-Checked 'npm' @('run','build') } finally { Pop-Location }
@@ -40,31 +45,79 @@ try {
     if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item -LiteralPath $backend -Destination (Join-Path $stage 'backend') -Recurse
-    $env:TAURI_CONFIG = Get-Content (Join-Path $repository 'desktop/tauri.bundle.conf.json') -Raw
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'collect_distribution_materials.py'),'--stage',$stage,'--skip-rust')
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_icons.py'))
+    $tauriInstalled = ''
+    try { $tauriInstalled = (Invoke-Checked 'cargo' @('tauri','--version') | Out-String).Trim() } catch { }
+    if ($tauriInstalled -notmatch [regex]::Escape($tauriCliVersion)) {
+        Invoke-Checked 'cargo' @('install','tauri-cli','--version',$tauriCliVersion,'--locked','--force')
+        $tauriInstalled = (Invoke-Checked 'cargo' @('tauri','--version') | Out-String).Trim()
+    }
+    if ($tauriInstalled -notmatch [regex]::Escape($tauriCliVersion)) { throw 'Pinned Tauri CLI version unavailable' }
     $env:CARGO_TARGET_DIR = Join-Path $repository 'desktop/target/distribution'
     $tauriOutput = Join-Path $env:CARGO_TARGET_DIR 'x86_64-pc-windows-msvc/release'
     $resourceBackend = Join-Path $tauriOutput 'backend'
-    # Cargo resources are otherwise additive across builds; obsolete DLLs must not survive updates.
-    if ([IO.Path]::GetFullPath($resourceBackend) -ne [IO.Path]::GetFullPath((Join-Path $repository 'desktop/target/distribution/x86_64-pc-windows-msvc/release/backend'))) { throw 'Invalid resource output path' }
-    if (Test-Path $resourceBackend) { Remove-Item -LiteralPath $resourceBackend -Recurse -Force }
-    # Rerun this package's build script even when Cargo's source timestamps are unchanged.
+    $resourceDirectories = @($resourceBackend, (Join-Path $tauriOutput 'licenses'), (Join-Path $tauriOutput 'source'))
+    $installerDirectory = Join-Path $tauriOutput 'bundle/nsis'
+    # Remove only disposable resources and installers from the dedicated distribution target.
+    foreach ($resourceDirectory in $resourceDirectories) {
+        if ([IO.Path]::GetFullPath($resourceDirectory) -notlike ((Join-Path $repository 'desktop/target/distribution/x86_64-pc-windows-msvc/release') + '*')) { throw 'Invalid resource output path' }
+        if (Test-Path $resourceDirectory) { Remove-Item -LiteralPath $resourceDirectory -Recurse -Force }
+    }
+    if (Test-Path $installerDirectory) { Remove-Item -LiteralPath $installerDirectory -Recurse -Force }
     Invoke-Checked 'cargo' @('clean','--manifest-path',(Join-Path $repository 'desktop/Cargo.toml'),'--package','genzoroom-desktop','--release','--target','x86_64-pc-windows-msvc')
     $features = if ($Smoke) { 'bundled-backend,webview-smoke' } else { 'bundled-backend' }
-    Invoke-Checked 'cargo' @('build','--locked','--manifest-path',(Join-Path $repository 'desktop/Cargo.toml'),'--release','--target','x86_64-pc-windows-msvc','--features',$features)
+    Push-Location (Join-Path $repository 'desktop')
+    try {
+        # Resolve and compile locked Rust crates before collecting their license metadata.
+        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--no-bundle','--config','tauri.bundle.conf.json','--','--locked')
+    } finally { Pop-Location }
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'collect_distribution_materials.py'),'--stage',$stage)
+    # Cargo resources are additive; remove the preliminary build's license staging before final bundling.
+    foreach ($resourceDirectory in $resourceDirectories) {
+        if (Test-Path $resourceDirectory) { Remove-Item -LiteralPath $resourceDirectory -Recurse -Force }
+    }
+    Push-Location (Join-Path $repository 'desktop')
+    try {
+        Invoke-Checked 'cargo' @('tauri','build','--target','x86_64-pc-windows-msvc','--features',$features,'--bundles','nsis','--config','tauri.bundle.conf.json','--','--locked')
+    } finally { Pop-Location }
     # Validate Tauri's resources output, not a separate copy that could hide a broken merge config.
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_bundle.py'),$resourceBackend,'--host',(Join-Path $tauriOutput 'genzoroom-desktop.exe'))
+    foreach ($resourceName in @('licenses','source')) {
+        if (-not (Test-Path (Join-Path $tauriOutput $resourceName))) { throw "Tauri resource is missing: $resourceName" }
+    }
     $application = Join-Path $run 'application'
     New-Item -ItemType Directory -Path $application | Out-Null
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'x86_64-pc-windows-msvc/release/genzoroom-desktop.exe') -Destination $application
-    Copy-Item -LiteralPath $resourceBackend -Destination (Join-Path $application 'backend') -Recurse
+    foreach ($resourceName in @('backend','licenses','source')) {
+        Copy-Item -LiteralPath (Join-Path $tauriOutput $resourceName) -Destination (Join-Path $application $resourceName) -Recurse
+    }
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_bundle.py'),(Join-Path $application 'backend'))
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_icons.py'),'--host',(Join-Path $application 'genzoroom-desktop.exe'))
+    $installer = @(Get-ChildItem -LiteralPath $installerDirectory -File -Filter '*-setup.exe')
+    if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS setup executable' }
+    $installerCopy = Join-Path $run $installer[0].Name
+    Copy-Item -LiteralPath $installer[0].FullName -Destination $installerCopy
+    Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'verify_icons.py'),'--installer',$installerCopy)
     $manifest = Get-Content (Join-Path $backend 'build-manifest.json') -Raw | ConvertFrom-Json
     $tools = @{ node=(Invoke-Checked 'node' @('--version')); npm=(Invoke-Checked 'npm' @('--version'));
-                rust=(Invoke-Checked 'rustc' @('--version')); cargo=(Invoke-Checked 'cargo' @('--version')); uv=(Invoke-Checked 'uv' @('--version')) }
-    @{ formatVersion=1; application=$application; smoke=[bool]$Smoke; manifest=$manifest; tools=$tools;
-       hostSha256=(Get-FileHash -LiteralPath (Join-Path $application 'genzoroom-desktop.exe') -Algorithm SHA256).Hash } |
+                rust=(Invoke-Checked 'rustc' @('--version')); cargo=(Invoke-Checked 'cargo' @('--version')); uv=(Invoke-Checked 'uv' @('--version')); tauri=$tauriInstalled }
+    $artifactFiles = @()
+    foreach ($root in @($application, $installerCopy)) {
+        $isInstaller = Test-Path -LiteralPath $root -PathType Leaf
+        $files = if ($isInstaller) { @(Get-Item -LiteralPath $root) } else { @(Get-ChildItem -LiteralPath $root -File -Recurse) }
+        foreach ($file in $files) {
+            $relative = if ($isInstaller) { Split-Path -Leaf $root } else { [IO.Path]::GetRelativePath($run, $file.FullName) }
+            $artifactFiles += @{ path=$relative; bytes=$file.Length; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash }
+        }
+    }
+    @{ formatVersion=2; product='GenzoRoom'; version=$distributionVersion; application=$application; installer=$installerCopy; smoke=[bool]$Smoke; manifest=$manifest; tools=$tools;
+       hostSha256=(Get-FileHash -LiteralPath (Join-Path $application 'genzoroom-desktop.exe') -Algorithm SHA256).Hash;
+       installerSha256=(Get-FileHash -LiteralPath $installerCopy -Algorithm SHA256).Hash;
+       installerBytes=(Get-Item -LiteralPath $installerCopy).Length; artifacts=$artifactFiles } |
         ConvertTo-Json -Depth 15 | Set-Content -LiteralPath (Join-Path $run 'distribution-complete.json') -Encoding utf8
-    Write-Output "GenzoRoom distribution completed: $application"
+    Write-Output "GenzoRoom application: $application"
+    Write-Output "GenzoRoom NSIS installer: $installerCopy"
 } finally {
     Pop-Location
     foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }

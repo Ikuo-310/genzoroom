@@ -1,0 +1,38 @@
+{
+  "formatVersion": 2,
+  "smallMark": {
+    "source": "frontend/src/GenzoRoomExportBadge.tsx",
+    "standaloneSvg": "desktop/icons/export-badge.svg",
+    "sha256": "2294976fc63e21c5b186dce162b3eb6a0721adf135c7fb15a5b04c040dcbe5bf",
+    "sizes": [
+      16,
+      24,
+      32,
+      48
+    ],
+    "pathDataPreserved": true,
+    "fillRuleMapping": "fillRule -> fill-rule"
+  },
+  "largeMark": {
+    "source": "design/genzo_icon_fix.svg",
+    "sha256": "323c57f85ff3f619cb732312c75146de89115bee2058eac88c384883d50cda3a",
+    "sizes": [
+      64,
+      128,
+      256
+    ]
+  },
+  "ico": {
+    "file": "icon.ico",
+    "sizes": [
+      16,
+      24,
+      32,
+      48,
+      64,
+      128,
+      256
+    ],
+    "frameEncoding": "PNG"
+  }
+}

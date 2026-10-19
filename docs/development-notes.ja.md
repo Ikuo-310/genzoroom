@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## Windows Phase 3C：NSIS配布・正式アイコン（2026-10-19）
+
+Tauriの配布専用overlayに正式名`GenzoRoom`、固定identifier `com.genzoroom.desktop`、NSIS currentUser、`%LOCALAPPDATA%\Programs\GenzoRoom`のアプリ配置、offline Evergreen WebView2導入を設定した。ユーザーデータは正式版の`%LOCALAPPDATA%\GenzoRoom`に独立して保持し、アンインストールの再帰削除とPoC参照を含めない。標準NSISのアプリ終了・Restart Manager経路を除き、Rustホストと共有するMutexをインストール／アンインストール開始前に保持する。起動中・ロック取得失敗時は通常・silentの両方で中止し、アプリを終了しない。過去のPoC identifierや開発設定は変更していない。
+
+元Reactバッジを16/24/32/48 px、復元済みの無変更`design/genzo_icon_fix.svg`を64/128/256 pxに割り当てる再現可能なPNG/ICO生成器を追加した。作業ツリー内の元SVG SHA-256、個別frameの一致、PEホスト／セットアップ埋め込みのサイズをテストする。
+
+`desktop/packaging/build.ps1`でReact production build、PyInstaller onedir、Backend runtime check、Tauri x64 Release、NSISセットアップ生成まで完走した。出力は`desktop/packaging/out/20261019-194459-70ef347a/`で、セットアップは255,708,267 bytes（243.86 MiB）、実行フォルダーは約100.8 MiB。完了manifestにツール版、Backend manifest、ホスト／インストーラー／アプリ同梱物のSHA-256と長さを記録する。local validation version `0.0.0-validation`は正式リリース番号として確定していない。
+
+検証途中にTauri CLIの`--release`が未対応であること、NSISカスタムテンプレートのStart Menu／Desktop shortcut関数欠落を実ビルドで発見・修正した。生成したセットアップPEとホストPEのアイコンframe検証は通過した。実インストール・更新・アンインストールは実行していない。検証時に既存の共有Mutexが存在し、所有プロセスを安全に特定できなかったため、ロックされた状態でインストーラーを起動しない判断をした。
+
+配布資料にはGenzoRoom AGPL、Python、Frontend production、Windows x64 Cargo依存のライセンス一覧／存在する原文noticeと対応ソースZIPを含める。306依存のうち6 Cargo crateのライセンス本文、NumPy/Pillow DLL・codecの正確な構成、WebView2 standalone再配布条件とEULA、NSIS/LZMA配布条件、公開配布ソースURLの確認が残るため、今回のEXEはローカル検証用であり公開配布の受入は保留。Phase 3Dの隔離実機テストとライセンスレビューをRelease blockerとして記録する。
+
 ## Windows Phase 3B：Python Backend同梱（2026-10-19）
 
 PyInstaller onedir、Tauri resources、既存Rust Command／Job Object／私有パイプの構成を実装した。配布専用のhash付きPython lockとspecを追加し、Frontend production buildも凍結物へ含めた。console-subsystem BackendとCREATE_NO_WINDOWを維持し、Shell Pluginや包括的ファイル権限は追加していない。開発用`.venv`と配布用の明示Cargo featureを分離し、Lifecycleが同じ絶対パスの起動設定を再起動にも保持する。

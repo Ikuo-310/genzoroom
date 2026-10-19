@@ -234,6 +234,27 @@ Tauriの名前付きMutexは通常のUI／manual起動でプロセス終了ま�
 - 可視保存ダイアログの操作、日本語パス・上書き確認、OS実キー／IME、DnD、DPI、全画面、最小化復帰、実写真WebGPU／Export。実Immichへの書き込みを伴う試験は自動実行していない。
 - Docker release Smoke TestとNASデプロイ検証。
 
+## Phase 3C：NSIS配布・正式アイコン（2026-10-19）
+
+配布版はTauri 2標準NSISで、`productName=GenzoRoom`、identifier `com.genzoroom.desktop`、Windows x64、`currentUser`を使用します。通常の既定先は`%LOCALAPPDATA%\Programs\GenzoRoom\`で、正式データの`%LOCALAPPDATA%\GenzoRoom\`と分離しています。WebView2はEvergreen Runtimeを利用し、未導入時はNSISへ同梱したoffline installerを実行します。Runtime本体をアプリディレクトリへ複製しません。
+
+再現可能な入口は次のビルドスクリプトです。Node/npm、CPython 3.14、MSVC/Rust/Windows SDK、ネットワークが必要です。Tauri CLI 2.12.2、NSIS、WebView2 offline installerを使い、Frontend、PyInstaller onedir、Backend単独runtime check、resource照合、Cargo locked Release build、NSIS、EXE/installer内アイコン検証、全配布ファイルのSHA-256 manifestまで実行します。
+
+```powershell
+Set-Location I:\code\genzoroom
+./desktop/packaging/build.ps1
+```
+
+成果物は`desktop/packaging/out/<日時-ID>/`へ出力し、`application/`はPhase 3B同様に実行可能な完全フォルダー、`GenzoRoom_0.0.0-validation_x64-setup.exe`はNSIS配布物です。2026-10-19のローカル検証ビルドではセットアップEXEが255,708,267 bytes（243.86 MiB）、アプリフォルダーが約100.8 MiBでした。容量にはWebView2 Evergreen offline installerが含まれます。`0.0.0-validation`はインストーラー検証用の仮番号で、正式な公開版番号ではありません。タグと既存配布版番号を確認してPhase 3C公開前に決定してください。ダウングレードは拒否し、同版再インストールはNSISの修復経路です。
+
+正式アイコンは`desktop/packaging/generate_icons.py`で生成します。16/24/32/48 pxは`frontend/src/GenzoRoomExportBadge.tsx`の既存字形を使い、64/128/256 pxは`design/genzo_icon_fix.svg`（SHA-256 `323c57f85ff3f619cb732312c75146de89115bee2058eac88c384883d50cda3a`）をそのまま解釈します。元SVG、個別PNG、`desktop/icons/icon.ico`の対応は`desktop/icons/manifest.json`に記録し、`test_icons.py`と`verify_icons.py`がICO frame、ホストPE、セットアップPEを検査します。Gallery内のバッジは変更していません。
+
+更新・アンインストール前に、インストーラー／アンインストーラーはTauriホストと共通の`Local\GenzoRoom.WindowsPoC` Mutexを取得します。ロック取得後までWebView2処理やアプリファイルの変更を進めず、アプリが起動中・ロック取得不能の場合は英語／日本語メッセージを表示して処理を中断します。silent実行も非0コードで拒否し、プロセスを終了しません。標準テンプレートのRestart Managerによる強制終了経路を除きました。再インストール時はアプリ配置先のBackend／ライセンス／ソースフォルダーだけを入れ替えます。アンインストーラーは`%LOCALAPPDATA%\GenzoRoom\`とPoCを削除せず、Credential Managerにも触れません。PoCと正式版は既存Mutexで同時起動できません。
+
+配布物の`application/licenses/`にGenzoRoom AGPL本文、Python本文、Python／Frontend production依存／Windows x64 Cargo依存のライセンス資料とバージョン一覧を収集し、`application/source/`に対応ソースZIPを含めます。今回の収集表は306項目で、6つのCargo依存はcrate側にライセンス式があるものの同梱元ディレクトリに本文を確認できませんでした。NumPy/Pillowの実収集DLL・codecとライセンスの対応、Microsoft WebView2 standalone installerの再配布条件・同梱EULA、NSIS圧縮モジュールの配布条件、各Cargoライセンス本文、公開後のソース提供URLは未確定です。従ってこの成果物はローカル受入用であり、公開配布はライセンスレビュー完了まで行わないでください。
+
+実ビルドではproduction TypeScript/Vite、PyInstaller onedirと`--check-runtime`、Tauri locked Release、NSIS生成、Backend/resource inventory、アイコン全7サイズのPNG/ICO・ホストEXE・セットアップEXEを確認しました。Viteの既存500 kB chunk警告は残ります。NSISの既定テンプレートはショートカット関数を参照しますが定義していなかったため、公式Tauri 2.12.2テンプレートの関数を追加してmakensisを通しました。Tauri CLIで受け付けない`--release`引数も除去しました。隔離インストール／更新／通常アンインストール、WebView2未導入時のRuntime導入、ユーザーデータ保持の実操作は未確認です。検証時に共有Mutexが既に存在し、所有プロセスをこの実行環境で特定できなかったため、インストーラー実行を続けていません。Phase 3Dで一時WindowsユーザーまたはVMを用いて実施してください。
+
 既知の共通Export課題として、外部ライブラリ由来のシングル素材をExportした場合、出力JPEGのSTACK COVER設定またはGallery表示が期待と異なる問題がWindows版・Docker版の双方で確認されている。一方、Immichライブラリ内のシングル素材はDocker版で正常にCOVER設定されることが確認済み。この問題は共通Export処理の別課題として扱い、今回のPhase 1・2完了判定およびFinding件数には含めない。
 
 Backendが失われた状態で暗室保存は成功しません。ウィンドウに編集が残っている間は、強制終了で未保存内容が失われる点に注意してください。DBを開けない回復画面では元DBの修復・ロック解除・対応版への復帰後に再起動を再試行します。Pythonや保存ルート自体が使用不能なら回復Backendも起動できないため、ウィンドウ外で原因を解消して再起動します。資格情報削除・DB初期化を自動復旧手段には使いません。
