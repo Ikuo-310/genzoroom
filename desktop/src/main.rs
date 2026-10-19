@@ -1,5 +1,12 @@
+#![cfg_attr(
+    all(feature = "bundled-backend", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
+mod backend_launch;
 mod backend_process;
 mod connection;
+mod host_diagnostics;
 mod lifecycle;
 mod report_download;
 mod single_instance;
@@ -170,6 +177,9 @@ fn run() -> Result<(), &'static str> {
             #[cfg(feature = "webview-smoke")]
             smoke::start_timeout(app.handle());
             let mut config = app.config().app.windows[0].clone();
+            if cfg!(feature = "bundled-backend") {
+                config.title = "GenzoRoom".into();
+            }
             config.url = WebviewUrl::External(bootstrap.clone());
             let handle = app.handle().clone();
             let downloads = report_download::Downloads::default();
@@ -254,6 +264,7 @@ fn main() {
     if let Err(code) = run() {
         // Tauri/HTTP errors may include a bootstrap URL; expose only fixed error codes.
         eprintln!("GenzoRoom desktop failed: {code}");
+        host_diagnostics::startup_failed(code);
         std::process::exit(1);
     }
 }

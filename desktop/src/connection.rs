@@ -28,7 +28,12 @@ pub fn user_root() -> Result<PathBuf, &'static str> {
     if !base.is_absolute() || base.to_string_lossy().starts_with(r"\\") {
         return Err("local_user_directory_invalid");
     }
-    Ok(base.join("GenzoRoom").join("WindowsPoC"))
+    let root = base.join("GenzoRoom");
+    Ok(if cfg!(feature = "bundled-backend") {
+        root
+    } else {
+        root.join("WindowsPoC")
+    })
 }
 
 fn read_bounded(reader: impl Read) -> Result<Vec<u8>, &'static str> {

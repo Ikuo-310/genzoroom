@@ -24,7 +24,8 @@ import uvicorn
 from backend_logging import backend_logger
 
 DEFAULT_PORT = 3191
-FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+FRONTEND_DIST = (Path(__file__).resolve().parent / "frontend" / "dist" if getattr(sys, "frozen", False)
+                 else Path(__file__).resolve().parent.parent / "frontend" / "dist")
 
 BOOTSTRAP_HTML = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="referrer" content="no-referrer"><title>GenzoRoom</title>
@@ -262,6 +263,7 @@ def main(argv=None):
     parser.add_argument("--managed", action="store_true", help="Use the private inherited desktop control pipe")
     parser.add_argument("--environment", action="store_true", help="Explicit diagnostic environment connection; isolated temporary profile")
     parser.add_argument("--connection-recovery", action="store_true", help="Open unconfigured Settings after failed restart")
+    parser.add_argument("--check-runtime", action="store_true", help="Offline native-library check; does not open user data")
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         parser.error("This entry point is for Windows only")
@@ -270,6 +272,12 @@ def main(argv=None):
     listener = None
     try:
         launch_id = None
+        from windows_runtime import apply_build_info
+        apply_build_info()
+        if args.check_runtime:
+            from windows_runtime_check import check_runtime
+            print(json.dumps(check_runtime()), flush=True)
+            return 0
         if args.managed:
             if not args.desktop:
                 raise RuntimeError("managed_launch_invalid")
@@ -304,7 +312,8 @@ def main(argv=None):
     except Exception as error:
         from storage import StorageInitializationError
         known = {"frontend_build_missing", "local_port_unavailable", "local_startup_failed",
-                 "windows_storage_configuration_too_late", "desktop_handoff_failed", "managed_launch_invalid"}
+                 "windows_storage_configuration_too_late", "desktop_handoff_failed", "managed_launch_invalid",
+                 "backend_build_info_invalid"}
         code = error.code if isinstance(error, StorageInitializationError) else \
             str(error) if isinstance(error, RuntimeError) and str(error) in known else "local_startup_failed"
         local_log("server.failed", level="error", errorCode=code)

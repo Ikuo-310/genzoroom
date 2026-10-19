@@ -70,6 +70,7 @@ struct LifecycleState {
 }
 
 pub struct Lifecycle {
+    launch: Option<crate::backend_launch::BackendLaunch>,
     owner: Mutex<Option<BackendProcess>>,
     state: Mutex<LifecycleState>,
     pub exit_code: AtomicI32,
@@ -79,6 +80,7 @@ pub struct Lifecycle {
 impl Lifecycle {
     pub fn new(owner: Option<BackendProcess>) -> Arc<Self> {
         Arc::new(Self {
+            launch: owner.as_ref().map(|owner| owner.launch.clone()),
             owner: Mutex::new(owner),
             state: Mutex::new(LifecycleState {
                 frontend: FrontendState::NeverReady,
@@ -317,7 +319,24 @@ impl Lifecycle {
             let _ = diagnostics.close();
         }
         let mut owner = self.owner.lock().unwrap();
-        let started = BackendProcess::start().or_else(|_| BackendProcess::start_mode(false, true));
+        let launch = self
+            .launch
+            .as_ref()
+            .expect("managed lifecycle owns a launch configuration");
+        let started = BackendProcess::start_launch(
+            launch.clone(),
+            std::time::Duration::from_secs(30),
+            false,
+            false,
+        )
+        .or_else(|_| {
+            BackendProcess::start_launch(
+                launch.clone(),
+                std::time::Duration::from_secs(30),
+                false,
+                true,
+            )
+        });
         match started {
             Ok((child, connection)) => {
                 *owner = Some(child);
@@ -500,6 +519,7 @@ mod tests {
 
     fn with_request(frontend: FrontendState, phase: RequestPhase, id: &str) -> Lifecycle {
         Lifecycle {
+            launch: None,
             owner: Mutex::new(None),
             state: Mutex::new(LifecycleState {
                 frontend,

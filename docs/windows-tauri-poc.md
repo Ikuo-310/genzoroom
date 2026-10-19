@@ -1,6 +1,53 @@
-# Windows Tauri 2 起動PoC（Phase 2B）
+# Windows Tauri 2 開発・同梱版（Phase 3B）
 
-既存React UIをTauri 2 / WebView2で表示するWindows開発用ホストです。通常起動ではリポジトリの`.venv`を使ってBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。Python同梱、インストーラー、LightCraft、RAW現像は含みません。
+既存React UIをTauri 2 / WebView2で表示するWindowsホストです。開発起動ではリポジトリの`.venv`、Phase 3Bの同梱版ではPyInstaller onedirのBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。インストーラー、LightCraft、RAW現像は含みません。以下の従来PoC手順・保存先は開発モードのものです。同梱版の差分は末尾を参照してください。
+
+## Phase 3B：同梱版のビルドと起動（2026-10-19）
+
+Windows x64、CPython 3.14、uv、Node.js（package.jsonの下限以上）／npm、MSVC向けRust、C++ Build Tools、Windows SDKを用意します。実行先ではWebView2 Runtimeが必要です。Python・Node.js・RustはビルドPCだけに必要で、同梱版の起動条件には含みません。WebView2導入とインストーラーはPhase 3Cで扱います。
+
+```powershell
+Set-Location I:\code\genzoroom
+./desktop/packaging/build.ps1
+# 別のCPython 3.14を明示する場合:
+# ./desktop/packaging/build.ps1 -PythonPath C:\path\to\python.exe
+```
+
+スクリプトは配布専用`desktop/packaging/.venv`を作成し、hash付き`runtime.lock`と`build.lock`へ同期します。既存の開発用`.venv`へビルド依存を追加しません。Frontendの`npm ci`・TypeScript/Vite build、PyInstaller 6.22.3／hooks-contrib 2026.8のonedir生成、オフラインネイティブ自己診断、Tauri resourcesのコピー、Release build、コピー後のファイル照合を順に実施します。resourcesへの旧DLL残留を防ぐため、配布専用の生成resourcesと当該Cargo packageだけをcleanし、他の依存ビルドは再利用します。照合は不足・改変だけでなく余剰ファイルも拒否します。UPX、Shell Plugin、Installerは使いません。初回の依存取得にはネットワークが必要です。
+
+成果物は`desktop/packaging/out/<日時-ID>/application/`です。フォルダー全体を別の場所へコピーし、その中の`genzoroom-desktop.exe`を起動してください。`backend/`を分離すると`backend_bundle_missing`で失敗し、開発用Pythonへフォールバックしません。成功の判定は同じrun直下の`distribution-complete.json`です。途中失敗時のフォルダーを配布しないでください。`-Smoke`付きビルドはfixture専用機能を含み、配布用には使いません。
+
+```text
+application/
+  genzoroom-desktop.exe          # GUI subsystem, x64
+  backend/
+    genzoroom-backend.exe        # console subsystem, x64; Rust hides its window
+    _internal/                  # Python DLL, native extensions, CA, frontend/dist
+    licenses/                   # collected original notices, subject to final review
+    build-manifest.json
+    collection.json             # collected module/DLL/data names
+    inventory.json              # per-file SHA-256/size, license review checklist
+```
+
+`bundled-backend` Cargo featureが配布モードを明示します。Release/Debugの暗黙判定はしません。通常Cargo開発ビルドは従来どおり`.venv`です。同梱版は実行ファイル隣の`backend`を絶対パスで解決し、その起動設定をLifecycleが保持して接続変更・回復再起動にも再利用します。Frontendは凍結モジュール位置の`frontend/dist`からBackendが配信し、オリジン・認証Cookie・画像URL・私有パイプ・Job Objectは従来と同じです。ReactはTauri assetsから配信しません。
+
+通常のビルド手順は`tauri.bundle.conf.json`をmergeし、Tauriのresources出力そのものを検証してapplicationへコピーします。単に`cargo build --features bundled-backend`だけではresourcesの準備になりません。ビルドscriptを使ってください。gitignoreの既存`.venv/`・`out/`・`dist/`規則により生成物はGit対象外です。依存更新時は`.in`を変更し、lockヘッダーの`uv pip compile --generate-hashes --python-version 3.14 --python-platform windows`を再実行してレビューします。
+
+### 正式データ領域と診断
+
+同梱版は`%LOCALAPPDATA%\GenzoRoom\`、開発PoCは従来の`WindowsPoC\`を使います。正式版の`connection.json`、`profiles/<ID>/data/genzoroom.db`、`profiles/<ID>/cache/thumbnails`、`webview2/`、`desktop-session.dpapi`はすべて正式ルートから解決します。資格情報参照は`GenzoRoom/Immich/<ID>`で、PoCの`GenzoRoom/WindowsPoC/Immich/<ID>`を読みません。PoCの探索・移行・削除はありません。正式ルートの更新でも保存データを保持します。DBスキーマは変更していません。共有Mutexは既存の名前を維持し、PoCと正式版の同時UI起動を拒否します。
+
+初回は接続未設定のSettingsから登録します。環境変数は通常起動の設定元にしません。診断用`--environment-backend`は引き続き明示モードとして利用でき、正式版でも新しい一時プロファイルを使います。手動起動を使う場合は、同じ配布物の`backend/genzoroom-backend.exe --desktop`を起動してから、ホストを`--manual-backend`で起動します。開発版と正式版のハンドオフ・資格情報は相互利用しません。
+
+ホストの起動失敗はReactに依存しないダイアログと`logs/host.jsonl`へ固定コードで通知します。`backend_bundle_missing`、`backend_spawn_failed`、`local_port_unavailable`、`backend_startup_timeout`等を区別します。ログは64KiBを超えると前世代1本へローテーションします。Backend stderr、URL、APIキー、Cookie、tokenは保存しません。ログ書き込み失敗は本来のエラーを隠しません。Backendを復旧できない場合はホストを閉じ、固定コードを確認し、配布フォルダーの欠落やポート競合を解消して再起動してください。データ削除による復旧は行いません。
+
+### Phase 3Bの検証と残課題
+
+実際のPyInstaller成果物をリポジトリ外へコピーし、私有パイプ・DPAPI/HMAC・Cookie、API/SPA/JPEG、接続変更再起動、正常終了・異常終了のJob回収、ポート競合、SQLite障害回復、JSON保存を生成画像とloopback Immich fixtureで確認しました。正式版用のランダム資格情報参照だけを作成・後始末し、実ユーザーの設定・DB・NASは使っていません。PoC sentinelが保持されることもfixtureで検証します。単体の`--check-runtime`はPillow ICC、JPEG decode/render/encode、NumPy、SQLite、certifi CA読込みをオフラインで検証し、ユーザーデータを作成しません。CA読込み成功は実サーバーへのTLS疎通成功を意味しません。
+
+配布manifestにはvalidation版、commit、working-tree dirty、source digest、Python／依存バージョンを記録し、完了manifestにはNode/npm/Rust/Cargo/uvとホストSHA-256も記録します。署名・インストーラー・自動更新はありません。開発環境なしのクリーンWindows 11 VM、実ImmichとのHTTPS、実写真Export、GUI保存ダイアログやOS入力の最終手動確認は未実施で、Phase 3Dの対象です。
+
+ライセンス一覧は基礎資料で、適合保証ではありません。GenzoRoomのAGPL-3.0-only対応ソースとビルド手順の提供、Python／PyInstaller bootloader例外、NumPy同梱GCC runtime等のソース条件、Pillow各codec、certifi MPL、Microsoft runtime、Rust/FrontendのNOTICEをPhase 3Cの正式配布前に確認してください。標準NumPy hookが拡張内部からの参照用に収集する`_multiarray_tests`は保持していますが、プロジェクトのtests/fixture・pytest・開発ツールは同梱していません。
 
 ## 前提
 

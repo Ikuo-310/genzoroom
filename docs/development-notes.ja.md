@@ -1,5 +1,31 @@
 # GenzoRoom 開発ノート
 
+## Windows Phase 3B：Python Backend同梱（2026-10-19）
+
+PyInstaller onedir、Tauri resources、既存Rust Command／Job Object／私有パイプの構成を実装した。配布専用のhash付きPython lockとspecを追加し、Frontend production buildも凍結物へ含めた。console-subsystem BackendとCREATE_NO_WINDOWを維持し、Shell Pluginや包括的ファイル権限は追加していない。開発用`.venv`と配布用の明示Cargo featureを分離し、Lifecycleが同じ絶対パスの起動設定を再起動にも保持する。
+
+正式版は`%LOCALAPPDATA%/GenzoRoom`、PoCは既存`WindowsPoC`、資格情報参照名も別namespaceとした。import前のDB/cacheルート確定、プロファイルID、終了保存、永続Export Stop、DPAPI/HMAC、Cookie、Mutexは維持した。既存PoCを移行・削除する処理はない。Frontendの操作・レイアウト、Dockerの起動や依存定義・永続化、DBスキーマは変更していない。
+
+初回の実onedirを外部一時フォルダーへコピーし、native/WebView2の既存17ケースが成功した。内容は接続設定更新と再起動・React文書更新、SQLite障害復旧、プロセス正常停止／異常回収、起動競合／タイムアウト、初回bootstrap失敗、JSON保存／キャンセル／失敗通知を含む。新しい実凍結EXEテスト3件はPATHをWindowsシステムだけに限定した起動、外部Python設定非依存、DPAPI/HMAC/Cookie、正式DB・PoC保持、ネイティブ自己診断、Backend欠落時のホスト固定コードを確認した。実ユーザーのデータやImmichは使わず、生成JPEG・loopback fixture・ランダムCredential参照のみを使用した。
+
+関連Backendは241件・118 subtests、Frontend境界3ファイル17件、Rustは開発／bundled両モード各18件が成功。Clippy両モード、Rust fmt、Frontend TypeScript/Viteと実PyInstaller／Tauri Release生成も成功した。最初のsandbox内Rustテストでloopback到達失敗が1件あり、同じコードの権限付き実行で成功を確認した。既存Vite chunkサイズ警告、PyInstallerの非Windows／任意モジュールの解析警告（tzdata等）は残るが、実行対象経路に必要な追加hookは確認されなかった。certifiのCA読込みは確認したが、実HTTPSサーバーとのTLS疎通を保証しない。
+
+限定監査の初回FindingはHigh 0／Medium 1／Low 0。resources出力は追加コピーのため前回の古いDLL等が残り得るのに、inventoryが記載ファイルだけを検証していた。同じ根本原因により、別コピーを配布するとTauri resources設定の誤りも隠せる。生成resourcesだけを明示的に削除し、当該Cargo packageをcleanしてbuild scriptを再実行、実際のCargo出力resourcesを検証・配布するよう修正した。余剰・欠落ファイル、SHA-256とサイズ、全Frontend成果物、x64 PE/subsystem、内外manifest一致を検査し、最後だけdistribution-completeを作成する。破損・欠落・旧DLL注入の決定的テストで再検証した。残る配布上の条件はクリーンWindows VM、実写真／実Immich、署名・WebView2導入・NSIS、ライセンスの最終精査であり、Phase 3C/3Dへ送る。既知共通Export COVER問題には着手していない。
+
+同梱smokeでPoC保持sentinelを含むnative統合＋凍結EXEは20 passed／1 skipped（通常配布GUI専用ケース）。従来PoCのnative統合も17 passed。smoke機能なしの通常配布物では3 passed／1 skipped（エラーダイアログを抑制するsmoke専用ケース）で、リポジトリ外のGUI起動・bootstrap認証・WM_CLOSE・子Backend停止を確認した。これらは開発PC上の自動native fixtureであり、クリーンVMや人による操作確認を意味しない。
+
+修正後の限定再監査はHigh 0／Medium 0／Low 0。厳格inventory検証を通った最終の非smoke成果物でも外部配置の3 passed／1 skippedを再確認した。Backend共通コードは既定の`/genzoroom`を保持し、release smokeの保存先・起動期待値に変更は不要と確認した。Dockerコンテナーのrelease smoke自体は今回実行していない。
+
+今回の変更ファイル（Phase 3B開始時の作業ツリーはclean）:
+
+- Backend: `storage.py`、`windows_connection.py`、`windows_credentials.py`、`windows_local.py`。追加: `windows_runtime.py`、`windows_runtime_check.py`。
+- Backend tests: `test_windows_process.py`。追加: `test_windows_runtime.py`、`test_windows_bundle.py`。
+- Rust: `desktop/Cargo.toml`、`desktop/src/backend_process.rs`、`connection.rs`、`lifecycle.rs`、`main.rs`。追加: `backend_launch.rs`、`host_diagnostics.rs`、`desktop/tauri.bundle.conf.json`。
+- 配布buildの追加: `desktop/packaging/{runtime.in,runtime.lock,build.in,build.lock,backend.spec,package_backend.py,verify_bundle.py,build.ps1}`。
+- 文書: `docs/windows-tauri-poc.md`、`docs/development-notes.ja.md`、`docs/architecture.md`。README、CHANGELOG、Docker関連設定、Frontendソース、既存アイコン、Git履歴は変更していない。生成物は既存ignore規則で除外されるため`.gitignore`の追加編集は不要だった。
+
+ライセンスは実収集module/DLL/dataと各ファイルhash、元license文書、依存バージョンを生成する基礎資料まで。GenzoRoom AGPL対応ソース、NumPy wheel同梱GCC runtime等、Pillow codecs、certifi MPL、Python／PyInstaller bootloader、Microsoft、Rust／Frontendの再配布条件を正式配布までに確認する。既存npm lockのsource-map-jsに対するnpm audit警告は別途依存更新対象で、Node/buildツール自体を配布物へ入れていない。クリーンVM・OS手動操作の未検証を自動テスト成功と混同しない。ビルドと起動の手順は[Windows運用文書](windows-tauri-poc.md)を参照。
+
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
 ## Windows Phase 1・2 完了記録（2026-10-19）

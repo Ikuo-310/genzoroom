@@ -1,4 +1,5 @@
 //! Own only a suspended, job-assigned child; ordinary shutdown never kills it.
+use crate::backend_launch::BackendLaunch;
 use crate::connection::Connection;
 use serde::Deserialize;
 #[cfg(windows)]
@@ -8,8 +9,7 @@ use std::os::windows::{
 };
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    path::Path,
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{Child, ChildStdin, Stdio},
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant},
 };
@@ -29,6 +29,7 @@ struct Event {
 }
 
 pub struct BackendProcess {
+    pub launch: BackendLaunch,
     // Keep the job alive through Child::wait; dropping it is an abnormal teardown boundary.
     #[cfg(windows)]
     _job: OwnedHandle,
@@ -40,10 +41,7 @@ pub struct BackendProcess {
 impl BackendProcess {
     #[cfg(feature = "webview-smoke")]
     pub fn startup_timeout_smoke() -> Result<(), &'static str> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or("repository_missing")?;
-        Self::start_at(root, Duration::ZERO, false, false).map(|_| ())
+        Self::start_launch(BackendLaunch::resolve()?, Duration::ZERO, false, false).map(|_| ())
     }
     pub fn start() -> Result<(Self, Connection), &'static str> {
         Self::start_mode(false, false)
@@ -53,28 +51,23 @@ impl BackendProcess {
         environment: bool,
         recovery: bool,
     ) -> Result<(Self, Connection), &'static str> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or("repository_missing")?;
-        Self::start_at(root, Duration::from_secs(30), environment, recovery)
+        Self::start_launch(
+            BackendLaunch::resolve()?,
+            Duration::from_secs(30),
+            environment,
+            recovery,
+        )
     }
 
-    fn start_at(
-        root: &Path,
+    pub fn start_launch(
+        launch: BackendLaunch,
         timeout: Duration,
         environment: bool,
         recovery: bool,
     ) -> Result<(Self, Connection), &'static str> {
-        let python = root.join(".venv/Scripts/python.exe");
-        let backend = root.join("backend");
-        if !python.is_file() || !backend.join("windows_local.py").is_file() {
-            return Err("backend_python_or_entry_missing");
-        }
         let launch_id = identifier()?;
-        let mut command = Command::new(python);
+        let mut command = launch.command()?;
         command
-            .args(["windows_local.py", "--desktop", "--managed"])
-            .current_dir(backend)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -139,6 +132,7 @@ impl BackendProcess {
             }
         });
         let mut owner = Self {
+            launch,
             #[cfg(windows)]
             _job: job,
             child,

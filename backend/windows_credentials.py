@@ -9,8 +9,9 @@ class ConnectionSettingsError(RuntimeError):
 
 
 class CredentialVault:
-    def __init__(self, namespace="GenzoRoom/WindowsPoC/Immich/"):
-        self.namespace = namespace
+    def __init__(self, namespace=None):
+        from windows_runtime import credential_namespace
+        self.namespace = namespace if namespace is not None else credential_namespace()
 
     def _api(self):
         class Credential(ctypes.Structure):

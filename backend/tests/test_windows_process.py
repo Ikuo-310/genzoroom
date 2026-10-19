@@ -17,10 +17,28 @@ import pytest
 
 from windows_local import DEFAULT_PORT, reserve_listener
 
-NATIVE = Path(__file__).resolve().parents[2] / "desktop/target/debug/genzoroom-desktop.exe"
+BUNDLED = os.environ.get("GENZOROOM_BUNDLED_APPLICATION")
+NATIVE = (Path(BUNDLED) / "genzoroom-desktop.exe" if BUNDLED else
+          Path(__file__).resolve().parents[2] / "desktop/target/debug/genzoroom-desktop.exe")
+DATA_DIRECTORY = "GenzoRoom" if BUNDLED else "GenzoRoom/WindowsPoC"
+CREDENTIAL_NAMESPACE = "GenzoRoom/Immich/" if BUNDLED else "GenzoRoom/WindowsPoC/Immich/"
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32" or os.environ.get("GENZOROOM_WEBVIEW_SMOKE") != "1" or not NATIVE.is_file(),
     reason="Opt-in Windows native smoke build required")
+
+
+@pytest.fixture(autouse=True)
+def protect_existing_poc_data(tmp_path):
+    if not BUNDLED:
+        yield
+        return
+    poc = tmp_path / "GenzoRoom/WindowsPoC"
+    poc.mkdir(parents=True)
+    sentinel = poc / "connection.json"
+    sentinel.write_bytes(b"isolated-old-poc-data")
+    yield
+    assert sentinel.read_bytes() == b"isolated-old-poc-data"
+    assert sorted(path.name for path in poc.iterdir()) == ["connection.json"]
 
 
 def environment(tmp_path):
@@ -50,14 +68,14 @@ def test_owned_child_normal_and_abnormal_teardown(tmp_path, abnormal):
         line = parent.stdout.readline()
         assert line.startswith("GenzoRoom process smoke: ready "), line + parent.stderr.read() if parent.poll() is not None else line
         pid = int(line.split()[-1])
-        assert (tmp_path / "GenzoRoom/WindowsPoC/profiles/unconfigured/data/genzoroom.db").is_file()
+        assert (tmp_path / DATA_DIRECTORY / "profiles/unconfigured/data/genzoroom.db").is_file()
         if abnormal:
             parent.kill()
             parent.communicate(timeout=15)
         else:
             _, stderr = parent.communicate("close\n", timeout=20)
             assert parent.returncode == 0, stderr
-            assert not (tmp_path / "GenzoRoom/WindowsPoC/desktop-session.dpapi").exists()
+            assert not (tmp_path / DATA_DIRECTORY / "desktop-session.dpapi").exists()
         wait_gone(pid)
         with reserve_listener(DEFAULT_PORT):
             pass
@@ -74,7 +92,7 @@ def test_conflict_never_reuses_or_stops_foreign_listener(tmp_path):
         assert result.returncode == 1
         assert "local_port_unavailable" in result.stderr
         assert listener.getsockname()[1] == DEFAULT_PORT
-        assert not (tmp_path / "GenzoRoom").exists()
+        assert not list((tmp_path / "GenzoRoom").rglob("*.db"))
 
 
 def test_startup_timeout_releases_owned_job_and_port(tmp_path):
@@ -220,7 +238,7 @@ def test_live_old_webview_prevents_a_second_tauri_backend_from_starting(tmp_path
         else:
             pytest.fail("Old WebView was not held after Backend failure")
 
-        handoff_path = tmp_path / "GenzoRoom/WindowsPoC/desktop-session.dpapi"
+        handoff_path = tmp_path / DATA_DIRECTORY / "desktop-session.dpapi"
         existing_handoff = handoff_path.read_bytes()
         second = subprocess.run([str(NATIVE), "--auto-smoke"], env=environment(tmp_path),
                                 capture_output=True, text=True, timeout=20)
@@ -249,7 +267,7 @@ def test_initial_storage_failure_opens_settings_without_replacing_profile(tmp_pa
     monkeypatch.setenv("IMMICH_URL", "")
     monkeypatch.setenv("IMMICH_API_KEY", "")
     server = start()
-    store = ConnectionStore(tmp_path / "GenzoRoom/WindowsPoC", CredentialVault())
+    store = ConnectionStore(tmp_path / DATA_DIRECTORY, CredentialVault(namespace=CREDENTIAL_NAMESPACE))
     key = os.environ["IMMICH_API_KEY"]
     entry = store.save(os.environ["IMMICH_URL"], server.user_id, key)
     database_path = store.root / "profiles" / entry["profile"] / "data/genzoroom.db"
@@ -317,7 +335,7 @@ def test_automatic_webview_authentication_and_graceful_exit(tmp_path, monkeypatc
         for field in ("domDown", "domUp", "documentEvents", "keyCode", "modifiers", "targetFocus", "simpleShortcut", "inputGuard"):
             assert f'"{field}":true' in result.stdout
         assert not (os.environ["IMMICH_API_KEY"] in result.stdout + result.stderr)
-        assert not (tmp_path / "GenzoRoom/WindowsPoC/desktop-session.dpapi").exists()
+        assert not (tmp_path / DATA_DIRECTORY / "desktop-session.dpapi").exists()
         with reserve_listener(DEFAULT_PORT):
             pass
         for line in result.stdout.splitlines():
@@ -341,7 +359,7 @@ def test_saved_connection_restart_isolates_database_queue_and_react_state(tmp_pa
     monkeypatch.setenv("IMMICH_API_KEY", "")
     first_server = start()
     first_url, first_key = os.environ["IMMICH_URL"], os.environ["IMMICH_API_KEY"]
-    store = ConnectionStore(tmp_path / "GenzoRoom/WindowsPoC", CredentialVault())
+    store = ConnectionStore(tmp_path / DATA_DIRECTORY, CredentialVault(namespace=CREDENTIAL_NAMESPACE))
     first = store.save(first_url, first_server.user_id, first_key)
     second_server = None
     parent = None

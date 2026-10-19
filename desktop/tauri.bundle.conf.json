@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GenzoRoom",
+  "version": "0.0.0-validation",
+  "identifier": "com.genzoroom.desktop",
+  "bundle": {
+    "active": false,
+    "resources": {
+      "packaging/out/staged/backend/": "backend/"
+    }
+  }
+}

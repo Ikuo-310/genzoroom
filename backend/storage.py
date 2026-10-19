@@ -18,16 +18,15 @@ WINDOWS_STORAGE = False
 
 
 def configure_windows_storage(profile: str | None = None) -> None:
-    """Select the PoC's isolated user directory before importing persistence consumers."""
+    """Select the deployment's isolated user directory before importing persistence consumers."""
     global STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE
     if "edit_store" in sys.modules or "main" in sys.modules:
         # edit_store intentionally binds DB_PATH at import; never split DB/cache ownership.
         raise RuntimeError("windows_storage_configuration_too_late")
-    base = Path(os.environ.get("LOCALAPPDATA", ""))
-    if not base.is_absolute() or base.drive.startswith("\\\\"):
-        raise StorageInitializationError("windows_storage_location_invalid")
-    root = (base / "GenzoRoom" / "WindowsPoC").resolve()
-    if root.drive.startswith("\\\\"):
+    from windows_runtime import data_root
+    try:
+        root = data_root().resolve()
+    except ValueError:
         raise StorageInitializationError("windows_storage_location_invalid")
     if profile is not None:
         import re

@@ -29,10 +29,11 @@ def connection_log(event, *, method=None, error=None):
 
 
 def user_root():
-    base = Path(os.environ.get("LOCALAPPDATA", ""))
-    if not base.is_absolute() or base.drive.startswith("\\\\"):
+    from windows_runtime import data_root
+    try:
+        return data_root()
+    except ValueError:
         raise ConnectionSettingsError("settings_location_invalid")
-    return base / "GenzoRoom" / "WindowsPoC"
 
 
 def normalize_url(value):
