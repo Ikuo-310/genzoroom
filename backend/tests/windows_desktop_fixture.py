@@ -36,3 +36,4 @@ def start():
     Thread(target=server.serve_forever, daemon=True).start()
     os.environ["IMMICH_URL"] = f"http://127.0.0.1:{server.server_port}"
     os.environ["IMMICH_API_KEY"] = "native-smoke-fixture"
+    return server

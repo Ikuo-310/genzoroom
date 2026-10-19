@@ -97,6 +97,8 @@ class ExportRuntime:
         self._source, self._family, self._registrar = source, family, registrar
         self._start_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
+        self._ready: asyncio.Future | None = None
+        self._shutdown_requested = False
 
     async def inspect_recovery(self):
         run = await run_in_threadpool(recoverable_export_run)
@@ -112,9 +114,12 @@ class ExportRuntime:
             raise RuntimeRejected("runtime_not_configured")
         ids = list(asset_ids)
         async with self._start_lock:
+            if self._shutdown_requested:
+                raise RuntimeRejected("run_active")
             if self._task is not None and not self._task.done():
                 raise RuntimeRejected("run_active")
             ready = asyncio.get_running_loop().create_future()
+            self._ready = ready
             # Retrieve errors even if a disconnected caller no longer awaits the ready signal.
             ready.add_done_callback(lambda result: None if result.cancelled() else result.exception())
             self._task = asyncio.create_task(self._serve(ids, ready))
@@ -132,6 +137,7 @@ class ExportRuntime:
             if self._task is not None and not self._task.done():
                 raise RuntimeRejected("run_active")
             ready = asyncio.get_running_loop().create_future()
+            self._ready = ready
             ready.add_done_callback(lambda result: None if result.cancelled() else result.exception())
             self._task = asyncio.create_task(self._serve(None, ready, recovery=run))
         return await asyncio.shield(ready)
@@ -143,6 +149,29 @@ class ExportRuntime:
     async def wait(self):
         if self._task is not None:
             await asyncio.shield(self._task)
+
+    async def stop_for_shutdown(self):
+        async with self._start_lock:
+            self._shutdown_requested = True
+            # Start may have dispatched a worker before its creation transaction completes.
+            # Freeze admission first, then observe the committed run before requesting Stop.
+            if self._ready is not None:
+                try:
+                    await asyncio.shield(self._ready)
+                except RuntimeRejected:
+                    pass
+            run = await run_in_threadpool(recoverable_export_run)
+            if run is not None:
+                try:
+                    await self.stop(run.run_id)
+                except RuntimeRejected as error:
+                    if error.code != "run_not_active":
+                        raise
+
+    async def resume_after_shutdown_cancelled(self):
+        async with self._start_lock:
+            # A committed Stop remains durable; cancellation only reopens Start admission.
+            self._shutdown_requested = False
 
     async def _serve(self, ids, ready, recovery=None):
         run = None

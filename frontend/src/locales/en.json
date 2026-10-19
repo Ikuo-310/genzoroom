@@ -1,4 +1,12 @@
 {
+  "desktopLifecycle": {
+    "title": "Closing GenzoRoom",
+    "saving": "Saving edits before closing…",
+    "waiting": "Waiting for the current export and Backend to finish…",
+    "failed": "Closing was cancelled. Check the save or export state, then close the window again to retry.",
+    "backendFailed": "The local Backend stopped unexpectedly. This window retains your edits; saving cannot finish until the Backend is available.",
+    "back": "Return to GenzoRoom"
+  },
   "webgpu": {
     "toggle": "Use WebGPU",
     "active": "GPU active",

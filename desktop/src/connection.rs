@@ -11,6 +11,8 @@ pub struct Connection {
     pub port: u16,
     bootstrap_token: String,
     probe_key: String,
+    #[serde(default)]
+    pub launch_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -122,6 +124,10 @@ impl Connection {
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
             || decode_hex(&self.probe_key).is_err()
+            || self
+                .launch_id
+                .as_ref()
+                .is_some_and(|value| decode_hex(value).is_err())
         {
             return Err("handoff_invalid");
         }
@@ -194,6 +200,7 @@ mod tests {
             port: 3191,
             bootstrap_token: "x".repeat(43),
             probe_key: "01".repeat(32),
+            launch_id: None,
         }
     }
 

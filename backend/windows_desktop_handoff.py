@@ -37,9 +37,11 @@ class DesktopHandoff:
         self.path = root / "desktop-session.dpapi"
         self._encrypted = None
 
-    def publish(self, *, port, bootstrap_token, probe_key):
-        payload = json.dumps({"version": 1, "port": port, "bootstrapToken": bootstrap_token,
-                              "probeKey": probe_key}, separators=(",", ":")).encode()
+    def publish(self, *, port, bootstrap_token, probe_key, launch_id=None):
+        data = {"version": 1, "port": port, "bootstrapToken": bootstrap_token, "probeKey": probe_key}
+        if launch_id is not None:
+            data["launchId"] = launch_id
+        payload = json.dumps(data, separators=(",", ":")).encode()
         encrypted = protect_for_current_user(payload)
         temporary = None
         try:

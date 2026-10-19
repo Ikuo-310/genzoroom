@@ -1,4 +1,12 @@
 {
+  "desktopLifecycle": {
+    "title": "GenzoRoomの終了",
+    "saving": "終了前に編集内容を保存しています…",
+    "waiting": "現在の出力処理とBackendの終了を待っています…",
+    "failed": "終了を中止しました。保存や出力の状態を確認し、もう一度ウィンドウを閉じて再試行してください。",
+    "backendFailed": "ローカルBackendが予期せず停止しました。編集内容はこの画面に残っていますが、Backendを利用できるまで保存は完了できません。",
+    "back": "GenzoRoomに戻る"
+  },
   "webgpu": {
     "toggle": "WebGPUを使用",
     "active": "GPU処理",

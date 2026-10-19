@@ -1,4 +1,6 @@
+mod backend_process;
 mod connection;
+mod lifecycle;
 #[cfg(feature = "webview-smoke")]
 mod smoke;
 
@@ -45,18 +47,38 @@ fn run() -> Result<(), &'static str> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let check_backend = arguments == ["--check-backend"];
     let smoke = cfg!(feature = "webview-smoke") && arguments == ["--webview-smoke"];
-    if !arguments.is_empty() && !check_backend && !smoke {
+    let auto_smoke = cfg!(feature = "webview-smoke") && arguments == ["--auto-smoke"];
+    let process_smoke = cfg!(feature = "webview-smoke") && arguments == ["--process-smoke"];
+    let manual = arguments == ["--manual-backend"] || check_backend || smoke;
+    if !arguments.is_empty() && !manual && !auto_smoke && !process_smoke {
         return Err("unsupported_arguments");
     }
-    let connection = Connection::load()?;
-    connection.verify_backend()?;
+    let (owner, connection) = if manual {
+        let connection = Connection::load()?;
+        if connection.launch_id.is_some() {
+            return Err("backend_is_managed_by_another_host");
+        }
+        connection.verify_backend()?;
+        (None, connection)
+    } else {
+        let (owner, connection) = backend_process::BackendProcess::start()?;
+        (Some(owner), connection)
+    };
     if check_backend {
         println!("GenzoRoom desktop: backend_verified");
         return Ok(());
     }
+    #[cfg(feature = "webview-smoke")]
+    if process_smoke {
+        return owner.unwrap().process_smoke();
+    }
     let port = connection.port;
     let bootstrap = connection.bootstrap_url();
-    tauri::Builder::default()
+    let state = lifecycle::Lifecycle::new(owner);
+    let exit_state = state.clone();
+    let application = tauri::Builder::default()
+        .manage(state.clone())
+        .invoke_handler(tauri::generate_handler![lifecycle::desktop_lifecycle])
         .menu(|app| {
             let fullscreen =
                 MenuItem::with_id(app, "fullscreen", "Full screen", true, None::<&str>)?;
@@ -84,12 +106,20 @@ fn run() -> Result<(), &'static str> {
             _ => {}
         })
         .setup(move |app| {
+            app.add_capability(
+                tauri::ipc::CapabilityBuilder::new("desktop-lifecycle")
+                    .local(false)
+                    .window("main")
+                    .remote(format!("http://127.0.0.1:{port}/*"))
+                    .permission("allow-desktop-lifecycle"),
+            )?;
             #[cfg(feature = "webview-smoke")]
             smoke::start_timeout(app.handle());
             let mut config = app.config().app.windows[0].clone();
             config.url = WebviewUrl::External(bootstrap.clone());
             let handle = app.handle().clone();
             WebviewWindowBuilder::from_config(app, &config)?
+                .initialization_script(lifecycle::BRIDGE)
                 .data_directory(user_root().map_err(std::io::Error::other)?.join("webview2"))
                 .on_navigation(move |url| allowed_navigation(url, port))
                 .on_new_window(move |url, _| {
@@ -105,13 +135,49 @@ fn run() -> Result<(), &'static str> {
                 .on_page_load(observe_page)
                 .on_document_title_changed(observe_title)
                 .build()?;
+            state.monitor(app.handle());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .map_err(|_| "window_runtime_failed")
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let state = window.state::<std::sync::Arc<lifecycle::Lifecycle>>();
+                    if !state.approved.load(std::sync::atomic::Ordering::SeqCst) {
+                        api.prevent_close();
+                        state.request_close(window.app_handle());
+                    }
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .map_err(|_| "window_runtime_failed")?;
+    application.run(move |app, event| {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            if !exit_state
+                .approved
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                api.prevent_exit();
+                if let Some(code) = code {
+                    exit_state
+                        .exit_code
+                        .store(code, std::sync::atomic::Ordering::SeqCst);
+                }
+                exit_state.request_close(app);
+            }
+        }
+    });
+    Ok(())
 }
 
 fn observe_page(window: tauri::WebviewWindow, payload: tauri::webview::PageLoadPayload<'_>) {
+    if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+        // A reloaded document must register its own save guard before accepting Close.
+        window
+            .state::<std::sync::Arc<lifecycle::Lifecycle>>()
+            .frontend_ready
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
     #[cfg(feature = "webview-smoke")]
     smoke::page_loaded(window, payload);
     #[cfg(not(feature = "webview-smoke"))]

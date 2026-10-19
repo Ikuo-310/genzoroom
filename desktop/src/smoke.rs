@@ -5,7 +5,7 @@ use tauri::{webview::PageLoadEvent, Manager};
 static ROOT_RESULTS: AtomicU8 = AtomicU8::new(0);
 
 fn enabled() -> bool {
-    std::env::args().any(|argument| argument == "--webview-smoke")
+    std::env::args().any(|argument| matches!(argument.as_str(), "--webview-smoke" | "--auto-smoke"))
 }
 
 pub fn start_timeout(app: &tauri::AppHandle) {
@@ -32,6 +32,38 @@ pub fn page_loaded(window: tauri::WebviewWindow, payload: tauri::webview::PageLo
 
 pub fn title_changed(window: tauri::WebviewWindow, title: String) {
     if !enabled() {
+        return;
+    }
+    if let Some(payload) = title.strip_prefix("GenzoRoom-keyboard:") {
+        if window.label() == "main" {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
+                let fields = [
+                    "domDown",
+                    "domUp",
+                    "documentEvents",
+                    "keyCode",
+                    "modifiers",
+                    "targetFocus",
+                    "simpleShortcut",
+                    "inputGuard",
+                ];
+                let passed = fields.iter().all(|key| value[key] == true);
+                let result: serde_json::Map<String, serde_json::Value> = fields
+                    .iter()
+                    .map(|key| {
+                        (
+                            (*key).to_string(),
+                            serde_json::Value::Bool(value[key] == true),
+                        )
+                    })
+                    .collect();
+                println!(
+                    "GenzoRoom keyboard smoke: {}",
+                    serde_json::Value::Object(result)
+                );
+                let _ = window.eval(format!("window.__genzoroomKeyboardPassed = {passed}"));
+            }
+        }
         return;
     }
     if let Some(payload) = title.strip_prefix("GenzoRoom-smoke-root:") {

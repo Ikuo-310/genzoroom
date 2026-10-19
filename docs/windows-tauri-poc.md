@@ -1,6 +1,6 @@
-# Windows Tauri 2 起動PoC（Phase 1B）
+# Windows Tauri 2 起動PoC（Phase 2A）
 
-既存React UIをTauri 2 / WebView2で表示する互換性確認用ホストです。Backendは引き続き手動起動します。Python同梱、インストーラー、資格情報ストア、LightCraft、RAW現像は含みません。
+既存React UIをTauri 2 / WebView2で表示するWindows開発用ホストです。通常起動ではリポジトリの`.venv`を使ってBackendを自動起動し、終了も管理します。Python同梱、インストーラー、資格情報ストア、LightCraft、RAW現像は含みません。
 
 ## 前提
 
@@ -8,7 +8,32 @@
 - Rust stable（MSVCターゲット）、Visual StudioのC++ビルドツール、Windows SDK、WebView2 Runtime。Tauriの[Windows prerequisites](https://v2.tauri.app/start/prerequisites/)に従います。
 - Tauri CLIや追加のNode UIフレームワークは不要です。Cargo.lockで固定した依存関係を使います。
 
-## 起動
+## 自動起動（通常）
+
+Frontendをビルドした後、Immich環境変数を設定した同じPowerShellからTauriを起動します。既に動いているBackendがある場合は、その所有者側で保存・停止を完了してください。既存Backendを自動で再利用したり停止したりしません。
+
+```powershell
+Set-Location I:\code\genzoroom\frontend
+npm run build
+Set-Location ..
+$env:IMMICH_URL = 'https://your-immich.example'
+$immichKeyInput = Read-Host 'Immich API key' -AsSecureString
+$env:IMMICH_API_KEY = [System.Net.NetworkCredential]::new('', $immichKeyInput).Password
+try {
+    cargo run --manifest-path desktop/Cargo.toml --locked
+} finally {
+    Remove-Item Env:IMMICH_API_KEY -ErrorAction SilentlyContinue
+    Remove-Variable immichKeyInput -ErrorAction SilentlyContinue
+}
+```
+
+Rustは固定したPythonパスと引数を直接起動し、シェル経由のコマンドを組み立てません。作業ディレクトリは`backend`、起動経路は`windows_local.py --desktop --managed`です。起動固有IDを私有パイプで渡し、そのIDを含むDPAPI情報とHMAC照合に成功してからウィンドウを開きます。APIキーは環境変数として継承するだけで、コマンド引数・ログ・WebViewへ渡しません。固定ポート3191の競合、30秒の起動待ちタイムアウト、起動失敗は固定エラーコードで終了します。
+
+通常終了ではExportのStopを永続化し、暗室の既存保存処理が成功するまでウィンドウを保持します。保存失敗時は終了を中止し、戻って再試行できます。保存成功後も処理中のExport 1件が完了するまで待ち、次の項目は開始しません。待ち時間には強制終了タイムアウトを設けません。残るQueue項目は既存のStop／次回復旧仕様で扱います。
+
+BackendはWindows Job Objectへ割り当ててから実行を再開します。通常終了は私有パイプで要求し、Uvicorn終了と子プロセスの終了を確認するまで所有権を保持します。Tauriが異常終了した場合だけ、Job Objectのkill-on-closeで子孫プロセスを回収します。この異常終了では編集中データや実行中Exportの完了を保証できず、既存の永続化済み状態と復旧に依存します。
+
+## 手動起動（Phase 1Bの診断用）
 
 まずFrontendをビルドします。
 
@@ -36,7 +61,7 @@ try {
 
 ```powershell
 Set-Location I:\code\genzoroom
-cargo run --manifest-path desktop/Cargo.toml --locked
+cargo run --manifest-path desktop/Cargo.toml --locked -- --manual-backend
 ```
 
 Tauriは暗号化した受け渡し情報を読み、起動済みBackendのインスタンスを照合した後、WebView2内でPhase 1Aの一回限りの認証を行います。API・画像・SPAは引き続き同じ`http://127.0.0.1:<port>`から読み込みます。
@@ -70,11 +95,11 @@ Phase 1Aの起動用URLは通常ブラウザーへ直接渡す方式で、Tauri�
 
 通常終了時に自分が作成した暗号化情報を削除します。強制終了で残っても、次回は新しい起動情報で置換され、停止したBackendや別インスタンスの応答では照合に成功しません。平文URL・キー・Cookieをログやコマンド引数に出力しません。
 
-Tauri capabilitiesは空で、リモートページにShell・Filesystem・HTTPプラグイン等の権限を付与していません。ReactからRustの独自コマンドを呼ぶ構成でもありません。DPAPIも同じユーザー権限の悪意あるプロセスから秘密を隔離するものではありません。
+Tauriは検証済みの厳密なローカルOrigin・mainウィンドウだけに、終了準備への応答用`desktop_lifecycle`コマンドを許可します。Shell・Filesystem・HTTPプラグイン等の権限は付与しません。Diagnosticsにはこの権限を付与しません。DPAPIも同じユーザー権限の悪意あるプロセスから秘密を隔離するものではありません。
 
 ## 停止
 
-暗室の編集を保存し、実行中ExportはUIのCancel後に現在項目の完了を待ちます。Tauriウィンドウを閉じた後、ターミナルAでCtrl+Cを一度押してBackend終了を待ちます。ウィンドウを閉じてもBackendは停止せず、終了前保存も自動実行しません。Export復旧動作と強制終了時の制限は[Phase 1Aの手順](windows-local-poc.md#停止とexport)と同じです。
+自動起動モードではウィンドウを閉じ、保存とExport現在項目の完了、Backend停止を待ちます。保存失敗時は終了しません。手動モードでも暗室保存を待ちますが、BackendやExportの停止は管理しません。手動モードではUIのCancel後に現在項目の完了を待ち、Tauriを閉じた後、ターミナルAでCtrl+Cを一度押します。Export復旧動作と強制終了時の制限は[Phase 1Aの手順](windows-local-poc.md#停止とexport)と同じです。
 
 ## 自動検証
 
@@ -93,13 +118,15 @@ cargo build --manifest-path desktop/Cargo.toml --locked --features webview-smoke
 Set-Location backend
 $env:GENZOROOM_WEBVIEW_SMOKE = '1'
 try {
-    & '..\.venv\Scripts\python.exe' -m pytest tests/test_windows_local.py -k 'windows_cli_build_startup_and_graceful_shutdown and desktop' -q -s
+    & '..\.venv\Scripts\python.exe' -m pytest tests/test_windows_process.py tests/test_windows_local.py -k 'windows_process or (windows_cli_build_startup_and_graceful_shutdown and desktop)' -q -s
 } finally {
     Remove-Item Env:GENZOROOM_WEBVIEW_SMOKE
 }
 ```
 
 このスモークは正規認証、React表示、APIエラーのJSON応答、画像URLからのJPEG／Canvas読み取り、Diagnostics別窓のCookie共有、既存WebGPU診断の実行を確認します。GPUがない環境では`gpuResults: false`も想定されるため、GPU描画の合否は出力を区別してください。手操作や実Immich写真の画質・速度を保証する検証ではありません。
+
+`GenzoRoom keyboard smoke`は実WebView2内で合成DOMイベントを生成し、`keydown`／`keyup`のwindow・documentへの到達、key／code・修飾キー、targetとactiveElement、GalleryのAキー、入力欄でCtrl+Aをアプリ側が横取りしないことを確認します。OSからの実キー入力やネイティブメニューとのフォーカス往復を保証するものではありません。暗室のG、Ctrl+Shift+矢印、IME・入力欄保護、終了失敗後の復帰はFrontend回帰テストでも確認します。
 
 ## 実機確認表
 
@@ -112,6 +139,6 @@ try {
 | WebGPU | 設定ON/OFF、初期化、連続プレビュー更新、画像変更、CPUフォールバック、実写真の色 |
 | Developer Diagnostics | Primaryクリックとネイティブメニュー、タブ移動、WebGPU・JPEG診断、JSON保存 |
 | ウィンドウ | リサイズ、最小化・復帰、DPIの異なる画面間移動、全画面往復、Alt+Tab後のフォーカス・キー解放 |
-| 終了・再起動 | 編集保存、Export Cancel、Tauri終了とBackend停止の分離、新しい認証での再起動 |
+| 終了・再起動 | 未保存編集の保存待ち・保存失敗と再試行、Export現在項目だけの完了待ち、正常終了後の子Backend消滅、異常終了後の復旧、手動モードでBackendを残すこと、新しい認証での再起動 |
 
 自動スモークで成立した項目と、この表の人による実機確認は区別して記録してください。

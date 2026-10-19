@@ -75,6 +75,7 @@ class LocalHost:
         self.session_token = secrets.token_urlsafe(32)
         self.cookie_name = f"genzoroom_local_{port}"
         self.desktop_probe_key = None
+        self.backend = backend
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -202,11 +203,12 @@ def reserve_listener(port):
 
 
 class LocalServer(uvicorn.Server):
-    def __init__(self, config, host, *, open_browser=True, desktop=False):
+    def __init__(self, config, host, *, open_browser=True, desktop=False, launch_id=None):
         super().__init__(config)
         self.local_host, self.open_browser = host, open_browser
         self.desktop = desktop
         self.handoff = None
+        self.launch_id = launch_id
 
     async def startup(self, sockets=None):
         await super().startup(sockets=sockets)
@@ -218,10 +220,13 @@ class LocalServer(uvicorn.Server):
                 self.local_host.desktop_probe_key = secrets.token_hex(32)
                 try:
                     self.handoff.publish(port=self.config.port, bootstrap_token=self.local_host.bootstrap_token,
-                                         probe_key=self.local_host.desktop_probe_key)
+                                         probe_key=self.local_host.desktop_probe_key, launch_id=self.launch_id)
                 except Exception:
                     await self.shutdown(sockets=sockets)
                     raise RuntimeError("desktop_handoff_failed") from None
+            if self.launch_id is not None:
+                from windows_managed import ManagedControl
+                ManagedControl(self).start()
             local_log("server.started", port=self.config.port)
             print(f"GenzoRoom Windows PoC ready on {self.local_host.origin}", flush=True)
             if self.open_browser:
@@ -249,6 +254,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--no-browser", action="store_true", help="Headless startup check; no interactive session")
     mode.add_argument("--desktop", action="store_true", help="Publish an encrypted handoff for the manual Tauri host")
+    parser.add_argument("--managed", action="store_true", help="Use the private inherited desktop control pipe")
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         parser.error("This entry point is for Windows only")
@@ -256,6 +262,12 @@ def main(argv=None):
         parser.error("port must be between 1024 and 65535")
     listener = None
     try:
+        launch_id = None
+        if args.managed:
+            if not args.desktop:
+                raise RuntimeError("managed_launch_invalid")
+            from windows_managed import read_launch
+            launch_id = read_launch(sys.stdin)
         listener = reserve_listener(args.port)
         if not (FRONTEND_DIST / "index.html").is_file():
             raise RuntimeError("frontend_build_missing")
@@ -266,7 +278,8 @@ def main(argv=None):
         host = LocalHost(app, port=args.port)
         config = uvicorn.Config(host, host="127.0.0.1", port=args.port, workers=1,
                                 proxy_headers=False, access_log=False, log_config=None)
-        server = LocalServer(config, host, open_browser=not (args.no_browser or args.desktop), desktop=args.desktop)
+        server = LocalServer(config, host, open_browser=not (args.no_browser or args.desktop),
+                             desktop=args.desktop, launch_id=launch_id)
         server.run(sockets=[listener])
         if not server.started:
             raise RuntimeError("local_startup_failed")
@@ -279,11 +292,14 @@ def main(argv=None):
     except Exception as error:
         from storage import StorageInitializationError
         known = {"frontend_build_missing", "local_port_unavailable", "local_startup_failed",
-                 "windows_storage_configuration_too_late", "desktop_handoff_failed"}
+                 "windows_storage_configuration_too_late", "desktop_handoff_failed", "managed_launch_invalid"}
         code = error.code if isinstance(error, StorageInitializationError) else \
             str(error) if isinstance(error, RuntimeError) and str(error) in known else "local_startup_failed"
         local_log("server.failed", level="error", errorCode=code)
         print(f"GenzoRoom Windows PoC failed: {code}", file=sys.stderr)
+        if args.managed:
+            from windows_managed import emit
+            emit("startup_failed", error_code=code)
         return 1
     finally:
         if listener is not None:

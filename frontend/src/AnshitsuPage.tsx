@@ -44,6 +44,7 @@ import { rememberWorkspaceSession } from './workspaceResume';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { frontendLogger } from './frontendLogging';
 import { requestThumbnailGeneration } from './thumbnailApi';
+import { useDesktopCloseGuard } from './DesktopLifecycle';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -441,6 +442,29 @@ export function AnshitsuPage() {
     }
   }
   exitToHomeRef.current = exitToHome;
+  const desktopExit = useRef(false);
+  const resumeDesktopExit = () => {
+    if (!desktopExit.current) return;
+    desktopExit.current = false;
+    resumeAfterExitFailure();
+    exitRef.current = false;
+    setExitSaving(false);
+  };
+  useDesktopCloseGuard({
+    prepare: async () => {
+      if (exitRef.current || switchingRef.current || exclusionBusy.current || failedSwitch || exitFailure) return false;
+      desktopExit.current = true;
+      exitRef.current = true;
+      setExitSaving(true);
+      try {
+        const result = await saveEditedAssetsForExit();
+        if (result.ok) return true;
+      } catch { /* The host retains the window and retries the existing save path. */ }
+      resumeDesktopExit();
+      return false;
+    },
+    resume: resumeDesktopExit,
+  });
 
   function stayInAnshitsu() {
     resumeAfterExitFailure();

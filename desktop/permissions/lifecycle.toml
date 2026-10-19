@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-desktop-lifecycle"
+description = "Allow the main verified UI to acknowledge native close preparation only."
+commands.allow = ["desktop_lifecycle"]

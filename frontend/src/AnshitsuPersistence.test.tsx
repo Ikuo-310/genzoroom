@@ -204,6 +204,97 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); container.remove(); clearWorkspaceSession(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 const filmstripPhotos = () => [...container.querySelectorAll('.filmstrip-item')].map(button => button.getAttribute('aria-label'));
+
+describe('desktop close uses the existing workspace persistence guard', () => {
+  const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+  const closeDialog = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+  beforeEach(() => {
+    vi.stubGlobal('__GENZOROOM_DESKTOP__', { respond: vi.fn().mockResolvedValue(undefined) });
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 0; });
+  });
+  afterEach(() => {
+    for (const [name, descriptor] of [['showModal', showModal], ['close', closeDialog]] as const) {
+      if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+    }
+  });
+  async function close(requestId = 'a'.repeat(64)) {
+    await act(async () => { window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId } })); });
+    await flush();
+  }
+  it.each([
+    { key: 'g', code: 'KeyG', modifiers: {}, destination: undefined },
+    { key: 'ArrowRight', code: 'ArrowRight', modifiers: { ctrlKey: true, shiftKey: true }, destination: 'second.jpg' },
+  ])('keeps $key available while the desktop lifecycle is idle', async ({ key, code, modifiers, destination }) => {
+    await mount();
+    const reachedDocument = vi.fn();
+    const reachedWindow = vi.fn();
+    document.addEventListener('keydown', reachedDocument);
+    window.addEventListener('keyup', reachedWindow);
+    try {
+      const event = await filmstripKey(key, { code, ...modifiers }, document.body);
+      document.body.dispatchEvent(new KeyboardEvent('keyup', { key, code, ...modifiers, bubbles: true }));
+      expect(reachedDocument).toHaveBeenCalledOnce();
+      expect(reachedWindow).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
+      expect(currentPhoto()).toBe(destination);
+    } finally {
+      document.removeEventListener('keydown', reachedDocument);
+      window.removeEventListener('keyup', reachedWindow);
+    }
+  });
+  it('keeps IME and text-input protection with the desktop bridge present', async () => {
+    await mount();
+    const input = document.createElement('input');
+    container.append(input); input.focus();
+    for (const [key, modifiers] of [['g', {}], ['ArrowRight', { ctrlKey: true, shiftKey: true }]] as const) {
+      expect((await filmstripKey(key, modifiers, input)).defaultPrevented).toBe(false);
+      expect((await filmstripKey(key, { ...modifiers, isComposing: true }, document.body)).defaultPrevented).toBe(false);
+      expect(currentPhoto()).toBe('first.jpg');
+    }
+    expect(document.activeElement).toBe(input);
+  });
+  it('removes the lifecycle dialog and restores focus and shortcuts after returning from a failed close', async () => {
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    const opener = container.querySelector<HTMLButtonElement>('button[aria-label="Enable Basic"]')!;
+    opener.focus();
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await close();
+    const back = document.querySelector<HTMLButtonElement>('dialog[role="alertdialog"] button')!;
+    await act(async () => back.click());
+    expect(document.querySelector('dialog[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    await filmstripKey('ArrowRight', { ctrlKey: true, shiftKey: true }, document.body);
+    expect(currentPhoto()).toBe('second.jpg');
+  });
+  it('does not acknowledge shutdown until the dirty Recipe save completes', async () => {
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    const saving = deferred<Awaited<ReturnType<typeof mocked.put>>>();
+    mocked.put.mockReturnValueOnce(saving.promise);
+    await close();
+    expect(window.__GENZOROOM_DESKTOP__!.respond).toHaveBeenCalledWith({ kind: 'ready' });
+    expect(window.__GENZOROOM_DESKTOP__!.respond).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'closeResult' }));
+    expect((await filmstripKey('ArrowRight')).defaultPrevented).toBe(true);
+    await act(async () => saving.resolve({ state: mocked.put.mock.calls[0][1], revision: 1,
+      updatedAt: '2026-09-25T00:00:00Z', lastSaveId: mocked.put.mock.calls[0][3] }));
+    await flush();
+    expect(window.__GENZOROOM_DESKTOP__!.respond).toHaveBeenLastCalledWith({ kind: 'closeResult', requestId: 'a'.repeat(64), saved: true });
+    expect(currentPhoto()).toBe('first.jpg');
+  });
+  it('rejects close on save failure and allows retry without losing edits', async () => {
+    await mount(); await click('button[aria-label="Disable Basic"]');
+    mocked.put.mockRejectedValueOnce(new EditStateApiError('unavailable'));
+    await close();
+    expect(window.__GENZOROOM_DESKTOP__!.respond).toHaveBeenLastCalledWith({ kind: 'closeResult', requestId: 'a'.repeat(64), saved: false });
+    expect(currentPhoto()).toBe('first.jpg');
+    expect(document.querySelector('dialog[role="alertdialog"]')).not.toBeNull();
+    await close('b'.repeat(64));
+    expect(window.__GENZOROOM_DESKTOP__!.respond).toHaveBeenLastCalledWith({ kind: 'closeResult', requestId: 'b'.repeat(64), saved: true });
+    expect(mocked.put).toHaveBeenCalledTimes(2);
+  });
+});
 const excludePhoto = (filename: string) => click(`.filmstrip-exclude[aria-label="${i18n.t('workspace.excludePhoto', { filename })}"]`);
 const exclusionUndoKey = () => filmstripKey('z', { ctrlKey: true });
 
