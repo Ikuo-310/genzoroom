@@ -75,6 +75,7 @@ ${StrLoc}
 
 Var PassiveMode
 Var UpdateMode
+Var HandoffMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
@@ -350,17 +351,25 @@ Function PageLeaveReinstall
     HideWindow
     ClearErrors
 
+    ; Keep new UI hosts and installers out while the existing uninstaller owns the app mutex.
+    !insertmacro GENZOROOM_RELEASE_NAMED_MUTEX $GenzoRoomInstallerMutex reinstall_mutex_release_failed reinstall_app_mutex
+
     ${If} $WixMode = 1
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
       ExecWait '$R1' $0
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+      ; The parent keeps the installer gate while the child temporarily owns the app mutex.
+      StrCpy $R1 "$R1 /GENZOROOM_HANDOFF"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
       ExecWait '$R1' $0
     ${EndIf}
+
+    ; Reacquire only after the child releases the app mutex; the parent still owns the installer gate.
+    !insertmacro GENZOROOM_REQUIRE_INSTALLATION_MUTEX reinstall_mutex_reacquire
 
     BringToFront
 
@@ -383,6 +392,12 @@ Function PageLeaveReinstall
       MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
       Abort
     ${EndIf}
+    Goto reinstall_mutex_handoff_done
+
+    reinstall_mutex_release_failed:
+      MessageBox MB_ICONSTOP|MB_OK "$(GenzoRoomInstallLockFailed)"
+      Quit
+    reinstall_mutex_handoff_done:
   reinst_done:
 FunctionEnd
 
@@ -418,7 +433,24 @@ Var AppStartMenuFolder
 !insertmacro MUI_PAGE_FINISH
 
 Function RunMainBinary
+  IfFileExists "$INSTDIR\${MAINBINARYNAME}.exe" run_main_exists
+  MessageBox MB_ICONSTOP|MB_OK "$(GenzoRoomLaunchFailed)"
+  Return
+
+  run_main_exists:
+  SetOutPath "$INSTDIR"
+  !insertmacro GENZOROOM_RELEASE_NAMED_MUTEX $GenzoRoomInstallerMutex run_main_lock_failed run_main_app_mutex
+  !insertmacro GENZOROOM_RELEASE_NAMED_MUTEX $GenzoRoomInstallerGateMutex run_main_lock_failed run_main_gate_mutex
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+  Pop $0
+  StrCmp $0 0 run_main_done
+  MessageBox MB_ICONSTOP|MB_OK "$(GenzoRoomLaunchFailed)"
+  Goto run_main_done
+
+  run_main_lock_failed:
+  MessageBox MB_ICONSTOP|MB_OK "$(GenzoRoomLaunchLockFailed)"
+
+  run_main_done:
 FunctionEnd
 
 ; Uninstaller Pages
@@ -439,6 +471,10 @@ FunctionEnd
 {{/each}}
 
 Function .onInit
+  ; Reserve the installer lifetime before pages can lead into an uninstaller handoff.
+  !insertmacro GENZOROOM_REQUIRE_INSTALLER_GATE install_gate_start
+  !insertmacro GENZOROOM_REQUIRE_INSTALLATION_MUTEX install_app_start
+
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
     StrCpy $PassiveMode 1
@@ -723,6 +759,22 @@ Function .onInstSuccess
 FunctionEnd
 
 Function un.onInit
+  ${GetOptions} $CMDLINE "/GENZOROOM_HANDOFF" $HandoffMode
+  ${IfNot} ${Errors}
+    StrCpy $HandoffMode 1
+  ${EndIf}
+
+  ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode
+  ${IfNot} ${Errors}
+    StrCpy $UpdateMode 1
+  ${EndIf}
+
+  ; During an update the parent retains this gate; standalone uninstallers acquire it here.
+  ${If} $HandoffMode <> 1
+    !insertmacro GENZOROOM_REQUIRE_INSTALLER_GATE uninstall_gate_start
+  ${EndIf}
+  !insertmacro GENZOROOM_REQUIRE_INSTALLATION_MUTEX uninstall_app_start
+
   !insertmacro SetContext
 
   !if "${INSTALLMODE}" == "both"
@@ -736,10 +788,6 @@ Function un.onInit
     StrCpy $PassiveMode 1
   ${EndIf}
 
-  ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode
-  ${IfNot} ${Errors}
-    StrCpy $UpdateMode 1
-  ${EndIf}
 FunctionEnd
 
 Section Uninstall
