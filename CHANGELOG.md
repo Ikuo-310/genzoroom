@@ -13,6 +13,10 @@ Internal changes are omitted unless they affect users.
 - Windows PoC now exits safely when its initial UI cannot become ready, correlates close failures to their request, confirms before closing during a page reload, and blocks a second Tauri host while an older WebView remains open.
 - Windows diagnostic Settings now displays the active environment-based Immich target instead of a different saved connection.
 
+### Changed
+
+- Windows desktop now has a bilingual per-user NSIS installer with app shortcuts, bundled Backend and WebView2 setup, and prompts users to close GenzoRoom before installing or uninstalling. Choosing uninstall from the same-version setup flow exits the installer after removal succeeds.
+
 ## [0.2.2] - 2026-10-17
 
 ### Added

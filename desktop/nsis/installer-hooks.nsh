@@ -12,7 +12,7 @@
   StrCmp $R7 $\" ${CONTEXT}_running ${CONTEXT}_done
   ${CONTEXT}_running:
   IfSilent ${CONTEXT}_silent_cancel ${CONTEXT}_prompt
-  StrCmp $PassiveMode "1" ${CONTEXT}_silent_cancel
+  StrCmp $PassiveMode "1" ${CONTEXT}_silent_cancel ${CONTEXT}_prompt
   ${CONTEXT}_silent_cancel:
     SetErrorLevel 2
     Abort

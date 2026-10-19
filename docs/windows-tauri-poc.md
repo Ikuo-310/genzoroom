@@ -1,6 +1,6 @@
-# Windows Tauri 2 開発・同梱版（Phase 3B）
+# Windows Tauri 2 開発・配布版（Phase 3C）
 
-既存React UIをTauri 2 / WebView2で表示するWindowsホストです。開発起動ではリポジトリの`.venv`、Phase 3Bの同梱版ではPyInstaller onedirのBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。インストーラー、LightCraft、RAW現像は含みません。以下の従来PoC手順・保存先は開発モードのものです。同梱版の差分は末尾を参照してください。
+既存React UIをTauri 2 / WebView2で表示するWindowsホストです。開発起動ではリポジトリの`.venv`、配布版ではPyInstaller onedirのBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。Windows配布版はTauri 2.12.2／NSISのユーザー単位インストーラーを使用します。LightCraft、RAW現像、自動更新は含みません。以下の従来PoC手順・保存先は開発モードのものです。配布版との差分は末尾を参照してください。
 
 ## Phase 3B：同梱版のビルドと起動（2026-10-19）
 
@@ -45,7 +45,7 @@ application/
 
 実際のPyInstaller成果物をリポジトリ外へコピーし、私有パイプ・DPAPI/HMAC・Cookie、API/SPA/JPEG、接続変更再起動、正常終了・異常終了のJob回収、ポート競合、SQLite障害回復、JSON保存を生成画像とloopback Immich fixtureで確認しました。正式版用のランダム資格情報参照だけを作成・後始末し、実ユーザーの設定・DB・NASは使っていません。PoC sentinelが保持されることもfixtureで検証します。単体の`--check-runtime`はPillow ICC、JPEG decode/render/encode、NumPy、SQLite、certifi CA読込みをオフラインで検証し、ユーザーデータを作成しません。CA読込み成功は実サーバーへのTLS疎通成功を意味しません。
 
-配布manifestにはvalidation版、commit、working-tree dirty、source digest、Python／依存バージョンを記録し、完了manifestにはNode/npm/Rust/Cargo/uvとホストSHA-256も記録します。署名・インストーラー・自動更新はありません。開発環境なしのクリーンWindows 11 VM、実ImmichとのHTTPS、実写真Export、GUI保存ダイアログやOS入力の最終手動確認は未実施で、Phase 3Dの対象です。
+配布manifestにはvalidation版、commit、working-tree dirty、source digest、Python／依存バージョンを記録し、完了manifestにはNode/npm/Rust/Cargo/uvとホストSHA-256も記録します。コード署名と自動更新はありません。開発環境なしのクリーンWindows 11 VM、実ImmichとのHTTPS、実写真Export、GUI保存ダイアログやOS入力の最終手動確認は未実施で、配布アプリ全体の受入確認に残っています。
 
 ライセンス一覧は基礎資料で、適合保証ではありません。GenzoRoomのAGPL-3.0-only対応ソースとビルド手順の提供、Python／PyInstaller bootloader例外、NumPy同梱GCC runtime等のソース条件、Pillow各codec、certifi MPL、Microsoft runtime、Rust/FrontendのNOTICEをPhase 3Cの正式配布前に確認してください。標準NumPy hookが拡張内部からの参照用に収集する`_multiarray_tests`は保持していますが、プロジェクトのtests/fixture・pytest・開発ツールは同梱していません。
 
@@ -245,15 +245,25 @@ Set-Location I:\code\genzoroom
 ./desktop/packaging/build.ps1
 ```
 
-成果物は`desktop/packaging/out/<日時-ID>/`へ出力し、`application/`はPhase 3B同様に実行可能な完全フォルダー、`GenzoRoom_0.0.0-validation_x64-setup.exe`はNSIS配布物です。2026-10-19のローカル検証ビルドではセットアップEXEが255,708,267 bytes（243.86 MiB）、アプリフォルダーが約100.8 MiBでした。容量にはWebView2 Evergreen offline installerが含まれます。`0.0.0-validation`はインストーラー検証用の仮番号で、正式な公開版番号ではありません。タグと既存配布版番号を確認してPhase 3C公開前に決定してください。ダウングレードは拒否し、同版再インストールはNSISの修復経路です。
+成果物は`desktop/packaging/out/<日時-ID>/`へ出力し、`application/`はPhase 3B同様に実行可能な完全フォルダー、`GenzoRoom_0.0.0-validation_x64-setup.exe`はNSIS配布物です。2026-10-19のローカル検証ビルドではセットアップEXEが255,708,267 bytes（243.86 MiB）、アプリフォルダーが約100.8 MiBでした。容量にはWebView2 Evergreen offline installerが含まれます。`0.0.0-validation`はインストーラー検証用の仮番号で、正式な公開版番号ではありません。タグと既存配布版番号を確認して公開版番号を決定してください。ダウングレードは現在無効です。同一版のメンテナンス画面からは再インストールまたはアンインストールを選べます。
 
 正式アイコンは`desktop/packaging/generate_icons.py`で生成します。16/24/32/48 pxは`frontend/src/GenzoRoomExportBadge.tsx`の既存字形を使い、64/128/256 pxは`design/genzo_icon_fix.svg`（SHA-256 `323c57f85ff3f619cb732312c75146de89115bee2058eac88c384883d50cda3a`）をそのまま解釈します。元SVG、個別PNG、`desktop/icons/icon.ico`の対応は`desktop/icons/manifest.json`に記録し、`test_icons.py`と`verify_icons.py`がICO frame、ホストPE、セットアップPEを検査します。Gallery内のバッジは変更していません。
 
-アプリ本体は`Local\GenzoRoom.WindowsPoC` Mutexで同一セッション内の二重起動を防ぎます。NSISはアプリMutexを取得せず、インストール・同一版再インストール・アンインストールの初期化時に`tasklist`で起動状態を確認します。起動中ならアプリ終了後の再確認またはキャンセルを案内し、silent/passive実行では中止します。この確認はアプリを終了せず、Tauri標準テンプレートのRestart Managerによる終了処理も使いません。完了画面の起動は標準の`nsis_tauri_utils::RunAsUser`呼び出しです。再インストール時はアプリ配置先のBackend／ライセンス／ソースフォルダーだけを入れ替えます。アンインストーラーは`%LOCALAPPDATA%\GenzoRoom\`とPoCを削除せず、Credential Managerにも触れません。PoCと正式版は同じアプリMutexを使うため同時起動できません。
+アプリ本体は`Local\GenzoRoom.WindowsPoC` Mutexで同一セッション内の二重起動を防ぎます。NSISはアプリMutexを取得せず、インストール・同一版メンテナンス・アンインストールの初期化時に`tasklist`で起動状態を確認します。対話モードでは起動中に再確認／キャンセルを案内し、利用者がアプリを終了した後に再確認します。サイレント／パッシブ実行では中止します。この確認はアプリを終了せず、Tauri標準テンプレートのRestart Managerによる終了処理も使いません。インストーラー専用Mutexや双方向排他制御はありません。完了画面の起動は標準の`nsis_tauri_utils::RunAsUser`呼び出しです。同一版メンテナンスで再インストールを選ぶと従来どおりインストールを続行し、アンインストールだけを選んだ場合は削除成功後に親セットアップも終了します。アップグレードでは旧版を削除してからインストールを続け、ダウングレードは配布設定で無効です。アンインストーラーは`%LOCALAPPDATA%\GenzoRoom\`とPoCを削除せず、Credential Managerにも触れません。PoCと正式版は同じアプリMutexを使うため同時起動できません。
 
 配布物の`application/licenses/`にGenzoRoom AGPL本文、Python本文、Python／Frontend production依存／Windows x64 Cargo依存のライセンス資料とバージョン一覧を収集し、`application/source/`に対応ソースZIPを含めます。今回の収集表は306項目で、6つのCargo依存はcrate側にライセンス式があるものの同梱元ディレクトリに本文を確認できませんでした。NumPy/Pillowの実収集DLL・codecとライセンスの対応、Microsoft WebView2 standalone installerの再配布条件・同梱EULA、NSIS圧縮モジュールの配布条件、各Cargoライセンス本文、公開後のソース提供URLは未確定です。従ってこの成果物はローカル受入用であり、公開配布はライセンスレビュー完了まで行わないでください。
 
-実ビルドではproduction TypeScript/Vite、PyInstaller onedirと`--check-runtime`、Tauri locked Release、NSIS生成、Backend/resource inventory、アイコン全7サイズのPNG/ICO・ホストEXE・セットアップEXEを確認しました。Viteの既存500 kB chunk警告は残ります。NSISの既定テンプレートはショートカット関数を参照しますが定義していなかったため、公式Tauri 2.12.2テンプレートの関数を追加してmakensisを通しました。Tauri CLIで受け付けない`--release`引数も除去しました。隔離インストール／更新／通常アンインストール、WebView2未導入時のRuntime導入、ユーザーデータ保持の実操作は未確認です。検証時に共有Mutexが既に存在し、所有プロセスをこの実行環境で特定できなかったため、インストーラー実行を続けていません。Phase 3Dで一時WindowsユーザーまたはVMを用いて実施してください。
+実ビルドではproduction TypeScript/Vite、PyInstaller onedirと`--check-runtime`、Tauri locked Release、NSIS生成、Backend/resource inventory、アイコン全7サイズのPNG/ICO・ホストEXE・セットアップEXEを確認しました。Viteの既存500 kB chunk警告は残ります。NSISの既定テンプレートはショートカット関数を参照しますが定義していなかったため、公式Tauri 2.12.2テンプレートの関数を追加してmakensisを通しました。Tauri CLIで受け付けない`--release`引数も除去しました。2026-10-19の初回検証時点では隔離インストール／更新／通常アンインストールなどの実操作は未確認で、共有Mutexのため実行を続けていませんでした。後日のHyper-V確認結果とPhase 3C完了判定を次項に記録します。
+
+### Phase 3C完了・Hyper-V受入記録（2026-10-20）
+
+Phase 3Cを完了と判定します。ユーザーのHyper-V Windows 11環境では、セットアップによるインストールと起動、同一版の再インストール、セットアップからのアンインストールを確認しました。同一版でアンインストールだけを選んだ後、不要なインストール画面へ戻らず親セットアップが終了する修正も確認済みです。起動中チェックについては、限定監査で対話モードの分岐不具合をMedium 1件として検出しました。分岐を修正した後、起動中の案内が表示される動作をユーザーがHyper-Vで確認しています。
+
+起動中チェックの修正後は、NSIS静的テスト5件と配布ビルドが成功しました。これらはコード上の分岐とインストーラー生成の確認であり、修正後コードの独立した再監査は実施していません。今回の実機報告に含まれないサイレント／パッシブ実行、アップグレード／ダウングレード、再確認後の各失敗条件などは、確認済みとして扱いません。
+
+Phase 3Cで修正した主要事項は、サイズ別SVGアイコンの変換、完了画面からの起動とショートカット表示、NSISの日英文字列、過剰なインストーラーMutex排他の撤去、`tasklist`による利用者操作型の起動確認、同一版アンインストール後の親セットアップ終了です。限定監査で見つかった起動中チェックの対話分岐も修正しました。アプリとデータの分離、ユーザーデータを残すアンインストール、Rust側の単一インスタンス制御を維持しています。
+
+公開配布前のライセンスレビューは別課題として残ります。Python／NumPy／Pillowの実収集物、WebView2オフラインインストーラー、NSIS関連物、Rust依存のライセンス本文とソース提供方法は確認完了としていません。Phase 3Cの実装・インストーラー受入完了は、公開配布のライセンス承認を意味しません。
 
 既知の共通Export課題として、外部ライブラリ由来のシングル素材をExportした場合、出力JPEGのSTACK COVER設定またはGallery表示が期待と異なる問題がWindows版・Docker版の双方で確認されている。一方、Immichライブラリ内のシングル素材はDocker版で正常にCOVER設定されることが確認済み。この問題は共通Export処理の別課題として扱い、今回のPhase 1・2完了判定およびFinding件数には含めない。
 
