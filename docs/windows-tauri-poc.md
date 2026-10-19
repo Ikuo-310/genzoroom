@@ -1,6 +1,6 @@
-# Windows Tauri 2 起動PoC（Phase 2A）
+# Windows Tauri 2 起動PoC（Phase 2B）
 
-既存React UIをTauri 2 / WebView2で表示するWindows開発用ホストです。通常起動ではリポジトリの`.venv`を使ってBackendを自動起動し、終了も管理します。Python同梱、インストーラー、資格情報ストア、LightCraft、RAW現像は含みません。
+既存React UIをTauri 2 / WebView2で表示するWindows開発用ホストです。通常起動ではリポジトリの`.venv`を使ってBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。Python同梱、インストーラー、LightCraft、RAW現像は含みません。
 
 ## 前提
 
@@ -10,24 +10,31 @@
 
 ## 自動起動（通常）
 
-Frontendをビルドした後、Immich環境変数を設定した同じPowerShellからTauriを起動します。既に動いているBackendがある場合は、その所有者側で保存・停止を完了してください。既存Backendを自動で再利用したり停止したりしません。
+Frontendをビルドした後、Tauriを起動します。Immich環境変数は不要で、設定されていても通常モードでは使用しません。既に動いているBackendがある場合は、その所有者側で保存・停止を完了してください。既存Backendを自動で再利用したり停止したりしません。
 
 ```powershell
 Set-Location I:\code\genzoroom\frontend
 npm run build
 Set-Location ..
-$env:IMMICH_URL = 'https://your-immich.example'
-$immichKeyInput = Read-Host 'Immich API key' -AsSecureString
-$env:IMMICH_API_KEY = [System.Net.NetworkCredential]::new('', $immichKeyInput).Password
-try {
-    cargo run --manifest-path desktop/Cargo.toml --locked
-} finally {
-    Remove-Item Env:IMMICH_API_KEY -ErrorAction SilentlyContinue
-    Remove-Variable immichKeyInput -ErrorAction SilentlyContinue
-}
+cargo run --manifest-path desktop/Cargo.toml --locked
 ```
 
-Rustは固定したPythonパスと引数を直接起動し、シェル経由のコマンドを組み立てません。作業ディレクトリは`backend`、起動経路は`windows_local.py --desktop --managed`です。起動固有IDを私有パイプで渡し、そのIDを含むDPAPI情報とHMAC照合に成功してからウィンドウを開きます。APIキーは環境変数として継承するだけで、コマンド引数・ログ・WebViewへ渡しません。固定ポート3191の競合、30秒の起動待ちタイムアウト、起動失敗は固定エラーコードで終了します。
+Rustは固定したPythonパスと引数を直接起動し、シェル経由のコマンドを組み立てません。作業ディレクトリは`backend`、起動経路は`windows_local.py --desktop --managed`です。起動固有IDを私有パイプで渡し、そのIDを含むDPAPI情報とHMAC照合に成功してからウィンドウを開きます。Pythonが資格情報マネージャーからAPIキーを読み、mainのimport前にそのプロセス内の既存Immich環境変数へ設定します。Rustへ秘密を返さず、コマンド引数やハンドオフにも含めません。固定ポート3191の競合、30秒の起動待ちタイムアウト、起動失敗は固定エラーコードで終了します。
+
+初回はSettingsの「Windows版のImmich接続」でHTTPまたはHTTPSのURLとAPIキーを入力し、接続テスト後に保存します。テストは`GET /api/users/me`の認証と有効なユーザーID取得（`user.read`）だけを確認します。Export・アップロード・STACK操作などの権限は実操作で別途確認してください。保存直前にも認証を再確認します。保存済みキーをUIへ読み戻す機能はありません。同じURLの空欄キーは保存済みキーを保持します。
+
+保存・削除後はPhase 2Aの編集保存、Export Stop永続化、現在項目の完了、Backend終了確認を経て、新設定でBackendを起動します。成功後に新しい認証を行い、React文書と接続先固有のsessionStorageを破棄してGalleryを表示します。終了前保存に失敗した場合は旧Backendを維持し、保存済み設定は反映待ちです。Settingsの「保存済み設定を反映・再起動を再試行」で再試行できます。
+
+## 保存形式・プロファイル・復旧
+
+- `%LOCALAPPDATA%\GenzoRoom\WindowsPoC\connection.json`：version、selected（正規化URL、認証済みuserId、ランダムprofile ID、資格情報参照ID）、未完了資格情報削除のcleanup ID一覧。APIキーは含みません。
+- Windows資格情報マネージャー：現在ユーザーのGeneric Credential。参照名は`GenzoRoom/WindowsPoC/Immich/<ランダムID>`、同じPCの次回ログオンでも利用できます。利用不能時に平文へフォールバックしません。
+- `profiles/<profile ID>/data/genzoroom.db`と`profiles/<profile ID>/cache/thumbnails`：Recipe、History、Queue、Export履歴、サムネイルを接続プロファイルごとに分離します。正規化URLと認証済みユーザーIDが現在の保存済み接続と一致すればprofile IDを維持し、APIキーだけの変更でもデータを引き継ぎます。URLまたはユーザーIDが異なる場合は新しいprofile IDを発行します。同一の資格情報・接続設定を保存した場合は既存資格情報を再利用し、Backendを再起動しません。過去プロファイルを推測で選択・移行・統合せず、そのファイルは保持します。
+- 通常の再起動では保存済みprofileを使いますが、先にCredential ManagerのキーでユーザーIDを再検証します。別ユーザー、認証失敗、接続不能などでは旧profileを開かず、`profiles/unconfigured`でSettingsを利用可能にします。旧WindowsPoC直下のDBは自動移行しません。
+- 保存後に新Backendを起動できなかった場合は、接続未設定の回復Backendを起動します。保存済み設定と以前のprofileは保持し、Settingsで修正・新規登録または再起動再試行できます。保存先DBの破損や新しいスキーマ等が原因なら、そのファイルを保全してから設定を再保存すると空のprofileで復帰できます。回復Backendも起動できない場合は表示されたエラーを確認し、ポート競合・Python環境・保存先アクセスを解消してTauriを再起動してください。
+- 資格情報の更新は新参照へ書き込み、JSON参照を原子的に切り替えた後で旧資格情報を削除します。書き込み失敗時は旧参照と選択設定を維持します。削除失敗はcleanupとして保持・表示し、接続削除の再試行で回収します。接続設定の削除は資格情報だけを削除し、DBやキャッシュは保持します。JSONが破損している場合は上書きせず、停止後に`connection.json`を退避して再登録してください。資格情報マネージャーに残る不要なGenzoRoom参照は所有者が確認して削除できます。
+
+環境変数を使う自動起動の診断モードは`cargo run --manifest-path desktop/Cargo.toml --locked -- --environment-backend`です。保存済み設定とは混用せず、接続設定欄は読み取り専用になります。診断モードと手動起動は毎回`profiles/environment-<ランダムID>`を作成し、過去のRecipe／Queueを再利用しません。Docker版は従来どおり環境変数と`/genzoroom`を使います。
 
 通常終了ではExportのStopを永続化し、暗室の既存保存処理が成功するまでウィンドウを保持します。保存失敗時は終了を中止し、戻って再試行できます。保存成功後も処理中のExport 1件が完了するまで待ち、次の項目は開始しません。待ち時間には強制終了タイムアウトを設けません。残るQueue項目は既存のStop／次回復旧仕様で扱います。
 
@@ -83,7 +90,7 @@ cargo run --manifest-path desktop/Cargo.toml --locked -- --check-backend
 - 両ウィンドウは検証済みBackendと同じオリジンへの遷移だけを許可し、Diagnostics以外のポップアップは拒否します。WebViewの開発者ツールは利用可能です。
 - DiagnosticsのJSONダウンロードは既存のブラウザー経路です。保存ダイアログ／保存先は実機確認対象です。
 
-保存先はPhase 1Aと同じです。WebView2の専用プロファイルを`%LOCALAPPDATA%\GenzoRoom\WindowsPoC\webview2`に追加します。通常ブラウザーとはCookie・UI設定が別になります。ポートを変えるとオリジン単位のUI設定も変わります。
+保存ルートはPhase 1Aと同じですが、DB・キャッシュは上記の接続プロファイル配下です。WebView2の専用プロファイルは`%LOCALAPPDATA%\GenzoRoom\WindowsPoC\webview2`です。通常ブラウザーとはCookie・UI設定が別になります。ポートを変えるとオリジン単位のUI設定も変わります。
 
 ## 認証情報の受け渡し
 

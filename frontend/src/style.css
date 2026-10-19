@@ -551,6 +551,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .workspace-autosave-warning { position: fixed; right: 20px; bottom: 105px; z-index: 20; max-width: min(420px, calc(100vw - 40px)); padding: 8px 12px; border: 1px solid #875d44; border-radius: 5px; background: #30251f; color: #ffd3b5; }
 .workspace-save-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 65%); }
 .workspace-save-dialog { width: min(100%, 420px); padding: 22px; border: 1px solid #666; border-radius: 8px; background: #242426; box-shadow: 0 10px 30px #0008; }
+/* Native dialog's CanvasText overrides inherited light text on the dark portal surface. */
+dialog.workspace-save-dialog { color: #ececee; }
 .workspace-save-dialog h2 { margin-top: 0; font-size: 1.1rem; }
 .workspace-save-dialog .edit-actions { margin: 18px 0 0; }
 
@@ -673,6 +675,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .settings-webgpu-row > .webgpu-control [role="status"] { grid-column: 2; }
 .settings-webgpu-row > .webgpu-control .webgpu-switch { grid-column: 3; }
 .settings-dialog select { background: var(--bg-app); color: inherit; border: 1px solid var(--border-subtle); border-radius: 5px; padding: 7px; max-width: 65%; }
+.windows-connection-settings input { min-width: 0; max-width: 60%; padding: 7px; color: inherit; background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: 5px; }
 .settings-dialog dl > div { display: grid; grid-template-columns: minmax(7rem, auto) minmax(0, 1fr); gap: 12px; margin: 6px 0; }
 .settings-dialog dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .settings-connection-groups { display: grid; gap: 14px; }

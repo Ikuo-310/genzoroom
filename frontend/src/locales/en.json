@@ -1,4 +1,34 @@
 {
+  "windowsConnection": {
+    "title": "Windows Immich connection", "url": "Immich URL", "key": "API key",
+    "keySet": "API key saved (leave blank to keep it)", "notSet": "No saved API key",
+    "source": { "saved": "Using saved Windows settings", "environment": "Diagnostic environment mode", "recovery": "Connection recovery mode" },
+    "readOnly": "Connection changes require the automatically managed Backend in saved-settings mode.",
+    "scope": "Checks current-user access (user.read) only. Export, upload, Stack and other permissions are not verified. The same normalized URL and authenticated user keep their profile; a different URL or user starts a new profile. Previous profiles remain untouched.",
+    "test": "Test connection", "testPassed": "Authentication succeeded. Save to apply after saving edits and stopping the current export.",
+    "save": "Save and restart Backend", "delete": "Remove saved connection", "restart": "Apply saved settings / retry restart",
+    "cleanupPending": "Obsolete credentials still need removal. Retry removing the saved connection before applying changes.",
+    "pendingRestart": "Saved settings have not been applied. The current connection stays unchanged until Backend restart.",
+    "savedWithoutRestart": "The saved connection is already active. Backend restart was not needed.",
+    "errors": {
+      "url_invalid": "Enter a valid HTTP or HTTPS URL without credentials, query or fragment.",
+      "key_invalid": "Enter a valid API key.", "key_required": "Enter an API key for this URL.",
+      "connection_timeout": "The connection timed out.", "unreachable": "The Immich server could not be reached.",
+      "tls_certificate_error": "TLS certificate verification failed. Check the server certificate and trusted CAs in the Python environment.",
+      "authentication_failed": "The API key was rejected.", "permission_denied": "The API key lacks user.read permission.",
+      "identity_unavailable": "The server did not provide a valid user identity. Existing profiles will not be reused.",
+      "identity_changed": "The current user differs from the saved profile. Register the connection again.",
+      "unexpected_response": "Immich returned an unsupported response or redirect.",
+      "credential_unavailable": "Windows Credential Manager is unavailable. No plaintext fallback is used.",
+      "credential_read_failed": "The saved credential could not be read.", "credential_write_failed": "The credential could not be saved.",
+      "credential_delete_failed": "Credential removal failed. Saved settings may be pending; retry removal.",
+      "settings_read_failed": "Saved connection settings could not be read. Preserve connection.json for recovery.",
+      "settings_write_failed": "Connection settings could not be saved. Check local storage access.",
+      "managed_mode_required": "Use automatic saved-settings mode to change the connection.",
+      "restart_failed": "The saved Backend failed to start. Settings and previous profiles were retained; correct settings or retry restart.",
+      "request_failed": "The operation failed. Check the connection state and retry.", "request_invalid": "The connection request was invalid."
+    }
+  },
   "desktopLifecycle": {
     "title": "Closing GenzoRoom",
     "saving": "Saving edits before closing…",

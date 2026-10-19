@@ -7,6 +7,7 @@ import { WebGpuControl } from './WebGpuControl';
 import { BinaryRadioChoice } from './BinaryRadioChoice';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { BUILD_INFO } from './buildInfo';
+import { WindowsConnectionSettings } from './WindowsConnectionSettings';
 
 type GpuStatus = { enabled: boolean; availability: GpuAvailability; active: boolean; setPreference: (value: boolean) => void };
 const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGpu: (_value: GpuStatus | null) => {} });
@@ -202,6 +203,8 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
         <option value="auto">{t('settings.auto')}</option><option value="original">{t('settings.original')}</option><option value="preview">{t('settings.preview')}</option>
       </select></label>
     </section>
-    <section aria-labelledby={`${title}-connection`}><h3 id={`${title}-connection`}>{t('settings.connection')}</h3><ConnectionInformation /></section>
+    <section aria-labelledby={`${title}-connection`}><h3 id={`${title}-connection`}>{t('settings.connection')}</h3>
+      {window.__GENZOROOM_DESKTOP__ && <WindowsConnectionSettings onClose={onClose} />}
+      <ConnectionInformation /></section>
   </dialog>;
 }

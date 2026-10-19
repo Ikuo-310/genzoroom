@@ -354,8 +354,11 @@ raise SystemExit(main([sys.argv[2], '--port', sys.argv[1]]))
                 sleep(0.05)
         assert ready
         root = tmp_path / "GenzoRoom" / "WindowsPoC"
-        assert (root / "data" / "genzoroom.db").is_file()
-        assert (root / "cache" / "thumbnails").is_dir()
+        profiles = list((root / "profiles").glob("environment-*"))
+        assert len(profiles) == 1
+        assert (profiles[0] / "data" / "genzoroom.db").is_file()
+        assert (profiles[0] / "cache" / "thumbnails").is_dir()
+        assert not (root / "data").exists()
         if mode == "--desktop":
             from windows_desktop_handoff import protect_for_current_user
             encrypted = (root / "desktop-session.dpapi").read_bytes()

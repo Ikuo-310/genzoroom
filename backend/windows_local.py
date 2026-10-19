@@ -1,6 +1,7 @@
 """Windows PoC host: same-origin UI/API, per-start browser authentication, one worker."""
 
 import argparse
+import asyncio
 from contextlib import asynccontextmanager
 from http.cookies import CookieError, SimpleCookie
 import json
@@ -66,7 +67,7 @@ class SpaFiles(StaticFiles):
 
 
 class LocalHost:
-    def __init__(self, backend, *, port=DEFAULT_PORT, dist=FRONTEND_DIST):
+    def __init__(self, backend, *, port=DEFAULT_PORT, dist=FRONTEND_DIST, connection=None):
         if not (dist / "index.html").is_file():
             raise RuntimeError("frontend_build_missing")
         self.authority = f"127.0.0.1:{port}"
@@ -76,6 +77,7 @@ class LocalHost:
         self.cookie_name = f"genzoroom_local_{port}"
         self.desktop_probe_key = None
         self.backend = backend
+        self.connection = connection
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -87,7 +89,10 @@ class LocalHost:
             # A root static mount otherwise swallows /api before Starlette's slash redirect.
             return RedirectResponse("/api/")
 
-        self.application = Starlette(routes=[
+        routes = []
+        if connection is not None:
+            routes.append(Route("/__local/connection", endpoint=connection.endpoint, methods=["GET", "POST", "PUT", "DELETE"]))
+        self.application = Starlette(routes=[*routes,
             Route("/api", endpoint=api_root, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
             Mount("/api", app=backend),
             Mount("/", app=SpaFiles(directory=dist, html=True)),
@@ -215,8 +220,8 @@ class LocalServer(uvicorn.Server):
         if self.started:
             if self.desktop:
                 from windows_desktop_handoff import DesktopHandoff
-                from storage import STORAGE_ROOT
-                self.handoff = DesktopHandoff(STORAGE_ROOT)
+                from windows_connection import user_root
+                self.handoff = DesktopHandoff(user_root())
                 self.local_host.desktop_probe_key = secrets.token_hex(32)
                 try:
                     self.handoff.publish(port=self.config.port, bootstrap_token=self.local_host.bootstrap_token,
@@ -255,6 +260,8 @@ def main(argv=None):
     mode.add_argument("--no-browser", action="store_true", help="Headless startup check; no interactive session")
     mode.add_argument("--desktop", action="store_true", help="Publish an encrypted handoff for the manual Tauri host")
     parser.add_argument("--managed", action="store_true", help="Use the private inherited desktop control pipe")
+    parser.add_argument("--environment", action="store_true", help="Explicit diagnostic environment connection; isolated temporary profile")
+    parser.add_argument("--connection-recovery", action="store_true", help="Open unconfigured Settings after failed restart")
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         parser.error("This entry point is for Windows only")
@@ -271,11 +278,16 @@ def main(argv=None):
         listener = reserve_listener(args.port)
         if not (FRONTEND_DIST / "index.html").is_file():
             raise RuntimeError("frontend_build_missing")
+        from windows_connection import load_windows_connection
+        connection, profile, _ = asyncio.run(load_windows_connection(
+            environment=args.environment or not args.managed, recovery=args.connection_recovery, managed=args.managed))
+        if profile == "environment":
+            profile = "environment-" + secrets.token_hex(32)
         from storage import configure_windows_storage
-        configure_windows_storage()
+        configure_windows_storage(profile)
         # Configure paths before imports bind DB_PATH; Docker continues to import main directly.
         from main import app
-        host = LocalHost(app, port=args.port)
+        host = LocalHost(app, port=args.port, connection=connection)
         config = uvicorn.Config(host, host="127.0.0.1", port=args.port, workers=1,
                                 proxy_headers=False, access_log=False, log_config=None)
         server = LocalServer(config, host, open_browser=not (args.no_browser or args.desktop),

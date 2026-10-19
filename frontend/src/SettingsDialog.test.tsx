@@ -32,6 +32,11 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('does not expose Windows connection settings or request credentials in a browser', async () => {
+    await click(host.querySelector('button')!);
+    expect(host.textContent).not.toContain('Windows Immich connection');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/__local/connection'))).toBe(false);
+  });
   it('localizes each embedded release channel and does not present validation as stable', async () => {
     const { default: i18n } = await import('./i18n');
     const tr = (key: string) => i18n.t(key);

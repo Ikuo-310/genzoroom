@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let stylesheet;
 let host;
+it.each(['dialog', 'alertdialog'])('keeps native lifecycle %s text readable on its dark background', (role) => {
+  host.innerHTML = `<dialog open class="workspace-save-dialog" role="${role}"><p>Waiting for export</p></dialog>`;
+  const dialog = host.querySelector('dialog');
+  expect(getComputedStyle(dialog).color).toBe('rgb(236, 236, 238)');
+  expect(getComputedStyle(dialog).backgroundColor).toBe('rgb(36, 36, 38)');
+});
 beforeEach(() => {
   stylesheet = document.createElement('style');
   stylesheet.textContent = readFileSync('src/style.css', 'utf8');

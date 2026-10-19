@@ -3,9 +3,15 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{webview::PageLoadEvent, Manager};
 
 static ROOT_RESULTS: AtomicU8 = AtomicU8::new(0);
+static RESTART_PAGES: AtomicU8 = AtomicU8::new(0);
 
 fn enabled() -> bool {
-    std::env::args().any(|argument| matches!(argument.as_str(), "--webview-smoke" | "--auto-smoke"))
+    std::env::args().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--webview-smoke" | "--auto-smoke" | "--restart-smoke" | "--restart-failure-smoke"
+        )
+    })
 }
 
 pub fn start_timeout(app: &tauri::AppHandle) {
@@ -20,6 +26,24 @@ pub fn start_timeout(app: &tauri::AppHandle) {
 }
 
 pub fn page_loaded(window: tauri::WebviewWindow, payload: tauri::webview::PageLoadPayload<'_>) {
+    if std::env::args().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--restart-smoke" | "--restart-failure-smoke"
+        )
+    }) && window.label() == "main"
+        && payload.event() == PageLoadEvent::Finished
+        && payload.url().path() == "/"
+    {
+        if RESTART_PAGES.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _ = window.eval("(async()=>{while(!document.querySelector('#root')?.childElementCount)await new Promise(r=>setTimeout(r,20));sessionStorage.setItem('genzoroom-restart-smoke','old');window.__genzoroomOldConnection=true;document.title='GenzoRoom-restart-ready';})()");
+        } else if std::env::args().any(|argument| argument == "--restart-failure-smoke") {
+            let _ = window.eval("(async()=>{while(!document.querySelector('.settings-button'))await new Promise(r=>setTimeout(r,20));document.querySelector('.settings-button').click();await new Promise(r=>setTimeout(r,100));const data=await(await fetch('/__local/connection')).json();document.title='GenzoRoom-recovery:'+JSON.stringify({documentFresh:!window.__genzoroomOldConnection,sessionCleared:sessionStorage.getItem('genzoroom-restart-smoke')===null,recoveryReady:data.source==='recovery'&&data.error==='restart_failed'&&data.pendingRestart,settingsAvailable:!!document.querySelector('input[type=password]')})})()");
+        } else {
+            let _ = window.eval("document.title='GenzoRoom-restarted:'+JSON.stringify({documentFresh:!window.__genzoroomOldConnection,sessionCleared:sessionStorage.getItem('genzoroom-restart-smoke')===null})");
+        }
+        return;
+    }
     if enabled()
         && payload.event() == PageLoadEvent::Finished
         && matches!(payload.url().path(), "/" | "/developer")
@@ -33,6 +57,60 @@ pub fn page_loaded(window: tauri::WebviewWindow, payload: tauri::webview::PageLo
 pub fn title_changed(window: tauri::WebviewWindow, title: String) {
     if !enabled() {
         return;
+    }
+    if window.label() == "main" {
+        if let Some(payload) = title.strip_prefix("GenzoRoom-recovery:") {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
+                let fields = [
+                    "documentFresh",
+                    "sessionCleared",
+                    "recoveryReady",
+                    "settingsAvailable",
+                ];
+                let result: serde_json::Map<String, serde_json::Value> = fields
+                    .iter()
+                    .map(|key| {
+                        (
+                            (*key).to_string(),
+                            serde_json::Value::Bool(value[key] == true),
+                        )
+                    })
+                    .collect();
+                let passed = fields.iter().all(|key| value[key] == true);
+                println!(
+                    "GenzoRoom recovery smoke: {}",
+                    serde_json::Value::Object(result)
+                );
+                window.app_handle().exit(if passed { 0 } else { 2 });
+            }
+            return;
+        }
+    }
+    if window.label() == "main" && title == "GenzoRoom-restart-ready" {
+        std::thread::spawn(move || {
+            use std::io::Write;
+            println!("GenzoRoom restart smoke: ready");
+            let _ = std::io::stdout().flush();
+            let mut line = String::new();
+            let _ = std::io::stdin().read_line(&mut line);
+            let _ = window.eval("window.__GENZOROOM_DESKTOP__.respond({kind:'restart'})");
+        });
+        return;
+    }
+    if window.label() == "main" {
+        if let Some(payload) = title.strip_prefix("GenzoRoom-restarted:") {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
+                let fresh = value["documentFresh"] == true;
+                let cleared = value["sessionCleared"] == true;
+                println!("GenzoRoom restart smoke: {{\"documentFresh\":{fresh},\"sessionCleared\":{cleared}}}");
+                if fresh && cleared {
+                    let _ = window.eval(include_str!("webview-smoke.js"));
+                } else {
+                    window.app_handle().exit(2);
+                }
+            }
+            return;
+        }
     }
     if let Some(payload) = title.strip_prefix("GenzoRoom-keyboard:") {
         if window.label() == "main" {

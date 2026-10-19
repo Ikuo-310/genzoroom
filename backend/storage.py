@@ -17,7 +17,7 @@ DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
 WINDOWS_STORAGE = False
 
 
-def configure_windows_storage() -> None:
+def configure_windows_storage(profile: str | None = None) -> None:
     """Select the PoC's isolated user directory before importing persistence consumers."""
     global STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE
     if "edit_store" in sys.modules or "main" in sys.modules:
@@ -29,6 +29,11 @@ def configure_windows_storage() -> None:
     root = (base / "GenzoRoom" / "WindowsPoC").resolve()
     if root.drive.startswith("\\\\"):
         raise StorageInitializationError("windows_storage_location_invalid")
+    if profile is not None:
+        import re
+        if not re.fullmatch(r"[0-9a-f]{64}|unconfigured|environment-[0-9a-f]{64}", profile):
+            raise StorageInitializationError("windows_storage_location_invalid")
+        root = root / "profiles" / profile
     STORAGE_ROOT, DB_PATH = root, root / "data" / "genzoroom.db"
     WINDOWS_STORAGE = True
 

@@ -1,5 +1,7 @@
 # Windows ローカル起動 PoC（Phase 1A）
 
+Phase 2B以降、通常のWindowsアプリは[Settingsと保存済み資格情報を使うTauri起動](windows-tauri-poc.md)を利用します。このページの手動起動は環境変数を使う診断モードで、毎回`%LOCALAPPDATA%\GenzoRoom\WindowsPoC\profiles\environment-<ランダムID>`に空のDB・キャッシュを作成します。従来のWindowsPoC直下のDBは自動移行・再利用しません。設定元は混用しません。
+
 既存React UIとFastAPIをWindows PCで実行する開発用の起動方法です。Tauri、Python同梱、インストーラー、LightCraft、RAW現像は含みません。Docker版のCompose・nginx・起動入口は従来どおりです。
 
 Phase 1BのTauriウィンドウから利用する場合は[Windows Tauri起動PoC](windows-tauri-poc.md)を参照してください。その場合は通常ブラウザーを開く起動方法に代えて`--desktop`を明示し、既存認証をWebView2内で行います。

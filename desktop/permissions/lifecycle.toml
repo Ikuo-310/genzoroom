@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-desktop-lifecycle"
-description = "Allow the main verified UI to acknowledge native close preparation only."
+description = "Allow the verified main UI to acknowledge close preparation and request managed Backend restart."
 commands.allow = ["desktop_lifecycle"]

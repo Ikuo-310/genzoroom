@@ -39,13 +39,25 @@ pub struct BackendProcess {
 
 impl BackendProcess {
     pub fn start() -> Result<(Self, Connection), &'static str> {
+        Self::start_mode(false, false)
+    }
+
+    pub fn start_mode(
+        environment: bool,
+        recovery: bool,
+    ) -> Result<(Self, Connection), &'static str> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .ok_or("repository_missing")?;
-        Self::start_at(root, Duration::from_secs(30))
+        Self::start_at(root, Duration::from_secs(30), environment, recovery)
     }
 
-    pub fn start_at(root: &Path, timeout: Duration) -> Result<(Self, Connection), &'static str> {
+    fn start_at(
+        root: &Path,
+        timeout: Duration,
+        environment: bool,
+        recovery: bool,
+    ) -> Result<(Self, Connection), &'static str> {
         let python = root.join(".venv/Scripts/python.exe");
         let backend = root.join("backend");
         if !python.is_file() || !backend.join("windows_local.py").is_file() {
@@ -59,6 +71,12 @@ impl BackendProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        if environment {
+            command.arg("--environment");
+        }
+        if recovery {
+            command.arg("--connection-recovery");
+        }
         #[cfg(windows)]
         let job = create_job()?;
         #[cfg(windows)]

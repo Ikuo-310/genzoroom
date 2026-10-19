@@ -49,8 +49,17 @@ fn run() -> Result<(), &'static str> {
     let smoke = cfg!(feature = "webview-smoke") && arguments == ["--webview-smoke"];
     let auto_smoke = cfg!(feature = "webview-smoke") && arguments == ["--auto-smoke"];
     let process_smoke = cfg!(feature = "webview-smoke") && arguments == ["--process-smoke"];
+    let restart_smoke = cfg!(feature = "webview-smoke")
+        && (arguments == ["--restart-smoke"] || arguments == ["--restart-failure-smoke"]);
+    let environment = arguments == ["--environment-backend"];
     let manual = arguments == ["--manual-backend"] || check_backend || smoke;
-    if !arguments.is_empty() && !manual && !auto_smoke && !process_smoke {
+    if !arguments.is_empty()
+        && !manual
+        && !auto_smoke
+        && !process_smoke
+        && !environment
+        && !restart_smoke
+    {
         return Err("unsupported_arguments");
     }
     let (owner, connection) = if manual {
@@ -61,7 +70,11 @@ fn run() -> Result<(), &'static str> {
         connection.verify_backend()?;
         (None, connection)
     } else {
-        let (owner, connection) = backend_process::BackendProcess::start()?;
+        let (owner, connection) = if environment || auto_smoke {
+            backend_process::BackendProcess::start_mode(true, false)?
+        } else {
+            backend_process::BackendProcess::start()?
+        };
         (Some(owner), connection)
     };
     if check_backend {
