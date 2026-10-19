@@ -560,6 +560,15 @@
     },
     "timingNotes": "These single-run diagnostic timings are not a strict benchmark. Scheduling, warmup, shader cache and system load affect results. Initialization includes adapter/device requests and optional GPU information; GPU time includes submission and readback, not just shader execution."
   },
+  "about": {
+    "title": "About GenzoRoom",
+    "application": "Application",
+    "version": "Version",
+    "build": "Build",
+    "commit": "Commit",
+    "license": "License",
+    "close": "Close"
+  },
   "language": {
     "nativeName": "English",
     "label": "Language",

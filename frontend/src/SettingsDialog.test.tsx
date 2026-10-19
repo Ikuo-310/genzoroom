@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applicationBuildLabel, SettingsButton, SettingsProvider } from './SettingsDialog';
+import { BUILD_INFO } from './buildInfo';
 import { changeAppLanguage } from './i18n';
 import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
@@ -29,9 +30,46 @@ beforeEach(async () => {
 });
 afterEach(() => {
   act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks();
+  Reflect.deleteProperty(window, '__GENZOROOM_DESKTOP__');
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('synchronizes the resolved app language to the native menu only in desktop mode', async () => {
+    const setMenuLanguage = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, '__GENZOROOM_DESKTOP__', {
+      configurable: true,
+      value: { respond: vi.fn().mockResolvedValue(undefined), setMenuLanguage },
+    });
+    await act(async () => {
+      root.unmount();
+      root = createRoot(host);
+      root.render(<SettingsProvider><SettingsButton /></SettingsProvider>);
+    });
+    expect(setMenuLanguage).toHaveBeenLastCalledWith('en');
+    await act(async () => changeAppLanguage('ja'));
+    expect(setMenuLanguage).toHaveBeenLastCalledWith('ja');
+  });
+  it('opens the existing Settings dialog from the native menu event without duplicating it', async () => {
+    act(() => window.dispatchEvent(new Event('genzoroom:open-settings')));
+    expect(dialog().querySelector('h2')?.textContent).toBe('Settings');
+    act(() => window.dispatchEvent(new Event('genzoroom:open-settings')));
+    await click(host.querySelector('button')!);
+    expect(host.querySelectorAll('dialog')).toHaveLength(1);
+  });
+  it('shows About with the embedded build metadata and localizes its labels', async () => {
+    act(() => window.dispatchEvent(new Event('genzoroom:show-about')));
+    expect(dialog().querySelector('h2')?.textContent).toBe('About GenzoRoom');
+    expect(dialog().textContent).toContain(BUILD_INFO.name);
+    expect(dialog().textContent).toContain(BUILD_INFO.version);
+    expect(dialog().textContent).toContain(applicationBuildLabel(BUILD_INFO, key => key === 'settings.development' ? 'Development build' : key));
+    expect(dialog().textContent).toContain('AGPL-3.0-only');
+    const outsideKey = new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true, ctrlKey: true });
+    act(() => document.body.dispatchEvent(outsideKey));
+    expect(outsideKey.defaultPrevented).toBe(true);
+    await act(async () => changeAppLanguage('ja'));
+    expect(dialog().querySelector('h2')?.textContent).toBe('GenzoRoomについて');
+    expect(dialog().textContent).toContain('ライセンス');
+  });
   it('does not expose Windows connection settings or request credentials in a browser', async () => {
     await click(host.querySelector('button')!);
     expect(host.textContent).not.toContain('Windows Immich connection');

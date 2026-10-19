@@ -5,7 +5,10 @@ import { useTranslation } from 'react-i18next';
 type CloseGuard = { prepare: () => Promise<boolean>; resume: () => void };
 type Message = { kind: 'ready' | 'restart' } | { kind: 'closeResult'; requestId: string; saved: boolean };
 declare global {
-  interface Window { __GENZOROOM_DESKTOP__?: { respond: (message: Message) => Promise<void> } }
+  interface Window { __GENZOROOM_DESKTOP__?: {
+    respond: (message: Message) => Promise<void>;
+    setMenuLanguage?: (language: 'en' | 'ja') => Promise<void>;
+  } }
 }
 const Context = createContext<(guard: CloseGuard) => () => void>(() => () => {});
 

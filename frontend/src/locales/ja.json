@@ -550,6 +550,15 @@
     },
     "timingNotes": "単発の診断用実測時間であり、厳密なbenchmarkではありません。スケジューリング、warmup、shader cache、システム負荷の影響を受けます。初期化にはadapter/device取得と任意のGPU情報取得を含みます。GPU時間はshader実行だけでなく投入・readbackを含みます。"
   },
+  "about": {
+    "title": "GenzoRoomについて",
+    "application": "アプリケーション",
+    "version": "バージョン",
+    "build": "ビルド",
+    "commit": "コミット",
+    "license": "ライセンス",
+    "close": "閉じる"
+  },
   "language": {
     "nativeName": "日本語",
     "label": "言語",

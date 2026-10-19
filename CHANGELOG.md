@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
+
 ### Fixed
 
 - Windows PoC Developer Diagnostics now offers a save destination for JSON reports, supports consecutive exports, and reports save failures while treating cancellation normally.

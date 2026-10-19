@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
+import i18n, { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
 import { ANSHITSU_INITIAL_SELECTIONS, ANSHITSU_RAW_PRESETS_ENABLED, DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type AnshitsuInitialSelection, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
@@ -27,13 +27,74 @@ export function SettingsButton() {
 }
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
+  const [isAboutOpen, setAboutOpen] = useState(false);
   const [gpu, publishGpu] = useState<GpuStatus | null>(null);
   const open = useCallback(() => setOpen(true), []);
   const close = useCallback(() => setOpen(false), []);
+  useEffect(() => {
+    const openSettings = () => open();
+    const showAbout = () => setAboutOpen(true);
+    window.addEventListener('genzoroom:open-settings', openSettings);
+    window.addEventListener('genzoroom:show-about', showAbout);
+    return () => {
+      window.removeEventListener('genzoroom:open-settings', openSettings);
+      window.removeEventListener('genzoroom:show-about', showAbout);
+    };
+  }, [open]);
+  useEffect(() => {
+    const setMenuLanguage = window.__GENZOROOM_DESKTOP__?.setMenuLanguage;
+    if (!setMenuLanguage) return;
+    const synchronize = (language = i18n.resolvedLanguage ?? i18n.language) => {
+      const resolved = language.toLowerCase().split('-')[0];
+      if (resolved === 'en' || resolved === 'ja') void setMenuLanguage(resolved).catch(() => {});
+    };
+    synchronize();
+    i18n.on('languageChanged', synchronize);
+    return () => { i18n.off('languageChanged', synchronize); };
+  }, []);
   return <SettingsContext.Provider value={{ open, isOpen, publishGpu }}>
     {children}
     {isOpen && <SettingsDialog gpu={gpu} onClose={close} />}
+    {isAboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
   </SettingsContext.Provider>;
+}
+function AboutDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const title = useId();
+  useLayoutEffect(() => {
+    const element = dialog.current!;
+    const previous = document.activeElement;
+    element.showModal();
+    element.querySelector<HTMLElement>('button')?.focus();
+    // Native modal inertness does not suppress application-level window shortcuts.
+    const blockOutside = (event: KeyboardEvent) => {
+      if (event.target instanceof Node && element.contains(event.target)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', blockOutside, true);
+    window.addEventListener('keyup', blockOutside, true);
+    return () => {
+      window.removeEventListener('keydown', blockOutside, true);
+      window.removeEventListener('keyup', blockOutside, true);
+      element.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+  return <dialog ref={dialog} className="settings-dialog" aria-modal="true" aria-labelledby={title}
+    onCancel={event => { event.preventDefault(); onClose(); }}
+    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onClose(); } }}>
+    <header><h2 id={title}>{t('about.title')}</h2><button type="button" className="tool-button" onClick={onClose}>{t('about.close')}</button></header>
+    <section aria-label={t('about.title')}>
+      <dl>
+        <div><dt>{t('about.application')}</dt><dd>{BUILD_INFO.name}</dd></div>
+        <div><dt>{t('about.version')}</dt><dd>{BUILD_INFO.version}</dd></div>
+        <div><dt>{t('about.build')}</dt><dd>{applicationBuildLabel(BUILD_INFO, t)}</dd></div>
+        {BUILD_INFO.commit && <div><dt>{t('about.commit')}</dt><dd>{BUILD_INFO.commit.slice(0, 7)}</dd></div>}
+        <div><dt>{t('about.license')}</dt><dd>AGPL-3.0-only</dd></div>
+      </dl>
+    </section>
+  </dialog>;
 }
 function HomeGpuControl() {
   // A full pipeline probe is released immediately; Home never owns a live renderer.

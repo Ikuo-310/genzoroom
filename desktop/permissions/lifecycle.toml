@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-desktop-lifecycle"
-description = "Allow the verified main UI to acknowledge close preparation and request managed Backend restart."
-commands.allow = ["desktop_lifecycle"]
+description = "Allow the verified main UI to manage desktop lifecycle and synchronize its native menu language."
+commands.allow = ["desktop_lifecycle", "set_native_menu_language"]

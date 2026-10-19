@@ -132,8 +132,10 @@ cargo run --manifest-path desktop/Cargo.toml --locked -- --check-backend
 
 - `dragDropEnabled: false`を設定し、STACK管理のHTML Drag & Dropへイベントを渡します。
 - React側のレイアウト、ショートカット、Slider、Viewer、Filmstrip、Undo/Redo、WebGPU／CPUフォールバック処理は変更していません。
-- SettingsのPrimary修飾クリックによる`window.open('/developer')`は、同じWebView2プロファイルのDiagnosticsウィンドウを開きます。ネイティブメニューの`Window > Developer Diagnostics`からも開けます。
-- `Window > Full screen`で全画面を切り替えます。新しいキーボードアクセラレーターは登録していません。同じメニューから戻ります。
+- SettingsのPrimary修飾クリックによる`window.open('/developer')`は、同じWebView2プロファイルのDiagnosticsウィンドウを開きます。Windowsネイティブメニューの`Help > Developer Diagnostics`も既存の`open_diagnostics`を使います。
+- Windowsネイティブメニューは`File`（Preferences `Ctrl+P`、Exit `Ctrl+Q`）、`View`（Full Screen）、`Help`（Developer Diagnostics、About GenzoRoom）で構成します。Preferencesは`genzoroom:open-settings`イベントを既存のReact `SettingsProvider`へ送り、同じ`SettingsDialog`を開きます。Gallery右上の歯車とPrimary修飾クリックの動作も維持します。Exitはmainウィンドウを閉じ、既存のCloseRequestedによる保存・Backend終了処理へ進みます。Aboutは既存ダイアログで`BUILD_INFO`由来のバージョン・ビルド情報と`AGPL-3.0-only`を表示します。
+- `View > Full Screen`は従来の全画面切替処理を使い、追加アクセラレーターはありません。Windows main WebViewの初期化スクリプトはCtrl+Pを捕捉してWebView2の印刷動作を抑止し、Preferencesと同じイベントを送ります。Docker／通常ブラウザーにはネイティブメニューやこのWindows専用キー処理を追加しません。
+- メニュー見出しと項目は初期表示後、Reactの既存i18next `languageChanged`イベントからTauri lifecycle bridgeの`set_native_menu_language`を呼んで更新します。Frontendは`resolvedLanguage`（なければ`language`）の地域部分を除き、`en`／`ja`だけを送信します。アプリの既存言語解決は未対応のブラウザー／Auto言語を英語へフォールバックし、Rustコマンドも`en`／`ja`以外を`unsupported_language`として拒否します。言語保存先やi18n機構は増やしていません。
 - 両ウィンドウは検証済みBackendと同じオリジンへの遷移だけを許可し、Diagnostics以外のポップアップは拒否します。WebViewの開発者ツールは利用可能です。
 - DiagnosticsのJSONは既存のBlob／`<a download>`経路を使い、Windowsホストがネイティブの保存先選択を表示します。Full／JPEG-only／WebGPU-onlyと既存ログJSONの命名・UTF-8内容を維持し、キャンセルは正常終了、保存失敗は既存UIのエラー表示になります。通常ブラウザーでは従来どおりブラウザー標準ダウンロードです。
 
@@ -264,6 +266,12 @@ Phase 3Cを完了と判定します。ユーザーのHyper-V Windows 11環境で
 Phase 3Cで修正した主要事項は、サイズ別SVGアイコンの変換、完了画面からの起動とショートカット表示、NSISの日英文字列、過剰なインストーラーMutex排他の撤去、`tasklist`による利用者操作型の起動確認、同一版アンインストール後の親セットアップ終了です。限定監査で見つかった起動中チェックの対話分岐も修正しました。アプリとデータの分離、ユーザーデータを残すアンインストール、Rust側の単一インスタンス制御を維持しています。
 
 公開配布前のライセンスレビューは別課題として残ります。Python／NumPy／Pillowの実収集物、WebView2オフラインインストーラー、NSIS関連物、Rust依存のライセンス本文とソース提供方法は確認完了としていません。Phase 3Cの実装・インストーラー受入完了は、公開配布のライセンス承認を意味しません。
+
+### Windowsネイティブメニュー完了記録
+
+Windows版にFile／View／Helpのネイティブメニューを追加し、Preferences（`Ctrl+P`）、Exit（`Ctrl+Q`）、Full Screen、Developer Diagnostics、About GenzoRoomを既存機能へ接続しました。Ctrl+PでWebView2の印刷画面が開く初回実装の問題は、Windows main WebViewで既定印刷動作を抑止して既存Settingsイベントへつなぐことで修正しました。英語固定だったメニューは、既存i18nextの言語変更イベントからTauriへ同期するよう修正しました。
+
+ユーザーのWindowsホストPCで、アプリの言語切り替えにメニュー表示が追随すること、およびCtrl+Pで印刷画面ではなく既存の環境設定が開くことを確認済みです。その他のメニュー操作は現行実装・関連テストで確認する範囲にとどめ、今回の実機確認済みとは扱いません。
 
 既知の共通Export課題として、外部ライブラリ由来のシングル素材をExportした場合、出力JPEGのSTACK COVER設定またはGallery表示が期待と異なる問題がWindows版・Docker版の双方で確認されている。一方、Immichライブラリ内のシングル素材はDocker版で正常にCOVER設定されることが確認済み。この問題は共通Export処理の別課題として扱い、今回のPhase 1・2完了判定およびFinding件数には含めない。
 

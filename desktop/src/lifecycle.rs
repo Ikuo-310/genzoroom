@@ -12,7 +12,7 @@ Object.defineProperty(window, '__GENZOROOM_DESKTOP__', {
     const response = window.__TAURI_INTERNALS__.invoke('desktop_lifecycle', { message });
     if (message.kind === 'ready') return response.then(value => { genzoroomFrontendReady = true; return value; });
     return response;
-  } })
+  }, setMenuLanguage: language => window.__TAURI_INTERNALS__.invoke('set_native_menu_language', { language }) })
 });
 const showGenzoRoomStartupError = () => {
   if (genzoroomFrontendReady || document.querySelector('[data-genzoroom-startup-error]')) return;
