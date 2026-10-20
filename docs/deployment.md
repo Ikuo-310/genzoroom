@@ -30,7 +30,9 @@ Enable the following permissions when creating the key.
 | `asset.download` | Download original JPEG files |
 | `asset.upload` | Upload developed JPEG files |
 | `asset.delete` | Move explicitly confirmed assets to Trash |
-| `album.read` | Browse albums |
+| `album.read` | Browse albums and retrieve current membership for Export and Stack management |
+| `albumAsset.create` | Add exported JPEG files, Stack COVERs and released photos to Albums |
+| `albumAsset.delete` | Remove ordinary non-COVER Album membership after Stack success |
 | `tag.read` | Retrieve tag information |
 | `tag.create` | Create the GenzoRoom tag |
 | `tag.asset` | Apply and repair asset tags |
@@ -40,6 +42,20 @@ Enable the following permissions when creating the key.
 | `stack.delete` | Remove or dissolve Stacks |
 
 The `server.about` permission is optional. When enabled, GenzoRoom can display Immich version information in Settings and related diagnostics.
+
+When exporting an Asset that belongs to Albums, GenzoRoom looks up those Albums and adds the developed JPEG to each one before creating or updating its Stack. This keeps the Album's visible Stack COVER in the Album after Reload. Assets with no Album membership follow the existing Export flow. If even one Album addition fails, Export stops before stacking; the uploaded JPEG and any successful earlier Album additions may remain for a later Retry. The Retry reuses the same Export timestamp when the saved edits are unchanged to avoid creating another output Asset.
+
+Album membership lookup needs `album.read`. Adding the JPEG needs `albumAsset.create`; `album.create` does not grant this operation. The configured Immich user must own each source Album or have Editor access. A failed membership lookup stops before upload. A missing `albumAsset.create` permission or insufficient Album access makes the addition fail and stops Export before Stack creation.
+
+### Stack Album normalization
+
+Stack management requires `album.read`, `albumAsset.create`, and `albumAsset.delete`. It reads all related members' current Album memberships and adds their union to the final COVER before writing the Stack. After success it removes ordinary non-COVER members from those Albums. Ordinary departures retain the source Stack's Albums; dissolution expands membership to every released photo. Trash reservations keep membership and use the existing normal-trash checks. Non-Album operations issue no Album writes.
+
+Lookup or pre-add failure stops the affected Stack write. Post-write Album failure is logged without reversing Stack success; duplicates or incomplete expansion can remain. Later Stack operations read current membership again. No Album history, DB mirror, post-send Undo or restart recovery is added. Only Albums visible to the configured user can be synchronized. Owners can remove Album assets; Editors can remove only assets they are permitted to share. No new `album.update` or `album.delete` permission is required.
+
+The Immich v3.3.3 native Album screen may not show a Stack icon for the exported photo even when the Album membership and Stack are correct. GenzoRoom does not change this Immich display behavior.
+
+After upgrading to a version with database schema v6, an older GenzoRoom version cannot open the migrated database. To roll back, restore the complete data-directory backup made before the upgrade; there is no downgrade migration.
 
 GenzoRoom uses Immich's regular Trash mechanism when moving assets to Trash. It does not permanently delete photos.
 

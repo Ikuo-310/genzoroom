@@ -60,6 +60,14 @@ Medium FindingはDeveloper JSON保存（保存先なし・連続自動ダウン�
 
 `--environment-backend`のSettings metadataは環境変数の有効URLとキー設定有無だけを表示する。保存済みURLや保存済み資格情報状態は診断接続先として返さない。通常の保存済み接続管理とDockerの環境変数経路は維持する。限定再検証ではRust17件、Backend接続・managed・export関連115件、Frontend lifecycle／Recipe保存／History編集182件、初回Frontend未準備・旧WebView隔離WebView2 smoke3件が成功し、TypeScript／Vite build、Clippy、Rust fmt、通常／smoke build、`git diff --check`も成功した。未保存編集終了の最終実機確認、Reloading確認ダイアログの手動操作、保存失敗の実機注入、Export終了、OSログオフ／終了通知、Cookieの別Backend送信直接試験は未実施事項として記録し、Phase完了を妨げない。外部ライブラリ由来シングル素材のSTACK COVER／Gallery表示不具合はWindows・Docker共通Exportの既知別課題で、今回の完了判定に含めない。
 
+## Album内StackのExport正規化完了記録（2026-10-20）
+
+当初、Album内の素材をExportして新しいStack COVERを作ると、新JPEGがAlbumに所属せず、GenzoRoom Album Galleryから写真が消える問題があった。STACK管理でAlbum membershipを最終COVERへ正規化した後は、非COVER source自身がAlbum非所属になるため、Exportもsource単体ではなく、操作時点のStack全memberのAlbum所属の和集合を新JPEGへ継承する必要が生じた。この修正でGenzoRoom Gallery上の表示は戻った。
+
+その後の実機確認では、ImmichネイティブAlbumに新COVERと旧COVERが2枚表示された。GalleryはStack非COVERを除外するため、Galleryの表示件数だけを確認するテストでは、Immichの生Album membershipに旧COVERが残る問題を検出できなかった。ExportでもStack/COVER確定と新COVER検証の後に最終Stackの非COVER memberを継承Albumから外すcleanupを追加し、BackendテストはGallery結果に加えて生のAlbum membershipをassertするよう強化した。
+
+最終確認では、Immich実機でAlbum内Stackの非COVER JPEGを編集・Exportし、新JPEGがCOVERとなり、旧COVERがAlbumから外れ、ImmichネイティブAlbumとGenzoRoom Album Galleryの両方で新COVERだけが表示されることを確認した。実機確認はOK。
+
 ## 色温度補正方向とスライダー表示の統一（2026-10-15）
 
 旧仕様ではTemperatureの正値が青方向、負値が赤方向へ画像を補正していたため、一般的な現像ソフトの補正方向と逆だった。White BalanceとShadows／Midtones／Highlightsの3WAY Temperatureを共通のRGBゲイン方向へ修正し、負値は青・寒色、0は無補正、正値は赤・暖色とした。JPEGのTemperatureは引き続き−100〜+100の相対補正であり、数値をKelvin値として表示・解釈しない。

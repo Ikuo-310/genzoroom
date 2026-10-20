@@ -8,7 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend_logging import backend_logger
 from immich import (
-    IMMICH_TIMEOUT, ImmichRequestError, classify_image_format, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
+    IMMICH_TIMEOUT, ImmichRequestError, ImmichAlbumError, get_asset_album_ids, add_asset_to_album,
+    remove_asset_from_album, classify_image_format, _get_asset_stacks, _immich_request, _parse_stack_snapshot,
     _log_response_failure, _request_error, _require_configuration, _stack_uuid,
 )
 
@@ -267,6 +268,60 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
             except (httpx.RequestError, httpx.InvalidURL, ImmichRequestError, ValueError, KeyError, TypeError, AttributeError):
                 results[op.operationId] = StackWriteResult(operationId=op.operationId, status="failed", errorCode="trash_preflight_failed")
 
+        # Freeze remote Album context before any additions or releases, so cycles cannot inherit our own writes.
+        final_members = {member for op in ops for member in (op.memberIds or [])}
+        reserved_trash = {member for op in ops for member in op.trashAssetIds}
+        related_members = {}
+        album_ids = {}
+        asset_albums = {}
+        album_errors = (ImmichAlbumError, httpx.RequestError, httpx.InvalidURL)
+
+        def album_failure(op, phase, error, *, terminal):
+            code = error.code if isinstance(error, ImmichAlbumError) else "unreachable"
+            _log_operation(op, "album.failed", level="error" if terminal else "warn", batchId=batch_id,
+                           phase=phase, errorCode=code, exceptionType=type(error).__name__)
+            if terminal:
+                results[op.operationId] = StackWriteResult(operationId=op.operationId, status="failed", errorCode=code)
+
+        for op in ops:
+            if op.operationId in results:
+                continue
+            if op.stackId is not None and op.stackId not in lookup:
+                results[op.operationId] = StackWriteResult(operationId=op.operationId, status="failed", errorCode="stack_missing")
+                continue
+            members = set(op.memberIds or []) | set(op.trashAssetIds)
+            if op.stackId:
+                members.update(UUID(a["id"]) for a in lookup[op.stackId]["assets"])
+            for member in list(members):
+                if member in owners:
+                    members.update(UUID(a["id"]) for a in lookup[owners[member]]["assets"])
+            related_members[op.operationId] = members
+            try:
+                for member in sorted(members):
+                    if member not in asset_albums:
+                        asset_albums[member] = set(await get_asset_album_ids(client, url, headers, member, batch_id=batch_id, operation_id=op.operationId))
+                album_ids[op.operationId] = set().union(*(asset_albums[member] for member in members))
+                if album_ids[op.operationId]:
+                    _log_operation(op, "album.context", batchId=batch_id, memberCount=len(members),
+                                   albumCount=len(album_ids[op.operationId]))
+            except album_errors as error:
+                album_failure(op, "lookup", error, terminal=True)
+
+        for op in ops:
+            if op.operationId in results or op.type == "delete":
+                continue
+            try:
+                # Standalone departures retain the source Stack's Albums; trash reservations are left untouched.
+                departures = {UUID(a["id"]) for a in lookup[op.stackId]["assets"]} if op.stackId else set()
+                departures -= final_members | reserved_trash
+                source_albums = set().union(*(asset_albums[UUID(a["id"])] for a in lookup[op.stackId]["assets"])) if op.stackId else set()
+                for member in sorted({op.primaryAssetId} | departures):
+                    required_albums = album_ids[op.operationId] if member == op.primaryAssetId else source_albums
+                    for album_id in sorted(required_albums):
+                        await add_asset_to_album(client, url, headers, album_id, member, batch_id=batch_id, operation_id=op.operationId)
+            except album_errors as error:
+                album_failure(op, "add", error, terminal=True)
+
         # Release all changing memberships first, including cycles between two updated Stacks.
         # v3.2.4 PUT changes only primary; membership updates require delete then create.
         for op in ops:
@@ -304,6 +359,38 @@ async def apply_stacks(immich_url, api_key, payload: StackApplyRequest, *, trans
                 results[op.operationId] = await write(op, "PUT", f"/stacks/{op.stackId}", {"primaryAssetId": str(op.primaryAssetId)}, op.stackId)
             if op.operationId in replacements:
                 results[op.operationId].releasedStackId = op.stackId
+        # Expand dissolved Stacks before cleanup, and never add back a member assigned to a final Stack.
+        # Failure leaves duplicates or incomplete expansion, never rolls back a committed Stack operation.
+        album_incomplete = set()
+        for op in ops:
+            if results[op.operationId].status != "success" or op.type != "delete":
+                continue
+            try:
+                for member in sorted(related_members[op.operationId] - final_members - reserved_trash):
+                    for album_id in sorted(album_ids[op.operationId]):
+                        await add_asset_to_album(client, url, headers, album_id, member, batch_id=batch_id, operation_id=op.operationId)
+            except album_errors as error:
+                album_incomplete.add(op.operationId)
+                album_failure(op, "expand", error, terminal=False)
+
+        for op in ops:
+            if results[op.operationId].status != "success" or op.type == "delete" or not album_ids[op.operationId]:
+                continue
+            related = related_members[op.operationId]
+            # A failed related operation may still need its original Album association as a recovery anchor.
+            if any(related & other_members and (results[other_id].status != "success" or other_id in album_incomplete)
+                   for other_id, other_members in related_members.items()):
+                _log_operation(op, "album.cleanup.skipped", level="warn", batchId=batch_id, reason="related_operation_incomplete")
+                continue
+            try:
+                for member in sorted(set(op.memberIds) - {op.primaryAssetId} - reserved_trash):
+                    for album_id in sorted(album_ids[op.operationId]):
+                        await remove_asset_from_album(client, url, headers, album_id, member, batch_id=batch_id, operation_id=op.operationId)
+                _log_operation(op, "album.normalized", level="info", batchId=batch_id,
+                               albumCount=len(album_ids[op.operationId]))
+            except album_errors as error:
+                album_failure(op, "cleanup", error, terminal=False)
+
         # Trash is a separate outcome: a committed Stack update is never rolled back or repeated.
         for op in ops:
             result = results[op.operationId]

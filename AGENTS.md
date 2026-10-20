@@ -58,6 +58,13 @@ These instructions apply repository-wide to all future GenzoRoom development tas
   `I:\code\genzoroom\.venv\Scripts\python.exe -m pytest`
 - If running this executable in the normal sandbox fails with `Permission denied` (including a `uv` trampoline error), rerun the same executable and arguments with privileged execution. Do not switch to `Activate.ps1`, `activate.bat`, or another Python environment.
 
+## Stack / Album invariants
+
+- Stack-related Immich Album membership is normalized onto the final COVER. Final non-COVER members leave those Albums except for explicit cases such as reserved Trash assets.
+- Dissolving a Stack expands its Album memberships to every released Asset. Export that creates or changes a Stack COVER follows the same normalization.
+- Do not persist Album membership history in GenzoRoom; use Immich's current state when each operation runs.
+- Do not validate Album behavior from GenzoRoom Gallery alone. Gallery hides Stack non-COVER assets, so tests for Album membership writes must inspect raw Immich Album membership too.
+
 ## Testing
 
 - Add or update regression tests for new behavior and bug fixes. Test interactions between related features, not only isolated functions.

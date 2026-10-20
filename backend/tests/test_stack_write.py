@@ -17,6 +17,8 @@ def written(ids=(A,B),primary=A,stack_id=NEW,code=201):
 def execute(operations,existing=(),outcomes=()):
     calls=[];responses=iter(outcomes)
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         assert request.headers['x-api-key']=='key'
         if request.method=='GET': return httpx.Response(200,json=list(existing))
         calls.append((request.method,request.url.path,json.loads(request.content) if request.content else None))
@@ -149,6 +151,8 @@ def test_malformed_update_success_and_unexpected_delete_status_are_unknown():
 def test_preflight_failure_per_operation_never_writes():
     calls=[]
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         calls.append(request.method)
         return httpx.Response(403,json={'message':'private upstream body'})
     result=asyncio.run(apply_stacks('http://immich.example','key',StackApplyRequest(operations=[op(),op('delete',name='old')]),transport=httpx.MockTransport(handler)))

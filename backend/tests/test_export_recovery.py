@@ -65,10 +65,12 @@ def test_v3_migration_preserves_every_row_and_marks_existing_current(db, status)
     assert run.run_id == run_id and run.worker_id == owner
     assert not run.stop_requested and run.current_position == (None if status == 'waiting' else 0)
     with database(db) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == edit_store.SCHEMA_VERSION
         for table, rows in before.items():
             after = connection.execute(f'SELECT * FROM {table}').fetchall()
-            assert ([row[:5] for row in after] if table == 'export_runs' else after) == rows
+            assert ([row[:5] for row in after] if table == 'export_runs' else
+                    [row[:12] for row in after] if table == 'export_run_items' else after) == rows
+        assert run.items[0].export_timestamp == run.created_at
         assert not connection.execute('PRAGMA foreign_key_check').fetchall()
     assert recoverable_export_run() == run
 

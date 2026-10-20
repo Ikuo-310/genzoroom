@@ -203,13 +203,15 @@ def test_old_stack_observation_does_not_remove_new_single_exclusion(db, family):
     assert request('GET', path('asset', asset_id)).json()['items'][0]['excluded']
 
 
-def test_v4_migration_adds_only_exclusion_table(db):
+def test_v4_migration_preserves_export_rows(db):
     with edit_store._connection() as conn:
         conn.execute('DROP TABLE development_exclusions')
+        conn.execute('DROP INDEX export_registration_retries')
+        conn.execute('ALTER TABLE export_run_items DROP COLUMN export_timestamp')
         conn.execute('PRAGMA user_version=4')
         before = {t: conn.execute(f'SELECT * FROM {t}').fetchall() for t in ('asset_edit_states', 'export_queue', 'export_runs', 'export_run_items')}
     with edit_store._connection() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == edit_store.SCHEMA_VERSION
         assert conn.execute('SELECT count(*) FROM development_exclusions').fetchone()[0] == 0
         for t, rows in before.items(): assert conn.execute(f'SELECT * FROM {t}').fetchall() == rows
 
