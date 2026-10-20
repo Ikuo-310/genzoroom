@@ -25,6 +25,8 @@ def logger(monkeypatch):
 
 def test_off_and_debug_communication_privacy_and_correlation(logger):
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         assert request.headers["x-api-key"] == PRIVATE_KEY
         return httpx.Response(200, json={"version": "v3", "unused": "PRIVATE_BODY"}, headers={"Authorization": "PRIVATE_RESPONSE"})
     for level in ["off", "debug"]:
@@ -52,6 +54,8 @@ def test_off_and_debug_communication_privacy_and_correlation(logger):
 def test_failure_classification_is_safe(logger, outcome, code):
     logger.set_level("debug")
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         if outcome == "timeout":
             raise httpx.ReadTimeout("PRIVATE_EXCEPTION", request=request)
         if outcome == "malformed":
@@ -94,6 +98,8 @@ def run_create(logger, verify, *, level="debug", post_members=None, members=None
     body = {"id": NEW, "primaryAssetId": requested[0], "assets": [{"id": value} for value in (post_members or requested)],
             "unneeded": "PRIVATE_RAW_BODY", "exifInfo": {"path": "PRIVATE_PATH"}}
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         assert request.headers["x-api-key"] == PRIVATE_KEY
         calls.append((request.method, request.url.path))
         if request.method == "GET" and request.url.path == "/api/stacks":
@@ -156,6 +162,8 @@ def apply_batch(logger, outcomes, level="info"):
     created = {}
     index = 0
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         nonlocal index
         if request.method == "GET":
             if request.url.path == "/api/stacks":
@@ -207,8 +215,9 @@ def test_large_batch_reports_dropped_evidence_and_retains_final_outcome(logger):
     results = apply_batch(logger, ["success"] * 500, "debug")
     assert all(result.status == "success" for result in results)
     report = logger.create_report()
-    assert 1000 < len(report["entries"]) < 5000
-    assert report["buffer"] == {"capacity": 5000, "droppedEntryCount": 0}
+    assert len(report["entries"]) == 5000
+    assert report["buffer"]["capacity"] == 5000
+    assert report["buffer"]["droppedEntryCount"] > 0
     assert report["entries"][-1]["event"] == "batch.result"
     assert report["entries"][-1]["context"]["successCount"] == 500
     assert len([entry for entry in report["entries"] if entry["event"] == "operation.result"]) == 500

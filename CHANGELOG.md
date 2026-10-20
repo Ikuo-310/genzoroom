@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Normalize Stack Albums onto the final COVER, preserve Albums for ordinary departures, and expand membership when dissolving Stacks. Stack management now also requires `albumAsset.delete`; trash reservations keep their Album memberships.
+
 - Fixed Album photos disappearing after Export and Stack creation by adding each developed JPEG to all of its source Asset's Albums before making it the Stack COVER.
 - Prevented duplicate output Assets on Retry after a partial Album addition failure by retaining the Export timestamp for unchanged saved edits.
 

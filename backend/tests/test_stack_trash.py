@@ -26,6 +26,8 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
     if extra:
         operations.append(op('update', name='two', stackId=SECOND_STACK_ID, memberIds=[D, str(UUID(int=99))], primaryAssetId=str(UUID(int=99))))
     def handler(request):
+        if request.method == "GET" and request.url.path == "/api/albums":
+            return httpx.Response(200, json=[])
         nonlocal current, stack_reads, asset_reads
         path = request.url.path
         if request.method == 'GET':
@@ -133,6 +135,10 @@ def test_batch_recreates_and_creates_stacks_before_independent_trash_outcomes():
     ]
 
     def handler(request):
+
+        if request.method == "GET" and request.url.path == "/api/albums":
+
+            return httpx.Response(200, json=[])
         nonlocal current
         path = request.url.path
         if request.method == 'GET':
@@ -207,6 +213,10 @@ def test_retry_after_release_preserves_original_primary_while_creating_new_stack
     creates = 0
 
     def handler(request):
+
+        if request.method == "GET" and request.url.path == "/api/albums":
+
+            return httpx.Response(200, json=[])
         nonlocal current, creates
         if request.method == 'GET':
             if request.url.path == '/api/stacks':

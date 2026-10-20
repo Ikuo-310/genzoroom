@@ -427,8 +427,9 @@ class ImmichAlbumError(Exception):
         super().__init__(code)
 
 
-async def get_asset_album_ids(client, url: str, headers: dict, asset_id: UUID) -> list[UUID]:
+async def get_asset_album_ids(client, url: str, headers: dict, asset_id: UUID, *, batch_id=None, operation_id=None) -> list[UUID]:
     response = await _immich_request(client, "GET", url, "/albums", headers=headers,
+                                     batch_id=batch_id, operation_id=operation_id,
                                      params={"assetId": str(asset_id)})
     if response.status_code != 200:
         raise ImmichAlbumError("album_lookup_failed")
@@ -447,8 +448,9 @@ async def get_asset_album_ids(client, url: str, headers: dict, asset_id: UUID) -
         raise ImmichAlbumError("invalid_album_response") from None
 
 
-async def add_asset_to_album(client, url: str, headers: dict, album_id: UUID, asset_id: UUID) -> str:
+async def add_asset_to_album(client, url: str, headers: dict, album_id: UUID, asset_id: UUID, *, batch_id=None, operation_id=None) -> str:
     response = await _immich_request(client, "PUT", url, f"/albums/{album_id}/assets", headers=headers,
+                                     batch_id=batch_id, operation_id=operation_id,
                                      json={"ids": [str(asset_id)]})
     if response.status_code != 200:
         raise ImmichAlbumError("album_permission_denied" if response.status_code in (401, 403) else "album_add_failed")
@@ -469,6 +471,31 @@ async def add_asset_to_album(client, url: str, headers: dict, album_id: UUID, as
         raise ImmichAlbumError("invalid_album_add_response") from None
     _log_response_failure(response, "album_add_failed")
     raise ImmichAlbumError("album_permission_denied" if result.get("error") == "no_permission" else "album_add_failed")
+
+
+async def remove_asset_from_album(client, url: str, headers: dict, album_id: UUID, asset_id: UUID, *, batch_id=None, operation_id=None) -> str:
+    response = await _immich_request(client, "DELETE", url, f"/albums/{album_id}/assets", headers=headers,
+                                     batch_id=batch_id, operation_id=operation_id,
+                                     json={"ids": [str(asset_id)]})
+    if response.status_code != 200:
+        raise ImmichAlbumError("album_permission_denied" if response.status_code in (401, 403) else "album_remove_failed")
+    try:
+        body = response.json()
+        if not isinstance(body, list) or len(body) != 1 or not isinstance(body[0], Mapping):
+            raise ValueError
+        result = body[0]
+        if type(result.get("id")) is not str or UUID(result["id"]) != asset_id or type(result.get("success")) is not bool:
+            raise ValueError
+        if result["success"] and result.get("error") is None:
+            return "removed"
+        # Only an item-level absence proves membership is satisfied; HTTP 404 can mean a missing Album.
+        if not result["success"] and result.get("error") == "not_found":
+            return "not_found"
+    except (ValueError, TypeError, KeyError):
+        _log_response_failure(response, "invalid_album_remove_response")
+        raise ImmichAlbumError("invalid_album_remove_response") from None
+    _log_response_failure(response, "album_remove_failed")
+    raise ImmichAlbumError("album_permission_denied" if result.get("error") == "no_permission" else "album_remove_failed")
 
 
 async def get_albums(

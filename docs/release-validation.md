@@ -91,7 +91,8 @@ The current calls were checked against Immich **v3.2.4** controller permission d
 | `asset.view` | `GET /assets/{id}/thumbnail`; thumbnails and previews |
 | `asset.download` | `GET /assets/{id}/original`; JPEG originals |
 | `album.read` | `GET /albums`; Home albums and Export source membership via `assetId` (album members use metadata search) |
-| `albumAsset.create` | `PUT /albums/{id}/assets`; inherit source Album memberships before Export stacking |
+| `albumAsset.create` | `PUT /albums/{id}/assets`; add Export outputs, Stack COVERs and released photos |
+| `albumAsset.delete` | `DELETE /albums/{id}/assets`; normalize ordinary non-COVER members |
 | `tag.read` | `GET /tags`; Home GenzoRoom filtering |
 | `asset.upload` | `POST /assets`; generated JPEG including inherited Favorite |
 | `tag.create` | `PUT /tags`; GenzoRoom tag upsert |
@@ -126,3 +127,7 @@ The related Backend tests passed: 300 tests and 10 subtests. The complete Backen
 7. Save Recipe/History, stop and back up `data` including WAL/SHM, then update to another published tag using pull/recreate. Confirm the selected image/digest, existing DB and Queue/Runtime survive replacement. Check the base Compose and optional external-network override both attach as configured. Roll back with the previous compatible image or the matching stopped backup; do not run a second writer against the same root.
 
 Before backup or rollback, stop the sole writer and copy the complete data directory including any WAL/SHM. Schema v6 upgrades existing databases transactionally; there is no downgrade migration, so returning to a pre-v6 version requires restoring the pre-upgrade backup. Static Windows tests and Compose parsing do not establish Linux container or NAS/Firefox behavior.
+
+### Stack Album normalization validation
+
+The key needs `album.read`, `albumAsset.create`, and `albumAsset.delete`; no new `album.update` or `album.delete` is required. Validate multi-Album creation (JPEG/RAW in different Albums), COVER changes, member moves, ordinary departures, and dissolution expanding the union to all released photos. Confirm trash reservations keep membership and existing COVER/RAW protections. Non-Album operations must issue no Album writes. Lookup/pre-add failure must stop the affected Stack operation; cleanup failure preserves Stack success without rollback. Item-level duplicate additions and not_found removals are satisfied, but HTTP 404 and permission failures are not. Validate Owner and Editor access, including individual removal denial. Membership is read live for Albums visible to the configured user, with no DB mirror, historical restoration, post-send Undo, or restart recovery. Live Immich verification remains a maintainer task.
