@@ -2,6 +2,14 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## STACKゴミ箱予約の元COVER条件見直し・実機確認完了（2026-10-21）
+
+従来は取得時点の元COVERを永久保護していたため、別AssetへCOVERを変更した後も元COVERをTrash予約できなかった。予約条件を現在COVER基準に整理し、元COVERでも現在非COVERの元Stack memberなら予約可能とした。RAW、現在COVER、元Stack memberではない追加素材の保護は維持する。retained trashSourceを使うMANUAL retryでも同じ条件を適用する。
+
+Album正規化では、予約AssetをAlbum cleanup対象外とする既存方針を維持する。新COVERへAlbum membershipを先に集約してStackを更新し、Stack成功後の既存Trash安全確認を通してから`force: false`で通常Trashへ送る。Trashが失敗してもStack成功を維持し、予約AssetのAlbum membershipを明示削除しない。
+
+利用者からの実機確認報告では、元COVER JPEGから別JPEGへCOVERを変更し、元COVERをTrash予約してImmichへ送信した結果、新COVERが正しく維持され、元COVERが通常Trashへ入り、Album表示も期待どおりだった。実機挙動は問題なし。2026-10-09の監査記録にある元COVER保護は当時の監査・実装履歴として残し、本記録でその条件を見直した。
+
 ## Album内StackのExport正規化完了記録（2026-10-20）
 
 当初、Album内の素材をExportして新しいStack COVERを作ると、新JPEGがAlbumに所属せず、GenzoRoom Album Galleryから写真が消える問題があった。STACK管理でAlbum membershipを最終COVERへ正規化した後は、非COVER source自身がAlbum非所属になるため、Exportもsource単体ではなく、操作時点のStack全memberのAlbum所属の和集合を新JPEGへ継承する必要が生じた。この修正でGenzoRoom Gallery上の表示は戻った。

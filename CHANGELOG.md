@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stack management can reserve a JPEG that was the former COVER for normal Trash after changing the COVER to another photo. The current COVER and RAW photos remain protected.
+
 ## [0.2.3] - 2026-10-20
 
 ### Fixed
