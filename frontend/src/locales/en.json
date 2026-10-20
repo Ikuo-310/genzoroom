@@ -206,8 +206,8 @@
     "edited": "Edited in GenzoRoom",
     "genzoRoomExport": "Exported by GenzoRoom",
     "exclusion": {
-      "loadFailed": "Could not confirm development exclusion status. Reload photos to retry.",
-      "saveFailed": "Could not save development exclusion. Reload photos to confirm the result."
+      "loadFailed": "Could not check the status of excluded photos. Please reload.",
+      "saveFailed": "Could not save exclusion settings. Please reload to check the result."
     },
     "exportQueue": {
       "addFailed": "Could not add the photo to Export Queue.",

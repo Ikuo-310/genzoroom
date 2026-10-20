@@ -52,8 +52,10 @@ def configuration(snapshot, kind, target_id):
         stack = lookup.get(target_id)
         if stack is not None:
             return "confirmed", str(UUID(stack["primaryAssetId"])), sorted(str(UUID(m["id"])) for m in stack["assets"])
-        # An unidentified malformed entry can hide any missing Stack or membership.
-        return ("absent" if snapshot.complete else "unknown"), None, None
+        if target_id in snapshot.invalid_stack_ids:
+            return "unknown", None, None
+        # Identifiable invalid Stacks cannot hide a different Stack ID; missing identities still can.
+        return ("absent" if snapshot.complete or snapshot.membership_identifiable else "unknown"), None, None
     if target_id in snapshot.quarantined_member_ids:
         return "unknown", None, None
     if any(target_id == UUID(m["id"]) for s in snapshot.stacks for m in s["assets"]):

@@ -99,7 +99,8 @@ export function useDevelopmentExclusions(assets: readonly RecentAsset[], context
           try {
             if (frontendLogger.getLevel() === 'debug') diagnosticResponses.current.push({ requestId, generation, offset, batch, statuses });
           } catch { /* Logging failures cannot turn a successful status read into a load failure. */ }
-          if (statuses.some((status, index) => !exclusionConfirmed(batch[index], status))) setFailure({ generation, kind: 'loadFailed' });
+          // Absence is a successful read, but cannot authorize actions using stale Gallery Stack metadata.
+          if (statuses.some((status, index) => status.configuration !== 'absent' && !exclusionConfirmed(batch[index], status))) setFailure({ generation, kind: 'loadFailed' });
           setEntries(previous => {
             if (generation !== scope.current.generation) return previous;
             const next = new Map(previous);
