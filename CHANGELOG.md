@@ -6,9 +6,13 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.2.4] - Planned
+
 ### Fixed
 
 - Stack management can reserve a JPEG that was the former COVER for normal Trash after changing the COVER to another photo. The current COVER and RAW photos remain protected.
+- Fixed Gallery exclusion-status warnings in Albums, Calendar, and Favorites when unrelated invalid Stacks made an identifiable Stack snapshot incomplete. A missing Stack is now reported as absent when its ID can be ruled out safely; absent status reads do not show a load-failure warning, and operation guards remain in place.
+- Reworded exclusion-setting error messages to make clear which photos could not be checked and when a reload is needed.
 
 ## [0.2.3] - 2026-10-20
 

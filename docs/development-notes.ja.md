@@ -10,6 +10,18 @@ Album正規化では、予約AssetをAlbum cleanup対象外とする既存方針
 
 利用者からの実機確認報告では、元COVER JPEGから別JPEGへCOVERを変更し、元COVERをTrash予約してImmichへ送信した結果、新COVERが正しく維持され、元COVERが通常Trashへ入り、Album表示も期待どおりだった。実機挙動は問題なし。2026-10-09の監査記録にある元COVER保護は当時の監査・実装履歴として残し、本記録でその条件を見直した。
 
+## Gallery除外設定警告のStack判定修正（2026-10-21）
+
+Recentでは警告が出ず、Albums / Calendar / Favoritesでは「除外設定された写真の状態を確認できませんでした」という警告が出ることがあった。Calendarでは写真自体は正常に表示されていた。
+
+ImmichのStack snapshotに`primary_not_member`のinvalid Stackが5件あり、snapshot全体が`complete=false`になっていた。対象Stack自体はそのinvalid Stackではなく、Stack IDとmembershipは識別可能だったが、Backendが全体の`complete=false`を理由に、無関係な不存在Stackまで`unknown`としていた。
+
+修正では`membership_identifiable`と既知invalid Stack IDを使い、snapshotが不完全でも対象IDを有効Stack・既知invalid Stackのどちらにも見つけられない場合は、その対象に限り`absent`と判定する。対象Stack自身がinvalid、またはStack IDを識別できない場合は`unknown`を維持する。Frontendは`absent`を正常に取得した状態としてload failure警告から除外する一方、Galleryが持つStack構成が古い可能性を考慮し、`known`と各操作ガードは従来どおり別判定で維持した。
+
+エラーメッセージから「現像対象外」の表現を廃止し、load failureを「除外設定された写真の状態を確認できませんでした。再読み込みしてください。」へ変更した。save failureも「除外設定」に用語を揃えた。
+
+Backend focused testは69件、Frontend focused testは107件成功。TypeScript typecheckと`git diff --check`も成功した。Frontend build、Frontend / Backend全テスト、Rust tests、Cargo build、Docker Smoke Testは未実施。利用者による実機確認でAlbums / Calendar / Favoritesの警告が消え、Recentでは元々再現していなかったことを確認済み。
+
 ## Album内StackのExport正規化完了記録（2026-10-20）
 
 当初、Album内の素材をExportして新しいStack COVERを作ると、新JPEGがAlbumに所属せず、GenzoRoom Album Galleryから写真が消える問題があった。STACK管理でAlbum membershipを最終COVERへ正規化した後は、非COVER source自身がAlbum非所属になるため、Exportもsource単体ではなく、操作時点のStack全memberのAlbum所属の和集合を新JPEGへ継承する必要が生じた。この修正でGenzoRoom Gallery上の表示は戻った。
