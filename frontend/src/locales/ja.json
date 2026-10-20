@@ -200,8 +200,8 @@
     "edited": "GenzoRoomで編集済み",
     "genzoRoomExport": "GenzoRoomで出力",
     "exclusion": {
-      "loadFailed": "現像対象外の状態を確認できませんでした。写真をReloadして再確認してください。",
-      "saveFailed": "現像対象外の状態を保存できませんでした。写真をReloadして結果を確認してください。"
+      "loadFailed": "除外設定された写真の状態を確認できませんでした。再読み込みしてください。",
+      "saveFailed": "除外設定を保存できませんでした。再読み込みして結果を確認してください。"
     },
     "exportQueue": {
       "addFailed": "写真を出力キューへ追加できませんでした。",
