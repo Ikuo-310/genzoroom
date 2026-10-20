@@ -40,7 +40,7 @@ class StackOperation(BaseModel):
                 raise ValueError("Invalid trash membership")
             if not self.expectedMemberIds or len(set(self.expectedMemberIds)) != len(self.expectedMemberIds) or not set(self.trashAssetIds) <= set(self.expectedMemberIds):
                 raise ValueError("Missing trash source")
-            if self.expectedPrimaryAssetId not in self.expectedMemberIds or self.expectedPrimaryAssetId in self.trashAssetIds or self.primaryAssetId in self.trashAssetIds:
+            if self.expectedPrimaryAssetId not in self.expectedMemberIds or self.primaryAssetId in self.trashAssetIds:
                 raise ValueError("Protected primary")
         elif self.expectedMemberIds is not None or self.expectedPrimaryAssetId is not None:
             raise ValueError("Unexpected trash source")

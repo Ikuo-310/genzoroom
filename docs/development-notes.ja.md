@@ -64,6 +64,14 @@ Medium FindingはDeveloper JSON保存（保存先なし・連続自動ダウン�
 
 `--environment-backend`のSettings metadataは環境変数の有効URLとキー設定有無だけを表示する。保存済みURLや保存済み資格情報状態は診断接続先として返さない。通常の保存済み接続管理とDockerの環境変数経路は維持する。限定再検証ではRust17件、Backend接続・managed・export関連115件、Frontend lifecycle／Recipe保存／History編集182件、初回Frontend未準備・旧WebView隔離WebView2 smoke3件が成功し、TypeScript／Vite build、Clippy、Rust fmt、通常／smoke build、`git diff --check`も成功した。未保存編集終了の最終実機確認、Reloading確認ダイアログの手動操作、保存失敗の実機注入、Export終了、OSログオフ／終了通知、Cookieの別Backend送信直接試験は未実施事項として記録し、Phase完了を妨げない。外部ライブラリ由来シングル素材のSTACK COVER／Gallery表示不具合はWindows・Docker共通Exportの既知別課題で、今回の完了判定に含めない。
 
+## STACKゴミ箱予約の元COVER条件見直し・実機確認完了（2026-10-21）
+
+従来は取得時点の元COVERを永久保護していたため、別AssetへCOVERを変更した後も元COVERをTrash予約できなかった。予約条件を現在COVER基準に整理し、元COVERでも現在非COVERの元Stack memberなら予約可能とした。RAW、現在COVER、元Stack memberではない追加素材の保護は維持する。retained trashSourceを使うMANUAL retryでも同じ条件を適用する。
+
+Album正規化では、予約AssetをAlbum cleanup対象外とする既存方針を維持する。新COVERへAlbum membershipを先に集約してStackを更新し、Stack成功後の既存Trash安全確認を通してから`force: false`で通常Trashへ送る。Trashが失敗してもStack成功を維持し、予約AssetのAlbum membershipを明示削除しない。
+
+利用者からの実機確認報告では、元COVER JPEGから別JPEGへCOVERを変更し、元COVERをTrash予約してImmichへ送信した結果、新COVERが正しく維持され、元COVERが通常Trashへ入り、Album表示も期待どおりだった。実機挙動は問題なし。2026-10-09の監査記録にある元COVER保護は当時の監査・実装履歴として残し、本記録でその条件を見直した。
+
 ## Album内StackのExport正規化完了記録（2026-10-20）
 
 当初、Album内の素材をExportして新しいStack COVERを作ると、新JPEGがAlbumに所属せず、GenzoRoom Album Galleryから写真が消える問題があった。STACK管理でAlbum membershipを最終COVERへ正規化した後は、非COVER source自身がAlbum非所属になるため、Exportもsource単体ではなく、操作時点のStack全memberのAlbum所属の和集合を新JPEGへ継承する必要が生じた。この修正でGenzoRoom Gallery上の表示は戻った。
@@ -71,6 +79,8 @@ Medium FindingはDeveloper JSON保存（保存先なし・連続自動ダウン�
 その後の実機確認では、ImmichネイティブAlbumに新COVERと旧COVERが2枚表示された。GalleryはStack非COVERを除外するため、Galleryの表示件数だけを確認するテストでは、Immichの生Album membershipに旧COVERが残る問題を検出できなかった。ExportでもStack/COVER確定と新COVER検証の後に最終Stackの非COVER memberを継承Albumから外すcleanupを追加し、BackendテストはGallery結果に加えて生のAlbum membershipをassertするよう強化した。
 
 最終確認では、Immich実機でAlbum内Stackの非COVER JPEGを編集・Exportし、新JPEGがCOVERとなり、旧COVERがAlbumから外れ、ImmichネイティブAlbumとGenzoRoom Album Galleryの両方で新COVERだけが表示されることを確認した。実機確認はOK。
+
+このAlbum / Stack / Export修正をDocker / GHCR版のbugfix release v0.2.3（2026-10-20）の対象として確定した。Windows desktop版は共通修正を取り込んでいるが、別開発ラインとして今回のリリース対象外。
 
 ## 色温度補正方向とスライダー表示の統一（2026-10-15）
 

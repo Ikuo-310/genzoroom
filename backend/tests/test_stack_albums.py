@@ -127,15 +127,17 @@ def test_failures_never_rollback_or_cleanup_uncertain_stack(phase, status):
 
 
 @pytest.mark.parametrize('trash_status', [204, 403])
-def test_trash_reservation_retains_membership(trash_status):
-    operation = op('update', memberIds=[A, C], trashAssetIds=[B], expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A)
+def test_original_cover_trash_retains_membership_and_keeps_stack_result(trash_status):
+    operation = op('update', memberIds=[B, C], primaryAssetId=B, trashAssetIds=[A], expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A)
     def failure(method, path, body):
         if path == '/assets': return httpx.Response(trash_status)
     results, calls, albums, _ = run([operation], {A: {X}, B: {Y}}, [stack(member_ids=[A, B, C])], failure)
     assert results[0].status == 'success'
     assert results[0].trashStatus == ('success' if trash_status == 204 else 'failed')
-    assert albums[B] == {Y} and albums[A] == {X, Y}
-    assert not any(m == 'DELETE' and p.startswith('/albums/') and b['ids'] == [B] for m, p, b in calls)
+    assert albums[B] == {X, Y} and albums[A] == {X}
+    assert not any(m == 'DELETE' and p.startswith('/albums/') and b['ids'] == [A] for m, p, b in calls)
+    assert ('DELETE', '/assets', {'ids': [A], 'force': False}) in calls
+    assert calls.index(('PUT', f'/albums/{X}/assets', {'ids': [B]})) < calls.index(('DELETE', f'/stacks/{STACK_ID}', None))
 
 
 @pytest.mark.parametrize('status,body,expected', [

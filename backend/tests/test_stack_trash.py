@@ -10,7 +10,7 @@ from test_stack_write import A, B, C, D, NEW, op, written, STACK_ID, SECOND_STAC
 from test_stack_assets import IDS, stack
 
 
-def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, trash_status=500, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
+def run_trash(*, singleton=False, raw=False, original_cover=False, changed=False, stack_failure=False, create_failure=False, trash_failure=False, trash_status=500, timeout=False, still_stacked=False, extra=False, corruption=None, detail_status=None, unrelated_invalid=False, preflight_detail=None):
     calls = []
     stack_reads = 0
     asset_reads = 0
@@ -21,7 +21,10 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
         current[0]['primaryAssetId'] = B
     if extra:
         current.append(stack(SECOND_STACK_ID, D, [D, str(UUID(int=99))]))
-    operations = [op('update', memberIds=[A] if singleton else [A, C], trashAssetIds=[B],
+    trash_asset = A if original_cover else B
+    final_members = [A] if singleton else [B, C] if original_cover else [A, C]
+    requested_primary = final_members[0] if not original_cover else B
+    operations = [op('update', memberIds=final_members, primaryAssetId=requested_primary, trashAssetIds=[trash_asset],
                      expectedMemberIds=[A, B] if singleton else [A, B, C], expectedPrimaryAssetId=A)]
     if extra:
         operations.append(op('update', name='two', stackId=SECOND_STACK_ID, memberIds=[D, str(UUID(int=99))], primaryAssetId=str(UUID(int=99))))
@@ -53,13 +56,13 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
             if path.startswith('/api/stacks/'):
                 found = next((s for s in current if s['id'] == path.rsplit('/', 1)[-1]), None)
                 return httpx.Response(200, json=found) if found else httpx.Response(404)
-            assert path == f'/api/assets/{B}'
+            assert path == f'/api/assets/{trash_asset}'
             asset_reads += 1
             if detail_status is not None and asset_reads >= 2: return httpx.Response(detail_status, json={'error':'PRIVATE RESPONSE BODY'})
             force_stack = corruption == 'detail_stack' and asset_reads >= 2
             if preflight_detail is not None and asset_reads == 1:
-                return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.jpg', 'isTrashed': False, **preflight_detail})
-            return httpx.Response(200, json={'id': B, 'originalFileName': 'photo.dng' if raw else 'photo.jpg', 'isTrashed': False,
+                return httpx.Response(200, json={'id': trash_asset, 'originalFileName': 'photo.jpg', 'isTrashed': False, **preflight_detail})
+            return httpx.Response(200, json={'id': trash_asset, 'originalFileName': 'photo.dng' if raw else 'photo.jpg', 'isTrashed': False,
                                             'stack': {'id': NEW, 'primaryAssetId': A} if force_stack else {'id': STACK_ID, 'primaryAssetId': A} if any(s['id'] == STACK_ID for s in current) else None})
         body = json.loads(request.content) if request.content else None
         calls.append((request.method, path, body))
@@ -78,8 +81,8 @@ def run_trash(*, singleton=False, raw=False, changed=False, stack_failure=False,
             return written(ids=[D, str(UUID(int=99))], primary=str(UUID(int=99)), stack_id=SECOND_STACK_ID, code=200)
         if create_failure:
             return httpx.Response(500)
-        current.append(stack(NEW, A, [A, C]))
-        return written(ids=[A, C])
+        current.append(stack(NEW, requested_primary, final_members))
+        return written(ids=final_members, primary=requested_primary)
     results = asyncio.run(apply_stacks('http://immich.example/api', 'key', StackApplyRequest(operations=operations), transport=httpx.MockTransport(handler))).results
     return results, calls
 
@@ -97,6 +100,11 @@ def test_unsafe_or_failed_update_never_trashes(kwargs):
     results, calls = run_trash(**kwargs)
     assert results[0].trashStatus != 'success'
     assert all(c[1] != '/api/assets' for c in calls)
+
+def test_raw_original_cover_stays_protected_after_cover_change():
+    results, calls = run_trash(original_cover=True, raw=True)
+    assert results[0].status == 'failed' and results[0].errorCode == 'trash_preflight_failed'
+    assert all(path != '/api/assets' and path != f'/api/stacks/{STACK_ID}' for _, path, _ in calls)
 
 
 @pytest.mark.parametrize(('timeout', 'trash_status', 'expected'), [(False, 400, 'failed'), (False, 500, 'unknown'), (False, 503, 'unknown'), (True, 500, 'unknown')])
@@ -177,12 +185,17 @@ def test_batch_recreates_and_creates_stacks_before_independent_trash_outcomes():
     ]
 
 
-@pytest.mark.parametrize('changes', [{'trashAssetIds': [A]}, {'trashAssetIds': [B, B]}, {'expectedPrimaryAssetId': B}])
+@pytest.mark.parametrize('changes', [{'trashAssetIds': [A]}, {'trashAssetIds': [B, B]}])
 def test_reject_primary_and_invalid_reservation(changes):
     values = op('update', memberIds=[A, C], trashAssetIds=[B], expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A)
     values.update(changes)
     with pytest.raises(ValidationError):
         StackApplyRequest(operations=[values])
+
+def test_allows_acquisition_primary_when_requested_primary_changes():
+    values = op('update', memberIds=[B, C], primaryAssetId=B, trashAssetIds=[A],
+                expectedMemberIds=[A, B, C], expectedPrimaryAssetId=A)
+    assert StackApplyRequest(operations=[values]).operations[0].trashAssetIds == [UUID(A)]
 
 def test_failed_replacement_reports_release_without_trash():
     results, calls = run_trash(create_failure=True)
