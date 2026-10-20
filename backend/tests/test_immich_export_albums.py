@@ -84,6 +84,11 @@ class StackAlbumRemote(Remote):
         super().__init__(stacks)
         self.asset_albums = {asset_id: list(album_ids) for asset_id, album_ids in (asset_albums or {}).items()}
         self.album_lookup_ids = []
+        self.delete_failure = None
+        self.stack_failure_mode = None
+        for asset_id, album_ids in self.asset_albums.items():
+            for album_id in album_ids:
+                self.album_members.setdefault(album_id, set()).add(asset_id)
 
     @staticmethod
     def _asset(asset_id, tagged=False):
@@ -93,6 +98,31 @@ class StackAlbumRemote(Remote):
 
     async def handle(self, request):
         path = request.url.path.removeprefix('/api')
+        if path.startswith('/albums/') and path.endswith('/assets') and request.method == 'DELETE':
+            self.calls.append(('DELETE', path))
+            if self.delete_failure == path:
+                return httpx.Response(503, json={'error': 'private body'})
+            album_id = UUID(path.split('/')[2])
+            ids = json.loads(request.content)['ids']
+            results = []
+            for value in ids:
+                asset_id = UUID(value)
+                members = self.album_members.setdefault(album_id, set())
+                if asset_id in members:
+                    members.remove(asset_id)
+                    results.append({'id': value, 'success': True})
+                else:
+                    results.append({'id': value, 'success': False, 'error': 'not_found'})
+            return httpx.Response(200, json=results)
+        if path == '/stacks' and request.method == 'POST' and self.stack_failure_mode == 'unknown':
+            raise httpx.ReadTimeout('unknown write result')
+        if path == '/stacks' and request.method == 'POST':
+            response = await super().handle(request)
+            if self.stack_failure_mode == 'invalid_cover':
+                body = response.json()
+                body['primaryAssetId'] = str(B)
+                return httpx.Response(response.status_code, json=body)
+            return response
         if path == '/albums' and request.method == 'GET':
             asset_id = UUID(request.url.params['assetId'])
             self.album_lookup_ids.append(asset_id)
@@ -149,19 +179,18 @@ def test_non_cover_stack_export_inherits_cover_album_and_remains_in_album_galler
 
     asyncio.run(scenario())
     assert remote.album_lookup_ids == [SOURCE, B]
-    assert remote.album_members[album_x] == {B, OUT}
+    assert remote.album_members == {album_x: {OUT}}
 
 
-@pytest.mark.parametrize('source_albums,other_albums,expected', [
-    ([], [ALBUMS[0], ALBUMS[1]], [ALBUMS[0], ALBUMS[1]]),
-    ([ALBUMS[2]], [ALBUMS[0]], [ALBUMS[2], ALBUMS[0]]),
+@pytest.mark.parametrize('asset_albums,expected', [
+    ({B: [ALBUMS[0], ALBUMS[1]]}, [ALBUMS[0], ALBUMS[1]]),
+    ({SOURCE: [ALBUMS[2]], B: [ALBUMS[0]], C: [ALBUMS[1]]}, [ALBUMS[2], ALBUMS[0], ALBUMS[1]]),
 ])
-def test_stack_export_inherits_album_union_from_source_and_all_members(source_albums, other_albums, expected):
-    remote = StackAlbumRemote(stacks=[stack([SOURCE, B, C], B)],
-                              asset_albums={SOURCE: source_albums, B: other_albums})
+def test_stack_export_inherits_album_union_from_source_and_all_members(asset_albums, expected):
+    remote = StackAlbumRemote(stacks=[stack([SOURCE, B, C], B)], asset_albums=asset_albums)
     asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
     assert set(remote.album_members) == set(expected)
-    assert all(OUT in remote.album_members[album_id] for album_id in expected)
+    assert all(remote.album_members[album_id] == {OUT} for album_id in expected)
     assert remote.album_lookup_ids == [SOURCE, B, C]
 
 
@@ -169,8 +198,7 @@ def test_unstacked_export_looks_up_only_source_album_membership():
     remote = StackAlbumRemote(asset_albums={SOURCE: [ALBUMS[0]], B: [ALBUMS[1]]})
     asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
     assert remote.album_lookup_ids == [SOURCE]
-    assert set(remote.album_members) == {ALBUMS[0]}
-    assert OUT in remote.album_members[ALBUMS[0]]
+    assert remote.album_members == {ALBUMS[0]: {OUT}, ALBUMS[1]: {B}}
 
 
 def test_albumless_stack_export_does_not_write_album_membership():
@@ -197,6 +225,63 @@ def test_stack_album_add_failure_does_not_run_stack_write():
         asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
     assert len(remote.outputs) == 1 and remote.tags == {OUT}
     assert ('POST', '/stacks') not in remote.calls
+
+
+def test_export_from_single_album_asset_cleans_source_after_creating_stack():
+    album_x = ALBUMS[0]
+    remote = StackAlbumRemote(asset_albums={SOURCE: [album_x]})
+    asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
+    assert remote.album_members[album_x] == {OUT}
+    assert remote.stacks[0]['primaryAssetId'] == str(OUT)
+
+
+def test_export_cover_update_cleans_every_final_non_cover_member():
+    album_x = ALBUMS[0]
+    remote = StackAlbumRemote(stacks=[stack([SOURCE, B, OUT], B)],
+                              asset_albums={B: [album_x], OUT: [album_x]})
+    remote.outputs[ARTIFACT.jpeg] = (ARTIFACT.filename, OUT)
+    asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
+    assert remote.stacks[0]['primaryAssetId'] == str(OUT)
+    assert remote.album_members[album_x] == {OUT}
+    assert ('PUT', f'/stacks/{remote.stacks[0]["id"]}') in remote.calls
+    assert {path for method, path in remote.calls if method == 'DELETE'} == {
+        f'/albums/{album_x}/assets',
+    }
+
+
+def test_export_cleanup_failure_preserves_success_and_leaves_album_duplicates(monkeypatch):
+    album_x = ALBUMS[0]
+    remote = StackAlbumRemote(stacks=[stack([SOURCE, B], B)], asset_albums={B: [album_x]})
+    remote.delete_failure = f'/albums/{album_x}/assets'
+    events = []
+    monkeypatch.setattr(immich_export, 'runtime_log', lambda event, **fields: events.append((event, fields)))
+    result = asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
+    assert result.registered_asset_id == OUT
+    assert remote.stacks[0]['primaryAssetId'] == str(OUT)
+    assert remote.album_members[album_x] == {B, OUT}
+    assert any(event == 'registration.albumCleanupFailed' and fields['memberAssetId'] == str(B)
+               for event, fields in events)
+
+
+def test_export_stack_write_failure_does_not_cleanup_members():
+    album_x = ALBUMS[0]
+    remote = StackAlbumRemote(stacks=[stack([SOURCE, B], B)], asset_albums={B: [album_x]})
+    remote.failure = '/stacks'
+    with pytest.raises(ExportRegistrationError):
+        asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
+    assert remote.album_members[album_x] == {B, OUT}
+    assert not any(method == 'DELETE' for method, _ in remote.calls)
+
+
+@pytest.mark.parametrize('failure_mode', ['unknown', 'invalid_cover'])
+def test_export_unknown_or_unverified_stack_does_not_cleanup(failure_mode):
+    album_x = ALBUMS[0]
+    remote = StackAlbumRemote(stacks=[stack([SOURCE, B], B)], asset_albums={B: [album_x]})
+    remote.stack_failure_mode = failure_mode
+    with pytest.raises(ExportRegistrationError):
+        asyncio.run(_album_registrar(remote).register(detail(), ARTIFACT, context()))
+    assert remote.album_members[album_x] == {B, OUT}
+    assert not any(method == 'DELETE' for method, _ in remote.calls)
 
 
 @pytest.mark.parametrize('status,body', [

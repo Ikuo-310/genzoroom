@@ -67,8 +67,17 @@ class Remote:
             UUID(request.url.params['assetId'])
             return httpx.Response(200, json=[{'id': str(album_id)} for album_id in self.source_albums])
         if path.startswith('/albums/') and path.endswith('/assets'):
-            assert request.method == 'PUT' and json.loads(request.content) == {'ids': [str(OUT)]}
             album_id = UUID(path.split('/')[2])
+            if request.method == 'DELETE':
+                ids = json.loads(request.content)['ids']
+                assert len(ids) == 1
+                asset_id = UUID(ids[0])
+                members = self.album_members.setdefault(album_id, set())
+                if asset_id in members:
+                    members.remove(asset_id)
+                    return httpx.Response(200, json=[{'id': ids[0], 'success': True}])
+                return httpx.Response(200, json=[{'id': ids[0], 'success': False, 'error': 'not_found'}])
+            assert request.method == 'PUT' and json.loads(request.content) == {'ids': [str(OUT)]}
             members = self.album_members.setdefault(album_id, set())
             if OUT in members:
                 return httpx.Response(200, json=[{'id': str(OUT), 'success': False, 'error': 'duplicate'}])

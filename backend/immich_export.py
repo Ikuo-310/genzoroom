@@ -10,7 +10,7 @@ from immich_tags import assign_genzoroom_tag
 from export_artifact import filename_family
 from export_runtime import RegistrationResult
 from export_runtime_store import runtime_log
-from immich import (IMMICH_TIMEOUT, ImmichAlbumError, add_asset_to_album, get_asset_album_ids,
+from immich import (IMMICH_TIMEOUT, ImmichAlbumError, add_asset_to_album, get_asset_album_ids, remove_asset_from_album,
                     _require_configuration, _immich_request, _get_asset_stacks, _parse_stack_snapshot)
 
 
@@ -200,15 +200,34 @@ class ImmichExportRegistrar:
                     if _uuid(output_stack["primaryAssetId"]) != output:
                         response = await _immich_request(client, "PUT", url, f"/stacks/{stack_id}", headers=headers,
                             json={"primaryAssetId": str(output)})
-                        self._verify_stack(response, 200, output, source.id,
-                                           {UUID(member["id"]) for member in source_stack["assets"]}, expected_id=stack_id)
+                        stack_id, final_member_ids = self._verify_stack(
+                            response, 200, output, source.id,
+                            {UUID(member["id"]) for member in source_stack["assets"]}, expected_id=stack_id,
+                        )
+                    else:
+                        final_member_ids = {UUID(member["id"]) for member in output_stack["assets"]}
                 else:
                     primary = _uuid(source_stack["primaryAssetId"]) if source_stack else source.id
                     old_members = {UUID(member["id"]) for member in source_stack["assets"]} if source_stack else {source.id}
                     # v3.2.4 POST absorbs the current primary's entire Stack transactionally.
                     response = await _immich_request(client, "POST", url, "/stacks", expected_status=201, headers=headers,
                         json={"assetIds": [str(output), str(primary)]})
-                    stack_id = self._verify_stack(response, 201, output, source.id, old_members)
+                    stack_id, final_member_ids = self._verify_stack(response, 201, output, source.id, old_members)
+                if album_ids:
+                    # Cleanup follows verified COVER membership so failures can leave duplicates, never hide the Stack photo.
+                    for member_id in sorted(final_member_ids - {output}, key=str):
+                        for album_id in album_ids:
+                            try:
+                                await remove_asset_from_album(
+                                    client, url, headers, album_id, member_id,
+                                    batch_id=str(context.run_id), operation_id=str(source.id),
+                                )
+                            except (ImmichAlbumError, httpx.RequestError, httpx.InvalidURL) as error:
+                                runtime_log(
+                                    "registration.albumCleanupFailed", level="warn", **trace,
+                                    registeredAssetId=str(output), memberAssetId=str(member_id),
+                                    albumId=str(album_id), errorCode=(error.code if isinstance(error, ImmichAlbumError) else "unreachable"),
+                                )
                 runtime_log("registration.completed", **trace, registeredAssetId=str(output), stackId=str(stack_id), stackStarted=True)
                 return RegistrationResult(output)
         except Exception as error:
@@ -234,4 +253,4 @@ class ImmichExportRegistrar:
         if expected_id is not None and stack_id != expected_id or _uuid(body["primaryAssetId"]) != output \
                 or members != old_members | {output, source}:
             raise ValueError("stack_response_mismatch")
-        return stack_id
+        return stack_id, members
