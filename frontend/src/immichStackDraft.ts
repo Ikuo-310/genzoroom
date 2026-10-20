@@ -15,7 +15,7 @@ export function canReserveStackTrash(group: DraftStack, assetId: string) {
   const source = stackTrashSource(group);
   const asset = group.members.find(member => member.id === assetId);
   return !!source && source.memberIds.length > 1 && source.memberIds.includes(assetId)
-    && !!asset && !asset.is_raw && assetId !== group.coverAssetId && assetId !== source.primaryAssetId;
+    && !!asset && !asset.is_raw && assetId !== group.coverAssetId;
 }
 
 function sameMemberIds(current: readonly string[], original: readonly string[]) {
