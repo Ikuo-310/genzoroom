@@ -99,8 +99,42 @@ class ImmichExportRegistrar:
             headers = {"x-api-key": key, "Accept": "application/json"}
             async with httpx.AsyncClient(timeout=IMMICH_TIMEOUT, trust_env=False, follow_redirects=False, transport=self._transport) as client:
                 runtime_log("registration.stepStarted", level="debug", **trace, phase=phase)
-                # Resolve membership before uploading so a failed lookup cannot leave a new unregistered JPEG.
-                album_ids = await get_asset_album_ids(client, url, headers, source.id)
+                # Resolve the source Stack and its Albums before upload so a missing COVER cannot inherit an empty source.
+                album_ids = []
+                album_id_set = set()
+                source_album_ids = await get_asset_album_ids(
+                    client, url, headers, source.id, batch_id=str(context.run_id), operation_id=str(source.id),
+                )
+                phase = "stack_context"
+                raw_stack_context = await _get_asset_stacks(url, key, transport=self._transport, batch_id=str(context.run_id))
+                source_snapshot = _parse_stack_snapshot(raw_stack_context, require_primary=True)
+                if source.id in source_snapshot.quarantined_member_ids:
+                    context_diagnostics.update({
+                        "sourceQuarantined": True, "outputQuarantined": False,
+                        "validStackCount": len(source_snapshot.stacks),
+                        "invalidStackCount": len(source_snapshot.invalid_stack_ids),
+                        "quarantinedMemberCount": len(source_snapshot.quarantined_member_ids),
+                    })
+                    raise ValueError("invalid_stack_context")
+                source_owners = {UUID(member["id"]): stack for stack in source_snapshot.stacks for member in stack["assets"]}
+                source_stack_context = source_owners.get(source.id)
+                source_member_ids = ([UUID(member["id"]) for member in source_stack_context["assets"]]
+                                     if source_stack_context is not None else [source.id])
+                phase = "album_context"
+                for member_id in source_member_ids:
+                    if member_id == source.id:
+                        member_albums = source_album_ids
+                    else:
+                        context_diagnostics["memberAssetId"] = str(member_id)
+                        member_albums = await get_asset_album_ids(
+                            client, url, headers, member_id, batch_id=str(context.run_id), operation_id=str(source.id),
+                        )
+
+                    for album_id in member_albums:
+                        if album_id not in album_id_set:
+                            album_id_set.add(album_id)
+                            album_ids.append(album_id)
+                context_diagnostics.pop("memberAssetId", None)
                 phase = "upload"
                 response = await _immich_request(client, "POST", url, "/assets", expected_status=(200, 201),
                     headers=headers, timeout=UPLOAD_TIMEOUT,
@@ -133,7 +167,7 @@ class ImmichExportRegistrar:
                                 inheritedAlbumIds=[str(value) for value in album_ids[offset:offset + 20]],
                                 albumCount=len(album_ids), offset=offset, stackStarted=False)
                 phase = "stack_context"
-                raw = await _get_asset_stacks(url, key, transport=self._transport)
+                raw = await _get_asset_stacks(url, key, transport=self._transport, batch_id=str(context.run_id))
                 snapshot = _parse_stack_snapshot(raw, require_primary=True)
                 source_quarantined = source.id in snapshot.quarantined_member_ids
                 output_quarantined = output in snapshot.quarantined_member_ids
@@ -145,6 +179,16 @@ class ImmichExportRegistrar:
                     raise ValueError("invalid_stack_context")
                 owners = {UUID(member["id"]): stack for stack in snapshot.stacks for member in stack["assets"]}
                 source_stack, output_stack = owners.get(source.id), owners.get(output)
+                current_source_members = ({UUID(member["id"]) for member in source_stack["assets"]}
+                                          if source_stack is not None else None)
+                expected_source_members = set(source_member_ids) if source_stack_context is not None else None
+                if (source_stack_context is None) != (source_stack is None) or (
+                    source_stack is not None and (
+                        UUID(source_stack["id"]) != UUID(source_stack_context["id"])
+                        or current_source_members != expected_source_members
+                    )
+                ):
+                    raise ValueError("source_stack_changed")
                 phase = "stack"
                 # Making the output COVER before all Album writes succeed would hide the source from those Albums.
                 context_diagnostics["stackStarted"] = True

@@ -60,7 +60,7 @@ class Remote:
         assert request.headers['x-api-key'] == 'private-key'
         path = request.url.path.removeprefix('/api')
         self.calls.append((request.method, path))
-        if self.failure == path:
+        if self.failure == path and not (path == '/stacks' and request.method == 'GET'):
             return httpx.Response(503, json={'error': 'private body'})
         if path == '/albums':
             assert request.method == 'GET' and set(request.url.params) == {'assetId'}
@@ -296,12 +296,14 @@ def test_upload_strict_status_uuid_shape_and_http_failure(status, body):
         calls.append(request.url.path)
         if request.url.path == '/api/albums':
             return httpx.Response(200, json=[])
+        if request.url.path == '/api/stacks' and request.method == 'GET':
+            return httpx.Response(200, json=[])
         return httpx.Response(status, json=body)
     remote = ImmichExportRegistrar('http://immich.example', 'key', transport=httpx.MockTransport(handle))
     with pytest.raises(ExportRegistrationError) as error:
         asyncio.run(remote.register(detail(), ExportArtifact('IMG-Genzo01.jpg', b'jpeg'), context()))
     assert str(error.value) == '' and error.value.code == 'registration_failed'
-    assert calls == ['/api/albums', '/api/assets']
+    assert calls == ['/api/albums', '/api/stacks', '/api/assets']
 
 
 @pytest.mark.parametrize('path', ['/albums', '/tags', '/tags/assets', '/stacks'])
