@@ -280,6 +280,7 @@ def test_unidentifiable_membership_keeps_unrelated_assets_unknown(db, family, da
     with configure([damaged]), patch.object(ex, 'get_asset_detail', new=AsyncMock()) as detail:
         unrelated = uuid4()
         assert request('GET', path('asset', unrelated)).json()['items'][0]['configuration'] == 'unknown'
+        assert request('GET', path('stack', unrelated)).json()['items'][0]['configuration'] == 'unknown'
         assert request('PUT', path('asset', unrelated)).status_code == 409
         detail.assert_not_awaited()
 
@@ -313,13 +314,14 @@ def test_partial_stack_observation_never_invalidates_existing_exclusions(db, fam
         assert connection.execute('SELECT count(*) FROM development_exclusions').fetchone()[0] == 2
 
 
-def test_unrelated_stack_absence_is_not_proven_by_partial_snapshot(db, family):
+def test_unrelated_stack_absence_is_proven_by_identifiable_partial_snapshot(db, family):
     with configure([family]):
         assert request('PUT', path('stack', family['id']), expected(family)).status_code == 200
     partial = {'id': str(uuid4()), 'primaryAssetId': str(uuid4()), 'assets': [{'id': str(uuid4())}]}
     with configure([partial]):
         item = request('GET', path('stack', family['id'])).json()['items'][0]
-        assert item['excluded'] and item['configuration'] == 'unknown'
+        assert not item['excluded'] and item['configuration'] == 'absent'
+        assert request('GET', path('stack', partial['id'])).json()['items'][0]['configuration'] == 'unknown'
 
 
 def test_complete_snapshot_keeps_single_and_stacked_classification(family):
@@ -327,6 +329,8 @@ def test_complete_snapshot_keeps_single_and_stacked_classification(family):
     assert snapshot.complete and snapshot.membership_identifiable
     assert ex.configuration(snapshot, 'asset', uuid4())[0] == 'single'
     assert ex.configuration(snapshot, 'asset', UUID(family['primaryAssetId']))[0] == 'stacked'
+    assert ex.configuration(snapshot, 'stack', UUID(family['id']))[0] == 'confirmed'
+    assert ex.configuration(snapshot, 'stack', uuid4())[0] == 'absent'
 
 
 def test_missing_primary_member_snapshot_bounds_uncertainty_to_known_uuids(family):

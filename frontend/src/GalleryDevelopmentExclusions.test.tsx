@@ -161,7 +161,7 @@ describe('cross-phase exclusion session regressions', () => {
     await clickSelector('.gallery-refresh');
     await act(async () => stale.resolve(photos));
     expect(host.querySelector('#home-calendar-tab')?.getAttribute('aria-selected')).toBe('true');
-    expect(host.textContent).not.toContain('Could not confirm development exclusion status');
+    expect(host.textContent).not.toContain('Could not check the status of excluded photos');
     expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
     expect(frontendLogger.getEntries().filter(entry => entry.event === 'state.unconfirmed'
       && entry.context?.reason === 'ownership_conflict')).toHaveLength(0);
@@ -172,7 +172,7 @@ describe('cross-phase exclusion session regressions', () => {
     const dayButton = (day: string) => [...host.querySelectorAll<HTMLButtonElement>('.calendar-day.has-assets')]
       .find(button => button.getAttribute('aria-label')?.includes(day))!;
     await click(dayButton('2026-10-07'));
-    expect(host.textContent).not.toContain('Could not confirm development exclusion status');
+    expect(host.textContent).not.toContain('Could not check the status of excluded photos');
     await clickSelector('.album-back'); await click(dayButton('2026-10-06'));
     expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(false);
     await clickSelector('#home-stacks-tab');
@@ -270,7 +270,7 @@ describe('cross-phase exclusion session regressions', () => {
     expect(items.map(value => value.assetId)).toEqual([ids[2]]);
     expect(excluded.has(stackId)).toBe(false);
     expect(card().classList.contains('development-excluded')).toBe(false);
-    expect(host.textContent).toContain('Reload photos to confirm the result');
+    expect(host.textContent).toContain('Please reload to check the result');
   });
 });
 
@@ -329,10 +329,14 @@ describe('Gallery development exclusions', () => {
     await clickSelector('.gallery-refresh'); await pressX();
     expect(api.save).not.toHaveBeenCalled(); expect(card().classList.contains('development-excluded')).toBe(true);
   });
-  it('does not display a failed save as success and blocks uncertain retries', async () => {
+  it.each([
+    ['en', 'Could not save exclusion settings. Please reload to check the result.'],
+    ['ja', '除外設定を保存できませんでした。再読み込みして結果を確認してください。'],
+  ])('does not display a failed save as success and blocks uncertain retries (%s)', async (language, message) => {
+    await i18n.changeLanguage(language);
     api.save.mockRejectedValue(new Error('network')); await mount(); await select(); await pressX(); await pressX();
     expect(api.save).toHaveBeenCalledTimes(1); expect(card().classList.contains('development-excluded')).toBe(false);
-    expect(host.textContent).toContain('Could not save development exclusion');
+    expect(host.textContent).toContain(message);
   });
   it('blocks X in inputs, dialogs and immersive preview', async () => {
     await mount(); await select();
@@ -380,6 +384,28 @@ describe('Gallery development exclusions', () => {
     await mount(); await select(); await select(2); await pressQ();
     expect(api.enqueue).toHaveBeenCalledWith([ids[2]], expect.any(AbortSignal));
     expect(api.enqueue).not.toHaveBeenCalledWith(expect.arrayContaining([ids[0]]), expect.any(AbortSignal));
+  });
+  it.each(['unknown', 'absent'] as const)('keeps stale Stack actions blocked for %s while distinguishing load warnings', async configuration => {
+    family();
+    api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({
+      ...target, excluded: false, configuration: target.kind === 'stack' ? configuration : 'single',
+    })));
+    await mount(); await select(); await pressQ(); await pressX(); await pressD();
+    expect(host.textContent?.includes('Could not check the status of excluded photos. Please reload.')).toBe(configuration === 'unknown');
+    expect(card().querySelector<HTMLButtonElement>('.edited-badge')?.disabled).toBe(true);
+    expect(api.enqueue).not.toHaveBeenCalled();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(host.querySelector('.workspace-probe')).toBeNull();
+    await clickSelector('#home-stacks-tab');
+    expect(host.querySelector('[data-testid="stack-session"]')).toBeNull();
+  });
+  it('displays the updated Japanese warning for an unknown exclusion status', async () => {
+    await i18n.changeLanguage('ja');
+    api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({
+      ...target, excluded: false, configuration: 'unknown',
+    })));
+    await mount();
+    expect(host.textContent).toContain('除外設定された写真の状態を確認できませんでした。再読み込みしてください。');
   });
   it('disables the card Queue control while its exclusion state is unknown', async () => {
     api.exclusions.mockImplementation(async targets => targets.map((target: { kind: string; id: string }) => ({

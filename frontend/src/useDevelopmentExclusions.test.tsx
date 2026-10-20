@@ -50,6 +50,24 @@ it.each(['unknown', 'stacked', 'absent', 'confirmed'] as const)('separates Backe
   expect(JSON.stringify(frontendLogger.getEntries())).not.toContain('private');
 });
 
+it.each(['unknown', 'absent'] as const)('keeps %s Stack actions guarded independently of load warnings', async configuration => {
+  api.read.mockResolvedValue([{ kind: 'stack', id: stackId, excluded: false, configuration }]);
+  await render([stack]);
+  expect(hook.failure).toBe(configuration === 'unknown' ? 'loadFailed' : null);
+  expect(hook.stateFor(stack).known).toBe(false);
+  expect(hook.stateFor(stack).diagnostic.configuration).toBe(configuration);
+});
+
+it('still warns for unknown when another Stack is absent in the same response', async () => {
+  const single = { ...photo, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' };
+  api.read.mockResolvedValue([{ kind: 'stack', id: stackId, excluded: false, configuration: 'absent' },
+    { kind: 'asset', id: single.id, excluded: false, configuration: 'unknown' }]);
+  await render([stack, single]);
+  expect(hook.failure).toBe('loadFailed');
+  expect(hook.stateFor(stack).known).toBe(false);
+  expect(hook.stateFor(single).known).toBe(false);
+});
+
 it.each(['target_unresolved', 'ownership_conflict'] as const)('reports local %s alongside normal Backend status', async reason => {
   const invalid = reason === 'target_unresolved' ? { ...stack, stackMemberIds: undefined } : stack;
   const assets = [invalid, { ...photo, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }];
