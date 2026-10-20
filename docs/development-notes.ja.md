@@ -2,6 +2,14 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## Album内StackのExport正規化完了記録（2026-10-20）
+
+当初、Album内の素材をExportして新しいStack COVERを作ると、新JPEGがAlbumに所属せず、GenzoRoom Album Galleryから写真が消える問題があった。STACK管理でAlbum membershipを最終COVERへ正規化した後は、非COVER source自身がAlbum非所属になるため、Exportもsource単体ではなく、操作時点のStack全memberのAlbum所属の和集合を新JPEGへ継承する必要が生じた。この修正でGenzoRoom Gallery上の表示は戻った。
+
+その後の実機確認では、ImmichネイティブAlbumに新COVERと旧COVERが2枚表示された。GalleryはStack非COVERを除外するため、Galleryの表示件数だけを確認するテストでは、Immichの生Album membershipに旧COVERが残る問題を検出できなかった。ExportでもStack/COVER確定と新COVER検証の後に最終Stackの非COVER memberを継承Albumから外すcleanupを追加し、BackendテストはGallery結果に加えて生のAlbum membershipをassertするよう強化した。
+
+最終確認では、Immich実機でAlbum内Stackの非COVER JPEGを編集・Exportし、新JPEGがCOVERとなり、旧COVERがAlbumから外れ、ImmichネイティブAlbumとGenzoRoom Album Galleryの両方で新COVERだけが表示されることを確認した。実機確認はOK。
+
 ## 色温度補正方向とスライダー表示の統一（2026-10-15）
 
 旧仕様ではTemperatureの正値が青方向、負値が赤方向へ画像を補正していたため、一般的な現像ソフトの補正方向と逆だった。White BalanceとShadows／Midtones／Highlightsの3WAY Temperatureを共通のRGBゲイン方向へ修正し、負値は青・寒色、0は無補正、正値は赤・暖色とした。JPEGのTemperatureは引き続き−100〜+100の相対補正であり、数値をKelvin値として表示・解釈しない。
