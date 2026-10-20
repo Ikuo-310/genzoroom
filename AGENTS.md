@@ -61,6 +61,7 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 ## Stack / Album invariants
 
 - Stack-related Immich Album membership is normalized onto the final COVER. Final non-COVER members leave those Albums except for explicit cases such as reserved Trash assets.
+- Stack Trash eligibility follows the current COVER: a former COVER can be reserved when it is now a non-COVER original Stack member; current COVERs, RAW assets and added non-members remain protected. Trash-reserved Assets are excluded from Album cleanup and keep their Album membership when sent to normal Trash.
 - Dissolving a Stack expands its Album memberships to every released Asset. Export that creates or changes a Stack COVER follows the same normalization.
 - Do not persist Album membership history in GenzoRoom; use Immich's current state when each operation runs.
 - Do not validate Album behavior from GenzoRoom Gallery alone. Gallery hides Stack non-COVER assets, so tests for Album membership writes must inspect raw Immich Album membership too.
