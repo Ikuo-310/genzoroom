@@ -1,5 +1,9 @@
 # GenzoRoom 開発ノート
 
+## LightCraft研究資料の収録（2026-10-20）
+
+[LightCraft研究資料](research/lightcraft/README.md)に基準バージョン、既存Windows/Linux PoC実測、Engine API調査、統合候補と最小PoC案を整理した。既存実測・ソース上の事実・設計提案・未検証事項を区別している。今回は文書収録のみで、GenzoRoom実接続、ビルド・現像の再実行、QNAP実機確認は行っていない。
+
 ## Windows Phase 3C：NSIS配布・正式アイコン（2026-10-19）
 
 Tauriの配布専用overlayに正式名`GenzoRoom`、固定identifier `com.genzoroom.desktop`、NSIS currentUser、`%LOCALAPPDATA%\Programs\GenzoRoom`のアプリ配置、offline Evergreen WebView2導入を設定した。ユーザーデータは正式版の`%LOCALAPPDATA%\GenzoRoom`に独立して保持し、アンインストールの再帰削除とPoC参照を含めない。標準NSISのアプリ終了・Restart Manager経路を除き、Rustホストと共有するMutexをインストール／アンインストール開始前に保持する。起動中・ロック取得失敗時は通常・silentの両方で中止し、アプリを終了しない。過去のPoC identifierや開発設定は変更していない。

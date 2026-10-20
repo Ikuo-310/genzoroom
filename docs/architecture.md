@@ -4,6 +4,10 @@
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
+## LightCraft integration research
+
+LightCraft integration remains unimplemented. The [research index](research/lightcraft/README.md) separates the v0.9.1 baseline, existing Windows/Linux PoC measurements, source-level Engine API findings, proposed integration designs, and unverified work.
+
 ## Gallery manual refresh
 
 The four Gallery browsing tabs are refreshable: Recent, Favorites, Album list/detail, and Calendar year/month/date detail. The leftmost Toolbar `Reload` button and the `homeRefreshPhotos` binding in the central `editShortcuts.ts` registry refresh only the current view. Shift+R uses the existing Home guards and shortcut-label formatter; R still opens Recent, while Ctrl+R / Command+R remain browser reload. STACK management, Export management, and inactive Home do not show or run Gallery Reload.
