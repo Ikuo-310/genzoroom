@@ -6,12 +6,14 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-20
+
 ### Fixed
 
-- Normalize Stack Albums onto the final COVER, preserve Albums for ordinary departures, and expand membership when dissolving Stacks. Stack management now also requires `albumAsset.delete`; trash reservations keep their Album memberships.
-
-- Fixed duplicate Album photos when exporting a non-COVER Stack photo: the developed JPEG inherits the Stack's Albums and replaces the old COVER as their Album member.
-- Prevented duplicate output Assets on Retry after a partial Album addition failure by retaining the Export timestamp for unchanged saved edits.
+- Fixed exported Album photos disappearing by carrying the source Album membership to the developed JPEG before it becomes the Stack COVER.
+- Fixed duplicate Album entries when exporting a non-COVER Stack photo: the new JPEG inherits the current Albums of all Stack members, becomes the COVER, and replaces the old COVER and other non-COVER members in those Albums.
+- Fixed Stack Album inconsistency during COVER and member changes or Stack release; membership now follows the final COVER, is expanded to released photos, and remains intact for Trash reservations.
+- Prevented duplicate output photos when retrying an Export after a partial Album addition failure.
 
 ## [0.2.2] - 2026-10-17
 

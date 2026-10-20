@@ -10,6 +10,8 @@ Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites
 
 最終確認では、Immich実機でAlbum内Stackの非COVER JPEGを編集・Exportし、新JPEGがCOVERとなり、旧COVERがAlbumから外れ、ImmichネイティブAlbumとGenzoRoom Album Galleryの両方で新COVERだけが表示されることを確認した。実機確認はOK。
 
+このAlbum / Stack / Export修正をDocker / GHCR版のbugfix release v0.2.3（2026-10-20）の対象として確定した。Windows desktop版は共通修正を取り込んでいるが、別開発ラインとして今回のリリース対象外。
+
 ## 色温度補正方向とスライダー表示の統一（2026-10-15）
 
 旧仕様ではTemperatureの正値が青方向、負値が赤方向へ画像を補正していたため、一般的な現像ソフトの補正方向と逆だった。White BalanceとShadows／Midtones／Highlightsの3WAY Temperatureを共通のRGBゲイン方向へ修正し、負値は青・寒色、0は無補正、正値は赤・暖色とした。JPEGのTemperatureは引き続き−100〜+100の相対補正であり、数値をKelvin値として表示・解釈しない。
