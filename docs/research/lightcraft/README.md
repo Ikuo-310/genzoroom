@@ -14,6 +14,7 @@ GenzoRoomのLightCraft統合を判断するための研究記録。統合実装�
 | [V0.10.0_CHANGES.md](V0.10.0_CHANGES.md) | v0.9.1からv0.10.0のソース差分、互換性・統合設計への影響、未検証事項と採用済み開発方針 |
 | [GPU_POC_V0.10.0.md](GPU_POC_V0.10.0.md) | Windows 11／Radeon RX 580のDX12常駐MCP実機PoC、GPU／CPUのPreview・Export実測と残存課題 |
 | [PHASE1A_DESIGN.md](PHASE1A_DESIGN.md) | Windows Python Backendによる常駐MCP管理のPhase 1A設計案、現行構造、テスト計画、未検証事項 |
+| [PHASE1B_DESIGN.md](PHASE1B_DESIGN.md) | 未実装のPhase 1B設計：固定v0.10.0のRAW／設定／Preview API、画像応答上限、Session・revision管理、要求集約、実装・テスト計画 |
 
 ## 出典と収録方針
 
