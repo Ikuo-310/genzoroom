@@ -22,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 import uvicorn
 
 from backend_logging import backend_logger
+from lightcraft_runtime import LightCraftManager
 
 DEFAULT_PORT = 3191
 FRONTEND_DIST = (Path(__file__).resolve().parent / "frontend" / "dist" if getattr(sys, "frozen", False)
@@ -84,7 +85,14 @@ class LocalHost:
         async def lifespan(_app):
             # Mounted ASGI apps do not run their lifespan automatically.
             async with backend.router.lifespan_context(backend):
-                yield
+                manager = LightCraftManager()
+                backend.state.lightcraft = manager
+                try:
+                    # RAW availability must not delay JPEG readiness or the desktop handoff.
+                    await manager.start()
+                    yield
+                finally:
+                    await manager.close()
 
         async def api_root(_request):
             # A root static mount otherwise swallows /api before Starlette's slash redirect.

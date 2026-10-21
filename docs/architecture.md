@@ -4,9 +4,30 @@
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
-## LightCraft integration research
+## LightCraft RAW integration foundation (Phase 1A)
 
-LightCraft integration remains unimplemented. The [research index](research/lightcraft/README.md) separates the v0.9.1 baseline, existing Windows/Linux PoC measurements, source-level Engine API findings, proposed integration designs, and unverified work. [Phase 1A design](research/lightcraft/PHASE1A_DESIGN.md) proposes one LightCraft MCP child owned by the Windows Python Backend; it is a pre-implementation design and does not describe shipped behavior.
+The Windows Python Backend now owns an optional, single LightCraft v0.10.0 headless MCP child. This is process and communication infrastructure only; RAW import, development, Preview, Export, Recipe/History integration and UI remain unimplemented. The [research index](research/lightcraft/README.md) retains source findings and prior PoC measurements; [Phase 1A design](research/lightcraft/PHASE1A_DESIGN.md) remains the original pre-implementation design record.
+
+`windows_local.LocalHost` creates `LightCraftManager` in its outer lifespan, after entering the common Backend lifespan. `start()` schedules an owned startup task and returns without waiting for the handshake; JPEG readiness and the desktop handoff do not depend on LightCraft. The manager is kept in `backend.state.lightcraft` and closed before the common lifespan exits. `main.app`, Tauri's managed prepare/shutdown and Export drain, and Docker startup do not create or manage this child. `--check-runtime` returns before LocalHost construction.
+
+`GENZOROOM_LIGHTCRAFT_EXE` must name an absolute executable path; unset configuration or a non-Windows platform is `disabled`. There is no PATH discovery, bundled executable fallback, automatic retry, or automatic restart. The manager hashes the file off the event loop, keeps SHA-256 in `status()`, and records it through the optional structured logger; no registered-hash check is required. The handshake requires server `lightcraft`, version `0.10.0`, and protocol `2025-06-18`; the binary's commit cannot be verified from the handshake. The intended upstream baseline is `a2a41383c4fd62fa85a46ccd00998639221f2d3c`.
+
+The child starts without a shell or visible console as `mcp --headless --compact`, with separate stdin/stdout/stderr pipes. Its environment contains only selected Windows runtime locations and processor metadata, a system-only PATH when SystemRoot is available, `LIGHTCRAFT_GPU_BACKEND=dx12`, and `LIGHTCRAFT_LOG=warn`. Parent credentials, Python/frozen PATH values, and ambient LightCraft/WGPU overrides are not inherited. The parent environment is unchanged. Inherited Windows DLL search-directory behavior in the frozen distribution still needs real executable validation.
+
+`lightcraft_mcp.LightCraftMCP` implements LF-delimited UTF-8 JSON-RPC with one reader, a 1 MiB frame bound, generation/sequence IDs, and one request lock. Parsing runs off the ASGI event loop. The timeout includes lock admission, write backpressure and response wait. Notifications are discarded separately from responses, including arbitrary progress text. JSON-RPC errors and tool `isError` have distinct safe exception types. Invalid UTF-8/JSON/envelopes, oversized/truncated frames, unknown/duplicate IDs, EOF and pipe errors invalidate the connection. Admission timeout sends nothing and preserves the current connection; timeout or cancellation after transmission invalidates it without resending. Closing also releases writes waiting on backpressure.
+
+| State / shared value | Owner, update conditions and invariant |
+|---|---|
+| Manager state | `LightCraftManager`: `stopped → starting → initializing → ready`; failures become `failed`; close uses `stopping → stopped`. An unavailable GPU alone preserves `ready`. Missing configuration/non-Windows stays `disabled`. |
+| Generation / current session | Manager lifecycle lock serializes start/close/restart. Each new process attempt increments generation. Old sessions hold only their own client/tasks and cannot update current manager state. A failed session needs explicit `restart()`. |
+| Pending request / ID | MCP client: one transmitted request at a time, matched by generation/sequence string ID; pending callers fail on disconnect/close/restart. Queued requests never transfer to a new client. |
+| Process and task ownership | One session owner retains spawn, exit watcher, stderr drain and MCP reader through cleanup. Close does not cancel an in-flight spawn and abandon its child; caller cancellation waits for owner cleanup. |
+
+Manager operations are async `start()`, `close()`, `restart()`, `ping()`, `get_gpu_info()` and synchronous immutable `status()`. Initialization sends `initialize → notifications/initialized → ping`. Default bounds are 10 seconds for spawn and for the complete handshake, 5 seconds for ping/basic requests, and 15 seconds for GPU information. `get_gpu_info()` calls `command_run` with `app.gpu` and validates structured `enabled`, `available`, `adapter`, `reason`, `lastFallback`; it does not change GPU preferences or automatically poll. GPU text is returned to the internal caller, never automatically logged. No HTTP endpoint or Frontend control is added.
+
+Failure cleanup first rejects pending work, closes stdin, waits up to 3 seconds for EOF shutdown, then kills if necessary and waits up to 2 seconds. Reader/drain tasks are joined. A child that still cannot be reaped keeps its session/exit watcher owned, reports `lightcraft_cleanup_failed`, and blocks restart; a later close can retry cleanup. Structured lifecycle/failure records contain only selected local codes, generation, version, digest, exit code and stderr byte count. Raw protocol/stderr, paths, credentials, and upstream error text are never copied into diagnostics, even at debug; logging failure does not affect the operation.
+
+Fake-process unit tests and LocalHost/managed shutdown regression tests cover these boundaries. Real LightCraft connection from development/frozen Backend, RX 580 device initialization, driver hangs, and Job Object recovery of the grandchild remain unverified. No LightCraft packaging, licensing finalization, RAW processing or Docker execution test is implied by Phase 1A.
 
 ## Gallery manual refresh
 

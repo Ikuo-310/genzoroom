@@ -37,6 +37,7 @@ def local(tmp_path, monkeypatch):
     monkeypatch.setattr(edit_store, "DB_PATH", storage.DB_PATH)
     monkeypatch.delenv("IMMICH_URL", raising=False)
     monkeypatch.delenv("IMMICH_API_KEY", raising=False)
+    monkeypatch.delenv("GENZOROOM_LIGHTCRAFT_EXE", raising=False)
     return LocalHost(main.app, dist=dist)
 
 
@@ -166,6 +167,80 @@ def test_mounted_lifespan_initializes_one_windows_db_and_cache(local):
         storage.validate_existing_database()
         assert list(storage.STORAGE_ROOT.rglob("genzoroom.db")) == [storage.DB_PATH]
     asyncio.run(exercise())
+
+
+def test_lightcraft_initialization_does_not_delay_backend_and_failure_keeps_jpeg_services(local, tmp_path, monkeypatch):
+    import windows_local
+    from tests.test_lightcraft_runtime import make_manager, assert_reaped
+    from tests.test_lightcraft_mcp import until
+
+    async def exercise():
+        gate = asyncio.Event()
+        manager, children, launches = make_manager(tmp_path, process_options={"version": "0.9.1"}, spawn_gate=gate)
+        monkeypatch.setattr(windows_local, "LightCraftManager", lambda: manager)
+        async with local.application.router.lifespan_context(local.application):
+            assert main.app.state.lightcraft is manager
+            assert main.app.state.export_runtime is not None
+            assert main.app.state.thumbnail_scheduler._task is not None
+            await until(lambda: bool(launches))
+            assert manager.status().state == "starting"
+            async with client(local) as http:
+                await authenticate(http, local)
+                assert (await http.get("/api/health")).json() == {"status": "ok"}
+                gate.set()
+                await until(lambda: manager.status().state == "failed")
+                assert manager.status().error_code == "lightcraft_version_mismatch"
+                assert (await http.get("/api/export/queue")).status_code == 200
+            session = manager._session
+        assert_reaped(session)
+        assert children[0].returncode is not None
+        assert manager.status().state == "stopped"
+    asyncio.run(exercise())
+
+
+def test_lightcraft_is_closed_before_common_lifespan_drains_export(local, tmp_path, monkeypatch):
+    import windows_local
+    from tests.test_lightcraft_runtime import make_manager, assert_reaped
+    from tests.test_lightcraft_mcp import until
+
+    async def exercise():
+        manager, _, _ = make_manager(tmp_path)
+        monkeypatch.setattr(windows_local, "LightCraftManager", lambda: manager)
+        observed = []
+        async with local.application.router.lifespan_context(local.application):
+            await until(lambda: manager.status().state == "ready")
+            session = manager._session
+            runtime = main.app.state.export_runtime
+            original_wait = runtime.wait
+            async def wait():
+                observed.append(manager.status().state)
+                await original_wait()
+            monkeypatch.setattr(runtime, "wait", wait)
+        assert observed == ["stopped"]
+        assert_reaped(session)
+    asyncio.run(exercise())
+
+
+def test_common_backend_lifespan_does_not_construct_lightcraft(local, monkeypatch):
+    import windows_local
+    def unexpected():
+        pytest.fail("common Backend constructed Windows LightCraft manager")
+    monkeypatch.setattr(windows_local, "LightCraftManager", unexpected)
+    async def exercise():
+        async with main.app.router.lifespan_context(main.app):
+            assert main.app.state.export_runtime is not None
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only entry point")
+def test_offline_runtime_check_does_not_construct_lightcraft(monkeypatch):
+    import windows_local
+    import windows_runtime_check
+    def unexpected():
+        pytest.fail("offline check constructed LightCraft manager")
+    monkeypatch.setattr(windows_local, "LightCraftManager", unexpected)
+    monkeypatch.setattr(windows_runtime_check, "check_runtime", lambda: {"status": "ok"})
+    assert windows_local.main(["--check-runtime"]) == 0
 
 
 def test_windows_configuration_happens_before_consumer_imports(tmp_path):

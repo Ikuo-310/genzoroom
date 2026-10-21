@@ -1,5 +1,21 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1A：常駐MCP接続基盤（2026-10-21）
+
+Windows `LocalHost`のlifespanに、Python Backendが1つのLightCraft headless MCPを所有する基盤を追加した。`lightcraft_mcp.py`は改行区切りJSON-RPC、ID対応、通知分離、要求直列化、timeoutと応答検証を担当し、`lightcraft_runtime.py`の`LightCraftManager`は起動、初期化、状態・世代、GPU情報、終了・明示再起動を担当する。内部操作は`start()`、`close()`、`restart()`、`ping()`、`get_gpu_info()`と同期`status()`。HTTP endpointやUIは追加していない。
+
+`GENZOROOM_LIGHTCRAFT_EXE`の絶対pathを使い、未設定・非Windowsではdisabledとする。SHA-256はthreadで計算してstatusと任意診断ログに保持するが、事前登録hashの一致判定はしない。起動時に`lightcraft`／`0.10.0`／protocol `2025-06-18`を検証する。固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`は開発基準で、handshakeからcommitを識別できるわけではない。
+
+Windows readyを待たせない起動taskを所有し、失敗時も共通Backendと既存JPEG処理を継続する。起動・初期化・ready・failed・停止状態とgenerationを管理し、古いreader／watcherが新しいsessionを変更しない。close／restartはlifecycle lockで直列化し、開始途中のspawnも同じownerが受け取って回収する。要求の期限はLock待ちとpipe書込み待ちを含み、送信後のtimeout／取消は接続を失敗させ、自動再送・自動再起動は行わない。
+
+起動引数は`mcp --headless --compact`、shellなし・非表示でstdioを分離する。子envはWindows実行に必要な限定項目を許可し、DX12とwarnログを明示する。親の資格情報、Python設定、PATH、GPU overrideは継承せず、親envも変更しない。stdoutの1 MiB上限、不正JSON／UTF-8、未知ID、EOFを検査し、stderrは本文を保存せず排出する。診断には固定error code、generation、version、digest、終了コード、stderr byte数等だけを記録する。GPU unavailableでも通信readyは維持する。
+
+終了はpending失敗確定、stdin EOF、3秒wait、必要時killと2秒wait、reader／drain回収の順とした。回収不能時は所有sessionとexit watcherを保持し、cleanup失敗を明示して再起動を拒否する。共通`main.py`、Tauriのmanaged shutdown／Export終了待機、Docker、JPEG現像・出力、Recipe／Historyは変更していない。`--check-runtime`では起動しない。[当初の設計記録](research/lightcraft/PHASE1A_DESIGN.md)を保持し、状態の所有者・制約は[architecture](architecture.md#lightcraft-raw-integration-foundation-phase-1a)へ反映した。重要な設計変更はない。
+
+fake process／streamsによる新規MCP・runtimeテストと、既存Windows LocalHost／managed shutdown／runtime関連の計113件が成功した。通常sandbox内では最初の非同期ケースが進まなかったため、同じリポジトリ`.venv`のPython 3.14.5で権限付き実行し、停止したテストprocessも回収した。Frontend／Backend全体suiteやDocker release Smoke Testは実行していない。
+
+実LightCraftの起動・ビルド、Windows配布版のDLL検索、RX 580のGPU初期化、driver停止時の回収、Tauri Job Objectによる孫process回収は今回未確認。RAW import、DevelopSettings、Preview、Export、Recipe、History、暗室UI、Immich連携はPhase 1B以降とする。
+
 ## LightCraft研究資料の収録（2026-10-20）
 
 [LightCraft研究資料](research/lightcraft/README.md)に基準バージョン、既存Windows/Linux PoC実測、Engine API調査、統合候補と最小PoC案を整理した。既存実測・ソース上の事実・設計提案・未検証事項を区別している。今回は文書収録のみで、GenzoRoom実接続、ビルド・現像の再実行、QNAP実機確認は行っていない。
