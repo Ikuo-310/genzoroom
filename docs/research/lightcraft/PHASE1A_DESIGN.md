@@ -242,3 +242,29 @@ Phase 1AではLightCraftプロセスの起動・停止、初期化、ping、GPU�
 - Session ownerのcancel中も別cleanup taskでprocess回収を続ける。exit watcherが同時にcancelされていた場合は新しい`process.wait()` watcherを作成する。外部呼出側のcancelはcleanupとownership更新後に伝播する。
 
 この追記の回帰検証では、実asyncio subprocessによる1 MiB超stdoutの排出、inspection中のclose・期限超過、owner／exit watcher同時cancelを追加し、関連Backendテスト117件が成功した。実LightCraft、RX 580、frozen DLL検索、Job Objectによる孫process回収の未検証状態は変わらない。
+
+## Phase 1A実装・検証結果
+
+この節は実装後の記録であり、上記の調査時点・設計案を遡って書き換えるものではない。
+
+### 実装と監査
+
+Phase 1A実装は`8cf74987d509620434942b00598144879068312e`で完了した。Windows `LocalHost` lifespanがLightCraftManagerを所有し、共通Backend、Docker、Tauri側にはLightCraft固有のプロセス管理を追加しない構成である。LightCraftの失敗時もBackendと既存JPEG機能を継続し、Backend readyはMCP handshakeを待たない。
+
+初回の限定コード監査はHigh 0件／Medium 3件／Low 0件だった。3件はいずれも終了・プロセス回収に関するもので、過大・不正stdoutでprotocol readerが停止した後のpipe排出、ownerとexit watcherが同時にcancelされた場合のcleanup、exe検査・SHA-256計算中にBackend終了要求を処理できない可能性を指摘した。監査後修正commitは`5a9e0f977579a27cd4131ec2034f0ad156519aae`。修正ではprotocol違反後のstdoutを応答として処理せずbounded chunkで排出し、独立cleanup taskと必要時に再作成した`process.wait()` watcherで回収し、UNC pathを拒否した上で10秒期限付きdaemon threadに検査を分離した。修正後の関連Backendテスト117件が成功し、残存High 0件／Medium 0件と報告された。
+
+### Windows開発Backend実機接続
+
+Windows 11、Python 3.14、Windows `LocalHost`／UvicornからLightCraft v0.10.0への接続に成功した。使用した実行fileは`I:\code\raw-test\lightcraft-v0.10.0-gpu-poc\target\release\lightcraft-cli.exe`、SHA-256は`9ca7a0483e3171805670f52af6fff1b8f93f78e10a32933e4f7c4fad872913d1`。CLIのバージョンはv0.10.0で、SHA-256は検証記録として採取したものであり、起動時の必須allowlist判定ではない。
+
+MCP `initialize`、`notifications/initialized`、`ping`が成功し、`status()`は`ready`となった。Backend readyは約90〜108 msで、LightCraft初期化を待たなかった。`get_gpu_info()`は`enabled=true`、`available=true`、adapter `Radeon RX 580 Series (Dx12)`を返した。明示`restart()`はgeneration 1→2で成功した。検証対象CLIを異常終了させたケースではmanagerが`lightcraft_eof`で`failed`となる一方Backendは稼働を続け、明示restartで復旧した。CLI未設定では`disabled`、不在pathでは`lightcraft_executable_missing`となり、どちらもBackend起動を妨げなかった。正常終了とspawn直後のclose競合で、今回起動したCLIと関連reader／stderr／owner／wait taskを回収した。
+
+### 当初設計からの実装上の補足
+
+監査後、実ファイル検査の停止不能I/Oを考慮してUNC pathを受け付けず、絶対pathの検査とhash計算に10秒の期限を設けた。OS I/O中のthreadはasyncio cancellationで停止できないため専用daemon threadを使い、期限後に残存するthreadがある間は追加検査を拒否する。この境界は当初案の絶対path検証・hash測定を維持しつつ、終了を妨げないための変更である。protocol異常後にstdoutを捨て排出することと、独立cleanup taskで終了処理を継続することも監査後に明確化・実装した。
+
+### 未検証事項と次段階
+
+今回のPASS判定は**Phase 1AのWindows開発Backend接続基盤：PASS**であり、開発BackendからのMCP通信、RX 580/DX12情報取得、状態遷移とprocess/task回収を対象とする。Tauriホスト経由の画面起動・通常終了、既存JPEG暗室の実画面操作、PyInstaller配布版のDLL検索と外部CLI起動、Windows Job Objectによる異常終了時の孫process回収は確認していない。RAW import、DevelopSettings、Preview、ExportのGenzoRoom統合も未実装・未検証である。これらをPhase 1AのPASSに含めない。
+
+上記の範囲でWindows開発Backend接続基盤が成立したため、Phase 1Bの設計・実装へ進行可能と判断する。Phase 1BではRAW import、現像設定、Preview、Exportの責務・キャンセル・generation整合性・Recipe／History接続を個別に定義し、Tauri／配布版およびJPEG既存経路との境界を検証する。
