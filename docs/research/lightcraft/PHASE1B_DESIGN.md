@@ -291,3 +291,14 @@ Phase 1Cへの判断事項：
 - UIのdesired controls集約、interaction単位、WebView2画像配信・色管理・Object URL寿命。Backend ticket guardの上に表示直前guardを加える。
 - RAW最終Export、Previewとの設定snapshot共有、停止／ファイル書込み、Immich登録・Stackとの整合。既存JPEG暗室／Export管理の変更は別設計とする。
 - 高解像度Preview、JPEG品質選択、CPU／GPU差の評価。異なる編集schemaが必要という結論になった場合も別途判断し、画像差だけで仕様を分岐させない。
+
+## 実装時の補足（2026-10-21）
+
+当初の調査・設計は上記のまま保持する。実装では以下を具体化した。
+
+- 同一source_key再open時に既存handleを再利用する案は、実装依頼の「開き直した際に旧handleを無効化する」条件を優先し、resident PhotoIdは再利用してもdocument tokenは更新する。selectでの往復はtokenを更新しない。
+- restore_active=Falseの明示resetはresident IDだけでなく保持snapshotも解放し、2枚制限から新しい素材へ進める操作とする。通常resetは非active snapshotも保持し、黙って容量超過分を捨てない。
+- 256回の上限は、適用後readbackで失敗した変更も試行として数える。native Historyの増加を成功回数だけでは制限できないためである。snapshotには復元照合用のfingerprintとcontent hashも保持し、source_key再利用で別原本へ旧設定を誤適用しない。
+- PNG完全性検証にはPillowに加えてchunk CRCとIEND終端の照合を行う。通常RPC／通知の1 MiB、対応Previewのみ8 MiBという境界は維持した。
+
+これらは内部PoCの限定的な補足であり、永続format、JPEGライン、LightCraft本体、公開APIの仕様変更ではない。実LightCraftによるPhase 1BのRAW現像・性能・GPU／CPU検証は未実施である。

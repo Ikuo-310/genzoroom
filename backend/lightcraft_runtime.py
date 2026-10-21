@@ -7,9 +7,11 @@ import os
 from pathlib import Path
 import sys
 import threading
+import shutil
+import tempfile
 
 from backend_logging import backend_logger
-from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_LINE_BYTES, MCPTransportError
+from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_PREVIEW_LINE_BYTES, MCPTransportError
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class _Session:
     stderr_task: asyncio.Task | None = None
     wait_task: asyncio.Task | None = None
     reaped: bool = False
+    temp_directory: Path | None = None
+    temp_root: Path | None = None
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -58,7 +62,9 @@ def lightcraft_log(event, *, level="info", **context):
         pass
 
 
-def child_environment(parent):
+def child_environment(parent, *, gpu_backend="dx12", temp_directory=None):
+    if gpu_backend not in ("dx12", "off"):
+        raise ValueError("lightcraft_invalid_gpu_backend")
     # Copy only OS runtime locations; arbitrary inherited keys can contain credentials.
     allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA",
                "USERPROFILE", "PROGRAMDATA", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
@@ -68,9 +74,37 @@ def child_environment(parent):
     if root:
         # Frozen Python's PATH and developer GPU/compiler overrides do not belong to the CLI.
         result["PATH"] = str(Path(root) / "System32") + os.pathsep + root
-    result["LIGHTCRAFT_GPU_BACKEND"] = "dx12"
+    result["LIGHTCRAFT_GPU_BACKEND"] = gpu_backend
     result["LIGHTCRAFT_LOG"] = "warn"
+    if temp_directory is not None:
+        result["TEMP"] = result["TMP"] = str(temp_directory)
     return result
+
+
+def _check_temp(session):
+    path = session.temp_directory
+    if path is None or session.temp_root is None or path.parent != session.temp_root or \
+            not path.name.startswith(f"genzoroom-lightcraft-{session.generation}-") or \
+            path.is_symlink() or path.resolve() != path:
+        raise LightCraftError("lightcraft_temp_cleanup_failed")
+    return path
+
+
+def _remove_temp(session):
+    path = _check_temp(session)
+    if path.exists():
+        # Never derive a recursive removal target from a child's response or an ambient TEMP.
+        shutil.rmtree(path)
+
+
+def _remove_preview_files(session):
+    path = _check_temp(session)
+    pid = getattr(session.process, "pid", None)
+    if pid is None:
+        return
+    for file in path.glob(f"lightcraft-mcp-{pid}-*-render.png"):
+        if file.is_file() and not file.is_symlink():
+            file.unlink(missing_ok=True)
 
 
 def _executable_info(value):
@@ -147,7 +181,10 @@ async def _await_task_resilient(task):
 
 
 class LightCraftManager:
-    def __init__(self, *, environment=None, platform=None, spawn=None, timeouts=None):
+    def __init__(self, *, environment=None, platform=None, spawn=None, timeouts=None, gpu_backend="dx12"):
+        if gpu_backend not in ("dx12", "off"):
+            raise ValueError("lightcraft_invalid_gpu_backend")
+        self._gpu_backend = gpu_backend
         self._environment = dict(os.environ if environment is None else environment)
         self._platform = sys.platform if platform is None else platform
         self._executable = self._environment.get("GENZOROOM_LIGHTCRAFT_EXE", "").strip()
@@ -206,13 +243,17 @@ class LightCraftManager:
             if self._current(session):
                 self._sha256 = digest
             lightcraft_log("process.artifact", generation=session.generation, sha256=digest)
+            session.temp_root = Path(tempfile.gettempdir()).resolve()
+            session.temp_directory = Path(tempfile.mkdtemp(
+                prefix=f"genzoroom-lightcraft-{session.generation}-", dir=session.temp_root))
             # Never cancel this owner from close: even an in-flight spawn must return its child
             # to the same owner before shutdown can release lifecycle ownership.
             async with asyncio.timeout(self._timeouts.initialize):
                 session.process = await self._spawn(
                     executable, "mcp", "--headless", "--compact", stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    limit=MAX_LINE_BYTES, env=child_environment(self._environment),
+                    limit=MAX_PREVIEW_LINE_BYTES, env=child_environment(self._environment,
+                        gpu_backend=self._gpu_backend, temp_directory=session.temp_directory),
                     creationflags=0x08000000, shell=False,  # CREATE_NO_WINDOW; no Job breakaway.
                 )
             process = session.process
@@ -320,6 +361,13 @@ class LightCraftManager:
             session.stderr_task.cancel()
             await asyncio.gather(session.stderr_task, return_exceptions=True)
         session.reaped = reaped
+        if reaped and session.temp_directory is not None:
+            try:
+                await asyncio.to_thread(_remove_temp, session)
+                session.temp_directory = None
+            except (OSError, LightCraftError):
+                lightcraft_log("process.tempCleanupFailed", level="warn", generation=session.generation,
+                               errorCode="lightcraft_temp_cleanup_failed")
 
     async def _stop_locked(self):
         session = self._session
@@ -331,11 +379,13 @@ class LightCraftManager:
             session.client.abort()
         # Shield cleanup against caller cancellation; lifecycle ownership outlives the caller.
         cancelled = await _await_task_resilient(session.task)
-        if not session.reaped:
+        if not session.reaped or session.temp_directory is not None:
             cleanup_task = asyncio.create_task(self._cleanup(session), name=f"lightcraft-cleanup-{session.generation}")
             cancelled = await _await_task_resilient(cleanup_task) or cancelled
         if not session.reaped:
             raise LightCraftError("lightcraft_cleanup_failed")
+        if session.temp_directory is not None:
+            raise LightCraftError("lightcraft_temp_cleanup_failed")
         self._session = None
         self._state, self._error = "stopped", None
         lightcraft_log("process.stopped", generation=session.generation)
@@ -373,3 +423,46 @@ class LightCraftManager:
             lightcraft_log("gpu.unavailable", level="warn", generation=client.generation,
                            enabled=value["enabled"], available=False)
         return GpuInfo(value["enabled"], value["available"], value["adapter"], value["reason"], value["lastFallback"])
+
+    def _raw_session(self, generation):
+        client = self._ready_client()
+        session = self._session
+        if client.generation != generation or client.failure.done():
+            raise MCPTransportError("lightcraft_session_lost")
+        return session
+
+    def _check_raw_session(self, session):
+        if not self._current(session) or self._state != "ready" or session.client.failure.done():
+            raise MCPTransportError("lightcraft_session_lost")
+
+    def _abort_raw(self, generation, code):
+        session = self._session
+        if session is not None and session.generation == generation and session.client is not None:
+            session.client.abort(code)
+            self._failed(session, code)
+
+    async def _raw_command(self, generation, command, params, *, timeout):
+        if command not in {"library.import", "library.select", "photo.inspect", "develop.get", "develop.set",
+                           "develop.merge", "develop.reset", "app.memoryBudget", "library.memory"}:
+            raise LightCraftError("lightcraft_unsupported_raw_command")
+        session = self._raw_session(generation)
+        result = await session.client.call_tool("command_run", {"id": command, "params": params}, timeout=timeout)
+        self._check_raw_session(session)
+        return result
+
+    async def _raw_preview(self, generation, photo_id, max_side, *, timeout):
+        session = self._raw_session(generation)
+        try:
+            result = await session.client.call_tool_result("render_preview", {
+                "id": photo_id, "max_side": max_side, "format": "png"}, timeout=timeout)
+            self._check_raw_session(session)
+            return result
+        finally:
+            # A completed reply means the synchronous helper stopped writing its temporary PNG.
+            # On disconnect only the process owner may remove files, after reaping the child.
+            if self._current(session) and self._state == "ready" and not session.client.failure.done():
+                try:
+                    await asyncio.to_thread(_remove_preview_files, session)
+                except (OSError, LightCraftError):
+                    lightcraft_log("preview.tempCleanupFailed", level="warn", generation=generation,
+                                   errorCode="lightcraft_temp_cleanup_failed")

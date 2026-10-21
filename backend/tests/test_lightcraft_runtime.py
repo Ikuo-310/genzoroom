@@ -474,3 +474,67 @@ def test_failed_kill_retains_ownership_and_blocks_restart(tmp_path):
         await manager.close()
         assert_reaped(session)
     asyncio.run(run())
+
+
+def test_private_temp_and_internal_cpu_setting_reaped_across_generations(tmp_path):
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    async def run():
+        manager, children, launches = make_manager(tmp_path)
+        manager._gpu_backend = "off"
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        session = manager._session
+        path = session.temp_directory
+        try:
+            env = launches[0][1]["env"]
+            assert env["TEMP"] == env["TMP"] == str(path)
+            assert env["LIGHTCRAFT_GPU_BACKEND"] == "off"
+            assert launches[0][1]["limit"] == MAX_PREVIEW_LINE_BYTES
+            children[0].pid = 999
+            (path / "lightcraft-mcp-999-0-render.png").write_bytes(b"orphan")
+            (path / "other-owner.png").write_bytes(b"keep during operation")
+            from lightcraft_runtime import _remove_preview_files
+            _remove_preview_files(session)
+            assert not (path / "lightcraft-mcp-999-0-render.png").exists()
+            assert (path / "other-owner.png").exists()
+            await manager.restart()
+            await until(lambda: manager.status().state == "ready")
+            assert not path.exists() and manager._session.temp_directory != path
+            new_path = manager._session.temp_directory
+            assert_reaped(session)
+        finally:
+            await manager.close()
+        assert not new_path.exists()
+    asyncio.run(run())
+
+
+def test_temp_cleanup_never_follows_an_unowned_target(tmp_path):
+    from lightcraft_runtime import _Session, _remove_temp, child_environment
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel").write_bytes(b"keep")
+    session = _Session(1, temp_directory=outside, temp_root=tmp_path / "different-root")
+    with pytest.raises(LightCraftError, match="lightcraft_temp_cleanup_failed"):
+        _remove_temp(session)
+    assert (outside / "sentinel").read_bytes() == b"keep"
+    with pytest.raises(ValueError, match="lightcraft_invalid_gpu_backend"):
+        LightCraftManager(gpu_backend="vulkan")
+    with pytest.raises(ValueError):
+        child_environment({}, gpu_backend="vulkan")
+
+
+def test_generation_guard_rejects_old_raw_commands_without_sending(tmp_path):
+    async def run():
+        manager, children, _ = make_manager(tmp_path)
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        await manager.restart()
+        await until(lambda: manager.status().state == "ready")
+        sent = len(children[1].stdin.messages)
+        try:
+            with pytest.raises(MCPTransportError, match="lightcraft_session_lost"):
+                await manager._raw_command(1, "develop.get", {"id": 1}, timeout=1)
+            assert len(children[1].stdin.messages) == sent
+        finally:
+            await manager.close()
+    asyncio.run(run())

@@ -5,6 +5,7 @@ import json
 
 
 MAX_LINE_BYTES = 1024 * 1024
+MAX_PREVIEW_LINE_BYTES = 8 * MAX_LINE_BYTES
 PROTOCOL_VERSION = "2025-06-18"
 
 
@@ -43,6 +44,7 @@ class LightCraftMCP:
         self._sequence = 0
         self._lock = asyncio.Lock()
         self._pending = {}
+        self._response_limits = {}
         self._error = None
         self._draining_stdout = False
         # A result (rather than an exception) remains safe if failure precedes monitoring.
@@ -76,11 +78,15 @@ class LightCraftMCP:
                 except asyncio.IncompleteReadError as error:
                     code = "lightcraft_truncated_response" if error.partial else "lightcraft_eof"
                     break
-                if len(line) > MAX_LINE_BYTES:
+                if len(line) > max(self._response_limits.values(), default=MAX_LINE_BYTES):
                     code = "lightcraft_response_too_large"
                     self._draining_stdout = True
                     break
                 if not line.strip():
+                    if len(line) > MAX_LINE_BYTES:
+                        code = "lightcraft_response_too_large"
+                        self._draining_stdout = True
+                        break
                     continue
                 try:
                     # Parsing a bounded but potentially large frame must not stall ASGI.
@@ -98,6 +104,10 @@ class LightCraftMCP:
                     self._draining_stdout = True
                     break
                 if "id" not in message:
+                    if len(line) > MAX_LINE_BYTES:
+                        code = "lightcraft_response_too_large"
+                        self._draining_stdout = True
+                        break
                     if not isinstance(message.get("method"), str) or \
                             not isinstance(message.get("params", {}), dict) or \
                             "result" in message or "error" in message:
@@ -109,6 +119,11 @@ class LightCraftMCP:
                 request_id = message["id"]
                 if type(request_id) is not str or request_id not in self._pending:
                     code = "lightcraft_unknown_id"
+                    self._draining_stdout = True
+                    break
+                if len(line) > self._response_limits[request_id] or (
+                        len(line) > MAX_LINE_BYTES and "error" in message):
+                    code = "lightcraft_response_too_large"
                     self._draining_stdout = True
                     break
                 future = self._pending[request_id]
@@ -129,6 +144,14 @@ class LightCraftMCP:
                         break
                     future.set_exception(MCPRpcError(error["code"]))
                 else:
+                    if len(line) > MAX_LINE_BYTES:
+                        result = message["result"]
+                        if not isinstance(result, dict) or result.get("isError") is not False or \
+                                not isinstance(result.get("content"), list) or not any(
+                                    isinstance(c, dict) and c.get("type") == "image" for c in result["content"]):
+                            code = "lightcraft_response_too_large"
+                            self._draining_stdout = True
+                            break
                     future.set_result(message["result"])
         except asyncio.CancelledError:
             return
@@ -157,7 +180,7 @@ class LightCraftMCP:
             draining.cancel()
             await asyncio.gather(draining, return_exceptions=True)
 
-    async def request(self, method, params=None, *, timeout=5):
+    async def request(self, method, params=None, *, timeout=5, _preview_response=False):
         future = None
         request_id = None
         sent = False
@@ -173,6 +196,7 @@ class LightCraftMCP:
                     encoded = json.dumps(packet, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
                     future = asyncio.get_running_loop().create_future()
                     self._pending[request_id] = future
+                    self._response_limits[request_id] = MAX_PREVIEW_LINE_BYTES if _preview_response else MAX_LINE_BYTES
                     sent = True
                     self.writer.write(encoded)
                     await self._drain()
@@ -192,6 +216,7 @@ class LightCraftMCP:
         finally:
             if request_id is not None:
                 self._pending.pop(request_id, None)
+                self._response_limits.pop(request_id, None)
             if future is not None:
                 if not future.done():
                     future.cancel()
@@ -238,14 +263,20 @@ class LightCraftMCP:
             raise MCPTransportError("lightcraft_invalid_ping")
 
     async def call_tool(self, name, arguments, *, timeout=5):
-        result = await self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
+        result = await self.call_tool_result(name, arguments, timeout=timeout)
+        return result.get("structuredContent")
+
+    async def call_tool_result(self, name, arguments, *, timeout=5):
+        # Only the image helper receives a larger budget; callers cannot enlarge arbitrary RPCs.
+        result = await self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout,
+                                    _preview_response=name == "render_preview")
         if not isinstance(result, dict) or type(result.get("isError")) is not bool or \
                 not isinstance(result.get("content"), list):
             self.abort("lightcraft_invalid_tool_response")
             raise MCPTransportError("lightcraft_invalid_tool_response")
         if result["isError"]:
             raise MCPToolError()
-        return result.get("structuredContent")
+        return result
 
     async def close(self, *, drain_stdout=False, wait_stdout=False):
         self.abort()

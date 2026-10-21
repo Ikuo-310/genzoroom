@@ -23,6 +23,7 @@ import uvicorn
 
 from backend_logging import backend_logger
 from lightcraft_runtime import LightCraftManager
+from lightcraft_raw import LightCraftRawSession
 
 DEFAULT_PORT = 3191
 FRONTEND_DIST = (Path(__file__).resolve().parent / "frontend" / "dist" if getattr(sys, "frozen", False)
@@ -87,12 +88,17 @@ class LocalHost:
             async with backend.router.lifespan_context(backend):
                 manager = LightCraftManager()
                 backend.state.lightcraft = manager
+                raw = LightCraftRawSession(manager)
+                backend.state.lightcraft_raw = raw
                 try:
                     # RAW availability must not delay JPEG readiness or the desktop handoff.
                     await manager.start()
                     yield
                 finally:
-                    await manager.close()
+                    try:
+                        await raw.close()
+                    finally:
+                        await manager.close()
 
         async def api_root(_request):
             # A root static mount otherwise swallows /api before Starlette's slash redirect.

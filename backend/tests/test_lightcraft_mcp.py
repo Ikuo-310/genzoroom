@@ -186,6 +186,75 @@ def test_real_subprocess_oversized_stdout_is_rejected_and_drained():
     asyncio.run(run())
 
 
+def test_preview_envelope_above_one_mib_preserves_existing_tool_contract():
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    async def run():
+        reader = asyncio.StreamReader(limit=MAX_PREVIEW_LINE_BYTES)
+        result = {"isError": False, "content": [{"type": "image", "data": "A" * (MAX_LINE_BYTES + 20),
+                                                "mimeType": "image/png"}]}
+        writer = PipeWriter(lambda m: reply(reader, m, result))
+        client = LightCraftMCP(reader, writer, 9)
+        try:
+            envelope = await client.call_tool_result("render_preview", {"id": 1})
+            assert len(envelope["content"][0]["data"]) > MAX_LINE_BYTES
+            assert await client.call_tool("render_preview", {"id": 1}) is None
+            assert not client._pending and not client._response_limits
+        finally:
+            await client.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("mode", ["ordinary", "notification", "unknown", "tool_error", "not_image", "too_big"])
+def test_preview_budget_is_not_granted_to_other_messages(mode):
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    async def run():
+        reader = asyncio.StreamReader(limit=MAX_PREVIEW_LINE_BYTES)
+        result = {"isError": False, "content": [{"type": "image", "data": "A" * (MAX_LINE_BYTES + 20)}]}
+        def respond(message):
+            if mode == "notification":
+                reader.feed_data(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                              "params": {"message": "x" * MAX_LINE_BYTES}}).encode() + b"\n")
+            elif mode == "unknown":
+                reply(reader, {"id": "old:99"}, result)
+            else:
+                if mode == "tool_error": result["isError"] = True
+                if mode == "not_image": result["content"][0]["type"] = "text"
+                if mode == "too_big": result["content"][0]["data"] = "x" * MAX_PREVIEW_LINE_BYTES
+                reply(reader, message, result)
+        writer = PipeWriter(respond)
+        client = LightCraftMCP(reader, writer, 9)
+        try:
+            with pytest.raises(MCPTransportError):
+                await client.call_tool_result("command_run" if mode == "ordinary" else "render_preview", {})
+            assert client.failure.done()
+        finally:
+            await client.close()
+    asyncio.run(run())
+
+
+def test_real_subprocess_over_eight_mib_preview_is_drained_and_reaped():
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    async def run():
+        process = await asyncio.create_subprocess_exec(sys.executable, "-c",
+            f"import sys; sys.stdin.buffer.readline(); sys.stdout.buffer.write(b'x' * {MAX_PREVIEW_LINE_BYTES + 1} + b'\\n'); sys.stdout.flush()",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            limit=MAX_PREVIEW_LINE_BYTES)
+        client = LightCraftMCP(process.stdout, process.stdin, 1)
+        waiting = asyncio.create_task(process.wait())
+        try:
+            with pytest.raises(MCPTransportError, match="lightcraft_response_too_large"):
+                await client.call_tool_result("render_preview", {}, timeout=5)
+            await asyncio.wait_for(waiting, 5)
+            await client.close(wait_stdout=True)
+            assert process.returncode == 0 and client._reader_task.done()
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            await client.close()
+    asyncio.run(run())
+
+
 def test_serialization_and_waiting_timeout_do_not_poison_current_request():
     async def run():
         reader = asyncio.StreamReader()

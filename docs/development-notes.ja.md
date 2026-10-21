@@ -1,5 +1,19 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1B：Backend内部RAW操作・Preview（2026-10-21）
+
+設計確定commit `c1e2141068f097bbc2778d22c3f05ac3323cafb7`を基準に、Windows LocalHostが既存LightCraftManagerと同じlifespanで所有する`LightCraftRawSession`を追加した。RAW未使用時は追加task、import、GPU照会、memoryBudget設定を開始しない。HTTP endpoint、UI、Recipe／History永続化、Export、Immich／Stack操作は追加せず、共通Backend・Docker・Tauri・JPEG処理は変更していない。
+
+内部Python操作はopen_raw、select、get_settings、set_controls、merge_settings、restore_settings、request_preview、reset_session、close、status。単一ファイルのmode addでimportし、photo.inspectのRAW種別・preview_only・寸法・content hashを確認する。原本・sidecarを書き換えるcommandやXMP auto-writeは有効にしない。複数RPCの操作lockで選択→設定適用→develop.getを直列化し、送信値ではなくreadbackを正本にする。全復元はreset→merge→getを照合し、processとWB scaleを保持する。途中失敗はdesynchronized、MCP切断はlostとして扱う。
+
+通常RPCの1 MiB上限を維持し、render_previewの一致する応答だけ8 MiBまで許容した。PreviewはPNG長辺1024pxまで、画像5 MiB、metadata 16 KiB、1,048,576画素まで。Base64、contentとid／寸法、PNG chunkのCRCと終端、単一frame、Pillow verify／loadを検査する。実行中1件＋最新待機1件をBackend workerが所有し、generation、document token、selection epoch、requested／applied revision、sequenceで古い画像を破棄する。ticketのawait取消は送信済みMCPをcancelしない。画像検査は論理期限後も所有workerの完了を待ち、次の検査を重ねない。
+
+PoC制限としてRAW／snapshot最大2枚、変更試行最大256回／generationを採用した。設定適用後のreadback失敗もnative Historyを増やし得るので試行に数える。明示resetは原本のfingerprintとcontent hashを照合して確定snapshotを復元する。restore_active=Falseは保持snapshotを明示解放する操作とし、再openは同一原本でもtokenを更新して旧handleを無効にする。世代別の私有TEMP／TMPを子processに渡し、通常応答後のPNG残骸と回収後directoryだけを掃除する。内部constructorのGPU指定はdx12（既定）／offだけで、親の任意GPU overrideは引き継がない。
+
+Python 3.14のリポジトリ`.venv`で、RAW／MCP／runtime／Windows LocalHost／managed shutdown／Windows runtimeの関連Backendテスト185件が成功した（10.66秒）。fake MCPのreadback、連続Preview・stale破棄、画像検査中cancel、検査中close、復元失敗、256回制限、専用TEMPと実asyncio subprocessの8 MiB超stdout回収を含む。通常sandboxではWindows非同期テストが進まなかったため、今回のテストprocessだけを回収し、同じPython環境の権限付き実行で確認した。Backend全suite、Frontend／Tauri buildは実施していない。
+
+今回は実LightCraftのRAW現像PoCを行っていない。GenzoRoom経由での2素材のimport・反復Preview・全設定復元、RX 580とCPU固定、実GPU障害fallback、時間・メモリ計測は次工程の未検証事項である。Tauri画面起動・JPEG暗室実画面操作、PyInstaller、Job Objectによる孫process回収も未検証のまま。Phase 1CのUI・永続化・最終Exportを完了したという意味ではない。
+
 ## RAW現像統合 Phase 1A：常駐MCP接続基盤（2026-10-21）
 
 実装commit `8cf74987d509620434942b00598144879068312e`で、Windows `LocalHost`のlifespanにPython Backendが1つのLightCraft headless MCPを所有する基盤を追加した。`lightcraft_mcp.py`は改行区切りJSON-RPC、ID対応、通知分離、要求直列化、timeoutと応答検証を担当し、`lightcraft_runtime.py`の`LightCraftManager`は起動、初期化、状態・generation、GPU情報、終了・明示再起動を担当する。内部操作は`start()`、`close()`、`restart()`、`ping()`、`get_gpu_info()`と同期`status()`。HTTP endpointやUIは追加していない。

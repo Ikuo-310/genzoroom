@@ -180,6 +180,8 @@ def test_lightcraft_initialization_does_not_delay_backend_and_failure_keeps_jpeg
         monkeypatch.setattr(windows_local, "LightCraftManager", lambda: manager)
         async with local.application.router.lifespan_context(local.application):
             assert main.app.state.lightcraft is manager
+            assert main.app.state.lightcraft_raw.manager is manager
+            assert main.app.state.lightcraft_raw._worker is None
             assert main.app.state.export_runtime is not None
             assert main.app.state.thumbnail_scheduler._task is not None
             await until(lambda: bool(launches))
@@ -191,10 +193,13 @@ def test_lightcraft_initialization_does_not_delay_backend_and_failure_keeps_jpeg
                 await until(lambda: manager.status().state == "failed")
                 assert manager.status().error_code == "lightcraft_version_mismatch"
                 assert (await http.get("/api/export/queue")).status_code == 200
+                assert main.app.state.lightcraft_raw._generation is None
+                assert not any(m.get("method") == "tools/call" for m in children[0].stdin.messages)
             session = manager._session
         assert_reaped(session)
         assert children[0].returncode is not None
         assert manager.status().state == "stopped"
+        assert main.app.state.lightcraft_raw.status().state == "stopped"
     asyncio.run(exercise())
 
 
@@ -214,6 +219,7 @@ def test_lightcraft_is_closed_before_common_lifespan_drains_export(local, tmp_pa
             original_wait = runtime.wait
             async def wait():
                 observed.append(manager.status().state)
+                assert main.app.state.lightcraft_raw.status().state == "stopped"
                 await original_wait()
             monkeypatch.setattr(runtime, "wait", wait)
         assert observed == ["stopped"]
