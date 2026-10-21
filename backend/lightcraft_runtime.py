@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import sys
+import threading
 
 from backend_logging import backend_logger
 from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_LINE_BYTES, MCPTransportError
@@ -76,6 +77,8 @@ def _executable_info(value):
     path = Path(value)
     if not path.is_absolute():
         raise LightCraftError("lightcraft_invalid_path")
+    if os.name == "nt" and str(path).startswith(("\\\\", "//")):
+        raise LightCraftError("lightcraft_network_path_unsupported")
     try:
         if not path.is_file():
             raise LightCraftError("lightcraft_executable_missing")
@@ -84,6 +87,63 @@ def _executable_info(value):
     except OSError:
         raise LightCraftError("lightcraft_executable_unreadable") from None
     return str(path), digest
+
+
+async def _inspect_executable(value, stop, register_thread):
+    """Run potentially stalled filesystem work outside the loop and beyond its executor shutdown."""
+    loop = asyncio.get_running_loop()
+    result = loop.create_future()
+
+    def inspect():
+        try:
+            outcome = (_executable_info(value), None)
+        except LightCraftError as error:
+            outcome = (None, error.code)
+        except Exception:
+            outcome = (None, "lightcraft_executable_unreadable")
+        try:
+            loop.call_soon_threadsafe(_deliver, outcome)
+        except RuntimeError:
+            pass
+
+    def _deliver(outcome):
+        if not result.done():
+            result.set_result(outcome)
+
+    thread = threading.Thread(target=inspect, name="lightcraft-exe-inspection", daemon=True)
+    register_thread(thread)
+    thread.start()
+    stop_task = asyncio.create_task(stop.wait())
+    try:
+        done, _ = await asyncio.wait((result, stop_task), return_when=asyncio.FIRST_COMPLETED)
+        if stop_task in done:
+            return None
+        value, error_code = result.result()
+        if error_code:
+            raise LightCraftError(error_code)
+        return value
+    finally:
+        stop_task.cancel()
+        await asyncio.gather(stop_task, return_exceptions=True)
+
+
+async def _await_task_resilient(task):
+    """Finish owned cleanup even when the awaiting lifecycle task is cancelled."""
+    cancelled = False
+    current = asyncio.current_task()
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.done() and task.cancelled() and current.cancelling() == 0:
+                break
+            cancelled = True
+            current.uncancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    return cancelled
 
 
 class LightCraftManager:
@@ -95,6 +155,7 @@ class LightCraftManager:
         self._timeouts = timeouts or LightCraftTimeouts()
         self._lock = asyncio.Lock()
         self._session = None
+        self._inspection_thread = None
         self._generation = 0
         self._state = "stopped" if self._platform == "win32" and self._executable else "disabled"
         self._version = self._sha256 = self._error = None
@@ -121,6 +182,11 @@ class LightCraftManager:
     def _current(self, session):
         return self._session is session and self._generation == session.generation
 
+    def _register_inspection(self, thread):
+        if self._inspection_thread is not None and self._inspection_thread.is_alive():
+            raise LightCraftError("lightcraft_inspection_busy")
+        self._inspection_thread = thread
+
     def _failed(self, session, code):
         if self._current(session) and not session.stop.is_set():
             self._state, self._error = "failed", code
@@ -128,8 +194,13 @@ class LightCraftManager:
 
     async def _run(self, session):
         stop_task = None
+        cancelled = False
         try:
-            executable, digest = await asyncio.to_thread(_executable_info, self._executable)
+            async with asyncio.timeout(self._timeouts.initialize):
+                inspected = await _inspect_executable(self._executable, session.stop, self._register_inspection)
+                if inspected is None:
+                    return
+                executable, digest = inspected
             if session.stop.is_set():
                 return
             if self._current(session):
@@ -137,12 +208,13 @@ class LightCraftManager:
             lightcraft_log("process.artifact", generation=session.generation, sha256=digest)
             # Never cancel this owner from close: even an in-flight spawn must return its child
             # to the same owner before shutdown can release lifecycle ownership.
-            session.process = await asyncio.wait_for(self._spawn(
-                executable, "mcp", "--headless", "--compact", stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                limit=MAX_LINE_BYTES, env=child_environment(self._environment),
-                creationflags=0x08000000, shell=False,  # CREATE_NO_WINDOW; no Job breakaway.
-            ), self._timeouts.initialize)
+            async with asyncio.timeout(self._timeouts.initialize):
+                session.process = await self._spawn(
+                    executable, "mcp", "--headless", "--compact", stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    limit=MAX_LINE_BYTES, env=child_environment(self._environment),
+                    creationflags=0x08000000, shell=False,  # CREATE_NO_WINDOW; no Job breakaway.
+                )
             process = session.process
             session.wait_task = asyncio.create_task(process.wait(), name=f"lightcraft-exit-{session.generation}")
             session.stderr_task = asyncio.create_task(self._drain_stderr(session), name=f"lightcraft-stderr-{session.generation}")
@@ -173,13 +245,19 @@ class LightCraftManager:
             self._failed(session, error.code)
         except TimeoutError:
             self._failed(session, "lightcraft_startup_timeout")
+        except asyncio.CancelledError:
+            cancelled = True
+            session.stop.set()
         except Exception:
             self._failed(session, "lightcraft_start_failed")
         finally:
             if stop_task is not None:
                 stop_task.cancel()
                 await asyncio.gather(stop_task, return_exceptions=True)
-            await self._cleanup(session)
+            cleanup_task = asyncio.create_task(self._cleanup(session), name=f"lightcraft-cleanup-{session.generation}")
+            cancelled = await _await_task_resilient(cleanup_task) or cancelled
+        if cancelled:
+            raise asyncio.CancelledError()
 
     async def _drain_stderr(self, session):
         count = 0
@@ -197,7 +275,7 @@ class LightCraftManager:
 
     async def _cleanup(self, session):
         if session.client is not None:
-            await session.client.close()
+            await session.client.close(drain_stdout=True)
         process = session.process
         if process is not None and session.client is None and process.stdin is not None:
             # Even a failure before client construction must deliver EOF to the owned child.
@@ -207,12 +285,13 @@ class LightCraftManager:
                 pass
         reaped = process is None
         if process is not None:
-            if session.wait_task is None:
-                session.wait_task = asyncio.create_task(process.wait())
+            if session.wait_task is None or session.wait_task.cancelled():
+                # asyncio.run may cancel the monitor while the subprocess transport still owns the child.
+                session.wait_task = asyncio.create_task(process.wait(), name=f"lightcraft-reap-{session.generation}")
             try:
                 await asyncio.wait_for(asyncio.shield(session.wait_task), self._timeouts.shutdown)
                 reaped = True
-            except (TimeoutError, OSError):
+            except (asyncio.CancelledError, Exception):
                 lightcraft_log("process.killRequired", level="warn", generation=session.generation)
                 try:
                     process.kill()
@@ -220,10 +299,13 @@ class LightCraftManager:
                     pass
                 except OSError:
                     pass
+                if session.wait_task.cancelled() or (
+                        session.wait_task.done() and session.wait_task.exception() is not None):
+                    session.wait_task = asyncio.create_task(process.wait(), name=f"lightcraft-reap-{session.generation}")
                 try:
                     await asyncio.wait_for(asyncio.shield(session.wait_task), self._timeouts.kill)
                     reaped = True
-                except (TimeoutError, OSError):
+                except (asyncio.CancelledError, Exception):
                     # Retain the session: restart must not launch another unowned process.
                     if self._current(session):
                         self._state, self._error = "failed", "lightcraft_cleanup_failed"
@@ -232,6 +314,8 @@ class LightCraftManager:
             if reaped:
                 lightcraft_log("process.reaped", level="debug", generation=session.generation,
                                exitCode=process.returncode)
+        if reaped and session.client is not None:
+            await session.client.close(wait_stdout=True)
         if session.stderr_task is not None:
             session.stderr_task.cancel()
             await asyncio.gather(session.stderr_task, return_exceptions=True)
@@ -246,14 +330,10 @@ class LightCraftManager:
         if session.client is not None:
             session.client.abort()
         # Shield cleanup against caller cancellation; lifecycle ownership outlives the caller.
-        cancelled = False
-        try:
-            await asyncio.shield(session.task)
-        except asyncio.CancelledError:
-            cancelled = True
-            await asyncio.shield(session.task)
+        cancelled = await _await_task_resilient(session.task)
         if not session.reaped:
-            await self._cleanup(session)
+            cleanup_task = asyncio.create_task(self._cleanup(session), name=f"lightcraft-cleanup-{session.generation}")
+            cancelled = await _await_task_resilient(cleanup_task) or cancelled
         if not session.reaped:
             raise LightCraftError("lightcraft_cleanup_failed")
         self._session = None

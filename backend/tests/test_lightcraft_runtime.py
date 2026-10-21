@@ -1,12 +1,14 @@
 import asyncio
 import hashlib
 import json
+import threading
 
 import pytest
 
 from backend_logging import backend_logger
 from lightcraft_mcp import LightCraftError, MCPTransportError, PROTOCOL_VERSION
 from lightcraft_runtime import LightCraftManager, LightCraftTimeouts, child_environment
+import lightcraft_runtime
 from tests.test_lightcraft_mcp import PipeWriter, reply, until
 
 
@@ -259,6 +261,81 @@ def test_close_during_spawn_waits_for_ownership_then_reaps(tmp_path):
         assert len(children) == 1 and not children[0].stdin.messages
         assert_reaped(session)
         assert manager.status().state == "stopped"
+    asyncio.run(run())
+
+
+def test_close_during_executable_inspection_does_not_wait_for_worker(tmp_path, monkeypatch):
+    async def run():
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        original = lightcraft_runtime._executable_info
+        def slow_inspection(value):
+            entered.set()
+            release.wait(2)
+            try:
+                return original(value)
+            finally:
+                finished.set()
+        monkeypatch.setattr(lightcraft_runtime, "_executable_info", slow_inspection)
+        manager, children, launches = make_manager(tmp_path)
+        await manager.start()
+        session = manager._session
+        try:
+            await until(entered.is_set)
+            async with asyncio.timeout(.5):
+                await manager.close()
+            assert manager.status().state == "stopped"
+            assert not children and not launches and session.reaped
+        finally:
+            release.set()
+        await until(finished.is_set)
+    asyncio.run(run())
+
+
+def test_executable_inspection_deadline_fails_without_spawning(tmp_path, monkeypatch):
+    async def run():
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        original = lightcraft_runtime._executable_info
+        def slow_inspection(value):
+            entered.set()
+            release.wait(2)
+            try:
+                return original(value)
+            finally:
+                finished.set()
+        monkeypatch.setattr(lightcraft_runtime, "_executable_info", slow_inspection)
+        manager, children, launches = make_manager(tmp_path)
+        await manager.start()
+        session = manager._session
+        try:
+            await until(entered.is_set)
+            await session.task
+            assert manager.status().state == "failed"
+            assert manager.status().error_code == "lightcraft_startup_timeout"
+            assert not children and not launches and session.reaped
+        finally:
+            release.set()
+        await until(finished.is_set)
+        await manager.close()
+    asyncio.run(run())
+
+
+def test_cancelling_owner_and_exit_watcher_still_kills_and_reaps_child(tmp_path):
+    async def run():
+        manager, children, _ = make_manager(tmp_path, process_options={"ignore_eof": True})
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        session = manager._session
+        session.wait_task.cancel()
+        session.task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await session.task
+        assert session.reaped and children[0].kills == 1
+        assert session.wait_task.done() and not session.wait_task.cancelled()
+        assert session.client._reader_task.done() and session.stderr_task.done()
+        assert manager._session is session
+        await manager.close()
+        assert manager.status().state == "stopped" and manager._session is None
+        assert_reaped(session)
     asyncio.run(run())
 
 

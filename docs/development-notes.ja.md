@@ -4,15 +4,19 @@
 
 Windows `LocalHost`のlifespanに、Python Backendが1つのLightCraft headless MCPを所有する基盤を追加した。`lightcraft_mcp.py`は改行区切りJSON-RPC、ID対応、通知分離、要求直列化、timeoutと応答検証を担当し、`lightcraft_runtime.py`の`LightCraftManager`は起動、初期化、状態・世代、GPU情報、終了・明示再起動を担当する。内部操作は`start()`、`close()`、`restart()`、`ping()`、`get_gpu_info()`と同期`status()`。HTTP endpointやUIは追加していない。
 
-`GENZOROOM_LIGHTCRAFT_EXE`の絶対pathを使い、未設定・非Windowsではdisabledとする。SHA-256はthreadで計算してstatusと任意診断ログに保持するが、事前登録hashの一致判定はしない。起動時に`lightcraft`／`0.10.0`／protocol `2025-06-18`を検証する。固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`は開発基準で、handshakeからcommitを識別できるわけではない。
+`GENZOROOM_LIGHTCRAFT_EXE`の絶対pathを使い、未設定・非Windowsではdisabledとする。UNC pathはネットワークI/Oが停止し得るため拒否する。SHA-256検査は10秒の起動期限内に専用daemon threadで行い、期限超過・close後もBackendやasyncio既定executorの終了を妨げない。検査中workerが残る間は次の検査を拒否する。SHA-256はstatusと任意診断ログに保持するが、事前登録hashの一致判定はしない。起動時に`lightcraft`／`0.10.0`／protocol `2025-06-18`を検証する。固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`は開発基準で、handshakeからcommitを識別できるわけではない。
 
 Windows readyを待たせない起動taskを所有し、失敗時も共通Backendと既存JPEG処理を継続する。起動・初期化・ready・failed・停止状態とgenerationを管理し、古いreader／watcherが新しいsessionを変更しない。close／restartはlifecycle lockで直列化し、開始途中のspawnも同じownerが受け取って回収する。要求の期限はLock待ちとpipe書込み待ちを含み、送信後のtimeout／取消は接続を失敗させ、自動再送・自動再起動は行わない。
 
 起動引数は`mcp --headless --compact`、shellなし・非表示でstdioを分離する。子envはWindows実行に必要な限定項目を許可し、DX12とwarnログを明示する。親の資格情報、Python設定、PATH、GPU overrideは継承せず、親envも変更しない。stdoutの1 MiB上限、不正JSON／UTF-8、未知ID、EOFを検査し、stderrは本文を保存せず排出する。診断には固定error code、generation、version、digest、終了コード、stderr byte数等だけを記録する。GPU unavailableでも通信readyは維持する。
 
-終了はpending失敗確定、stdin EOF、3秒wait、必要時killと2秒wait、reader／drain回収の順とした。回収不能時は所有sessionとexit watcherを保持し、cleanup失敗を明示して再起動を拒否する。共通`main.py`、Tauriのmanaged shutdown／Export終了待機、Docker、JPEG現像・出力、Recipe／Historyは変更していない。`--check-runtime`では起動しない。[当初の設計記録](research/lightcraft/PHASE1A_DESIGN.md)を保持し、状態の所有者・制約は[architecture](architecture.md#lightcraft-raw-integration-foundation-phase-1a)へ反映した。重要な設計変更はない。
+終了はpending失敗確定、stdin EOF、3秒wait、必要時killと2秒wait、stdout／stderr reader回収の順とする。不正stdoutはMCP接続を失敗させた後も、応答として処理せずbounded chunkで破棄排出し、子process終了時のpipe切断を妨げない。ownerとexit watcherが同時にcancelされた場合も、独立cleanup taskが新しい`process.wait()` watcherを必要に応じて作り、kill・回収を完了する。呼出側のcancelはcleanup後に伝播する。回収不能時は所有sessionを保持して再起動を拒否する。共通`main.py`、Tauriのmanaged shutdown／Export終了待機、Docker、JPEG現像・出力、Recipe／Historyは変更していない。`--check-runtime`では起動しない。[当初の設計記録](research/lightcraft/PHASE1A_DESIGN.md)は維持し、UNC拒否とcleanup中の独立回収を実装差分として追記する。
 
 fake process／streamsによる新規MCP・runtimeテストと、既存Windows LocalHost／managed shutdown／runtime関連の計113件が成功した。通常sandbox内では最初の非同期ケースが進まなかったため、同じリポジトリ`.venv`のPython 3.14.5で権限付き実行し、停止したテストprocessも回収した。Frontend／Backend全体suiteやDocker release Smoke Testは実行していない。
+
+限定コード監査で見つかったstdout pipe詰まり、owner／exit watcher同時cancel、exe hash I/O中の終了待ちを修正した。protocol異常後のstdoutは応答処理を停止したままbounded chunkで排出する。cleanupはownerから独立したtaskで行い、cancel済みexit watcherの代わりに`process.wait()`を再作成する。UNC実行pathは拒否し、絶対pathの検査／SHA-256計算は10秒期限のdaemon threadで実施する。OS I/O自体は強制cancelできないため、残存workerがある間は次の検査を拒否する。
+
+実asyncio subprocessの過大stdout回帰と、inspection中close／期限超過、owner・exit watcher同時cancelを含む関連Backendテスト117件が成功した。sandbox内ではWindows Proactorの内部socketpair初期化が停止したため、同じPython環境の権限付き実行で確認した。実LightCraft、GPU、frozen配布版DLL検索、Job Object孫process回収は引き続き未検証。
 
 実LightCraftの起動・ビルド、Windows配布版のDLL検索、RX 580のGPU初期化、driver停止時の回収、Tauri Job Objectによる孫process回収は今回未確認。RAW import、DevelopSettings、Preview、Export、Recipe、History、暗室UI、Immich連携はPhase 1B以降とする。
 

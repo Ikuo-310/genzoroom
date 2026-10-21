@@ -232,3 +232,13 @@ Phase 1AではLightCraftプロセスの起動・停止、初期化、ping、GPU�
 - Exportの停止・ファイル書込み・登録処理とshutdown期限。Phase 1Aの強制kill方針をそのまま適用しない。
 - Session＋StageCacheを使うRust Adapterとの性能比較。Python側境界は`status`／`ping`／GPU取得等の必要操作に留め、将来の置換点を保つ。
 - Recipe、History、Undo、Immich Stack／Album、暗室UIの整合性。これらはPhase 1Aの対象外。
+
+## 実装後の限定修正追記
+
+2026-10-21の限定コード監査で見つかった終了・回収経路を補強した。元の設計判断と本体の記録は保持する。
+
+- Windows UNC pathは遅延・停止する可能性のあるネットワークI/Oを避けるため実行fileとして受け付けない。hash検査は10秒のstartup期限を持つ専用daemon threadで実行する。worker threadはOS I/Oを強制停止できないため、期限後に残っている間は次の検査を拒否し、Backend shutdownを待たせない。
+- MCP frame違反後は接続を失敗として固定し、stdoutをJSONとして再処理せず、bounded chunkでEOFまで破棄排出する。これにより実プロセスのpipe transportが終了を認識できる。
+- Session ownerのcancel中も別cleanup taskでprocess回収を続ける。exit watcherが同時にcancelされていた場合は新しい`process.wait()` watcherを作成する。外部呼出側のcancelはcleanupとownership更新後に伝播する。
+
+この追記の回帰検証では、実asyncio subprocessによる1 MiB超stdoutの排出、inspection中のclose・期限超過、owner／exit watcher同時cancelを追加し、関連Backendテスト117件が成功した。実LightCraft、RX 580、frozen DLL検索、Job Objectによる孫process回収の未検証状態は変わらない。

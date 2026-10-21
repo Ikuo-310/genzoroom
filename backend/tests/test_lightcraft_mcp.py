@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 
 import pytest
 
@@ -153,6 +154,34 @@ def test_eof(partial, code):
             with pytest.raises(MCPTransportError, match=code):
                 await client.ping()
         finally:
+            await client.close()
+    asyncio.run(run())
+
+
+def test_real_subprocess_oversized_stdout_is_rejected_and_drained():
+    async def run():
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-c",
+            f"import sys; sys.stdout.buffer.write(b'x' * {MAX_LINE_BYTES * 8} + b'\\n'); sys.stdout.flush()",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE, limit=MAX_LINE_BYTES)
+        client = LightCraftMCP(process.stdout, process.stdin, 7)
+        wait_task = asyncio.create_task(process.wait())
+        request_task = asyncio.create_task(client.ping(timeout=3))
+        try:
+            await until(lambda: client.failure.done())
+            assert client.failure.result() == "lightcraft_response_too_large"
+            with pytest.raises(MCPTransportError, match="lightcraft_response_too_large"):
+                await request_task
+            async with asyncio.timeout(3):
+                await wait_task
+            await client.close(wait_stdout=True)
+            assert process.returncode == 0
+            assert client._reader_task.done()
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
             await client.close()
     asyncio.run(run())
 

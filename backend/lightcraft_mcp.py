@@ -44,6 +44,7 @@ class LightCraftMCP:
         self._lock = asyncio.Lock()
         self._pending = {}
         self._error = None
+        self._draining_stdout = False
         # A result (rather than an exception) remains safe if failure precedes monitoring.
         self.failure = asyncio.get_running_loop().create_future()
         self._reader_task = asyncio.create_task(self._read(), name=f"lightcraft-stdout-{generation}")
@@ -70,12 +71,14 @@ class LightCraftMCP:
                     line = await self.reader.readuntil(b"\n")
                 except asyncio.LimitOverrunError:
                     code = "lightcraft_response_too_large"
+                    self._draining_stdout = True
                     break
                 except asyncio.IncompleteReadError as error:
                     code = "lightcraft_truncated_response" if error.partial else "lightcraft_eof"
                     break
                 if len(line) > MAX_LINE_BYTES:
                     code = "lightcraft_response_too_large"
+                    self._draining_stdout = True
                     break
                 if not line.strip():
                     continue
@@ -84,37 +87,45 @@ class LightCraftMCP:
                     message = await asyncio.to_thread(_decode, line)
                 except UnicodeDecodeError:
                     code = "lightcraft_invalid_utf8"
+                    self._draining_stdout = True
                     break
                 except (ValueError, RecursionError):
                     code = "lightcraft_invalid_json"
+                    self._draining_stdout = True
                     break
                 if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
                     code = "lightcraft_invalid_response"
+                    self._draining_stdout = True
                     break
                 if "id" not in message:
                     if not isinstance(message.get("method"), str) or \
                             not isinstance(message.get("params", {}), dict) or \
                             "result" in message or "error" in message:
                         code = "lightcraft_invalid_notification"
+                        self._draining_stdout = True
                         break
                     # Notifications (including progress text) are never responses or logs.
                     continue
                 request_id = message["id"]
                 if type(request_id) is not str or request_id not in self._pending:
                     code = "lightcraft_unknown_id"
+                    self._draining_stdout = True
                     break
                 future = self._pending[request_id]
                 if future.done():
                     code = "lightcraft_duplicate_response"
+                    self._draining_stdout = True
                     break
                 if "method" in message or ("result" in message) == ("error" in message):
                     code = "lightcraft_invalid_response"
+                    self._draining_stdout = True
                     break
                 if "error" in message:
                     error = message["error"]
                     if not isinstance(error, dict) or type(error.get("code")) is not int or \
                             not isinstance(error.get("message"), str):
                         code = "lightcraft_invalid_response"
+                        self._draining_stdout = True
                         break
                     future.set_exception(MCPRpcError(error["code"]))
                 else:
@@ -124,6 +135,16 @@ class LightCraftMCP:
         except Exception:
             pass
         self.abort(code)
+        if self._draining_stdout:
+            await self._discard_stdout()
+
+    async def _discard_stdout(self):
+        # Keep the child pipe moving after rejecting frames so subprocess exit can be reaped.
+        try:
+            while await self.reader.read(8192):
+                pass
+        except Exception:
+            pass
 
     async def _drain(self):
         draining = asyncio.create_task(self.writer.drain())
@@ -226,11 +247,21 @@ class LightCraftMCP:
             raise MCPToolError()
         return result.get("structuredContent")
 
-    async def close(self):
+    async def close(self, *, drain_stdout=False, wait_stdout=False):
         self.abort()
-        self._reader_task.cancel()
-        await asyncio.gather(self._reader_task, return_exceptions=True)
         try:
             self.writer.close()
         except (OSError, RuntimeError):
             pass
+        if wait_stdout:
+            await asyncio.gather(self._reader_task, return_exceptions=True)
+        elif drain_stdout and not self._reader_task.done():
+            if not self._draining_stdout:
+                self._draining_stdout = True
+                self._reader_task.cancel()
+                await asyncio.gather(self._reader_task, return_exceptions=True)
+                self._reader_task = asyncio.create_task(
+                    self._discard_stdout(), name=f"lightcraft-stdout-drain-{self.generation}")
+        elif not self._draining_stdout:
+            self._reader_task.cancel()
+            await asyncio.gather(self._reader_task, return_exceptions=True)
