@@ -11,6 +11,7 @@ GenzoRoomのLightCraft統合を判断するための研究記録。統合実装�
 | [POC_RESULTS.md](POC_RESULTS.md) | Windows/Linuxの既存実測、画像比較、Docker資材、QNAP未検証事項 |
 | [ENGINE_API.md](ENGINE_API.md) | CLI/MCP、Session、ソース・段階キャッシュ、Preview、DevelopSettings、Process Version、XMP入出力仕様 |
 | [INTEGRATION_DESIGN.md](INTEGRATION_DESIGN.md) | 統合候補比較、常駐MCPの最小PoC案、Rust Adapter案、受入条件、XMPバックアップ・交換候補 |
+| [V0.10.0_CHANGES.md](V0.10.0_CHANGES.md) | v0.9.1からv0.10.0のソース差分、互換性・統合設計への影響、未検証事項と更新判断の保留 |
 
 ## 出典と収録方針
 
