@@ -6,7 +6,7 @@ This document describes the current implementation and possible future extension
 
 ## LightCraft integration research
 
-LightCraft integration remains unimplemented. The [research index](research/lightcraft/README.md) separates the v0.9.1 baseline, existing Windows/Linux PoC measurements, source-level Engine API findings, proposed integration designs, and unverified work.
+LightCraft integration remains unimplemented. The [research index](research/lightcraft/README.md) separates the v0.9.1 baseline, existing Windows/Linux PoC measurements, source-level Engine API findings, proposed integration designs, and unverified work. [Phase 1A design](research/lightcraft/PHASE1A_DESIGN.md) proposes one LightCraft MCP child owned by the Windows Python Backend; it is a pre-implementation design and does not describe shipped behavior.
 
 ## Gallery manual refresh
 
