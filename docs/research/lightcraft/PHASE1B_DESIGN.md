@@ -313,3 +313,56 @@ Phase 1Cへの判断事項：
 - stderr drainはprocessをreapできるまで維持する。taskが先に終了していた場合は再回収時にdrainを再作成し、reap後にjoinする。生stderrはログへ出さない。
 
 追加した回帰は連続reset、capacity拒否後の既存写真操作、停止するTEMP I/Oのstartup／Preview／shutdown期限、UNC拒否、実asyncio subprocessでのreap再試行と大量stderrを含む。関連Backendテストは190件成功。任意の実ネットワークfilesystem停止、実LightCraftのRAW現像、GPU／CPU、PyInstaller DLL検索、Job Objectは未検証であり、Phase 1Bの実機PoCで確認する。
+
+## Windows実機PoC結果（2026-10-22）
+
+この節は上記の実装前調査・提案と監査後修正記録を保持したまま、後日完了した実機PoCの事実を追記する。設計時点で「未実施」とした箇所を過去の記録として残し、以下を実装・検証済みの結果とする。
+
+### 環境と範囲
+
+- Windows 11 `10.0.26300.0`、既存GenzoRoom `.venv`のPython `3.14.5`。
+- GenzoRoom `feature/lightcraft-integration`、実装・監査後修正基準commit `1b7c4e0813f8be31709096c2f06af314a0fe8fda`。
+- LightCraft v0.10.0、固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`。CLIは`I:\code\raw-test\lightcraft-v0.10.0-gpu-poc\target\release\lightcraft-cli.exe`、SHA-256 `9ca7a0483e3171805670f52af6fff1b8f93f78e10a32933e4f7c4fad872913d1`。
+- Windows `LocalHost`／UvicornとBackend内部Python interfaceを使用した。検証storageは独立directoryへ分離し、Immich環境変数を除外した。インストーラー／配布版、Tauri再build、Immich、既存DBは使用していない。
+
+### 操作結果
+
+Pixel 7 Proの`sample2.dng`（source `4064×3056`）とPentaxの`sample.DNG`（`5472×3648`）をRAWとしてimportし、inspectの寸法・種別とPhotoId／GenzoRoom handle対応を確認した。各sourceのPhotoIdはそれぞれ1、2だった。同一素材の再openはresident PhotoIdを再利用しつつdocument tokenを更新し、旧handleを拒否した。A→B→A切替が成功した。2枚保持中の3枚目相当要求は`raw_session_capacity`で拒否され、再selectなしで既存写真の設定変更とPreviewが続行できた。
+
+両素材で初期設定を取得し、Exposure `+0.25`、`+0.5`、`+1`、`-0.5`、`0 EV`を`set_controls`／`merge_settings`経路で適用した。各`develop.get`の確定値と内部snapshotが一致し、この範囲ではEngine補正は観測されなかった。`process=2`、WB scale `kelvin`は維持された。
+
+Preview PNGはPixel `1024×770`、Pentax `1024×683`。PNG signature、寸法・metadata、CRC／終端、Pillowによる完全性を検査し、目視確認した出力で不自然な向き、真っ黒画像、明白な色異常は認めなかった。最大PNGは`1,161,088 bytes`、最大JSON行は`1,548,305 bytes`で、画像5 MiB／Preview応答8 MiBの上限内だった。Pixelでは実応答が通常RPCの1 MiBを超え、Preview専用の応答枠が利用された。
+
+実CLIで連続Preview時に実行中最大1件、追加した中間待機要求の`superseded`、最後のframe返却を確認した。A→B→A時の旧ticketも破棄された。caller cancel後も内部処理が完了しMCP pingが通った。Preview実行中の設定変更では古いticketを破棄し、新revisionのframeを返した。Preview中closeはticketを`lightcraft_closed`で解放した。これは実際に通った経路の確認であり、任意タイミングの全競合網羅を意味しない。
+
+Exposure `+0.5`を含むsnapshotでresetをgeneration `1→2→3`と連続実行した。最初のreset後、設定取得を挟まず再resetしても内部正本と設定が保持され、最終`develop.get`と一致した。旧generation handleは`raw_stale_handle`で拒否され、2回目reset後もPreviewに成功した。
+
+### 時間・メモリ測定
+
+次の時間は内部APIのawait完了までで、画像保存などの後処理を除く。継続Previewは3回、露光変更後Previewは5回の中央値。importは登録・inspect・初期設定取得であり、RAW decodeは初回Previewに含む。OS cacheを冷却していない短時間・少数回の測定で、一般的な性能保証ではない。
+
+| 素材・経路 | import | 初回Preview | 継続Preview | 露光変更後 |
+|---|---:|---:|---:|---:|
+| Pixel DX12 | 27.4 ms | 903.3 ms | 91.5 ms | 90.9 ms |
+| Pixel CPU | 29.7 ms | 876.3 ms | 94.0 ms | 92.0 ms |
+| Pentax DX12 | 26.5 ms | 611.3 ms | 74.8 ms | 80.9 ms |
+| Pentax CPU | 23.3 ms | 596.7 ms | 76.6 ms | 71.6 ms |
+
+| 経路 | Working Set | Private Usage | Peak Working Set |
+|---|---:|---:|---:|
+| DX12 LightCraft | 356.5 MiB | 782.8 MiB | 467.1 MiB |
+| CPU LightCraft | 130.0 MiB | 121.0 MiB | 308.6 MiB |
+
+Python BackendのWorking Setは約84 MiB、Private Usageは約547 MiB。`library.memory.engineBytes`はDX12／CPUの両方で`114,737,312 bytes`（約109.4 MiB）。これはOS process memoryとは別のLightCraft内報告値である。GPU経路のadapterは`Radeon RX 580 Series (Dx12)`、`enabled=true`／`available=true`、CPU固定別processは`gpu_backend="off"`でPreviewが成功した。GPU allocationも観測したが、各frameがGPUで実行された証拠ではない。GPUとCPUの速度差はこの測定では小さく、GPUが常に高速とはいえない。
+
+Backend readyはDX12約`101.1 ms`、CPU約`98.8 ms`で、LightCraft初期化を待たなかった。`/api/health`は検証前後ともHTTP 200だった。
+
+### 回収・判定
+
+正常終了、reset、Preview中closeを含む今回の検証CLI 10 processは全てreturn code 0で回収された。各実行でowner／MCP reader／stderr／wait task、RAW Preview worker、pending ticket／operationが終了し、世代専用TEMPも残らなかった。対象PIDの終了後照会でも残存processはなかった。検証前後でRAW原本と既存sidecarのfingerprintは一致した。
+
+完了判定：**Phase 1B Windows開発Backend実機PoC：PASS**。この判定は上記Windows開発環境の内部Backend interfaceに限定する。
+
+未検証として次を残す：実GPU障害からのCPU fallback、任意の全タイミングにおける非同期競合、長時間運用時のmemory leak、Tauriホスト経由の画面起動・通常終了、JPEG暗室の実画面操作、PyInstaller配布版DLL検索、Windows Job Objectによる孫process回収、RAW暗室UI、Recipe／History永続化、最終Export、Immich統合。今回のCPU固定成功はGPU障害fallbackの確認ではない。RAW最大2枚と変更256回／generationはPoC用の保守的制限であり、正式な製品仕様として確定していない。
+
+測定スクリプト、ログ、画像を含む独立検証記録は`C:\Users\iku19\.codex\visualizations\2026\10\21\01a15dc9-0ad5-7330-a47c-388a27c75593\genzoroom-phase1b-poc-20261022\RESULTS.md`と同directory内に保存されている。

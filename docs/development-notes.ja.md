@@ -14,6 +14,38 @@ Python 3.14のリポジトリ`.venv`で、RAW／MCP／runtime／Windows LocalHos
 
 今回は実LightCraftのRAW現像PoCを行っていない。GenzoRoom経由での2素材のimport・反復Preview・全設定復元、RX 580とCPU固定、実GPU障害fallback、時間・メモリ計測は次工程の未検証事項である。Tauri画面起動・JPEG暗室実画面操作、PyInstaller、Job Objectによる孫process回収も未検証のまま。Phase 1CのUI・永続化・最終Exportを完了したという意味ではない。
 
+## RAW現像統合 Phase 1B：Windows開発Backend実機PoC（2026-10-22）
+
+Phase 1B初期実装commitは`299bdb6a3485b5b879e34568cafba5c1181a8a52`。限定監査はHigh 0件／Medium 3件／Low 1件で、MediumはSession復元snapshot、TEMP I/Oの期限・所有、回収失敗時のstderr排出に関する指摘、LowはRAW読込拒否後の現在写真操作に関する指摘だった。修正後commit `1b7c4e0813f8be31709096c2f06af314a0fe8fda`で対応し、関連Backendテスト190件が成功した。監査後のHigh／Mediumは残っていない。
+
+Windows 11（10.0.26300）、既存`.venv`のPython 3.14.5、LightCraft v0.10.0固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`で、開発用Windows `LocalHost`／Uvicornから内部Python interfaceを実行した。CLIは`I:\code\raw-test\lightcraft-v0.10.0-gpu-poc\target\release\lightcraft-cli.exe`、SHA-256は`9ca7a0483e3171805670f52af6fff1b8f93f78e10a32933e4f7c4fad872913d1`。検証用storageは独立directoryに隔離し、Immich環境変数を外して実施した。
+
+Pixel 7 Pro DNGとPentax DNGのRAW読込・inspect、handleの対応、再open時の旧handle無効化、A→B→A切替を確認した。2枚保持時の3枚目相当要求は容量エラーとなり、その後再selectなしで既存写真の設定変更とPreviewが成功した。各素材でExposure `+0.25`／`+0.5`／`+1`／`-0.5`／`0 EV`をset_controlsとmerge_settingsで適用し、`develop.get`確定値と内部snapshotが一致した。`process=2`とWB scale `kelvin`を保持した。
+
+PNG PreviewはPixel `1024×770`、Pentax `1024×683`で、PNG完全性・metadata・寸法を検証した。最大PNGは`1,161,088 bytes`、最大JSON行は`1,548,305 bytes`。目視確認した出力に不自然な向き、真っ黒画像、明白な色異常はなかった。連続要求で実行中Preview最大1件、待機要求の最新1件集約、superseded／stale結果の破棄を実CLIで確認した。caller cancel後もMCP pingは成功し、Preview中の設定変更は新revisionで画像を返し、Preview中closeは待機を解放して回収した。
+
+Exposure `+0.5`のsnapshotをgeneration `1→2→3`で連続resetし、2回目のreset前に`get_settings()`を挟まなくても設定が維持されること、readbackとの一致、旧generation handleの拒否、reset後Previewを確認した。RX 580のDX12経路は`Radeon RX 580 Series (Dx12)`、enabled／availableともtrue。CPU固定は別processで実行し、同じ設定schemaとPreviewが成功した。Backend readyは約99〜101 ms、`/api/health`は検証前後とも200だった。
+
+| 素材・経路 | import | 初回Preview | 継続Preview | 露光変更後 |
+|---|---:|---:|---:|---:|
+| Pixel DX12 | 27.4 ms | 903.3 ms | 91.5 ms | 90.9 ms |
+| Pixel CPU | 29.7 ms | 876.3 ms | 94.0 ms | 92.0 ms |
+| Pentax DX12 | 26.5 ms | 611.3 ms | 74.8 ms | 80.9 ms |
+| Pentax CPU | 23.3 ms | 596.7 ms | 76.6 ms | 71.6 ms |
+
+継続Previewは3回、露光変更後は5回の中央値で、内部APIのawait完了までを測定した。`open_raw`は登録・inspect・初期設定取得であり、RAW decodeは初回Previewに含む。少数回の測定でGPUが常に高速とはいえない。
+
+2素材処理後のLightCraft OS memoryは次のとおり。Python BackendはWorking Set約84 MiB、Private Usage約547 MiB。`library.memory.engineBytes`はDX12／CPUとも約109.4 MiBで、native cacheとOS process memoryは別指標。Private Usageはsnapshot時点値でありpeakではない。
+
+| 経路 | Working Set | Private Usage | Peak Working Set |
+|---|---:|---:|---:|
+| DX12 | 356.5 MiB | 782.8 MiB | 467.1 MiB |
+| CPU | 130.0 MiB | 121.0 MiB | 308.6 MiB |
+
+正常終了・reset・Preview中closeを含む10個の検証CLI processはすべてreturn code 0で回収され、関連reader／stderr／wait／RAW workerと世代専用TEMPも残らなかった。検証前後でRAW原本と存在するsidecarのfingerprintは一致し、既存GenzoRoom DBとImmichは操作していない。測定・出力・詳細は独立PoC記録`genzoroom-phase1b-poc-20261022/RESULTS.md`に保存されている。
+
+完了判定：**Phase 1B Windows開発Backend実機PoC：PASS**。これは指定したWindows開発環境と内部Backend interfaceによる短時間PoCの範囲に限る。GPU障害からのCPU fallback、全タイミングの非同期競合、長時間メモリリーク、Tauriホスト経由の起動・終了、JPEG暗室の実画面操作、PyInstaller配布版DLL検索、Windows Job Objectによる孫process回収、RAW暗室UI、Recipe／History永続化、最終Export、Immich統合は未検証でありPASSに含めない。RAW最大2枚と変更256回／generationはPoC制限で、正式な製品仕様ではない。
+
 ## RAW現像統合 Phase 1A：常駐MCP接続基盤（2026-10-21）
 
 実装commit `8cf74987d509620434942b00598144879068312e`で、Windows `LocalHost`のlifespanにPython Backendが1つのLightCraft headless MCPを所有する基盤を追加した。`lightcraft_mcp.py`は改行区切りJSON-RPC、ID対応、通知分離、要求直列化、timeoutと応答検証を担当し、`lightcraft_runtime.py`の`LightCraftManager`は起動、初期化、状態・generation、GPU情報、終了・明示再起動を担当する。内部操作は`start()`、`close()`、`restart()`、`ping()`、`get_gpu_info()`と同期`status()`。HTTP endpointやUIは追加していない。
