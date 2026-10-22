@@ -19,7 +19,7 @@ LightCraft v0.11.0の調査・移行は行わない。過去のv0.9.1資料は�
 
 | 領域 | コード・テスト・文書 |
 |---|---|
-| 既存設計 | [INTEGRATION_DESIGN](INTEGRATION_DESIGN.md)、[PHASE1A_DESIGN](PHASE1A_DESIGN.md)、[PHASE1B_DESIGN](PHASE1B_DESIGN.md)、[architecture](../../architecture.md)、[開発記録](../../development-notes.ja.md) |
+| 既存設計 | [INTEGRATION_DESIGN](INTEGRATION_DESIGN.md)、[PHASE1A_DESIGN](PHASE1A_DESIGN.md)、[PHASE1B_DESIGN](PHASE1B_DESIGN.md)、[PHASE1C C4 native features](PHASE1C_C4_NATIVE_FEATURES.md)、[architecture](../../architecture.md)、[開発記録](../../development-notes.ja.md) |
 | 送信指定 | `frontend/src/appSettings.ts`、`SettingsDialog.tsx`、`StackFormatSwitches.tsx`、`galleryAssetSelection.ts::selectGalleryAssetTargets`、`useGalleryStackSelections.ts::resolveGalleryStackSelection` |
 | 展開・起動 | `GalleryPage.tsx::openWorkspaceAssets/openHomeWorkspace`、`workspaceAssetResolver.ts::resolveWorkspaceAssets`、`photoSelection.ts`、`assets.ts::WorkspaceNavigationState`、`App.tsx` |
 | 暗室・写真切替 | `AnshitsuPage.tsx::activateAsset/exitToHome`、`Filmstrip.tsx`、`workspaceResume.ts`、`homeReturn.ts`、`WorkspaceLayout.tsx` |
@@ -99,12 +99,12 @@ RAW API所有者はWindows LocalHost内。共通FastAPI appへWindows限定route
 | Preview pixel処理 | RAW専用 | LightCraft PNG。JPEG source decoder／renderAdjustments／WebGPUは呼ばない |
 | Slider外観・数値入力・focus・begin/change/commit | Adapterを介して共用 | 基本項目の既存AdjustmentIdをUI識別子に使い、RAW controlへ明示対応。JPEG reducerは共用しない |
 | WB | RAW専用の値表示・設定処理 | Kelvin／scale／AsShot。既存JPEG相対WBとは別binding |
-| Before／After | Adapterを介して共用 | 同じ操作をRAW初期snapshot Previewと現在Previewへ接続。Immich PreviewをRAWのBeforeと偽らない |
-| Reset | Adapterを介して共用 | RAW開始時の確定baselineへ全復元しreadback。JPEG allResetもSession再起動も別操作 |
+| Before／After | Adapterを介して共用 | LightCraftのBefore render機構を使う方向。headlessでのBefore画像取得はMCP拡張の要否を別工程で判断。基準設定はC4設計で決定し、比較表示は既存ImageViewerを使う |
+| Reset | Adapterを介して共用 | LightCraft標準Reset（camera/import defaults）と、SQLiteに保持するGenzoRoom編集開始baselineの復元を別操作として設計。いずれもreadback確認 |
 | 編集状態表示 | Adapterを介して共用 | C3以降はRAWレシピの保存・未保存状態をRAW専用に表示し、既存永続edited／historyOnly statusへ混入させない |
 | ショートカット | Adapterを介して共用 | registry・formatterと各ownerのguardを維持。Undo／Reset等だけactive engineへdispatch |
-| Recipe copy/paste・カテゴリbypass | Phase 1Cでは対応しない（RAW） | JPEG動作維持。RAWへのJPEG clipboard適用を禁止。RAWのbypass semanticsを推測しない。AdjustmentSliderのenabled／onToggleもJPEGのまま結線せず、RAWでは未対応のpower操作を隠す最小prop追加が必要 |
-| History一覧 | Adapterを介して共用 | C4でRAW専用履歴を表示。JPEG History形式とは分離し、C3のcurrent recipe保存へ履歴を混在させない |
+| Recipe copy/paste・カテゴリbypass | copy/pasteはPhase 1Cでは対応しない。カテゴリbypassはJPEG・RAWで維持 | JPEG個別ON/OFFは廃止し個別Resetを維持。RAW個別ON/OFFは作らず個別Resetを維持。カテゴリON/OFFはJPEG既存動作を維持し、RAWはLightCraft native `disabled_sections`を利用。Recipe／SQLite schema変更と既存データ影響はC4設計で決定 |
+| History一覧 | Adapterを介して共用 | C4でRAW履歴を追加。GenzoRoom SQLiteを正本とし完全DevelopSettings snapshotとcursorを管理する。native Session Undo／Redoと履歴cursorを混在させない。JPEG History形式と分離 |
 | Histogram | Phase 1Cでは対応しない（RAW初期範囲） | JPEG継続。RAWでJPEG由来の古いscopeを隠す。PNG由来scope追加は後続候補 |
 | Export Queue | Phase 1Cでは対応しない（RAW） | JPEG機能維持。RAW Q／badge操作を不可とし理由表示 |
 | Crop／Curve／Detail／RAW grading専用panel | Phase 1Cでは対応しない | 後続の独立UI追加。JPEG panelの大規模再構成を前提にしない |
