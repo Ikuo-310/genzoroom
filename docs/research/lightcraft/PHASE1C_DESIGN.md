@@ -292,3 +292,64 @@ C1だけで「RAWを編集できるPhase 1C完了」としない。C2–C4の設
 | 後続 | PyInstaller／Job Object／Tauri実機、実GPU障害fallback、Rust Adapter | 既存未検証範囲を引継ぐ。Phase 1Cで成功を推測しない |
 
 この設計は既存の暗室送信を維持し、Windows専用APIとRAW document adapterを追加する最小接続を推奨する。実装開始・LightCraft更新・RAW現像試験は本調査の範囲外である。
+
+## Phase 1C-C1実装結果（2026-10-22）
+
+本節は設計Commit `c912146f22c0f34fb5ea6d5364044c4fedd06c16`時点の本文を保持したまま追加するC1実装記録である。Phase 1C全体の完了やWindows実画面での受入完了を意味しない。LightCraftはv0.10.0／固定commitのまま。本体・v0.11.0は変更していない。
+
+### 実装した経路
+
+既存のGallery／Stack素材指定→解決済みAsset集合→同じ暗室／Filmstripを維持した。`useRawDocument`がRAWのactive detailだけを対象にcapabilityを取得し、Windows専用`RawPreviewApi`でworkspace作成→Asset IDから原本取得→Phase 1B `open_raw`→`request_preview`→LightCraft `render_preview`のPNG応答へ進む。FrontendはJPEGのAdjustedImageやCPU／WebGPUへRAWを渡さず、検証・decodeしたBlob URLをImageViewerの通常画像表示へ渡す。RAW中はJPEG GPU初期化も停止し、JPEGへ戻ると従来経路へ復帰する。
+
+RAW現像PreviewにはLightCraft・最大1024pxという状態表示を付け、100%を「プレビュー100%」と表示する。capabilityなし（Dockerの404／Windows disabled等）では明示した「Immich閲覧用Preview」として従来画像を表示する。capability取得後に原本取得・現像・decode等が失敗した場合は画像を表示せずエラーを示す。閲覧用Previewを現像成功へ置き換えない。RAWのSlider／Before／History／Recipe／Exportは未実装・利用不可で、既存JPEG機能は維持する。
+
+### C1の実API
+
+全endpointはWindows LocalHostの`/api/raw` mountにあり、既存Host／Origin／cookie認証・no-store保護の内側である。共通FastAPI app／Dockerにrouteは追加していない。
+
+| Method・path（prefix省略） | 契約 |
+|---|---|
+| `GET /capabilities` | available／state／version／maxSide／maxImageBytes。起動・GPU照会の副作用なし |
+| `POST /workspaces` | 空JSON→Backend発行workspaceId。単一owner、競合409 |
+| `POST /documents` | workspaceId＋Asset UUID→opaque handle／Asset ID／generation／documentToken／revision／workspaceId |
+| `GET /documents/{handle}` | `X-Raw-Workspace`で所有権確認し、document metadataと現在stateを取得。設定変更・importなし |
+| `POST /documents/{handle}/preview` | workspaceId／generation／documentToken／revision／serial→検証済みPNG。Supersededは204。`X-Raw-{Generation,Token,Revision,Epoch,Sequence,Serial,Width,Height}`で画像identityを返す |
+| `DELETE /workspaces/{workspaceId}` | owned操作完了を待ち、RAW session reset後に原本cacheを解放 |
+| `DELETE /documents/{handle}` | `X-Raw-Workspace`で確認し、そのC1 workspaceごと解放 |
+
+raw request JSONは4 KiB、読取り5秒。FrontendのJSON読取りも4 KiB、PNG読取りは5 MiB。opaque handle／別workspace／旧generation／不一致revisionを拒否し、400／409／413／503等と固定codeで応答する。path、PhotoId、任意MCP commandや更新APIを公開していない。metadataのみを返しDevelopSettings本文はC1ではFrontendへ配信しない。
+
+### 原本cache・期限・所有
+
+`backend/raw_source.py`は既存Immich接続設定・認証・HTTP request方針を再利用する独立RAW取得層。JPEG限定`get_asset_original`の条件は変更していない。Asset detailのUUID／RAW種別／許可formatを確認し、原本GETを64 KiB chunkでBackend私有TEMP内の固定local driveへ保存する。拡張子は許可されたRAW formatから生成し、Asset filenameやFrontend pathを使わない。`.part`を最後に完成fileへrenameし、Photo inspectがRAWかつpreview_onlyなしであることをPhase 1Bが再確認する。原本・sidecar・Immichライブラリへの書込みAPIは呼ばない。
+
+| 初期制限 | 値・意味 |
+|---|---|
+| RAW原本 | 最大512 MiB／file、宣言Content-Lengthと実受信byte両方を検査。空・truncatedを拒否 |
+| cache | 最大1 GiB／workspace。C1はactive RAW 1枚だけを保持するため、通常は512 MiB以内 |
+| disk空き容量 | chunk書込み後に1 GiBを残せない場合は停止 |
+| 全download | detail／stream／disk処理を含め120秒。既存Immich接続3秒／通信5秒も適用 |
+| 個別disk I/O | 5秒、daemon workerとcache lockで所有を保持。timeoutしたthreadを停止したとはみなさない |
+| 操作 | HTTP所有task最大2件、実操作はlockで直列化。Frontendの所有変更も直列化 |
+| workspace lease | 最終要求から180秒、15秒刻みで失効確認。表示中は30秒ごとの状態取得で更新 |
+
+512 MiBは既存Pixel／Pentax DNGを想定した保守的な初期値で、全cameraへの対応や実download成功を保証するものではない。容量超過時は固定codeで拒否し、無制限に並べない。未完了downloadの部分fileも同じcache ownerが保持し、失敗／解放／shutdownで回収する。Engine importの部分成功もあり得るため、原本削除はnative参照解放後に限る。回収不能なprocessやdisk workerがある場合はcache所有権を保持し、新workspaceで上書きしない。強制終了で残った過去directoryを起動時に広く探索・削除する処理はない。
+
+HTTP waiterのcancelはBackend所有taskをcancelしない。shutdownではdownloadだけを個別cancelでき、送信済みMCP import／renderはPhase 1Bのclose・pending解放・process回収へ委ねる。lease失効／明示解放もnative参照解放後にcacheを回収する。TEMP I/Oの実OS停止や任意の全競合は未検証。
+
+### 設計との差分・C2以降
+
+- C1は1 active document／workspace。写真切替・離脱で旧workspaceを解放し、次RAWを新workspaceで開く。解放は`reset_session(restore_active=False)`を使うためEngine世代が変わり、RAW往復時は再download／再importになる。既存の2枚／256試行制限を撤廃せず、C3の多数写真snapshot store／evictionを先行実装しない。
+- workspaceを明示作成するAPIを追加し、import中に画面が離れた場合でも既知のownerを解放できるようにした。request到達後にresponseを失ったownerはleaseで回収する。Frontendはimportを途中abortせず結果を待ってからreleaseする。
+- raw document metadataのみを保持・配信し、control更新／select／restore／明示Engine復旧APIは実装していない。異常終了時は明示エラーまたはunavailable表示とし、JPEG利用は継続できる。RAW再試行は写真の開き直し、Engineが復帰しない場合はアプリ再起動が必要。
+- `ImageViewer`にdocument identityを追加。Blob URLだけが変わる同じdocumentではpan／zoomを維持し、新documentではfitへ戻る。状態表示はviewport内overlayとし既存gridの行構成を変えない。
+- Frontendは受信header・PNG上限／signature・decode寸法、decode後のBackend状態を照合し、Asset ID／serial／generation／token／revisionが一致した候補だけ表示する。離脱・pagehide・失敗でBlob URLを解放。bfcacheで戻った場合も解放済み画像を現像成功として残さない。
+- JPEG Recipe v18／History／Autosave／Queue、Gallery送信resolver／プリセットguard／Stack素材選択は変更していない。RAWパラメータ操作・Undo／Redo・永続保存・最終ExportはC1対象外。
+
+### 検証方法と限界
+
+Backendテストは本物のPhase 1B adapter＋fake MCP childを用い、`render_preview`呼出し回数とPNG bytes／headerの一致を確認する。単に画像が表示されたというassertionだけではない。sourceテストはMockTransport／fake streamで認証付き原本GET、RAW種別、上限、disk空き、timeout、途中失敗、cleanupを確認する。認証／Origin／Host、Docker route不在、handle所有・旧generation、HTTP cancel中renderとsource保持、shutdown／native回収失敗も扱う。
+
+FrontendではRAW／JPEG混在Filmstripの既存順序、RAW中にJPEG rendererを使わないこと、capabilityなしと現像失敗の表示差、stale HTTP／decode結果の破棄、URL解放、pagehide、同documentのzoom保持、新documentのfit復帰を確認する。関連する既存JPEG保存／Queue・Gallery送信・shortcutテストも回帰対象とした。実行件数・結果は同日の開発記録に記載する。
+
+未実施：実Immichの原本download、実LightCraftのRAW現像／GPU試験、Windows/Tauri/WebView2実画面、実色管理、NAS／Firefox、PyInstaller、実GPU障害fallback、長時間運用、正式コード監査。**C1実装と自動テストは実画面の受入完了を意味しない。** 実画面では既存RAW素材指定→暗室内のLightCraft表示、最大1024px／プレビュー100%、混在Filmstrip切替、失敗表示、正常終了・cache回収を別工程で確認する。

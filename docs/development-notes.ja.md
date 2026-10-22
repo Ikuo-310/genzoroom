@@ -1,5 +1,24 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C1：Windows暗室へのRAW Preview接続（2026-10-22）
+
+設計Commit `c912146f22c0f34fb5ea6d5364044c4fedd06c16`からC1を実装した。LightCraft v0.10.0固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`を維持する。既存のGallery／Stack形式バッジ・送信対象解決・暗室route・Filmstripの集合と順序を再利用し、RAW時だけLightCraft生成PNGをImageViewerへ接続した。既存JPEGのRecipe／History／Autosave／Queueを維持し、RAWのSlider／Undo／永続化／Exportは追加していない。
+
+主な追加は`backend/raw_source.py`と`windows_raw_api.py`、`frontend/src/rawApi.ts`と`useRawDocument.ts`。`windows_local.py`が専用APIを既存認証wrapper内にmountし、shutdownではcancel耐性のあるownerがdownload・RAW session・HTTP task・cacheを回収する。共通Backend／Docker／JPEG限定original関数／LightCraft本体は変更していない。RAW取得は既存Immich資格情報を利用したGETのみで、原本pathとPhotoIdはFrontendへ返さない。
+
+初期制限はRAW 512 MiB/file、cache 1 GiB/workspace、空きdisk 1 GiB、download全体120秒、disk I/O 5秒、JSON 4 KiB、PNG 5 MiB／最大辺1024。`.part`から完成fileへrenameし、失敗・離脱・終了時に所有directoryだけを回収する。停止したdisk workerや未回収processの参照を無視して削除しない。workspaceは180秒のlease（15秒ごと確認、表示中は30秒ごとの状態取得）を持つ。C1は1 active RAW／workspaceで、切替時に旧workspaceのRAW sessionをresetして解放するため、RAW往復は再download／再importとなる。2枚／256試行のPoC制限緩和やsnapshot退避はC3へ残す。
+
+FrontendはRAWのgeneration／document token／revision／request serialとPNG header・decode寸法・decode後のdocument状態を確認し、stale結果を拒否する。JPEG用CPU／AdjustedImageを呼ばず、RAW表示中のJPEG WebGPU初期化も停止する。状態overlayでLightCraft生成・最大1024pxを示し、100%をPreview pixelの倍率と明示する。capabilityなしではImmichの閲覧用であることを表示するが、現像失敗を閲覧用画像で成功扱いしない。Blob URLだけの更新はzoom／panを保持し、切替・失敗・pagehideでURLを解放する。
+
+自動検証は変更範囲ごとに分割実行した。BackendはRAW／MCP／runtime／Windows LocalHostを含む6ファイル199件成功の後、追加したdisk worker期限・shutdown・原本保護を含む2ファイル29件、最終API shutdown修正後のRAW取得／API／Windows LocalHostの3ファイル74件が成功し、lease失効回収を追加した最終APIテスト17件も成功（同一テストの重複実行を含む）。Pythonはrepo `.venv`の3.14、cwdはbackend。通常sandboxで非同期テストが進まなかったため、その実行processだけを回収し同じexecutable・引数の権限付き実行へ切り替えた。
+
+Frontendの関連15ファイル496件では旧RAWパネル文言の期待値1件が失敗し、期待値をC1のRAW Preview専用表示へ更新した。修正後の保存／Viewer／混在暗室／RAW hookの4ファイル135件、GPU境界を含む3ファイル64件、最終API client／RAW hook／混在暗室／GPUの4ファイル34件が成功した。他の関連成功結果は変更との依存関係を確認して再利用した。通常sandboxのVitest一時module読取りエラーは権限付きで同じfocusedテストを再実行して解消した。TypeScript checkとVite production build成功。既存の500 kB超chunk警告は残る。全Frontend／Backend suiteは実行していない。`release/smoke-test.sh`も確認し、Windows専用TEMP cache／APIはDockerのstorage・起動契約を変えないため変更不要と判断した。フルDocker Smoke Testは実行していない。`git diff --check`成功。
+
+成功判定の根拠は画像表示だけではなく、本物のPhase 1B adapterをfake MCPへ接続した`render_preview`の呼出し・PNG byte／metadata照合と、FrontendのJPEG renderer非呼出し・失敗時画像非表示・stale／URL解放テストである。実LightCraftや実Immichを呼び出した試験ではない。
+
+実画面受入・正式コード監査は別工程。Windows/Tauri/WebView2、実Immich原本download、実LightCraft RAW現像／GPU、NAS／Firefox、PyInstaller、実GPU障害fallback、長時間memoryは未検証。README／CHANGELOGは変更していない。API契約・設計との差分・残課題の詳細は[Phase 1C設計書のC1実装追記](research/lightcraft/PHASE1C_DESIGN.md#phase-1c-c1実装結果2026-10-22)を参照。
+
+
 ## RAW現像統合 Phase 1B：Backend内部RAW操作・Preview（2026-10-21）
 
 設計確定commit `c1e2141068f097bbc2778d22c3f05ac3323cafb7`を基準に、Windows LocalHostが既存LightCraftManagerと同じlifespanで所有する`LightCraftRawSession`を追加した。RAW未使用時は追加task、import、GPU照会、memoryBudget設定を開始しない。HTTP endpoint、UI、Recipe／History永続化、Export、Immich／Stack操作は追加せず、共通Backend・Docker・Tauri・JPEG処理は変更していない。

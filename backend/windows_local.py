@@ -24,6 +24,7 @@ import uvicorn
 from backend_logging import backend_logger
 from lightcraft_runtime import LightCraftManager
 from lightcraft_raw import LightCraftRawSession
+from windows_raw_api import RawPreviewApi
 
 DEFAULT_PORT = 3191
 FRONTEND_DIST = (Path(__file__).resolve().parent / "frontend" / "dist" if getattr(sys, "frozen", False)
@@ -81,6 +82,7 @@ class LocalHost:
         self.desktop_probe_key = None
         self.backend = backend
         self.connection = connection
+        self.raw_api = RawPreviewApi()
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -90,13 +92,14 @@ class LocalHost:
                 backend.state.lightcraft = manager
                 raw = LightCraftRawSession(manager)
                 backend.state.lightcraft_raw = raw
+                self.raw_api.bind(raw, manager)
                 try:
                     # RAW availability must not delay JPEG readiness or the desktop handoff.
                     await manager.start()
                     yield
                 finally:
                     try:
-                        await raw.close()
+                        await self.raw_api.close()
                     finally:
                         await manager.close()
 
@@ -109,6 +112,7 @@ class LocalHost:
             routes.append(Route("/__local/connection", endpoint=connection.endpoint, methods=["GET", "POST", "PUT", "DELETE"]))
         self.application = Starlette(routes=[*routes,
             Route("/api", endpoint=api_root, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+            Mount("/api/raw", app=self.raw_api.app),
             Mount("/api", app=backend),
             Mount("/", app=SpaFiles(directory=dist, html=True)),
         ], lifespan=lifespan)

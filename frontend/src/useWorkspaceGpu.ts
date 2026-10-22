@@ -11,16 +11,16 @@ type Snapshot = {
   key: string; enabled: boolean; availability: GpuAvailability; renderer: WorkspaceGpuRenderer | null;
 };
 
-export function useWorkspaceGpu(key: string, probeOnly = false) {
+export function useWorkspaceGpu(key: string, probeOnly = false, suspended = false) {
   const [enabled, setEnabled] = useState(readWebGpuEnabled);
   useEffect(() => subscribeWebGpu(setEnabled), []);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [paintedRenderer, setPaintedRenderer] = useState<WorkspaceGpuRenderer | null>(null);
   const current = useRef({ key, enabled, snapshot });
   current.current = { key, enabled, snapshot };
-  const matches = snapshot?.key === key && snapshot.enabled === enabled;
+  const matches = !suspended && snapshot?.key === key && snapshot.enabled === enabled;
   const renderer = matches ? snapshot.renderer : null;
-  const availability = matches ? snapshot.availability : 'checking';
+  const availability = suspended ? 'unavailable' : matches ? snapshot.availability : 'checking';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -30,6 +30,11 @@ export function useWorkspaceGpu(key: string, probeOnly = false) {
       if (!controller.signal.aborted) setSnapshot({ key, enabled, availability, renderer });
     };
     publish('checking', null);
+    // Native RAW frames must not allocate or probe the JPEG processing pipeline.
+    if (suspended) {
+      publish('unavailable', null);
+      return () => controller.abort();
+    }
     if (globalThis.isSecureContext !== true || !defaultGpu()) {
       publish('unavailable', null);
       return () => controller.abort();
@@ -56,7 +61,7 @@ export function useWorkspaceGpu(key: string, probeOnly = false) {
       unsubscribe();
       owned?.dispose();
     };
-  }, [key, enabled, probeOnly]);
+  }, [key, enabled, probeOnly, suspended]);
 
   const setPreference = useCallback((next: boolean) => {
     saveWebGpuEnabled(next);

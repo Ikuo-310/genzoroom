@@ -266,6 +266,14 @@
     "openSelected": "暗室へ"
   },
   "workspace": {
+    "rawPreview": {
+      "loading": "LightCraftでRAWプレビューを現像しています…",
+      "ready": "LightCraft RAW現像プレビュー · 最大1024px",
+      "unavailable": "RAW現像は利用できません · Immichの閲覧用プレビューを表示中",
+      "error": "LightCraftのRAW現像プレビューに失敗しました。別の写真へ移動し、開き直して再試行してください。",
+      "readOnly": "RAW現像プレビューのみ対応しています。この段階ではパラメータを操作できません。",
+      "actualSize": "プレビュー100%"
+    },
     "historyRetained": "編集履歴あり",
     "name": "暗室",
     "backToPhotos": "ギャラリーに戻る",

@@ -529,6 +529,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .history-confirmation-warning-icon { flex: none; color: inherit; }
 .workspace-section-content .edit-source-note { margin-top: 14px; }
 .viewer-image-status { position: absolute; top: 50%; left: 50%; margin: 0; color: #aaa; transform: translate(-50%, -50%); }
+.raw-preview-note { position: absolute; bottom: .5rem; left: .5rem; max-width: calc(100% - 1rem); margin: 0; padding: .25rem .5rem; background: #080809d9; color: #bbb; font-size: .75rem; pointer-events: none; }
 .viewer-message { position: relative; }
 .viewer-message > p { align-self: center; justify-self: center; color: #aaa; }
 .filmstrip { min-width: 0; min-height: 0; padding: 10px 12px; border-top: 1px solid #353537; background: #151517; }

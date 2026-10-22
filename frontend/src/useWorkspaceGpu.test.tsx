@@ -13,8 +13,8 @@ vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { creat
 
 let host: HTMLDivElement, root: Root;
 let state: ReturnType<typeof useWorkspaceGpu>;
-function Harness({ source = 'photo:preview' }: { source?: string }) {
-  state = useWorkspaceGpu(source);
+function Harness({ source = 'photo:preview', suspended = false }: { source?: string; suspended?: boolean }) {
+  state = useWorkspaceGpu(source, false, suspended);
   return <WebGpuControl {...state} onChange={state.setPreference} />;
 }
 function fakeRenderer() {
@@ -42,6 +42,15 @@ afterEach(() => {
 });
 
 describe('workspace WebGPU ownership and UI with mocked initialization', () => {
+  it('does not create the JPEG renderer while RAW owns the viewer and resumes for JPEG', async () => {
+    const gpu = fakeRenderer(); vi.mocked(WebGpuAdjustmentRenderer.create).mockResolvedValue(gpu.value);
+    await act(async () => root.render(<Harness suspended />));
+    expect(WebGpuAdjustmentRenderer.create).not.toHaveBeenCalled();
+    expect(state.renderer).toBeNull();
+    await mount(); expect(state.renderer).toBe(gpu.renderer);
+    await act(async () => root.render(<Harness suspended />));
+    expect(gpu.renderer.dispose).toHaveBeenCalled(); expect(state.renderer).toBeNull();
+  });
   it('distinguishes checking, available, and an accepted GPU paint', async () => {
     const pending = deferred<WebGpuAdjustmentRenderer | null>(), gpu = fakeRenderer();
     vi.mocked(WebGpuAdjustmentRenderer.create).mockReturnValueOnce(pending.promise);

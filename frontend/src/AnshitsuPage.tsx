@@ -24,6 +24,7 @@ import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './ColorGradingAdjustmentControls';
 import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
 import { useJpegOriginal } from './useJpegOriginal';
+import { useRawDocument } from './useRawDocument';
 import type { JpegProfile } from './jpegProfile';
 import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
@@ -124,6 +125,7 @@ export function AnshitsuPage() {
     || switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null;
   const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
+  const rawDocument = useRawDocument(activeDetail?.is_raw ? assetId : null);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     recipeChangeRevision,
@@ -188,7 +190,7 @@ export function AnshitsuPage() {
   queueToggleRef.current = toggleQueue;
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
-  const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`);
+  const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`, false, !activeDetail || activeDetail.is_raw);
   useEffect(() => {
     // Preserve source-bound GPU ownership so an old render cannot overlap a new source upload.
     // Original promotion is latched by useJpegOriginal while the new renderer prepares.
@@ -678,7 +680,12 @@ export function AnshitsuPage() {
       viewer={detailState === 'ready' && activeDetail ? (
         <ImageViewer gpuRenderer={gpu.renderer} onGpuError={gpu.fail} onBackendChange={gpu.reportBackend}
           key={assetId}
-          src={activeDetail.preview_url}
+          src={rawDocument?.status === 'ready' ? rawDocument.url! : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
+          documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
+          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' ? 'error' : undefined}
+          statusNote={rawDocument ? t(`workspace.rawPreview.${rawDocument.status}`) : undefined}
+          previewPixels={!!rawDocument}
+          beforeAvailable={!activeDetail.is_raw}
           editSource={editable ? jpegOriginal.source : undefined}
           originalStatus={jpegOriginal.status}
           showingOriginal={jpegOriginal.showingOriginal}
@@ -769,7 +776,7 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : <p>{t('workspace.jpegOnly')}</p>}
+          </div> : <p>{t(rawDocument ? 'workspace.rawPreview.readOnly' : 'workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip

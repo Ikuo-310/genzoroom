@@ -147,6 +147,30 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('preserves native Preview zoom across frame URLs, resets for a new document and never calls the JPEG renderer', async () => {
+    const render = async (src: string, documentKey: string) => act(async () => root.render(<ImageViewer
+      src={src} documentKey={documentKey} alt="raw" leftOpen rightOpen previewPixels beforeAvailable={false}
+      onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));
+    const before = mockImage.renders;
+    await render('blob:raw-1', 'document-a');
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    const image = host.querySelector('img')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 600 });
+    act(() => image.dispatchEvent(new Event('load')));
+    click([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Preview 100%')!);
+    const zoom = host.querySelector('.zoom-controls output')!.textContent;
+    await render('blob:raw-2', 'document-a');
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
+    expect(comparisonToggle().disabled).toBe(true);
+    expect(mockImage.renders).toBe(before);
+    await render('blob:raw-3', 'document-b');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('0px');
+    act(() => host.querySelector('img')!.dispatchEvent(new Event('load')));
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+  });
   it('wires the Settings GPU switch and runtime fallback without changing source, History, or Recipe', async () => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
     Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });

@@ -13,6 +13,11 @@ import type { HistogramChangeHandler } from './histogram';
 
 type ImageViewerProps = {
   src: string;
+  documentKey?: string;
+  previewStatus?: 'loading' | 'error';
+  statusNote?: string;
+  previewPixels?: boolean;
+  beforeAvailable?: boolean;
   editSource?: EditImageSource;
   originalStatus?: 'loading' | 'ready' | 'error';
   showingOriginal?: boolean;
@@ -40,7 +45,7 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
-export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -57,7 +62,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
   const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [backslashHeld, setBackslashHeld] = useState(false);
-  const showBeforeAdjustments = persistentBeforeAdjustments || backslashHeld;
+  const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   useLayoutEffect(() => {
     onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
   }, [showBeforeAdjustments, onBeforeAdjustmentsDisplayChange]);
@@ -91,7 +96,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         }
       } else if (matchesShortcut(event, 'viewerBefore')) {
         event.preventDefault();
-        if (!event.repeat) setBackslashHeld(true);
+        if (beforeAvailable && !event.repeat) setBackslashHeld(true);
       }
     };
     const keyup = (event: KeyboardEvent) => {
@@ -109,15 +114,17 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       window.removeEventListener('blur', release);
       document.removeEventListener('visibilitychange', visibilityChange);
     };
-  }, [editSource, keyboardBlocked, onOriginalToggle, originalStatus]);
+  }, [editSource, keyboardBlocked, onOriginalToggle, originalStatus, beforeAvailable]);
 
+  // A new native frame is not a new document: preserve the user's zoom and pan.
+  const imageIdentity = documentKey ?? `${src}:${editSource?.kind ?? ''}:${editSource?.url ?? ''}`;
   useEffect(() => {
     setImageState('loading');
     setImageSize({ x: 0, y: 0 });
     setFitMode(true);
     setPan({ x: 0, y: 0 });
     previousTransform.current = null;
-  }, [src, editSource?.kind, editSource?.url]);
+  }, [imageIdentity]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -216,7 +223,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
         <button type="button" className="tool-button" onClick={fit}
           title={fitShortcut ? t('workspace.fitShortcutHint', { shortcut: fitShortcut }) : t('workspace.fit')}>{t('workspace.fit')}</button>
-        <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
+        <button type="button" className="tool-button" onClick={setActualSize}>{t(previewPixels ? 'workspace.rawPreview.actualSize' : 'workspace.actualSize')}</button>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
@@ -241,6 +248,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
           </span>}
         </>}
         <button type="button" className="tool-button before-after-controls" aria-label={t('workspace.beforeAfter')}
+          disabled={!beforeAvailable}
           title={beforeShortcut ? t('workspace.beforeHoldShortcutHint', { shortcut: beforeShortcut }) : t('workspace.beforeAfter')}
           aria-pressed={showBeforeAdjustments} aria-description={t(showBeforeAdjustments ? 'workspace.before' : 'workspace.after')}
           onClick={() => onBeforeAdjustmentsChange?.(!persistentBeforeAdjustments)}>
@@ -298,7 +306,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
-          onError={() => { setImageState('error'); onImageError?.(); }} /> : <img
+          onError={() => { setImageState('error'); onImageError?.(); }} /> : src && !previewStatus ? <img
           src={src}
           alt={alt}
           draggable="false"
@@ -308,10 +316,11 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
             setImageSize({ x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight });
           }}
           onError={() => setImageState('error')}
-        />}
+        /> : null}
       </div>
-      {imageState !== 'ready' && <p className={`viewer-image-status${imageState === 'error' ? ' error-text' : ''}`}>
-        {t(imageState === 'error' ? 'workspace.previewFailed' : 'workspace.loading')}
+      {statusNote && <p className="raw-preview-note" role="status">{statusNote}</p>}
+      {(previewStatus || imageState !== 'ready') && <p className={`viewer-image-status${(previewStatus ?? imageState) === 'error' ? ' error-text' : ''}`}>
+        {t((previewStatus ?? imageState) === 'error' ? 'workspace.previewFailed' : 'workspace.loading')}
       </p>}
     </div>
   </section>;

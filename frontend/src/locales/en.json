@@ -275,6 +275,14 @@
     "openSelectedCompact": "Develop"
   },
   "workspace": {
+    "rawPreview": {
+      "loading": "Developing RAW Preview with LightCraft…",
+      "ready": "LightCraft RAW Preview · up to 1024 px",
+      "unavailable": "RAW development unavailable · showing Immich viewing preview",
+      "error": "LightCraft RAW Preview failed. Leave this photo and reopen it to retry.",
+      "readOnly": "RAW Preview only. Adjustments are not available in this phase.",
+      "actualSize": "Preview 100%"
+    },
     "historyRetained": "Edit history retained",
     "name": "Develop",
     "subtitle": "Photo development workspace",
