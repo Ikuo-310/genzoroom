@@ -77,7 +77,7 @@ def test_old_versions_migrate_without_changing_existing_columns(db, version):
     edit_store.initialize_database()
     storage.validate_existing_database(db)
     with closing(sqlite3.connect(db)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION
         for table, (columns, values) in before.items():
             assert connection.execute(f"SELECT {','.join(columns)} FROM {table}").fetchall() == values
         assert connection.execute("SELECT count(*) FROM asset_raw_recipes").fetchone()[0] == 0
@@ -356,7 +356,7 @@ def test_real_sqlite_full_rolls_back_without_losing_original(db, monkeypatch):
     assert rows(db, "raw_recipe_saves") == before
 
 
-def test_release_smoke_sqlite_assertions_against_real_v7_database(db):
+def test_release_smoke_sqlite_assertions_against_current_database(db):
     edit_store.initialize_database()
     script = (Path(__file__).resolve().parents[2] / "release" / "smoke-test.sh").read_text()
     # Execute the release script's actual SQLite block without Docker/build-info/network probes.

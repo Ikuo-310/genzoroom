@@ -11,7 +11,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from storage import DB_PATH, StorageInitializationError
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -180,8 +180,42 @@ def _create_v7(connection: sqlite3.Connection) -> None:
     )""")
 
 
+def _create_v8(connection: sqlite3.Connection) -> None:
+    connection.execute("SELECT develop_settings_json, recipe_revision, last_save_id FROM asset_raw_recipes LIMIT 0")
+    connection.execute("SELECT save_id, request_hash, recipe_revision, updated_at FROM raw_recipe_saves LIMIT 0")
+    identity = """asset_id TEXT NOT NULL, source_content_hash TEXT NOT NULL,
+        engine_name TEXT NOT NULL, engine_version TEXT NOT NULL, engine_commit TEXT NOT NULL,
+        settings_schema_version INTEGER NOT NULL CHECK (settings_schema_version >= 1)"""
+    keys = "asset_id, source_content_hash, engine_name, engine_version, engine_commit, settings_schema_version"
+    connection.execute(f"""CREATE TABLE raw_history_saves (
+        {identity},
+        save_id TEXT PRIMARY KEY NOT NULL REFERENCES raw_recipe_saves(save_id),
+        request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+        request_json TEXT NOT NULL, result_json TEXT NOT NULL,
+        result_hash TEXT NOT NULL CHECK (length(result_hash) = 64),
+        step_id TEXT UNIQUE,
+        recipe_revision INTEGER NOT NULL CHECK (recipe_revision >= 1), updated_at TEXT NOT NULL,
+        FOREIGN KEY ({keys}) REFERENCES asset_raw_recipes({keys})
+    )""")
+    connection.execute(f"CREATE INDEX raw_history_saves_identity ON raw_history_saves({keys})")
+    connection.execute(f"""CREATE TABLE asset_raw_histories (
+        {identity}, baseline_settings_json TEXT NOT NULL,
+        history_cursor INTEGER NOT NULL CHECK (history_cursor >= 0),
+        last_save_id TEXT NOT NULL REFERENCES raw_history_saves(save_id),
+        PRIMARY KEY ({keys}), FOREIGN KEY ({keys}) REFERENCES asset_raw_recipes({keys})
+    )""")
+    # Retention is an application policy, not a schema constraint or a cascading receipt deletion.
+    connection.execute(f"""CREATE TABLE asset_raw_history_steps (
+        {identity}, position INTEGER NOT NULL CHECK (position >= 1),
+        step_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, metadata_json TEXT NOT NULL,
+        develop_settings_json TEXT NOT NULL, created_at TEXT NOT NULL,
+        save_id TEXT NOT NULL REFERENCES raw_history_saves(save_id),
+        PRIMARY KEY ({keys}, position), FOREIGN KEY ({keys}) REFERENCES asset_raw_histories({keys})
+    )""")
+
+
 MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5,
-              5: _create_v6, 6: _create_v7}
+              5: _create_v6, 6: _create_v7, 7: _create_v8}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:

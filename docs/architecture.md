@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows has an internal RAW import/settings/Preview adapter, verified in a Windows development Backend PoC against LightCraft v0.10.0. Windows RAW Preview and LightCraft sliders are implemented. C3-A adds SQLite RAW recipe storage, C3-B restores compatible saved recipes before publishing a RAW document, and C3-C connects confirmed readback Autosave and save guards for photo switching, Gallery return and normal Windows close. C3-D renews the same RAW session at a soft threshold of 200 mutation attempts while retaining the 256-attempt hard safety limit. RAW History, final RAW Export and Immich integration remain unimplemented.**
+**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows has an internal RAW import/settings/Preview adapter, verified in a Windows development Backend PoC against LightCraft v0.10.0. Windows RAW Preview and LightCraft sliders are implemented. C3-A adds SQLite RAW recipe storage, C3-B restores compatible saved recipes before publishing a RAW document, and C3-C connects confirmed readback Autosave and save guards for photo switching, Gallery return and normal Windows close. C3-D renews the same RAW session at a soft threshold of 200 mutation attempts while retaining the 256-attempt hard safety limit. C4-B1 adds the RAW History SQLite persistence layer; its document/API/UI connections, final RAW Export and Immich integration remain unimplemented.**
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -131,6 +131,48 @@ The same existing ownership queue releases the old workspace, then creates a new
 Renewal tracks only the current operation's save/release/open phase and expected revision/fingerprint. It is not a settings snapshot/history store. Save failure leaves the old owners and unconfirmed desired state intact and does not release native resources. Release/cleanup failure retains the old workspace identity for retry and never forces creation. Failed reimport/restore/readback/Preview keeps the saved DB row, disables editing and exposes session-renewal retry; it never resumes on defaults. For a lost DELETE acknowledgment, a repeated DELETE's workspace-conflict response permits recovery only after the existing observational capability endpoint confirms `workspaceState=empty` and `cleanupPending=false`. Other uncertain ownership stops. A lost workspace-creation response cannot reconstruct its opaque ID: creation stays refused while Backend ownership exists, and existing lease/lifecycle cleanup remains authoritative.
 
 The panel displays renewal progress/failure and explicit retry. Structured lifecycle diagnostics include safe Asset ID, generation, revision, attempt count and fixed failure codes without settings, paths or credentials. SQLite schema, native Session/cache implementation, normal RAW-to-RAW/JPEG switching and JPEG editing/persistence are unchanged. Three-RAW cycling uses ordinary release/reimport/SQLite restoration, not three resident photos. Multiple resident optimization, memory snapshot stores, LRU/recipe-capacity management, new cache management and generic reset APIs remain excluded. Before/After, Reset, bypass, History and Undo/Redo remain C4; RAW Export remains later work. Fake tests establish ordering and state integrity; real GPU/RSS behavior, renewal latency, long load and Windows interaction require user acceptance.
+
+### C4-B1: RAW History SQLite persistence
+
+Schema v8 adds `asset_raw_histories`, `asset_raw_history_steps`, and `raw_history_saves` to the
+existing migration chain without changing JPEG, RAW current-recipe, or Queue tables. Startup
+validation and the release SQLite smoke assertions check the new columns. Upgrading a real
+profile requires a consistent backup; an older v7-only Backend cannot open v8, so downgrade
+requires restoring that backup. Development tests use temporary databases only.
+
+| State | Owner and invariant |
+|---|---|
+| History identity | The same six canonical Asset/content/engine/schema fields as `asset_raw_recipes`; no handle, PhotoId, path or local fingerprint. |
+| Baseline, cursor, latest History save | `asset_raw_histories`; cursor 0 selects baseline, otherwise cursor selects the corresponding step. Its latest History receipt seals the baseline, ordering and cursor. |
+| Ordered snapshots | `asset_raw_history_steps`; contiguous positions, stable globally unique step UUIDs, allowlisted kind/metadata, complete validated after-settings and timestamp. Before-settings come from the preceding step or baseline. |
+| Current settings and revision | Existing `asset_raw_recipes`; settings always equal the selected History snapshot. The existing recipe revision is the shared CAS; no additional History revision exists. |
+| Retry receipts | Existing `raw_recipe_saves` plus `raw_history_saves`; identity, bounded request metadata/hashes, bounded result metadata/hash and reserved step UUIDs. Receipts contain no settings bodies and survive branch deletion/pruning. |
+
+`raw_recipe_store.get_raw_history(identity, initial_settings=...)` returns a validated internal
+snapshot without initializing History rows. A legacy saved recipe supplies its current settings
+as baseline; an unsaved RAW can supply its initial confirmed readback. Explicit
+`initialize_raw_history(...)` persists a baseline checkpoint. `append_raw_history(...)` records
+one confirmed operation; `move_raw_history_cursor(..., target_step_id=...)` accepts a stable step
+UUID or `None` for baseline and requires matching complete confirmed settings. These are Python
+storage functions, not HTTP endpoints. Engine compatibility/readback provenance remain the
+document adapter's responsibility; the store validates and isolates the full identity and schema.
+
+All writes share the existing recipe CAS helper and one `BEGIN IMMEDIATE` transaction. Appending
+after Undo removes Redo only when settings change. The code policy retains 200 steps, rolling the
+last discarded after-settings into baseline and renumbering retained positions without changing
+UUIDs. The schema does not encode 200. No-op requests retain the branch and create no step, but
+still consume one recipe revision/receipt so their saveId cannot later identify another request.
+Cursor changes between equal snapshots are meaningful and save normally.
+
+History writes return `{ack, current, replayed}`: `ack` is the original immutable result and
+`current` separately reports current revision/cursor/count/fingerprint. Cross-domain saveId
+reuse is rejected even if settings match. Recipe-only `put_raw_recipe()` preserves its contract
+for legacy recipes and old retries; after History initialization it may checkpoint identical
+settings, but a new different-settings write raises `raw_history_requires_operation` instead
+of silently rewriting a step. Reads reject corrupt History/current/receipt combinations.
+
+C4-B1 adds no LightCraft operations, Windows RAW endpoints, Frontend History state or UI.
+Those remain C4-B2/B3; existing C3 operations create no History rows by themselves.
 
 ## Gallery manual refresh
 

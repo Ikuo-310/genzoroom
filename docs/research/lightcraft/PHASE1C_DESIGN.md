@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22、Asia/Tokyo）。**C1〜C3-Dは実装済み、C4-Aの実装前調査・詳細設計は末尾に記録、C4-B以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-DおよびC4-B1永続化層は実装済み。C4-A確定設計とC4-B1実装記録は末尾を参照し、C4-B2以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -887,3 +887,48 @@ JPEG EditEntryにRAW Settingsを変換せず、表示用kind／label／数値だ
 - RAW温度／Tintのいずれの個別ResetもWB全体をAs Shotへ戻す。カテゴリReset・All ResetもAs Shotを確認する。source値と完全readbackが一致しない場合は成功扱いせず代替値を推測しない。全体でHistory 1操作としUndo可能にする。
 - RAW Historyは最大200操作。上限超過時に最古stepから整理しbaselineを繰り上げる。current recipe・cursorを同一transactionで整合させる。上限はschemaへ固定せず、後日の件数変更・手動History整理／圧縮に対応できる構造にする。JPEGの手動整理機能をC4に実装しない。
 - JPEGもカラー（温度／Tint／自然な彩度／彩度）を最上部、基本補正を次に統合し、Color Gradingは独立する。統合カラーのtoggle／Resetは一操作とする。`whiteBalanceEnabled`／`colorEnabled`をRecipe v18・SQLite schema内に保持し、render時は統合状態として扱い、新しい操作では両fieldを同期する。個別ON/OFFを廃止し、個別ResetとJPEG History／Before・After／Export／補正済みサムネイルを維持する。過去状態の互換・migrationは設計しない。
+
+## Phase 1C-C4-B1 実装結果（2026-10-23）
+
+開始HEAD `3c66494ad24261690550d704339ef25cd372912c`、`feature/lightcraft-integration`、cleanから実装。対象はBackend永続化層のみ。C4-Aの確定仕様とC1〜C3完了記録を保持し、LightCraft操作・Windows RAW API・Frontend／UIは未接続である。
+
+### schema v8・共有状態
+
+既存migration chainにv7→v8を追加した。旧JPEG table、RAW current recipe、recipe receipt、Queue／Export tableは変更しない。起動時 `storage.validate_existing_database()` とrelease smokeの実SQLite assertionもv8へ合わせた。
+
+| Table | 確定した構造・不変条件 |
+|---|---|
+| `asset_raw_histories` | 既存6項目identityの複合PK／current recipeへのFK、完全 `baseline_settings_json`、`history_cursor`、最新History receiptへの `last_save_id`。cursor 0はbaseline、それ以外はpositionに対応。current recipeと選択snapshotは必ず一致 |
+| `asset_raw_history_steps` | 同identity＋連続positionのPK、global UNIQUEなstable UUID `step_id`、固定kind・bounded `metadata_json`、完全after settings、UTC作成日時、作成receiptへの `save_id`。beforeを重複保存しない |
+| `raw_history_saves` | 同identityとrecipeへのFK、既存recipe receiptへのPK／FK `save_id`、request hash／bounded request JSON、result hash／bounded ack JSON、予約済みstep UUID、recipe revision／更新日時。snapshot本文を持たず、枝切り／pruneで削除しない |
+
+保持上限はコードの `HISTORY_LIMIT = 200`。schema CHECKには固定しない。有効append時だけRedo枝を切り、超過した最古stepのafterをbaselineへ繰り上げ、残存UUID／順序を維持してpositionとcursorを補正する。current recipe、両receipt、parent、step変更を一つの `BEGIN IMMEDIATE` 内で保存する。既存write部分をconnection受取 `_write_recipe()` に抽出し、別transactionから `put_raw_recipe()` を呼ばない。
+
+### 内部Python保存API・C4-B2への契約
+
+- `get_raw_history(identity, initial_settings=None)`：current recipeとHistoryを同じread transactionで検証して返す。未保存なら任意の初期readback、C3保存済みなら現在保存値をbaselineとする読み取り用viewを返す。Historyのない写真を読んでもHistory rowを作らない。
+- `initialize_raw_history(identity, expected_revision, save_id, settings)`：現在設定のbaseline checkpoint。架空の編集stepは作らない。
+- `append_raw_history(identity, expected_revision, save_id, settings, kind=..., metadata=..., step_id=..., baseline_settings=...)`：確定snapshotから1操作を追加。未保存RAWの最初のappendには編集前readbackをbaselineとして渡す。step UUID省略時はsaveIdを使用する。
+- `move_raw_history_cursor(identity, expected_revision, save_id, settings, target_step_id=...)`：Undo／Redo／jumpの保存境界。stable UUIDまたはbaselineの `None` を指定し、渡された確定readbackとtarget全設定が一致した場合だけ保存する。cursor移動はstep追加なし。同じ設定でも異なるcursorへの移動は保存可能。
+- writerは `{ack, current, replayed}` を返す。`ack`は元requestの結果revision／cursor／件数／step ID／fingerprint、`current`は今の保存状態metadata。過去ackを現行cursorとして適用してはいけない。再送は同一saveId／expectedRevision／操作／step ID／Settings／baselineを保持する。
+
+kindは `control`／`controlReset`／`sectionToggle`／`sectionReset`／`allReset`。metadataはC2の10 control IDまたはlight／color section ID、toggle boolだけを許可し、1 KiB以内とする。receipt JSONは各4 KiB以内、snapshotは既存256 KiB／深さ32／node 32,768等のvalidatorを共用する。全identityを正規化・分離するが、実engineとの互換性やreadback由来の証明は引き続きadapter callerの責務である。
+
+no-opはstepを増やさずRedo枝も切らない。ただし受理したsaveIdを別payloadへ使い回せないよう、保存checkpointとしてrecipe revisionとreceiptを一度だけ増やす。同一request再送は増やさない。History step UUIDはprune／枝切り後もreceiptで予約され再使用できない。
+
+Historyなしの既存 `put_raw_recipe()` は入力・出力・競合・古いsaveId replayの契約を維持する。History初期化後は同一current設定のcheckpointだけを許可し、新しい異設定のrecipe-only保存は `StoreConflict(raw_history_requires_operation)` で拒否する。履歴snapshotの上書きや架空stepでの補填をしない。C4-B2はHistory writerへ結線する必要がある。
+
+保存済みデータはSettings、連続position、cursor、UUID、allowlist metadata、step作成receipt、最新receiptの全履歴fingerprint、current選択snapshot一致まで検証する。receiptはrequest／result hashと既存recipe receiptを照合する。破損は `StoreUnavailable(persistence_unavailable)`、History入力不正は `InvalidRawHistory(invalid_raw_history)`、Settings入力不正は既存 `InvalidRawRecipe`。不整合を空履歴扱いしたり自動修復したりしない。
+
+### テスト・限定監査・残る境界
+
+repo `.venv` Python 3.14、cwd backendで次のfocused検証を実施した。通常sandboxのpytest TEMP作成失敗はテストsetupの環境制限であり、同じPythonの権限付き実行で確認した。
+
+- `test_raw_history_store.py`：最終92件成功。v1〜v7→v8・migration失敗rollback、既存列／データ保持、遅延baseline、初期化、append／Undo・Redo・jump、no-op／同設定異cursor、枝切り、200／201件、baseline繰上げ・連続position・UUID保持、prune／枝切り後の過去ack、異payload／保存domain衝突、並行writer、破損のfail-closedを検証した。
+- C3-A〜D関連保存と依存境界：`test_raw_recipe_store.py`、`test_raw_recipe_api.py`、`test_raw_recipe_restore.py`、`test_storage.py`、`test_windows_raw_api.py`、`test_raw_controls.py`、`test_edit_state.py`、`test_export_queue.py`の266件＋41 subtests成功。既存recipe-only保存・復元／Autosave保存API、JPEG History／Queueの回帰を確認した。
+- 実SQLite writer lock／SQLITE_FULLに加え、recipe／両receipt／parent／step／prune／position更新／commitの各失敗を注入し、current・cursor・baseline・receiptがすべて元状態へrollbackすることを確認した。release script内の実SQLite assertion blockを一時v8 DBへ限定実行した。
+- 限定監査ではtransaction境界、古いackの扱い、recipe-only checkpoint、pruneとbaseline、receipt破損、migration rollbackを点検。prune済みUUID再利用の拒否、cursor-only／初回insert／再番号付け失敗、同一設定cursor差と再送の回帰を追加し、最新receiptと選択Settings fingerprintの照合も補強した。未解決High／Mediumはない。
+
+`git diff --check`で差分の空白を確認。Frontendテスト／build・全Backend suite・フルDocker Smoke Test・実LightCraft／GPU／Immich・実機DB操作は行っていない。テストDB以外へmigrationは実行していない。実profileのv8 upgrade前には整合backupを取り、v7以下への復帰はbackup復元で行う。既存schemaのdowngradeは提供しない。
+
+C4-B1で停止する。HTTP API、gesture／readback操作owner、UI、通常編集からのHistory登録はC4-B2／B3へ残す。RAW Export／サムネイル、JPEGカテゴリ統合・個別ON/OFF削除も今回実装していない。
