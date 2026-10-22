@@ -1,8 +1,9 @@
-"""Windows-only RAW editing and durable recipes; no RAW History or Export."""
+"""Windows-only RAW editing, durable recipes and confirmed History operations."""
 
 import asyncio
 import hashlib
 import json
+import re
 import secrets
 from time import monotonic
 from uuid import UUID
@@ -20,6 +21,12 @@ from raw_controls import controls_state, validate_controls
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
+MAX_HISTORY_RESPONSE_BYTES = 16 * 1024
+HISTORY_PAGE_SIZE = 20
+HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
+                     "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
+                     "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
+                     "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation"}
 LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
@@ -31,6 +38,7 @@ class RawPreviewApi:
         self.workspace = self.document = None
         self._lock = asyncio.Lock()
         self._tasks = set()
+        self._history_tasks = set()
         self._closing = False
         self._lease_task = None
         self._close_task = None
@@ -38,6 +46,9 @@ class RawPreviewApi:
         self._workspace_state = "empty"
         self._native_released = False
         self._recipe_save = None
+        self._history_save = None
+        self._history_identity = None
+        self._history_initialized = self._history_enabled = self._history_draining = False
         self.app = Starlette(routes=[
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
@@ -48,6 +59,9 @@ class RawPreviewApi:
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
+            Route("/documents/{handle}/history", self.endpoint, methods=["GET"]),
+            *[Route(f"/documents/{{handle}}/history/{action}", self.endpoint, methods=["POST"])
+              for action in ("initialize", "commit", "undo", "redo", "jump", "recover")],
         ])
 
     def bind(self, raw, manager):
@@ -87,19 +101,22 @@ class RawPreviewApi:
     async def endpoint(self, request):
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
-            if self._closing or len(self._tasks) >= 2:
+            if self._closing or self._history_draining or len(self._tasks) >= 2:
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
             task = asyncio.create_task(self._execute(request, body), name="windows-raw-request")
             self._tasks.add(task)
+            if request.method == "POST" and "/history/" in request.url.path:
+                self._history_tasks.add(task)
             task.add_done_callback(self._done)
             return await asyncio.shield(task)
         except (LightCraftError, TimeoutError) as error:
             code = error.code if isinstance(error, LightCraftError) else "raw_request_timeout"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
-                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid"} else
-                      503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed"} else
-                      409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
+                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
+                      503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
+                                      "raw_history_unavailable", "raw_history_save_failed"} else
+                      409 if code in HISTORY_CONFLICTS or code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
                                       "raw_recipe_revision_conflict", "raw_recipe_save_id_reused"} else 502)
@@ -111,6 +128,7 @@ class RawPreviewApi:
 
     def _done(self, task):
         self._tasks.discard(task)
+        self._history_tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             error = task.exception()
             code = error.code if isinstance(error, LightCraftError) else "raw_operation_failed"
@@ -118,6 +136,9 @@ class RawPreviewApi:
                                  "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable",
                                  "raw_source_too_large", "raw_cache_capacity", "raw_disk_capacity"}
             rejection |= code in {"raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"}
+            rejection |= code in HISTORY_CONFLICTS
+            if code in {"raw_history_revision_conflict", "raw_history_readback_mismatch", "raw_history_baseline_mismatch"}:
+                rejection &= not (self._history_save and self._history_save["stage"] != "complete")
             lightcraft_log("raw.operation.failed", level="warn" if rejection else "error", errorCode=code)
 
     def _owner(self, workspace):
@@ -187,6 +208,8 @@ class RawPreviewApi:
                 self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self.document["recipeFingerprint"] = self.document["settingsFingerprint"]
                 self._recipe_save = None
+                self._history_save = None
+                self._history_enabled = False
                 self._raw_handle = handle
                 self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
                 self._touched = monotonic()
@@ -194,7 +217,10 @@ class RawPreviewApi:
                                revision=snapshot.revision)
                 return JSONResponse(self.document)
             settings_request = path.endswith("/settings")
-            doc = self._document(request.path_params["handle"], resync=settings_request)
+            history_request = "/history" in path
+            doc = self._document(request.path_params["handle"], resync=settings_request or history_request)
+            if history_request:
+                return await self._history(request, body, doc)
             if path.endswith("/recipe"):
                 return await self._recipe(request, body, doc)
             if settings_request or path.endswith("/controls"):
@@ -208,6 +234,9 @@ class RawPreviewApi:
                 if settings_request:
                     snapshot = await self.raw.get_settings(self._raw_handle)
                 else:
+                    self._history_unsettled()
+                    if self._history_initialized and not self._history_enabled:
+                        raise LightCraftError("raw_history_client_required")
                     if type(body.get("expectedRevision")) is not int or body["expectedRevision"] != doc["revision"]:
                         raise LightCraftError("raw_revision_conflict")
                     values = validate_controls(body["values"], self._wb_available)
@@ -272,6 +301,7 @@ class RawPreviewApi:
             return JSONResponse({**doc, "recipeRevision": saved["revision"] if present else 0,
                 "recipeFingerprint": fingerprint, "lastSaveId": saved.get("lastSaveId"), "updatedAt": saved.get("updatedAt")})
 
+        self._history_unsettled()
         if set(body) != {"workspaceId", "generation", "documentToken", "documentRevision", "expectedRecipeRevision", "saveId"} \
                 or any(type(body.get(key)) is not int or not 0 <= body[key] < 2**53
                        for key in ("generation", "documentRevision", "expectedRecipeRevision")):
@@ -299,13 +329,17 @@ class RawPreviewApi:
                 raise LightCraftError("raw_revision_conflict")
             # One immutable transport retry belongs to this document, not a photo snapshot store.
             pending = {"request": body, "settings": snapshot.settings,
-                       "identity": self.raw.recipe_identity(self._raw_handle), "fingerprint": doc["settingsFingerprint"]}
+                       "identity": self.raw.recipe_identity(self._raw_handle), "fingerprint": doc["settingsFingerprint"], "settled": False}
             self._recipe_save = pending
         try:
             result = await run_in_threadpool(put_raw_recipe, pending["identity"], body["expectedRecipeRevision"],
                                              body["saveId"], pending["settings"])
         except StoreConflict as error:
-            raise LightCraftError("raw_recipe_save_id_reused" if error.code == "save_id_reused"
+            if error.code == "raw_history_requires_operation":
+                # The store has rejected this new checkpoint without a receipt or a write.
+                pending["settled"] = True
+            raise LightCraftError("raw_history_requires_operation" if error.code == "raw_history_requires_operation" else
+                                  "raw_recipe_save_id_reused" if error.code == "save_id_reused"
                                   else "raw_recipe_revision_conflict") from None
         except InvalidRawRecipe:
             raise LightCraftError("raw_recipe_invalid") from None
@@ -318,14 +352,290 @@ class RawPreviewApi:
             raise LightCraftError("raw_recipe_save_unknown") from None
         doc["recipeRevision"] = result["revision"]
         doc["recipeFingerprint"] = pending["fingerprint"]
+        pending["settled"] = True
         lightcraft_log("raw.recipe.saved", level="debug", assetId=doc["assetId"], revision=result["revision"])
         return JSONResponse({**{key: doc[key] for key in ("workspaceId", "handle", "assetId", "generation", "documentToken")},
             "documentRevision": body["documentRevision"], "settingsFingerprint": pending["fingerprint"],
             "recipeRevision": result["revision"], "saveId": result["lastSaveId"], "updatedAt": result["updatedAt"]})
 
+    def _history_unsettled(self):
+        if self._history_save and self._history_save["stage"] != "complete":
+            raise LightCraftError("raw_history_save_pending")
+
+    def _history_verify(self, doc):
+        if self._closing or self._document(doc["handle"], resync=True) is not doc:
+            raise LightCraftError("raw_stale_handle")
+        if self.raw.status().state == "synced" and self.raw.recipe_identity(self._raw_handle) != self._history_identity:
+            raise LightCraftError("raw_stale_handle")
+
+    def _confirmed(self, doc, snapshot):
+        doc["revision"] = snapshot.revision
+        doc["settingsFingerprint"] = self._fingerprint(snapshot.settings)
+        doc.update(self._edit_budget())
+        self._wb_available = controls_state(snapshot)["wb"]["available"]
+
+    async def _history_load(self, doc):
+        from raw_recipe_store import get_raw_history, InvalidRawRecipe, StoreUnavailable
+        try:
+            state = await run_in_threadpool(get_raw_history, self._history_identity)
+        except (InvalidRawRecipe, StoreUnavailable):
+            raise LightCraftError("raw_history_unavailable") from None
+        self._history_verify(doc)
+        self._history_initialized = state["initialized"]
+        return state
+
+    def _history_public(self, doc, state):
+        history = state["history"]
+        cursor = history["cursor"] if history else 0
+        steps = history["steps"] if history else []
+        saved = self._fingerprint(state["recipe"]["settings"]) if state["recipe"] else None
+        return {"history": {"initialized": state["initialized"], "cursor": cursor, "length": len(steps),
+                            "selectedStepId": steps[cursor - 1]["stepId"] if cursor else None},
+                "recipeRevision": state["revision"], "recipeFingerprint": saved,
+                "historyPending": bool(self._history_save and self._history_save["stage"] != "complete"),
+                "nativeState": self.raw.status().state,
+                "nativeMatchesRecipe": self.raw.status().state == "synced"
+                    and doc["settingsFingerprint"] == (saved or doc["recipeFingerprint"])}
+
+    @staticmethod
+    def _history_json(payload, limit=MAX_JSON_BYTES):
+        response = JSONResponse(payload, headers={"Cache-Control": "no-store"})
+        if len(response.body) > limit:
+            raise LightCraftError("raw_history_response_too_large")
+        return response
+
+    async def _history_response(self, doc, result):
+        state = await self._history_load(doc)
+        metadata = self._history_public(doc, state)
+        doc["recipeRevision"] = metadata["recipeRevision"]
+        if metadata["recipeFingerprint"] is not None:
+            doc["recipeFingerprint"] = metadata["recipeFingerprint"]
+        snapshot = self.raw.confirmed_settings(self._raw_handle, doc["revision"], allow_desync=True)
+        return self._history_json({**doc, **controls_state(snapshot), **metadata,
+                                   "ack": result["ack"] if result else None,
+                                   "replayed": result["replayed"] if result else False})
+
+    def _history_body(self, body, doc, action):
+        required = {"workspaceId", "generation", "documentToken", "documentRevision",
+                    "expectedRecipeRevision", "settingsFingerprint"}
+        if action != "recover":
+            required.add("saveId")
+        if action == "commit":
+            required |= {"kind", "metadata"}
+        elif action == "jump":
+            required.add("targetStepId")
+        if (set(body) != required or any(type(body.get(key)) is not int or not 0 <= body[key] < 2**53
+                for key in ("generation", "documentRevision", "expectedRecipeRevision"))
+                or type(body.get("settingsFingerprint")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", body["settingsFingerprint"]) is None):
+            raise LightCraftError("raw_invalid_request")
+        if any(body[key] != doc[key] for key in ("generation", "documentToken")):
+            raise LightCraftError("raw_stale_handle")
+        body = dict(body)
+        try:
+            for key in ("saveId", "targetStepId"):
+                if key in body and (key != "targetStepId" or body[key] is not None):
+                    if type(body[key]) is not str or len(body[key]) > 45:
+                        raise ValueError()
+                    body[key] = str(UUID(body[key]))
+        except ValueError:
+            raise LightCraftError("raw_invalid_request") from None
+        if action == "commit":
+            from raw_controls import CONTROLS
+            metadata = body["metadata"]
+            if (body["kind"] != "control" or type(metadata) is not dict or set(metadata) != {"control"}
+                    or type(metadata["control"]) is not str or metadata["control"] not in CONTROLS):
+                raise LightCraftError("raw_invalid_request")
+        return body
+
+    async def _history(self, request, body, doc):
+        from raw_recipe_store import (HISTORY_LIMIT, get_raw_history_save, initialize_raw_history, append_raw_history,
+                                      move_raw_history_cursor, InvalidRawRecipe, StoreConflict, StoreUnavailable)
+        if request.method == "GET":
+            if (request.headers.get("x-raw-generation") != str(doc["generation"])
+                    or request.headers.get("x-raw-token") != doc["documentToken"]):
+                raise LightCraftError("raw_stale_handle")
+            try:
+                if set(request.query_params) - {"offset", "limit"}:
+                    raise ValueError()
+                offset = int(request.query_params.get("offset", "0"))
+                limit = int(request.query_params.get("limit", str(HISTORY_PAGE_SIZE)))
+                if not 0 <= offset <= HISTORY_LIMIT or not 1 <= limit <= HISTORY_PAGE_SIZE:
+                    raise ValueError()
+            except ValueError:
+                raise LightCraftError("raw_invalid_request") from None
+            state = await self._history_load(doc)
+            steps = state["history"]["steps"] if state["history"] else []
+            return self._history_json({**doc, **self._history_public(doc, state), "offset": offset,
+                "limit": limit, "hasMore": offset + limit < len(steps), "steps": [
+                    {key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
+                    for step in steps[offset:offset + limit]]}, MAX_HISTORY_RESPONSE_BYTES)
+        action = request.url.path.rsplit("/", 1)[1]
+        body = self._history_body(body, doc, action)
+        fingerprint = hashlib.sha256(json.dumps([doc["handle"], action, body], sort_keys=True,
+                                                separators=(",", ":")).encode()).hexdigest()
+        if self._recipe_save and not self._recipe_save.get("settled", False):
+            raise LightCraftError("raw_recipe_save_pending")
+        pending = self._history_save
+        if pending and pending["request"].get("saveId") == body.get("saveId") and action != "recover":
+            if pending["action"] != action or pending["request"] != body:
+                raise LightCraftError("raw_history_save_id_reused")
+        try:
+            if action != "recover":
+                replay = await run_in_threadpool(get_raw_history_save, self._history_identity, body["saveId"],
+                                                 request_fingerprint=fingerprint)
+                self._history_verify(doc)
+                if replay is not None:
+                    if pending and pending["request"].get("saveId") == body["saveId"]:
+                        pending["stage"] = "complete"
+                    self._history_enabled = True
+                    lightcraft_log("raw.history.replayed", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
+                                   revision=replay["current"]["revision"], historyCursor=replay["current"]["historyCursor"])
+                    return await self._history_response(doc, replay)
+            if action == "recover":
+                return await self._history_recover(doc, body)
+            if not pending or pending["request"].get("saveId") != body["saveId"]:
+                self._history_unsettled()
+                if body["documentRevision"] != doc["revision"] or body["settingsFingerprint"] != doc["settingsFingerprint"]:
+                    raise LightCraftError("raw_revision_conflict")
+                state = await self._history_load(doc)
+                if state["revision"] != body["expectedRecipeRevision"]:
+                    raise LightCraftError("raw_history_revision_conflict")
+                if action != "initialize" and not state["initialized"]:
+                    raise LightCraftError("raw_history_not_initialized")
+                if (action == "initialize" and state["recipe"]
+                        and self._fingerprint(state["recipe"]["settings"]) != doc["settingsFingerprint"]):
+                    raise LightCraftError("raw_history_commit_required")
+                target = None
+                if action in {"undo", "redo", "jump"}:
+                    if self._fingerprint(state["recipe"]["settings"]) != doc["settingsFingerprint"]:
+                        raise LightCraftError("raw_history_commit_required")
+                    history = state["history"]
+                    cursor = history["cursor"]
+                    if action == "undo":
+                        cursor = max(0, cursor - 1)
+                        target = history["steps"][cursor - 1]["stepId"] if cursor else None
+                    elif action == "redo":
+                        cursor = min(len(history["steps"]), cursor + 1)
+                        target = history["steps"][cursor - 1]["stepId"] if cursor else None
+                    else:
+                        target = body["targetStepId"]
+                        matches = [i for i, step in enumerate(history["steps"], 1) if step["stepId"] == target]
+                        if target is not None and not matches:
+                            raise LightCraftError("raw_history_target_missing")
+                        cursor = matches[0] if target is not None else 0
+                    selected = history["steps"][cursor - 1]["settings"] if cursor else history["baselineSettings"]
+                else:
+                    selected = state["recipe"]["settings"] if action == "initialize" and state["recipe"] else None
+                pending = {"request": body, "action": action, "stage": "readback", "settings": None,
+                           "fingerprint": fingerprint, "identity": dict(self._history_identity),
+                           "target": target, "selected": selected}
+                self._history_save = pending
+                lightcraft_log("raw.history.started", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
+                               generation=doc["generation"], revision=doc["revision"], phase=action)
+            state = await self._history_load(doc)
+            if state["revision"] != body["expectedRecipeRevision"]:
+                raise LightCraftError("raw_history_revision_conflict")
+            if pending["stage"] != "save":
+                snapshot = await self.raw.get_settings(self._raw_handle)
+                self._history_verify(doc)
+                self._confirmed(doc, snapshot)
+                if action in {"initialize", "commit"}:
+                    if snapshot.revision != body["documentRevision"] or doc["settingsFingerprint"] != body["settingsFingerprint"]:
+                        # No mutation was sent here; let the caller resync and submit fresh confirmed intent.
+                        self._history_save = None
+                        raise LightCraftError("raw_revision_conflict")
+                elif pending["stage"] == "readback" and (snapshot.revision != body["documentRevision"]
+                        or doc["settingsFingerprint"] != body["settingsFingerprint"]):
+                    self._history_save = None
+                    raise LightCraftError("raw_revision_conflict")
+                elif self._fingerprint(snapshot.settings) != self._fingerprint(pending["selected"]):
+                    pending["stage"] = "applying"
+                    snapshot = await self.raw.restore_persisted_settings(self._raw_handle,
+                        {**pending["identity"], "settings": pending["selected"]}, snapshot.revision)
+                    self._history_verify(doc)
+                    self._confirmed(doc, snapshot)
+                # Keep supported legacy omission of WB scale in saved snapshots; the adapter has
+                # verified their complete normalized engine representation, as in C3-B restore.
+                pending["settings"] = pending["selected"] if pending["selected"] is not None else snapshot.settings
+                pending["stage"] = "save"
+            self._history_verify(doc)
+            if self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
+                raise LightCraftError("raw_history_readback_mismatch")
+            kwargs = {"request_fingerprint": pending["fingerprint"]}
+            args = (pending["identity"], body["expectedRecipeRevision"], body["saveId"], pending["settings"])
+            if action == "initialize":
+                result = await run_in_threadpool(initialize_raw_history, *args, **kwargs)
+            elif action == "commit":
+                result = await run_in_threadpool(append_raw_history, *args, kind=body["kind"], metadata=body["metadata"], **kwargs)
+            else:
+                result = await run_in_threadpool(move_raw_history_cursor, *args, target_step_id=pending["target"], **kwargs)
+            try:
+                self._history_verify(doc)
+            except LightCraftError:
+                raise LightCraftError("raw_history_save_unknown") from None
+            pending["stage"] = "complete"
+            self._history_initialized = self._history_enabled = True
+            lightcraft_log("raw.history.saved", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
+                           generation=doc["generation"], documentRevision=doc["revision"],
+                           mutationAttempts=self.raw.status().edits, revision=result["current"]["revision"],
+                           historyCursor=result["current"]["historyCursor"], historyLength=result["current"]["historyLength"])
+            return await self._history_response(doc, result)
+        except StoreConflict as error:
+            code = "raw_history_save_id_reused" if error.code == "save_id_reused" else (
+                "raw_history_revision_conflict" if error.code == "revision_conflict" else error.code)
+            raise LightCraftError(code) from None
+        except InvalidRawRecipe:
+            raise LightCraftError("raw_history_invalid") from None
+        except StoreUnavailable:
+            raise LightCraftError("raw_history_save_failed") from None
+
+    async def _history_recover(self, doc, body):
+        # Explicitly discard an uncommitted native result only after consulting durable SQLite truth.
+        if body["documentRevision"] != doc["revision"] or body["settingsFingerprint"] != doc["settingsFingerprint"]:
+            raise LightCraftError("raw_revision_conflict")
+        state = await self._history_load(doc)
+        if not state["recipe"]:
+            raise LightCraftError("raw_history_not_initialized")
+        if state["revision"] != body["expectedRecipeRevision"]:
+            raise LightCraftError("raw_history_revision_conflict")
+        pending = self._history_save
+        self._history_save = {"stage": "recovering", "request": {}, "action": "recover"}
+        try:
+            snapshot = await self.raw.get_settings(self._raw_handle)
+            self._history_verify(doc)
+            self._confirmed(doc, snapshot)
+            if self._fingerprint(snapshot.settings) != self._fingerprint(state["recipe"]["settings"]):
+                snapshot = await self.raw.restore_persisted_settings(self._raw_handle, state["recipe"], snapshot.revision)
+                self._history_verify(doc)
+                self._confirmed(doc, snapshot)
+            verified = await self._history_load(doc)
+            if verified["revision"] != state["revision"]:
+                raise LightCraftError("raw_history_revision_conflict")
+            self._history_save = None
+            self._history_enabled = verified["initialized"]
+            return await self._history_response(doc, None)
+        except BaseException:
+            self._history_save = pending or {"stage": "recovering", "request": {}, "action": "recover"}
+            raise
+
+    async def _history_checkpoint(self):
+        self._history_unsettled()
+        if self.document is None or not self._history_initialized:
+            return
+        if self.raw.status().state != "synced":
+            raise LightCraftError("raw_history_commit_required")
+        if self._recipe_save and not self._recipe_save.get("settled", False):
+            raise LightCraftError("raw_recipe_save_pending")
+        state = await self._history_load(self.document)
+        if state["revision"] != self.document["recipeRevision"]:
+            raise LightCraftError("raw_history_revision_conflict")
+        if self._fingerprint(state["recipe"]["settings"]) != self.document["settingsFingerprint"]:
+            raise LightCraftError("raw_history_commit_required")
+
     async def _restore_document(self, handle, snapshot):
         # Persistence must bind only after Windows has selected its profile and initialized storage.
-        from raw_recipe_store import InvalidRawRecipe, StoreUnavailable, lookup_raw_recipe
+        from raw_recipe_store import InvalidRawRecipe, StoreUnavailable, lookup_raw_recipe, get_raw_history
         workspace, cache = self.workspace, self.cache
         identity = self.raw.recipe_identity(handle)
         epoch = self.raw.status().selection_epoch
@@ -345,6 +655,15 @@ class RawPreviewApi:
         verify()
         if saved["status"] in {"source_mismatch", "engine_incompatible"}:
             raise LightCraftError(f'raw_recipe_{saved["status"]}')
+        try:
+            history = await run_in_threadpool(get_raw_history, identity)
+        except (StoreUnavailable, InvalidRawRecipe):
+            raise LightCraftError("raw_history_unavailable") from None
+        verify()
+        if history["revision"] != saved.get("revision", 0):
+            raise LightCraftError("raw_history_revision_conflict")
+        self._history_identity = identity
+        self._history_initialized = history["initialized"]
         if saved["status"] == "none":
             lightcraft_log("raw.recipe.none", level="debug", assetId=identity["assetId"])
             return snapshot, "none", 0
@@ -357,8 +676,11 @@ class RawPreviewApi:
     async def _release(self):
         if self.workspace is None:
             return
+        await self._history_checkpoint()
         self.document = None
         self._recipe_save = None
+        self._history_save = self._history_identity = None
+        self._history_initialized = self._history_enabled = False
         self._workspace_state = "releasing"
         try:
             # A cleanup retry must not restart the Engine or admit new source references.
@@ -396,6 +718,15 @@ class RawPreviewApi:
             raise asyncio.CancelledError()
 
     async def _close(self):
+        if self._history_initialized or self._history_save or self._history_tasks:
+            self._history_draining = True
+            try:
+                # History native application and its DB acknowledgment own the session until settled.
+                if self._tasks:
+                    await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+                await self._history_checkpoint()
+            finally:
+                self._history_draining = False
         self._closing = True
         if self.workspace is not None:
             self._workspace_state = "releasing"
@@ -419,4 +750,6 @@ class RawPreviewApi:
         self.cache = None
         self.workspace = self.document = None
         self._recipe_save = None
+        self._history_save = self._history_identity = None
+        self._history_initialized = self._history_enabled = False
         self._workspace_state = "empty"

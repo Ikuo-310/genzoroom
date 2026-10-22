@@ -375,9 +375,11 @@ def _history_receipt(connection, save_id):
         if _history_uuid(row["save_id"]) != row["save_id"]:
             raise InvalidRawHistory()
         request = _stored_json(row["request_json"], MAX_HISTORY_RECEIPT_BYTES)
-        if type(request) is not dict or set(request) != {
-                "identity", "expectedRevision", "operation", "settingsFingerprint", "baselineFingerprint", "recipeRequestHash"}:
+        keys = {"identity", "expectedRevision", "operation", "settingsFingerprint", "baselineFingerprint", "recipeRequestHash"}
+        if type(request) is not dict or set(request) not in (keys, keys | {"requestFingerprint"}):
             raise InvalidRawHistory()
+        if "requestFingerprint" in request:
+            _request_fingerprint(request["requestFingerprint"])
         identity = normalize_identity(request["identity"])
         if identity != request["identity"] or any(row[column] != identity[field]
                                                 for column, field in zip(IDENTITY_COLUMNS, IDENTITY_FIELDS)):
@@ -505,23 +507,23 @@ def get_raw_history(identity: dict, *, initial_settings: dict | None = None) -> 
             raise
 
 
-def initialize_raw_history(identity, expected_revision, save_id, settings):
+def initialize_raw_history(identity, expected_revision, save_id, settings, *, request_fingerprint=None):
     """Persist a baseline checkpoint, not an invented editing operation."""
-    return _save_history(identity, expected_revision, save_id, settings, {"type": "initialize"}, None)
+    return _save_history(identity, expected_revision, save_id, settings, {"type": "initialize"}, None, request_fingerprint)
 
 
 def append_raw_history(identity, expected_revision, save_id, settings, *, kind, metadata=None,
-                       step_id=None, baseline_settings=None):
+                       step_id=None, baseline_settings=None, request_fingerprint=None):
     """Append one confirmed operation; supply the initial readback for an unsaved RAW."""
     operation = {"type": "append", "kind": kind, "metadata": {} if metadata is None else metadata,
                  "stepId": _history_uuid(save_id if step_id is None else step_id)}
-    return _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings)
+    return _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint)
 
 
-def move_raw_history_cursor(identity, expected_revision, save_id, settings, *, target_step_id):
+def move_raw_history_cursor(identity, expected_revision, save_id, settings, *, target_step_id, request_fingerprint=None):
     """Confirm Undo/Redo/jump readback against a stable step UUID; None selects baseline."""
     return _save_history(identity, expected_revision, save_id, settings,
-                         {"type": "move", "targetStepId": target_step_id}, None)
+                         {"type": "move", "targetStepId": target_step_id}, None, request_fingerprint)
 
 
 def _history_summary(current, history):
@@ -529,7 +531,41 @@ def _history_summary(current, history):
             "historyLength": len(history["steps"]), "settingsFingerprint": _digest(_json(current["recipe"]["settings"]))}
 
 
-def _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings):
+def _request_fingerprint(value):
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise InvalidRawHistory()
+    return value
+
+
+def get_raw_history_save(identity, save_id, *, request_fingerprint):
+    """Verify an HTTP retry without retaining or reconstructing its historical settings."""
+    identity = normalize_identity(identity)
+    save_id = _history_uuid(save_id)
+    request_fingerprint = _request_fingerprint(request_fingerprint)
+    with _connection() as connection:
+        connection.execute("BEGIN")
+        try:
+            current = _read_row(connection, identity)
+            history = _read_history(connection, identity, current)
+            receipt = _history_receipt(connection, save_id)
+            if receipt is None:
+                if connection.execute("SELECT 1 FROM raw_recipe_saves WHERE save_id=?", (save_id,)).fetchone():
+                    raise StoreConflict("save_id_reused")
+                result = None
+            else:
+                if receipt[0]["identity"] != identity or receipt[0].get("requestFingerprint") != request_fingerprint:
+                    raise StoreConflict("save_id_reused")
+                if history is None or current["revision"] < receipt[1]["revision"]:
+                    raise StoreUnavailable()
+                result = {"ack": receipt[1], "current": _history_summary(current, history), "replayed": True}
+            connection.commit()
+            return result
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint):
     identity = normalize_identity(identity)
     if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
         raise InvalidRawHistory()
@@ -541,6 +577,8 @@ def _save_history(identity, expected_revision, save_id, settings, operation, bas
     request = {"identity": identity, "expectedRevision": expected_revision, "operation": operation,
                "settingsFingerprint": _digest(encoded), "baselineFingerprint": None if baseline is None else _digest(baseline),
                "recipeRequestHash": recipe_digest}
+    if request_fingerprint is not None:
+        request["requestFingerprint"] = _request_fingerprint(request_fingerprint)
     with _connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         try:

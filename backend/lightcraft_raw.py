@@ -614,6 +614,13 @@ class LightCraftRawSession:
 
         return await self._submit(action, self._timeouts.command)
 
+    def confirmed_settings(self, handle, expected_revision, *, allow_desync=False):
+        """Observe the last confirmed snapshot without issuing an engine command."""
+        photo = self._photo(handle, active=True, allow_desync=allow_desync)
+        if type(expected_revision) is not int or expected_revision != photo.applied_revision:
+            raise LightCraftError("raw_revision_conflict")
+        return self._snapshot(photo)
+
     async def get_settings(self, handle):
         self._photo(handle, allow_desync=True)
 

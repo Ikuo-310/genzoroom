@@ -490,3 +490,34 @@ def test_history_does_not_change_jpeg_history_queue_or_raw_recipe_identity(db):
     assert edit_store.get_edit_state(A) == jpeg
     assert all(rows(db, table) == content for table, content in before.items())
     assert history()["recipe"] == {**identity(), "settings": value()}
+
+
+def test_transport_receipt_fingerprint_replays_without_historical_snapshot(db):
+    request_id = uuid4()
+    result = raw.append_raw_history(identity(), 0, request_id, value(1), kind="control",
+        metadata={"control": "light.exposure"}, baseline_settings=value(), request_fingerprint="a" * 64)
+    move(None, 1, 0)
+    append(2, 2)
+    replay = raw.get_raw_history_save(identity(), request_id, request_fingerprint="a" * 64)
+    assert replay["ack"] == result["ack"]
+    assert replay["current"]["revision"] == 3 and replay["replayed"]
+    with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
+        raw.get_raw_history_save(identity(), request_id, request_fingerprint="b" * 64)
+    assert raw.get_raw_history_save(identity(), uuid4(), request_fingerprint="a" * 64) is None
+
+
+def test_transport_receipt_cannot_reuse_a_legacy_or_other_identity_save(db):
+    request_id = uuid4()
+    save(save_id=request_id)
+    with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
+        raw.get_raw_history_save(identity(), request_id, request_fingerprint="a" * 64)
+    result = raw.initialize_raw_history(identity(), 1, uuid4(), settings(), request_fingerprint="a" * 64)
+    with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
+        raw.get_raw_history_save(identity(assetId=str(uuid4())), result["ack"]["saveId"], request_fingerprint="a" * 64)
+
+
+@pytest.mark.parametrize("fingerprint", ["", "a" * 63, "A" * 64, 3, [], "x" * 64])
+def test_invalid_transport_fingerprint_does_not_open_db(db, fingerprint):
+    with pytest.raises(raw.InvalidRawHistory):
+        raw.initialize_raw_history(identity(), 0, uuid4(), value(), request_fingerprint=fingerprint)
+    assert not db.exists()

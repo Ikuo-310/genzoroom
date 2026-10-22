@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-DおよびC4-B1永続化層は実装済み。C4-A確定設計とC4-B1実装記録は末尾を参照し、C4-B2以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層とC4-B2 Backend操作APIは実装済み。C4-A確定設計とC4-B1／B2実装記録は末尾を参照し、C4-B3以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -932,3 +932,63 @@ repo `.venv` Python 3.14、cwd backendで次のfocused検証を実施した。�
 `git diff --check`で差分の空白を確認。Frontendテスト／build・全Backend suite・フルDocker Smoke Test・実LightCraft／GPU／Immich・実機DB操作は行っていない。テストDB以外へmigrationは実行していない。実profileのv8 upgrade前には整合backupを取り、v7以下への復帰はbackup復元で行う。既存schemaのdowngradeは提供しない。
 
 C4-B1で停止する。HTTP API、gesture／readback操作owner、UI、通常編集からのHistory登録はC4-B2／B3へ残す。RAW Export／サムネイル、JPEGカテゴリ統合・個別ON/OFF削除も今回実装していない。
+
+## Phase 1C-C4-B2 実装結果（2026-10-23）
+
+開始HEAD `cb98ec3be266353f0a5138bcefafe29d363ca800`、`feature/lightcraft-integration`、cleanから実装。上のB1完了時点の未接続記述に対し、本節を現行のBackend接続仕様とする。C1〜C3とC4-A／B1の記録は保持した。
+
+### Windows操作APIとreadback・保存境界
+
+既存Windows専用routerの `/api/raw/documents/{handle}` に以下を追加した。Docker routerへ追加せず、LightCraft v0.10.0と既存owner lock／認証・Host／Origin検証を使用する。
+
+| Method／suffix | 確定した契約 |
+|---|---|
+| `GET /history` | History/currentの整合性を検証し、cursor・件数・選択UUID・SQLite revisionとstep UUID／kind／metadata／createdAtだけを返す。`offset=0`、`limit=20`が既定、1ページ最大20件。offset上限は保存層の保持上限定数を共用。このendpointだけ応答上限16 KiB、他は4 KiBを維持する |
+| `POST /history/initialize` | 初回gesture前の明示的なHistory利用開始。完全readbackからbaseline checkpointを保存しstepは増やさない。既存Historyは保持。既存Recipeとnativeが異なる初期化は拒否し、C3保存を先に完了させる |
+| `POST /history/commit` | 編集操作の確定だけを受理し、完全readback・所有権／revision／fingerprintを検証後、B1 appendでHistory/currentを同時保存。B2は `kind=control` とallowlist内の `metadata.control` 1項目だけを受理する |
+| `POST /history/undo`／`redo`／`jump` | cursorからstable UUIDを解決する。jumpは `targetStepId` UUID、baselineは `null`。保存snapshotを内部取得し既存 `restore_persisted_settings()` で全設定適用・readback一致後、B1 moveでcurrentとcursorを同時保存。新stepは作らない |
+| `POST /history/recover` | 明示的な未確定native変更の破棄。最新の検証済みSQLite currentへ復元し、DB revisionが変化していないことも確認する。DB書込／receipt／History stepを作らない。保存Recipeがなければ拒否し、初期値を推測しない |
+
+GETの所有権headerは `X-Raw-Workspace`／`X-Raw-Generation`／`X-Raw-Token`。POST共通bodyは `workspaceId`／`generation`／`documentToken`／`documentRevision`／`expectedRecipeRevision`／`settingsFingerprint`、recover以外はUUID `saveId` も必須。commitは `kind`／`metadata`、jumpは `targetStepId` を追加する。それ以外のfield、任意Settings本文・native commandは受理しない。request上限4 KiBを維持し、snapshot本文・source hash／path・native PhotoIdは応答へ出さない。
+
+中間controls更新は従来どおりnativeへ適用するがHistory保存は行わない。確定commitだけで有効変化1件につき1stepとなる。no-opでRedo枝を切らず、Undo／Redo／jumpはUUIDとbaselineを使用する。同一設定でcursorだけが異なる移動も保存対象。`edit.undo`／`edit.redo`／`history.restore` は呼ばない。
+
+### 保存整合性・共有状態と失敗回復
+
+| 状態 | owner・更新条件・不変条件 |
+|---|---|
+| native `revision`／`settingsFingerprint`／mutationAttempts | 既存adapterとdocumentがreadbackで更新。SQLite revision／cursorと混同しない。追加した `confirmed_settings()` は最後の確定snapshotを観測するだけでnativeへ送信しない |
+| SQLite `recipeRevision`／`recipeFingerprint`・cursor／UUID | B1保存層が正本。mutation応答で最新状態を再読込し、immutableな元 `ack` とは別に返す。旧ackを現在状態として適用しない |
+| `_history_identity`／`_history_initialized`／`_history_enabled` | API ownerがopen時に6項目identityとDB初期化状態を取得。利用開始はdocumentごとに明示する。History保存済み写真を旧C3 clientが開いた場合、初期化等で契約を確立するまでcontrolsを拒否する |
+| `_history_save` | active documentの未確定操作を最大1件保持。要求／saveId／対象UUID／readback／stageを固定して再送する。一時的な操作ownerであり、別のHistory／snapshot保管庫を作らない |
+| `_history_tasks`／`_history_draining` | pending作成前も含む受理済みHistory要求を追跡。HTTP待機側cancel後も処理を所有する。終了は新要求を止めて受理済み処理を待ち、保存checkpoint一致後だけnativeを解放する |
+| `_recipe_save.settled` | 既存C3保存の結果不明と既知の結果を区別。結果不明なら同一C3要求を解決するまでHistory開始を拒否。書込なしが確定した `raw_history_requires_operation` 拒否は、正しいHistory commitを妨げない |
+
+native適用／readbackに失敗した場合、DB cursor/currentを更新せずdesync保護を維持する。readbackが要求revision／fingerprintと異なる新規操作は拒否し、Undo対象を適用して未確定変更を隠さない。native状態がdesynchronizedなら、最後の確定cacheがDBと等しくても保存済み扱いしない。
+
+SQL busy／full／commit失敗・保存結果不明ではimmutable要求と適用済みnative状態を保持し、controls・Recipe保存・releaseを拒否する。同一saveId／同一bodyによる再送でreceiptを確認し、存在すればnative適用なしで元ackと最新metadataを返す。存在しなければ同じB1 writeを再試行する。異payload・別domain／identityへのsaveId再利用を拒否する。CAS競合は自動上書きせず、最新SQLite revisionを確認した明示recover等で解決する。`/settings` resyncだけで未確定保存を消さない。
+
+応答の `historyPending`／`nativeState`／`nativeMatchesRecipe` を併せて確認する。過去のackだけでは現在nativeが保存済みとは判断できない。互換WB scale省略データは、adapterによる完全な正規化readbackの一致を確認しつつ、保存snapshotの元表現を保持する。ack内の保存fingerprintとdocumentの正規化fingerprintを混同しない。
+
+B1保存APIにはoptional `request_fingerprint` と読み取り関数 `get_raw_history_save()` を最小追加した。理由は、枝切り／prune後も失われた旧snapshotを再構成せず、正確なHTTP再送をreceiptで検証するためである。action／opaque handle／全要求fieldのdigestだけをreceiptに記録し、bodyやpathは保持しない。既存B1呼出し・旧receiptの読み取り、schema v8、CAS／receipt／rollback／200件保持の実装を維持する。Windows側へ保存transactionを複製していない。
+
+### C3共存・B3への条件
+
+History未初期化の通常C3 documentは従来のrecipe-only保存・終了経路を維持し、自動的にHistory rowを作らない。初期化後のrecipe-only保存は同一current設定のcheckpointだけを許可する。異設定をB1が拒否した場合に架空stepや自動上書きで成功扱いしない。
+
+History documentの写真切替・Session再生成・通常終了は、未確定保存なし、native同期、最新SQLite revisionと設定の一致を確認してから解放する。C3-Dの200 soft threshold／256 hard limitは変更しない。History復元も既存adapterのmutation attemptとして計上し、再生成による復元をstepにしない。再openはcursor／UUIDを維持するが、新しいgeneration／tokenでのみ操作できる。
+
+B3は最初のgesture前にinitializeし、gesture終端ごとに1回だけcommitする。失敗時はsaveIdとbodyを固定して再送し、最新metadataが保存済みになるまで次の変更・切替・再生成・終了を進めない。従来の5秒recipe-only保存を異設定History保存の代用にしない。recoverは未確定変更を捨てる明示的な操作として接続する。Frontend／History UIの接続、カテゴリON/OFF・Reset、Before/AfterはそれぞれB3／C／Dに残す。
+
+### 自動テスト・限定監査
+
+repo `.venv` Python 3.14、cwd backend、Fake LightCraftと一時SQLiteでfocusedテストを実行した。通常sandboxのTEMP制限に対しては同じ実行環境の権限付きpytestを使用した。
+
+- 既存依存境界のfocused回帰：History store、RAW recipe store／API／restore、Windows RAW API、controls、adapter、Windows local、JPEG edit state、Export Queueで429件＋41 subtests成功。
+- 監査修正後のHistory API／store・C3保存API／restore・Windows RAW API／controls：223件成功。このうちHistory APIは33件、storeは100件。最後の共通保持上限定数利用への変更後、API33件を再確認した。これらの実行範囲には重複がある。
+- 新規APIテストで、lazy GET・応答制限／認証／所有権、確定操作と中間更新、Undo／Redo／jump／baseline、同設定異cursor、Redo保持／枝切り、旧ack再送、異payload、native適用／readback失敗、実SQLite lock／SQLITE_FULL／commit失敗／commit後ack消失、CAS外部writer、HTTP cancel、pending作成前／native適用中／DB保存中の終了待機、200 mutationを跨ぐ2回の再生成、旧generation／token／別asset、legacy WB表現を検証した。
+- 限定diff監査で、所有権・readback→DB→ackの順序、receipt再送、既存C3との競合、終了・解放、private情報／ログ境界を点検した。既知のRecipe-only拒否で操作を詰まらせないこと、desync中の誤った保存済み判定、Undo直前readback変化の拒否、初期化受理直後の終了待機を補強し、関連テストを再実行した。未解決High／Mediumはない。
+
+`git diff --check`成功。schema／migration／release smokeの変更は不要。Frontend・LightCraftソース・JPEG renderer／Recipe／History・RAW Export／サムネイル・README／CHANGELOGは変更していない。Frontend check／build、全Backend suite、フルDocker Smoke Test、実LightCraft／GPU／Immich／実機DB・ブラウザ検証は未実施。通常終了の保存待機を自動確認したが、強制process終了時の未確定native状態の保持は保証しない。
+
+設計書とarchitectureを更新しCommit／Push後、C4-B2で停止する。実機のGPU／Windows UI・B3接続後のgesture／Autosave／再生成の受入は後続でユーザーが実施する。

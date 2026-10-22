@@ -174,6 +174,69 @@ of silently rewriting a step. Reads reject corrupt History/current/receipt combi
 C4-B1 adds no LightCraft operations, Windows RAW endpoints, Frontend History state or UI.
 Those remain C4-B2/B3; existing C3 operations create no History rows by themselves.
 
+### C4-B2: Windows RAW History operations
+
+The Windows-only RAW router now connects the B1 writers to the existing serialized document
+owner and verified `restore_persisted_settings()` adapter. Docker mounts no new endpoints.
+LightCraft remains pinned to v0.10.0; native undo/redo/history commands are not used.
+
+| Endpoint under `/api/raw/documents/{handle}` | Contract |
+|---|---|
+| `GET /history` | Read validated current metadata and a page of step UUID/kind/metadata/createdAt. `offset` defaults to 0; `limit` defaults to, and cannot exceed, 20. Only this response permits 16 KiB. No read initializes rows or requests native settings. |
+| `POST /history/initialize` | Explicitly opt this document into History before its first gesture; persist the confirmed baseline without adding a step. Existing History is retained. A dirty legacy recipe must first finish its C3 save. |
+| `POST /history/commit` | Full readback of one confirmed operation, then B1 append/current save. B2 accepts only `kind=control` and one allowlisted `metadata.control`; category/Reset operations remain C4-C. |
+| `POST /history/undo`, `/redo`, `/jump` | Resolve the target to a retained stable UUID, or `targetStepId=null` for baseline on jump; verify complete native restoration before B1 cursor/current save. No new step. |
+| `POST /history/recover` | Explicitly discard unconfirmed native changes and restore verified current SQLite settings. It writes no DB row/receipt and creates no History operation. |
+
+GET requires `X-Raw-Workspace`, `X-Raw-Generation`, and `X-Raw-Token`. POST bodies require
+`workspaceId`, `generation`, `documentToken`, `documentRevision`, `expectedRecipeRevision`,
+and `settingsFingerprint`; all except recover also require a UUID `saveId`. Commit additionally
+requires `kind`/`metadata`; jump requires `targetStepId`. Other fields, settings bodies, and
+arbitrary commands are rejected. Existing authentication, Host/Origin restrictions, 4 KiB
+requests, and 4 KiB mutation responses remain. Metadata never includes settings snapshots,
+source hashes/paths or native PhotoIds.
+
+| Shared state | Ownership and invariant |
+|---|---|
+| Native `revision`, `settingsFingerprint`, mutation budget | Existing RAW document/adapter; settings and controls readback update these. `confirmed_settings()` only observes its last verified snapshot and never calls native. A desynchronized snapshot is not evidence of a saved native state. |
+| `recipeRevision`, `recipeFingerprint`, History cursor/UUID | SQLite is authoritative. Responses reload current state, separately from immutable `ack`. Native revision, SQLite revision, cursor and mutationAttempts are distinct. |
+| `_history_identity`, `_history_initialized`, `_history_enabled` | API document owner; six-field storage identity captured at open, initialization loaded from SQLite, explicit History capability enabled per open document. Loaded History refuses controls until initialize/recover or a verified History request establishes this contract. |
+| `_history_save` | At most one immutable transport operation for the active document: exact request, identity, selected target/readback, and readback/applying/save/complete stage. This is retry state, not an additional History/snapshot store. Unsettled state blocks further controls, recipe saves and release. |
+| `_history_tasks`, `_history_draining` | Accepted History requests remain owned after HTTP cancellation, including before a pending save exists. Close stops admission, drains owners and verifies the saved checkpoint before releasing native resources. Failure leaves the owner available for retry/recover. |
+| `_recipe_save.settled` | Existing C3 immutable retry tracks whether a save result is known. An uncertain C3 save must be retried before History starts. A proven `raw_history_requires_operation` rejection is settled and permits the correct History commit. |
+
+B1 writer signatures gain an optional `request_fingerprint`; `get_raw_history_save()` validates
+the stored receipt against that exact transport digest before another readback/native attempt.
+The digest includes action, opaque document handle and all request fields, without persisting
+their bodies. This permits replay after branch deletion/pruning without reconstructing deleted
+settings. Existing B1 callers/receipts remain valid; schema v8 and transaction/CAS/rollback
+logic are unchanged. Supported legacy WB scale omission is retained in stored snapshots while
+the adapter verifies their normalized native representation.
+
+After a native restore, SQL busy/full/commit failure retains the immutable operation and native
+state. Same-saveId/same-body retry resolves a durable receipt or retries the same B1 write;
+changed intent is rejected. A replay returns the original `ack` alongside current metadata,
+never promotes that old ack to current document state, and does not run native restore again.
+`historyPending`, `nativeState` and `nativeMatchesRecipe` distinguish a saved checkpoint from
+unconfirmed or desynchronized native state. `/settings` resynchronization alone does not clear
+an unresolved save. A CAS conflict requires explicit recover against the latest SQLite revision
+or resolution of the original request, without automatic overwrites or guessed settings.
+
+Legacy C3 documents with no initialized History keep recipe-only autosave and shutdown behavior.
+Once History is initialized, recipe-only saves can checkpoint identical settings but cannot
+replace a step. Switching/renewal/normal close requires a settled save, synchronized native
+state, current SQLite revision and matching settings. Renewal keeps the C3-D 200 soft/256 hard
+mutation limits; verified native restoration counts toward the existing attempt budget, not
+History length. Reopen retains cursor/UUIDs and requires fresh generation/token ownership.
+
+C4-B3 must initialize before the first gesture, commit exactly once at its boundary, preserve
+the exact saveId/body across retry, and wait for current saved metadata before marking clean,
+switching, renewing or closing. It must not substitute an old `ack` for current state or send
+the C3 five-second recipe-only save for changed History settings. Recovery needs explicit
+discard intent. Frontend, History UI, Reset/category actions, Before/After and RAW Export are
+not connected in B2. Fake LightCraft/temporary SQLite tests establish API ordering and failure
+integrity; real GPU, Windows UI and forced process termination remain separate acceptance work.
+
 ## Gallery manual refresh
 
 The four Gallery browsing tabs are refreshable: Recent, Favorites, Album list/detail, and Calendar year/month/date detail. The leftmost Toolbar `Reload` button and the `homeRefreshPhotos` binding in the central `editShortcuts.ts` registry refresh only the current view. Shift+R uses the existing Home guards and shortcut-label formatter; R still opens Recent, while Ctrl+R / Command+R remain browser reload. STACK management, Export management, and inactive Home do not show or run Gallery Reload.
