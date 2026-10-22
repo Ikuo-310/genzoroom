@@ -9,6 +9,7 @@ import sys
 import threading
 import shutil
 import tempfile
+import uuid
 
 from backend_logging import backend_logger
 from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_PREVIEW_LINE_BYTES, MCPTransportError
@@ -21,6 +22,7 @@ class LightCraftTimeouts:
     gpu: float = 15
     shutdown: float = 3
     kill: float = 2
+    temp_io: float = 2
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class _Session:
     reaped: bool = False
     temp_directory: Path | None = None
     temp_root: Path | None = None
+    temp_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -91,20 +94,99 @@ def _check_temp(session):
 
 
 def _remove_temp(session):
-    path = _check_temp(session)
-    if path.exists():
-        # Never derive a recursive removal target from a child's response or an ambient TEMP.
-        shutil.rmtree(path)
+    with session.temp_lock:
+        path = _check_temp(session)
+        if path.exists():
+            # Never derive a recursive removal target from a child's response or an ambient TEMP.
+            shutil.rmtree(path)
 
 
 def _remove_preview_files(session):
-    path = _check_temp(session)
-    pid = getattr(session.process, "pid", None)
-    if pid is None:
-        return
-    for file in path.glob(f"lightcraft-mcp-{pid}-*-render.png"):
-        if file.is_file() and not file.is_symlink():
-            file.unlink(missing_ok=True)
+    with session.temp_lock:
+        path = _check_temp(session)
+        pid = getattr(session.process, "pid", None)
+        if pid is None:
+            return
+        for file in path.glob(f"lightcraft-mcp-{pid}-*-render.png"):
+            if file.is_file() and not file.is_symlink():
+                file.unlink(missing_ok=True)
+
+
+def _trusted_temp_root(configured=None, *, windows=None):
+    windows = os.name == "nt" if windows is None else windows
+    configured = tempfile.gettempdir() if configured is None else configured
+    # Check the raw spelling first because Path.resolve can normalize a UNC path unexpectedly.
+    if windows:
+        if str(configured).startswith(("\\\\", "//")):
+            raise LightCraftError("lightcraft_temp_location_unsupported")
+    root = Path(configured).resolve(strict=True)
+    if windows:
+        if str(root).startswith(("\\\\", "//")):
+            raise LightCraftError("lightcraft_temp_location_unsupported")
+        try:
+            import ctypes
+            get_drive_type = ctypes.windll.kernel32.GetDriveTypeW
+            get_drive_type.argtypes = [ctypes.c_wchar_p]
+            get_drive_type.restype = ctypes.c_uint
+            drive_type = get_drive_type(root.anchor)
+        except Exception:
+            raise LightCraftError("lightcraft_temp_location_unverified") from None
+        if drive_type != 3:  # DRIVE_FIXED; do not place RAW intermediates on removable/network storage.
+            raise LightCraftError("lightcraft_temp_location_unsupported")
+    if not root.is_dir():
+        raise LightCraftError("lightcraft_temp_location_unavailable")
+    return root
+
+
+def _create_temp_directory(session):
+    # Resolve ambient TEMP only in the daemon worker; UNC and mapped network drives are rejected.
+    root = _trusted_temp_root()
+    with session.temp_lock:
+        if session.stop.is_set():
+            return
+        path = root / f"genzoroom-lightcraft-{session.generation}-{uuid.uuid4().hex}"
+        session.temp_root, session.temp_directory = root, path
+        try:
+            path.mkdir()
+        except OSError:
+            # mkdir is atomic; without success this candidate is not ours to remove later.
+            session.temp_root = session.temp_directory = None
+            raise
+        # If close raced a slow mkdir, its cleanup worker follows this same lock and owned path.
+        if session.stop.is_set():
+            shutil.rmtree(path)
+
+
+async def _bounded_temp_io(function, *args, timeout):
+    """Bound slow filesystem calls without leaving a non-daemon executor worker behind."""
+    loop = asyncio.get_running_loop()
+    result = loop.create_future()
+
+    def deliver(outcome):
+        if not result.done():
+            result.set_result(outcome)
+
+    def run():
+        try:
+            outcome = (function(*args), None)
+        except LightCraftError as error:
+            outcome = (None, error.code)
+        except Exception:
+            outcome = (None, "lightcraft_temp_io_failed")
+        try:
+            loop.call_soon_threadsafe(deliver, outcome)
+        except RuntimeError:
+            pass
+
+    threading.Thread(target=run, name="lightcraft-temp-io", daemon=True).start()
+    try:
+        async with asyncio.timeout(timeout):
+            value, error = await asyncio.shield(result)
+    except TimeoutError:
+        raise LightCraftError("lightcraft_temp_io_timeout") from None
+    if error:
+        raise LightCraftError(error)
+    return value
 
 
 def _executable_info(value):
@@ -243,9 +325,9 @@ class LightCraftManager:
             if self._current(session):
                 self._sha256 = digest
             lightcraft_log("process.artifact", generation=session.generation, sha256=digest)
-            session.temp_root = Path(tempfile.gettempdir()).resolve()
-            session.temp_directory = Path(tempfile.mkdtemp(
-                prefix=f"genzoroom-lightcraft-{session.generation}-", dir=session.temp_root))
+            await _bounded_temp_io(_create_temp_directory, session, timeout=self._timeouts.temp_io)
+            if session.stop.is_set():
+                return
             # Never cancel this owner from close: even an in-flight spawn must return its child
             # to the same owner before shutdown can release lifecycle ownership.
             async with asyncio.timeout(self._timeouts.initialize):
@@ -326,6 +408,9 @@ class LightCraftManager:
                 pass
         reaped = process is None
         if process is not None:
+            if session.stderr_task is None or session.stderr_task.done():
+                session.stderr_task = asyncio.create_task(
+                    self._drain_stderr(session), name=f"lightcraft-stderr-{session.generation}")
             if session.wait_task is None or session.wait_task.cancelled():
                 # asyncio.run may cancel the monitor while the subprocess transport still owns the child.
                 session.wait_task = asyncio.create_task(process.wait(), name=f"lightcraft-reap-{session.generation}")
@@ -357,17 +442,17 @@ class LightCraftManager:
                                exitCode=process.returncode)
         if reaped and session.client is not None:
             await session.client.close(wait_stdout=True)
-        if session.stderr_task is not None:
+        if reaped and session.stderr_task is not None:
             session.stderr_task.cancel()
             await asyncio.gather(session.stderr_task, return_exceptions=True)
         session.reaped = reaped
         if reaped and session.temp_directory is not None:
             try:
-                await asyncio.to_thread(_remove_temp, session)
+                await _bounded_temp_io(_remove_temp, session, timeout=self._timeouts.temp_io)
                 session.temp_directory = None
-            except (OSError, LightCraftError):
+            except LightCraftError as error:
                 lightcraft_log("process.tempCleanupFailed", level="warn", generation=session.generation,
-                               errorCode="lightcraft_temp_cleanup_failed")
+                               errorCode=error.code)
 
     async def _stop_locked(self):
         session = self._session
@@ -462,7 +547,7 @@ class LightCraftManager:
             # On disconnect only the process owner may remove files, after reaping the child.
             if self._current(session) and self._state == "ready" and not session.client.failure.done():
                 try:
-                    await asyncio.to_thread(_remove_preview_files, session)
-                except (OSError, LightCraftError):
+                    await _bounded_temp_io(_remove_preview_files, session, timeout=self._timeouts.temp_io)
+                except LightCraftError as error:
                     lightcraft_log("preview.tempCleanupFailed", level="warn", generation=generation,
-                                   errorCode="lightcraft_temp_cleanup_failed")
+                                   errorCode=error.code)

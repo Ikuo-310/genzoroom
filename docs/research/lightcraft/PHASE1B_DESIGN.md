@@ -302,3 +302,14 @@ Phase 1Cへの判断事項：
 - PNG完全性検証にはPillowに加えてchunk CRCとIEND終端の照合を行う。通常RPC／通知の1 MiB、対応Previewのみ8 MiBという境界は維持した。
 
 これらは内部PoCの限定的な補足であり、永続format、JPEGライン、LightCraft本体、公開APIの仕様変更ではない。実LightCraftによるPhase 1BのRAW現像・性能・GPU／CPU検証は未実施である。
+
+## 監査後修正の記録（2026-10-22）
+
+本節は調査時点の設計記録を上書きせず、監査対象commit `299bdb6a3485b5b879e34568cafba5c1181a8a52`に対する実装修正を追記する。限定監査はHigh 0件／Medium 3件／Low 1件。MediumはSession reset後の設定snapshot不整合、期限管理外のTEMP I/O、未回収processのstderr drain停止。LowはRAW import拒否後に既存写真の操作ができなくなる問題だった。
+
+- reset時に`develop.get`の確定値を新しい内部snapshotとrevisionへ反映する。復元途中の失敗は従来どおりlost／desynchronizedとして成功扱いしない。
+- RAWのfile情報・fingerprint・既知のcapacity拒否は選択無効化前に検証する。選択開始後の失敗は、その要求が最新で、既存写真が同じgenerationでsyncedの場合だけ選択tokenを戻す。selection epochは巻き戻さない。
+- TEMP rootの解決・directory作成・Preview後の残骸削除・終了時削除を期限付きdaemon workerへ移す。WindowsではUNCとnetwork driveを拒否し、fixed local driveに限定する。処理が期限を超えてもthread自体は停止したと仮定せず、generation専用pathとsession lockを保持し、再cleanupまでmanager sessionを解放せずrestartを止める。期限内に安全に回収できないTEMPは未回収としてcleanup errorを返す。
+- stderr drainはprocessをreapできるまで維持する。taskが先に終了していた場合は再回収時にdrainを再作成し、reap後にjoinする。生stderrはログへ出さない。
+
+追加した回帰は連続reset、capacity拒否後の既存写真操作、停止するTEMP I/Oのstartup／Preview／shutdown期限、UNC拒否、実asyncio subprocessでのreap再試行と大量stderrを含む。関連Backendテストは190件成功。任意の実ネットワークfilesystem停止、実LightCraftのRAW現像、GPU／CPU、PyInstaller DLL検索、Job Objectは未検証であり、Phase 1Bの実機PoCで確認する。

@@ -522,9 +522,9 @@ class LightCraftRawSession:
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
             settings = await self._read_settings(photo, deadline)
-            self._commit(photo, settings)
             if previous is not None:
-                await self._restore(photo, previous.settings_json, deadline)
+                settings = await self._restore(photo, previous.settings_json, deadline)
+            self._commit(photo, settings)
             self._photos[key] = photo
             return photo
         except BaseException:
@@ -536,15 +536,25 @@ class LightCraftRawSession:
         self._available()
         if not isinstance(source_key, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", source_key):
             raise LightCraftError("raw_invalid_source_key")
+
+        # Admission failures must not disturb the current selection or invalidate a usable handle.
+        path, fingerprint = await self._file_info(absolute_path)
+        previous = self._photos.get(source_key)
+        if previous is not None and (path != previous.path or fingerprint != previous.fingerprint):
+            raise LightCraftError("raw_source_changed")
+        if previous is None and len(self._photos) >= MAX_RAW_FILES:
+            raise LightCraftError("raw_session_capacity")
+
         self._invalidate(selection=True)
         epoch = self._epoch
+        previous_active = self._photos.get(self._active)
+        previous_token = self._desired_token
         self._desired_token = None
 
         async def action(deadline):
             self._phase = "loading"
             if epoch != self._epoch:
                 raise LightCraftError("raw_selection_superseded")
-            path, fingerprint = await self._file_info(absolute_path)
             previous = self._photos.get(source_key)
             if previous is not None and (path != previous.path or fingerprint != previous.fingerprint):
                 raise LightCraftError("raw_source_changed")
@@ -564,7 +574,17 @@ class LightCraftRawSession:
                 self._desired_token = photo.handle.document_token
             return photo.handle, self._snapshot(photo)
 
-        return await self._submit(action, self._timeouts.import_raw)
+        try:
+            return await self._submit(action, self._timeouts.import_raw)
+        except BaseException:
+            # A rejected latest request may restore intent, but its epoch stays advanced so old frames stay stale.
+            if epoch == self._epoch and previous_active is not None and \
+                    self._photos.get(previous_active.handle.source_key) is previous_active and \
+                    previous_active.handle.generation == self._generation and \
+                    previous_active.sync == "synced" and not self._lost and not self._desynchronized:
+                self._active = previous_active.handle.source_key
+                self._desired_token = previous_token or previous_active.handle.document_token
+            raise
 
     async def select(self, handle):
         self._photo(handle)

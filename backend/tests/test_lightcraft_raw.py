@@ -221,6 +221,49 @@ def test_import_edit_readback_restore_preview_and_capacity(tmp_path):
     asyncio.run(run())
 
 
+def test_reset_twice_without_readback_keeps_restored_settings(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            expected = await raw.set_controls(handle, {"light.exposure": 1.25}, initial.revision)
+            await raw.reset_session()
+            # The second reset must restore the first reset's confirmed state, without a repairing get.
+            second = await raw.reset_session()
+            assert children[2].photos[1]["settings"]["light"]["exposure"] == 1.25
+            assert second.generation == 3
+            assert raw._photos["pixel"].settings_json == _settings_json(children[2].photos[1]["settings"])
+            confirmed = await raw.get_settings(second)
+            assert confirmed.revision == raw._photos["pixel"].applied_revision > expected.revision
+            assert confirmed.settings["light"]["exposure"] == 1.25
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_capacity_rejection_keeps_existing_photo_editable_and_previewable(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            first, snapshot = await raw.open_raw("pixel", files[0])
+            second, _ = await raw.open_raw("pentax", files[1])
+            await raw.select(first)
+            old_epoch = raw.status().selection_epoch
+            with pytest.raises(LightCraftError, match="raw_session_capacity"):
+                await raw.open_raw("third", files[2])
+            assert raw.status().selection_epoch == old_epoch
+            with pytest.raises(LightCraftError):
+                await raw.open_raw("bad-path", tmp_path / "missing.DNG")
+            assert raw.status().selection_epoch == old_epoch
+            changed = await raw.set_controls(first, {"light.exposure": .75}, snapshot.revision)
+            frame = await raw.request_preview(first, changed.revision)
+            assert frame.data.startswith(b"\x89PNG") and frame.handle == first
+            assert raw.status().resident_count == 2
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_reopen_rotates_token_and_reuses_photo_without_import(tmp_path):
     async def run():
         raw, _, children, files = await create(tmp_path)

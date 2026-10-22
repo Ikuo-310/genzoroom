@@ -22,6 +22,16 @@ Python 3.14のリポジトリ`.venv`で、RAW／MCP／runtime／Windows LocalHos
 
 初回の関連Backendテストは113件成功した。続く限定コード監査はHigh 0件／Medium 3件／Low 0件で、3件はいずれも終了・プロセス回収に関する指摘だった。監査後修正commit `5a9e0f977579a27cd4131ec2034f0ad156519aae`で、stdout読取り停止後のpipe排出、ownerとexit watcherの同時cancel時のcleanup、実行file検査・SHA-256計算中の終了処理を修正した。修正後は実asyncio subprocessによる過大stdout、検査中close／期限超過、owner・exit watcher同時cancelを含む関連Backendテスト117件が成功し、再監査の残存High 0件／Medium 0件となった。
 
+## Phase 1B限定監査後の修正（2026-10-22）
+
+監査対象commit `299bdb6a3485b5b879e34568cafba5c1181a8a52`の限定監査はHigh 0件／Medium 3件／Low 1件だった。復元後の確定設定がPython snapshotへ未反映、TEMP作成・削除I/Oが期限外、回収失敗後にstderr drainを停止する問題を修正した。RAWの事前拒否が現在写真の選択意図を消すLow指摘も修正した。
+
+`reset_session()`の再importはreset→merge→`develop.get`の確定値を新handleのsnapshot／revisionへcommitする。RAW file fingerprint・容量などの事前拒否はselection epochを変更する前に行う。実行開始後の失敗は要求epochが最新で、旧写真・generation・同期状態が有効な場合だけ選択tokenを復元する。epochは進めたままなので古いPreviewは再有効化しない。
+
+LightCraft専用TEMPは解決後のrootがWindows固定ローカルdriveであることを確認し、UNC・network driveを拒否する。resolve・作成・Preview残骸削除・終了時削除はevent loop／default executor外のdaemon I/O workerで期限付き実行する。期限超過したworkerをcancelしたものとして扱わず、世代専用pathとper-session lockを保持する。子process回収前およびTEMP cleanup未完了の間はsession ownershipを保ち、restartを拒否する。stderr drainはprocess未回収中に止めず、回収成功後にjoinする。stderr本文は引き続きログへ保存しない。
+
+回帰テストは、readbackなしの連続reset、3枚目拒否後の既存写真編集／Preview、停止するTEMP作成・Preview cleanup・終了cleanup、Windows UNC root拒否、および実asyncio subprocessの初回reap失敗→大量stderr→再回収を追加した。関連Backend 6ファイルは**190件成功**。Phase 1AのMCP／プロセス回収とWindows lifecycle関連も同じ実行で成功した。実LightCraftによるRAW／GPU検証、任意のnetwork filesystemの実停止挙動、Job Object／PyInstallerは未検証である。監査後のHigh／Medium残存はなし。
+
 Windows 11開発環境ではPython 3.14とWindows `LocalHost`／Uvicornから実LightCraftへ接続した。使用CLIは`I:\code\raw-test\lightcraft-v0.10.0-gpu-poc\target\release\lightcraft-cli.exe`、LightCraft v0.10.0、SHA-256 `9ca7a0483e3171805670f52af6fff1b8f93f78e10a32933e4f7c4fad872913d1`。MCPの`initialize`、`notifications/initialized`、`ping`が成功し、managerの`ready`を確認した。Backend readyは約90〜108 msで、LightCraft GPU初期化を待たなかった。GPU応答は`enabled=true`、`available=true`、`Radeon RX 580 Series (Dx12)`だった。
 
 明示`restart()`はgeneration 1から2へ進み、再接続に成功した。検証用CLIだけを異常終了させるとmanagerは`lightcraft_eof`で`failed`になり、Backendは継続し、明示restartで復旧した。環境変数未設定では`disabled`、不在pathでは`lightcraft_executable_missing`となり、いずれもBackendは起動を継続した。通常終了と起動途中のcloseで対象CLI、MCP reader、stderr、owner／wait関連taskを回収した。検証後に対象processは残らず、GenzoRoom作業ツリーもcleanだった。

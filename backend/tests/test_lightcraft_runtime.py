@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
 import json
+import sys
 import threading
+import time
 
 import pytest
 
@@ -473,6 +475,128 @@ def test_failed_kill_retains_ownership_and_blocks_restart(tmp_path):
         child.kill = original_kill
         await manager.close()
         assert_reaped(session)
+    asyncio.run(run())
+
+
+def test_temp_io_deadlines_bound_start_preview_and_shutdown(tmp_path, monkeypatch):
+    async def run():
+        timeouts = LightCraftTimeouts(initialize=.3, request=.1, gpu=.1, shutdown=.02, kill=.05, temp_io=.03)
+
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        original_create = lightcraft_runtime._create_temp_directory
+        def stalled_create(session):
+            entered.set()
+            release.wait()
+            try:
+                return original_create(session)
+            finally:
+                finished.set()
+        monkeypatch.setattr(lightcraft_runtime, "_create_temp_directory", stalled_create)
+        (tmp_path / "startup").mkdir()
+        manager, children, _ = make_manager(tmp_path / "startup", process_options=None)
+        manager._timeouts = timeouts
+        await manager.start()
+        session = manager._session
+        await asyncio.to_thread(entered.wait, 1)
+        await asyncio.wait_for(session.task, .3)
+        assert manager.status().state == "failed" and manager.status().error_code == "lightcraft_temp_io_timeout"
+        assert not children
+        release.set()
+        await asyncio.to_thread(finished.wait, 1)
+        await manager.close()
+
+        monkeypatch.setattr(lightcraft_runtime, "_create_temp_directory", original_create)
+        (tmp_path / "preview").mkdir()
+        manager, children, _ = make_manager(tmp_path / "preview")
+        manager._timeouts = timeouts
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        entered, release = threading.Event(), threading.Event()
+        original_preview = lightcraft_runtime._remove_preview_files
+        def stalled_preview(session):
+            entered.set()
+            release.wait()
+            return original_preview(session)
+        monkeypatch.setattr(lightcraft_runtime, "_remove_preview_files", stalled_preview)
+        started = time.monotonic()
+        await manager._raw_preview(manager.status().generation, 1, 1024, timeout=.1)
+        assert time.monotonic() - started < .3 and manager.status().state == "ready"
+        assert await asyncio.to_thread(entered.wait, 1)
+        release.set()
+        await manager.close()
+
+        (tmp_path / "shutdown").mkdir()
+        manager, children, _ = make_manager(tmp_path / "shutdown")
+        manager._timeouts = timeouts
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        session = manager._session
+        entered, release = threading.Event(), threading.Event()
+        original_remove = lightcraft_runtime._remove_temp
+        def stalled_remove(session):
+            entered.set()
+            release.wait()
+            return original_remove(session)
+        monkeypatch.setattr(lightcraft_runtime, "_remove_temp", stalled_remove)
+        started = time.monotonic()
+        with pytest.raises(LightCraftError, match="lightcraft_temp_cleanup_failed"):
+            await manager.close()
+        assert time.monotonic() - started < .5
+        assert manager._session is session and session.reaped and session.temp_directory is not None
+        assert await asyncio.to_thread(entered.wait, 1)
+        with pytest.raises(LightCraftError, match="lightcraft_temp_cleanup_failed"):
+            await manager.restart()
+        assert len(children) == 1
+        release.set()
+        await manager.close()
+        assert manager._session is None and session.temp_directory is None
+    asyncio.run(run())
+
+
+def test_untrusted_windows_temp_roots_are_rejected():
+    from lightcraft_runtime import _trusted_temp_root
+    with pytest.raises(LightCraftError, match="lightcraft_temp_location_unsupported"):
+        _trusted_temp_root(r"\\server\share\temp", windows=True)
+
+
+def test_real_subprocess_stderr_keeps_draining_after_failed_reap(tmp_path):
+    async def run():
+        executable = tmp_path / "lightcraft-cli.exe"
+        executable.write_bytes(b"test executable")
+        script = (
+            "import json,sys,threading,time\n"
+            "def flood():\n"
+            "  block=b'x'*8192\n"
+            "  for _ in range(3072): sys.stderr.buffer.write(block)\n"
+            "  sys.stderr.buffer.flush()\n"
+            "threading.Thread(target=flood,daemon=True).start()\n"
+            "for line in sys.stdin:\n"
+            "  m=json.loads(line)\n"
+            "  if 'id' not in m: continue\n"
+            f"  r={{'protocolVersion':{PROTOCOL_VERSION!r},'serverInfo':{{'name':'lightcraft','version':'0.10.0'}},'capabilities':{{}}}} if m['method']=='initialize' else {{}}\n"
+            "  sys.stdout.write(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':r})+'\\n'); sys.stdout.flush()\n"
+            "while True: time.sleep(1)\n"
+        )
+        async def spawn(*args, **kwargs):
+            return await asyncio.create_subprocess_exec(sys.executable, "-u", "-c", script,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, limit=kwargs["limit"])
+        manager = LightCraftManager(environment={"GENZOROOM_LIGHTCRAFT_EXE": str(executable)},
+                                    platform="win32", spawn=spawn,
+                                    timeouts=LightCraftTimeouts(initialize=1, request=.2, gpu=.2,
+                                                                shutdown=.02, kill=.1, temp_io=.5))
+        await manager.start()
+        await until(lambda: manager.status().state == "ready")
+        session = manager._session
+        process = session.process
+        original_kill = process.kill
+        process.kill = lambda: None
+        with pytest.raises(LightCraftError, match="lightcraft_cleanup_failed"):
+            await manager.restart()
+        assert session.stderr_task is not None and not session.stderr_task.done()
+        process.kill = original_kill
+        await manager.close()
+        assert session.reaped and session.stderr_task.done()
     asyncio.run(run())
 
 
