@@ -72,6 +72,10 @@ export function keyboardAdjustment(): HTMLInputElement | null {
   return focused instanceof HTMLInputElement && isAvailable(focused) ? focused : null;
 }
 
+export function isKeyboardNavigationTarget(element: HTMLInputElement): boolean {
+  return keyboardNavigation && activeAdjustment === element;
+}
+
 function adjustmentIdOf(element: HTMLInputElement | null): AdjustmentId | null {
   if (!isAvailable(element)) return null;
   const id = element.dataset.adjustmentId;

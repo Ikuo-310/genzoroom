@@ -89,6 +89,7 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 ## Development workflow
 
 - Do not commit or push changes unless explicitly requested. The user performs Git operations, deployment, and NAS/Firefox verification.
+- Use Conventional Commits with an English type prefix and a Japanese change summary after the colon, for example `fix: RAWスライダーのフォーカスを維持`. Keep existing commits unchanged.
 - Do not deploy to the NAS or claim to have performed manual browser testing.
 - Do not update README, CHANGELOG, or other project documentation unless the task requests it or the implementation makes an update necessary.
 - Keep README content for general users: describe features, operation, and limitations, not internal implementation or development history. Normally leave README unchanged during implementation, audit, and fix work. Once a feature is confirmed complete, update README for changes that affect users. Before completion, update it only when explicitly requested or when correcting a serious error or misleading instruction.

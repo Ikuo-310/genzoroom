@@ -4,7 +4,7 @@ import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 import {
   activateFromMouse, blurAdjustmentRange, enterAdjustmentRange, focusAdjustmentCategory,
   focusAdjustmentRange, isRegisteredAdjustment, keyboardAdjustment, leaveAdjustmentRange,
-  moveOverAdjustmentRange, navigateAdjustments, registerAdjustment, startAdjustmentPointer,
+  isKeyboardNavigationTarget, moveOverAdjustmentRange, navigateAdjustments, registerAdjustment, startAdjustmentPointer,
   unregisterAdjustment,
 } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
@@ -40,6 +40,7 @@ export function AdjustmentSlider(props: Props) {
   const latest = useRef(props);
   latest.current = props;
   const hovered = useRef(false);
+  const restoreKeyboardFocusAfterLock = useRef(false);
   const interaction = useRef<'idle' | 'keyboard' | 'wheel' | 'pointer' | 'number'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const numberStartValue = useRef<number | null>(null);
@@ -177,10 +178,17 @@ export function AdjustmentSlider(props: Props) {
       scheduleCommit('wheel');
     };
     const pointerEnd = () => finishPointer();
+    const cancelPendingKeyboardFocus = (event: Event) => {
+      if (!restoreKeyboardFocusAfterLock.current || event.target === element) return;
+      restoreKeyboardFocusAfterLock.current = false;
+      blurAdjustmentRange(element);
+    };
     element?.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
+    document.addEventListener('focusin', cancelPendingKeyboardFocus);
+    window.addEventListener('blur', cancelPendingKeyboardFocus);
     return () => {
       unregisterAdjustment(element);
       clearTimeout(timer.current);
@@ -189,8 +197,20 @@ export function AdjustmentSlider(props: Props) {
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
       window.removeEventListener('pointercancel', pointerEnd);
+      document.removeEventListener('focusin', cancelPendingKeyboardFocus);
+      window.removeEventListener('blur', cancelPendingKeyboardFocus);
     };
   }, []);
+  useEffect(() => {
+    const element = range.current;
+    if (props.disabled || !restoreKeyboardFocusAfterLock.current) return;
+    restoreKeyboardFocusAfterLock.current = false;
+    if (!element || !isRegisteredAdjustment(element) || element.disabled || !element.isConnected) return;
+    // A save lock briefly disables native ranges in Chromium. Restore only if that blur left
+    // focus on the document; focusin/window-blur guards cancel this when the user moves away.
+    if (document.activeElement === document.body || document.activeElement === document.documentElement)
+      element.focus({ preventScroll: true });
+  }, [props.disabled]);
   return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group" aria-labelledby={labelId}
     onContextMenu={(event) => {
       if (!props.onOpenContextMenu || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
@@ -217,8 +237,17 @@ export function AdjustmentSlider(props: Props) {
       onKeyDown={(event) => {
         if (keyboardAdjustment() === event.currentTarget) navigateAdjustments(event.nativeEvent, event.currentTarget);
       }}
-      onBlur={() => {
-        if (!hovered.current) blurAdjustmentRange(range.current);
+      onBlur={(event) => {
+        const element = range.current;
+        if (hovered.current) return;
+        const related = event.relatedTarget;
+        if (props.disabled && element && isKeyboardNavigationTarget(element)
+          && (!related || related === document.body || related === document.documentElement)) {
+          restoreKeyboardFocusAfterLock.current = true;
+          return;
+        }
+        restoreKeyboardFocusAfterLock.current = false;
+        blurAdjustmentRange(element);
       }}
       onPointerDown={(event) => {
         if (event.button !== 0) return;

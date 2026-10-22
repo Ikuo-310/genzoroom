@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
+import { isRegisteredAdjustment, keyboardAdjustment } from './adjustmentFocus';
 import { SettingsProvider } from './SettingsDialog';
 import i18n from './i18n';
 import type { AssetDetail } from './assets';
@@ -519,4 +520,86 @@ it('labels RAW temperature in Kelvin without inventing unavailable before/after 
   await mount();
   expect(history().textContent).toContain(`${i18n.t('workspace.temperature')} (K)`);
   expect(history().textContent).toContain(i18n.t('workspace.tint')); expect(history().textContent).not.toContain('→');
+});
+
+function simulateChromiumRangeDisableBlur(range: HTMLInputElement) {
+  // jsdom won't blur a disabled input, so temporarily enable only the DOM node to emit native blur.
+  range.disabled = false;
+  act(() => range.blur());
+  range.disabled = true;
+}
+
+it.each(['Shift navigation', 'mouse focus'] as const)('records RAW slider focus across a History commit after %s', async method => {
+  vi.useFakeTimers();
+  let resolve!: () => void;
+  let pendingRequest!: rawApi.RawHistoryRequest;
+  const model = historyBackend(0);
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => request.action === 'initialize' ? Promise.resolve(model.save(request))
+    : new Promise(yes => { pendingRequest = request; resolve = () => yes(model.save(request)); }));
+  await mount();
+  const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!;
+  const before: Array<{ phase: string; activeElement: Element | null; logicalTarget: Element | null; registered: boolean; disabled: boolean }> = [];
+  const record = (phase: string) => before.push({ phase, activeElement: document.activeElement,
+    logicalTarget: keyboardAdjustment(), registered: isRegisteredAdjustment(range), disabled: range.disabled });
+  if (method === 'Shift navigation') {
+    const category = host.querySelector<HTMLButtonElement>('.raw-adjustment-category .adjustment-category-title')!;
+    act(() => category.focus()); historyKey('ArrowDown', { ctrlKey: false, shiftKey: true }, category);
+  } else {
+    act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+    act(() => range.focus());
+  }
+  record('before input');
+  expect(document.activeElement).toBe(range); expect(keyboardAdjustment()).toBe(range);
+  historyKey('ArrowRight', { ctrlKey: false }, range);
+  act(() => vi.advanceTimersByTime(500)); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1);
+  // Chromium moves focus off a native range when React applies the RAW save lock.
+  if (range.disabled) simulateChromiumRangeDisableBlur(range);
+  record('commit pending');
+  expect(pendingRequest.action).toBe('commit');
+  expect(range.disabled).toBe(true); expect(isRegisteredAdjustment(range)).toBe(true);
+  await act(async () => resolve()); await flush();
+  record('commit acknowledged');
+  expect(range.isConnected).toBe(true); expect(range.disabled).toBe(false);
+  expect(keyboardAdjustment()).toBe(range);
+  if (method === 'Shift navigation') expect(document.activeElement).toBe(range);
+  else expect(document.activeElement).toBe(document.body);
+  expect(before.map(({ phase, activeElement, logicalTarget, registered, disabled }) => ({
+    phase, activeElement: activeElement === range ? 'range' : activeElement?.tagName ?? null,
+    logicalTarget: logicalTarget === range ? 'range' : logicalTarget?.tagName ?? null, registered, disabled,
+  }))).toEqual([
+    { phase: 'before input', activeElement: 'range', logicalTarget: 'range', registered: true, disabled: false },
+    { phase: 'commit pending', activeElement: 'BODY', logicalTarget: null, registered: true, disabled: true },
+    { phase: 'commit acknowledged', activeElement: method === 'Shift navigation' ? 'range' : 'BODY',
+      logicalTarget: 'range', registered: true, disabled: false },
+  ]);
+  const value = range.getAttribute('aria-valuetext');
+  historyKey('ArrowRight', { ctrlKey: false }, method === 'Shift navigation' ? range : document.activeElement!);
+  expect(range.getAttribute('aria-valuetext')).not.toBe(value);
+  act(() => vi.advanceTimersByTime(500)); await flush();
+  expect(pendingRequest.action).toBe('commit');
+  await act(async () => resolve()); await flush();
+});
+
+it('does not reclaim a RAW slider after the user moves focus elsewhere during a save lock', async () => {
+  vi.useFakeTimers();
+  let resolve!: () => void;
+  let pendingRequest!: rawApi.RawHistoryRequest;
+  const model = historyBackend(0);
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => request.action === 'initialize' ? Promise.resolve(model.save(request))
+    : new Promise(yes => { pendingRequest = request; resolve = () => yes(model.save(request)); }));
+  await mount();
+  const category = host.querySelector<HTMLButtonElement>('.raw-adjustment-category .adjustment-category-title')!;
+  const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!;
+  act(() => category.focus()); historyKey('ArrowDown', { ctrlKey: false, shiftKey: true }, category);
+  historyKey('ArrowRight', { ctrlKey: false }, range);
+  act(() => vi.advanceTimersByTime(500)); await flush();
+  expect(pendingRequest.action).toBe('commit'); expect(range.disabled).toBe(true);
+  simulateChromiumRangeDisableBlur(range);
+  const external = document.createElement('button'); document.body.append(external);
+  act(() => external.focus());
+  await act(async () => resolve()); await flush();
+  expect(document.activeElement).toBe(external);
+  expect(keyboardAdjustment()).toBeNull();
+  external.remove();
 });

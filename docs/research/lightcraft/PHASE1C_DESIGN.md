@@ -1093,6 +1093,14 @@ metadata GETだけの失敗はDB保存失敗と区別し、既存cacheを残し�
 
 設計書・architectureを更新してCommit／Push後、C4-B3-2で停止する。B3-3統合検証とC4-C以降へは進まない。
 
+## RAWスライダーのHistory commit後フォーカス（2026-10-23）
+
+RAW sliderのHistory commitでは保存coordinatorが`raw.locked`をtrueにし、`RawAdjustmentControls`がrangeを一時的に`disabled`にする。Chromiumはdisabled化されたfocused rangeからDOM focusを外す。Shift＋カーソルでカテゴリから移動した場合はpointer hoverがないため、`onBlur`が`adjustmentFocus`の論理対象も解除していた。一方、マウス経由はhover中のblurを既存処理が無視するため論理対象が残り、保存解除後の連続キー入力に差が生じる。HistoryによるReact node再生成は原因ではなく、同じrange nodeがcommit中に登録されたまま、`raw.locked`とdisabledが遷移する。
+
+キーボードナビゲーションが登録した対象について、save lockによるdisabled blurがdocument/bodyへ移った場合だけ、論理対象を一時保持する。lock解除後、同じ登録済み・接続済みrangeが有効で、かつdocument focusがbody/documentElementに残る時だけ`preventScroll`付きでfocusを復帰する。復帰前にfocusinで別要素へ移動するかwindowがblurした場合は復帰を破棄して論理対象も解除し、ユーザーが意図したfocusを奪わない。マウス経由、JPEGのsave/commit、raw saverのlock／Retry／History順序には変更を加えない。
+
+RAW統合テストはShift navigation／mouse focusそれぞれでHistory commit前・lock中・ack後の`document.activeElement`、`keyboardAdjustment()`、登録状態、disabledを記録し、同じDOM node上で次の矢印入力が反映されることを確認する。さらにsave lock中に別のbuttonへfocusを移した場合、ack後もそのfocusを維持する。JPEGの既存controlsテストにもShiftでスライダーへ戻った後、通常の矢印入力・commitを連続できる回帰確認を加える。利用可能なWindows UIはインストーラー版でRAW非対応のため、現行ソースのRAW UIは実機手動確認していない。
+
 ## RAW調整コントロールの状態表示（2026-10-23）
 
 Windows実機での操作時に、`raw.saving`・`raw.dirty`・`raw.pending`に対応する正常状態テキストがスライダー群の前へ挿入され、状態変化ごとに配置を押し下げていた。`RawAdjustmentControls`からsaving／dirty表示を削除し、pending表示は同じ状態を伝える`AnshitsuPage`のViewer status noteと合わせて描画しないようにした。CSSで非表示にはせず、文言を描画しない。

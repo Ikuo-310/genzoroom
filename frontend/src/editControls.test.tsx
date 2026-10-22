@@ -143,6 +143,10 @@ describe('edit controls DOM interaction', () => {
     key('ArrowRight', range());
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
     expect(range().value).toBe('0.01');
+    key('ArrowRight', range());
+    act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
+    expect(range().value).toBe('0.02');
+    expect(document.activeElement).toBe(range());
     const beforeHistory = session().history;
     key('ArrowRight', range(), { shiftKey: true });
     key('ArrowRight', number(), { shiftKey: true });
