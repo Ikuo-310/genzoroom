@@ -2,6 +2,13 @@ export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
 };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number };
+export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
+  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
+export type RawControlId = typeof RAW_CONTROL_IDS[number];
+export type RawValues = Record<RawControlId, number>;
+export type RawSettings = RawDocument & { values: RawValues; process: number;
+  controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
+  wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
   constructor(public readonly code: string) { super(code); }
 }
@@ -78,6 +85,27 @@ export async function readRawDocument(doc: RawDocument, signal?: AbortSignal) {
 }
 export async function releaseRawWorkspace(workspaceId: string) {
   await request(`/workspaces/${workspaceId}`, { method: 'DELETE' });
+}
+function settings(value: RawSettings, doc: RawDocument): RawSettings {
+  document(value, doc.workspaceId, doc.assetId);
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
+    || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
+    || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
+    || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
+    || new Set(value.controls.map(c => c.id)).size !== RAW_CONTROL_IDS.length
+    || value.controls.some(c => !RAW_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
+      || c.min >= c.max || c.step <= 0 || !integer(c.precision) || c.precision > 4)) throw new RawApiError('raw_invalid_response');
+  return value;
+}
+const identityBody = (doc: RawDocument) => ({ workspaceId: doc.workspaceId, generation: doc.generation, documentToken: doc.documentToken });
+export async function readRawSettings(doc: RawDocument): Promise<RawSettings> {
+  return settings(await json(`/documents/${doc.handle}/settings`, post(identityBody(doc))), doc);
+}
+export async function setRawControls(doc: RawDocument, values: Partial<RawValues>): Promise<RawSettings> {
+  const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values })), doc);
+  if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
+  return result;
 }
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal): Promise<RawFrame> {
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,

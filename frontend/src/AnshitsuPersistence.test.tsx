@@ -675,7 +675,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe(members[2].filename);
     const ranges = [...container.querySelectorAll<HTMLInputElement>('.develop-panel input[type="range"]')];
     expect(ranges).toHaveLength(0);
-    expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.rawPreview.readOnly'));
+      expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.rawPreview.temporary'));
     await click(`.filmstrip-item[aria-label="${members[3].filename}"]`);
     expect(currentPhoto()).toBe(members[3].filename);
     expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.jpegOnly'));

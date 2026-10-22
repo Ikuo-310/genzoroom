@@ -10,7 +10,9 @@ export const SHOW_KEYBOARD_SHORTCUTS_KEY = 'genzoroom.showKeyboardShortcuts';
 export const ANSHITSU_INITIAL_SELECTION_KEY = 'genzoroom.anshitsuInitialSelection';
 export const ANSHITSU_INITIAL_SELECTIONS = ['nonRaw', 'raw', 'both'] as const;
 export type AnshitsuInitialSelection = typeof ANSHITSU_INITIAL_SELECTIONS[number];
-export const ANSHITSU_RAW_PRESETS_ENABLED = false;
+export function effectiveAnshitsuSelection(saved: AnshitsuInitialSelection, rawAvailable: boolean): AnshitsuInitialSelection {
+  return rawAvailable ? saved : 'nonRaw';
+}
 export const DATE_LOCALES = ['ja-JP', 'en-US', 'en-GB', 'de-DE', 'fr-FR', 'zh-CN', 'ko-KR'] as const;
 // Keep the legacy Auto value as browser-region mode; saved preferences must not switch to language sync.
 export const DATE_LOCALE_CHOICES = ['auto', 'auto-language', ...DATE_LOCALES] as const;
@@ -41,8 +43,7 @@ export function readSettings(storage = browserStorage()): Settings {
   catch { /* Blocked storage keeps shortcut explanations enabled by default. */ }
   try {
     const value = storage?.getItem(ANSHITSU_INITIAL_SELECTION_KEY);
-    if (ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)
-      && (ANSHITSU_RAW_PRESETS_ENABLED || value === 'nonRaw')) anshitsuInitialSelection = value as AnshitsuInitialSelection;
+    if (ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) anshitsuInitialSelection = value as AnshitsuInitialSelection;
   } catch { /* Blocked storage keeps the safe Non-RAW preset. */ }
   try {
     const value = Number(storage?.getItem(HOME_THUMBNAIL_COLUMNS_KEY));
@@ -66,9 +67,8 @@ export function readSettings(storage = browserStorage()): Settings {
 let settings = readSettings();
 const listeners = new Set<() => void>();
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-  settings = { ...settings, [key]: value };
   if (key === 'anshitsuInitialSelection' && !ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) return;
-  if (key === 'anshitsuInitialSelection' && !ANSHITSU_RAW_PRESETS_ENABLED && value !== 'nonRaw') return;
+  settings = { ...settings, [key]: value };
   const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY }[key];
   try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }
   listeners.forEach(listener => listener());

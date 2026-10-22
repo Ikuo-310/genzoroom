@@ -20,6 +20,8 @@ beforeEach(async () => {
   await changeAppLanguage('en');
   updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto');
   updateSetting('showKeyboardShortcuts', true);
+  updateSetting('anshitsuInitialSelection', 'nonRaw');
+  localStorage.removeItem(ANSHITSU_INITIAL_SELECTION_KEY);
   vi.stubGlobal('isSecureContext', false);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
@@ -34,6 +36,16 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('unlocks and saves RAW and Both only after the Windows RAW capability is available', async () => {
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
+      ? new Response(JSON.stringify({ available: true, version: '0.10.0' }), { headers: { 'Content-Type': 'application/json' } }) : fallback(url));
+    await click(host.querySelector('button')!);
+    const radios = [...dialog().querySelectorAll<HTMLInputElement>('.anshitsu-selection-options input')];
+    expect(radios.every(radio => !radio.disabled)).toBe(true);
+    await click(radios[1]); expect(localStorage.getItem(ANSHITSU_INITIAL_SELECTION_KEY)).toBe('raw');
+    await click(radios[2]); expect(localStorage.getItem(ANSHITSU_INITIAL_SELECTION_KEY)).toBe('both');
+  });
   it('synchronizes the resolved app language to the native menu only in desktop mode', async () => {
     const setMenuLanguage = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(window, '__GENZOROOM_DESKTOP__', {

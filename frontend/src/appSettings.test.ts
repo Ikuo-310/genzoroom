@@ -87,8 +87,8 @@ describe('browser preferences', () => {
     expect(storage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('4');
     expect(storage.getItem(RECENT_PHOTO_COUNT_KEY)).toBe('450');
     expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailColumns: 4, recentPhotoCount: 450, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
-    expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'raw' }) as Storage).anshitsuInitialSelection).toBe('nonRaw');
-    expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'both' }) as Storage).anshitsuInitialSelection).toBe('nonRaw');
+    expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'raw' }) as Storage).anshitsuInitialSelection).toBe('raw');
+    expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'both' }) as Storage).anshitsuInitialSelection).toBe('both');
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'invalid' }) as Storage).anshitsuInitialSelection).toBe('nonRaw');
   });
   it('keeps date locale independent of manual or fallback display language', async () => {

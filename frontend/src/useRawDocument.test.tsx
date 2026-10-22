@@ -4,10 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRawDocument } from './useRawDocument';
 import * as api from './rawApi';
+import { rawSettings } from './test/rawSettings';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(), releaseRawWorkspace: vi.fn() }));
+  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn() }));
 let root: Root;
 let current: ReturnType<typeof useRawDocument>;
 const createURL = vi.fn(), revokeURL = vi.fn();
@@ -29,10 +30,39 @@ beforeEach(() => {
     workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1 }));
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
   vi.mocked(api.readRawDocument).mockImplementation(async doc => doc);
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => rawSettings(doc));
+  vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
+    values: { ...rawSettings(doc).values, ...patch } }));
   vi.mocked(api.releaseRawWorkspace).mockResolvedValue();
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.unstubAllGlobals(); });
 describe('RAW document lifetime', () => {
+  it('rejects old slider callbacks after a successor RAW document has opened', async () => {
+    await render('a'); await flush(); const old = current!;
+    await render('b'); await flush();
+    act(() => { old.changeControls({ 'light.exposure': 2 }); old.flushControls(); }); await flush();
+    expect(api.setRawControls).not.toHaveBeenCalled(); expect(current?.document?.assetId).toBe('b');
+  });
+  it('discards a Preview revision immediately when newer desired values arrive', async () => {
+    await render('raw'); await flush();
+    const pending = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(pending.promise);
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+    act(() => { current!.changeControls({ 'light.exposure': 2 }); current!.flushControls(); });
+    await act(async () => pending.resolve({ blob: new Blob(['old']), width: 16, height: 12, epoch: 1, sequence: 2 })); await flush();
+    expect(api.setRawControls).toHaveBeenCalledTimes(2); expect(createURL).toHaveBeenCalledTimes(2);
+    expect(current?.url).toBe('blob:raw-2'); expect(current?.settings?.values['light.exposure']).toBe(2);
+    expect(current?.pending).toBe(false); expect(revokeURL).toHaveBeenCalledWith('blob:raw-1');
+  });
+  it('keeps an in-flight mutation owned but never publishes it after switching to JPEG', async () => {
+    await render('raw'); await flush();
+    const pending = deferred<api.RawSettings>(); vi.mocked(api.setRawControls).mockReturnValueOnce(pending.promise);
+    act(() => { current!.changeControls({ 'light.contrast': 20 }); current!.flushControls(); }); await flush();
+    expect(current?.pending).toBe(true);
+    await render(null);
+    await act(async () => pending.resolve({ ...rawSettings({ workspaceId: 'workspace', handle: 'raw', assetId: 'raw',
+      generation: 1, documentToken: 'raw', revision: 2 }) })); await flush();
+    expect(current).toBeNull(); expect(api.rawPreview).toHaveBeenCalledOnce(); expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
+  });
   it('does nothing for JPEG and only publishes a decoded, verified native frame', async () => {
     await render(null); expect(api.rawCapability).not.toHaveBeenCalled();
     await render('raw'); await flush();

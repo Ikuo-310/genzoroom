@@ -392,3 +392,51 @@ Backend関連6ファイルは212件成功。その後、native解放失敗時の
 変更差分と直接依存するnative reset／close・HTTP owner・cache workerの順序を限定再監査し、今回の修正範囲の残存FindingはHigh 0／Medium 0／Low 0。修正前の「cleanupが未完了なのに同一workspaceの再openが成功する」経路は、API状態guardと閉鎖済みcacheの二重の受付拒否で成立しなくなった。
 
 Windows実画面確認へ進める状態と判断する。ただし今回もfake MCP／streamと一時directoryによる自動検証であり、実LightCraft・GPU・Immich・RAW原本・sidecar・既存PoC成果物は操作していない。Windows/Tauri/WebView2実画面、実OSの停止したdisk I/O、強制終了後の残骸回収、実GPU障害fallback等の既存未検証範囲を追加認定するものではない。
+
+## Phase 1C-C2実装結果（2026-10-22）
+
+### 基準とC1実機確認
+
+開始HEADは`f21f3354c74c2193e504e17dd5b397245df3bfe3`、開始時clean。LightCraft v0.10.0／commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`を維持した。ユーザーによるC1 Windows/Tauri実機確認は完了し、RAW原本取得・LightCraft PNG生成・暗室画像表示とLightCraft識別表示を確認済みの接続として再利用した。以下はC2の実装事実であり、C3／C4を完了した意味ではない。
+
+### 実装したcontrolとUI
+
+| control | 値域 | step／初期値 | 表示・意味 |
+|---|---|---|---|
+| `light.exposure` | -5..5 | .01／0 | EV、2桁 |
+| `light.contrast`／`highlights`／`shadows`／`whites`／`blacks` | -100..100 | 1／0 | 基本補正、整数 |
+| `wb.temp` | 2000..50000 | 50／spec 6500 | Kelvin。実際の開始値はreadback |
+| `wb.tint` | -150..150 | 1／0 | native Tint。JPEG相対値と同一視しない |
+| `color.vibrance`／`color.saturation` | -100..100 | 1／0 | native readback、整数 |
+
+`backend/raw_controls.py`は固定v0.10.0の`crates/develop/src/controls.rs`の上記specだけをallowlist化する。`RawAdjustmentControls.tsx`は既存右パネルと`AdjustmentSlider`のrange・数値入力・keyboard／wheel・確定方法を使用する。共通Sliderへ追加した`actions=false`はRAWでbypass／resetだけを省き、JPEG既定動作を変更しない。UI focus用AdjustmentIdは再利用するが、値のbindingはnative control IDに分離し、JPEG reducer／Recipe・clipboardへ渡さない。WB・基本・色の3カテゴリのみを表示し、RAW Color Gradingは追加しない。
+
+WBは`photo.inspect.as_shot_wb`の有限な範囲内2値と、設定の明示`wb.scale=kelvin`を確認できた場合だけ有効とする。この肯定的な証拠がない素材、scale省略（v0.10.0のlegacy表現）やlegacy素材はWBのみ無効。matrix／camera名から独自推測せず、Kelvinと旧相対値を変換しない。既存`develop.set`が行うscale正規化とAsShot→Customを利用し、readbackのmode／scaleを表示する。現段階でAsShotへ戻すReset操作は追加しない。判定不能素材でWBが無効になる制限は明示する。
+
+### APIと非同期所有
+
+追加routeはWindows専用`POST /api/raw/documents/{handle}/settings`と`POST .../controls`。前者はworkspaceId／generation／documentTokenだけでexplicit readback・resyncを行い、後者はさらにexpectedRevision／valuesを要求する。所有とidentity一致、整数revision、許可control・有限値・範囲を検証し、不正値は400、競合は409で拒否する。C1のbody上限・認証・Origin／Host・no-store・所有task／直列lockを維持し、任意MCP・原本path・PhotoId・資格情報は公開しない。共通Docker appにrouteを追加しない。resyncはsnapshotの確定状態を変え得るためPOSTとし、既存GETはnative処理を始めない。
+
+応答は確定revision、control値・spec、Process Version、WB能力・mode・scaleのみ。値はnative readbackを正本とし、設定送信値を成功値として返さない。readback失敗後のpublic revisionは進めず、明示settings resyncでengine状態を確認する。HTTP切断でも送信済み操作はC1 ownerが完了まで所有する。
+
+| 状態 | 所有・更新・不変条件 |
+|---|---|
+| API document revision | native readback成功後だけ更新。旧expectedRevisionでmutationしない |
+| `RawControls.confirmed` | documentごとの確定settings／revision。Previewはこのrevisionを使用 |
+| `desired` | 最新入力の未確定値。UIでは更新中であることを明示し、readback完了後に確定値へ戻す |
+| `pending` | 最新未送信patch。処理中の1件と別にcontrol単位で上書き集約 |
+| `serial`／busy／error | 新入力ごとにserialを進める。mutation・Previewは1ownerで逐次実行。結果不明は停止 |
+| `useRawDocument` editorRef | Asset identityと一致したcallbackだけ操作可能。dispose後に成功や旧画像をpublishしない |
+| 表示URL | native metadata・revision・frame serial、最新desired serialを取得後／decode後／表示直前に確認して採用。候補・旧URLをrevoke |
+| capability `available` | 共有subscriberが非同期取得、15秒poll。初期・失敗・404はfalse、起動を待たせない |
+| 保存preset／実効preset | 保存は3値を維持。利用不可時の実効値のみNon-RAW。回復時に保存値を再適用 |
+
+入力は150 ms debounceで集約し、Slider commitは最後のpendingを即flushする。送信中の新入力は最新patchだけを保持し、中間revisionのPreviewを省く。Preview処理中の新入力は旧結果の表示guardを直ちに失効させる。画像更新のdocumentKeyはrevisionでは変えずzoom／panを維持する。競合は1回explicit resyncして最新patchを再適用し、再競合やHTTP timeout等の結果不明は自動再送しない。明示「再同期して再試行」はまずreadbackし、確定revisionでpendingを送信／Previewを再要求する。復旧できなければ写真を開き直す。以前の確定画像が残る間も更新中・失敗のラベルを表示し、現在値での成功と誤認させない。
+
+写真切替／離脱は未確定値を成功扱いしない。transmitted mutationは完了まで所有したうえでC1 workspaceを解放する。値・Session snapshotの退避はせず、RAW設定は写真切替・終了で失われる旨を表示する。既存JPEG autosave／History／Exportは別系統。2枚保持・256変更試行のPoC制限は変更せず、C3の容量・長時間編集・往復復元へ残す。Before／After、Reset、Undo／Redo、RAW HistoryはC4。永続Recipe・最終Export・Immich登録は未実装。
+
+### プリセットと検証結果
+
+`appSettings.ts`の固定ロックを廃止し、保存値はread／update時にraw／bothを含めて保持する。Settingsの3選択肢はそのまま、Windows LightCraft capabilityがtrueのときだけRAW／両方を有効化する。Gallery／Stack badgeの実効presetは同じcapabilityでNon-RAWへfallbackし、手動選択優先・RAW-only等の従来fallbackを維持する。Dockerの404はunavailableであり、RAW編集対応と表示しない。保存値を書き換えないためcapability回復時にraw／bothが戻る。
+
+最終関連検証はBackend 4ファイル139件、Frontend 15ファイル384件成功。Backendはrepo Python 3.14／cwd backendで、fake MCPを使用したcontrol mapping・readback・WB mode／scale、revision／所有拒否、切断後もownedなmutation、readback失敗resync、C1 cleanup／Windows認証を確認した。Frontendはgateと制御timerでdesired集約、commit flush、逐次処理、revision衝突・結果不明、古いPreview／callback破棄、切替、WBのみ無効、RAW／JPEG経路分離、capability前ロック・失敗／404・回復・保存値保持、既存Slider／Viewer／保存・Stack選択回帰を確認した。TypeScript checkを含む`npm run build`成功、既存500 kB超chunk警告あり。全suite・実GPU・実Immich・Windows画面操作は実施していない。C2のSlider操作とreadback／Preview、JPEG往復のWindows実画面受入はユーザーが行う。

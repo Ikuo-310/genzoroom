@@ -58,6 +58,7 @@ class DevelopSnapshot:
     engine_commit: str = ENGINE_COMMIT
     _fingerprint: tuple | None = field(default=None, repr=False)
     _content_hash: str | None = field(default=None, repr=False)
+    wb_kelvin: bool = False
 
     @property
     def settings(self):
@@ -107,6 +108,7 @@ class _Photo:
     applied_revision: int = 0
     requested_revision: int = 0
     sync: str = "synced"
+    wb_kelvin: bool = False
 
 
 class PreviewTicket:
@@ -370,7 +372,8 @@ class LightCraftRawSession:
 
     def _snapshot(self, photo):
         return DevelopSnapshot(photo.handle, photo.applied_revision, photo.settings_json,
-                               _fingerprint=photo.fingerprint, _content_hash=photo.content_hash)
+                               _fingerprint=photo.fingerprint, _content_hash=photo.content_hash,
+                               wb_kelvin=photo.wb_kelvin)
 
     def _discard_pending(self, error=None):
         if self._pending is not None:
@@ -522,6 +525,12 @@ class LightCraftRawSession:
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
             settings = await self._read_settings(photo, deadline)
+            # Only expose Kelvin editing when the engine supplies a measured as-shot white.
+            white = info.get("as_shot_wb")
+            photo.wb_kelvin = (isinstance(white, list) and len(white) == 2
+                               and all(type(v) in (int, float) and math.isfinite(v) for v in white)
+                               and 2000 <= white[0] <= 50000 and -150 <= white[1] <= 150
+                               and json.loads(settings).get("wb", {}).get("scale") == "kelvin")
             if previous is not None:
                 settings = await self._restore(photo, previous.settings_json, deadline)
             self._commit(photo, settings)

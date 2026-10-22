@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C2：LightCraftスライダー接続（2026-10-22）
+
+開始HEAD `f21f3354c74c2193e504e17dd5b397245df3bfe3`、作業ツリーcleanから実装した。ユーザーによるC1のWindows/Tauri実機確認は完了。LightCraft画像と識別表示、および原本取得・`raw.document.ready`・`preview.completed`・`raw.preview.complete`の成功を確認済みの基盤として再利用した。LightCraft v0.10.0／固定commitを維持する。
+
+Windows専用APIへsettings readback／resyncとallowlist controlsのPOSTを追加し、workspace・handle・generation・document tokenと`expectedRevision`を検証する。基本6項目（`light.exposure`／contrast／highlights／shadows／whites／blacks）に続き、`wb.temp`／`wb.tint`／`color.vibrance`／`color.saturation`を接続した。値域・step・初期値は固定v0.10.0のcontrol specから定義し、確定値とrevisionは必ずnative readbackを使用する。WBはinspectの有限なas-shot値と明示Kelvin scaleを確認できた素材だけ有効。scale省略・legacy・判定不能時はWBだけ無効にし、AsShot→Customはengine自身に任せ、JPEG相対補正へ変換しない。
+
+既存`AdjustmentSlider`をRAW右パネルで再利用し、RAWではbypass／resetのボタンを表示しない。`RawControls`が150 ms debounce、commit flush、処理中1件＋最新未送信patch、desired値・確定値・最新入力serialを所有する。readback後にだけPreviewを要求し、取得後・decode後・表示直前のidentity／revision／serialで古い結果を破棄する。同一documentではzoom／panを維持する。競合はreadback再同期、結果不明は自動再送停止と明示的な再同期・再試行へ進む。離脱後のmutationは所有して回収するが成功表示せず、旧Slider callbackは新documentへ届かない。RAW値はJPEG Recipe／autosave／History／Exportへ渡さない。写真切替・終了で失う一時編集であることを表示し、C3の退避・容量管理、C4のBefore／Reset／Undoは追加していない。
+
+暗室送りプリセットの固定ロックを廃止した。共有capability取得前・失敗・Windows利用不可・DockerのRAW route欠落では実効Non-RAW、Windows LightCraft利用可能時は3選択肢が有効。保存済みRAW／両方は上書きせず、capability回復で再適用する。既存Gallery／Stack手動形式選択の優先・fallback・Filmstrip順序は維持する。
+
+最終検証はBackend関連4ファイル139件、Frontend関連15ファイル384件が成功。fake MCP／HTTP・gate・制御タイマーでcontrol mapping/readback、WB能力・AsShot／Custom・省略scale、mutationの切断・結果不明・競合、desired集約・stale Preview・離脱、プリセット保存・回復・Dockerロック、JPEG Slider／Viewer／保存・Stack選択の回帰を確認した。`npm run build`のTypeScript checkとproduction buildは成功し、既存の500 kB超chunk警告は残る。初回検証の旧fixture期待値・テスト用型定義の不一致は修正し、関連範囲で再確認した。全体suite・実GPU・実Immich・Windows画面操作は行っていない。C2の実画面受入はユーザーが行う。README／CHANGELOGは変更していない。
+
 ## RAW現像統合 Phase 1C-C1：Windows暗室へのRAW Preview接続（2026-10-22）
 
 設計Commit `c912146f22c0f34fb5ea6d5364044c4fedd06c16`からC1を実装した。LightCraft v0.10.0固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`を維持する。既存のGallery／Stack形式バッジ・送信対象解決・暗室route・Filmstripの集合と順序を再利用し、RAW時だけLightCraft生成PNGをImageViewerへ接続した。既存JPEGのRecipe／History／Autosave／Queueを維持し、RAWのSlider／Undo／永続化／Exportは追加していない。

@@ -1,4 +1,4 @@
-"""Windows-only C1 RAW Preview API; no editing, persistence or Export commands."""
+"""Windows-only RAW Preview and allowlisted C2 controls; no persistence or Export."""
 
 import asyncio
 import json
@@ -14,6 +14,7 @@ from lightcraft_mcp import LightCraftError
 from lightcraft_raw import MAX_IMAGE_BYTES, SUPERSEDED
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
+from raw_controls import controls_state, validate_controls
 
 MAX_JSON_BYTES = 4096
 LEASE_SECONDS = 180
@@ -40,6 +41,8 @@ class RawPreviewApi:
             Route("/documents", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}", self.endpoint, methods=["GET", "DELETE"]),
             Route("/documents/{handle}/preview", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
         ])
 
     def bind(self, raw, manager):
@@ -89,7 +92,7 @@ class RawPreviewApi:
         except (LightCraftError, TimeoutError) as error:
             code = error.code if isinstance(error, LightCraftError) else "raw_request_timeout"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
-                      400 if code == "raw_invalid_request" else
+                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready"} else
                       409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"} else 502)
@@ -105,7 +108,8 @@ class RawPreviewApi:
             error = task.exception()
             code = error.code if isinstance(error, LightCraftError) else "raw_operation_failed"
             rejection = code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
-                                 "raw_invalid_request", "raw_source_too_large", "raw_cache_capacity", "raw_disk_capacity"}
+                                 "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable",
+                                 "raw_source_too_large", "raw_cache_capacity", "raw_disk_capacity"}
             rejection |= code in {"raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"}
             lightcraft_log("raw.operation.failed", level="warn" if rejection else "error", errorCode=code)
 
@@ -114,12 +118,12 @@ class RawPreviewApi:
             raise LightCraftError("raw_workspace_conflict")
         self._touched = monotonic()
 
-    def _document(self, handle):
+    def _document(self, handle, *, resync=False):
         self._ready()
         doc = self.document
         if doc is None or doc["handle"] != handle or doc["generation"] != self.manager.status().generation:
             raise LightCraftError("raw_stale_handle")
-        if self.raw.status().state in {"lost", "desynchronized", "stopped", "closing"}:
+        if self.raw.status().state in ({"lost", "stopped", "closing"} if resync else {"lost", "desynchronized", "stopped", "closing"}):
             raise LightCraftError("raw_unavailable")
         return doc
 
@@ -171,11 +175,33 @@ class RawPreviewApi:
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace}
                 self._raw_handle = handle
+                self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
                 self._touched = monotonic()
                 lightcraft_log("raw.document.ready", assetId=str(asset_id), generation=handle.generation,
                                revision=snapshot.revision)
                 return JSONResponse(self.document)
-            doc = self._document(request.path_params["handle"])
+            settings_request = path.endswith("/settings")
+            doc = self._document(request.path_params["handle"], resync=settings_request)
+            if settings_request or path.endswith("/controls"):
+                required = {"workspaceId", "generation", "documentToken"}
+                if not settings_request:
+                    required |= {"expectedRevision", "values"}
+                if set(body) != required or type(body.get("generation")) is not int:
+                    raise LightCraftError("raw_invalid_request")
+                if any(body[key] != doc[key] for key in ("generation", "documentToken")):
+                    raise LightCraftError("raw_stale_handle")
+                if settings_request:
+                    snapshot = await self.raw.get_settings(self._raw_handle)
+                else:
+                    if type(body.get("expectedRevision")) is not int or body["expectedRevision"] != doc["revision"]:
+                        raise LightCraftError("raw_revision_conflict")
+                    values = validate_controls(body["values"], self._wb_available)
+                    snapshot = await self.raw.set_controls(self._raw_handle, values, doc["revision"])
+                confirmed = controls_state(snapshot)
+                doc["revision"] = snapshot.revision
+                self._wb_available = confirmed["wb"]["available"]
+                lightcraft_log("raw.controls.confirmed", level="debug", generation=doc["generation"], revision=doc["revision"])
+                return JSONResponse({**doc, **confirmed})
             if method == "GET":
                 return JSONResponse({**doc, "state": self.raw.status().state})
             if set(body) != {"workspaceId", "generation", "documentToken", "revision", "serial"} \

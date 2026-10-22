@@ -8,6 +8,7 @@ import { SettingsProvider } from './SettingsDialog';
 import i18n from './i18n';
 import type { AssetDetail } from './assets';
 import * as rawApi from './rawApi';
+import { rawSettings } from './test/rawSettings';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
   date: '2026-10-22', thumbnail_url: '/thumb', preview_url: '/immich-viewing', format: 'DNG', is_raw: true, exif: {} };
@@ -23,7 +24,9 @@ vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjuste
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(async () => 'workspace'), openRawDocument: vi.fn(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 })),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), releaseRawWorkspace: vi.fn(async () => {}) }));
+  rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
+  setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
+    values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}) }));
 let root: Root, host: HTMLDivElement;
 async function flush() { await act(async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); }); }
 async function mount() {
@@ -65,6 +68,31 @@ it('shows the viewing Preview only with an explicit unavailable label', async ()
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('/immich-viewing');
   expect(host.textContent).toContain('showing Immich viewing preview');
   expect(rawApi.openRawDocument).not.toHaveBeenCalled();
+});
+it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
+  await mount();
+  const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  expect(sliders).toHaveLength(10);
+  expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
+  expect(sliders[1].min).toBe('-150'); expect(sliders[2].step).toBe('0.01');
+  expect(host.querySelector('.adjustment-power')).toBeNull(); expect(host.querySelector('.adjustment-reset')).toBeNull();
+  const number = sliders[2].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '1.25');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  }); await flush();
+  expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
+  expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
+  expect(number.value).toBe('1.25'); expect(host.textContent).toContain('RAW edits are temporary');
+});
+it('disables only WB when Kelvin capability is unknown', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), wb: { available: false, mode: 'asShot', scale: 'legacy' } }));
+  await mount();
+  const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  expect(sliders.slice(0, 2).every(slider => slider.disabled)).toBe(true);
+  expect(sliders.slice(2).every(slider => !slider.disabled)).toBe(true);
 });
 it('does not show an Immich image as the result of failed native rendering', async () => {
   vi.mocked(rawApi.rawPreview).mockRejectedValue(new rawApi.RawApiError('raw_render_failed'));

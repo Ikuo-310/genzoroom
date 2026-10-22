@@ -36,7 +36,8 @@ import { readWorkspaceSession } from './workspaceResume';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { ExportManagementContent, ExportManagementToolbar, ExportRetryPriorityNotice } from './ExportManagement';
 import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
-import { RECENT_PHOTO_COUNTS, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
+import { RECENT_PHOTO_COUNTS, effectiveAnshitsuSelection, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
+import { useRawCapability } from './useRawCapability';
 import { filterPhotos, filterPhotosByDevelopStatus, filterPhotosByEditStatus, photoFiltersForMode, readDevelopStatusFilterMode, readEditStatusFilterMode, writeDevelopStatusFilterMode, writeEditStatusFilterMode, type DevelopStatusFilterMode, type EditStatusFilterMode } from './photoFilters';
 import {
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -65,6 +66,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const recentCountSelectId = useId();
   const shortcut = useShortcutDisplay();
   const settings = useAppSettings();
+  const rawAvailable = useRawCapability();
+  const effectivePreset = effectiveAnshitsuSelection(settings.anshitsuInitialSelection, rawAvailable);
   const navigate = useNavigate();
   const location = useLocation();
   const workspaceSession = useMemo(() => readWorkspaceSession(), [active, location.key]);
@@ -811,7 +814,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     if (workspaceNavigating.current) return;
     const eligibleAssets = assetsToOpen.filter(galleryAssetAllowed);
     if (eligibleAssets.length === 0) return;
-    const resolution = resolveWorkspaceAssets(eligibleAssets, settings.anshitsuInitialSelection);
+    const resolution = resolveWorkspaceAssets(eligibleAssets, effectivePreset);
     try {
       frontendLogger.add({ level: resolution.status === 'unavailable' ? 'error' : resolution.status === 'empty' ? 'info' : 'debug',
         component: 'gallery', event: 'workspace.resolve', context: {
@@ -1329,7 +1332,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
       const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
       const selectionCard = asset.stackId ? stackSelections.currentCard(asset) : asset;
       const manual = selectionCard.stackId ? stackSelections.getManualSelection(selectionCard.stackId) : undefined;
-      const resolvedStack = selectionCard.stackId ? selectGalleryAssetTargets(selectionCard, settings.anshitsuInitialSelection, manual) : null;
+      const resolvedStack = selectionCard.stackId ? selectGalleryAssetTargets(selectionCard, effectivePreset, manual) : null;
       const stackMembers = resolvedStack?.status === 'ready' ? selectionCard.stackMembers ?? null : null;
       const selectedStackIds = resolvedStack?.status === 'ready' ? resolvedStack.selectedAssetIds : new Set<string>();
       const exclusionState = exclusions.stateFor(asset);
@@ -1366,7 +1369,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
             onDarkroomToggle: (member: RecentAsset, checked: boolean) => {
               if (!selectionCard.stackId || !exclusionAllowed) return;
               const latestCard = stackSelections.currentCard(asset);
-              const latest = stackSelections.resolve(latestCard, settings.anshitsuInitialSelection);
+              const latest = stackSelections.resolve(latestCard, effectivePreset);
               if (latest.status !== 'ready') return;
               const current = new Set(stackSelections.getManualSelection(selectionCard.stackId) ?? latest.selectedAssetIds);
               if (checked) current.add(member.id.toLowerCase()); else current.delete(member.id.toLowerCase());

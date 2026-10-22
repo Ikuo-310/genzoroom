@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RecentAsset } from './assets';
-import { useAppSettings } from './appSettings';
+import { effectiveAnshitsuSelection, useAppSettings } from './appSettings';
+import { useRawCapability } from './useRawCapability';
 import { selectGalleryAssetTargets } from './galleryAssetSelection';
 import { useGalleryStackSelections } from './useGalleryStackSelections';
 
@@ -10,11 +11,13 @@ export function StackFormatSwitches({ asset, formats }: {
   formats: readonly { format: string; isRaw: boolean }[];
 }) {
   const settings = useAppSettings();
+  const rawAvailable = useRawCapability();
+  const preset = effectiveAnshitsuSelection(settings.anshitsuInitialSelection, rawAvailable);
   const selections = useGalleryStackSelections();
   const { t } = useTranslation();
   const currentCard = selections.currentCard(asset);
   const manual = selections.getManualSelection(currentCard.stackId!);
-  const selection = selectGalleryAssetTargets(currentCard, settings.anshitsuInitialSelection, manual);
+  const selection = selectGalleryAssetTargets(currentCard, preset, manual);
   const candidates = selectGalleryAssetTargets(currentCard, 'both');
   const formatSource = currentCard.stackFormats?.length ? currentCard.stackFormats : formats;
   const uniqueFormats = formatSource.filter((format, index) => formatSource.findIndex(candidate =>
@@ -25,8 +28,8 @@ export function StackFormatSwitches({ asset, formats }: {
     : uniqueFormats;
 
   // Reconcile persistence after rendering; notifying shared subscribers during render is unsafe.
-  useEffect(() => { selections.resolve(currentCard, settings.anshitsuInitialSelection); },
-    [currentCard, settings.anshitsuInitialSelection, manual, selections.resolve, selections.revision]);
+  useEffect(() => { selections.resolve(currentCard, preset); },
+    [currentCard, preset, manual, selections.resolve, selections.revision]);
 
   return <div className="stack-format-badges">
     {currentFormats.map(({ format, isRaw }) => {
@@ -44,7 +47,7 @@ export function StackFormatSwitches({ asset, formats }: {
           event.stopPropagation();
           // Resolve again at activation so a shared change cannot be overwritten by a stale render.
           const latestCard = selections.currentCard(asset);
-          const latest = selections.resolve(latestCard, settings.anshitsuInitialSelection);
+          const latest = selections.resolve(latestCard, preset);
           const latestCandidates = selectGalleryAssetTargets(latestCard, 'both');
           const latestMembers = latestCandidates.assets?.filter(member => member.format === format && member.is_raw === isRaw) ?? [];
           if (latest.status !== 'ready' || latestMembers.length === 0) return;

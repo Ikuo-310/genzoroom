@@ -20,7 +20,8 @@ from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 
 
 DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "tint": 0., "scale": "kelvin"},
-           "light": {"exposure": 0., "contrast": 0.}, "geometry": {"scale": 100.},
+           "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
+           "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
            "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
 
@@ -64,6 +65,7 @@ class RawProcess(FakeProcess):
         self.fail_get = self.mismatch = False
         self.bad_image = False
         self.raw_tool_error = False
+        self.as_shot_wb = None
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -120,7 +122,7 @@ class RawProcess(FakeProcess):
                 value["failed"] = [[path, "PRIVATE secret"]]
         elif command == "photo.inspect":
             value = {"id": params["id"], "kind": self.kind, "width": 4000, "height": 3000,
-                     "content_hash": self.photos[params["id"]]["hash"]}
+                     "content_hash": self.photos[params["id"]]["hash"], "as_shot_wb": self.as_shot_wb}
             if self.preview_only:
                 value["preview_only"] = self.preview_only
         elif command == "library.select":
@@ -141,6 +143,8 @@ class RawProcess(FakeProcess):
                     if section not in settings or key not in settings[section]:
                         return self.tool(message, error=True)
                     settings[section][key] = v
+                    if section == "wb":
+                        settings["wb"]["mode"] = "custom"
             else:
                 merge(settings, params["settings"])
             # Independent fake clamp oracle: sent extremes must not become the adapter's truth.
@@ -631,7 +635,7 @@ def test_conflicting_mutations_are_not_coalesced_or_applied_to_wrong_photo(tmp_p
             changed = await a
             with pytest.raises(LightCraftError, match="raw_revision_conflict"):
                 await b
-            assert changed.settings["light"] == {"exposure": .5, "contrast": 0.}
+            assert changed.settings["light"] == DEFAULT["light"] | {"exposure": .5}
             assert (await raw.request_preview(handle, changed.revision)).revision == changed.revision
         finally:
             await raw.close()

@@ -25,6 +25,7 @@ import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './C
 import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
 import { useJpegOriginal } from './useJpegOriginal';
 import { useRawDocument } from './useRawDocument';
+import { RawAdjustmentControls } from './RawAdjustmentControls';
 import type { JpegProfile } from './jpegProfile';
 import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
@@ -683,7 +684,7 @@ export function AnshitsuPage() {
           src={rawDocument?.status === 'ready' ? rawDocument.url! : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
           documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
           previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' ? 'error' : undefined}
-          statusNote={rawDocument ? t(`workspace.rawPreview.${rawDocument.status}`) : undefined}
+          statusNote={rawDocument ? t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.pending ? 'updating' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           beforeAvailable={!activeDetail.is_raw}
           editSource={editable ? jpegOriginal.source : undefined}
@@ -776,7 +777,7 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : <p>{t(rawDocument ? 'workspace.rawPreview.readOnly' : 'workspace.jpegOnly')}</p>}
+          </div> : rawDocument ? <RawAdjustmentControls raw={rawDocument} /> : <p>{t('workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip
