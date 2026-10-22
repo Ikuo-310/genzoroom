@@ -1,4 +1,4 @@
-"""Windows-only RAW Preview and allowlisted C2 controls; no persistence or Export."""
+"""Windows-only RAW Preview, C2 controls and persisted recipe restore; no save or Export."""
 
 import asyncio
 import json
@@ -7,6 +7,7 @@ from time import monotonic
 from uuid import UUID
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
@@ -93,9 +94,10 @@ class RawPreviewApi:
             code = error.code if isinstance(error, LightCraftError) else "raw_request_timeout"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
                       400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable"} else
-                      503 if code in {"raw_unavailable", "lightcraft_not_ready"} else
+                      503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable"} else
                       409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
-                                      "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"} else 502)
+                                      "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
+                                      "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible"} else 502)
             return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
         except Exception:
             lightcraft_log("raw.http.failed", level="error", errorCode="raw_operation_failed")
@@ -167,13 +169,15 @@ class RawPreviewApi:
                 try:
                     source = await self.cache.download(asset_id)
                     handle, snapshot = await self.raw.open_raw(str(asset_id), str(source))
+                    snapshot, recipe_status, recipe_revision = await self._restore_document(handle, snapshot)
                 except BaseException:
                     # Import may have partially registered the source; reap before deleting it.
                     await self._release()
                     raise
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
-                                 "revision": snapshot.revision, "workspaceId": self.workspace}
+                                 "revision": snapshot.revision, "workspaceId": self.workspace,
+                                 "recipeStatus": recipe_status, "recipeRevision": recipe_revision}
                 self._raw_handle = handle
                 self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
                 self._touched = monotonic()
@@ -224,6 +228,37 @@ class RawPreviewApi:
                            generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data))
             self._touched = monotonic()
             return Response(frame.data, media_type="image/png", headers=headers)
+
+    async def _restore_document(self, handle, snapshot):
+        # Persistence must bind only after Windows has selected its profile and initialized storage.
+        from raw_recipe_store import InvalidRawRecipe, StoreUnavailable, lookup_raw_recipe
+        workspace, cache = self.workspace, self.cache
+        identity = self.raw.recipe_identity(handle)
+        epoch = self.raw.status().selection_epoch
+
+        def verify():
+            if self._closing or self.workspace != workspace or self.cache is not cache or \
+                    self._workspace_state != "active" or self.document is not None or \
+                    self.raw.status().selection_epoch != epoch:
+                raise LightCraftError("raw_stale_handle")
+            if self.raw.recipe_identity(handle) != identity:
+                raise LightCraftError("raw_stale_handle")
+
+        try:
+            saved = await run_in_threadpool(lookup_raw_recipe, identity)
+        except (StoreUnavailable, InvalidRawRecipe):
+            raise LightCraftError("raw_recipe_unavailable") from None
+        verify()
+        if saved["status"] in {"source_mismatch", "engine_incompatible"}:
+            raise LightCraftError(f'raw_recipe_{saved["status"]}')
+        if saved["status"] == "none":
+            lightcraft_log("raw.recipe.none", level="debug", assetId=identity["assetId"])
+            return snapshot, "none", 0
+        snapshot = await self.raw.restore_persisted_settings(handle, saved["recipe"], snapshot.revision)
+        verify()
+        lightcraft_log("raw.recipe.restored", assetId=identity["assetId"],
+                       generation=handle.generation, revision=snapshot.revision)
+        return snapshot, "restored", saved["revision"]
 
     async def _release(self):
         if self.workspace is None:

@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C3-B：SQLiteレシピのLightCraft復元（2026-10-22）
+
+Windowsの既存document openに、import→実content hash／engine/schema照合→SQLite lookup→全DevelopSettings適用→readback一致確認を接続した。C3-Aの正規化・JSON検証・256 KiB上限・receipt検証を再利用する。完全一致レシピだけを使い、当該Assetの行なしなら従来初期状態、原本やengineが異なる場合は区別した固定エラーでopenを拒否する。DB行・receiptの書換え／削除は行わない。
+
+`restore_persisted_settings()`は再import後の同hashを確認して復元し、旧`restore_settings()`のfingerprint条件は変更しない。`lightcraft`／handshake `0.10.0`／固定adapter commit／settings schema 1を照合し、既存native reset・全merge・readbackを使用する。WB scale省略はlegacyのままでKelvinへ推測変換しない。C2未対応fieldも一致確認し、失敗・結果不明・古いselection/document/generationは成功確定しない。binary commitのhandshake証明は既存どおり未対応である。
+
+documentにはopen由来の`recipeStatus`（none／restored）とSQLite側`recipeRevision`を追加し、Previewには既存native `revision`を使う。復元失敗時はdocumentを公開せずC1 cleanupへ進む。HTTP cancel／shutdownでも送信済み処理の所有を維持し、native解放前にcacheを削除しない。Windows profile選択前のDB path bindを避ける遅延importもテストした。設定本文・原本hash・PhotoId・pathの公開や新しい保存endpointは追加していない。
+
+検証：repo Python 3.14／cwd backend、関連Backend 7ファイル275件＋41 subtests成功。Fake LightCraft＋一時SQLiteで同hash／異fingerprint、全設定、未保存、原本／engine不一致、readback不一致・通信結果不明、HTTP cancel、切替・世代更新・shutdown、DB行保持を確認。既存C1 cleanup／C2 controls・Preview、C3-A保存層、JPEG保存／Queueも成功。`git diff --check`成功。Frontendテスト／build、実LightCraft・GPU・Immich・Windows画面確認は実施していない。
+
+C3-Bのみ完了。schema v7・保存規約・C2動作は維持し、Frontend Autosave、写真切替・終了保存guard、Gallery復帰の編集管理、resident／世代再生成／mutation容量対策はC3-C／Dへ残す。RAW History／Undo／Redo／Reset・Exportには着手していない。新しいC2編集はまだ一時的である。
+
 ## RAW現像統合 Phase 1C-C3-A：SQLite保存基盤（2026-10-22）
 
 既存DBへschema v7として`asset_raw_recipes`と設定本文を持たない冪等受付記録`raw_recipe_saves`を追加した。レシピはAsset ID＋原本content hash＋engine名/version/commit＋settings schema versionで識別し、異なる原本・engine行を残す。`raw_recipe_store.py`が完全DevelopSettings JSON、recipe revision、saveId、保存時刻を管理し、JPEG Recipe v18／History／現像済み判定／Queueへ接続しない。C2スライダー・LightCraft・Frontendは変更していない。

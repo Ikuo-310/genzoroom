@@ -193,6 +193,40 @@ def get_raw_recipe(identity: dict) -> dict:
             raise
 
 
+def validate_raw_recipe(recipe: dict) -> dict:
+    """Revalidate a DB recipe at the engine boundary using the C3-A format and limits."""
+    if type(recipe) is not dict or set(recipe) != {*IDENTITY_FIELDS, "settings"}:
+        raise InvalidRawRecipe()
+    identity = normalize_identity({key: recipe[key] for key in IDENTITY_FIELDS})
+    encoded = _settings_json(recipe["settings"], identity["settingsSchemaVersion"])
+    return {**identity, "settings": json.loads(encoded)}
+
+
+def lookup_raw_recipe(identity: dict) -> dict:
+    """Distinguish absence from a changed source/engine without applying alternate rows."""
+    identity = normalize_identity(identity)
+    with _connection() as connection:
+        connection.execute("BEGIN")
+        try:
+            result = _read_row(connection, identity)
+            if result is not None:
+                outcome = {"status": "matched", **result}
+            elif connection.execute("""SELECT 1 FROM asset_raw_recipes
+                    WHERE asset_id=? AND source_content_hash=? LIMIT 1""",
+                    (identity["assetId"], identity["sourceContentHash"])).fetchone():
+                outcome = {"status": "engine_incompatible"}
+            elif connection.execute("SELECT 1 FROM asset_raw_recipes WHERE asset_id=? LIMIT 1",
+                                    (identity["assetId"],)).fetchone():
+                outcome = {"status": "source_mismatch"}
+            else:
+                outcome = {"status": "none"}
+            connection.commit()
+            return outcome
+        except Exception:
+            connection.rollback()
+            raise
+
+
 def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict) -> dict:
     """Atomically save confirmed readback; a saveId binds the entire normalized request forever."""
     identity = normalize_identity(identity)

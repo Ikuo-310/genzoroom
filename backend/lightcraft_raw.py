@@ -1,4 +1,4 @@
-"""Internal, Windows-owned RAW editing session; no HTTP, Recipe or JPEG dependencies."""
+"""Internal, Windows-owned RAW editing session; no HTTP or JPEG editing integration."""
 
 import asyncio
 import base64
@@ -636,7 +636,7 @@ class LightCraftRawSession:
             raise LightCraftError("raw_restore_mismatch")
         return actual
 
-    async def _mutate(self, handle, command, params, expected_revision, restored=None):
+    async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None):
         photo = self._photo(handle, active=True)
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
             raise LightCraftError("raw_revision_conflict")
@@ -657,6 +657,8 @@ class LightCraftRawSession:
                     raise LightCraftError("raw_revision_conflict")
                 if self._edits >= MAX_EDITS:
                     raise LightCraftError("raw_session_edit_limit")
+                if verify is not None:
+                    verify()
                 self._phase = "applying"
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
                 sent = True
@@ -667,6 +669,8 @@ class LightCraftRawSession:
                 else:
                     await self._command(command, params, deadline)
                     actual = await self._read_settings(photo, deadline)
+                if verify is not None:
+                    verify()
                 return self._commit(photo, actual, reserved)
             except BaseException:
                 if sent:
@@ -705,6 +709,55 @@ class LightCraftRawSession:
             raise LightCraftError("raw_source_changed")
         encoded = _settings_json(engine_snapshot.settings)
         return await self._mutate(handle, "develop.merge", {}, expected_revision, restored=encoded)
+
+    def recipe_identity(self, handle):
+        # Windows selects its DB profile after importing this module; do not bind persistence earlier.
+        from raw_recipe_store import InvalidRawRecipe, normalize_identity
+        photo = self._photo(handle, active=True)
+        try:
+            return normalize_identity({"assetId": handle.source_key, "sourceContentHash": photo.content_hash,
+                "engineName": "lightcraft", "engineVersion": self.manager.status().version,
+                "engineCommit": ENGINE_COMMIT, "settingsSchemaVersion": json.loads(photo.settings_json)["version"]})
+        except InvalidRawRecipe:
+            raise LightCraftError("raw_recipe_invalid") from None
+
+    async def restore_persisted_settings(self, handle, recipe, expected_revision):
+        """Restore a validated DB recipe to a new import; never relax private snapshot identity."""
+        from raw_recipe_store import InvalidRawRecipe, IDENTITY_FIELDS, validate_raw_recipe
+        try:
+            recipe = validate_raw_recipe(recipe)
+        except InvalidRawRecipe:
+            raise LightCraftError("raw_recipe_invalid") from None
+        identity = {key: recipe[key] for key in IDENTITY_FIELDS}
+        epoch = self._epoch
+
+        def verify():
+            if epoch != self._epoch:
+                raise LightCraftError("raw_stale_handle")
+            current = self.recipe_identity(handle)
+            if any(identity[key] != current[key] for key in ("assetId", "sourceContentHash")):
+                raise LightCraftError("raw_recipe_source_mismatch")
+            if current["engineVersion"] != "0.10.0" or current["settingsSchemaVersion"] != 1 or \
+                    any(identity[key] != current[key] for key in IDENTITY_FIELDS[2:]):
+                raise LightCraftError("raw_recipe_engine_incompatible")
+
+        verify()
+        # Preserve the native adapter's explicit legacy-scale normalization, not JPEG WB conversion.
+        encoded = _settings_json(recipe["settings"])
+        try:
+            return await self._mutate(handle, "develop.merge", {}, expected_revision,
+                                      restored=encoded, verify=verify)
+        except MCPTransportError:
+            raise LightCraftError("raw_recipe_restore_unknown") from None
+        except LightCraftError as error:
+            if error.code in {"raw_stale_handle", "raw_not_active", "raw_revision_conflict",
+                              "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
+                              "raw_session_lost", "raw_closed", "raw_resetting"}:
+                raise
+            code = ("raw_recipe_restore_mismatch" if error.code == "raw_restore_mismatch" else
+                    "raw_recipe_restore_unknown" if error.code == "raw_operation_timeout" else
+                    "raw_recipe_restore_failed")
+            raise LightCraftError(code) from None
 
     def request_preview(self, handle, expected_revision, max_side=1024):
         photo = self._photo(handle, active=True)

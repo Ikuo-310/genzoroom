@@ -5,6 +5,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+import edit_store
 import main
 import windows_raw_api as module
 import raw_source
@@ -17,6 +18,9 @@ from lightcraft_mcp import LightCraftError
 
 
 async def setup(tmp_path, local, monkeypatch):
+    # ASGITransport does not enter the common lifespan that initializes the selected profile DB.
+    edit_store.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    edit_store.initialize_database()
     raw, manager, children, _ = await create(tmp_path)
     api = local.raw_api
     api.bind(raw, manager)
@@ -52,7 +56,9 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                 for headers in ({"Origin": "http://evil.example"}, {"Host": "evil.example"}):
                     assert (await http.get("/api/raw/capabilities", headers=headers)).status_code == 403
                 workspace, doc = await open_document(http)
-                assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId"}
+                assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId",
+                                    "recipeStatus", "recipeRevision"}
+                assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})
                 assert state.json()["revision"] == doc["revision"]
                 response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))

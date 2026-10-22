@@ -128,6 +128,17 @@ def test_raw_only_does_not_create_jpeg_edit_status_or_queue(db):
     assert rows(db, "export_queue") == rows(db, "asset_edit_states") == []
 
 
+def test_lookup_distinguishes_absence_source_and_engine_without_mutation(db):
+    saved = save()
+    save(identity(sourceContentHash="b" * 16))
+    before = {table: rows(db, table) for table in ("asset_raw_recipes", "raw_recipe_saves")}
+    assert raw.lookup_raw_recipe(identity()) == {"status": "matched", **saved}
+    assert raw.lookup_raw_recipe(identity(sourceContentHash="c" * 16)) == {"status": "source_mismatch"}
+    assert raw.lookup_raw_recipe(identity(engineCommit="b" * 40)) == {"status": "engine_incompatible"}
+    assert raw.lookup_raw_recipe(identity(assetId=str(uuid4()))) == {"status": "none"}
+    assert {table: rows(db, table) for table in before} == before
+
+
 @pytest.mark.parametrize("change", [
     {"assetId": str(uuid4())}, {"sourceContentHash": "b" * 16}, {"engineName": "other"},
     {"engineVersion": "0.10.1"}, {"engineCommit": "b" * 40}, {"settingsSchemaVersion": 2},
