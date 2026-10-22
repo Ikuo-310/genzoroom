@@ -142,7 +142,7 @@ WBの注意：`wb.scale=legacy`は省略可能で、旧相対値とKelvinの意�
 
 ### 7.1 Windows専用の最小HTTP契約
 
-以下はC3全体の契約である。C3-Bで`POST /documents`内部のSQLiteレシピ復元、C3-Cでrecipe GET／PUTとAutosave・保存guardを接続した。session reset API／容量管理はC3-Dであり未実装。C1／C2の既存endpointはWindows専用`/api/raw`配下であり、認証・所有確認を再利用する。C3でも原本path、PhotoId、任意commandやDevelopSettings本文をFrontend requestから受け付けない。JSONは型・件数・byte上限を検証する。
+以下はC3全体の契約である。C3-Bで`POST /documents`内部のSQLiteレシピ復元、C3-Cでrecipe GET／PUTとAutosave・保存guardを接続した。同一RAW長時間編集の上限前再openはC3-Dであり未実装。workspace解放時のSession reset／cache回収は既存実装を利用する。C1／C2の既存endpointはWindows専用`/api/raw`配下であり、認証・所有確認を再利用する。C3でも原本path、PhotoId、任意commandやDevelopSettings本文をFrontend requestから受け付けない。JSONは型・件数・byte上限を検証する。
 
 | API案 | 入出力・責務 |
 |---|---|
@@ -153,7 +153,7 @@ WBの注意：`wb.scale=legacy`は省略可能で、旧相対値とKelvinの意�
 | `GET /documents/{handle}/recipe` | C3-C実装済み。現在documentのAsset ID／LightCraft content hash／engine tupleに一致する保存metadataを再同期。設定本文は返さず、別原本／非互換設定を適用しない |
 | `PUT /documents/{handle}/recipe` | C3-C実装済み。workspace／generation／document token、expected recipe revision、saveId、confirmed document revisionだけ受け付け、Backendがnative readbackから得た完全DevelopSettingsを保存。任意設定値を受け付けない |
 | `POST /documents/{handle}/preview` | expectedRevision、client selection serial／request serial、maxSide→PNG bytes＋一致確認用response headers。Supersededは204、画像なし |
-| `POST /session/reset` | workspace ID＋expectedGeneration、明示復旧／安全な世代再生成。新handle対応表を返す |
+| `POST /session/reset`（旧候補・必須から除外） | C3-Dは既存workspace解放・再openの再利用を優先する。汎用reset APIは追加を前提としない |
 | `DELETE /workspaces/{id}` | 明示破棄／終了。要求を無効化し、Engineから参照がなくなってからowned RAW fileを回収。JPEG処理を停止しない |
 
 SQLiteレシピ復元は`POST /documents`内部で行い、C3のために旧snapshot IDによる汎用restore APIは追加しない。C4のReset／Undo／Redoが必要とする復元境界は後続設計で別途定義する。
@@ -208,22 +208,58 @@ lost／desynchronized／resettingをRAW panelへ表示し、設定操作・Undo�
 
 診断は既存frontendLogger／backend loggerを使用し、open、設定適用の失敗、世代更新、stale、容量再生成、回収・復旧の境界を選ぶ。成功の詳細・revision／sequence／timingはdebug、重要な開始／完了はinfo、復旧可能異常はwarn、必要操作の最終失敗はerror。Asset ID、世代、revision、counts／bytes、固定codeだけを採用し、path、設定本文、画像、URL、秘密、任意エラー本文を記録しない。logging失敗は操作へ影響させない。
 
-## 8. RAW SessionとFilmstrip管理（提案）
+## 8. RAW SessionとFilmstrip管理（C3-D限定見直し・2026-10-22）
 
-**必要な変更：** Filmstripの枚数とLightCraft resident枚数を分け、全写真を起動時にimportしない。RAWレシピの正本はC3からGenzoRoom既存SQLiteのRAW専用tableに置き、LightCraft resident／GPU資源、workspace、document handle、原本cacheは実行時資源として別管理する。JPEG documentにRAW handleを作らない。
+### 8.1 現行実装で成立していること
 
-SQLiteは確定レシピを保持するが、native resourceの容量や寿命を管理しない。C3は引き続き**bounded generation再生成＋必要RAWの遅延import**を行う。現行の2枚／generation、256 mutation試行というPoC制限をそのまま製品仕様へ引き上げず、上限だけを増やす案も採らない。
+調査基準はC3-C完了Commit `6a98d8ecb96d5304ad0c632c0cc9850c2e96718b`。以下はコード上の確認結果であり、新規実装要件ではない。
 
-- C3ではactive RAWを中心に少数のnative residentだけを保持する。3枚目へ進む前に旧activeのdesiredをreadbackまでflushし、その確定設定のSQLite保存ackを待つ。Engineを安全に解放してgenerationを再生成し、古いhandleをすべて無効化する。新activeを遅延importし、content hashでSQLite行を特定、検証済みrecipeを適用・readbackしてから編集を再開する。
-- 非activeのレシピはSQLiteから再取得するため、memory snapshot store、独自recipe LRU、snapshot件数／byte上限、History snapshot容量管理は追加しない。未確認のreadbackや未保存のdirty値はSQLiteへ書かれない。切替時の保存が失敗した場合は切替を拒否し、再試行できる状態を保つ。
-- RAW原本cacheはactive／resident参照中には削除しない。native解放が確認できた後に未使用cacheを回収し、再入時は必要なら再downloadしてLightCraft content hashを再確認する。C1のcache所有権・bytes／disk／timeout制限・cleanup worker保証を維持する。LightCraftが参照中のpathをDBに保存しない。
-- 256回上限前の安全な境界でgenerationを再生成する案は維持する。200試行は候補であり確定値ではない。readbackとRecipe saveの両方を確定し、操作途中ではなく境界で実行する。hard limit／容量到達／cleanup不確定時は次のRAW操作を明示的に止め、JPEG編集を継続可能にする。
-- 再生成中に新しいdesired値が来た場合は最新値だけをFrontendで保持し、再importとrecipe復元の完了後、新document revisionに基づいて適用する。復元不一致・原本変更・再import／保存失敗時は既存recipeを保持し、初期値で正常復元したように扱わない。
-- JPEG→RAW／RAW→JPEGでもFilmstrip順序とGallery復帰を維持する。JPEGの保存guardとRAWのflush＋SQLite保存guardを個別に尊重する。RAW→JPEGでEngineを即時再起動せずともよいが、idle releaseと再入時のDB復元をworkspaceが管理する。
+- `frontend/src/AnshitsuPage.tsx:activateAsset`はRAWの`prepareSave()`成功後にのみ写真を切り替える。`useRawDocument.ts:prepareSave`はdesiredのflush・readback確定・SQLite保存ack・cleanを待つ。保存失敗時は写真と編集を保持する。
+- `useRawDocument.ts`はmodule単位の`ownership` queueへnative編集／保存／workspace解放／次workspace作成を直列登録する。effect cleanupは旧ownerを失効させ、送信済み処理の後ろにreleaseをenqueueする。次RAWも同じqueueで必要な原本だけを遅延importする。Filmstrip全体の枚数をnative resident枚数へ対応させる処理はない。
+- `backend/windows_raw_api.py:_execute`はlockでworkspace操作を直列化し、1 workspace・1 active documentだけを公開する。`_release()`はdocumentを失効させ、`reset_session(restore_active=False)`成功確認後にcacheをcloseし、両方成功してからworkspaceをemptyにする。RAW→RAW／JPEGのたびにこの解放経路を使うため、「3枚目のresidentを追加する前だけ再生成する」設計は不要。
+- `backend/lightcraft_raw.py:_reset`は既存managerのcloseと送信済み操作の回収後に新世代をstartし、readyを待ってresident・mutation試行数をクリアする。`restore_active=False`では内部photo snapshotも破棄する。既存handleはgeneration／token等で失効する。これは既に実装済みのSession再生成であり、C3-Dが作り直す対象ではない。
+- `raw_source.py`は512 MiB/file、1 GiB/cache、空きdisk 1 GiB、download期限・disk I/O期限、部分file／完成file、所有directoryを管理する。書込みと容量検査は同じlock内。cleanup対象を開始時の所有resourceへ固定し、timeout後もworkerを追跡する。`_release()`失敗ではworkspace/cache所有情報とcleanup_failedを残し、新規openを拒否する。参照中原本を先に消さない既存順序を維持する。
+- C3-AのSQLiteレシピとreceiptが保存の正本。C3-Bの`_restore_document()`→`lookup_raw_recipe()`→`restore_persisted_settings()`が再import後のcontent hash／engine／schema確認・全設定適用・readback一致確認を担う。C3-Cが保存と切替guardを接続済み。非active写真のメモリsnapshot storeは不要。
 
-nativeの個別evictionやinteraction／history整理を公開する案は改善候補。現行RAW allowlist/interfaceには解放・interaction APIがない。`history.clear`は新たなcommitを作るので、それだけで全Undo memoryや試行制限を解消したとみなせない。後続でLightCraft cache／catalog／Undoまで実際に解放されることを調査してから採用する。専用Rust Adapter／StageCacheへの移行はPhase 1C必須にしない。
+**実機確認済み（ユーザー報告）：** C3-CのWindows実機でRAWレシピ保存・復元が成功した。これは同一RAWの256試行超継続、長時間memory、cleanup故障時復旧の実機確認までを意味しない。
 
-**未検証：** 再生成の実用待ち時間、再download費用、長時間native memory、resident上限、soft mutation threshold、download上限、idle期限、SQLiteのDB-full／busy時のUI動作。PoCの短時間測定を長時間保証へ拡張しない。Phase 1C受入には3枚以上と256試行を超える編集の継続確認が必要である。
+### 8.2 同一RAWの長時間編集だけを追加対象とする
+
+**確認済み事実：** `lightcraft_raw.py:MAX_EDITS=256`はGenzoRoomのPhase 1B PoC安全制限であり、LightCraft v0.10.0が256回で動作不能になる仕様ではない。`_mutate()`は送信前に上限確認し、native変更を試行すると`_edits`を加算する。readback失敗も数え、DBレシピ復元もこのmutation経路を使う。Sliderイベント数・成功回数・native revision・SQLite recipe revisionのどれとも同一ではない。内部`status().edits`で実試行数を取得できるが、現行Frontendに上限前の継続復旧処理はない。
+
+Phase 1B調査（`PHASE1B_DESIGN.md`のnative HistoryとSession制限）と`_mutate()`のコメントは、native History／Undo・catalog／pending logの無制限蓄積を避ける目的を示す。`app.memoryBudget`はcache配分を制御するがprocess RSSや全Historyの厳密な上限ではない。**未検証：** 256という数値と実memory増加量の対応、危険になる具体的回数、同一RAWを長時間編集した場合の再生成費用。今回、新しいnative memory測定やLightCraft内部の広範囲再調査は行っていない。
+
+| 選択肢 | 評価 |
+|---|---|
+| 上限だけ引き上げ／撤廃 | 少ない変更で拒否を先送りできるが、native蓄積の上界を保証せず、別の有限値でも継続問題は残る。安全とする実測根拠がないため採用しない |
+| idle時間や写真枚数で常時再生成 | 写真切替は既に再生成済み。不要なrestartや新しいresident管理を増やすため採用しない |
+| 同一RAWの試行予算到達前だけ保存して再open | 既存の保存・release・open・DB復元を再利用し、hard limitを保ったまま継続できる。C3-Dの推奨最小案 |
+
+**推奨案（未実装）：** 同一RAWを長時間開いた場合だけ、実`edits`予算に基づく保存済み状態からの自動再openを接続する。無制限編集のmemory安全性を実証したからではなく、現行hard limitを維持しつつ操作継続を成立させるために必要と判断する。専用の複数resident管理や汎用`/session/reset` APIは必須にしない。既存DELETE workspace→POST workspace/documentの再利用を優先する。
+
+1. Backendの実試行数・残予算を既存の安全なdocument/settings metadataへ最小限公開する案を採る。FrontendのSlider回数やrevisionから推計しない。各native readback境界で予算を確認し、上限直前まで入力し続けてからflush不能になる構成を避ける。
+2. 次patchを送る前の直列境界で新規入力を一時停止し、送信済みmutationのreadbackと最後のdesiredの確定を待つ。待機中のpatch数は既存「送信中1件＋最新未送信設定」を超えて増やさない。そのflushに必要な予算を残してsoft境界を選ぶ。初期候補は200試行だが、性能根拠のある確定値ではなく、復元試行・失敗試行・flush分を含めて256未満に収まる条件を実装前に確定する。連続ドラッグでidleが来なくても次patch送信前に停止できることを必要条件とする。
+3. C3-Cと同じ確定設定の保存を完了し、結果不明requestのreplay／競合解消も済ませ、clean ackを確認する。保存失敗時には旧workspaceを解放しない。未確定desiredを保存済み扱いにせず、操作を止めて再試行可能にする。
+4. 保存済みの同じAssetを対象に、既存ownership queue内で旧workspaceをreleaseし、その成功後だけ新workspaceへ再openする。古いhandle・Preview・保存応答を採用しない。同じAsset IDでも新document lifecycleとして扱うための最小のhook再open契機は必要だが、別の所有queueや写真snapshot storeは作らない。
+5. 新importのcontent hashとengine tupleをSQLite行へ照合し、既存C3-B経路で全設定復元・readback確認後にPreviewと編集を再開する。旧ローカルfingerprintやnative PhotoIdを復元identityへ使わない。再生成中の入力は無効にし、旧document宛のpatchを蓄積しない。
+6. release／cleanup失敗では所有情報を保つ既存拒否状態に従い、新workspaceを強制作成しない。再open／原本同一性／互換性／readbackの失敗では保存済みrecipeを維持し、復旧失敗を表示する。初期値で編集再開したように扱わず、明示再試行かGalleryへの安全な離脱を選べるようにする。旧process解放後も最後の確定編集はSQLiteにある。
+
+hard limitに既に達した場合やnative結果不明の場合は、desiredを捨てて通常`prepareSave()`が成功したことにしない。まずreadback同期可能性とconfirmed保存を確認し、未確定入力が残る状態を明示する。自動再openのために失敗試行を減算したり、`MAX_EDITS`だけを上げたりしない。C4のHistory／Undo保存形式は今回変更しない。
+
+### 8.3 高速連続切替と回収の限定判断
+
+**確認済み：** 通常のA→B→C→Aでは、各activateAssetの保存guard、hook cleanupのrelease、次effectのopenが既存queueで順序付けられ、Backend lockとworkspace存在確認も働く。Bのopen中にCへ移った場合も、旧ownerのcurrent判定とfinallyのreleaseを経てから次queueへ進む。今回確認した通常経路に「旧cleanupが新workspaceの原本を削除する」「旧openが新documentを公開する」競合は特定できなかった。高速であることだけを理由に新しいlock・queue・generation管理層を追加しない。
+
+**成立する失敗経路（安全側の拒否）：** releaseのHTTP失敗／timeout／cleanup失敗はhook側で`raw_release_failed`を記録してqueueを進める場合がある。Backendは旧workspaceを保持するので次createはconflict／busy等となり、新しいRAWが開けない可能性はある。これは新旧cacheを混線させる競合ではなく既存の失敗保護である。lease回収や明示cleanup再試行が成功するまでは再利用しない。自動再open実装でもrelease失敗を成功と解釈せず、再試行できる表示と旧所有情報を扱う最小接続に限定する。通常切替全体の再設計はしない。
+
+native解放、世代更新、cache所有権／cleanup worker追跡／再open拒否は既存機能として維持する。今回の限定確認では別の回収機構を必要とする不足を実証していない。独自レシピLRU・RAWメモリsnapshot store・複数native resident最適化・cache管理の再実装をC3-D必須から除外する。再downloadや再importの性能問題を実測した場合に限り、後続改善候補として別途検討する。
+
+### 8.4 C3-Dの最小受入条件（今後の実装・検証）
+
+- 同一RAWで旧256試行を超えて編集を継続でき、soft境界前の確定readbackをSQLiteへ保存してから新世代を開く。最終値がDB・復元readback・Previewで一致する。復元や失敗試行も予算計上し、連続入力でもhard limitへ未処理desiredを押し込まない。
+- 保存失敗／応答消失／競合では旧documentと未確定入力を保持し、保存確定前にreleaseしない。release失敗では新workspaceを作らず、再open／restore失敗では保存rowを維持して復旧失敗を表示し、再試行可能である。
+- gate等の限定テストでrelease遅延、途中openからの連続切替、旧generationのPreview／保存応答を確認する。通常A→B→C→Aは既存保存・解放・SQLite復元で成立することを確認するだけで、3枚residentを要求しない。cleanup失敗・timeout時の所有保持とJPEG切替／通常終了保証も維持する。
+- 同一RAWの再生成待ち時間と長時間memoryはWindows実機で別途確認する。fakeテストだけでGPU／process RSS回収完了や性能を保証しない。C4／RAW Exportの受入範囲を広げない。
 
 ## 9. Recipe／History／Exportとの境界
 
@@ -271,7 +307,7 @@ Undo／RedoはRAW snapshot IDのrestore→readback成功後にcursorを更新し
 |---|---|---|---|---|
 | C1: 既存送信→Preview | 新`backend/windows_raw_api.py`／`raw_source.py`、`windows_local.py`、RAW専用Immich取得追加、`frontend/src/rawApi.ts`／`useRawDocument.ts`、`AnshitsuPage.tsx`、`ImageViewer.tsx`、必要な翻訳 | 既存resolver／形式選択は変更不要。JPEG source・処理は維持。RAW時のcapabilityとbinary frame分岐のみ | 偽Immich stream→file→fake RAW session→PNG API、認証・path拒否・size／timeout／cleanup、Frontend RAW分岐・stale表示・URL破棄、JPEG非呼出し回帰 | 既存バッジでRAW指定→暗室内にLightCraft Preview。JPEG／混在Filmstrip順序維持。API未設定でもJPEG利用可。最初は2枚制限内。前提: 1B |
 | C2: Slider接続 | `useRawDocument.ts`、新`RawAdjustmentControls.tsx`、既存Sliderの必要最小adapter、API controls、RAW hook state | P1基本6項目→P2 WB／色。JPEG reducerと設定値は変更しない。copy／bypass等はRAW無効 | gate付きPATCH中連続desired、readback補正、revision衝突、commit flush、古いPreview、WB mode／scaleを検証 | 入力停止後に最後の設定のPreview。Slider数値とreadback一致。WBは能力判定したRAWだけ。前提: C1 |
-| C3: 永続Recipe・Filmstrip・容量 | `backend/edit_store.py`／`storage.py`（additive v7 RAW table）、Windows RAW recipe API、`lightcraft_raw.py`の検証済みDB復元、RAW autosave adapter／RAW専用save coordinator、`useRawDocument.ts`／暗室切替・復帰、source cache | JPEG `asset_edit_states`／Recipe v18／Queueは変更せず、SQLite保存規約と切替guardを再利用。3枚以上・長時間Sessionを実用化 | migration v1–v6、RAW row／engine/hash分離、revision/saveId replay/conflict、confirmedのみ保存、再import異fingerprint同hash復元、mismatch／非互換保持、切替・restart復元、3枚以上A→B→C→A、256超試行、cleanup | 3枚以上巡回・多数変更で保存値保持、原本／engine変更で誤適用しない、DB保存失敗で編集を保ち遷移拒否、JPEG edited／Queue不変。前提: C2 |
+| C3: 永続Recipe・Filmstrip・容量 | `backend/edit_store.py`／`storage.py`（additive v7 RAW table）、Windows RAW recipe API、`lightcraft_raw.py`の検証済みDB復元、RAW autosave adapter／RAW専用save coordinator、`useRawDocument.ts`／暗室切替・復帰、source cache | JPEG `asset_edit_states`／Recipe v18／Queueは変更せず、SQLite保存規約と切替guardを再利用。C3-A〜C実装済み。C3-Dは同一RAW上限前の保存・再openに限定 | migration v1–v6、RAW row／engine/hash分離、revision/saveId replay/conflict、confirmedのみ保存、再import異fingerprint同hash復元、mismatch／非互換保持、切替・restart復元、既存解放経路でA→B→C→A、同一RAWの256超試行継続、cleanup | 3枚以上巡回・多数変更で保存値保持、原本／engine変更で誤適用しない、DB保存失敗で編集を保ち遷移拒否、JPEG edited／Queue不変。前提: C2 |
 | C4: 操作整合 | RAW History／baseline Before／Reset／ON/OFF、`EditHistory.tsx`のview adapter、`ImageViewer.tsx`、`AnshitsuPage.tsx`、既存shortcut registry | JPEG Undo／保存／Queueを維持。C3 SQLiteはcurrent RAW recipeを維持し、C4の履歴操作結果もreadback後autosave。Beforeは同engineのbaseline | gesture単位、Undo／Redo／枝切りと復元・保存失敗、Before frame identity、zoom維持、キーguard、切替失敗、close／復帰、RAW Queue不可 | JPEG/RAW混在で操作がactive engineだけに作用、Gallery復帰・再起動でcurrent RAW recipe復元、保存失敗で編集と再試行を保持。前提: C3 |
 | C5: 完了確認 | 変更diffと影響境界レビュー、focused回帰、必要な設計文書追随 | Windows RAW追加とDocker JPEG維持の確認 | 関連Frontend unit／integration、TS check／production build、関連Backend（repo Python3.14・cwd backend）、git diff --check。全suiteはfocusedで不足する理由がある場合のみ | ユーザーによるWindows/Tauri・WebView2実画面、長時間・終了・復旧、既存Docker JPEG/NAS/Firefox確認。実施していない項目は未検証として明示。前提: C1–C4 |
 
@@ -298,9 +334,9 @@ C1だけで「RAWを編集できるPhase 1C完了」としない。C2–C4の設
 |---|---|---|
 | C1前 | 原本bytes／disk budget／download期限・安全な拡張子、HTTP header名称／エラーschema | 無制限を許さず、代表的RAWを拒否しすぎない値と境界テストを実装時に確定 |
 | C2 WB前 | matrixなしRAWの能力判定、AsShot／Customの正確な遷移、K track | 固定v0.10.0のinspect／WB commandを追加確認。判定不能ならWBだけ無効化 |
-| C3-A／Bで確定／後続 | RAW table・複合主キー、content hash正規化、JSON上限、v7 rollbackはC3-A記録、exact engine/schema復元と固定エラーはC3-B記録で確定。保存・Autosaveと詳細な不一致復旧UIは後続 | Asset ID＋hash＋engine tupleを一意にし、旧行を保持する。document openはreadback一致まで公開せず、C2変更を保存済みと扱わない |
+| C3-A〜Cで確定／後続 | RAW table・複合主キー／hash正規化／JSON上限はC3-A、互換性確認・readback復元はC3-B、保存・Autosave／切替guardはC3-C記録で確定。詳細な不一致復旧UIは後続 | Asset ID＋hash＋engine tupleを一意にし旧行を保持。document openはreadback一致まで公開せず、追加編集はSQLite保存ackまで未保存とする |
 | C3実装前 | C2 confirmed settingsのcanonical serialization、LightCraft `photo.inspect` hashの正規化、WB scale／processの全field保持 | v0.10.0の実fixtureでserialize→restore→readback一致を確認。local fingerprintをDB identityに含めない |
-| C3受入 | 世代再生成の待ち時間／cache削除／再download、resident数、256回前soft閾値、idle TTL、SQLite disk full／busy応答 | 実測を根拠に少数resident数や運用閾値を調整。recipeはDBを正本にし、PoC上限を製品仕様へ転記しない |
+| C3-D実装前／受入 | 実試行数metadata、soft境界とflush予算、同一Assetのhook再open契機、release失敗時の明示再試行、再生成待ち時間／長時間memory | §8の既存保存・release・open・DB復元を再利用。200は暫定候補であり、失敗・復元・flush試行込みで256未満に停止できる条件を先に確定。resident／LRU／idle管理の新設は必須にしない |
 | C4前 | Historyの操作境界・保持形式、Before baselineの再取得、WebView2色管理 | C3 current recipeとは分離し、Undo／Redo結果だけを確定後にcurrent recipeへ保存 |
 | 後続 | RAW full-size sRGB Export、metadata、Immich／Stack／COVER／Album | job snapshot固定と登録冪等性を定義し、既存不変条件を維持 |
 | 後続 | Curve、Crop、Detail、grading、bypass、clipboard、scope、高解像度Preview | engineの意味に合う個別UI／テストを追加。JPEGの同名値を変換しない |
@@ -567,4 +603,13 @@ RAW→JPEG→RAW、Gallery再入場・新Backend/session後の再openはC3-BのS
 
 Fake LightCraft・一時SQLiteとHTTPでreadback保存、冪等再送／異payload拒否、競合再同期、readback revision不一致、書込失敗、HTTP切断、shutdown中commit／旧owner失効、再open・新BackendでのDB復元、認証・Host／Originを検証。Frontendは制御timer／gateで5秒Autosave、保存中の追加編集、結果不明の同一saveId再送と後続保存、競合時の非自動上書き、旧document応答拒否、最終desired flush、RAW→JPEG／RAW／Galleryと通常Windows終了の保存待機・失敗阻止・再試行、再入場復元を確認する。実行結果はdevelopment notesに記録する。
 
-C3-Dの3枚以上resident最適化・mutation上限前の世代再生成・長時間Session/cache性能改善は未実装。既存2枚／generation 256試行のhard limit、写真切替の再download／再importを維持する。多数RAW・長時間編集を本工程の受入完了とはしない。C4のBefore／After・Reset・ON/OFF・History・Undo／Redo、RAW Exportにも着手しない。実GPU・Immich・Windows画面操作、全体suiteは実施しない。
+C3-C完了時点ではC3-Dのmutation上限前再生成等は未実装。後日の限定見直し（§8）で、複数resident最適化・cache性能改善は必須対象から除外し、同一RAWの上限前保存・再openだけを残した。既存2枚／generation 256試行のhard limit、写真切替の再download／再importを維持する。多数RAW・長時間編集を本工程の受入完了とはしない。C4のBefore／After・Reset・ON/OFF・History・Undo／Redo、RAW Exportにも着手しない。実GPU・Immich・Windows画面操作、全体suiteは実施しない。
+
+
+## C3-D限定設計見直し記録（2026-10-22）
+
+C3-C後の現行コードを確認し、§8・API候補・C3工程／未決定表を更新した。C3-A〜Cの保存層・復元・Autosave／切替guard、既存Session再生成とcache回収を再実装しない。C3-CのWindows実機RAWレシピ保存・復元成功はユーザー確認として記録した。C1／C2／C3-A〜Cの完了履歴を保持し、C4 History／UndoとRAW Exportの範囲は変更していない。
+
+確認済み事実はコード参照を伴う§8.1／8.2、推奨未実装案は§8.2、通常切替と失敗時の限定判断は§8.3、最小受入条件は§8.4に分けた。256と実リソース量の因果関係や再生成性能は未測定であり、安全な大幅上限緩和の根拠はない。上限を保った同一RAWの保存済みレシピからの再openを推奨し、新しいresident manager・snapshot store・cache制御は追加しない。
+
+今回は設計書のみ変更し、ソースコード・テスト・DB schemaは未変更。テスト／build／DB migration・実LightCraft／GPU／Immich／Windows画面操作は実施していない。文書差分と整合性を確認し、`git diff --check`成功。
