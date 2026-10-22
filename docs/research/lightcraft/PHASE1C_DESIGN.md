@@ -650,7 +650,7 @@ Fake LightCraft／一時SQLiteで複数generation合計256試行超の編集、�
 - 開始ブランチは `feature/lightcraft-integration`、HEADは `e2e357824995d54f9f1d269432f11a2cfac81ac2`、作業ツリーはclean。Fetch／Pull／Resetは行っていない。
 - GenzoRoomは現在のローカルコードを正本とし、C3-A〜D完了記録および `docs/architecture.md` のRAW・JPEG編集・保存・Viewer・Export・サムネイル境界を照合した。
 - LightCraftは既存参照worktreeのHEADが固定 `a2a41383c4fd62fa85a46ccd00998639221f2d3c`（v0.10.0）であることを確認した。全面再調査はせず、既存 [C4 native features調査](PHASE1C_C4_NATIVE_FEATURES.md) §2〜6を根拠に、WB Reset・section対応・headless renderの必要箇所だけを追加確認した。
-- この節はC4の最新設計。上記初期設計の「Resetを標準／編集開始baselineの2操作にする」、Before基準未決定、Recipe／DBの破壊的変更許容、C3未実装等の古い記述をC4の実装条件として使わない。native調査書§7〜10の旧提案も本節の確定仕様を優先する。
+- 本節内の「C4-A最終補正」がC4最新の確定設計。上記初期設計とnative調査書§7〜10の旧C4提案、`docs/architecture.md`の現行JPEG配置等の記述は各調査・実装時点の記録として保持し、C4以後のReset／カテゴリ／Recipe変更には本節を優先する。
 - **今回の変更は本書のみ。以下のtable／API名は実装提案であり未実装。ソース・テスト・LightCraft・実DBは変更せず、migration・テスト・build・ブラウザ／実機検証は行わない。**
 
 ### 2. 現行コードで確認した事実
@@ -685,11 +685,11 @@ native `revision`は設定適用・再同期を識別する値、SQLite `recipe_
 ### 3. 今回確定済みの製品仕様
 
 1. **RAW History：** GenzoRoom SQLiteが唯一の正本。完全DevelopSettings snapshot、操作単位、Undo／Redo／履歴選択／新操作でのRedo枝切りはJPEGの操作体系に合わせる。native History／Session Undoは呼び出さず、targetの完全設定適用とreadback確認で復元する。C3-C guard・C3-D再生成を維持する。
-2. **RAWカテゴリ：** native `disabled_sections`で値を保持してbypassする。追加指定により**色温度→TINT→自然な彩度→彩度を「カラー」1カテゴリに統合し、RAWパネルの最上部（従来WBの位置）へ置く。次が基本補正**。この4項目のON/OFFはnative `color`の共通switchとする。JPEGカテゴリ配置の変更は今回の追加指定から広げない。
-3. **RAW Reset：** 個別／カテゴリ／All ResetはUndo可能な1操作。WB ResetはAs Shot、All Resetはnative `develop.reset`が基礎。ResetでGenzoRoom Historyを消さない。編集開始baselineへ戻す別Reset、RAW個別ON/OFF、WBプリセット選択UIは追加しない。
+2. **カテゴリ配置・ON/OFF：** RAW・JPEGとも**カラー**を最上部、**基本補正**をその下に配置する。カラーは色温度・Tint・自然な彩度・彩度の4項目を含む1カテゴリで、カテゴリON/OFFとResetも共通化する。JPEGのColor Gradingは独立カテゴリで維持する。RAWのカラー4項目はLightCraft native `color` bypassで値を保持して無効化する。
+3. **RAW Reset：** 温度とTintの個別ResetはいずれもWBペア全体を正確なAs Shotへ戻す。カテゴリResetとAll ResetもWBをAs Shotへ戻す。As Shotのreadbackがsource由来のWBと一致しない、または正確に適用できない場合は成功として履歴へ追加せず、代替値を推測しない。各Resetは全体で1つのHistory操作としてUndo可能。All Resetはnative `develop.reset`を基礎にする。ResetでGenzoRoom Historyを消さない。編集開始baselineへ戻す別Reset、RAW個別ON/OFF、WBプリセット選択UIは追加しない。
 4. **RAW Before：** native初期現像 `import_defaults()` を基準とし、現在crop／orientationの適用はnative標準に従う。手動レンズ歪曲補正をBeforeへ強制転写しない。初回Previewを固定保存する方式、After設定をBefore値へ一時変更して往復renderする方式は採用しない。
 5. **比較表示：** 既存ImageViewerのBefore／After switch・一時表示・zoom／pan体系を使う。1024pxは現在の暫定Preview制約であり将来の固定仕様ではない。高解像度化自体はC4対象外。
-6. **JPEG：** 個別ON/OFFの操作と現像上の効果を廃止する。`adjustmentEnabled`の16項目構造、Recipe v18、JPEG SQLite構造は維持し、今後の個別enabledはすべて有効として扱う。個別Reset・カテゴリ／grading range ON/OFF・History・コピー／ペースト・Before／After・補正済みサムネイル・Exportを維持する。旧OFF救済・データ移行・旧挙動互換は設計しない。
+6. **JPEG：** 個別ON/OFFの操作と現像上の効果を廃止する。RAWと同じカラー（温度・Tint・自然な彩度・彩度）／基本補正（露出・コントラスト・ハイライト・白レベル・シャドウ・黒レベル）へ統合し、カラーを最上部、基本補正をその下に置く。Color Gradingは独立カテゴリ。統合カラーのON/OFF・Resetは一操作で行う。Recipe v18、SQLite schema、`whiteBalanceEnabled`・`colorEnabled`の両fieldは維持するが、以後は同じカラーカテゴリ状態を表し、別々の操作を発生させない。16個別flagは今後すべて有効として扱う。個別Reset・基本補正／Color Grading ON/OFF・History・コピー／ペースト・Before／After・補正済みサムネイル・Exportを維持する。過去状態の互換・migration・救済は設計しない。
 7. RAW Export／Immich登録、RAW補正済みサムネイル、Gallery RAW編集状態filter、高解像度Preview、crop／geometry UI、WBプリセットUI、mask／AI、LightCraft更新は対象外。「現」バッジはExport素材識別のままでRAW編集状態へ転用しない。
 
 以下の推奨保存構造はRAW Historyに必要な**additive schema追加**であり、「JPEG側SQLite schemaを維持」と両立する。既存RAW current recipe tableとJPEG tableを置換・削除しない。今回schema操作は実施しない。
@@ -698,7 +698,7 @@ native `revision`は設定適用・再同期を識別する値、SQLite `recipe_
 
 #### 4.1 最小の永続構造と不変条件
 
-既存 `raw_recipe_store.py` を拡張し、独立したmemory History managerは作らない。提案する追加tableは次の3つ。history用JSONをJPEG tableへ押し込まず、stepごとの最大256 KiB検証を既存validatorで共有する。
+既存 `raw_recipe_store.py` を拡張し、独立したmemory History managerは作らない。提案する追加tableは次の3つ。history用JSONをJPEG tableへ押し込まず、stepごとの最大256 KiB検証を既存validatorで共有する。保持上限200は実行時の履歴保持ポリシーであり、DB schemaやtable CHECK制約へ埋め込まない。後日のポリシー変更や手動整理・圧縮に拡張できるようbaseline・step列・cursorの構造を保つ。
 
 | Table案 | 最小項目と責務 |
 |---|---|
@@ -745,9 +745,9 @@ cursor確定までlockするため、各操作を直ちにSQLite保存する場�
 
 #### 4.4 保持件数と読込容量
 
-推奨上限は**200操作＋baseline 1 snapshot／identity**（nativeの上限とは別のGenzoRoom契約）。新step追加で超えた場合にだけ、同transactionで古い適用済みprefixを除き、最後に除いたsnapshotを新baselineとしてcursorとpositionを詰める。currentの完全設定、残したstep UUID、Redo枝を壊さない。Undo／jumpだけで整理しない。件数整理で古い履歴に戻れなくなることをUIへ短く示す。
+保持上限は**200操作＋baseline 1 snapshot／identity**（nativeの上限とは別のGenzoRoom契約）。有効な新stepを追加する前にRedo枝を破棄してから上限を判定する。超過時は同じ保存transaction内で最古の適用済みstepから必要数を削除し、削除した最後のstepのafter snapshotを新baselineにする。cursorから削除数を差し引いてpositionを詰める。Redo枝破棄・prefix整理・新step追加の前後で、現在recipeとcursorが指す状態が一致することを検証する。200は実行時ポリシー定数で、schemaには固定しない。履歴管理tableはbaseline・step列・cursorを保持し、後日手動History整理／圧縮を加えられる形にする。JPEG側の手動clear／trim／compact UIやAPIはC4に追加しない。
 
-256 KiB × 201で設定本文の最悪約50.25 MiB／identityを許容する案であり、200は性能測定値ではない。履歴一覧へ本文を返さず、targetだけを読み、検証もboundedにする。receiptは既存同様自動削除しない。全Asset合計容量の自動削除やLRUはC4に追加しない。件数・容量予算は§8の実装前判断項目とする。
+256 KiB × 201で設定本文の最悪約50.25 MiB／identityとなる。これは上限計算であり、実測値ではない。履歴一覧へ本文を返さず、targetだけを読み、検証もboundedにする。receiptは既存同様自動削除しない。全Asset合計容量の自動削除やLRUはC4に追加しない。
 
 ### 5. 推奨実装：カテゴリ・Reset（C4-C）
 
@@ -757,15 +757,15 @@ cursor確定までlockするため、各操作を直ちにSQLite保存する場�
 |---|---|
 | 基本ON/OFF | `develop.sectionEnabled {section:"light", enabled}`。lightとcurveへ作用するnativeのまとまりを維持。UI未対応curveを独自に分離しない |
 | 最上部カラーON/OFF | `develop.sectionEnabled {section:"color", enabled}`。統合したWB／自然な彩度／彩度は同じbool。nativeではmixer／grading等も含む（native調査§3）。値は保持し、OFF中のResetも可能にする |
-| 非WB個別Reset | `develop.resetControl {control}`。現在allowlistのlight 6項目／color 2項目だけ。`ControlSpec.default`へのResetであり、編集開始値へ戻す操作ではない |
+| Basic／彩度個別Reset | `develop.resetControl {control}`。WB以外のallowlist controlだけ。`ControlSpec.default`へのResetであり、編集開始値へ戻す操作ではない。色温度・Tintの各Resetは次行のAs Shot WB全体Resetへ接続する |
 | 基本カテゴリReset | `develop.resetSection {section:"light"}`。native Light ResetはCurve Resetを含まない。bypassとResetの範囲差を説明し、UI未対応Curveを推測resetしない |
-| カラーカテゴリReset | `develop.resetSection {section:"color"}` 後に `develop.wb {mode:"asShot"}`、最後に完全readback。native Color sectionの補正とWBをresetする。disabled_sectionsを維持し、別Sectionのmixer／grading等を追加resetしない |
-| WB個別Reset | `develop.resetControl`のそのまま利用は不可。推奨は温度／TINTどちらのResetも `develop.wb {mode:"asShot"}`でWB全体を戻し、両値／mode／scaleをreadback。表示を「WBをAs Shotに戻す」として影響範囲を明示。§8で個別Resetの意味を最終判断する |
-| All Reset | `develop.reset`を使う。通常import defaults／camera defaultsへ戻り、processもnative標準で現行化される。import_lookがAs Shot以外なら、必要に応じて `develop.wb {mode:"asShot"}`を続け、製品仕様のAs Shotを満たす。1つのGenzoRoom操作として全readback後に保存し、Historyは消去しない |
+| 温度／Tint個別Reset | `develop.resetControl`をWB fieldへ使用しない。いずれのResetボタンも `develop.wb {mode:"asShot"}`でWB全体を戻し、source由来のtemp／tint・mode・scaleをreadbackする。UI label／tooltipで両値が戻ると伝える |
+| カラーカテゴリReset | `develop.resetSection {section:"color"}`でnative Color controlsをreset後、`develop.wb {mode:"asShot"}`。WBを含む完全Settingsを検証して1つのHistory操作にする。disabled_sectionsは維持する |
+| All Reset | `develop.reset`で全体をresetし、`develop.wb {mode:"asShot"}`を実行して完全readbackする。import_look等で標準reset後のWBがAs Shotでなければ、As Shot適用後の全Settingsを確定値にする。Reset全体を1つのHistory操作に保存し、History自体は消去しない |
 
-**WBで追加確認した事実：** 固定ソース `crates/develop/src/controls.rs`の `wb.temp`既定値は6500、`wb.tint`は0。`controls::set()`はfield代入なので個別ResetはAs Shot mode／撮影時値を保証しない。`DevelopSettings::reset_section(Section::Color)`はWBを既定数値へ戻してmodeだけAs Shotにする。`crates/engine/src/cmd/develop.rs`の `develop.wb` はsource infoのAs Shot値を解決・scale正規化後に保存し、temp／tintを許可範囲へclampする。renderはmode名だけでは撮影時WBを再計算しない。このためmode=As Shotというreadbackだけでは合格にせず、source由来の値／scaleも確認する。
+**WBで追加確認した事実：** 固定ソース `crates/develop/src/controls.rs`の `wb.temp`既定値は6500、`wb.tint`は0。`controls::set()`はfield代入なので個別ResetはAs Shot mode／撮影時値を保証しない。`DevelopSettings::reset_section(Section::Color)`はWBを既定数値へ戻してmodeだけAs Shotにする。`crates/engine/src/cmd/develop.rs`の `develop.wb` はsource infoのAs Shot値を解決・scale正規化後に保存し、temp／tintを許可範囲へclampする。renderはmode名だけでは撮影時WBを再計算しない。このためmode=As Shotというreadbackだけでは合格にせず、source由来の実値・scaleまで一致を要求する。
 
-All Resetの `import_look`分岐もWBを必ずAs Shotへ変更するものではない（native調査§5）。現在adapter importはユーザーpreset指定を公開していないが、将来やnative側の条件を推定してAs Shot保証を省略しない。追加WB commandは必要時のみとし、native値域外のAs ShotやKelvin能力なしの場合の制約は§8に残す。
+All Resetの `import_look`分岐もWBを必ずAs Shotへ変更するものではない（native調査§5）。標準Reset後に明示的にAs Shotを設定し、source由来のWBとreadbackが一致した場合だけReset全体をHistoryへcommitする。As Shotを正確に表現できない、またはreadbackが一致しない場合は成功扱いせず、推測値へfallbackしない。複合Reset途中で失敗した場合は開始時の完全Settingsへ戻してreadback検証する。復元も一致しなければdocumentをdesynchronizedとしてlockし、成功表示せず明示的な同期回復を要求する。
 
 Reset／section toggleも `_mutate` のbudgetとdocument revisionを通す。複合Resetは「SQLite Historyは1件」でもnative command数を1と偽らない。推奨はbounded command列を1 adapter操作で実行し、**送信したdevelop mutation commandごとにattemptを保守的に計上**する（readback／select／Before設定選択はmutationでない）。既存restoreのreset＋mergeも同じ計上に揃えるなら、C3-D testの期待attempt数だけを合わせる必要がある。200／256定数、hold・保存・再生成の責務は変えず、複合操作開始前に必要な残予算を確認する。途中command失敗ではdesyncとし、半分成功した操作を別Historyへ分割しない。
 
@@ -807,13 +807,13 @@ Before準備中はその状態を表示してAfterを維持し、準備完了後
 
 | 変更対象 | 実装する内容／維持する境界 |
 |---|---|
-| `AdjustmentSlider.tsx` とWB／Basic／Color／ColorGrading各Controls | 個別power・toggle props・個別OFFのdim表示を外す。Resetのbutton／callbackは残す。RAWも共通部品から個別powerを受け取らず、Resetだけを接続可能にする。`actions=false`でまとめて消すとResetも消えるため使わない |
-| `AnshitsuPage.tsx`／`AdjustmentContextMenu.tsx` | slider menuの個別toggleのみ削除。copy／paste／Reset・focus復帰を維持。カテゴリ／grading rangeのtoggle行は維持し、共用menuにはtoggle表示の明示的な区別を持たせる |
+| `AdjustmentSlider.tsx` とWB／Basic／Color／ColorGrading各Controls | 個別power・toggle props・個別OFFのdim表示を外す。Reset button／callbackは残す。RAWも共通部品から個別powerを受け取らず、Resetだけを接続可能にする。`actions=false`でまとめて消すとResetも消えるため使わない。JPEG controlsの順をカラー（temperature／tint／vibrance／saturation）→基本（exposure／contrast／highlights／whites／shadows／blacks）→独立Color Gradingとする |
+| `AnshitsuPage.tsx`／`AdjustmentCategoryMenu.tsx`／`AdjustmentContextMenu.tsx` | 左カテゴリ順をカラー→基本→Color Gradingにする。旧WB／Colorを別々にtoggle・Resetしない。`whiteBalanceEnabled`と`colorEnabled`は一つの操作で同値更新し、1 History entryを作る。統合カラーResetは4数値を一操作で戻し、両fieldを同一状態に保つ。basic／grading toggle・個別Reset・copy／paste・focus復帰を維持する。個別slider menuのtoggleだけ削除し、カテゴリ／grading rangeのtoggleは維持する |
 | `adjustmentNavigation.ts`／関連CSS／locale | 個別powerへのfocus探索・レイアウトを整理。category／range powerは残す。削除済みcontrolへのfocus退避経路を作らない |
-| `editing.ts` | 新規 `toggleAdjustment` actionの生成・reducer操作を廃止し、新しいRecipeは全個別flag trueのまま。`effectiveAdjustments`から個別flagによる既定値代入を除き、カテゴリ／grading rangeだけをbypassに使う。Frontendのnon-default／edited判定（`recipesEqual(recipe, defaultRecipe())`利用箇所を含む）も個別flagだけで編集ありとしないようBackendと揃える。保存整合性の完全Recipe比較とは責務を区別し、数値・カテゴリのHistory検証を弱めない。Recipe型／version／flag構造は残す |
+| `editing.ts`／`editState.ts` | 新規 `toggleAdjustment` actionの生成・reducer操作を廃止し、新しいRecipeは全個別flag trueのまま。`effectiveAdjustments`から個別flagによる既定値代入を除き、カテゴリ／grading rangeだけをbypassに使う。統合カラーtoggle actionは既存の両fieldを一操作で同期し、統合color Resetを4数値の一操作としてHistory化する。History reducer／validator／compactorで既存 `whiteBalanceEnabled`・`colorEnabled` の変化を別カテゴリ操作として新規生成しない。Frontendのnon-default／edited判定も個別flagだけで編集ありとしないようBackendと揃える。Recipe型／version／16 flagの保存形状は残し、完全snapshotの等価性・History整合性検証は維持する |
 | `adjustmentPipeline.ts`／Worker／`webgpuRecipe.ts` | 共有effective処理を使う現行境界を維持し、CPU・Worker・GPUで個別OFFを処理しない。画素式・stage順・processing versionは変更しない（UIとenabledポリシーの変更） |
-| `backend/jpeg_renderer.py`／`edit_state.py` | rendererの個別OFF代入を除く。編集済み判定で個別flagのみのOFFを有効な編集とみなす依存も除く。Recipe v18の16 bool形状検証は維持し、schemaやversionを上げない。JPEG Historyの数値・カテゴリ・cursor整合性検証は緩めない |
-| `editState.ts`／`EditHistory.tsx`／`editClipboard.ts` | 個別toggleを新規作成しない。既存の数値Reset・カテゴリ・paste History／localizationは維持する。旧toggle種別の型・validator・表示を残すことは可能だが復元しても個別flagを現像bypassに使わない。copy／pasteは現行どおり数値のみ |
+| `backend/jpeg_renderer.py`／`edit_state.py` | rendererの個別OFF代入を除く。統合カラーの有効状態は既存2 flagsの単一カテゴリ方針へ揃え、フロントのeffective/render処理と同じにする。編集済み判定で個別flagだけのOFFを有効な編集とみなす依存も除く。Recipe v18の16 bool形状検証とSQLite schemaは維持し、Historyの数値・カテゴリ・cursor整合性検証は緩めない |
+| `EditHistory.tsx`／`editClipboard.ts`／共有History整理処理 | 統合カラーON/OFF・Resetのlabelとundo／redo／jumpを一操作として表示する。既存の数値Reset・basic／Color Grading・paste Historyを維持する。過去履歴のmigration・互換や個別flag toggle操作の再生成を追加しない。copy／pasteは現行どおり数値のみとしenabled flagsはコピーしない |
 | `thumbnail_generator.py`／Export経路／`webgpuRecipeCases.ts` | Backend renderer共有を確認し、個別OFFなしのCPU／GPU／Export／補正済みサムネイル一致を回帰対象にする。診断caseの旧「個別OFFでbypassする」期待も更新。cacheのRecipe version・DB schema・保存データを一括変換しない |
 
 全個別flagをtrueへ書き換えるデータmigrationや、旧OFF状態を再現・救済するload処理は追加しない。保存済みfalseが来ても現像では無視するという新方針を両rendererへ適用する。Historyのbefore／afterやcurrentを一括書換えて新しい整合性問題を作らない。旧個別OFF由来のthumbnail cache救済・過去Export再生成も対象外。新規操作で個別falseを生成しないことと、flagを参照して画素をbypassする箇所が残らないことが受入条件である。
@@ -824,11 +824,8 @@ Before準備中はその状態を表示してAfterを維持し、準備完了後
 
 | 判断時期 | 課題と推奨案 |
 |---|---|
-| C4-B開始時 | RAW Historyの200操作／約50.25 MiBという最悪容量を採用するか。推奨は200＋baselineで開始し、実機で待機時間／DB容量を見る。件数を変えてもschema・native上限とは独立させる |
 | C4-B開始時 | API名／一覧pagination・許可kind・receipt ack項目の最終定義。4096 bytes制限のJSON helperは履歴一覧全件に足りない。推奨はページ単位（例20件）、固定label IDとbounded metadata、履歴metadataだけに限定した応答上限を定義。通常request 4 KiBは広げない |
-| C4-C前 | 温度／TINTの「個別Reset」でWBペア両方をAs Shotへ戻すか。推奨は両方を戻し名称を明示。片値だけ戻してmode As Shotと表示する案はnative renderの意味に合わない。ユーザー指定のAs Shotを静的6500／0で代用しない |
-| C4-C前 | import_lookのWBを保つnative All Resetと、必ずAs Shotにする製品仕様の差。推奨はnative Reset後に必要な場合だけWB As Shotを追加し1 Historyにまとめる。標準Resetだけで満たせると断定しない |
-| C4-C前 | Kelvin能力なし／native clamp範囲外のAs Shot。推奨は既存WB能力guardを維持し、As Shotを正確に表現できない場合はWB専用Resetを無効化・理由表示する。All Resetは他補正のResetとWB制約をどう表示するかを実fixtureで確定し、mode文字列だけの成功表示を避ける |
+| C4-C実装時 | As Shot値がnative適用範囲外またはreadback不一致となるfixtureの回復・表示。確定仕様は成功扱いしないこと。推奨は開始Settingsへの検証付きrollbackを行い、rollback不能ならdocumentをlockする。値をclamp／推測して成功にしない |
 | C4-D開始時 | 最小MCP拡張のBefore key metadata、対応識別、既存Afterとの互換契約・固定ソースに対するpatchの配布方法。LightCraft版はv0.10.0固定のまま、変更済みbinaryをversionだけで同一視しない。release artifact／runtime検査を変えるなら当該期待値も確認 |
 | C4-D実機受入 | native標準crop／orientationと両frame実寸、WebView2の表示色・比較切替待ち時間。自動fake画像テストでは実GPU／GUIと同じ結果を保証できない |
 
@@ -844,16 +841,16 @@ JPEGの履歴整理menu（clear／trim／compact／resetEdits）全機能をRAW�
 |---|---|---|---|
 | B1 永続契約 | `backend/raw_recipe_store.py`、`edit_store.py`、`storage.py`、`release/smoke-test.sh`。additive table・read validation・原子的writer・receipt・200件整理 | `test_raw_recipe_store.py`／`test_storage.py`とHistory追加テスト。v7以前からのupgrade、既存JPEG／Queue保持、append／jump／枝切り／prune、busy/full／commit rollback、同設定異cursor、saveId replay／異payload拒否。Smoke Testの変更SQL／Python assertionはfocused実行 | upgrade前の整合backup／復旧手順を確認。実DB操作は実装時の承認範囲で別管理。currentとcursorが常に同じ保存状態であることが完了条件 |
 | B2 document／操作API | `backend/windows_raw_api.py`、`lightcraft_raw.py`、必要な `raw_controls.py`。gesture／target restore／History metadata、既存queue／owner／shutdown／保存receipt統合 | `test_raw_recipe_api.py`／`test_raw_recipe_restore.py`／`test_windows_raw_api.py`／`test_lightcraft_raw.py`。HTTP cancel、native未知／mismatch、DB失敗、commit後ack消失、外部CAS競合、世代変更、checkpointとHistory同期 | Undo／Redo後の保存・再openとエラー再試行。失敗時cursor成功表示なし、任意Settings／command公開なし、DockerへRAW route追加なし |
-| B3 UI／gesture | `rawApi.ts`、`rawControls.ts`、`rawRecipeSave.ts`、`useRawDocument.ts`、`RawAdjustmentControls.tsx`、`AnshitsuPage.tsx`、`EditHistory.tsx`またはRAW表示分岐、`useAssetEdits.ts`のshortcut arbitration最小接続、必要なlocale | 既存raw系unit／hook、`useRawDocument.test.tsx`、`AnshitsuRawPreview.test.tsx`、`AnshitsuPersistence.test.tsx`、History／shortcut focused。長いdrag・500ms・数値Escape・begin重複・control変更・no-op枝保持・保存retry・close guard・200境界再生成 | pointer／数値／keyboard／wheelが各1履歴、Undo／Redo／jump・枝切り、RAW↔JPEG、Gallery・通常終了・再起動でcursorとRedo保持。256超の累計操作を新世代で継続し、再生成で履歴を増減しない |
+| B3 UI／gesture | `rawApi.ts`、`rawControls.ts`、`rawRecipeSave.ts`、`useRawDocument.ts`、`RawAdjustmentControls.tsx`、`AnshitsuPage.tsx`、`EditHistory.tsx`またはRAW表示分岐、`useAssetEdits.ts`のshortcut arbitration最小接続、必要なlocale | 既存raw系unit／hook、`useRawDocument.test.tsx`、`AnshitsuRawPreview.test.tsx`、`AnshitsuPersistence.test.tsx`、History／shortcut focused。長いdrag・500ms・数値Escape・begin重複・control変更・no-op枝保持・保存retry・close guard・200境界再生成 | pointer／数値／keyboard／wheelが各1履歴、Undo／Redo／jump・枝切り、200件保持とbaseline繰上げ、RAW↔JPEG、Gallery・通常終了・再起動でcursorとRedo保持。256超の累計操作を新世代で継続し、再生成で履歴を増減しない |
 
 JPEG EditEntryにRAW Settingsを変換せず、表示用kind／label／数値だけを共用部品へ渡す。KelvinはRAW formatterを使う。shortcutは既存 `editShortcuts.ts`／formatterを使い、Filmstrip除外Undo優先とactive engine dispatchを1経路で仲裁する。RAW用第二listenerで同じPrimary+Zを処理しない。
 
 #### C4-C：カテゴリON/OFF・個別／カテゴリ／All Reset
 
-- 変更：`backend/lightcraft_raw.py`／`raw_controls.py`／`windows_raw_api.py`、Frontendの `rawApi.ts`／`rawControls.ts`／`useRawDocument.ts`／`RawAdjustmentControls.tsx`／`AdjustmentSlider.tsx`／`AnshitsuPage.tsx`／locale。最上部カラー4項目の統合、native allowlist、As Shot対応、mutation budget、BのHistory writerへの操作登録を担当する。
-- 自動テスト：native command payload・順序、OFF中の値保持／Reset、light／color section境界、WB mode・値・scale、As Shotと異なる6500／0、import_look分岐、複合command途中失敗、1 History／Undo復元、200／256予算、save失敗guard。既存 `test_raw_controls.py` とraw adapter／API／Controls・Anshitsu focused testを拡張。
-- Windows実機：最上部カラー→基本の順、カラー共通powerで4項目の見た目と補正が連動、OFF→ONで値保持、WB各Reset／カテゴリ／All ResetのAs Shot、Reset→Undo→Redo、保存・再入場、200境界のResetを確認する。
-- 完了：カテゴリ／Resetが1操作でSQLite保存・Undo可能。native readback全体を維持し、個別power／WB preset UI／History clearを追加しない。§8のWB判断が確定し、代表fixtureと実機で制約を説明できる。
+- 変更：`backend/lightcraft_raw.py`／`raw_controls.py`／`windows_raw_api.py`、Frontendの `rawApi.ts`／`rawControls.ts`／`useRawDocument.ts`／`RawAdjustmentControls.tsx`／`AdjustmentSlider.tsx`／`AnshitsuPage.tsx`／locale。最上部カラー4項目の統合、native allowlist、WB値とscaleまで照合するAs Shot処理、mutation budget、BのHistory writerへの操作登録を担当する。
+- 自動テスト：native command payload・順序、OFF中の値保持／Reset、light／color section境界、WB mode・値・scale、As Shotと異なる6500／0、import_look分岐、正確にAs Shotへ戻せない場合のrollbackと失敗扱い、複合command途中失敗、1 History／Undo復元、200／256予算、save失敗guard。既存 `test_raw_controls.py` とraw adapter／API／Controls・Anshitsu focused testを拡張。
+- Windows実機：最上部カラー→基本の順、カラー共通powerで4項目の見た目と補正が連動、OFF→ONで値保持、温度ResetとTint ResetがともにWB全体をAs Shotへ戻すこと、カテゴリ／All ResetのAs Shot、Reset→Undo→Redo、保存・再入場、200境界のResetを確認する。
+- 完了：カテゴリ／Resetが1操作でSQLite保存・Undo可能。native readback全体を維持し、個別power／WB preset UI／History clearを追加しない。As Shot一致の条件と失敗経路をテストし、代替値を成功として受理しない。
 
 #### C4-D：RAW Before/After・最小MCP拡張
 
@@ -862,12 +859,13 @@ JPEG EditEntryにRAW Settingsを変換せず、表示用kind／label／数値だ
 - Windows実機：初回Before生成と2回目cache切替、補正しても初期現像Before、同一位置・zoom／pan、Backslash／JIS、RAW切替／再生成／再入場、Before失敗時のAfter編集継続、拡張非対応binaryを確認。crop／orientation・歪曲はUI追加せずfixtureで標準動作を検証する。
 - 完了：最初のPreview保存に依存せずnative Beforeが取得でき、After現在設定・History・保存状態を変えない。key更新／所有／寸法検証とJPEG比較回帰が成立し、1024を将来固定仕様として記載しない。
 
-#### C4-E：JPEG個別ON/OFF削除
+#### C4-E：JPEGカテゴリ統合・個別ON/OFF削除
 
-- 変更：§7のFrontend Controls／Slider／menu／navigation／`editing.ts`／`edit_state.py`／`jpeg_renderer.py`／診断case・関連test／locale。Recipe v18・16 bool・JPEG table構造は維持する。RAW Bのadditive migrationとは独立。
-- 自動テスト：`editControls.test.tsx`、`editing.test.ts`、`editClipboard`／History／`useAssetEdits`／`editState`、CPU pipeline／Worker／WebGPU recipe、Backend `test_jpeg_renderer.py`／`test_edit_state.py`／`test_thumbnail_generator.py`とExport focused。個別flagをfalseにしても画素は有効、カテゴリ／grading range OFFは引き続きbypass、Reset・Undo／Redo・paste・保存の整合性を確認。旧個別OFFを再現する期待だけを更新し、無関係のpixel goldenは変更しない。
-- Windows実機：個別powerとslider menu toggleがなくResetが使えること、カテゴリ・grading range・コピー／ペースト・History・Before／After・Export／補正サムネイルを確認。NAS／Firefoxの既存JPEG回帰はユーザー確認へ残す。
-- 完了：新しい個別falseを生成する操作がなく、Frontend／Backendとも個別OFFで値を無効化しない。migration・過去データ救済なしで新規操作の保存／描画／Exportが一致する。
+- 変更：§7のFrontend Controls／Slider／category・slider menu／navigation／`editing.ts`／`edit_state.py`／`jpeg_renderer.py`／診断case・関連test／locale。カラーを最上部へ移しWBとColorの4項目・toggle・resetを統合、基本補正を次に置き、Color Gradingは独立させる。Recipe v18・16 bool・両category flag・JPEG table構造を維持する。RAW Bのadditive migrationとは独立。
+- カテゴリ状態：`whiteBalanceEnabled`・`colorEnabled`のどちらも削除・改名せず、単一カラーtoggleが両方を同じ値へ更新する。以降これらを独立更新するactionを作らない。render上は2 fieldのANDを単一category状態として4項目へ適用し、操作を通じて両fieldを同期する。category resetは4数値を一つのHistory操作でresetし、両fieldを単一category状態へ同期する。個別Resetは各数値だけを変える。過去の異なるflag状態に対する互換性は設計しない。
+- 自動テスト：`editControls.test.tsx`、`editing.test.ts`、`editClipboard`／History／`useAssetEdits`／`editState`、CPU pipeline／Worker／WebGPU recipe、Backend `test_jpeg_renderer.py`／`test_edit_state.py`／`test_thumbnail_generator.py`とExport focused。個別flagをfalseにしても個別bypassされず、category toggleは両fieldを同期、4項目すべてのON/OFFと一操作のReset／Undo／Redo／History jump、数値個別Reset・basic／grading toggle、paste・保存を確認。旧個別OFF期待だけを更新し、無関係のpixel goldenは変更しない。
+- Windows実機：カラーが最上部・基本補正が次であること、4項目が一つのカラーON/OFFとResetを共有し、個別Resetは使えること、Color Gradingが別カテゴリであることを確認。コピー／ペースト・History・Before／After・Export／補正サムネイルを確認。NAS／Firefoxの既存JPEG回帰はユーザー確認へ残す。
+- 完了：新しい個別falseや独立WB／Color category actionを生成しない。Recipe v18・16 flag・両category flag・SQLite schemaを保ち、過去状態のcompatibility／migrationなしで、Frontend／Backend renderer／Export／thumbnailが統合category方針に揃う。History・Before／After・copy/paste・個別ResetとColor Gradingは維持する。
 
 #### C4-F：横断監査・回帰・実機受入
 
@@ -883,3 +881,9 @@ JPEG EditEntryにRAW Settingsを変換せず、表示用kind／label／数値だ
 今回完了したのは、接続箇所・保存transaction／失敗境界・UI方針・実装区分の調査と本節への記録である。新規memory snapshot store、native History同期、C3再実装、JPEG旧OFF移行は提案しない。C1〜C3完了記録とnative調査書を保持し、README／CHANGELOG／architectureは今回変更しない。
 
 検証は文書差分の確認と `git diff --check` のみ。テスト／build・migration・実データ操作・LightCraft変更・実機操作は未実施。Commit／Push後はC4-Aで停止し、C4-B以降へ進まない。
+
+### C4-A最終補正（2026-10-23、確定仕様）
+
+- RAW温度／Tintのいずれの個別ResetもWB全体をAs Shotへ戻す。カテゴリReset・All ResetもAs Shotを確認する。source値と完全readbackが一致しない場合は成功扱いせず代替値を推測しない。全体でHistory 1操作としUndo可能にする。
+- RAW Historyは最大200操作。上限超過時に最古stepから整理しbaselineを繰り上げる。current recipe・cursorを同一transactionで整合させる。上限はschemaへ固定せず、後日の件数変更・手動History整理／圧縮に対応できる構造にする。JPEGの手動整理機能をC4に実装しない。
+- JPEGもカラー（温度／Tint／自然な彩度／彩度）を最上部、基本補正を次に統合し、Color Gradingは独立する。統合カラーのtoggle／Resetは一操作とする。`whiteBalanceEnabled`／`colorEnabled`をRecipe v18・SQLite schema内に保持し、render時は統合状態として扱い、新しい操作では両fieldを同期する。個別ON/OFFを廃止し、個別ResetとJPEG History／Before・After／Export／補正済みサムネイルを維持する。過去状態の互換・migrationは設計しない。
