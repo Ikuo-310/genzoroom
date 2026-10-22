@@ -126,7 +126,7 @@ def test_existing_database_edit_history_queue_and_runtime_survive_initialization
     assert recoverable_export_run() == original_run
     assert original_run.stop_requested
     with edit_store._connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == edit_store.SCHEMA_VERSION == 7
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert storage.DB_PATH.with_name("genzoroom.db-wal").exists()
         assert storage.DB_PATH.with_name("genzoroom.db-shm").exists()
@@ -181,7 +181,7 @@ def test_lifespan_initializes_missing_database_for_new_install(mounted_storage, 
     assert not storage.DB_PATH.exists()
     start_lifespan()
     with edit_store._connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert connection.execute("SELECT count(*) FROM asset_edit_states").fetchone()[0] == 0
 
 
@@ -191,6 +191,8 @@ def test_lifespan_initializes_missing_database_for_new_install(mounted_storage, 
     ("export_runs", "created_at"),
     ("export_run_items", "frozen_recipe_json"),
     ("export_run_items", "export_timestamp"),
+    ("asset_raw_recipes", "develop_settings_json"),
+    ("raw_recipe_saves", "request_hash"),
 ])
 def test_lifespan_rejects_missing_required_columns_before_initialization(
         mounted_storage, monkeypatch, table, column):

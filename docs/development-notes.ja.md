@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C3-A：SQLite保存基盤（2026-10-22）
+
+既存DBへschema v7として`asset_raw_recipes`と設定本文を持たない冪等受付記録`raw_recipe_saves`を追加した。レシピはAsset ID＋原本content hash＋engine名/version/commit＋settings schema versionで識別し、異なる原本・engine行を残す。`raw_recipe_store.py`が完全DevelopSettings JSON、recipe revision、saveId、保存時刻を管理し、JPEG Recipe v18／History／現像済み判定／Queueへ接続しない。C2スライダー・LightCraft・Frontendは変更していない。
+
+保存は既存SQLite接続と`BEGIN IMMEDIATE`を再利用し、expectedRevisionとsaveIdで競合・冪等性を保証する。同一requestの再送は後続保存後も元のackを返し、異payloadへのID再利用を拒否する。receiptとcurrent recipeは同じtransactionでcommit／rollbackする。設定JSONはUTF-8最大256 KiB／深さ32／32,768 nodes、finite JSON・version/process/WBの構造を検証し、全fieldを保持する。内部handle／PhotoId／cache path等は保存しない。読込時も設定・metadata・receiptを再検証し、破損時は上書きしない。
+
+検証はrepo Python 3.14／cwd backendでRAW保存層86件、既存のstorage／JPEG保存・status／Queue／Export復旧／除外設定の関連235件＋56 subtests成功。v1〜v6からのmigration・既存行保持、migration失敗rollback、複数identity、競合／並行保存／saveId replay、JSON上限、破損読込、実SQLite busy／SQLITE_FULL、書込・commit失敗を確認した。sandboxのpytest TEMP作成失敗は同じPythonの権限付き実行で回避し、長大parameter ID由来のテストTEMP pathエラー2件はIDを短縮して解消した。`release/smoke-test.sh`のschema期待値・RAW table検査を更新し、そのSQLite blockを新規v7テストDBで実行した。`git diff --check`成功。
+
+利用中DBは操作せず、migrationはテストDBでのみ検証した。v6以前のBackendへ戻す際は整合したmigration前DB backupが必要。フルDocker Smoke Test、Frontendテスト／build、実LightCraft・GPU・Immich試験は実施していない。保存済み設定のLightCraft復元、RAW API、Frontend Autosave、写真切替保存確認、Session管理はC3-B以降。History／Undo／Redo等はC4、RAW Exportは後続工程であり、現在の暗室はまだ一時編集のまま。
+
 ## RAW現像統合 Phase 1C-C2：RAWスライダーパネル仕上げ（2026-10-22）
 
 JPEG暗室とパネル配置を揃え、RAWのTemperature／Tintに既存JPEG gradientを適用した。基本補正の表示順をExposure → Contrast → Highlights → Whites → Shadows → Blacksへ変更し、RAW native control ID・値・現像処理は維持する。個別／カテゴリ／全体のON/OFF・ResetボタンはC4実装までdisabledで配置し、「RAWでは準備中」と示す。クリックやキー操作ではRAW設定を変更しない。

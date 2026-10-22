@@ -205,6 +205,8 @@ def test_old_stack_observation_does_not_remove_new_single_exclusion(db, family):
 
 def test_v4_migration_preserves_export_rows(db):
     with edit_store._connection() as conn:
+        conn.execute('DROP TABLE asset_raw_recipes')
+        conn.execute('DROP TABLE raw_recipe_saves')
         conn.execute('DROP TABLE development_exclusions')
         conn.execute('DROP INDEX export_registration_retries')
         conn.execute('ALTER TABLE export_run_items DROP COLUMN export_timestamp')

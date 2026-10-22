@@ -11,7 +11,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from storage import DB_PATH, StorageInitializationError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -155,7 +155,33 @@ def _create_v6(connection: sqlite3.Connection) -> None:
         WHERE status='failed' AND error_code='registration_failed'""")
 
 
-MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5, 5: _create_v6}
+def _create_v7(connection: sqlite3.Connection) -> None:
+    connection.execute("SELECT export_timestamp FROM export_run_items LIMIT 0")
+    # Receipts retain idempotency without retaining historical settings or native handles.
+    connection.execute("""CREATE TABLE raw_recipe_saves (
+        save_id TEXT PRIMARY KEY NOT NULL,
+        request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+        recipe_revision INTEGER NOT NULL CHECK (recipe_revision >= 1),
+        updated_at TEXT NOT NULL
+    )""")
+    connection.execute("""CREATE TABLE asset_raw_recipes (
+        asset_id TEXT NOT NULL,
+        source_content_hash TEXT NOT NULL,
+        engine_name TEXT NOT NULL,
+        engine_version TEXT NOT NULL,
+        engine_commit TEXT NOT NULL,
+        settings_schema_version INTEGER NOT NULL CHECK (settings_schema_version >= 1),
+        develop_settings_json TEXT NOT NULL,
+        recipe_revision INTEGER NOT NULL CHECK (recipe_revision >= 1),
+        last_save_id TEXT NOT NULL UNIQUE REFERENCES raw_recipe_saves(save_id),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (asset_id, source_content_hash, engine_name, engine_version,
+                     engine_commit, settings_schema_version)
+    )""")
+
+
+MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5,
+              5: _create_v6, 6: _create_v7}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:

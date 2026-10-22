@@ -230,11 +230,11 @@ nativeの個別evictionやinteraction／history整理を公開する案は改善
 
 **事実：** JPEGはRecipe v18、`useAssetEdits`のAsset別record、`editState.ts`のvalidation／migration、Backend保存revision／save ID、autosave・retry／conflictを持つ。LightCraftはDevelopSettingsのschema `version`と描画`process`が別で、さらにengine version／commitがある。
 
-**提案：** C3の初回から既存SQLite DBへRAWレシピを永続化する。JPEGの`asset_edit_states`とRecipe v18／History形式は変更せず、別の`asset_raw_recipes` table（table名は実装時に確定）を加える。主キー候補は`(asset_id, source_content_hash, engine_name, engine_version, engine_commit, settings_schema_version)`。これにより同一Asset IDの原本差替えや非互換engine recipeを上書きせず保持し、Asset ID単位の取得時に現在のcontent hashと互換engine tupleで絞り込める。旧recipeの削除・自動上書き・暗黙変換はしない。
+**C3設計（保存層はC3-Aで実装済み）：** C3の初回から既存SQLite DBへRAWレシピを永続化する。JPEGの`asset_edit_states`とRecipe v18／History形式は変更せず、別の`asset_raw_recipes` tableを加えた。確定した主キーは`(asset_id, source_content_hash, engine_name, engine_version, engine_commit, settings_schema_version)`。これにより同一Asset IDの原本差替えや非互換engine recipeを上書きせず保持し、Asset ID単位の取得時に現在のcontent hashと互換engine tupleで絞り込める。旧recipeの削除・自動上書き・暗黙変換はしない。暗室からの保存・復元接続はC3-B以降である。
 
 行にはAsset ID、正規化したLightCraft content hash、engine名／version／固定commit、DevelopSettings schema version、LightCraft readbackから得た完全DevelopSettings JSON（未対応field、`process`、WB scaleを含む）、独立した`recipe_revision`、`updated_at`、`last_save_id`を保存する。handle、PhotoId、cache path、source fingerprint、認証情報は保存しない。raw content hashを同一性の根拠とし、file fingerprintは再download間で同じとは仮定しない。
 
-`backend/edit_store.py`のSQLite接続・WAL／FULL・transaction／optimistic revisionと冪等saveId規約、`backend/storage.py`のDB検証を再利用し、RAW tableを追加するschema migration（推奨v7）を行う。RAW CRUDはJPEGの`put_edit_state_with_recipe_change`を呼ばない。このJPEG関数はJPEG現像状態とExport Queue副作用を扱うため、RAW保存はqueue／JPEG edited判定へ作用しない独立transactionにする。Dockerも共通DB migrationで空tableを持ち得るが、Windows専用RAW API／capabilityは追加せずRAW利用可能と表示しない。
+`backend/edit_store.py`のSQLite接続・WAL／FULL・transaction／optimistic revisionと冪等saveId規約、`backend/storage.py`のDB検証を再利用し、C3-AでRAW tableを追加するschema migration v7を実装した。RAW CRUDはJPEGの`put_edit_state_with_recipe_change`を呼ばない。このJPEG関数はJPEG現像状態とExport Queue副作用を扱うため、RAW保存はqueue／JPEG edited判定へ作用しない独立transactionにする。Dockerも共通DB migrationで空tableを持ち得るが、Windows専用RAW API／capabilityは追加せずRAW利用可能と表示しない。
 
 既存JPEGからは保存規約を再利用する。`useAssetEdits`／`editStateApi`のAsset別autosave、dirty/clean、revision競合、saveIdによる同一request再送、応答不明後のreplay、写真切替／離脱前にclean ackを待ち失敗時に移動を止める挙動を、エンジン非依存の最小autosave coordinatorとして共有する案を推奨する。JPEG／RAW adapterは別のsnapshot validator・serializer・API・tableを保ち、JPEG Recipe v18、`EditStateSnapshot`、History本文をRAWへcastしない。保存失敗／競合時に新しいsnapshotへすり替えてsaveIdを再利用しない。
 
@@ -297,7 +297,7 @@ C1だけで「RAWを編集できるPhase 1C完了」としない。C2–C4の設
 |---|---|---|
 | C1前 | 原本bytes／disk budget／download期限・安全な拡張子、HTTP header名称／エラーschema | 無制限を許さず、代表的RAWを拒否しすぎない値と境界テストを実装時に確定 |
 | C2 WB前 | matrixなしRAWの能力判定、AsShot／Customの正確な遷移、K track | 固定v0.10.0のinspect／WB commandを追加確認。判定不能ならWBだけ無効化 |
-| C3実装前 | RAW tableの最終列・複合主キー表現、content hash canonical form、JSON上限、engine/schema互換判定、source mismatchのUI、v7 migration rollback | Asset ID＋hash＋engine tupleを一意にし、旧行を上書きせず、保存失敗／競合を再試行できる契約を固定する。推奨は本書9.1のcomposite identityとexact v0.10.0復元 |
+| C3-Aで確定／C3-B前 | RAW table・複合主キー、content hash正規化、JSON上限、v7 rollbackは末尾のC3-A記録で確定。engine/schema互換判定・source mismatchのUIは未実装 | Asset ID＋hash＋engine tupleを一意にし、旧行を保持する。C3-Bはexact v0.10.0復元とreadback由来の設定だけを渡す境界を実装する |
 | C3実装前 | C2 confirmed settingsのcanonical serialization、LightCraft `photo.inspect` hashの正規化、WB scale／processの全field保持 | v0.10.0の実fixtureでserialize→restore→readback一致を確認。local fingerprintをDB identityに含めない |
 | C3受入 | 世代再生成の待ち時間／cache削除／再download、resident数、256回前soft閾値、idle TTL、SQLite disk full／busy応答 | 実測を根拠に少数resident数や運用閾値を調整。recipeはDBを正本にし、PoC上限を製品仕様へ転記しない |
 | C4前 | Historyの操作境界・保持形式、Before baselineの再取得、WebView2色管理 | C3 current recipeとは分離し、Undo／Redo結果だけを確定後にcurrent recipeへ保存 |
@@ -462,3 +462,34 @@ JPEGとの画面比較を受け、RAWカテゴリ見出しと個別SliderにJPEG
 初期フォーカス不能の原因は、暗室から操作パネルへ入る`Shift+↑／↓`の入口がJPEG用`historyEnabled`を必須としていたこと。RAWは一時編集でJPEG Historyを所有しないため、フォーカス復帰が拒否されていた。RAW documentがreadyで操作を遮る画面状態がない場合に、同じ`restoreAdjustmentFocus()`を許可する。無効なWB rangeは既存focus registryが除外し、カテゴリ見出し・表示行を通じた移動はDOM順に従う。range上の矢印、wheel、数値入力と確定処理は共通Sliderを維持する。
 
 回帰検証は関連Frontend 4ファイル201件成功。JPEGと同じ基本補正順、未フォーカス時のViewerからの初期focus、無効WBの除外、ボタン全27件disabled・クリック非作用、Temperature/Tint gradient、RAW値変更経路を確認した。`npm run build`（TypeScript checkを含む）成功。既存500 kB超chunk警告あり。JPEG側の共通Slider既定ボタン動作もfocused回帰で確認した。`git diff --check`成功。
+
+## Phase 1C-C3-A実装結果（2026-10-22）
+
+設計変更Commit `6aee67613750c2015c1b9532410d36257b564885`を基準にSQLite保存層のみを実装した。LightCraft v0.10.0／C2の操作・Preview・Frontendには変更を加えていない。DBに渡す設定がnative確定readback由来であることは内部callerの責務であり、document接続による保証はC3-B以降で実装する。
+
+### 確定schema・検証規約
+
+既存DBのschema v7はv6へ二つのRAW専用tableを追加する。v1〜v6のmigration chainとWAL／FULL接続を維持し、既存JPEG table・Queue・Export行は変更しない。
+
+| Table | 列・制約 |
+|---|---|
+| `asset_raw_recipes` | `asset_id`、`source_content_hash`、`engine_name`、`engine_version`、`engine_commit`、`settings_schema_version`の複合PRIMARY KEY。`develop_settings_json`、`recipe_revision >= 1`、`last_save_id`（UNIQUE／receiptへの外部キー）、`updated_at`。settings schemaは正整数 |
+| `raw_recipe_saves` | `save_id` PRIMARY KEY、`request_hash`（正規化identity＋expectedRevision＋全設定JSONのSHA-256、64桁hex）、`recipe_revision >= 1`、`updated_at`。過去の設定本文やHistoryは含まない |
+
+Asset ID／saveIdはUUIDをcanonical文字列へ、content hash（16〜128桁hex）・engine名（64文字以内の安全なtoken）・commit（40桁hex）は小文字へ正規化する。engine versionは64文字以内、先頭数字の安全なtokenとしcaseを保持する。settings schema versionは1〜uint32上限、processは0〜uint32上限。engine/schemaの互換性判断と変換は保存層で行わない。
+
+DevelopSettingsはUTF-8 JSON最大256 KiB、深さ32、走査node数32,768以内とする。schema `version`一致、`process`整数、WBのmode／数値temp・tint／optional scaleを検証し、非有限値・過大整数・非JSON型・重複JSON key・既知の内部resource fieldを拒否する。欠落scaleへKelvinを推定代入せず、全JSONを保持する。UI未対応fieldも切り落とさない。SQLiteにはhandle、PhotoId、cache path、source fingerprintを保存しない。ロード時も同じ検証とreceipt照合を行い、破損を黙って修復・上書きしない。
+
+### 内部保存契約
+
+`backend/raw_recipe_store.py`の`get_raw_recipe(identity)`は完全一致identityだけを読み、未保存なら`{recipe: null}`を返す。`put_raw_recipe(identity, expected_revision, save_id, settings)`は完全な確定readback設定を受け、`recipe`（identity＋settings）、`revision`、`lastSaveId`、UTCミリ秒`updatedAt`を返す。新規identityのexpectedRevisionは0、以後はSQLite側recipe revisionと一致する場合だけ+1する。LightCraft document revisionとは独立している。
+
+保存は既存`edit_store._connection()`と`BEGIN IMMEDIATE`内でreceipt／current recipeをまとめて更新する。saveIdはRAW全identity間で一つのrequestへ固定する。完全同一requestは後続保存後でも元のackを返し、現在行は巻き戻さない。異payload・異expectedRevision・異identityへの再利用は`StoreConflict(save_id_reused)`、Revision不一致は`StoreConflict(revision_conflict)`。入力不正は`InvalidRawRecipe(invalid_raw_recipe)`、保存行破損／SQLite busy・full・I/O失敗は既存`StoreUnavailable(persistence_unavailable)`。receiptは設定Historyではなく冪等性を維持する小さな受付記録であり、C3-Aでは自動削除しない。JPEG保存関数・Queue変更は呼ばない。
+
+### 検証結果と残件
+
+Pythonはrepo `.venv`の3.14、cwdはbackend。RAW保存層86件と既存関連Backend235件（56 subtests）成功。v1〜v6→v7とDDL失敗時の全rollback、JPEG Recipe／History・Queue／Export行保持、複数identity、readback JSON全体保存、競合・同時保存・saveId replay／不正再利用、UTF-8上限・型・深さ、読込時破損拒否、実SQLite writer lock／SQLITE_FULL、書込／commit失敗時のrowとreceipt rollbackを確認した。通常sandboxのpytest TEMP作成失敗後は同じPythonの権限付き実行を用いた。テスト用の長大parameter IDで一時path生成が失敗した2件は短いIDへ修正して成功した。
+
+schemaを検査する`release/smoke-test.sh`をv7／RAW table対応に更新し、その実際のSQLite assertion blockを新規v7テストDBへ実行した。フルDocker Smoke Test、Frontendテスト／build、実Immich・GPU・LightCraft試験は実施していない。migrationはテスト用DBだけに実行し、利用中のDBには触れていない。v6以前のBackendへ戻す場合は整合したmigration前DB backupの復元が必要で、downgradeは提供しない。
+
+C3-B以降には保存済み設定のLightCraft適用・content hash／engine互換性確認・readback照合、RAW document API接続、Frontend autosave、写真切替・終了保存guard、Session再生成・容量管理を残す。C2は引き続き一時編集であり、C3-A完了を暗室の保存・復元対応とは表示しない。History／Undo／Redo・Before／Reset／ON/OFFはC4、RAW Exportは後続工程のまま。

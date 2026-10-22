@@ -16,6 +16,8 @@ def failed_registration(asset_id):
 
 
 def downgrade_to_v5(connection):
+    connection.execute('DROP TABLE asset_raw_recipes')
+    connection.execute('DROP TABLE raw_recipe_saves')
     connection.execute('DROP INDEX export_registration_retries')
     connection.execute('ALTER TABLE export_run_items DROP COLUMN export_timestamp')
     connection.execute('PRAGMA user_version=5')
@@ -35,7 +37,7 @@ def test_v5_migration_preserves_preupgrade_active_and_failed_attempt_timestamps(
     assert restored.items[0].export_timestamp == second.created_at > first.created_at
     assert get_export_run(first.run_id).items[0].export_timestamp == first.created_at
     with database(db) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 6
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == edit_store.SCHEMA_VERSION
         assert not connection.execute('PRAGMA foreign_key_check').fetchall()
         for table, rows in before.items():
             after = connection.execute(f'SELECT * FROM {table}').fetchall()
