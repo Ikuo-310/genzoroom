@@ -9,6 +9,7 @@ import i18n from './i18n';
 import type { AssetDetail } from './assets';
 import * as rawApi from './rawApi';
 import { rawSettings } from './test/rawSettings';
+import { rawHistoryResult } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
@@ -29,7 +30,8 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
-  saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+  saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+const commitHistory = vi.fn(async (request: rawApi.RawHistoryRequest): Promise<rawApi.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
 async function flush() { await act(async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); }); }
 async function mount() {
@@ -55,12 +57,12 @@ beforeEach(async () => {
     revision: doc.revision + 1, settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...((doc as rawApi.RawSettings).values ?? rawSettings(doc).values), ...patch } }));
   vi.mocked(rawApi.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
-  vi.mocked(rawApi.saveRawRecipe).mockReset().mockImplementation(async request => ({ documentRevision: request.doc.revision,
-    settingsFingerprint: request.doc.settingsFingerprint, recipeRevision: request.expectedRecipeRevision + 1,
-    saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
+  commitHistory.mockReset().mockImplementation(async request => rawHistoryResult(request));
+  vi.mocked(rawApi.saveRawHistory).mockReset().mockImplementation(async request => request.action === 'initialize'
+    ? rawHistoryResult(request) : commitHistory(request));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.unstubAllGlobals(); });
+afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 async function editRaw() {
   const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!
@@ -180,34 +182,35 @@ it('does not show an Immich image as the result of failed native rendering', asy
 });
 
 it('blocks RAW to JPEG on a lost save response and retries the exact saveId before navigation', async () => {
-  await mount(); await editRaw();
-  vi.mocked(rawApi.saveRawRecipe).mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  await editRaw();
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
   expect(host.querySelector('[role="alertdialog"]')).not.toBeNull(); expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
-  const first = vi.mocked(rawApi.saveRawRecipe).mock.calls[0][0];
+  const first = commitHistory.mock.calls[0][0];
   await clickText('Retry RAW save', host.querySelector('[role="alertdialog"]')!);
-  expect(vi.mocked(rawApi.saveRawRecipe).mock.calls[1][0]).toEqual(first);
+  expect(commitHistory.mock.calls[1][0]).toEqual(first);
   expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
 });
 
 it('blocks Gallery return on a failed RAW save, preserves editing on cancel, and exits only after retry', async () => {
-  await mount(); await editRaw();
-  vi.mocked(rawApi.saveRawRecipe).mockRejectedValueOnce(new rawApi.RawSaveError('raw_recipe_save_failed', 'unknown', 503));
+  await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_recipe_save_failed', 'unknown', 503));
+  await editRaw();
   await clickText('Back to Gallery');
   expect(host.querySelector('[data-gallery]')).toBeNull(); expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
   await clickText(i18n.t('workspace.stayInAnshitsu'));
-  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(false);
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   await clickText('Retry RAW save');
   await clickText('Back to Gallery'); expect(host.querySelector('[data-gallery]')).not.toBeNull();
 });
 
 it('restores the saved RAW readback when returning through JPEG', async () => {
   const saved = new Map<string, rawApi.RawSettings>();
-  vi.mocked(rawApi.saveRawRecipe).mockImplementation(async request => {
+  commitHistory.mockImplementation(async request => {
     saved.set(request.doc.assetId, request.doc);
-    return { documentRevision: request.doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
-      recipeRevision: request.expectedRecipeRevision + 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' };
+    return rawHistoryResult(request);
   });
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => saved.has(doc.assetId)
     ? { ...saved.get(doc.assetId)!, ...doc, settingsFingerprint: saved.get(doc.assetId)!.settingsFingerprint,
@@ -222,23 +225,23 @@ it('restores the saved RAW readback when returning through JPEG', async () => {
 });
 
 it('waits for the RAW save acknowledgement before approving normal Windows close', async () => {
-  const respond = desktop(); await mount(); await editRaw();
-  let resolve!: (ack: rawApi.RawRecipeAck) => void;
-  vi.mocked(rawApi.saveRawRecipe).mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+  const respond = desktop(); await mount();
+  let resolve!: (ack: rawApi.RawHistoryResult) => void;
+  commitHistory.mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+  await editRaw();
   act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'a'.repeat(64) } }))); await flush();
   expect(respond).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'closeResult', saved: true }));
-  const request = vi.mocked(rawApi.saveRawRecipe).mock.calls[0][0];
-  await act(async () => resolve({ documentRevision: request.doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
-    recipeRevision: 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' })); await flush();
+  const request = commitHistory.mock.calls[0][0];
+  await act(async () => resolve(rawHistoryResult(request))); await flush();
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: true, requestId: 'a'.repeat(64) });
 });
 
 it('waits for saving RAW A before opening RAW B and restores A on Gallery reentry', async () => {
   let saved: rawApi.RawSettings | undefined;
-  let resolve!: (ack: rawApi.RawRecipeAck) => void;
-  vi.mocked(rawApi.saveRawRecipe).mockImplementation(async request => {
+  let resolve!: (ack: rawApi.RawHistoryResult) => void;
+  commitHistory.mockImplementation(async request => {
     saved = request.doc;
-    return new Promise(yes => { resolve = yes; });
+    return new Promise<rawApi.RawHistoryResult>(yes => { resolve = yes; });
   });
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => saved?.assetId === doc.assetId
     ? { ...saved, ...doc, settingsFingerprint: saved.settingsFingerprint, recipeFingerprint: saved.settingsFingerprint, recipeRevision: 1 }
@@ -246,9 +249,8 @@ it('waits for saving RAW A before opening RAW B and restores A on Gallery reentr
   await mount(); await editRaw();
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(rawApi.openRawDocument).toHaveBeenCalledTimes(1);
-  const request = vi.mocked(rawApi.saveRawRecipe).mock.calls[0][0];
-  await act(async () => resolve({ documentRevision: request.doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
-    recipeRevision: 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' })); await flush();
+  const request = commitHistory.mock.calls[0][0];
+  await act(async () => resolve(rawHistoryResult(request))); await flush();
   expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
   await clickText('Back to Gallery'); expect(host.querySelector('[data-gallery]')).not.toBeNull();
   // Reenter through a fresh route owner; persistence, not a visited-photo snapshot, supplies A.
@@ -259,8 +261,9 @@ it('waits for saving RAW A before opening RAW B and restores A on Gallery reentr
 });
 
 it('refuses Windows close after RAW save failure and allows explicit retry', async () => {
-  const respond = desktop(); await mount(); await editRaw();
-  vi.mocked(rawApi.saveRawRecipe).mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  const respond = desktop(); await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  await editRaw();
   act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'b'.repeat(64) } }))); await flush();
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: false, requestId: 'b'.repeat(64) });
   act(() => document.querySelector<HTMLButtonElement>('dialog button')!.click()); await flush();
@@ -270,15 +273,82 @@ it('refuses Windows close after RAW save failure and allows explicit retry', asy
 });
 
 
-it('offers renewal retry while retaining a RAW edit after its boundary save fails', async () => {
+it('offers save retry before renewal while retaining a RAW edit after its boundary save fails', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), mutationAttempts: 199 }));
   vi.mocked(rawApi.setRawControls).mockImplementation(async (doc, patch) => ({ ...rawSettings(doc), mutationAttempts: 200,
     revision: doc.revision + 1, settingsFingerprint: '2'.repeat(64), values: { ...rawSettings(doc).values, ...patch } }));
-  vi.mocked(rawApi.saveRawRecipe).mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
   await mount(); await editRaw();
-  expect(host.textContent).toContain(i18n.t('workspace.rawPreview.regenerationFailed'));
-  const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('workspace.rawPreview.retryRegeneration'))!;
+  expect(host.textContent).toContain(i18n.t('workspace.rawPreview.saveFailed'));
+  const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('workspace.rawPreview.retrySave'))!;
   expect(retry.disabled).toBe(false);
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+});
+
+const exposure = () => host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
+function inputValue(element: HTMLInputElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+it.each(['pointerup', 'pointercancel'])('commits one History operation for a long drag ending with %s', async ending => {
+  vi.useFakeTimers(); await mount();
+  const range = exposure();
+  act(() => range.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+  for (let i = 1; i <= 8; i++) {
+    inputValue(range, String(i / 10));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); }); await flush();
+  expect(commitHistory).not.toHaveBeenCalled(); expect(rawApi.saveRawRecipe).not.toHaveBeenCalled();
+  expect(rawApi.setRawControls).toHaveBeenCalledTimes(8);
+  act(() => window.dispatchEvent(new MouseEvent(ending, { bubbles: true }))); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].doc.values['light.exposure']).toBe(.8);
+});
+
+it.each(['Enter', 'blur'])('commits a numeric edit on %s only once', async ending => {
+  await mount();
+  const number = exposure().closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  act(() => number.focus()); inputValue(number, '1.25');
+  if (ending === 'blur') act(() => number.blur());
+  else act(() => number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await flush(); act(() => number.blur()); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce(); expect(commitHistory.mock.calls[0][0].doc.values['light.exposure']).toBe(1.25);
+});
+
+it.each(['keyboard', 'wheel'])('uses the existing 500ms %s commit boundary', async kind => {
+  vi.useFakeTimers(); await mount(); const range = exposure();
+  act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+  for (let i = 0; i < 3; i++) {
+    act(() => range.dispatchEvent(kind === 'keyboard'
+      ? new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      : new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true })));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(349); }); await flush();
+  expect(commitHistory).not.toHaveBeenCalled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); }); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+});
+
+it('finishes a gesture when its category unmounts its sliders', async () => {
+  await mount(); const range = exposure();
+  act(() => range.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+  inputValue(range, '.7');
+  const title = range.closest('.raw-adjustment-category')!.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  act(() => title.click()); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce(); expect(commitHistory.mock.calls[0][0].doc.values['light.exposure']).toBe(.7);
+});
+
+it('keeps sliders disabled after initialization fails and retries without changing native', async () => {
+  vi.mocked(rawApi.saveRawHistory).mockRejectedValueOnce(new rawApi.RawSaveError('raw_history_save_failed', 'unknown'));
+  await mount();
+  expect(exposure().disabled).toBe(true); expect(rawApi.setRawControls).not.toHaveBeenCalled();
+  const first = vi.mocked(rawApi.saveRawHistory).mock.calls[0][0];
+  await clickText('Retry RAW save');
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0]).toEqual(first); expect(exposure().disabled).toBe(false);
 });

@@ -237,6 +237,61 @@ discard intent. Frontend, History UI, Reset/category actions, Before/After and R
 not connected in B2. Fake LightCraft/temporary SQLite tests establish API ordering and failure
 integrity; real GPU, Windows UI and forced process termination remain separate acceptance work.
 
+### C4-B3-1: RAW gesture persistence coordinator
+
+`useRawDocument` now installs `RawRecipeSave` in History mode, with the existing `RawControls`
+owner. It schedules B2 initialize once for every opened document before admitting control
+input, including after C3-D renewal. Unsaved RAWs gain a baseline checkpoint; existing recipes
+and History retain their settings, cursor and steps. Initialization failure exposes save Retry
+with editing locked. The initial Preview remains independent of the initialization request.
+
+| State | Owner, updates and invariant |
+|---|---|
+| `RawRecipeSave.initialized` | Per-document successful initialize/commit ack; false until current owner/readback and SQLite metadata agree. A new generation gets a new coordinator and initialization. |
+| `gesture` | Current control ID and starting confirmed fingerprint. Repeated begin for the same control is idempotent; a change without begin establishes the gesture. The start must match the saved baseline. It stays dirty until the confirmed operation is saved, including when values return to baseline. |
+| `handoff` | At most one adjacent control's unsent scalar value and end flag. Its native gesture starts only after the previous ack, on the same existing owner queue. Failure retains that intent behind the immutable retry; freezing for departure still drains previously accepted intent. It stores no settings/history snapshots. |
+| `retryRequest` | The existing single immutable retry slot now accepts a recipe or History request. History mode exclusively uses initialize/commit; one copied current UI document binds action/control/saveId/native revision/fingerprint/expected recipe revision. No arbitrary DevelopSettings or history array is retained or sent. |
+| `revision`, `savedFingerprint`, `lastSaveId`, `dirty`, `error`, `saving` | Existing save owner. Only verified current metadata advances saved state. Pending gesture/request/initialization remains dirty; pending save or error locks new gestures. Native revision remains distinct from SQLite recipe revision. |
+
+`RawAdjustmentControls` supplies each control ID to the shared Slider's existing begin/change/
+commit callbacks. Pointer end/cancel, numeric Enter/blur/Escape, keyboard/wheel 500 ms inactivity,
+and slider unmount retain their existing boundaries. `RawControls` still coalesces intermediate
+values with its 150 ms debounce. A gesture end flushes the last desired value, then places the
+save barrier on the existing ownership queue after native mutation/readback. The save callback
+never awaits a task it has scheduled behind itself. Intermediate readbacks create no History
+step; B1 compares the full snapshot to preserve Redo for no-op intent.
+
+The History commit saves current Recipe too. History mode disables the five-second recipe-only
+timer and never issues a separate PUT for the same operation. The plain C3 coordinator mode,
+including autosave/conflict retry, remains available and tested. B2 responses are bounded and
+validated; the original ack is separate from current metadata. Clean state requires matching
+owner/native revision/fingerprint, initialized History, `historyPending=false`, synchronized
+native state, `nativeMatchesRecipe=true`, matching current recipe fingerprint, and current
+recipe revision/cursor/length/step UUID equal to that acknowledged checkpoint. A stale receipt
+or later divergent checkpoint cannot mark the document clean.
+
+Unknown/rejected History saves retain the exact saveId/body and native editing result. Explicit
+Retry resends that request; it does not rebase a CAS conflict, guess settings, or discard edits.
+Retry/Stay use the existing save-failure UI; Stay does not unlock unresolved History. Native
+readback retry first waits for the existing resynchronization task, then settles controls and
+saves. A Preview-only failure does not prevent persisting already verified readback, preserving
+the C3 distinction between rendering and edit persistence. B3-1 adds no discard/recover UI;
+irreconcilable CAS/native mismatches remain fail-closed rather than silently overwritten.
+
+`prepareSave()` freezes new input and drains accepted gestures/handoffs, final readback and
+History ack before certifying departure. Existing RAW-to-RAW/JPEG switches, Gallery return,
+Filmstrip removal and normal Windows exit keep this guard. At 200 mutation attempts, the same
+C3-D hold preserves the final desired value; only a clean acknowledged operation permits
+renewal/release. No extra History step is created by renewal. Owner/token/generation checks
+reject departing slider callbacks and late successor responses. An unexpected hook unmount
+also queues the old gesture's final save before cleanup; an unconfirmed save refuses release.
+Browser/OS forced termination still cannot guarantee completion of the final network operation.
+
+History list, Undo/Redo/jump UI and cursor display remain B3-2. Category toggles, Reset,
+Before/After and JPEG category changes remain later phases; their disabled RAW placeholders
+are unchanged. No new save queue, native snapshot store, Backend/schema or LightCraft change
+is introduced here.
+
 ## Gallery manual refresh
 
 The four Gallery browsing tabs are refreshable: Recent, Favorites, Album list/detail, and Calendar year/month/date detail. The leftmost Toolbar `Reload` button and the `homeRefreshPhotos` binding in the central `editShortcuts.ts` registry refresh only the current view. Shift+R uses the existing Home guards and shortcut-label formatter; R still opens Recent, while Ctrl+R / Command+R remain browser reload. STACK management, Export management, and inactive Home do not show or run Gallery Reload.

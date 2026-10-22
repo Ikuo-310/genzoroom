@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層とC4-B2 Backend操作APIは実装済み。C4-A確定設計とC4-B1／B2実装記録は末尾を参照し、C4-B3以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作APIとC4-B3-1 Frontend保存coordinatorは実装済み。C4-A確定設計と各実装記録は末尾を参照し、C4-B3-2のHistory UI以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -992,3 +992,53 @@ repo `.venv` Python 3.14、cwd backend、Fake LightCraftと一時SQLiteでfocuse
 `git diff --check`成功。schema／migration／release smokeの変更は不要。Frontend・LightCraftソース・JPEG renderer／Recipe／History・RAW Export／サムネイル・README／CHANGELOGは変更していない。Frontend check／build、全Backend suite、フルDocker Smoke Test、実LightCraft／GPU／Immich／実機DB・ブラウザ検証は未実施。通常終了の保存待機を自動確認したが、強制process終了時の未確定native状態の保持は保証しない。
 
 設計書とarchitectureを更新しCommit／Push後、C4-B2で停止する。実機のGPU／Windows UI・B3接続後のgesture／Autosave／再生成の受入は後続でユーザーが実施する。
+
+## Phase 1C-C4-B3-1 実装結果（2026-10-23）
+
+開始HEAD `4274f92511ec538be7679c925f30031ac2d7ad48`、`feature/lightcraft-integration`、cleanから実装。B2末尾のFrontend未接続記述に対し、本節を保存coordinatorの現行仕様とする。History一覧・Undo／Redo UIはB3-2へ残す。
+
+### 初期化・gestureと既存保存ownerの統合
+
+`rawApi.ts` にB2 initialize／commitの型と `saveRawHistory()` を追加した。4 KiBのJSON応答制約と既存request処理を利用し、所有権・native／DB revision・fingerprint・History metadata・元ackを検証する。Frontendから送るのは既存identity、native revision／fingerprint、expected recipe revision、saveId、commit時のcontrol IDだけで、DevelopSettingsを取得／保持／送信しない。
+
+`useRawDocument` の既存 `ownership` queue、`RawControls` と `RawRecipeSave` を再利用する。open→初期readback／Preview→coordinator設置後、同じqueueへinitializeを1回だけscheduleし、成功までRAW 10項目の編集をlockする。未保存／既存Recipe／既存HistoryのいずれもBackendの確定値をbaselineとして扱い、既存step／cursorを保つ。初期化不一致・保存失敗は未保存のままRetry対象とし、編集を始めない。再生成でdocumentが変わった場合は、新ownerをinitializeする。
+
+`RawAdjustmentControls` は共通 `AdjustmentSlider` のbegin／change／commitへcontrol IDを渡す。Slider本体の確定境界やJPEG処理は変更していない。pointer終了／cancel、数値Enter／blur／Escape、keyboard／wheel 500 ms inactivity、slider unmountを確定境界とする。同じcontrolへのbegin重複は一操作にまとめ、beginなしchangeも受理する。
+
+操作中は既存150 ms debounceでnativeへ反映する。終端は最後のdesiredをflush→同じqueue上のbarrier→native/readback確定確認→History commit→ackの順。中間readbackでstepを追加しない。before／afterの全Settings比較・no-op時のRedo保持はB1へ委ね、Frontendは中立な確定intentを渡す。別controlへ移る場合は、前操作の保存ack後に次controlを適用する。
+
+| 共有状態 | owner・更新条件・不変条件 |
+|---|---|
+| `RawRecipeSave.initialized` | document単位の利用開始。B2応答の所有権とcurrent一致を検証するまでfalse。新generationには引き継がない |
+| `gesture` | control IDと開始時の確定fingerprint。保存済みbaselineと一致する開始状態を識別し、同じcontrolのbeginを繰り返しても置換しない。ackまで未確定／dirty |
+| `handoff` | 隣のcontrolへの未送信値1件と終端flag。前操作のackまでnative操作を開始せず、失敗時もimmutable要求の後ろに保持。切替で入力をfreezeしても既に受理したintentは確定する。snapshot列や第二queueではない |
+| `retryRequest` | C3からの現在操作1件のslotをRecipe／Historyのunionへ拡張。History利用時はaction／control／saveId／native revision・fingerprint／expected DB revisionを固定し、現在UI documentをcopyする。失敗を理由に要求を書き換えない |
+| `revision`／`savedFingerprint`／`lastSaveId`／`dirty`／`saving`／`error` | 既存保存coordinatorが管理。未初期化・gesture・handoff・未確定要求はdirty。request処理中／error時に次のgestureを許可しない。最新readbackとcurrent metadataの一致後だけcleanにする |
+
+History commitがcurrent Recipe保存を兼ねるため、History利用時は5秒Recipe-only Autosaveをscheduleせず、別PUTも送らない。既存C3単独モードの5秒Autosave・CAS再同期・immutable retry実装は維持し、別保存queue／非active写真snapshot storeは追加していない。
+
+### 失敗・切替・終了・200 mutation
+
+保存失敗／結果不明ではnative編集結果とimmutable要求を保持し、既存保存失敗表示とRetry／Stayへ接続する。Retryボタンは保存lock中も利用できるが、次のgesture・切替・通常終了・再生成は許可しない。Stayだけで未確定保存を解除しない。同一saveId／bodyの再送だけを行い、CAS競合に対する自動rebase・自動破棄は行わない。B3-1では専用recover／破棄UIを追加せず、再送で解決しないnative／current不一致は失敗のまま保持する。
+
+clean判定は元ackの受信だけで行わない。現owner／native revision／fingerprint、`historyPending=false`、`nativeState=synced`、`nativeMatchesRecipe=true`、current recipe fingerprint、最新recipe revision／cursor／件数／選択UUIDとackの一致がすべて必要。古いdocument／generationの応答や、同じ旧ackが返るだけの不整合応答で保存済みにはしない。
+
+`prepareSave()` は既存所有権guardを使い、入力freeze→native retryのqueue完了待ち→controls settle→History保存ack→受理済みhandoffを含むclean確認まで待つ。RAW→RAW／JPEG、Gallery、Filmstrip除外、Windows通常終了からの呼出しは維持する。native readback失敗では再同期を待ってから要求を作る。Previewだけの失敗なら、既に検証済みreadbackを保存可能とする従来C3の区別を保つ。
+
+C3-Dの200 soft／256 hardと再生成ownerを再実装せず、gesture中の200到達では既存holdで最終desiredを保持する。gesture終端または `prepareSave()` のpauseで最終値をflushし、History保存成功後に限り既存release／reopenへ進む。再生成自体をstepにしない。UI用History再取得・cursor表示はB3-2に残す。
+
+sliderのlate unmount callbackはclosureのasset／generation／tokenで次documentへの送信を拒否する。hook自体の予期しないunmountでは旧ownerの最終保存を既存queueへ先に置き、成功後だけcleanup／releaseする。未確定ならreleaseを拒否し、新documentへ旧ackを反映しない。通常の切替はunmount前のguardで失敗を捕捉する。ブラウザ／OS強制終了で最後の通信が完了する保証は従来どおりない。
+
+### テスト・限定監査
+
+Frontend focused回帰は `rawApi`／`rawControls`／`rawRecipeSave`／新規 `rawHistorySave`／`useRawDocument`／`AnshitsuRawPreview`／`AnshitsuPersistence`／`editControls`／`useAssetEdits` を対象とした。通常sandboxのVitest一時変換ファイルENOENTに対しては、同じテストを権限付きで再実行した。
+
+- 初回focused 9ファイル356件成功。監査修正後は影響範囲のRAW 6ファイル116件成功（実行範囲に重複あり）。隣controlを保持したまま切替待機に入るケースと、ackとcurrentのcursor不一致も最終確認した。
+- B2 Backend契約 `test_raw_history_api.py`：Python 3.14、Fake LightCraft／一時SQLiteで33件成功。Backendソース・schemaに変更はない。
+- `npm run build`（`tsc --noEmit` とVite production build）成功。500 kB超chunkの警告は残る。Frontend全suite／全Backend suite／Docker Smoke Testは実行していない。
+- 新規／更新テストは未保存・既存Recipe・既存Historyの初期化と失敗lock、全10 control ID、長いpointer dragとcancel、数値Enter／blur、keyboard／wheel 500 ms、category unmount、begin重複／beginなしchange／隣controlの待機、no-opとRedo保持、gesture中5秒経過でPUTなし、revision更新、同一要求再送・未知結果・旧ack、native retry、切替／通常Windows終了／200 mutationでの保存待機、旧owner応答とhook unmountを確認した。JPEG保存／共有Slider・RAW Preview／C3単独Autosaveも回帰対象とした。
+- 限定監査では初期化前の入力、重複／欠落、二重保存、pending保持、queue deadlock、切替／終了／再生成、stale owner、JPEG境界を確認した。200到達中の終端イベントなし切替におけるhold解除、native retry前の古いerror参照、隣controlの受理済みintent保持、Previewだけの失敗と保存失敗の区別を補強し、関連テストを追加した。
+
+監査修正後もTypeScript typecheck／production build成功。未解決High／Mediumなし。`git diff --check`成功。実LightCraft／GPU、Windows実機UI、ブラウザ動的確認は未実施。RAW History一覧・Undo／Redo／jump UI、カテゴリON/OFF・各Reset・Before/After、JPEGカテゴリ統合は変更していない。README／CHANGELOG・LightCraft・SQLiteも変更していない。
+
+Commit／Push後、C4-B3-1で停止する。

@@ -22,6 +22,13 @@ export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: numbe
 export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
   documentRevision: number; settingsFingerprint: string };
 export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
+export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit'; control?: RawControlId };
+export type RawHistoryResult = RawSettings & {
+  history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
+  historyPending: boolean; nativeState: string; nativeMatchesRecipe: boolean; replayed: boolean;
+  ack: { saveId: string; revision: number; settingsFingerprint: string; updatedAt: string;
+    historyCursor: number; historyLength: number; stepId: string | null };
+};
 const fingerprint = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const opaque = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
@@ -145,6 +152,32 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
       || value.documentRevision !== doc.revision || value.settingsFingerprint !== doc.settingsFingerprint
       || !integer(value.recipeRevision) || value.recipeRevision !== expectedRecipeRevision + 1 || value.saveId !== saveId
       || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) throw new RawApiError('raw_invalid_response');
+    return value;
+  } catch (cause) {
+    const error = cause instanceof RawApiError ? cause : new RawApiError('raw_connection_failed');
+    throw new RawSaveError(error.code, accepted || !error.status || error.status >= 500 || error.status === 408 ? 'unknown' : 'rejected', error.status);
+  }
+}
+/** A retry keeps the exact document/body; current metadata is independent of the original ack. */
+export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
+  const { doc, action, expectedRecipeRevision, saveId, control } = request;
+  let accepted = false;
+  try {
+    const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
+      documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
+      ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}) }));
+    accepted = true;
+    settings(value, doc);
+    const h = value.history, ack = value.ack;
+    const uuid = (id: unknown) => typeof id === 'string' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id);
+    if (!h || h.initialized !== true || !integer(h.cursor) || !integer(h.length) || h.cursor > h.length
+      || h.length > 200 || (h.cursor === 0 ? h.selectedStepId !== null : !uuid(h.selectedStepId))
+      || typeof value.historyPending !== 'boolean' || typeof value.nativeMatchesRecipe !== 'boolean'
+      || !['synced', 'desynchronized'].includes(value.nativeState) || typeof value.replayed !== 'boolean'
+      || !ack || ack.saveId !== saveId || ack.revision !== expectedRecipeRevision + 1
+      || !fingerprint(ack.settingsFingerprint) || !integer(ack.historyCursor) || !integer(ack.historyLength)
+      || ack.historyCursor > ack.historyLength || (ack.historyCursor === 0 ? ack.stepId !== null : !uuid(ack.stepId))
+      || typeof ack.updatedAt !== 'string' || !Number.isFinite(Date.parse(ack.updatedAt))) throw new RawApiError('raw_invalid_response');
     return value;
   } catch (cause) {
     const error = cause instanceof RawApiError ? cause : new RawApiError('raw_connection_failed');

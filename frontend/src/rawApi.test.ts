@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, readRawRecipe, rawWorkspaceEmpty, RawSaveError, type RawDocument } from './rawApi';
+import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawRecipe, rawWorkspaceEmpty,
+  RawSaveError, type RawDocument, type RawHistoryRequest } from './rawApi';
 import { rawSettings } from './test/rawSettings';
+import { rawHistoryResult } from './test/rawHistory';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
   assetId: 'asset', generation: 1, revision: 2 };
@@ -12,6 +14,45 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+describe('RAW History transport', () => {
+  const historyRequest = (action: 'initialize' | 'commit'): RawHistoryRequest => ({ doc: rawSettings(doc),
+    action, control: action === 'commit' ? 'light.exposure' : undefined,
+    expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' });
+  it.each(['initialize', 'commit'] as const)('sends bounded %s metadata without settings bodies', async action => {
+    const request = historyRequest(action), result = rawHistoryResult(request);
+    const fetch = vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await saveRawHistory(request)).toEqual(result);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`/api/raw/documents/${doc.handle}/history/${action}`);
+    expect(init.method).toBe('POST'); expect(JSON.parse(init.body as string)).toEqual({ workspaceId: doc.workspaceId,
+      generation: doc.generation, documentToken: doc.documentToken, documentRevision: doc.revision,
+      settingsFingerprint: request.doc.settingsFingerprint, expectedRecipeRevision: 4, saveId: request.saveId,
+      ...(action === 'commit' ? { kind: 'control', metadata: { control: 'light.exposure' } } : {}) });
+  });
+  it.each([{ generation: 2 }, { documentToken: 'd'.repeat(32) }, { handle: 'd'.repeat(32) },
+    { ack: null }, { history: { initialized: true, cursor: 3, length: 2, selectedStepId: null } }])(
+    'treats malformed or stale successful responses as unknown: %j', async patch => {
+      const request = historyRequest('commit');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawHistoryResult(request), ...patch }),
+        { headers: { 'Content-Type': 'application/json' } })));
+      await expect(saveRawHistory(request)).rejects.toMatchObject({ outcome: 'unknown', code: 'raw_invalid_response' });
+    });
+  it('keeps replay ack separate from current state and exposes pending/desync to the coordinator', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { recipeRevision: 9, historyPending: true, nativeMatchesRecipe: false,
+      nativeState: 'desynchronized', replayed: true });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } })));
+    const response = await saveRawHistory(request);
+    expect(response.recipeRevision).toBe(9); expect(response.ack.revision).toBe(5); expect(response.historyPending).toBe(true);
+  });
+  it.each([409, 503])('classifies HTTP %i without silently rebasing the request', async status => {
+    const request = historyRequest('commit');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'raw_history_save_failed' }), { status })));
+    await expect(saveRawHistory(request)).rejects.toMatchObject({ outcome: status === 409 ? 'rejected' : 'unknown' });
+    expect(request.expectedRecipeRevision).toBe(4);
+  });
+});
 describe('bounded RAW binary contract', () => {
   it('sends metadata only for RAW saves and validates the exact acknowledged revision/fingerprint/saveId', async () => {
     const request = { doc: rawSettings(doc), expectedRecipeRevision: 3, saveId: '00000000-0000-4000-8000-000000000001' };

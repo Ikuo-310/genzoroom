@@ -29,7 +29,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {raw.dirty && !raw.saving && !raw.saveError && <p role="status">{t('workspace.rawPreview.unsaved')}</p>}
     {raw.saveError && <div role="alert"><p>{t(raw.saveError === 'raw_recipe_revision_conflict'
       ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed')}</p>
-      <button className="tool-button" type="button" disabled={disabled || raw.locked}
+      <button className="tool-button" type="button" disabled={disabled || raw.regenerating || raw.saving}
         onClick={() => { void raw.retrySave(); }}>{t('workspace.rawPreview.retrySave')}</button></div>}
     {raw.pending && !raw.editError && <p role="status">{t('workspace.rawPreview.updating')}</p>}
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
@@ -46,12 +46,12 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         // C4 owns RAW bypass and reset semantics; disabled placeholders keep the JPEG panel layout consistent.
         return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} actionsDisabled
           actionsUnavailableLabel={actionsUnavailable} trackGradient={trackGradient}
-          label={t(`workspace.${id}`)} enabled onToggle={() => {}} onReset={() => {}} onBegin={raw.beginControls}
+          label={t(`workspace.${id}`)} enabled onToggle={() => {}} onReset={() => {}} onBegin={() => raw.beginControls(control)}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(`workspace.${id}Reset`)} valueLabel={t(`workspace.${id}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={disabled || raw.locked || !!raw.editError || raw.status !== 'ready' || control.startsWith('wb.') && !settings.wb.available}
-          onChange={value => raw.changeControls({ [control]: value })} onCommit={raw.flushControls} />;
+          onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
       })}
     </RawCategory>)}
   </div>;
