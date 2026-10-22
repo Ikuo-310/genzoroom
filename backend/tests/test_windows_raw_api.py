@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from uuid import uuid4
 
 import httpx
@@ -6,6 +7,7 @@ import pytest
 
 import main
 import windows_raw_api as module
+import raw_source
 from raw_source import RawSourceCache
 from tests.test_raw_source import Original
 from tests.test_lightcraft_raw import create, png
@@ -247,5 +249,183 @@ def test_expired_workspace_releases_native_source_and_allows_new_owner(local, tm
                 await until(lambda: api.workspace is None)
                 assert children[0].returncode is not None and not list(root.iterdir())
                 assert (await http.post("/api/raw/workspaces", json={})).status_code == 200
+        finally: await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["timeout", "io_error"])
+def test_failed_open_cleanup_blocks_reopen_until_explicit_release(local, tmp_path, monkeypatch, failure):
+    async def run():
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace = (await http.post("/api/raw/workspaces", json={})).json()["workspaceId"]
+                cache = api.cache
+                remove, close = cache._remove, cache.close
+                def blocked_remove(*target):
+                    loop.call_soon_threadsafe(entered.set)
+                    if failure == "io_error":
+                        raise OSError("PRIVATE path and upstream text")
+                    gate.wait()
+                    remove(*target)
+                async def short_close():
+                    with monkeypatch.context() as deadline:
+                        deadline.setattr(raw_source, "IO_SECONDS", 0)
+                        await close()
+                monkeypatch.setattr(cache, "_remove", blocked_remove)
+                if failure == "timeout": monkeypatch.setattr(cache, "close", short_close)
+                children[0].kind = "jpeg"
+                failed = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                assert failed.status_code in (409, 502)
+                assert "PRIVATE" not in failed.text
+                await entered.wait()
+                assert api._workspace_state == "cleanup_failed" and api.workspace == workspace
+                worker = cache._io_worker
+                generation = manager.status().generation
+                rejected = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                assert rejected.status_code == 409
+                assert rejected.json() == {"code": "raw_workspace_cleanup_failed"}
+                assert api.document is None and cache._io_worker is worker
+                cap = (await http.get("/api/raw/capabilities")).json()
+                assert cap["workspaceState"] == "cleanup_failed"
+                assert cap["cleanupPending"] is (failure == "timeout")
+                assert (await http.get("/api/health")).status_code == 200
+                gate.set()
+                if failure == "timeout":
+                    await cache._cleanup_task
+                    assert not cache.cleanup_pending
+                    # Worker completion alone must not reopen an unconfirmed workspace.
+                    assert (await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})).status_code == 409
+                monkeypatch.setattr(cache, "_remove", remove)
+                monkeypatch.setattr(cache, "close", close)
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                assert api._workspace_state == "empty" and not list(root.iterdir())
+                assert manager.status().generation == generation
+                next_workspace, doc = await open_document(http)
+                assert next_workspace != workspace and doc["generation"] == generation
+                new_path = next(root.rglob("*.dng"))
+                assert (await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})).status_code == 409
+                # Joining the old cleanup again cannot affect the new workspace's directory.
+                await cache.close()
+                assert new_path.exists()
+                result = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
+                assert result.status_code == 200 and new_path.exists()
+                assert (await http.delete(f"/api/raw/workspaces/{next_workspace}")).status_code == 204
+        finally:
+            gate.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+def test_shutdown_retains_pending_cleanup_worker_and_retries_same_resource(local, tmp_path, monkeypatch):
+    async def run():
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, _ = await open_document(http)
+                cache = api.cache
+                remove, close = cache._remove, cache.close
+                def blocked_remove(*target):
+                    assert children[0].returncode is not None
+                    loop.call_soon_threadsafe(entered.set)
+                    gate.wait()
+                    remove(*target)
+                async def short_close():
+                    with monkeypatch.context() as deadline:
+                        deadline.setattr(raw_source, "IO_SECONDS", 0)
+                        await close()
+                monkeypatch.setattr(cache, "_remove", blocked_remove)
+                monkeypatch.setattr(cache, "close", short_close)
+                response = await http.delete(f"/api/raw/workspaces/{workspace}")
+                assert response.status_code == 409
+                await entered.wait()
+                worker = cache._io_worker
+                with pytest.raises(LightCraftError, match="raw_cache_cleanup_pending"):
+                    await api.close()
+                assert api.cache is cache and api.workspace == workspace
+                assert cache._io_worker is worker and cache.cleanup_pending
+                assert api._workspace_state == "cleanup_failed" and manager.status().state == "stopped"
+                assert (await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})).status_code == 409
+                gate.set()
+                await cache._cleanup_task
+                monkeypatch.setattr(cache, "close", close)
+                await api.close()
+                assert api.cache is None and api.workspace is None and api._workspace_state == "empty"
+                assert not list(root.iterdir())
+        finally:
+            gate.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+def test_releasing_state_and_cancelled_release_keep_cache_owned(local, tmp_path, monkeypatch):
+    async def run():
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        release = None
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, _ = await open_document(http)
+                cache = api.cache
+                remove = cache._remove
+                def blocked_remove(*target):
+                    assert children[0].returncode is not None
+                    loop.call_soon_threadsafe(entered.set)
+                    gate.wait()
+                    remove(*target)
+                monkeypatch.setattr(cache, "_remove", blocked_remove)
+                release = asyncio.create_task(api._release())
+                await entered.wait()
+                cap = (await http.get("/api/raw/capabilities")).json()
+                assert cap["workspaceState"] == "releasing" and cap["cleanupPending"] is True
+                release.cancel()
+                with pytest.raises(asyncio.CancelledError): await release
+                assert api._workspace_state == "cleanup_failed" and api.cache is cache
+                assert (await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})).status_code == 409
+                gate.set()
+                await cache._cleanup_task
+                generation = manager.status().generation
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                assert manager.status().generation == generation and not list(root.iterdir())
+        finally:
+            gate.set()
+            if release is not None:
+                await asyncio.gather(release, return_exceptions=True)
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+def test_native_release_failure_cannot_start_cache_cleanup_or_reopen(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, root = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, _ = await open_document(http)
+                cache = api.cache
+                source = next(root.rglob("*.dng"))
+                reset = api.raw.reset_session
+                async def failed(*args, **kwargs):
+                    raise LightCraftError("lightcraft_cleanup_failed")
+                monkeypatch.setattr(api.raw, "reset_session", failed)
+                response = await http.delete(f"/api/raw/workspaces/{workspace}")
+                assert response.status_code == 502
+                assert api._workspace_state == "cleanup_failed" and not api._native_released
+                assert source.exists() and cache._cleanup_task is None and children[0].returncode is None
+                assert (await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})).status_code == 409
+                monkeypatch.setattr(api.raw, "reset_session", reset)
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                assert children[0].returncode is not None and not source.exists()
         finally: await api.close()
     asyncio.run(run())

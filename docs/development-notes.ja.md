@@ -1514,3 +1514,15 @@ Galleryの戻るボタンはカレンダー日付詳細で「カレンダーに�
 既存のCalendar date-detail限定監査はHigh 0／Medium 0／Low 1で、唯一のLow（disabled日付矢印のcursor表示）は修正済み。今回照合したリリース対象の記録に未解決のHigh／Medium指摘はない一方、全項目に独立したseverity集計が残っているわけではなく、今回新たなコード監査は行っていない。温度補正の実ブラウザー／WebGPU、`generate_thumbnail()`統合、Backend全体テスト、Gallery戻るボタンの実機確認が未検証として残る。
 
 安定版のバージョンは`vMAJOR.MINOR.PATCH`タグから配布workflowへ渡されるため、`frontend/package.json`の`0.0.0`などを手動変更していない。v0.2.2のGitタグ、コンテナイメージ、GitHub Releaseはまだ作成・公開されておらず、CHANGELOG・設計文書の確定までを記録する。
+
+## Phase 1C-C1限定監査 Medium修正：RAW cache cleanupと再open（2026-10-22）
+
+監査対象・修正前HEAD `deec7121795cd1b220e8313ba3624d99fee09c9e`の限定監査結果はHigh 0／Medium 1／Low 0。open失敗後のcache cleanup timeoutで残存workerがあるのに同一workspaceの再openを受け付け、遅延cleanupが新しい原本まで削除する競合を修正した。既存の設計・C1実装記録は保持する。
+
+変更は`backend/raw_source.py`／`windows_raw_api.py`、対応するBackendテスト2ファイル、本記録と`PHASE1C_DESIGN.md`のみ。workspaceに`active`／`releasing`／`cleanup_failed`／`empty`を保持し、回収未確認のdocument openを409で拒否する。capabilityにworkspace状態とcleanup待機状態を付加した。cacheはclose開始後のdownloadを拒否し、I/OのFuture・threadと単一cleanup taskを追跡する。先行I/O完了後に確定した所有directoryへ削除対象を固定し、timeout／cancelを成功扱いせず、同じworkerの完了を待つ。native参照解放前にcacheを削除しない保証は維持する。
+
+workerが遅れて終了しただけでは再openを許可しない。既存DELETEで回収成功を確認し、旧workspaceを解放してから新workspaceを作成する。cache回収だけの再試行では、解放済みEngineを繰り返し再起動しない。shutdownでも未完了worker・cache・workspace所有を保持し、完了後のclose再試行で解放する。新しいAPI route、Frontend実装、JPEG処理、C2機能、LightCraft本体・versionは変更していない。
+
+新規回帰9ケースではgate／イベントで競合順序を固定した。監査経路の再open拒否、cleanup timeout／I/O失敗／cancel、遅延directory作成、worker起動失敗、別ownerの原本保護、shutdownと回収再試行、native解放失敗時の削除禁止を確認した。Backend関連6ファイル212件成功に加え、最後に追加したnative解放失敗回帰を含むRAW APIテスト22件成功。既存FrontendのAPI client／document hook 19件も成功。既知のWindows sandbox制約を避けてrepo Python 3.14／cwd backendで権限付き実行した。全suite・Frontend buildは変更範囲上不要と判断し未実施。`git diff --check`成功。
+
+差分と直接依存する所有・回収境界の限定再監査はHigh 0／Medium 0／Low 0。監査Mediumの再現経路は修正後に成立しないことを確認し、Windows実画面確認へ進める状態と判断した。実LightCraft／GPU／Immich、RAW原本・sidecar・既存PoC成果物は操作していない。詳細な状態遷移・API code・残る未検証範囲は[Phase 1C設計書の監査修正追記](research/lightcraft/PHASE1C_DESIGN.md#c1限定監査-medium修正cache-cleanupと再openの競合2026-10-22)を参照。README／CHANGELOGは変更していない。

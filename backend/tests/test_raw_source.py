@@ -137,7 +137,7 @@ def test_timed_out_disk_worker_retains_cache_ownership_until_cleanup(tmp_path, m
             with pytest.raises(LightCraftError, match="lightcraft_temp_io_timeout"):
                 await cache.download(uuid4())
             directory = cache.directory
-            with pytest.raises(LightCraftError, match="lightcraft_temp_io_timeout"):
+            with pytest.raises(LightCraftError, match="raw_cache_cleanup_pending"):
                 await cache.close()
             assert cache.directory == directory and directory.exists()
         finally:
@@ -145,4 +145,101 @@ def test_timed_out_disk_worker_retains_cache_ownership_until_cleanup(tmp_path, m
         monkeypatch.setattr(module, "IO_SECONDS", 5)
         await cache.close()
         assert not directory.exists()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_cleanup_timeout_or_cancel_keeps_one_worker_and_fixed_target(tmp_path, monkeypatch, cancel):
+    async def run():
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        async def acquire(_): return Original(), "dng"
+        cache = RawSourceCache(root=tmp_path, acquire=acquire)
+        path = await cache.download(uuid4())
+        remove = cache._remove
+        calls = []
+        def delayed(*target):
+            calls.append(target)
+            loop.call_soon_threadsafe(entered.set)
+            gate.wait()
+            remove(*target)
+        monkeypatch.setattr(cache, "_remove", delayed)
+        try:
+            if cancel:
+                closing = asyncio.create_task(cache.close())
+                await entered.wait()
+                closing.cancel()
+                with pytest.raises(asyncio.CancelledError): await closing
+            else:
+                with monkeypatch.context() as deadline:
+                    deadline.setattr(module, "IO_SECONDS", 0)
+                    with pytest.raises(LightCraftError, match="raw_cache_cleanup_pending"):
+                        await cache.close()
+                await entered.wait()
+            worker = cache._io_worker
+            assert cache.cleanup_pending and not worker[0].done()
+            assert cache.directory == path.parent and path.exists()
+            with pytest.raises(LightCraftError, match="raw_cache_closed"):
+                await cache.download(uuid4())
+            with monkeypatch.context() as deadline:
+                deadline.setattr(module, "IO_SECONDS", 0)
+                with pytest.raises(LightCraftError, match="raw_cache_cleanup_pending"):
+                    await cache.close()
+            assert cache._io_worker is worker and len(calls) == 1
+            successor = RawSourceCache(root=tmp_path, acquire=acquire)
+            next_path = await successor.download(uuid4())
+        finally:
+            gate.set()
+        await cache.close()
+        assert not cache.cleanup_pending and worker[0].done() and not path.exists()
+        assert calls == [(path.parent, tmp_path.resolve(), True)]
+        assert next_path.exists()
+        await successor.close()
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_cleanup_waits_for_timed_out_creation_before_capturing_directory(tmp_path, monkeypatch):
+    async def run():
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        async def acquire(_): return Original(), "dng"
+        cache = RawSourceCache(root=tmp_path, acquire=acquire)
+        create = cache._create
+        def delayed():
+            loop.call_soon_threadsafe(entered.set)
+            gate.wait()
+            create()
+        monkeypatch.setattr(cache, "_create", delayed)
+        try:
+            with monkeypatch.context() as deadline:
+                deadline.setattr(module, "IO_SECONDS", 0)
+                with pytest.raises(LightCraftError, match="lightcraft_temp_io_timeout"):
+                    await cache.download(uuid4())
+            await entered.wait()
+            with monkeypatch.context() as deadline:
+                deadline.setattr(module, "IO_SECONDS", 0)
+                with pytest.raises(LightCraftError, match="raw_cache_cleanup_pending"):
+                    await cache.close()
+            assert cache._cleanup_target is None and cache.cleanup_pending
+        finally:
+            gate.set()
+        await cache.close()
+        assert cache._cleanup_target[2] is True
+        assert not list(tmp_path.iterdir())
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_failed_worker_start_does_not_leave_unfinishable_io(tmp_path, monkeypatch):
+    async def run():
+        cache = RawSourceCache(root=tmp_path)
+        def failed(_): raise RuntimeError("PRIVATE worker failure")
+        with monkeypatch.context() as start:
+            start.setattr(module.threading.Thread, "start", failed)
+            with pytest.raises(LightCraftError, match="raw_cache_io_failed"):
+                await cache._io(lambda: None)
+            assert cache._io_worker[0].done()
+        await cache.close()
+        assert not cache.cleanup_pending
     asyncio.run(run())

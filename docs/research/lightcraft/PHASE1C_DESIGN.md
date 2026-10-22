@@ -353,3 +353,42 @@ Backendテストは本物のPhase 1B adapter＋fake MCP childを用い、`render
 FrontendではRAW／JPEG混在Filmstripの既存順序、RAW中にJPEG rendererを使わないこと、capabilityなしと現像失敗の表示差、stale HTTP／decode結果の破棄、URL解放、pagehide、同documentのzoom保持、新documentのfit復帰を確認する。関連する既存JPEG保存／Queue・Gallery送信・shortcutテストも回帰対象とした。実行件数・結果は同日の開発記録に記載する。
 
 未実施：実Immichの原本download、実LightCraftのRAW現像／GPU試験、Windows/Tauri/WebView2実画面、実色管理、NAS／Firefox、PyInstaller、実GPU障害fallback、長時間運用、正式コード監査。**C1実装と自動テストは実画面の受入完了を意味しない。** 実画面では既存RAW素材指定→暗室内のLightCraft表示、最大1024px／プレビュー100%、混在Filmstrip切替、失敗表示、正常終了・cache回収を別工程で確認する。
+
+## C1限定監査 Medium修正：cache cleanupと再openの競合（2026-10-22）
+
+監査対象・修正前HEADは`deec7121795cd1b220e8313ba3624d99fee09c9e`、`feature/lightcraft-integration`、開始時の作業ツリーはclean。限定監査の結果はHigh 0／Medium 1／Low 0。既存のC1設計・実装記録は上記のまま保持する。今回の修正はこのMedium 1件に限定し、LightCraft v0.10.0・Phase 1A／1B本体・JPEG処理・Frontend実装・C2以降の機能は変更していない。
+
+### Findingと修正
+
+open失敗後の`_release()`でcache cleanupが期限切れになると、旧実装はworkspaceを保持したままdocumentだけを空にしていた。同じworkspaceの再openを許可するため、残存cleanup workerが遅れて同じcacheを削除し、新しい原本と公開documentが不整合になる経路があった。監査時のfake RAW／streamによる一時再現では、再openのHTTP 200後に原本が消失した。
+
+`RawPreviewApi`はworkspaceの状態を`empty → active → releasing → empty`として保持する。native解放またはcache回収が失敗・timeout・cancelした場合は`cleanup_failed`へ移り、workspace IDとcache ownerを保持する。`releasing`／`cleanup_failed`からの新規document openは409の固定codeで拒否する。capability GETに`workspaceState`と`cleanupPending`を付加し、内部path・例外本文を返さず状態を確認できるようにした。route追加や既存request形式の変更はない。
+
+`RawSourceCache`はI/Oごとの結果Futureとdaemon thread、単一のcleanup taskを保持する。timeoutは待機期限だけであり、workerを終了扱いにしない。cleanup再試行は未完了の同じtaskを待ち、workerを重複起動しない。先行するdirectory作成／書込みworkerの終了を確認してから、所有directory・parent・所有済みflagをcleanup targetとして確定し、その値を削除workerへ渡す。遅延workerは実行時の可変directoryを削除対象として再取得しない。cacheはclose開始時点で新規downloadを受け付けなくなる。
+
+### 状態・所有責任と回復条件
+
+| 状態・共有値 | 所有者・条件・不変条件 |
+|---|---|
+| workspace状態 | API owner。`active`だけが新規open可能。`releasing`／`cleanup_failed`では既存workspaceの回収再試行のみ許可する |
+| native解放確認 | API owner。RAW session reset成功後に記録し、その後のcache-only回収再試行でEngineを再起動しない。native解放失敗時はcache cleanupを開始しない |
+| I/O結果Future／thread | cache owner。待機のtimeout／cancel後も保持し、処理終了を示すFutureを確認するまで次の回収workerを開始しない |
+| cleanup task／target | cache owner。未完了taskはshieldして再利用し、削除対象は確定した旧directoryに固定する。結果が失敗した場合の再試行も同じtargetを使う |
+| 回収完了の確認 | worker終了だけではworkspaceを再open可能にしない。既存DELETEの再試行でcleanup成功を確認してから旧workspaceを解放し、新workspaceの作成を許可する |
+| shutdown | API close owner。native closeとHTTP ownerの終了後に同じcache cleanup taskを確認する。期限切れならcache／workspace／worker参照を保持して失敗を返し、後のclose再試行で回収する |
+
+新しい固定codeは`raw_workspace_releasing`／`raw_workspace_cleanup_failed`／`raw_cache_cleanup_pending`（HTTP 409）、`raw_cache_cleanup_failed`（HTTP 502）。低層I/Oは安全な固定codeへ変換し、任意の内部例外・path・資格情報はAPIや診断へ出さない。cleanupが永続的に完了しない場合は再openを拒否したままにする。旧workspace IDの再利用を自動的に再開する仕組みは追加していない。
+
+### 回帰確認と限定再監査
+
+追加回帰は9ケース。gate／async eventでworkerの停止と再開を制御し、待機期限の注入でtimeoutを発生させる。競合順序をsleepの経過に依存させない。
+
+- open失敗→cleanup worker停止→timeout→同一workspaceからの再openを409で拒否→gate解除→cleanup終了後も未確認workspaceでは拒否→DELETE再試行成功→別workspaceでopen／Preview成功、という監査経路を検証した。旧cleanupを再度joinしても新しい原本を削除しない。
+- 実I/O例外によるcleanup失敗、close待機cancel、timeout後の同じworker／task保持、先行directory作成workerの遅延、worker起動失敗時の完了処理、別cache ownerの原本保護を確認した。
+- 解放中／失敗状態の表示、shutdown中のcleanup timeoutと再試行、native解放失敗時に原本を保持して再openを拒否すること、正常open／close／再open、旧workspace／generation拒否、JPEG health継続も確認した。
+
+Backend関連6ファイルは212件成功。その後、native解放失敗時の回収開始禁止を追加した最終RAW APIテスト22件も成功した（重複実行を含む）。Pythonはrepo `.venv`の3.14、cwdは`backend`。Windows sandboxの既知の非同期実行制約を避け、同じrepo executableを権限付きで実行した。Frontend実装は未変更で、既存API client／document hookの互換性テスト19件が成功した。全suiteや不要なFrontend buildは実行していない。`git diff --check`成功。
+
+変更差分と直接依存するnative reset／close・HTTP owner・cache workerの順序を限定再監査し、今回の修正範囲の残存FindingはHigh 0／Medium 0／Low 0。修正前の「cleanupが未完了なのに同一workspaceの再openが成功する」経路は、API状態guardと閉鎖済みcacheの二重の受付拒否で成立しなくなった。
+
+Windows実画面確認へ進める状態と判断する。ただし今回もfake MCP／streamと一時directoryによる自動検証であり、実LightCraft・GPU・Immich・RAW原本・sidecar・既存PoC成果物は操作していない。Windows/Tauri/WebView2実画面、実OSの停止したdisk I/O、強制終了後の残骸回収、実GPU障害fallback等の既存未検証範囲を追加認定するものではない。

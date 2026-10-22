@@ -31,6 +31,8 @@ class RawPreviewApi:
         self._lease_task = None
         self._close_task = None
         self._touched = monotonic()
+        self._workspace_state = "empty"
+        self._native_released = False
         self.app = Starlette(routes=[
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
@@ -53,6 +55,8 @@ class RawPreviewApi:
         status = self.manager.status() if self.manager else None
         return JSONResponse({"available": bool(status and status.state == "ready" and not self._closing),
                              "state": status.state if status else "disabled", "version": "0.10.0",
+                             "workspaceState": self._workspace_state,
+                             "cleanupPending": bool(self.cache and self.cache.cleanup_pending),
                              "maxSide": 1024, "maxImageBytes": MAX_IMAGE_BYTES}, headers={"Cache-Control": "no-store"})
 
     async def _body(self, request):
@@ -87,7 +91,8 @@ class RawPreviewApi:
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
                       400 if code == "raw_invalid_request" else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready"} else
-                      409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict"} else 502)
+                      409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
+                                      "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"} else 502)
             return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
         except Exception:
             lightcraft_log("raw.http.failed", level="error", errorCode="raw_operation_failed")
@@ -101,6 +106,7 @@ class RawPreviewApi:
             code = error.code if isinstance(error, LightCraftError) else "raw_operation_failed"
             rejection = code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                  "raw_invalid_request", "raw_source_too_large", "raw_cache_capacity", "raw_disk_capacity"}
+            rejection |= code in {"raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending"}
             lightcraft_log("raw.operation.failed", level="warn" if rejection else "error", errorCode=code)
 
     def _owner(self, workspace):
@@ -127,6 +133,8 @@ class RawPreviewApi:
                     raise LightCraftError("raw_workspace_conflict")
                 self.workspace = secrets.token_hex(16)
                 self.cache = RawSourceCache()
+                self._workspace_state = "active"
+                self._native_released = False
                 self._touched = monotonic()
                 self._lease_task = asyncio.create_task(self._expire(), name="windows-raw-lease")
                 return JSONResponse({"workspaceId": self.workspace})
@@ -139,6 +147,9 @@ class RawPreviewApi:
                     self._document(request.path_params["handle"])
                 await self._release()
                 return Response(status_code=204)
+            if self._workspace_state != "active":
+                raise LightCraftError("raw_workspace_releasing" if self._workspace_state == "releasing"
+                                      else "raw_workspace_cleanup_failed")
             if path.endswith("/documents") and method == "POST":
                 if set(body) != {"assetId", "workspaceId"}:
                     raise LightCraftError("raw_invalid_request")
@@ -192,11 +203,20 @@ class RawPreviewApi:
         if self.workspace is None:
             return
         self.document = None
-        # Reset releases all native references before the source directory is removed.
-        await self.raw.reset_session(restore_active=False)
-        await self.cache.close()
+        self._workspace_state = "releasing"
+        try:
+            # A cleanup retry must not restart the Engine or admit new source references.
+            if not self._native_released:
+                await self.raw.reset_session(restore_active=False)
+                self._native_released = True
+            await self.cache.close()
+        except BaseException:
+            self._workspace_state = "cleanup_failed"
+            lightcraft_log("raw.workspace.cleanupFailed", level="warn", errorCode="raw_workspace_cleanup_failed")
+            raise
         self.cache = None
         self.workspace = None
+        self._workspace_state = "empty"
         lightcraft_log("raw.workspace.released", generation=self.manager.status().generation)
         if self._lease_task and self._lease_task is not asyncio.current_task():
             self._lease_task.cancel()
@@ -221,6 +241,8 @@ class RawPreviewApi:
 
     async def _close(self):
         self._closing = True
+        if self.workspace is not None:
+            self._workspace_state = "releasing"
         if self.cache:
             # Only the download is cancellable; native import/render stays owned by Phase 1B.
             self.cache.stop_download()
@@ -228,9 +250,16 @@ class RawPreviewApi:
             self._lease_task.cancel()
             await asyncio.gather(self._lease_task, return_exceptions=True)
         # Closing the RAW session releases in-flight native calls without cancelling HTTP owners.
-        await self.raw.close()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-        if self.cache:
-            await self.cache.close()
+        try:
+            await self.raw.close()
+            if self._tasks:
+                await asyncio.gather(*self._tasks, return_exceptions=True)
+            if self.cache:
+                await self.cache.close()
+        except BaseException:
+            if self.workspace is not None:
+                self._workspace_state = "cleanup_failed"
+            raise
+        self.cache = None
         self.workspace = self.document = None
+        self._workspace_state = "empty"
