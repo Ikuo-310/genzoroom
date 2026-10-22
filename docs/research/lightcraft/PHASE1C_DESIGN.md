@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書は**設計段階**の記録（2026-10-22、Asia/Tokyo）。Phase 1Cは未実装である。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」を参照コードで確認した挙動、「提案」を今回の推奨構成、「未検証」を今後の確認対象として区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22、Asia/Tokyo）。**C1〜C3-Dは実装済み、C4-Aの実装前調査・詳細設計は末尾に記録、C4-B以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -642,3 +642,244 @@ workspace解放の`reset_session(restore_active=False)`、native参照確認後�
 Fake LightCraft／一時SQLiteで複数generation合計256試行超の編集、最終flush・保存fingerprint一致、復元による新世代1試行からの継続、旧handle拒否、native 256 hard拒否の維持、3 RAW巡回・各row保持を確認。Frontendは制御timer／gateで200到達中の300入力集約と201試行での最終保存、保存失敗replay、cleanup失敗で新規createなし、restore mismatch拒否、再試行、再生成中の入力／切替待機、旧Preview／callback拒否、解放応答消失後のempty確認、高速切替直列化を検証した。JPEG保存・History・Queue・Viewer・Windows終了の関連回帰も対象とした。最終件数と型チェック・build結果はdevelopment notesへ記録する。
 
 実GPU・実Immich・Windows画面・長時間負荷・RSS／GPUメモリ回収・再生成待ち時間は未検証で、ユーザー実機受入へ残す。200は操作継続と試行予算のための保守的な確定値であり、実memoryの安全限界を実測した数値ではない。実機で問題が出た場合も、native上限撤廃や複数residentの先行実装で代替しない。
+
+## Phase 1C-C4-A 詳細設計（2026-10-22〜23、Asia/Tokyo）
+
+### 1. 調査基準・適用順序
+
+- 開始ブランチは `feature/lightcraft-integration`、HEADは `e2e357824995d54f9f1d269432f11a2cfac81ac2`、作業ツリーはclean。Fetch／Pull／Resetは行っていない。
+- GenzoRoomは現在のローカルコードを正本とし、C3-A〜D完了記録および `docs/architecture.md` のRAW・JPEG編集・保存・Viewer・Export・サムネイル境界を照合した。
+- LightCraftは既存参照worktreeのHEADが固定 `a2a41383c4fd62fa85a46ccd00998639221f2d3c`（v0.10.0）であることを確認した。全面再調査はせず、既存 [C4 native features調査](PHASE1C_C4_NATIVE_FEATURES.md) §2〜6を根拠に、WB Reset・section対応・headless renderの必要箇所だけを追加確認した。
+- この節はC4の最新設計。上記初期設計の「Resetを標準／編集開始baselineの2操作にする」、Before基準未決定、Recipe／DBの破壊的変更許容、C3未実装等の古い記述をC4の実装条件として使わない。native調査書§7〜10の旧提案も本節の確定仕様を優先する。
+- **今回の変更は本書のみ。以下のtable／API名は実装提案であり未実装。ソース・テスト・LightCraft・実DBは変更せず、migration・テスト・build・ブラウザ／実機検証は行わない。**
+
+### 2. 現行コードで確認した事実
+
+#### 2.1 保存・復元・revision
+
+| 追跡点 | 現行の責務とC4への接続点 |
+|---|---|
+| `backend/raw_recipe_store.py::normalize_identity/_settings_json/_read_row/lookup_raw_recipe/put_raw_recipe` | Asset UUID＋原本content hash＋engine名／version／commit＋settings schemaの6項目identity。完全DevelopSettingsを256 KiB以内で検証・保存する。現在レシピとsave receiptのみでHistoryはない。lookupは原本不一致／engine非互換を区別し、推測復元しない |
+| `backend/edit_store.py::_create_v7/_connection` | 現在schema v7。`asset_raw_recipes` と `raw_recipe_saves` を所有し、WAL／FULL／busy timeout／`BEGIN IMMEDIATE`を使用。JPEGは `asset_edit_states` のcurrentRecipe・history JSON・cursorを同時保存するが、そのRecipe v18検証やQueue副作用をRAWへ転用できない |
+| `backend/storage.py::validate_existing_database` | v7上限と必須列を検査する。RAW Historyのadditive schema追加時はmigrationだけでなく起動時検査・`release/smoke-test.sh`のschema期待値も更新が必要 |
+| `backend/windows_raw_api.py::_restore_document/_recipe/_execute` | open時にSQLite lookup→互換性確認→native適用・readback一致→document公開。recipe PUTは所有情報・documentRevision・expectedRecipeRevision・saveIdだけを受け、Backendが完全readbackを保存する。FrontendからSettings本文は受けない |
+| `backend/lightcraft_raw.py::_mutate/_restore/restore_persisted_settings/get_settings` | active写真を選択し、native command→`develop.get`→確定snapshotを更新。復元はreset→全settings merge→canonical readback一致。失敗・結果不明ではdesynchronized扱い。復元用6項目identity検証を通常のprivate snapshot fingerprint条件から分離済み |
+| `frontend/src/rawControls.ts::RawControls` | 150 ms debounce、最新desired／pending、既存queue、1回のrevision conflict resync、readbackとPreviewのserial確認を所有。`settle()`は送信・readbackのqueue barrier。中間patchとgesture確定は別で、まだ履歴は作らない |
+| `frontend/src/rawRecipeSave.ts::RawRecipeSave` | 確定fingerprintのdirty判定、5秒Autosave、SQLite revision、同一saveIdのimmutable retry、競合時のmetadata再同期。dirtyは今のところ設定差とretry requestのみで、履歴cursorの差は表現しない |
+| `frontend/src/useRawDocument.ts::notify/prepareSave/restart/install` | 現在documentのControls／Save ownerと既存ownership queueを束ねる。離脱前freeze→desired flush→readback→save ack。200試行到達時は操作終了後に保存・release・再open・世代／revision／fingerprint確認。新たなresident／snapshot storeはない |
+
+native `revision`は設定適用・再同期を識別する値、SQLite `recipe_revision`は保存transactionの順序、saveIdはimmutable requestの冪等性キーであり、互換なカウンタではない。`_mutate`はrevisionを先に予約するため失敗で欠番があり得る。`mutationAttempts`は失敗を含む実試行数で、200 soft／256 hardをrevisionやHistory件数から計算しない。既存restoreも1 adapter mutationとして数えるが、その内部ではreset＋mergeを実行する。
+
+`raw_recipe_saves.request_hash`はidentity＋expectedRevision＋完全設定を束縛し、`_read_row`もこの形式でcurrent rowのreceiptを検証する。古いsaveIdの同一request再送も元のackを返し、後続保存を巻き戻さない。**cursor／操作種別を付けずにこのhashだけを流用すると、同じ設定へ戻る異なる履歴操作を識別できない。** C4には追加の履歴操作receiptが必要である。
+
+#### 2.2 gesture・画面・JPEG
+
+- `AdjustmentSlider.tsx`のpointer up／cancel／lost capture、数値Enter／blur、keyboard／wheelの500 ms無操作、unmountに既存commit境界がある。数値Escapeは開始値を再送してcommitするので、差がなければ履歴を作らない。keyboard／wheelはbeginを複数回呼び、rangeの一部changeではbeginなしでもcommitへ進む。単純なbegin回数やdebounce完了回数を履歴数にしてはいけない。
+- `RawAdjustmentControls.tsx`は現在WB→基本→カラーの3カテゴリ。RAW個別・カテゴリReset／powerはdisabled placeholder。公開 `controls_state()` は数値・WB能力・processだけで、`disabled_sections`は公開していない。C4では必要sectionのenabled状態を安全なbool subsetとして追加できる。
+- JPEGの `editing.ts::commit/editSession` はpending開始値と最終値を比較し、no-opならRedo枝を残し、変化があるときだけcursor以降を破棄する。Undoはpending確定後に1つ戻り、Redo／History jumpもpending確定を先行する。`EditHistory.tsx`は新しい順に表示し、操作後状態とInitial State（cursor 0）へ移動する。ただし表示はJPEG `EditEntry` と相対値formatに依存し、その型へRAWを入れられない。
+- `useAssetEdits.ts` はJPEG session・Autosave・exit compactionを所有する。Undo shortcutは同じhandler内でFilmstrip除外Undoを先に判定し、JPEG編集へ進む。RAWの別listener追加だけでは二重実行を防げない。`AnshitsuPage.tsx`の `historyEnabled`／左panel、Reset、menu、shortcut dispatchもRAW用availability分岐が必要。
+- `ImageViewer.tsx`はすでに `documentKey` でframe URLと写真identityを分離し、同一documentのRAW Preview更新でzoom／panを保つ。旧設計§5の「src変更で常にFitへ戻る」は現行には当てはまらない。ただしRAW Before入力は未接続で、`AnshitsuPage`は `beforeAvailable={!activeDetail.is_raw}`。JPEGは `AdjustedImage` の2 Canvas切替であり、plain RAW imgへBefore状態だけ渡しても画像は切り替わらない。
+- JPEG個別OFFはUIだけでなく `editing.ts::effectiveAdjustments` と `backend/jpeg_renderer.py::JpegRenderer.render` に作用する。CPU／Workerは前者を使い、`webgpuRecipe.ts::prepareGpuRecipe`も前者を使う。Backend rendererはExportと補正済みサムネイルの共通境界なので、UIだけ消すと操作不能なOFFが残る。
+- 個別power参照は `AdjustmentSlider`、`WhiteBalanceAdjustmentControls`、`BasicAdjustmentControls`、`ColorAdjustmentControls`、`ColorGradingAdjustmentControls`、`AnshitsuPage`のslider context menu、`AdjustmentContextMenu`、`adjustmentNavigation.ts` にある。カテゴリ・Color Grading range menuも共通context menuを使うため、共通toggle行の無条件削除は不可。`editClipboard.ts`は数値だけをコピーし、enabled状態はコピーしない。
+
+### 3. 今回確定済みの製品仕様
+
+1. **RAW History：** GenzoRoom SQLiteが唯一の正本。完全DevelopSettings snapshot、操作単位、Undo／Redo／履歴選択／新操作でのRedo枝切りはJPEGの操作体系に合わせる。native History／Session Undoは呼び出さず、targetの完全設定適用とreadback確認で復元する。C3-C guard・C3-D再生成を維持する。
+2. **RAWカテゴリ：** native `disabled_sections`で値を保持してbypassする。追加指定により**色温度→TINT→自然な彩度→彩度を「カラー」1カテゴリに統合し、RAWパネルの最上部（従来WBの位置）へ置く。次が基本補正**。この4項目のON/OFFはnative `color`の共通switchとする。JPEGカテゴリ配置の変更は今回の追加指定から広げない。
+3. **RAW Reset：** 個別／カテゴリ／All ResetはUndo可能な1操作。WB ResetはAs Shot、All Resetはnative `develop.reset`が基礎。ResetでGenzoRoom Historyを消さない。編集開始baselineへ戻す別Reset、RAW個別ON/OFF、WBプリセット選択UIは追加しない。
+4. **RAW Before：** native初期現像 `import_defaults()` を基準とし、現在crop／orientationの適用はnative標準に従う。手動レンズ歪曲補正をBeforeへ強制転写しない。初回Previewを固定保存する方式、After設定をBefore値へ一時変更して往復renderする方式は採用しない。
+5. **比較表示：** 既存ImageViewerのBefore／After switch・一時表示・zoom／pan体系を使う。1024pxは現在の暫定Preview制約であり将来の固定仕様ではない。高解像度化自体はC4対象外。
+6. **JPEG：** 個別ON/OFFの操作と現像上の効果を廃止する。`adjustmentEnabled`の16項目構造、Recipe v18、JPEG SQLite構造は維持し、今後の個別enabledはすべて有効として扱う。個別Reset・カテゴリ／grading range ON/OFF・History・コピー／ペースト・Before／After・補正済みサムネイル・Exportを維持する。旧OFF救済・データ移行・旧挙動互換は設計しない。
+7. RAW Export／Immich登録、RAW補正済みサムネイル、Gallery RAW編集状態filter、高解像度Preview、crop／geometry UI、WBプリセットUI、mask／AI、LightCraft更新は対象外。「現」バッジはExport素材識別のままでRAW編集状態へ転用しない。
+
+以下の推奨保存構造はRAW Historyに必要な**additive schema追加**であり、「JPEG側SQLite schemaを維持」と両立する。既存RAW current recipe tableとJPEG tableを置換・削除しない。今回schema操作は実施しない。
+
+### 4. 推奨実装：RAW Historyの保存契約（C4-B）
+
+#### 4.1 最小の永続構造と不変条件
+
+既存 `raw_recipe_store.py` を拡張し、独立したmemory History managerは作らない。提案する追加tableは次の3つ。history用JSONをJPEG tableへ押し込まず、stepごとの最大256 KiB検証を既存validatorで共有する。
+
+| Table案 | 最小項目と責務 |
+|---|---|
+| `asset_raw_histories` | 既存6項目identityをPK／current recipeへの複合FK、`baseline_settings_json`、`history_cursor`。cursorは適用済み操作数0..N。baselineは保持範囲の開始状態でありBeforeの基準とは別。current recipe revisionを共通CASとして使い、独立したhistory revisionは作らない |
+| `asset_raw_history_steps` | 同じidentity＋`position`（1..N）をPK、stable UUID `step_id`、固定 `kind`、許可control／section ID等のbounded metadata、完全 `develop_settings_json`（操作後）、`created_at`。beforeは前stepまたはbaselineから得てsnapshot重複を避ける。history parentへのFKを持つ |
+| `raw_history_saves` | `save_id`をPK（対応する既存RAW receiptへのFK）、操作request hash、結果recipe revision／settings fingerprint／cursor／件数／stable target等のbounded ack metadata。snapshotは保存しない。branch削除・上限整理後も再送の元ackを返すため、step削除に連動して消さない |
+
+- 同じAssetでもhash・engine tupleが違えば別History。handle／generation／PhotoId／local fingerprint／pathを永続キーにしない。既存identity不一致の復元拒否を維持する。
+- transaction成功時に `asset_raw_recipes.settings == baseline`（cursor 0）、または `== steps[cursor].settings` をcanonical JSONで保証する。position連続、cursor範囲、UUID重複、snapshot schema・上限を読込時にも検証し、破損を空Historyで隠さない。
+- 既存C3レシピにHistoryがなければ**その復元済み設定をbaseline**として遅延初期化する。過去操作やimport初期値への架空Undoを作らない。未保存RAWは初回readbackがbaseline。初回の有効commit／再生成用checkpointで同transaction内にparentを作る。openしただけで保存しない。
+- 保存receiptは既存 `raw_recipe_saves` の形式を保持する。追加receiptのhashはidentity・expectedRecipeRevision・operation kind／operation ID・target step IDまたはbaseline指定・完全設定fingerprint等を束縛する。saveId再利用の検出は既存recipe-only requestとHistory requestの間も行う。snapshot本文を重複保持するreceiptにしない。
+- `put_raw_recipe()`を外から呼んだ後に別transactionで履歴を書いてはいけない。既存の内部write処理をconnection受取helperへ最小抽出し、1つの `BEGIN IMMEDIATE` でCAS確認→枝切り／step追加またはcursor更新→current recipe更新→両receipt→上限整理→commitとする。JPEG save・Queue処理は呼ばない。
+- 新commit／cursor変更は共通recipe revisionを+1。同一設定でも別cursorへの移動なら保存が必要。今の設定fingerprintだけのdirty判定へ「未確定gesture／未ack History操作」を追加する。同一saveId再送は新しいstepもrevisionも増やさない。replay ackは過去結果なので、最新cursorへ無条件適用せず現行metadataを再取得する。
+
+#### 4.2 gesture確定、Autosaveと再生成
+
+推奨は**操作確定時にHistoryとcurrent recipeを直ちに同時保存**する。5秒分の完全Settings列を別memory storeへ貯める方式を避け、gesture中のnative中間値は現行Controls内だけにとどめる。C3の5秒Autosave ownerは継続し、確定操作の未保存retry／checkpointを同じwriterへ流す。通常の操作は5秒より早く保存されるが、保存失敗・再試行・離脱保証は弱めない。
+
+1. 最初のchange前に既存queue上でgesture開始を登録し、現在SQLite cursor／recipe revisionと開始readbackを固定する。同じ操作の繰り返しbeginは同じoperation IDで無害にし、beginなしchangeには暗黙beginを行う。別control開始は前操作を確定してから進める。Frontendは完全Settingsを持たない。
+2. `RawControls`の150 ms patch／Previewはそのまま使う。中間readbackでstepを追加しない。gesture中は `RawRecipeSave.observe` の「settled」条件へgesture完了も含め、途中に5秒停止してもcurrent recipeだけを中間値へ保存しない。Backendでも未終了gesture中の通常checkpointを拒否／待機させる。
+3. 既存commitで最後のdesiredをflush→queue barrier→完全readback→開始値との差を判定する。変化なしならstep追加・Redo枝切りなし。有効な変化だけ1 stepとcurrent recipeを同時commitする。Sliderの500 ms境界とnative patch debounceを混同しない。
+4. commit保存中は次のgesture／Undo／Resetを止める。既存の `_recipe_save` を一般化した**現在操作1件のimmutable retry payload**だけを保持する。これは輸送復旧用であり、非active写真・履歴列のmemory storeではない。native確定済みでもDB失敗なら未保存表示と操作lockを保つ。
+5. `prepareSave()`はgesture確定まで含むsettle→History/currentのack→既存clean確認。写真切替・Filmstrip除外・Gallery復帰・Windows通常終了はこの関数を引き続き使う。unmountのlate commitで次documentへ送らない。ブラウザ強制終了／OS障害の最後の未commit操作は保証外という既存境界を維持する。
+6. C3-Dの200到達notifyはHistory確定を先に待つ。操作中hold→最終flush→History/current transactionのack→既存release／再open。新世代はrecipe revision／fingerprintだけでなくHistory cursor・末尾step ID／件数も照合し再取得する。native復元を新しい履歴操作として記録しない。再生成進行中のHistory／Resetは無効。
+
+native begin/endInteractionはGenzoRoom Historyの成立条件にしない。現行 `_mutate` が毎回 `library.select` を行いnative interactionを終えるため、追加するだけでは効果がなく、C3-Dによるnative蓄積上限も既にある。必要になるまで接続しない。queue実行中に同じqueueへ処理を積んでawaitするdeadlockを避け、UI ownerが順序を組み、Backendは既存lock内でnative→DBを直列実行する。
+
+#### 4.3 Undo／Redo／履歴選択と失敗境界
+
+履歴一覧APIはboundedなkind／表示数値／step ID／cursor／件数とrevisionを返し、完全SettingsをFrontendへ送らない。undo／redo／jump要求も任意JSONではなくtarget ID（またはbaseline）とexpectedRecipeRevision・documentRevision・saveId・既存所有情報だけを受ける。Backendが同identityのSQLite targetを読み、完全設定を `restore_persisted_settings()` の検証付きreset／merge／readbackへ渡す。target read中に外部saveがあればcommit時CASで拒否する。
+
+pending gestureを確定→target取得→native適用→全readback一致→cursor/current/receiptの同時保存→ack→controls／History表示／Preview更新の順。履歴操作自体は新stepを追加しない。Undoで残るRedo列は保持し、その後の**有効な新操作の保存transaction**でのみ削除する。History jumpは対象操作後の状態、Initial Stateは保持baselineで、JPEGと同じcursorの意味にする。
+
+| 失敗境界 | 保持状態と回復 |
+|---|---|
+| native送信前の所有／revision／target不一致 | SQLiteもcursorも変更せず拒否。古いindexだけで別のstepを選び直さない |
+| 通信断／timeout／readback mismatch | DB cursor・currentは旧状態。画面を成功扱いせず、desired・targetと操作IDを保持してlock。native結果不明を自動再送しない。明示retryでreadbackしtargetと一致する場合だけ保存へ進み、不一致なら検証付き復元を行う |
+| native一致後のSQLite busy/full／commit失敗 | DBはtransaction rollback。nativeはtargetになっていても「未保存の履歴移動」として表示し、確定cursorは旧位置のまま。次操作・切替・終了・再生成を止め、同一payload/saveIdの保存retryを優先。自動rollback mutationは追加しない |
+| SQLite commit後のHTTP応答消失／owner失効 | commit不明として保持。receiptを先に照合する同一request再送で解決。新しいnative revision不一致だけで既commitのreplayを拒否しない。再送後は最新metadataでcursorを同期 |
+| CAS競合 | 自動上書き・自動branch mergeをしない。currentとHistory metadataを同じread transactionで再取得。local操作は保持するが、自動rebaseせず、明示再試行で期待revision／targetが有効か再確認。両立しなければ再openによる保存済み状態の復元が必要 |
+| Preview／decode失敗 | DB commit成功と画像失敗を区別。cursorや保存を巻き戻さず、同じ確定revisionで画像だけ再試行。古いPreviewには未更新／失敗表示を付ける |
+
+cursor確定までlockするため、各操作を直ちにSQLite保存する場合もC3の保存guardを一本化できる。Undo targetを適用する前に保存対象となった旧gestureを先にackし、古いsave ackで新cursorをcleanにしない。サーバーshutdown／HTTP切断時も既存owned taskの完了待機を維持する。
+
+#### 4.4 保持件数と読込容量
+
+推奨上限は**200操作＋baseline 1 snapshot／identity**（nativeの上限とは別のGenzoRoom契約）。新step追加で超えた場合にだけ、同transactionで古い適用済みprefixを除き、最後に除いたsnapshotを新baselineとしてcursorとpositionを詰める。currentの完全設定、残したstep UUID、Redo枝を壊さない。Undo／jumpだけで整理しない。件数整理で古い履歴に戻れなくなることをUIへ短く示す。
+
+256 KiB × 201で設定本文の最悪約50.25 MiB／identityを許容する案であり、200は性能測定値ではない。履歴一覧へ本文を返さず、targetだけを読み、検証もboundedにする。receiptは既存同様自動削除しない。全Asset合計容量の自動削除やLRUはC4に追加しない。件数・容量予算は§8の実装前判断項目とする。
+
+### 5. 推奨実装：カテゴリ・Reset（C4-C）
+
+専用adapter methodは既存 `_mutate` を通し、許可control／sectionだけをWindows RAW APIへ公開する。Frontendへ `command_run` や任意section文字列は公開しない。各論理操作の最終readbackを§4の同じHistory writerへ渡し、native操作成功だけで完了としない。
+
+| 操作 | native接続と範囲 |
+|---|---|
+| 基本ON/OFF | `develop.sectionEnabled {section:"light", enabled}`。lightとcurveへ作用するnativeのまとまりを維持。UI未対応curveを独自に分離しない |
+| 最上部カラーON/OFF | `develop.sectionEnabled {section:"color", enabled}`。統合したWB／自然な彩度／彩度は同じbool。nativeではmixer／grading等も含む（native調査§3）。値は保持し、OFF中のResetも可能にする |
+| 非WB個別Reset | `develop.resetControl {control}`。現在allowlistのlight 6項目／color 2項目だけ。`ControlSpec.default`へのResetであり、編集開始値へ戻す操作ではない |
+| 基本カテゴリReset | `develop.resetSection {section:"light"}`。native Light ResetはCurve Resetを含まない。bypassとResetの範囲差を説明し、UI未対応Curveを推測resetしない |
+| カラーカテゴリReset | `develop.resetSection {section:"color"}` 後に `develop.wb {mode:"asShot"}`、最後に完全readback。native Color sectionの補正とWBをresetする。disabled_sectionsを維持し、別Sectionのmixer／grading等を追加resetしない |
+| WB個別Reset | `develop.resetControl`のそのまま利用は不可。推奨は温度／TINTどちらのResetも `develop.wb {mode:"asShot"}`でWB全体を戻し、両値／mode／scaleをreadback。表示を「WBをAs Shotに戻す」として影響範囲を明示。§8で個別Resetの意味を最終判断する |
+| All Reset | `develop.reset`を使う。通常import defaults／camera defaultsへ戻り、processもnative標準で現行化される。import_lookがAs Shot以外なら、必要に応じて `develop.wb {mode:"asShot"}`を続け、製品仕様のAs Shotを満たす。1つのGenzoRoom操作として全readback後に保存し、Historyは消去しない |
+
+**WBで追加確認した事実：** 固定ソース `crates/develop/src/controls.rs`の `wb.temp`既定値は6500、`wb.tint`は0。`controls::set()`はfield代入なので個別ResetはAs Shot mode／撮影時値を保証しない。`DevelopSettings::reset_section(Section::Color)`はWBを既定数値へ戻してmodeだけAs Shotにする。`crates/engine/src/cmd/develop.rs`の `develop.wb` はsource infoのAs Shot値を解決・scale正規化後に保存し、temp／tintを許可範囲へclampする。renderはmode名だけでは撮影時WBを再計算しない。このためmode=As Shotというreadbackだけでは合格にせず、source由来の値／scaleも確認する。
+
+All Resetの `import_look`分岐もWBを必ずAs Shotへ変更するものではない（native調査§5）。現在adapter importはユーザーpreset指定を公開していないが、将来やnative側の条件を推定してAs Shot保証を省略しない。追加WB commandは必要時のみとし、native値域外のAs ShotやKelvin能力なしの場合の制約は§8に残す。
+
+Reset／section toggleも `_mutate` のbudgetとdocument revisionを通す。複合Resetは「SQLite Historyは1件」でもnative command数を1と偽らない。推奨はbounded command列を1 adapter操作で実行し、**送信したdevelop mutation commandごとにattemptを保守的に計上**する（readback／select／Before設定選択はmutationでない）。既存restoreのreset＋mergeも同じ計上に揃えるなら、C3-D testの期待attempt数だけを合わせる必要がある。200／256定数、hold・保存・再生成の責務は変えず、複合操作開始前に必要な残予算を確認する。途中command失敗ではdesyncとし、半分成功した操作を別Historyへ分割しない。
+
+### 6. 推奨実装：Before／After（C4-D）
+
+#### 6.1 最小MCP拡張とadapter／HTTP
+
+native調査§2／§6の通り、`render_preview`→`render_photo`→`ui.render`→`Headless::render`→`render_now`が `before=false`固定。`beforeAfter.setBefore`で基準だけ選択しても既存画像toolの出力はAfterのままである。
+
+- LightCraft `crates/mcp/src/tools.rs`：`render_preview`のtool入力schema・説明と `render_photo` にoptional bool `before`（既定false）を追加し `ui.render`へ転送。既存After呼出しと返却PNG／metadataを維持する。
+- `crates/mcp/src/headless.rs::Headless::render`：trueなら既存 `session.render_job(id,size,size,true,true)` を実行して通常renderと同じ結果処理へつなぐ。`render_now`のrun／accept／error処理との整合性を確認する。Engine全体の既定動作やGUIには変更しない。
+- 未対応binaryが未知flagを無視してAfterを返す事態を防ぐため、MCPのtool schemaで対応有無を検査し、responseにも実際の `before`種別を追加してadapterが検証する。versionが同じ0.10.0というだけで拡張対応としない。既存handshakeのcommit非証明という制約も残る。
+- GenzoRoom `lightcraft_raw.py`：既存Preview ticketへkind／Before keyを追加、Before renderを同じmanager直列化・PNG／寸法／PhotoId検証に通す。現在の単一pending ticketでBeforeとAfterを相互に誤supersedeしないよう、同一documentの表示要求をAfter優先で順序付けする。処理経路や画像上限を複製しない。
+- `windows_raw_api.py`の既存preview POSTへ `kind:after|before`を追加する案。所有情報／confirmed revision／serial検証とno-storeを維持し、種別・Before cache keyもresponse headerへ返す。既存HTTP画像5 MiB／MCP Preview上限は維持。maxSide=1024は当面継続するがcache keyに寸法を含め、将来拡張可能にする。
+- `rawApi.ts`のframe型／header検証、`useRawDocument.ts`の要求・decode・URL解放を拡張する。拡張非対応ならRAW After編集を継続しBeforeだけ無効化する。Before失敗をAfter／Immich画像のBefore表示で埋めない。
+
+新importごとにadapterが `beforeAfter.setBefore {source:"import"}` を明示し、native初期現像を選ぶ。Before sourceの任意History／current選択UI・永続設定は作らない。通常の復元やUndoはAfterだけを変える。native復元中の `develop.reset` をBefore基準保存の代用にしない。
+
+#### 6.2 キャッシュとViewer
+
+Beforeは初回表示要求時に遅延生成する。ユーザーの「crop変更後の初回Originalは遅く、2回目以降は瞬時」「手動レンズ歪曲補正はBeforeへ出ない」というWindows観察は受入の参考とし、GUI内部cache実装の証明とは扱わない。
+
+| 状態 | 所有・寿命・無効化 |
+|---|---|
+| Before基準 | LightCraft Session。各importでimport defaultsを選ぶ。DB current／履歴baselineから作らない。再生成／再入場で選び直す |
+| Before render key | Backendがdocumentのimport基準識別子・source identity・engine tuple・確定readbackのcrop／orientation・出力寸法／crop有無から作る。nativeの有効Before設定fingerprintもrender metadataで照合する。Afterだけの露出／WB／歪曲変更は含めない。Frontendへ設定本文やsource hashは出さずopaque fingerprintで渡す |
+| Before PNG／Blob URL | active document内の圧縮画像1件のみをFrontendが保持。再要求を同じkeyで集約。正しいdecode・寸法・kind・key確認後に差替え、旧URLをrevoke。永続disk cache／写真横断cacheは作らない |
+| 無効化条件 | source／document／generation／token変更、Before基準変更、native有効Before設定変更、要求出力寸法変更。crop／orientationはnativeに従いkeyを更新。単なるAfter slider／カテゴリ／ResetでBefore keyが不変なら再利用可能 |
+| 非同期所有 | 既存selection serial／document revision／epoch／sequenceにkind／keyを追加。生成開始後にcrop・寸法・documentが変わればstaleとして破棄し候補URLを回収。After revisionが変わってもBefore keyが同じ場合の再利用は、最新ownerとkeyの再検証後だけ許可 |
+| RAW切替・Session再生成・離脱 | Before画像・候補・pendingを破棄し、再openのnative基準から再生成。JPEGのpersistent Before/After選択は現行どおりAnshitsuPageで所有し、表示要求がBeforeなら新RAWの有効画像を待つ。画像cache自体は持ち越さない |
+
+cache lookup前のkeyはBackendが既に持つ完全確定snapshotのcrop／orientationから計算する。Before基準は同一document内でimportに固定するので、基準識別子はdocument生成時に固定でき、新しいSettings snapshot storeは要らない。native `before_settings()`のfingerprintを生成結果に付けてこの契約を検証する。追加toolを増やさず、keyはsettings応答にも返し、画像取得なしでFrontendが無効化を判定できるようにする。現行公開数値subsetだけではcrop／orientation差を判定できないため、全settings fingerprintをBefore keyとして使って毎slider再生成する実装を最終形にしない。
+
+`ImageViewer`へRAW用Before画像入力とloading/errorを追加し、既存plain img部分のBefore／Afterを同じstage／transform内で切り替える。`documentKey`に画像種別やBlob URLを入れず、同じdocumentの切替はzoom／panを維持する。nativeが同じcrop／orientationで出力した両画像の実寸・aspectを検証し、同じ要求maxSideで揃える。寸法不一致を伸縮や別fitで隠さず比較を保留する。cropで実寸が変わる場合だけ両frameを再取得し共通fit／pan clampを更新する。
+
+Before準備中はその状態を表示してAfterを維持し、準備完了後に比較する。Backslash一時表示、永続switch、JIS Originalキー優先、IME／入力／dialog／menu guardとフォーカスを既存registry経由で維持する。JPEGは従来 `AdjustedImage` のCanvas比較を使い、RAW入力を渡さなければ動作は変わらない。RAW Scope／Exportは有効化しない。
+
+### 7. 推奨実装：JPEG個別ON/OFF削除（C4-E）
+
+| 変更対象 | 実装する内容／維持する境界 |
+|---|---|
+| `AdjustmentSlider.tsx` とWB／Basic／Color／ColorGrading各Controls | 個別power・toggle props・個別OFFのdim表示を外す。Resetのbutton／callbackは残す。RAWも共通部品から個別powerを受け取らず、Resetだけを接続可能にする。`actions=false`でまとめて消すとResetも消えるため使わない |
+| `AnshitsuPage.tsx`／`AdjustmentContextMenu.tsx` | slider menuの個別toggleのみ削除。copy／paste／Reset・focus復帰を維持。カテゴリ／grading rangeのtoggle行は維持し、共用menuにはtoggle表示の明示的な区別を持たせる |
+| `adjustmentNavigation.ts`／関連CSS／locale | 個別powerへのfocus探索・レイアウトを整理。category／range powerは残す。削除済みcontrolへのfocus退避経路を作らない |
+| `editing.ts` | 新規 `toggleAdjustment` actionの生成・reducer操作を廃止し、新しいRecipeは全個別flag trueのまま。`effectiveAdjustments`から個別flagによる既定値代入を除き、カテゴリ／grading rangeだけをbypassに使う。Frontendのnon-default／edited判定（`recipesEqual(recipe, defaultRecipe())`利用箇所を含む）も個別flagだけで編集ありとしないようBackendと揃える。保存整合性の完全Recipe比較とは責務を区別し、数値・カテゴリのHistory検証を弱めない。Recipe型／version／flag構造は残す |
+| `adjustmentPipeline.ts`／Worker／`webgpuRecipe.ts` | 共有effective処理を使う現行境界を維持し、CPU・Worker・GPUで個別OFFを処理しない。画素式・stage順・processing versionは変更しない（UIとenabledポリシーの変更） |
+| `backend/jpeg_renderer.py`／`edit_state.py` | rendererの個別OFF代入を除く。編集済み判定で個別flagのみのOFFを有効な編集とみなす依存も除く。Recipe v18の16 bool形状検証は維持し、schemaやversionを上げない。JPEG Historyの数値・カテゴリ・cursor整合性検証は緩めない |
+| `editState.ts`／`EditHistory.tsx`／`editClipboard.ts` | 個別toggleを新規作成しない。既存の数値Reset・カテゴリ・paste History／localizationは維持する。旧toggle種別の型・validator・表示を残すことは可能だが復元しても個別flagを現像bypassに使わない。copy／pasteは現行どおり数値のみ |
+| `thumbnail_generator.py`／Export経路／`webgpuRecipeCases.ts` | Backend renderer共有を確認し、個別OFFなしのCPU／GPU／Export／補正済みサムネイル一致を回帰対象にする。診断caseの旧「個別OFFでbypassする」期待も更新。cacheのRecipe version・DB schema・保存データを一括変換しない |
+
+全個別flagをtrueへ書き換えるデータmigrationや、旧OFF状態を再現・救済するload処理は追加しない。保存済みfalseが来ても現像では無視するという新方針を両rendererへ適用する。Historyのbefore／afterやcurrentを一括書換えて新しい整合性問題を作らない。旧個別OFF由来のthumbnail cache救済・過去Export再生成も対象外。新規操作で個別falseを生成しないことと、flagを参照して画素をbypassする箇所が残らないことが受入条件である。
+
+### 8. まだ設計判断が必要な事項
+
+確定した最上部カラー統合・SQLite正本・As Shot・native Before・JPEG v18維持は再検討事項にしない。残る判断は次に限定する。
+
+| 判断時期 | 課題と推奨案 |
+|---|---|
+| C4-B開始時 | RAW Historyの200操作／約50.25 MiBという最悪容量を採用するか。推奨は200＋baselineで開始し、実機で待機時間／DB容量を見る。件数を変えてもschema・native上限とは独立させる |
+| C4-B開始時 | API名／一覧pagination・許可kind・receipt ack項目の最終定義。4096 bytes制限のJSON helperは履歴一覧全件に足りない。推奨はページ単位（例20件）、固定label IDとbounded metadata、履歴metadataだけに限定した応答上限を定義。通常request 4 KiBは広げない |
+| C4-C前 | 温度／TINTの「個別Reset」でWBペア両方をAs Shotへ戻すか。推奨は両方を戻し名称を明示。片値だけ戻してmode As Shotと表示する案はnative renderの意味に合わない。ユーザー指定のAs Shotを静的6500／0で代用しない |
+| C4-C前 | import_lookのWBを保つnative All Resetと、必ずAs Shotにする製品仕様の差。推奨はnative Reset後に必要な場合だけWB As Shotを追加し1 Historyにまとめる。標準Resetだけで満たせると断定しない |
+| C4-C前 | Kelvin能力なし／native clamp範囲外のAs Shot。推奨は既存WB能力guardを維持し、As Shotを正確に表現できない場合はWB専用Resetを無効化・理由表示する。All Resetは他補正のResetとWB制約をどう表示するかを実fixtureで確定し、mode文字列だけの成功表示を避ける |
+| C4-D開始時 | 最小MCP拡張のBefore key metadata、対応識別、既存Afterとの互換契約・固定ソースに対するpatchの配布方法。LightCraft版はv0.10.0固定のまま、変更済みbinaryをversionだけで同一視しない。release artifact／runtime検査を変えるなら当該期待値も確認 |
+| C4-D実機受入 | native標準crop／orientationと両frame実寸、WebView2の表示色・比較切替待ち時間。自動fake画像テストでは実GPU／GUIと同じ結果を保証できない |
+
+JPEGの履歴整理menu（clear／trim／compact／resetEdits）全機能をRAWへ移植することは今回の必須受入に含めない。RAWへ有効化するのはUndo／Redo／jumpと新操作の枝切りまで。ResetとHistory消去を結び付けず、未対応menuは理由付きで無効／非表示にする。
+
+### 9. 実装区分・依存・受入条件
+
+依存は **C4-B1→B2→B3→C4-C、C4-B3→C4-D、C4-Cの共通Slider整理と調整してC4-E、全体→C4-F**。C4-EのBackend画素方針は独立して準備できるが、共用Sliderの削除をC4-Cと重複実装しない。C3基盤は置換しない。以下は将来実装時のテスト計画で、今回実施した結果ではない。
+
+#### C4-B：RAW History・Undo/Redo
+
+| 単位 | 対象ファイル・責務 | 自動テスト範囲 | Windows実機・完了条件 |
+|---|---|---|---|
+| B1 永続契約 | `backend/raw_recipe_store.py`、`edit_store.py`、`storage.py`、`release/smoke-test.sh`。additive table・read validation・原子的writer・receipt・200件整理 | `test_raw_recipe_store.py`／`test_storage.py`とHistory追加テスト。v7以前からのupgrade、既存JPEG／Queue保持、append／jump／枝切り／prune、busy/full／commit rollback、同設定異cursor、saveId replay／異payload拒否。Smoke Testの変更SQL／Python assertionはfocused実行 | upgrade前の整合backup／復旧手順を確認。実DB操作は実装時の承認範囲で別管理。currentとcursorが常に同じ保存状態であることが完了条件 |
+| B2 document／操作API | `backend/windows_raw_api.py`、`lightcraft_raw.py`、必要な `raw_controls.py`。gesture／target restore／History metadata、既存queue／owner／shutdown／保存receipt統合 | `test_raw_recipe_api.py`／`test_raw_recipe_restore.py`／`test_windows_raw_api.py`／`test_lightcraft_raw.py`。HTTP cancel、native未知／mismatch、DB失敗、commit後ack消失、外部CAS競合、世代変更、checkpointとHistory同期 | Undo／Redo後の保存・再openとエラー再試行。失敗時cursor成功表示なし、任意Settings／command公開なし、DockerへRAW route追加なし |
+| B3 UI／gesture | `rawApi.ts`、`rawControls.ts`、`rawRecipeSave.ts`、`useRawDocument.ts`、`RawAdjustmentControls.tsx`、`AnshitsuPage.tsx`、`EditHistory.tsx`またはRAW表示分岐、`useAssetEdits.ts`のshortcut arbitration最小接続、必要なlocale | 既存raw系unit／hook、`useRawDocument.test.tsx`、`AnshitsuRawPreview.test.tsx`、`AnshitsuPersistence.test.tsx`、History／shortcut focused。長いdrag・500ms・数値Escape・begin重複・control変更・no-op枝保持・保存retry・close guard・200境界再生成 | pointer／数値／keyboard／wheelが各1履歴、Undo／Redo／jump・枝切り、RAW↔JPEG、Gallery・通常終了・再起動でcursorとRedo保持。256超の累計操作を新世代で継続し、再生成で履歴を増減しない |
+
+JPEG EditEntryにRAW Settingsを変換せず、表示用kind／label／数値だけを共用部品へ渡す。KelvinはRAW formatterを使う。shortcutは既存 `editShortcuts.ts`／formatterを使い、Filmstrip除外Undo優先とactive engine dispatchを1経路で仲裁する。RAW用第二listenerで同じPrimary+Zを処理しない。
+
+#### C4-C：カテゴリON/OFF・個別／カテゴリ／All Reset
+
+- 変更：`backend/lightcraft_raw.py`／`raw_controls.py`／`windows_raw_api.py`、Frontendの `rawApi.ts`／`rawControls.ts`／`useRawDocument.ts`／`RawAdjustmentControls.tsx`／`AdjustmentSlider.tsx`／`AnshitsuPage.tsx`／locale。最上部カラー4項目の統合、native allowlist、As Shot対応、mutation budget、BのHistory writerへの操作登録を担当する。
+- 自動テスト：native command payload・順序、OFF中の値保持／Reset、light／color section境界、WB mode・値・scale、As Shotと異なる6500／0、import_look分岐、複合command途中失敗、1 History／Undo復元、200／256予算、save失敗guard。既存 `test_raw_controls.py` とraw adapter／API／Controls・Anshitsu focused testを拡張。
+- Windows実機：最上部カラー→基本の順、カラー共通powerで4項目の見た目と補正が連動、OFF→ONで値保持、WB各Reset／カテゴリ／All ResetのAs Shot、Reset→Undo→Redo、保存・再入場、200境界のResetを確認する。
+- 完了：カテゴリ／Resetが1操作でSQLite保存・Undo可能。native readback全体を維持し、個別power／WB preset UI／History clearを追加しない。§8のWB判断が確定し、代表fixtureと実機で制約を説明できる。
+
+#### C4-D：RAW Before/After・最小MCP拡張
+
+- 変更：固定LightCraftの `crates/mcp/src/tools.rs`／`headless.rs` と関連MCP test（本工程で初めて変更）、GenzoRoom `lightcraft_raw.py`／必要な `lightcraft_mcp.py`・runtime能力検査／`windows_raw_api.py`、`rawApi.ts`／`useRawDocument.ts`／`ImageViewer.tsx`／`AnshitsuPage.tsx`／locale。画像取得・key・kind・Blob寿命・共通Viewerを担当。
+- 自動テスト：拡張なしAfter互換／Before非対応、true flag伝達、native初期設定・crop／orientation・歪曲非転写、同key cache hit／寸法・世代変更miss、Before／After queue衝突、PNGサイズ／metadata不一致、decode中切替、URL解放、再生成後再取得。JPEG `ImageViewer.test.tsx`／`AdjustedImage`比較も回帰。
+- Windows実機：初回Before生成と2回目cache切替、補正しても初期現像Before、同一位置・zoom／pan、Backslash／JIS、RAW切替／再生成／再入場、Before失敗時のAfter編集継続、拡張非対応binaryを確認。crop／orientation・歪曲はUI追加せずfixtureで標準動作を検証する。
+- 完了：最初のPreview保存に依存せずnative Beforeが取得でき、After現在設定・History・保存状態を変えない。key更新／所有／寸法検証とJPEG比較回帰が成立し、1024を将来固定仕様として記載しない。
+
+#### C4-E：JPEG個別ON/OFF削除
+
+- 変更：§7のFrontend Controls／Slider／menu／navigation／`editing.ts`／`edit_state.py`／`jpeg_renderer.py`／診断case・関連test／locale。Recipe v18・16 bool・JPEG table構造は維持する。RAW Bのadditive migrationとは独立。
+- 自動テスト：`editControls.test.tsx`、`editing.test.ts`、`editClipboard`／History／`useAssetEdits`／`editState`、CPU pipeline／Worker／WebGPU recipe、Backend `test_jpeg_renderer.py`／`test_edit_state.py`／`test_thumbnail_generator.py`とExport focused。個別flagをfalseにしても画素は有効、カテゴリ／grading range OFFは引き続きbypass、Reset・Undo／Redo・paste・保存の整合性を確認。旧個別OFFを再現する期待だけを更新し、無関係のpixel goldenは変更しない。
+- Windows実機：個別powerとslider menu toggleがなくResetが使えること、カテゴリ・grading range・コピー／ペースト・History・Before／After・Export／補正サムネイルを確認。NAS／Firefoxの既存JPEG回帰はユーザー確認へ残す。
+- 完了：新しい個別falseを生成する操作がなく、Frontend／Backendとも個別OFFで値を無効化しない。migration・過去データ救済なしで新規操作の保存／描画／Exportが一致する。
+
+#### C4-F：横断監査・回帰・実機受入
+
+- 対象はB〜Eのdiffと依存境界、必要な `docs/architecture.md` の共有状態表・仕様追随、既存関連テスト。新機能や対象外工程を追加する区分ではない。
+- 監査対象はnative→readback→History/currentのtransaction→ack→Preview、generation変更、gestureの残存、receipt再送／CAS、cursor-only dirty、複合Reset失敗、Before cache所有、JPEG renderer／thumbnail／Exportの方針一致、認証・4 KiB request制約、構造化診断のprivacy。
+- 診断は既存loggerへoperation開始／完了・readback不一致・保存失敗／再送・stale破棄・再生成・Before cache詳細を必要なlevelで追加する。operation ID／saveId／revision／cursor／件数／generation／bytes／固定errorCodeだけを用い、Settings／History本文・画像・path・cookie・任意文字列を出さない。終端失敗をoperation errorとして記録し、logger失敗で処理を失敗させない。
+- 自動確認は変更に対応するFrontend／Backend focused統合とTS check／production build、`git diff --check`。B／Eは保存・renderer共有を跨ぐため両側を確認する。full suiteはfocusedで残る具体的な不足を報告してから判断し、成功済みの無変更範囲は繰り返さない。フルDocker Smoke Testは行わず、schema等の変更assertionをfocused実行する。
+- Windows実機受入はユーザーが実施する。混在Filmstrip→長いRAW gesture→Undo／Redo／Reset→200再生成→Before比較→保存失敗retry→通常終了／再起動、原本／engine不一致、実GPU／RSS／待機時間、JPEG Export／サムネイル、NAS／Firefoxをチェックする。自動fake成功と実機成功を分けて記録する。
+- 完了条件はB〜Eの受入・未決定事項が解消され、保存整合性とJPEG回帰の未解決重大問題がなく、実機未実施項目が明示されていること。実機の未確認を自動テストで確認済みとはしない。
+
+### 10. C4-Aの完了範囲
+
+今回完了したのは、接続箇所・保存transaction／失敗境界・UI方針・実装区分の調査と本節への記録である。新規memory snapshot store、native History同期、C3再実装、JPEG旧OFF移行は提案しない。C1〜C3完了記録とnative調査書を保持し、README／CHANGELOG／architectureは今回変更しない。
+
+検証は文書差分の確認と `git diff --check` のみ。テスト／build・migration・実データ操作・LightCraft変更・実機操作は未実施。Commit／Push後はC4-Aで停止し、C4-B以降へ進まない。
