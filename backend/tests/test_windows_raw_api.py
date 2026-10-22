@@ -57,7 +57,8 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                     assert (await http.get("/api/raw/capabilities", headers=headers)).status_code == 403
                 workspace, doc = await open_document(http)
                 assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId",
-                                    "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint"}
+                                    "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint",
+                                    "mutationAttempts", "mutationLimit", "regenerationThreshold"}
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})
                 assert state.json()["revision"] == doc["revision"]

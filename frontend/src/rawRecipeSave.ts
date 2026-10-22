@@ -33,7 +33,7 @@ export class RawRecipeSave {
   }
   pause() { this.paused = true; clearTimeout(this.timer); }
   resume() { this.paused = false; this.observe(this.confirmed, true); }
-  save(retry = false): Promise<void> {
+  save(retry = false, force = false): Promise<void> {
     if (this.operation) return this.operation;
     clearTimeout(this.timer);
     let finish!: () => void, reject!: (error: unknown) => void;
@@ -48,7 +48,8 @@ export class RawRecipeSave {
         if (retry && this.conflict && !this.retryRequest) { await this.resync(); this.conflict = false; }
         // Replay the exact saved document revision before creating a new saveId for newer readback.
         if (this.retryRequest) await this.send(this.retryRequest);
-        if (this.confirmed.settingsFingerprint !== this.savedFingerprint) {
+        // Renewal needs a DB row even when edits returned to an initially unsaved baseline.
+        if (force || this.confirmed.settingsFingerprint !== this.savedFingerprint) {
           await this.send({ doc: { ...this.confirmed }, expectedRecipeRevision: this.revision, saveId: createEditStateSaveId() });
         }
         if (!this.active) throw new RawApiError('raw_document_closed');

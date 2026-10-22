@@ -269,3 +269,63 @@ def test_new_backend_host_restores_the_sqlite_recipe_after_restart(local, tmp_pa
         finally:
             await api.close()
     asyncio.run(run())
+
+
+def test_soft_budget_reopen_restores_readback_beyond_old_generation_limit(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                old = doc
+                for cycle in range(2):
+                    assert doc["mutationLimit"] == 256 and doc["regenerationThreshold"] == 200
+                    for attempt in range(200 - doc["mutationAttempts"]):
+                        doc = await change(http, doc, (attempt % 30) / 10)
+                    assert doc["mutationAttempts"] == 200
+                    # One final flush after the UI has stopped accepting new operations.
+                    doc = await change(http, doc, 1.25 + cycle)
+                    assert doc["mutationAttempts"] == 201
+                    result = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc, cycle))
+                    assert result.status_code == 200
+                    assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                    workspace, reopened = await open_asset(http, doc["assetId"])
+                    assert reopened.status_code == 200
+                    next_doc = reopened.json()
+                    assert next_doc["generation"] > doc["generation"] and next_doc["handle"] != doc["handle"]
+                    assert next_doc["recipeStatus"] == "restored" and next_doc["mutationAttempts"] == 1
+                    assert next_doc["settingsFingerprint"] == doc["settingsFingerprint"]
+                    assert (await http.post(f'/api/raw/documents/{old["handle"]}/preview', json={
+                        **identity(old), "revision": old["revision"], "serial": 1})).status_code == 409
+                    doc = next_doc
+                api.raw._edits = 256
+                rejected = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json={
+                    **identity(doc), "expectedRevision": doc["revision"], "values": {"light.exposure": 3}})
+                assert rejected.json()["code"] == "raw_session_edit_limit"
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 30))
+
+
+def test_three_raw_switches_use_existing_release_and_sqlite_restore(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        assets = [str(uuid4()) for _ in range(3)]
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                for index, asset in enumerate(assets + assets[:1]):
+                    workspace, response = await open_asset(http, asset)
+                    assert response.status_code == 200
+                    doc = response.json()
+                    if index == 3:
+                        assert doc["recipeStatus"] == "restored" and doc["recipeRevision"] == 1
+                    else:
+                        doc = await change(http, doc, (index + 1) / 2)
+                        assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))).status_code == 200
+                    assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                assert len(database_rows()["asset_raw_recipes"]) == 3
+        finally:
+            await api.close()
+    asyncio.run(run())

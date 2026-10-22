@@ -15,6 +15,7 @@ export class RawControls {
   constructor(public confirmed: RawSettings, private options: {
     schedule: (action: () => Promise<void>) => void;
     changed: () => void;
+    hold?: () => boolean;
     preview: (settings: RawSettings, current: () => boolean) => Promise<void>;
   }) {}
 
@@ -29,7 +30,7 @@ export class RawControls {
   }
   flush() {
     clearTimeout(this.timer);
-    if (!this.active || this.error || this.busy || this.queued || !Object.keys(this.pending).length) return;
+    if (this.options.hold?.() || !this.active || this.error || this.busy || this.queued || !Object.keys(this.pending).length) return;
     this.queued = true;
     this.options.schedule(async () => {
       this.queued = false;
@@ -39,6 +40,8 @@ export class RawControls {
       let conflicts = 0;
       try {
         while (this.active && Object.keys(this.pending).length) {
+          // Preserve the latest drag intent without consuming the reserved final-flush budget.
+          if (this.options.hold?.()) break;
           const patch = this.pending;
           this.pending = {};
           try {

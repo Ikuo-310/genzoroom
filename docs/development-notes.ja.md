@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C3-D：同一RAWの安全なSession自動再生成（2026-10-22）
+
+設計修正Commit `33a130eda91c868c8facc39ad80418b929b60d11`から限定実装した。Backendは既存mutation試行カウンターをdocument／settingsへ公開し、soft閾値200・hard上限256を使用する。復元・readback失敗を含む実試行数を使い、revisionやSlider入力数から推測しない。native adapterのhard limit・Session再生成・cache所有権／cleanup、SQLite schema v7は変更していない。
+
+RAWパネルが既存Slider begin／commitをhookへ伝える。操作中に200へ達した場合は最新desiredだけを保持してnative送信をholdし、操作自体は切断しない。操作確定後に新規入力を停止し、最終patchのflush→readback→SQLite保存ack→旧workspace解放→同じRAWの再import／DB復元→新generation・recipe revision・全設定fingerprint一致→Preview確認の順に再開する。残56試行を最終flush・既存の有限な再同期等の余裕とし、連続入力でも200以降を無制限送信しない。DB未保存の初期baselineへ戻った場合も再生成前は確定設定を明示保存する。
+
+保存失敗・結果不明では旧document／desired／同一saveIdの保存requestを保持して解放しない。release／cleanup失敗は旧workspace IDを残し、新規createを拒否する。restore／readback／Preview失敗ではDB行を保持し、初期値で成功扱いせずsession再試行を表示する。DELETE応答のみ失ったケースは再送conflictと既存capabilitiesのempty／cleanupPending=falseを確認した場合だけ進める。作成応答消失でopaque IDが得られない場合は所有を推定せず、既存lease等の回収待ちが残る。正常切替・終了は進行中の再生成を待ち、旧generation/tokenのSlider callbackとPreviewを採用しない。
+
+検証：repo Python 3.14／cwd backend、関連8ファイル293件＋41 subtests成功。Fake LightCraftと一時SQLiteで複数世代の256試行超継続、200＋最終flush、完全readback保存復元、旧handle拒否、hard limit維持、RAW3枚の既存release／保存復元を確認した。Frontend関連10ファイル246件成功後、解放応答消失と再生成中の退出待機を追加し、変更範囲3ファイル43件も成功（最終関連範囲は計248件）。制御timer／gateで長いドラッグの300入力集約・最終201試行、保存／cleanup／復元失敗と再試行、再生成中新規編集拒否、旧Preview／callback・高速切替を検証した。JPEG保存・History・Queue・Viewer・Windows通常終了の関連回帰も成功。TypeScript check／production buildと`git diff --check`成功。既存500 kB超chunk警告あり。
+
+C3-A〜Cの規約・JPEG編集保存は維持し、RAW3枚以上の切替は既存queue／lockを利用する。新しいresident manager、snapshot store、LRU、cache再実装、DB変更、C4／RAW Exportは追加していない。C3-CのWindows実機保存・復元成功は既存のユーザー確認として維持する。今回の実GPU・実Immich・Windows画面・長時間負荷／RSS・再生成待ち時間は未検証で、ユーザー実機確認へ残す。200はmemory危険値の実測結果ではなく、試行予算を保つための閾値である。全体suite・README／CHANGELOG変更は行っていない。
+
 ## RAW現像統合 Phase 1C-C3-C：Autosaveと写真切替・通常終了保存（2026-10-22）
 
 C3-B完了Commit `5bdffb955103c2dcdfb36b9f20ca33c785c30915`から、Windows RAW recipe GET／PUTとFrontend保存ownerを接続した。Backendはworkspace／document／generation／tokenとnative revisionを確認し、LightCraftの完全な確定readbackだけを既存SQLite保存層へ渡す。Frontendは設定本文を送らず、native document revisionとSQLite recipe revisionを分け、完全設定のfingerprintでdirtyを判定する。schema v7、C3-Aのtransaction／saveId規約、C3-Bの原本・engine互換性検証と復元、C1 cleanup所有権は維持する。

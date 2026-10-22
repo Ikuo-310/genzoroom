@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, readRawRecipe, RawSaveError, type RawDocument } from './rawApi';
+import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, readRawRecipe, rawWorkspaceEmpty, RawSaveError, type RawDocument } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
@@ -56,7 +56,7 @@ describe('bounded RAW binary contract', () => {
     expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/settings`);
   });
   it('rejects stale identity and malformed control metadata in settings responses', async () => {
-    for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} }, { wb: { available: 'yes' } }]) {
+    for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} }, { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } }]) {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), ...patch }),
         { headers: { 'Content-Type': 'application/json' } })));
       await expect(readRawSettings(doc)).rejects.toThrow('raw_invalid_response');
@@ -83,4 +83,15 @@ describe('bounded RAW binary contract', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Not Found', { status: 404 })));
     await expect(rawCapability()).rejects.toThrow('raw_unsupported');
   });
+});
+
+
+it('permits release-ack recovery only for an observed empty workspace with no cleanup pending', async () => {
+  for (const state of [
+    { workspaceState: 'active', cleanupPending: false }, { workspaceState: 'cleanup_failed', cleanupPending: false },
+    { workspaceState: 'empty', cleanupPending: true }, {}, { workspaceState: 'empty', cleanupPending: false },
+  ]) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(state), { headers: { 'Content-Type': 'application/json' } })));
+    expect(await rawWorkspaceEmpty()).toBe(state.workspaceState === 'empty' && state.cleanupPending === false);
+  }
 });

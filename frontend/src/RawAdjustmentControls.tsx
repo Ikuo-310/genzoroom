@@ -21,6 +21,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const actionsUnavailable = t('workspace.rawPreview.actionsUnavailable');
   return <div className="raw-adjustment-controls">
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
+    {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
+    {raw.regenerationError && <div role="alert"><p>{t('workspace.rawPreview.regenerationFailed')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.regenerating}
+        onClick={raw.retryRegeneration}>{t('workspace.rawPreview.retryRegeneration')}</button></div>}
     {raw.saving && <p role="status">{t('workspace.rawPreview.saving')}</p>}
     {raw.dirty && !raw.saving && !raw.saveError && <p role="status">{t('workspace.rawPreview.unsaved')}</p>}
     {raw.saveError && <div role="alert"><p>{t(raw.saveError === 'raw_recipe_revision_conflict'
@@ -42,7 +46,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         // C4 owns RAW bypass and reset semantics; disabled placeholders keep the JPEG panel layout consistent.
         return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} actionsDisabled
           actionsUnavailableLabel={actionsUnavailable} trackGradient={trackGradient}
-          label={t(`workspace.${id}`)} enabled onToggle={() => {}} onReset={() => {}} onBegin={() => {}}
+          label={t(`workspace.${id}`)} enabled onToggle={() => {}} onReset={() => {}} onBegin={raw.beginControls}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(`workspace.${id}Reset`)} valueLabel={t(`workspace.${id}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}

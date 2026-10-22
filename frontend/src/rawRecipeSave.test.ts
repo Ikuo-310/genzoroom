@@ -94,3 +94,12 @@ it('does not accept an acknowledgement for a disposed document', async () => {
   expect(await saving).toBeInstanceOf(api.RawApiError);
   expect(changed).not.toHaveBeenCalled(); expect(c.savedFingerprint).toBe(fingerprint(1));
 });
+
+
+it('can persist an unchanged initial baseline before session renewal without marking desired values saved', async () => {
+  const c = saver();
+  expect(c.dirty).toBe(false);
+  await c.save(false, true);
+  expect(api.saveRawRecipe).toHaveBeenCalledOnce(); expect(c.revision).toBe(1);
+  expect(vi.mocked(api.saveRawRecipe).mock.calls[0][0].doc).toEqual(settings());
+});

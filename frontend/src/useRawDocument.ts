@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, readRawDocument, readRawSettings,
-  releaseRawWorkspace, RawApiError, type RawDocument, type RawSettings, type RawValues } from './rawApi';
+  releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
@@ -8,7 +8,7 @@ import { RawRecipeSave } from './rawRecipeSave';
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; document?: RawDocument; code?: string; settings?: RawSettings;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
-  saving?: boolean; saveError?: string; locked?: boolean };
+  saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string };
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
@@ -24,6 +24,10 @@ export function useRawDocument(assetId: string | null) {
   const editorRef = useRef<RawControls | null>(null);
   const saverRef = useRef<RawRecipeSave | null>(null);
   const frozen = useRef(false);
+  const interacting = useRef(false);
+  const restartRef = useRef<(retry?: boolean) => Promise<void>>(async () => {});
+  const restartWaitRef = useRef<() => Promise<void>>(async () => {});
+  const renewalLockedRef = useRef<() => boolean>(() => false);
   const notifyRef = useRef<() => void>(() => {});
   identity.current = assetId;
   useEffect(() => {
@@ -34,7 +38,13 @@ export function useRawDocument(assetId: string | null) {
     let editor: RawControls | undefined;
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
+    interacting.current = false;
     let frameSerial = 0;
+    let restarting = false, regenerationError: string | undefined;
+    let restartOperation: Promise<void> | undefined;
+    let stage: 'save' | 'release' | 'open' = 'save';
+    let expectedFingerprint: string | undefined, expectedRecipeRevision: number | undefined;
+    let oldGeneration: number | undefined;
     const controller = new AbortController();
     const current = () => active && identity.current === assetId && serial.current === currentSerial;
     const revoke = () => { if (url) URL.revokeObjectURL(url); url = undefined; };
@@ -77,6 +87,121 @@ export function useRawDocument(assetId: string | null) {
         setState(previous => ({ ...previous, assetId, status: 'ready', url, document: doc }));
       } finally { if (candidate) URL.revokeObjectURL(candidate); }
     };
+    const notify = () => {
+      if (!current() || !editor) return;
+      if (editor.error) log(editor.error, 'controls.failed');
+      const confirmed = editor.confirmed;
+      saver?.observe(confirmed, !editor.unsettled);
+      setState(previous => ({ ...previous, assetId, status: previous?.status ?? 'ready',
+        document: confirmed, settings: confirmed, desired: { ...editor!.desired }, pending: editor!.unsettled,
+        editError: editor!.error, dirty: saver?.dirty, saving: saver?.saving, saveError: saver?.error,
+        locked: frozen.current, regenerating: restarting, regenerationError }));
+      if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && !interacting.current
+        && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
+    };
+    const install = (settings: RawSettings) => {
+      const installed = new RawControls(settings, { schedule: enqueue, changed: notify,
+        hold: () => interacting.current && installed.confirmed.mutationAttempts >= installed.confirmed.regenerationThreshold,
+        preview: (confirmed, valid) => displayPreview(confirmed, () => current() && editor === installed && valid()),
+      });
+      editor = installed;
+      saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify });
+      saverRef.current = saver;
+      editorRef.current = editor;
+      notifyRef.current = notify;
+      setState(previous => ({ ...previous, assetId, status: 'ready', document: settings, settings,
+        desired: {}, pending: false, editError: undefined, dirty: false, saving: false, saveError: undefined }));
+    };
+    // Compose release/open on the existing owner queue, never a second lifecycle dispatcher.
+    const owned = (action: () => Promise<void>) => new Promise<void>((resolve, reject) => {
+      enqueue(async () => { try { await action(); resolve(); } catch (error) { reject(error); } });
+    });
+    const release = async () => {
+      if (!workspace) return;
+      try { await releaseRawWorkspace(workspace); }
+      catch (cause) {
+        if (!(cause instanceof RawApiError) || cause.code !== 'raw_workspace_conflict' || !await rawWorkspaceEmpty()) throw cause;
+      }
+      workspace = undefined;
+    };
+    const sessionEvent = (event: string) => {
+      try { frontendLogger.add({ level: 'info', component: 'raw', event, context: {
+        assetId, generation: editor!.confirmed.generation, revision: editor!.confirmed.revision,
+        mutationAttempts: editor!.confirmed.mutationAttempts } }); } catch { /* Optional diagnostics. */ }
+    };
+    const restart = (retry = false): Promise<void> => {
+      if (restartOperation) return restartOperation;
+      if (!current() || !editor || !saver) return Promise.reject(new RawApiError('raw_document_closed'));
+      sessionEvent('session.regenerationStarted');
+      restarting = true;
+      regenerationError = undefined;
+      frozen.current = true;
+      interacting.current = false;
+      saver.pause();
+      notify();
+      restartOperation = Promise.resolve().then(async () => {
+        if (stage === 'save') {
+          if (retry && editor!.error) editor!.retry(true);
+          if (saver!.error) await saver!.save(retry);
+          await editor!.settle();
+          if (!current()) throw new RawApiError('raw_document_closed');
+          saver!.observe(editor!.confirmed, true);
+          await saver!.save(retry, saver!.revision === 0);
+          if (saver!.dirty || editor!.unsettled) throw new RawApiError('raw_save_unconfirmed');
+          expectedFingerprint = editor!.confirmed.settingsFingerprint;
+          expectedRecipeRevision = saver!.revision;
+          oldGeneration = editor!.confirmed.generation;
+          stage = 'release';
+          editor!.dispose(); saver!.dispose();
+        }
+        await owned(async () => {
+          if (!current()) throw new RawApiError('raw_document_closed');
+          revoke();
+          setState(previous => ({ ...previous!, status: 'loading', url: undefined }));
+          await release();
+          if (!current()) throw new RawApiError('raw_document_closed');
+          stage = 'open';
+          workspace = await createRawWorkspace();
+          // A failed open may already have released its workspace; retry still verifies that fact.
+          stage = 'release';
+          if (!current()) throw new RawApiError('raw_document_closed');
+          const doc = await openRawDocument(workspace, assetId);
+          if (!current()) throw new RawApiError('raw_document_closed');
+          const settings = await readRawSettings(doc);
+          if (!current()) throw new RawApiError('raw_document_closed');
+          if (settings.generation === oldGeneration || settings.settingsFingerprint !== expectedFingerprint
+            || settings.recipeFingerprint !== expectedFingerprint || settings.recipeRevision !== expectedRecipeRevision)
+            throw new RawApiError('raw_recipe_restore_mismatch');
+          await displayPreview(settings);
+          if (!current()) throw new RawApiError('raw_document_closed');
+          install(settings);
+          stage = 'save';
+          frozen.current = false;
+          sessionEvent('session.regenerationCompleted');
+        });
+      }).catch(cause => {
+        if (current()) {
+          regenerationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+          log(regenerationError, 'session.regenerationFailed');
+          if (stage !== 'save') setState(previous => ({ ...previous!, status: 'error', url: undefined }));
+        }
+        throw cause;
+      }).finally(() => {
+        restarting = false;
+        restartOperation = undefined;
+        if (current()) {
+          if (stage === 'save') notify();
+          else setState(previous => ({ ...previous!, locked: true, regenerating: false, regenerationError }));
+        }
+      });
+      return restartOperation;
+    };
+    renewalLockedRef.current = () => restarting || !!regenerationError;
+    restartRef.current = restart;
+    restartWaitRef.current = async () => {
+      if (restartOperation) await restartOperation;
+      if (regenerationError) throw new RawApiError(regenerationError);
+    };
     setState({ assetId, status: 'loading' });
     enqueue(async () => {
       try {
@@ -92,27 +217,11 @@ export function useRawDocument(assetId: string | null) {
         if (!current()) return;
         await displayPreview(settings);
         if (!current()) return;
-        const notify = () => {
-            if (!current() || !editor) return;
-            if (editor.error) log(editor.error, 'controls.failed');
-            const confirmed = editor.confirmed;
-            saver?.observe(confirmed, !editor.unsettled);
-            setState(previous => ({ ...previous, assetId, status: previous?.status === 'error' ? 'error' : 'ready', document: confirmed, settings: confirmed,
-              desired: { ...editor!.desired }, pending: editor!.unsettled, editError: editor!.error,
-              dirty: saver?.dirty, saving: saver?.saving, saveError: saver?.error, locked: frozen.current }));
-        };
-        editor = new RawControls(settings, { schedule: enqueue, changed: notify,
-          preview: (confirmed, valid) => displayPreview(confirmed, () => current() && valid()),
-        });
-        saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify });
-        saverRef.current = saver;
-        notifyRef.current = notify;
-        editorRef.current = editor;
-        setState(previous => ({ ...previous, assetId, status: 'ready', settings }));
+        install(settings);
         const heartbeat = async () => {
-          const attempt = editor!.serial;
-          try { if (!editor!.unsettled && !editor!.error) await readRawDocument(editor!.confirmed, controller.signal); }
-          catch (error) { if (attempt === editor!.serial) { fail(error); return; } }
+          const attempt = editor!.serial, owner = editor;
+          try { if (!restarting && !regenerationError && !editor!.unsettled && !editor!.error) await readRawDocument(editor!.confirmed, controller.signal); }
+          catch (error) { if (!restarting && !regenerationError && owner === editor && attempt === editor!.serial) { fail(error); return; } }
           if (current()) timer = setTimeout(() => void heartbeat(), 30_000);
         };
         timer = setTimeout(() => void heartbeat(), 30_000);
@@ -155,13 +264,21 @@ export function useRawDocument(assetId: string | null) {
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
   // A departing slider's commit callback must never flush the successor document's owner.
   const activeEditor = () => identity.current === assetId && editorRef.current?.confirmed.assetId === assetId ? editorRef.current : null;
+  const callbackEditor = () => {
+    const editor = activeEditor(), doc = visible?.document;
+    return editor && doc?.generation === editor.confirmed.generation
+      && doc.documentToken === editor.confirmed.documentToken ? editor : null;
+  };
   const resume = () => {
     if (!activeEditor()) return;
+    if (renewalLockedRef.current()) return;
     frozen.current = false;
     saverRef.current?.resume();
     notifyRef.current();
   };
   const prepareSave = async (retry = false) => {
+    await restartWaitRef.current();
+    interacting.current = false;
     const editor = activeEditor(), saver = saverRef.current;
     if (!editor || !saver) return; // No editable document has been exposed yet.
     frozen.current = true;
@@ -175,8 +292,10 @@ export function useRawDocument(assetId: string | null) {
     await saver.save(retry);
     if (saver.dirty || editor.unsettled) throw new RawApiError('raw_save_unconfirmed');
   };
-  return visible && { ...visible, changeControls: (values: Partial<RawValues>) => { if (!frozen.current) activeEditor()?.change(values); },
-    flushControls: () => activeEditor()?.flush(), retryControls: () => activeEditor()?.retry(), prepareSave, resumeEditing: resume,
+  return visible && { ...visible, changeControls: (values: Partial<RawValues>) => { if (!frozen.current) callbackEditor()?.change(values); },
+    beginControls: () => { if (callbackEditor() && !frozen.current) interacting.current = true; },
+    flushControls: () => { if (!callbackEditor()) return; interacting.current = false; callbackEditor()?.flush(); notifyRef.current(); },
+    retryRegeneration: () => { if (callbackEditor() && visible.regenerationError) void restartRef.current(true).catch(() => {}); }, retryControls: () => callbackEditor()?.retry(), prepareSave, resumeEditing: resume,
     retrySave: async () => { try { await prepareSave(true); } catch (cause) {
       const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed'; log(code, 'recipe.saveFailed');
     } finally { resume(); } } };

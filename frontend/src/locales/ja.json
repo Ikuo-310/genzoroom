@@ -267,6 +267,9 @@
   },
   "workspace": {
     "rawPreview": {
+      "regenerating": "RAW編集セッションを保存・再生成しています…",
+      "regenerationFailed": "RAW編集セッションの再生成に失敗しました。編集の保存状態を保持しています。再試行してください。",
+      "retryRegeneration": "セッション再生成を再試行",
       "loading": "LightCraftでRAWプレビューを現像しています…",
       "ready": "LightCraft RAW現像プレビュー · 最大1024px",
       "unavailable": "RAW現像は利用できません · Immichの閲覧用プレビューを表示中",

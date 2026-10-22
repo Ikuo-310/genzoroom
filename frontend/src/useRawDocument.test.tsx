@@ -8,7 +8,7 @@ import { rawSettings } from './test/rawSettings';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(),
+  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 let root: Root;
 let current: ReturnType<typeof useRawDocument>;
@@ -38,7 +38,8 @@ beforeEach(() => {
   vi.mocked(api.saveRawRecipe).mockImplementation(async request => ({ documentRevision: request.doc.revision,
     recipeRevision: request.expectedRecipeRevision + 1, settingsFingerprint: request.doc.settingsFingerprint,
     saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
-  vi.mocked(api.releaseRawWorkspace).mockResolvedValue();
+  vi.mocked(api.releaseRawWorkspace).mockReset().mockResolvedValue();
+  vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('RAW document lifetime', () => {
@@ -167,5 +168,136 @@ describe('RAW document lifetime', () => {
       recipeRevision: 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
     await transition; await flush();
     expect(current?.assetId).toBe('b'); expect(current?.saveError).toBeUndefined();
+  });
+});
+
+
+describe('bounded RAW session renewal', () => {
+  function renewal() {
+    let generation = 1, attempts = 199;
+    let saved: api.RawRecipeRequest | undefined;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `workspace-${generation}`);
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
+      workspaceId, assetId, handle: `handle-${generation}`, generation, documentToken: `token-${generation}`, revision: 1 }));
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), mutationAttempts: attempts,
+      ...(saved ? { values: saved.doc.values, settingsFingerprint: saved.doc.settingsFingerprint,
+        recipeFingerprint: saved.doc.settingsFingerprint, recipeRevision: saved.expectedRecipeRevision + 1 } : {}) }));
+    vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => ({ ...doc as api.RawSettings,
+      revision: doc.revision + 1, mutationAttempts: ++attempts, settingsFingerprint: String(attempts).padStart(64, '0'),
+      values: { ...(doc as api.RawSettings).values, ...patch } }));
+    vi.mocked(api.saveRawRecipe).mockImplementation(async request => {
+      saved = request;
+      return { documentRevision: request.doc.revision, recipeRevision: request.expectedRecipeRevision + 1,
+        settingsFingerprint: request.doc.settingsFingerprint, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00Z' };
+    });
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async () => { generation++; attempts = 1; });
+    return { saved: () => saved };
+  }
+  async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
+  async function threshold() {
+    await render('a'); await drain();
+    act(() => { current!.beginControls(); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await drain();
+    expect(current?.settings?.mutationAttempts).toBe(200);
+  }
+  it('pauses native changes during a drag at 200, flushes the final desired value and restores it after saving', async () => {
+    vi.useFakeTimers(); const model = renewal(); await threshold();
+    const old = current!;
+    for (let i = 0; i < 300; i++) act(() => current!.changeControls({ 'light.exposure': i / 100 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); await drain();
+    expect(api.setRawControls).toHaveBeenCalledOnce(); expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    expect(current?.desired?.['light.exposure']).toBe(2.99);
+    act(() => current!.flushControls()); await drain();
+    expect(model.saved()?.doc.values['light.exposure']).toBe(2.99);
+    expect(model.saved()?.doc.mutationAttempts).toBe(201);
+    expect(current?.document?.generation).toBe(2); expect(current?.settings?.values['light.exposure']).toBe(2.99);
+    expect(current?.dirty).toBe(false); expect(current?.locked).toBe(false);
+    const count = vi.mocked(api.setRawControls).mock.calls.length;
+    act(() => { old.changeControls({ 'light.exposure': 4 }); old.flushControls(); }); await drain();
+    expect(api.setRawControls).toHaveBeenCalledTimes(count);
+    expect(vi.mocked(api.saveRawRecipe).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[0]);
+    expect(revokeURL).toHaveBeenCalledWith('blob:raw-1');
+  });
+  it('keeps the old document and exact save request after saving fails, then retries before release', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const save = vi.mocked(api.saveRawRecipe).getMockImplementation()!;
+    vi.mocked(api.saveRawRecipe).mockRejectedValueOnce(new api.RawSaveError('raw_connection_failed', 'unknown'));
+    act(() => current!.flushControls()); await drain();
+    expect(current?.regenerationError).toBe('raw_connection_failed'); expect(current?.locked).toBe(true);
+    expect(current?.document?.generation).toBe(1); expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    const first = vi.mocked(api.saveRawRecipe).mock.calls[0][0];
+    vi.mocked(api.saveRawRecipe).mockImplementation(save);
+    act(() => current!.retryRegeneration()); await drain();
+    expect(vi.mocked(api.saveRawRecipe).mock.calls[1][0]).toEqual(first);
+    expect(current?.document?.generation).toBe(2); expect(current?.regenerationError).toBeUndefined();
+  });
+  it('never creates a replacement while cleanup is pending and retries the same release owner', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_cache_cleanup_pending'));
+    act(() => current!.flushControls()); await drain();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce(); expect(current?.status).toBe('error');
+    expect(current?.regenerationError).toBe('raw_cache_cleanup_pending');
+    act(() => current!.retryRegeneration()); await drain();
+    expect(vi.mocked(api.releaseRawWorkspace).mock.calls.slice(0, 2)).toEqual([['workspace-1'], ['workspace-1']]);
+    expect(current?.document?.generation).toBe(2); expect(current?.locked).toBe(false);
+  });
+  it('does not accept default settings after a failed restore and keeps the saved recipe for retry', async () => {
+    vi.useFakeTimers(); const model = renewal(); await threshold();
+    const read = vi.mocked(api.readRawSettings).getMockImplementation()!;
+    vi.mocked(api.readRawSettings).mockImplementationOnce(async doc => rawSettings(doc));
+    act(() => current!.flushControls()); await drain();
+    expect(model.saved()).toBeDefined(); expect(current?.status).toBe('error');
+    expect(current?.regenerationError).toBe('raw_recipe_restore_mismatch');
+    vi.mocked(api.readRawSettings).mockImplementation(read);
+    act(() => current!.retryRegeneration()); await drain();
+    expect(current?.document?.generation).toBe(3); expect(current?.settings?.values['light.exposure']).toBe(1);
+  });
+  it('does not publish a replacement Preview after switching to JPEG mid-renewal', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
+    act(() => current!.flushControls()); await drain();
+    expect(current?.regenerating).toBe(true); await render(null);
+    await act(async () => gate.resolve({ blob: new Blob(['stale']), width: 16, height: 12, epoch: 2, sequence: 1 })); await drain();
+    expect(current).toBeNull(); expect(createURL).toHaveBeenCalledTimes(2);
+    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+  });
+  it('waits for renewal save before allowing departure and rejects edits during renewal', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const gate = deferred<void>(), save = vi.mocked(api.saveRawRecipe).getMockImplementation()!;
+    vi.mocked(api.saveRawRecipe).mockImplementationOnce(async request => { await gate.promise; return save(request); });
+    act(() => current!.flushControls()); await drain();
+    expect(current?.regenerating).toBe(true); expect(current?.locked).toBe(true);
+    let leaving!: Promise<void>;
+    act(() => { current!.changeControls({ 'light.exposure': 4 }); leaving = current!.prepareSave(); });
+    await drain(); expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    await act(async () => { gate.resolve(); await leaving; }); await drain();
+    expect(current?.settings?.values['light.exposure']).toBe(1);
+    expect(current?.document?.generation).toBe(2); expect(current?.dirty).toBe(false);
+    expect(api.setRawControls).toHaveBeenCalledOnce();
+  });
+  it('recovers a lost release acknowledgement only after the Backend confirms an empty owner', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const release = vi.mocked(api.releaseRawWorkspace).getMockImplementation()!;
+    vi.mocked(api.releaseRawWorkspace).mockImplementationOnce(async id => {
+      await release(id); throw new api.RawApiError('raw_connection_failed');
+    });
+    act(() => current!.flushControls()); await drain();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce(); expect(current?.status).toBe('error');
+    vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_workspace_conflict', 409));
+    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(true);
+    act(() => current!.retryRegeneration()); await drain();
+    expect(api.rawWorkspaceEmpty).toHaveBeenCalledOnce(); expect(current?.document?.generation).toBe(2);
+    expect(current?.regenerationError).toBeUndefined();
+  });
+  it('serializes A to B to C to A with an in-flight import on the existing queue', async () => {
+    renewal(); const gate = deferred<api.RawDocument>();
+    vi.mocked(api.openRawDocument).mockReturnValueOnce(gate.promise);
+    await render('a'); await drain(); await render('b'); await render('c'); await render('a');
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    await act(async () => gate.resolve({ workspaceId: 'workspace-1', assetId: 'a', handle: 'old', generation: 1, documentToken: 'old', revision: 1 }));
+    await drain();
+    expect(current?.status).toBe('ready'); expect(current?.document?.assetId).toBe('a');
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.createRawWorkspace).mock.invocationCallOrder[1]);
   });
 });

@@ -8,6 +8,7 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
   values: RawValues; process: number;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
@@ -101,7 +102,8 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
     || !fingerprint(value.settingsFingerprint) || !integer(value.recipeRevision)
     || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
-    || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
+    || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
+    || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
@@ -172,4 +174,10 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
   check();
   if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
   return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence };
+}
+
+/** A repeated DELETE can lose its ack; only an observed empty owner permits moving on. */
+export async function rawWorkspaceEmpty(): Promise<boolean> {
+  const value = await json('/capabilities');
+  return value.workspaceState === 'empty' && value.cleanupPending === false;
 }

@@ -276,6 +276,9 @@
   },
   "workspace": {
     "rawPreview": {
+      "regenerating": "Saving and renewing the RAW editing session…",
+      "regenerationFailed": "RAW session renewal failed. The current save state has been retained. Retry to continue.",
+      "retryRegeneration": "Retry session renewal",
       "loading": "Developing RAW Preview with LightCraft…",
       "ready": "LightCraft RAW Preview · up to 1024 px",
       "unavailable": "RAW development unavailable · showing Immich viewing preview",

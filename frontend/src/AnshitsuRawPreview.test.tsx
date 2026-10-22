@@ -268,3 +268,17 @@ it('refuses Windows close after RAW save failure and allows explicit retry', asy
   act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'c'.repeat(64) } }))); await flush();
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: true, requestId: 'c'.repeat(64) });
 });
+
+
+it('offers renewal retry while retaining a RAW edit after its boundary save fails', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), mutationAttempts: 199 }));
+  vi.mocked(rawApi.setRawControls).mockImplementation(async (doc, patch) => ({ ...rawSettings(doc), mutationAttempts: 200,
+    revision: doc.revision + 1, settingsFingerprint: '2'.repeat(64), values: { ...rawSettings(doc).values, ...patch } }));
+  vi.mocked(rawApi.saveRawRecipe).mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
+  await mount(); await editRaw();
+  expect(host.textContent).toContain(i18n.t('workspace.rawPreview.regenerationFailed'));
+  const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('workspace.rawPreview.retryRegeneration'))!;
+  expect(retry.disabled).toBe(false);
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
+  expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+});

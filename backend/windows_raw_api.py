@@ -13,11 +13,12 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from lightcraft_mcp import LightCraftError
-from lightcraft_raw import MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
+from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
 from raw_controls import controls_state, validate_controls
 
+REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
 LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
@@ -182,6 +183,7 @@ class RawPreviewApi:
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
                                  "recipeStatus": recipe_status, "recipeRevision": recipe_revision}
+                self.document.update(self._edit_budget())
                 self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self.document["recipeFingerprint"] = self.document["settingsFingerprint"]
                 self._recipe_save = None
@@ -212,6 +214,7 @@ class RawPreviewApi:
                     snapshot = await self.raw.set_controls(self._raw_handle, values, doc["revision"])
                 confirmed = controls_state(snapshot)
                 doc["revision"] = snapshot.revision
+                doc.update(self._edit_budget())
                 doc["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self._wb_available = confirmed["wb"]["available"]
                 lightcraft_log("raw.controls.confirmed", level="debug", generation=doc["generation"], revision=doc["revision"])
@@ -238,6 +241,11 @@ class RawPreviewApi:
                            generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data))
             self._touched = monotonic()
             return Response(frame.data, media_type="image/png", headers=headers)
+
+    def _edit_budget(self):
+        # The soft boundary leaves 56 attempts for final flush, resync and failed readbacks.
+        return {"mutationAttempts": self.raw.status().edits, "mutationLimit": MAX_EDITS,
+                "regenerationThreshold": REGENERATE_AFTER_EDITS}
 
     @staticmethod
     def _fingerprint(settings):
