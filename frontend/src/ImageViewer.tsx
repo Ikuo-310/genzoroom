@@ -45,22 +45,27 @@ type ImageViewerProps = {
   keyboardBlocked?: boolean;
 };
 
+const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
+
 export function ImageViewer({ src, documentKey, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
   const fitShortcut = shortcut.label('viewerFitRestore');
   const viewportRef = useRef<HTMLDivElement>(null);
+  const imageIdentity = documentKey ?? `${src}:${editSource?.kind ?? ''}:${editSource?.url ?? ''}`;
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
   const [closeToolbarMenuSignal, setCloseToolbarMenuSignal] = useState(0);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
-  const [imageSize, setImageSize] = useState<Point>({ x: 0, y: 0 });
+  // Identity-tagged load state prevents a late passive effect from undoing an already-fired load event.
+  const [loadedImage, setLoadedImage] = useState<{ identity: string; status: 'ready' | 'error'; size: Point } | null>(null);
+  const imageState = loadedImage?.identity === imageIdentity ? loadedImage.status : 'loading';
+  const imageSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
   const [fitScale, setFitScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
-  const [imageState, setImageState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   useLayoutEffect(() => {
@@ -117,10 +122,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
   }, [editSource, keyboardBlocked, onOriginalToggle, originalStatus, beforeAvailable]);
 
   // A new native frame is not a new document: preserve the user's zoom and pan.
-  const imageIdentity = documentKey ?? `${src}:${editSource?.kind ?? ''}:${editSource?.url ?? ''}`;
   useEffect(() => {
-    setImageState('loading');
-    setImageSize({ x: 0, y: 0 });
     setFitMode(true);
     setPan({ x: 0, y: 0 });
     previousTransform.current = null;
@@ -305,17 +307,18 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
         }}>
         {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
-          onLoad={(width, height) => { setImageState('ready'); setImageSize({ x: width, y: height }); }}
-          onError={() => { setImageState('error'); onImageError?.(); }} /> : src && !previewStatus ? <img
+          onLoad={(width, height) => { setLoadedImage({ identity: imageIdentity, status: 'ready', size: { x: width, y: height } }); }}
+          onError={() => { setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE }); onImageError?.(); }} /> : src && !previewStatus ? <img
           src={src}
           alt={alt}
           draggable="false"
           style={{ width: imageSize.x ? `${imageSize.x * scale}px` : undefined }}
           onLoad={(event) => {
-            setImageState('ready');
-            setImageSize({ x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight });
+            setLoadedImage({ identity: imageIdentity, status: 'ready', size: {
+              x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight,
+            } });
           }}
-          onError={() => setImageState('error')}
+          onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })}
         /> : null}
       </div>
       {statusNote && <p className="raw-preview-note" role="status">{statusNote}</p>}

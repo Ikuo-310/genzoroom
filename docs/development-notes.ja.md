@@ -18,6 +18,14 @@ Frontendの関連15ファイル496件では旧RAWパネル文言の期待値1件
 
 実画面受入・正式コード監査は別工程。Windows/Tauri/WebView2、実Immich原本download、実LightCraft RAW現像／GPU、NAS／Firefox、PyInstaller、実GPU障害fallback、長時間memoryは未検証。README／CHANGELOGは変更していない。API契約・設計との差分・残課題の詳細は[Phase 1C設計書のC1実装追記](research/lightcraft/PHASE1C_DESIGN.md#phase-1c-c1実装結果2026-10-22)を参照。
 
+## Phase 1C-C1実画面確認後のRAW Preview表示修正（2026-10-22）
+
+Windows実機の診断JSONでは原本取得、`raw.document.ready`、`preview.completed`、`raw.preview.complete`が成功し、画面にもLightCraft Preview画像と識別表示が出ていた一方、中央の読込表示が残っていた。`ImageViewer`は`documentKey`変更時のpassive `useEffect`で読み込み状態と画像寸法を初期化していたため、同じコミットで先行した`<img onLoad>`のready更新を後からloadingへ戻し得る状態更新順序が原因だった。
+
+画像状態と寸法を`imageIdentity`に結び付け、identity変更直後は同期的にloading／空寸法として扱う。load／errorイベントもidentity付きで記録し、zoom／panのreset effectは表示状態を変更しない。これによりRAW Previewの読込完了後に表示が消え、同一document内のBlob更新では既存のzoom／panを保ち、RAW／JPEG切替では前の画像状態を引き継がない。JPEGの表示・AdjustedImage経路は維持する。
+
+回帰テストは親layout effectから画像loadを同期発火し、子のpassive effectよりloadが先に到着する順序を再現した。RAWのloading／ready／error、JPEGへの切替と読み込み完了を確認し、`ImageViewer.test.tsx`と`AnshitsuRawPreview.test.tsx`は53件成功、`npx tsc --noEmit`も成功した。実機での再確認は別途必要。変更対象は`frontend/src/ImageViewer.tsx`、同テストと本記録のみで、Backend／RAW現像／GPU／Immich試験は行っていない。
+
 
 ## RAW現像統合 Phase 1B：Backend内部RAW操作・Preview（2026-10-21）
 

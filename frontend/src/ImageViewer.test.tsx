@@ -1,7 +1,7 @@
 import { SettingsProvider } from './SettingsDialog';
 import { updateSetting } from './appSettings';
 // @vitest-environment jsdom
-import { act, useState } from 'react';
+import { act, useLayoutEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -94,6 +94,23 @@ function BlockingBeforeHarness({ keyboardBlocked = false }: { keyboardBlocked?: 
     keyboardBlocked={keyboardBlocked} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
+function NativePreviewHarness({ src, documentKey, previewStatus, autoLoad }: {
+  src: string; documentKey?: string; previewStatus?: 'loading' | 'error'; autoLoad: boolean;
+}) {
+  useLayoutEffect(() => {
+    if (!autoLoad) return;
+    const image = host.querySelector<HTMLImageElement>('.viewer-panel img');
+    if (!image) return;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 770 });
+    // A cached Blob can report load before ImageViewer's passive identity effect runs.
+    image.dispatchEvent(new Event('load'));
+  }, [autoLoad, documentKey, src]);
+  return <ImageViewer src={src} documentKey={documentKey} previewStatus={previewStatus}
+    statusNote={documentKey ? 'LightCraft RAW Preview' : undefined} previewPixels={!!documentKey}
+    alt="photo" leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
+}
+
 function PanelToggleHarness() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -147,6 +164,27 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('keeps native Preview load state aligned with its document across fast loads and JPEG switches', () => {
+    const render = (props: { src: string; documentKey?: string; previewStatus?: 'loading' | 'error'; autoLoad: boolean }) =>
+      act(() => root.render(<NativePreviewHarness {...props} />));
+    const status = () => host.querySelector('.viewer-image-status')?.textContent;
+
+    render({ src: '', documentKey: 'raw-a', previewStatus: 'loading', autoLoad: false });
+    expect(status()).toBe('Loading photo…');
+
+    render({ src: 'blob:raw-a', documentKey: 'raw-a', autoLoad: true });
+    expect(host.querySelector('.raw-preview-note')?.textContent).toBe('LightCraft RAW Preview');
+    expect(status()).toBeUndefined();
+
+    render({ src: '', documentKey: 'raw-a', previewStatus: 'error', autoLoad: false });
+    expect(status()).toBe('The preview image could not be loaded.');
+
+    render({ src: '/jpeg', autoLoad: false });
+    expect(status()).toBe('Loading photo…');
+    render({ src: '/jpeg', autoLoad: true });
+    expect(status()).toBeUndefined();
+  });
+
   it('preserves native Preview zoom across frame URLs, resets for a new document and never calls the JPEG renderer', async () => {
     const render = async (src: string, documentKey: string) => act(async () => root.render(<ImageViewer
       src={src} documentKey={documentKey} alt="raw" leftOpen rightOpen previewPixels beforeAvailable={false}
