@@ -732,7 +732,8 @@ export function AnshitsuPage() {
           src={rawDocument?.status === 'ready' ? rawDocument.url! : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
           documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
           previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' ? 'error' : undefined}
-          statusNote={rawDocument ? t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.pending ? 'updating' : rawDocument.status}`) : undefined}
+          statusNote={rawDocument ? rawDocument.pending && !rawDocument.editError ? undefined
+            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           beforeAvailable={!activeDetail.is_raw}
           editSource={editable ? jpegOriginal.source : undefined}

@@ -1092,3 +1092,11 @@ metadata GETだけの失敗はDB保存失敗と区別し、既存cacheを残し�
 `git diff --check`成功。実LightCraft／GPU・Windows実機UI・ブラウザ動的確認は未実施。B3-1実機保存確認とB3-2の自動fake成功を混同しない。RAWカテゴリON/OFF・各Reset・Before/After・JPEGカテゴリ統合／個別ON/OFF削除・RAW Export／サムネイル・History手動整理／圧縮は変更していない。SQLite schema v8・200件保持・LightCraft固定version、README／CHANGELOGも維持する。
 
 設計書・architectureを更新してCommit／Push後、C4-B3-2で停止する。B3-3統合検証とC4-C以降へは進まない。
+
+## RAW調整コントロールの状態表示（2026-10-23）
+
+Windows実機での操作時に、`raw.saving`・`raw.dirty`・`raw.pending`に対応する正常状態テキストがスライダー群の前へ挿入され、状態変化ごとに配置を押し下げていた。`RawAdjustmentControls`からsaving／dirty表示を削除し、pending表示は同じ状態を伝える`AnshitsuPage`のViewer status noteと合わせて描画しないようにした。CSSで非表示にはせず、文言を描画しない。
+
+保存失敗、編集失敗、Session再生成失敗と各Retry操作は維持し、調整カテゴリ群の後ろへ配置した。Session再生成中の状態表示も末尾へ移したため、エラー／状態通知が現れても調整項目の位置は変化しない。`raw.locked`等の編集制限、History commit、Autosave、readback、Session再生成、JPEG状態表示には変更を加えていない。
+
+`AnshitsuRawPreview.test.tsx`で保存中・保存後に正常状態文言が存在しないこと、native編集pending中もViewer status noteがなくスライダー要素が維持されること、保存失敗時に末尾のエラーとRetryが残り、入力がlockされることを確認する。FrontendのHistory／RAW保存関連テスト、TypeScript typecheck、production build、`git diff --check`を実行する。Windows実機での配置確認は依頼範囲のコード検証とは分け、未実施ならその旨を報告する。

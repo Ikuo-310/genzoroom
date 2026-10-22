@@ -353,6 +353,14 @@ Primary modifiers, repeat/defaultPrevented/native-input/IME/modal guards remain 
 RAW edits invalidate exclusion Undo through the same workspace edit boundary. No additional
 global shortcut listener or hard-coded command matching is added.
 
+RAW adjustment controls do not render routine saving, unsaved, or Preview-updating text. Those
+messages changed the height above the sliders during a gesture and moved the controls. Save,
+edit, and Session regeneration errors with their Retry actions remain after the adjustment
+categories, so they do not change slider positions when they appear. Save locks, Retry behavior,
+History commits, Autosave, readback, and Session renewal are unchanged. JPEG status messages
+keep their existing placement and behavior. The Viewer also omits the RAW pending note while
+native controls and Preview update; edit errors and Preview lifecycle notes remain available.
+
 C4-B3-2 changes no Backend, SQLite v8, LightCraft, JPEG Recipe/renderer, RAW Export or thumbnail
 contract. B3-3 integrated acceptance and C4-C Reset/category work remain separate. User-reported
 B3-1 Windows save/restore acceptance is retained as prior evidence; B3-2 real Windows/GPU

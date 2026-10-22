@@ -281,10 +281,52 @@ it('offers save retry before renewal while retaining a RAW edit after its bounda
   commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
   await mount(); await editRaw();
   expect(host.textContent).toContain(i18n.t('workspace.rawPreview.saveFailed'));
+  expect(!!(host.querySelector('.raw-adjustment-controls > [role="alert"]')!.compareDocumentPosition(
+    host.querySelector('.raw-adjustment-controls > .adjustment-category')!,
+  ) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
   const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === i18n.t('workspace.rawPreview.retrySave'))!;
   expect(retry.disabled).toBe(false);
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+});
+
+it('does not render normal save-state text while a RAW save is pending or after it succeeds', async () => {
+  let resolve!: () => void;
+  commitHistory.mockImplementation(request => new Promise(yes => { resolve = () => yes(rawHistoryResult(request)); }));
+  await mount(); await editRaw();
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.saving'));
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.unsaved'));
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.updating'));
+  const firstSlider = host.querySelector('[data-adjustment-id="temperature"]');
+  expect(firstSlider).not.toBeNull();
+  await act(async () => resolve()); await flush();
+  expect(host.querySelector('[data-adjustment-id="temperature"]')).toBe(firstSlider);
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.saving'));
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.unsaved'));
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.updating'));
+});
+
+it('keeps the adjustment controls in place while a RAW native edit is pending', async () => {
+  let resolve!: (settings: rawApi.RawSettings) => void;
+  vi.mocked(rawApi.setRawControls).mockImplementation(() => new Promise(yes => { resolve = yes; }));
+  await mount();
+  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!
+    .querySelector<HTMLInputElement>('input[type="number"]')!;
+  const firstSlider = host.querySelector('[data-adjustment-id="temperature"]');
+  act(() => {
+    number.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '1.25');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  await flush();
+  expect(rawApi.setRawControls).toHaveBeenCalledOnce();
+  expect(host.textContent).not.toContain(i18n.t('workspace.rawPreview.updating'));
+  expect(host.querySelector('[data-adjustment-id="temperature"]')).toBe(firstSlider);
+  await act(async () => resolve({ ...rawSettings({ workspaceId: 'workspace', assetId: base.id, handle: 'handle', generation: 1,
+    documentToken: 'token', revision: 1 }), revision: 2, settingsFingerprint: '2'.repeat(64),
+    values: { ...rawSettings({ workspaceId: 'workspace', assetId: base.id, handle: 'handle', generation: 1,
+      documentToken: 'token', revision: 1 }).values, 'light.exposure': 1.25 } }));
+  await flush();
 });
 
 const exposure = () => host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;

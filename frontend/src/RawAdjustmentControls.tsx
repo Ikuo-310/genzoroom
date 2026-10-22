@@ -21,20 +21,6 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const actionsUnavailable = t('workspace.rawPreview.actionsUnavailable');
   return <div className="raw-adjustment-controls">
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
-    {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
-    {raw.regenerationError && <div role="alert"><p>{t('workspace.rawPreview.regenerationFailed')}</p>
-      <button className="tool-button" type="button" disabled={disabled || raw.regenerating}
-        onClick={raw.retryRegeneration}>{t('workspace.rawPreview.retryRegeneration')}</button></div>}
-    {raw.saving && <p role="status">{t('workspace.rawPreview.saving')}</p>}
-    {raw.dirty && !raw.saving && !raw.saveError && <p role="status">{t('workspace.rawPreview.unsaved')}</p>}
-    {raw.saveError && <div role="alert"><p>{t(raw.saveError === 'raw_recipe_revision_conflict'
-      ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed')}</p>
-      <button className="tool-button" type="button" disabled={disabled || raw.regenerating || raw.saving}
-        onClick={() => { void raw.retrySave(); }}>{t('workspace.rawPreview.retrySave')}</button></div>}
-    {raw.pending && !raw.editError && <p role="status">{t('workspace.rawPreview.updating')}</p>}
-    {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
-      <button className="tool-button" type="button" disabled={disabled || raw.locked}
-        onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category} unavailableLabel={actionsUnavailable}>
       {category === 'whiteBalance' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
@@ -54,6 +40,17 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
       })}
     </RawCategory>)}
+    {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
+    {raw.regenerationError && <div role="alert"><p>{t('workspace.rawPreview.regenerationFailed')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.regenerating}
+        onClick={raw.retryRegeneration}>{t('workspace.rawPreview.retryRegeneration')}</button></div>}
+    {raw.saveError && <div role="alert"><p>{t(raw.saveError === 'raw_recipe_revision_conflict'
+      ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.regenerating || raw.saving}
+        onClick={() => { void raw.retrySave(); }}>{t('workspace.rawPreview.retrySave')}</button></div>}
+    {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.locked}
+        onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
   </div>;
 }
 
