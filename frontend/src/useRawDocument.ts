@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, readRawDocument, readRawSettings,
-  releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId } from './rawApi';
+  releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
+  type RawHistoryResult, type RawHistoryStep } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
@@ -8,7 +9,9 @@ import { RawRecipeSave } from './rawRecipeSave';
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; document?: RawDocument; code?: string; settings?: RawSettings;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
-  saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string };
+  saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
+  history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[]; historyOffset?: number;
+  historyLoading?: boolean; historyError?: string; canUndo?: boolean; canRedo?: boolean; movingHistory?: boolean };
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
@@ -93,7 +96,10 @@ export function useRawDocument(assetId: string | null) {
       saver?.observe(confirmed, !editor.unsettled);
       setState(previous => ({ ...previous, assetId, status: previous?.status ?? 'ready',
         document: confirmed, settings: confirmed, desired: { ...editor!.desired }, pending: editor!.unsettled,
-        editError: editor!.error, dirty: saver?.dirty, saving: saver?.saving, saveError: saver?.error,
+        editError: editor!.error, dirty: saver?.dirty || saver?.moving, saving: saver?.saving, saveError: saver?.error,
+        history: saver?.history, historySteps: saver?.steps, historyOffset: saver?.historyOffset,
+        historyLoading: saver?.historyLoading, historyError: saver?.historyError, canUndo: saver?.canUndo, canRedo: saver?.canRedo,
+        movingHistory: saver?.moving,
         locked: frozen.current || saver?.locked, regenerating: restarting, regenerationError }));
       if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && saver?.initialized && !saver.dirty && !saver.locked
         && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
@@ -262,7 +268,7 @@ export function useRawDocument(assetId: string | null) {
     };
     window.addEventListener('pagehide', pagehide);
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (current() && (saver?.dirty || editor?.unsettled)) { event.preventDefault(); event.returnValue = ''; }
+      if (current() && (saver?.dirty || saver?.moving || editor?.unsettled)) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => { window.removeEventListener('pagehide', pagehide); window.removeEventListener('beforeunload', beforeUnload); dispose(); };
@@ -290,6 +296,7 @@ export function useRawDocument(assetId: string | null) {
     frozen.current = true;
     saver.pause();
     notifyRef.current();
+    await saver.waitHistory(retry);
     if (retry && (editor.error || saver.error === 'raw_revision_conflict')) {
       editor.retry(true);
       // Retry first resynchronizes on this queue; settle must not inspect its old error.
@@ -305,7 +312,14 @@ export function useRawDocument(assetId: string | null) {
       // Drain it through the same queue before certifying departure.
     } while (saver.dirty || editor.unsettled);
   };
-  return visible && { ...visible, changeControls: (values: Partial<RawValues>) => {
+  const moveHistory = (action: 'undo' | 'redo' | 'jump', targetStepId?: string | null) => {
+    if (!callbackEditor() || frozen.current) return;
+    void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
+  };
+  return visible && { ...visible, undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
+    jumpHistory: (stepId: string | null) => moveHistory('jump', stepId),
+    loadMoreHistory: (retry = false, newer = false) => { if (callbackEditor() && !frozen.current) saverRef.current?.loadMoreHistory(retry, newer); },
+    changeControls: (values: Partial<RawValues>) => {
       if (!frozen.current && callbackEditor()) for (const [control, value] of Object.entries(values))
         saverRef.current?.change(control as RawControlId, value!);
     },

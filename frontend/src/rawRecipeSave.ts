@@ -1,7 +1,7 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
-import { RawApiError, RawSaveError, readRawRecipe, saveRawRecipe, saveRawHistory,
-  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId } from './rawApi';
+import { RawApiError, RawSaveError, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
+  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep } from './rawApi';
 import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
@@ -20,6 +20,14 @@ export class RawRecipeSave {
   private retryRequest?: RawRecipeRequest | RawHistoryRequest;
   private conflict = false;
   initialized = false;
+  history?: RawHistoryResult['history'];
+  steps: RawHistoryStep[] = [];
+  historyOffset = 0;
+  historyLoading = false;
+  historyError?: string;
+  moving = false;
+  private historyOperation?: Promise<void>;
+  private moveIntent?: { action: 'undo' | 'redo' | 'jump'; targetStepId?: string | null };
   private gesture?: { control: RawControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -31,10 +39,86 @@ export class RawRecipeSave {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
   }
-  get dirty() { return !!this.retryRequest || !!this.gesture || !!this.handoff
+  get dirty() { return !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.options.controls && (!this.initialized || !!this.operation || !!this.error); }
-  get gesturing() { return !!this.gesture && !this.operation && !this.paused; }
+  get locked() { return !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
+  get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture); }
+  get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
+  async waitHistory(retry = false) { try { await this.historyOperation; } catch (cause) { if (!retry) throw cause; } }
+  move(action: 'undo' | 'redo' | 'jump', targetStepId?: string | null): Promise<void> {
+    if (!this.active || this.locked || this.historyLoading || this.historyError || !this.history) return Promise.resolve();
+    if (action === 'undo' && !this.canUndo || action === 'redo' && !this.canRedo) return Promise.resolve();
+    if (action === 'jump' && targetStepId !== null && !this.steps.some(step => step.stepId === targetStepId)) return Promise.resolve();
+    this.moving = true;
+    this.moveIntent = { action, targetStepId };
+    // Reserve the entire commit->move sequence on the existing queue before cleanup can enter.
+    const operation = this.save().finally(() => {
+      this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
+    });
+    this.historyOperation = operation;
+    return operation;
+  }
+  loadMoreHistory(retry = false, newer = false) {
+    if (!this.active || !this.initialized || this.historyLoading || this.moving || this.operation || this.error || this.dirty) return;
+    this.historyLoading = true;
+    this.options.changed();
+    this.options.schedule(async () => { await this.loadHistoryPage(retry ? undefined : newer
+      ? Math.min(this.history?.length ?? 0, this.historyOffset + this.steps.length) : Math.max(0, this.historyOffset - 20)); });
+  }
+  private async loadHistoryPage(offset?: number) {
+    this.historyLoading = true;
+    try {
+      const selected = this.history?.cursor || this.history?.length || 1;
+      const start = offset ?? Math.floor((selected - 1) / 20) * 20;
+      const page = await readRawHistory(this.confirmed, start);
+      if (!this.active) return;
+      if (page.recipeRevision !== this.revision || page.recipeFingerprint !== this.savedFingerprint || page.historyPending
+        || page.nativeState !== 'synced' || !page.nativeMatchesRecipe || !this.history
+        || page.history.cursor !== this.history.cursor || page.history.length !== this.history.length
+        || page.history.selectedStepId !== this.history.selectedStepId) throw new RawApiError('raw_history_revision_conflict');
+      const prepend = offset !== undefined && start + page.steps.length === this.historyOffset;
+      const append = offset !== undefined && start === this.historyOffset + this.steps.length;
+      const steps = prepend ? [...page.steps, ...this.steps] : append ? [...this.steps, ...page.steps] : page.steps;
+      if (new Set(steps.map(step => step.stepId)).size !== steps.length || steps.length > 200)
+        throw new RawApiError('raw_invalid_response');
+      this.steps = steps;
+      if (!append) this.historyOffset = start;
+      this.historyError = undefined;
+    } catch (cause) {
+      if (this.active) {
+        this.historyError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+        try { frontendLogger.add({ level: 'warn', component: 'raw', event: 'history.loadFailed', context: {
+          assetId: this.confirmed.assetId, generation: this.confirmed.generation, recipeRevision: this.revision,
+          errorCode: this.historyError } }); } catch { /* Optional diagnostics. */ }
+      }
+    } finally { this.historyLoading = false; if (this.active) this.options.changed(); }
+  }
+  private async sendMoveIntent() {
+    if (!this.moveIntent) return;
+    if (this.historyError) await this.loadHistoryPage();
+    if (this.historyError) throw new RawApiError(this.historyError);
+    const { action, targetStepId } = this.moveIntent;
+    // Cache refresh can hide a still-valid UUID. Let SQLite validate membership; never
+    // infer deletion from a page miss or retarget a removed UUID by position.
+    const available = action === 'undo' ? this.canUndo : action === 'redo' ? this.canRedo
+      : targetStepId !== this.history?.selectedStepId;
+    this.moveIntent = undefined;
+    if (!available) return;
+    this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
+      saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}) };
+    try { await this.sendHistory(); }
+    catch (cause) {
+      if (!(cause instanceof RawSaveError) || cause.outcome !== 'rejected' || cause.status !== 409
+        || cause.code !== 'raw_history_target_missing') throw cause;
+      // B2 rejects this target before native application or receipt creation. The preceding
+      // gesture is saved; keeping its obsolete target as an uncertain save would deadlock Retry.
+      this.retryRequest = undefined;
+      this.historyError = cause.code;
+      try { frontendLogger.add({ level: 'warn', component: 'raw', event: 'history.targetMissing', context: {
+        assetId: this.confirmed.assetId, recipeRevision: this.revision, errorCode: cause.code } }); } catch { /* Optional diagnostics. */ }
+    }
+  }
   begin(control: RawControlId) {
     if (!this.active || this.locked || this.paused) return;
     if (this.gesture?.control === control) return;
@@ -83,6 +167,7 @@ export class RawRecipeSave {
         this.options.changed();
         if (this.options.controls) {
           await this.sendHistory();
+          await this.sendMoveIntent();
           this.error = undefined;
           finish();
           return;
@@ -113,7 +198,7 @@ export class RawRecipeSave {
           // Pausing admission for navigation must still drain intent already accepted.
           this.gesture = { control: next.control, fingerprint: this.confirmed.settingsFingerprint };
           if (next.value !== undefined) this.options.controls?.change({ [next.control]: next.value });
-          if (next.ended || this.paused) this.end(next.control);
+          if (next.ended || this.paused || this.moving) this.end(next.control);
         }
         if (this.active) { this.options.changed(); this.observe(this.confirmed, true); }
       }
@@ -137,12 +222,13 @@ export class RawRecipeSave {
       if (!('action' in request)) throw new RawApiError('raw_save_unconfirmed');
       const result = await saveRawHistory(request);
       if (!this.active) throw new RawApiError('raw_document_closed');
+      const moving = request.action === 'undo' || request.action === 'redo' || request.action === 'jump';
       // A valid old receipt does not certify the current native or SQLite checkpoint.
       if (result.generation !== this.confirmed.generation || result.documentToken !== this.confirmed.documentToken
         || result.handle !== this.confirmed.handle || result.workspaceId !== this.confirmed.workspaceId
-        || result.revision !== request.doc.revision || result.revision !== this.confirmed.revision
-        || result.settingsFingerprint !== request.doc.settingsFingerprint
-        || result.settingsFingerprint !== this.confirmed.settingsFingerprint || result.historyPending
+        || (moving ? result.revision < request.doc.revision : result.revision !== request.doc.revision
+          || result.revision !== this.confirmed.revision || result.settingsFingerprint !== request.doc.settingsFingerprint
+          || result.settingsFingerprint !== this.confirmed.settingsFingerprint) || result.historyPending
         || result.nativeState !== 'synced' || !result.nativeMatchesRecipe
         || result.recipeFingerprint !== result.settingsFingerprint || result.recipeRevision !== result.ack.revision
         || result.history.cursor !== result.ack.historyCursor || result.history.length !== result.ack.historyLength
@@ -155,9 +241,16 @@ export class RawRecipeSave {
       this.retryRequest = undefined;
       this.gesture = undefined;
       this.confirmed = controls.confirmed = result;
+      this.history = result.history;
+      // Metadata pages are a bounded display cache. Any new commit can prune/replace UUIDs.
+      if (!moving || this.historyError) await this.loadHistoryPage();
+      else if (result.history.cursor > 0 && (result.history.cursor <= this.historyOffset
+        || result.history.cursor > this.historyOffset + this.steps.length))
+        await this.loadHistoryPage(Math.floor((result.history.cursor - 1) / 20) * 20);
+      if (moving) await controls.refreshPreview();
       try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'history.saved', context: {
         assetId: result.assetId, generation: result.generation, saveId: result.ack.saveId,
-        revision: result.revision, recipeRevision: result.recipeRevision, historyCursor: result.history.cursor,
+        action: request.action, revision: result.revision, recipeRevision: result.recipeRevision, historyCursor: result.history.cursor,
         historyLength: result.history.length, replayed: result.replayed } }); } catch { /* Optional diagnostics. */ }
     }
     if (this.confirmed.settingsFingerprint !== this.savedFingerprint) throw new RawApiError('raw_save_unconfirmed');

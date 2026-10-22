@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RawSaveError, type RawDocument, type RawHistoryRequest } from './rawApi';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryPage } from './test/rawHistory';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
   assetId: 'asset', generation: 1, revision: 2 };
@@ -51,6 +51,40 @@ describe('RAW History transport', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'raw_history_save_failed' }), { status })));
     await expect(saveRawHistory(request)).rejects.toMatchObject({ outcome: status === 409 ? 'rejected' : 'unknown' });
     expect(request.expectedRecipeRevision).toBe(4);
+  });
+  it.each(['undo', 'redo', 'jump'] as const)('sends a %s operation without controls or snapshots', async action => {
+    const request: RawHistoryRequest = { ...historyRequest('commit'), action, targetStepId: null };
+    const result = rawHistoryResult(request, { revision: doc.revision + 1 });
+    const fetch = vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch); expect(await saveRawHistory(request)).toEqual(result);
+    const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toContain(`/history/${action}`);
+    expect(JSON.parse(init.body as string)).toEqual({ workspaceId: doc.workspaceId, generation: doc.generation,
+      documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
+      expectedRecipeRevision: 4, saveId: request.saveId, ...(action === 'jump' ? { targetStepId: null } : {}) });
+  });
+  it('reads only 20 metadata rows within the History-only 16 KiB boundary', async () => {
+    const result = rawHistoryResult(historyRequest('commit'), { history: { initialized: true, cursor: 200, length: 200,
+      selectedStepId: historyRequest('commit').saveId } });
+    const page = rawHistoryPage(result, 180);
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ...page, internal: 'excluded', settings: { private: true } }),
+      { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const value = await readRawHistory(result, 180); expect(value.steps).toHaveLength(20); expect(value).not.toHaveProperty('settings');
+    expect(value).not.toHaveProperty('internal');
+    const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe(`/api/raw/documents/${doc.handle}/history?offset=180&limit=20`);
+    expect(init.headers).toEqual({ 'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': '1', 'X-Raw-Token': doc.documentToken });
+  });
+  it.each(['generation', 'rows', 'cursor', 'metadata', 'oversize'])('rejects invalid History %s', async invalid => {
+    const result = rawHistoryResult(historyRequest('commit')), page = rawHistoryPage(result, 0);
+    if (invalid === 'generation') page.generation++;
+    if (invalid === 'rows') page.steps.push(page.steps[0]);
+    if (invalid === 'cursor') page.history = { ...page.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
+    if (invalid === 'metadata') page.steps[0].metadata.control = 'native.unknown' as never;
+    const content = invalid === 'oversize' ? JSON.stringify(page) + ' '.repeat(16384) : JSON.stringify(page);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result, 0)).rejects.toThrow('raw_invalid_response');
   });
 });
 describe('bounded RAW binary contract', () => {

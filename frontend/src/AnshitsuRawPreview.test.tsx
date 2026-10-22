@@ -9,7 +9,7 @@ import i18n from './i18n';
 import type { AssetDetail } from './assets';
 import * as rawApi from './rawApi';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
@@ -30,7 +30,7 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
-  saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 const commitHistory = vi.fn(async (request: rawApi.RawHistoryRequest): Promise<rawApi.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
 async function flush() { await act(async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); }); }
@@ -43,6 +43,7 @@ async function mount() {
   await flush();
 }
 beforeEach(async () => {
+  vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async (doc, offset) => rawHistoryPage(doc, offset));
   vi.clearAllMocks(); await i18n.changeLanguage('en');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -351,4 +352,129 @@ it('keeps sliders disabled after initialization fails and retries without changi
   const first = vi.mocked(rawApi.saveRawHistory).mock.calls[0][0];
   await clickText('Retry RAW save');
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0]).toEqual(first); expect(exposure().disabled).toBe(false);
+});
+
+function historyBackend(count = 2) {
+  const model = fakeRawHistory(count);
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => model.settings(doc));
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(async request => model.save(request));
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async (doc, offset) => model.page(doc, offset));
+  return model;
+}
+function historyKey(key = 'z', init: KeyboardEventInit = {}, target: EventTarget = window) {
+  const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true, ...init });
+  act(() => target.dispatchEvent(event)); return event;
+}
+const history = () => host.querySelector<HTMLOListElement>('.edit-history')!;
+const historyButton = (position: number) => position === 0 ? history().querySelector<HTMLButtonElement>('.initial-state button')!
+  : history().querySelector<HTMLButtonElement>(`li[value="${position}"] button`)!;
+
+it('displays baseline for an unedited RAW and saved History timestamps/selection for an edited RAW', async () => {
+  await mount(); expect(historyButton(0).getAttribute('aria-current')).toBe('step');
+  expect([...host.querySelectorAll<HTMLButtonElement>('.edit-actions button')].every(button => button.disabled)).toBe(true);
+  act(() => root.unmount()); await flush(); root = createRoot(host);
+  historyBackend(); await mount();
+  expect(history().querySelectorAll('li')).toHaveLength(3); expect(historyButton(2).getAttribute('aria-current')).toBe('step');
+  expect(history().querySelector('time')?.dateTime).toBe('2026-10-23T00:00:00Z');
+  expect(history().textContent).toContain('Exposure'); expect(historyButton(0).textContent).toBe('Initial State');
+});
+
+it('shares the History presentation while mapping rows to stable RAW UUIDs and baseline null', async () => {
+  const model = historyBackend(); await mount();
+  act(() => historyButton(1).click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0]).toMatchObject({ action: 'jump', targetStepId: model.entries[0].id });
+  expect(historyButton(1).getAttribute('aria-current')).toBe('step'); expect(exposure().value).toBe('1');
+  const undo = host.querySelectorAll<HTMLButtonElement>('.edit-actions button')[0], redo = host.querySelectorAll<HTMLButtonElement>('.edit-actions button')[1];
+  expect(redo.disabled).toBe(false); act(() => historyButton(0).click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls[2][0].targetStepId).toBeNull(); expect(undo.disabled).toBe(true);
+  expect(history().querySelectorAll('.undone')).toHaveLength(2); expect(exposure().value).toBe('0');
+  act(() => redo.click()); await flush(); expect(historyButton(1).getAttribute('aria-current')).toBe('step');
+});
+
+it('dispatches each RAW shortcut once and leaves native input, IME, repeat and modal events untouched', async () => {
+  historyBackend(); await mount();
+  expect(historyKey().defaultPrevented).toBe(true); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'undo']);
+  historyKey('z', { shiftKey: true }); await flush(); expect(historyButton(2).getAttribute('aria-current')).toBe('step');
+  const count = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const input = exposure().closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  expect(historyKey('z', {}, input).defaultPrevented).toBe(false);
+  historyKey('z', { isComposing: true }); historyKey('z', { repeat: true });
+  const modal = document.createElement('div'); modal.setAttribute('role', 'dialog'); document.body.append(modal);
+  expect(historyKey().defaultPrevented).toBe(false); modal.remove(); await flush();
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(count);
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
+  historyKey(); await flush(); expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(count);
+});
+
+it('prioritizes Filmstrip exclusion Undo before RAW History Undo', async () => {
+  historyBackend(); await mount();
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude b.jpg from Filmstrip"]')!.click()); await flush();
+  expect(host.querySelectorAll('.filmstrip-item')).toHaveLength(2);
+  historyKey(); await flush(); expect(host.querySelectorAll('.filmstrip-item')).toHaveLength(3);
+  expect(rawApi.saveRawHistory).toHaveBeenCalledOnce();
+  historyKey(); await flush(); expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0].action).toBe('undo');
+});
+
+it('commits an open RAW gesture before shortcut Undo without recording the move as a new step', async () => {
+  historyBackend(); await mount();
+  act(() => exposure().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+  inputValue(exposure(), '3'); historyKey(); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'commit', 'undo']);
+  expect(historyButton(2).getAttribute('aria-current')).toBe('step'); expect(history().querySelectorAll('li')).toHaveLength(4);
+});
+
+it('pages through 200 saved operations in batches of 20', async () => {
+  historyBackend(200); await mount(); expect(history().querySelectorAll('li')).toHaveLength(21);
+  expect(rawApi.readRawHistory).toHaveBeenCalledOnce();
+  for (let i = 0; i < 9; i++) await clickText('Load 20 earlier operations');
+  expect(history().querySelectorAll('li')).toHaveLength(201); expect(rawApi.readRawHistory).toHaveBeenCalledTimes(10);
+  expect(historyButton(200).getAttribute('aria-current')).toBe('step');
+});
+
+it('retains the old cursor on save failure, locks history/editing, and retries exactly the same move', async () => {
+  const model = historyBackend(); await mount();
+  vi.mocked(rawApi.saveRawHistory).mockImplementationOnce(async request => {
+    model.save(request); throw new rawApi.RawSaveError('raw_history_save_failed', 'unknown');
+  });
+  historyKey(); await flush(); const request = vi.mocked(rawApi.saveRawHistory).mock.calls[1][0];
+  expect(historyButton(2).getAttribute('aria-current')).toBe('step'); expect(exposure().disabled).toBe(true);
+  expect([...history().querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true);
+  await clickText('Retry RAW save');
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls[2][0]).toEqual(request);
+  expect(historyButton(1).getAttribute('aria-current')).toBe('step'); expect(exposure().disabled).toBe(false);
+});
+
+it('waits for an in-flight History move before approving Windows close', async () => {
+  const respond = desktop(), model = historyBackend(); await mount();
+  let resolve!: (result: rawApi.RawHistoryResult) => void;
+  vi.mocked(rawApi.saveRawHistory).mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+  historyKey(); await flush(); const request = vi.mocked(rawApi.saveRawHistory).mock.calls[1][0];
+  historyKey(); act(() => historyButton(0).click()); await flush();
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(2);
+  act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'd'.repeat(64) } }))); await flush();
+  expect(respond).not.toHaveBeenCalledWith(expect.objectContaining({ saved: true }));
+  await act(async () => resolve(model.save(request))); await flush();
+  expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: true, requestId: 'd'.repeat(64) });
+});
+
+it('reloads the persisted cursor and Redo range after switching through JPEG', async () => {
+  historyBackend(); await mount(); historyKey(); await flush();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
+  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
+  expect(historyButton(1).getAttribute('aria-current')).toBe('step');
+  expect(host.querySelectorAll<HTMLButtonElement>('.edit-actions button')[1].disabled).toBe(false);
+  expect(rawApi.readRawHistory).toHaveBeenCalledTimes(2);
+});
+
+it('labels RAW temperature in Kelvin without inventing unavailable before/after values', async () => {
+  const model = historyBackend();
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async (doc, offset) => {
+    const page = model.page(doc, offset);
+    page.steps[0].metadata.control = 'wb.temp'; page.steps[1].metadata.control = 'wb.tint'; return page;
+  });
+  await mount();
+  expect(history().textContent).toContain(`${i18n.t('workspace.temperature')} (K)`);
+  expect(history().textContent).toContain(i18n.t('workspace.tint')); expect(history().textContent).not.toContain('→');
 });

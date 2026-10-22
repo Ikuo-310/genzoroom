@@ -1,6 +1,6 @@
 # Provisional Architecture
 
-**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows has an internal RAW import/settings/Preview adapter, verified in a Windows development Backend PoC against LightCraft v0.10.0. Windows RAW Preview and LightCraft sliders are implemented. C3-A adds SQLite RAW recipe storage, C3-B restores compatible saved recipes before publishing a RAW document, and C3-C connects confirmed readback Autosave and save guards for photo switching, Gallery return and normal Windows close. C3-D renews the same RAW session at a soft threshold of 200 mutation attempts while retaining the 256-attempt hard safety limit. C4-B1 adds the RAW History SQLite persistence layer; its document/API/UI connections, final RAW Export and Immich integration remain unimplemented.**
+**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows has an internal RAW import/settings/Preview adapter, verified in a Windows development Backend PoC against LightCraft v0.10.0. Windows RAW Preview and LightCraft sliders are implemented. C3-A adds SQLite RAW recipe storage, C3-B restores compatible saved recipes before publishing a RAW document, and C3-C connects confirmed readback Autosave and save guards for photo switching, Gallery return and normal Windows close. C3-D renews the same RAW session at a soft threshold of 200 mutation attempts while retaining the 256-attempt hard safety limit. C4-B1/B2 connect SQLite RAW History to the Windows document API. C4-B3-1 persists adjustment gestures, and C4-B3-2 adds RAW History metadata, Undo/Redo, baseline/step selection and shared shortcut arbitration. RAW category/Reset, Before/After and final RAW Export/Immich integration remain later work. The later C4 records below supersede earlier phase-specific unimplemented statements.**
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
@@ -291,6 +291,72 @@ History list, Undo/Redo/jump UI and cursor display remain B3-2. Category toggles
 Before/After and JPEG category changes remain later phases; their disabled RAW placeholders
 are unchanged. No new save queue, native snapshot store, Backend/schema or LightCraft change
 is introduced here.
+
+### C4-B3-2: RAW History view and cursor operations
+
+The existing History panel now selects its engine explicitly. `EditHistory` keeps JPEG entry
+formatting, Recipe types and organization menus; `RawEditHistory` builds rows from B2 metadata.
+Both share the presentation-only `HistoryList` (newest first, undone/current classes, accessible
+row buttons and baseline). RAW rows use stable step UUIDs, localized operation/control labels
+and timestamps. Temperature is labelled in Kelvin; B2 supplies no before/after values, so the
+view does not invent deltas or convert RAW values to JPEG adjustment units. Existing RAW
+slider/value formatting remains intact. RAW organization/Reset/category placeholders stay disabled.
+
+`readRawHistory(doc, offset)` requests exactly 20 rows from B2 with workspace/generation/token
+headers. Only this GET allows 16 KiB; all other JSON responses remain 4 KiB. The reader validates
+owner/native revision, current metadata, page bounds, step UUIDs, timestamps and allowlisted
+kind/metadata, then returns only display-contract fields. No DevelopSettings/source path/hash or
+PhotoId enters the view. The initial page contains the selected step, or the newest page for
+baseline; pages are aligned to 20. Earlier/later buttons extend the bounded display cache up to
+200 rows. Moves fetch a selected page only if it lies outside that cache; commit/reopen/renewal
+refresh one page because branch deletion/pruning may change UUIDs. They never refetch all rows
+on every operation. Page merges require the same SQLite revision/cursor/length/selected UUID
+and saved fingerprint; a failed/mismatched read retains the old cache with a retry message and
+disables History commands. A metadata retry performs GET only, not a second save.
+
+| Shared state | Owner and invariant |
+|---|---|
+| `RawRecipeSave.history` | Latest validated B2 ack/current metadata. Cursor/Redo bounds never advance optimistically. SQLite remains authoritative. |
+| `steps`, `historyOffset`, `historyLoading`, `historyError` | At most 200 display-only metadata rows in the same coordinator, tied to its current revision. No recipe snapshots or independent history persistence. |
+| `moveIntent` | One primitive action/target accepted before gesture settlement. The same queued save first confirms the gesture, then resolves current bounds/UUID membership. An intent survives an uncertain gesture save; its later RPC uses the existing immutable `retryRequest` slot. A UUID removed by the preceding branch edit is never replaced with a positional target. |
+| `moving`, `historyOperation` | UI admission lock and completion fence for one accepted move. They are not a second dispatcher/queue. The full commit→move sequence is reserved synchronously on the existing owner queue, before cleanup can enter. |
+| `retryRequest` | Existing sole recipe/History transport retry slot, extended with undo/redo/jump and optional target UUID/null. SaveId/body remain unchanged through native/DB failure or lost ack. |
+
+Undo/Redo/jump pause new gesture admission, flush desired controls, wait for confirmed readback
+and gesture commit, then call B2. Baseline sends `targetStepId=null`; step jumps send UUIDs.
+The coordinator rechecks bounds after the gesture because a new commit can remove Redo.
+No History move creates a commit step. A same-settings/different-cursor move is accepted even
+when native revision/fingerprint stay unchanged. The current recipe/History metadata must
+match the receipt and current synchronized native state before saved state advances. Unknown
+or inconsistent outcomes retain the immutable request, old displayed cursor and edit lock;
+existing Retry/Stay resolves them without automatic discard/rebase.
+
+A page miss after committing the gesture does not mean the requested UUID was deleted; the
+original UUID is still sent to B2. Only its initial `409 raw_history_target_missing` rejection
+proves that neither native application nor receipt creation started. In that case the already
+saved gesture stays current, the impossible target is cleared and the UI requests refresh and
+reselection. It never substitutes another step/baseline or treats an unknown save this way.
+
+On verified success, controls and saved recipe revision/fingerprint/cursor update together;
+`RawControls.refreshPreview()` then uses the existing serial/frame validation on the same queue.
+Preview-only failure preserves the saved cursor and reports an edit/Preview error rather than
+rewinding persistence. `prepareSave()` waits for the History fence before departure. Photo
+switches, Gallery, Filmstrip removal and normal Windows close keep their existing guard.
+C3-D cannot renew during a pending move; after a clean move reaches 200 attempts, existing
+renewal/reopen restores settings and reloads the selected History page/Redo range. Renewal
+itself creates no step. Late callbacks/results cannot publish into a successor owner.
+
+The existing `useAssetEdits` key handler remains the single Undo/Redo dispatcher. It first
+offers workspace exclusion Undo, then the selected RAW engine, then existing JPEG dispatch.
+RAW claims unsupported/busy events without falling through to JPEG. Existing registry bindings,
+Primary modifiers, repeat/defaultPrevented/native-input/IME/modal guards remain unchanged.
+RAW edits invalidate exclusion Undo through the same workspace edit boundary. No additional
+global shortcut listener or hard-coded command matching is added.
+
+C4-B3-2 changes no Backend, SQLite v8, LightCraft, JPEG Recipe/renderer, RAW Export or thumbnail
+contract. B3-3 integrated acceptance and C4-C Reset/category work remain separate. User-reported
+B3-1 Windows save/restore acceptance is retained as prior evidence; B3-2 real Windows/GPU
+acceptance remains to be performed.
 
 ## Gallery manual refresh
 

@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作APIとC4-B3-1 Frontend保存coordinatorは実装済み。C4-A確定設計と各実装記録は末尾を参照し、C4-B3-2のHistory UI以降は未実装**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作API、C4-B3-1保存coordinatorとC4-B3-2 RAW History UIは実装済み。C4-A確定設計と各実装記録は末尾を参照し、B3-3の統合検証・C4-C以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -1042,3 +1042,53 @@ Frontend focused回帰は `rawApi`／`rawControls`／`rawRecipeSave`／新規 `r
 監査修正後もTypeScript typecheck／production build成功。未解決High／Mediumなし。`git diff --check`成功。実LightCraft／GPU、Windows実機UI、ブラウザ動的確認は未実施。RAW History一覧・Undo／Redo／jump UI、カテゴリON/OFF・各Reset・Before/After、JPEGカテゴリ統合は変更していない。README／CHANGELOG・LightCraft・SQLiteも変更していない。
 
 Commit／Push後、C4-B3-1で停止する。
+
+## Phase 1C-C4-B3-2 実装結果（2026-10-23）
+
+開始HEAD `13e64439bd7f249c23a12d445b7d0a1daf625aae`、`feature/lightcraft-integration`、cleanから実装。ユーザーからB3-1のWindows実機における補正値保存・復元の正常動作を確認済みと報告された。本節はB3-1末尾のHistory UI未接続記述を更新するもので、過去のC1〜C3／C4-A／B1〜B3-1完了記録を保持する。B3-2の実機操作を今回実施したという意味ではない。
+
+### Frontend API・History表示
+
+`rawApi.ts` に `readRawHistory(doc, offset)` とHistory metadata／step型を追加し、既存 `saveRawHistory()` をundo／redo／jumpにも拡張した。GETはworkspace／generation／documentToken headerを送って `offset`／`limit=20` を指定する。この応答だけ16 KiB、他JSONは4 KiBのまま。owner／native revision・fingerprint、ページ件数・cursor・selected UUID、kind／metadata allowlist、timestamp、UUID重複を検証し、返却値から表示契約外のfieldを除外する。完全DevelopSettings・source path／content hash・PhotoIdはFrontendへ持ち込まない。
+
+既存 `EditHistory` のJPEG固有description／Recipe型は保持し、共通の `HistoryList` へ表示row（ID・position・description・日時）を渡す形にした。`RawEditHistory` はB2 metadataだけから同じ表示rowを構築する。最新順、undone／current表示、`aria-current`、行buttonと末尾baselineを共用し、RAWをJPEG Recipe／EditEntryへ変換しない。JPEGのcontext menu・手動履歴整理は維持し、RAWでは追加しない。
+
+RAWはkind／controlのローカライズ名、操作日時、cursor／全件数、現在選択行とbaselineを表示する。温度はKelvinの `K` を明示し、Tint等の現在値表示は既存RAW formatterを維持する。B2 metadataにbefore／after値はないため、相対温度や架空の数値差を表示しない。
+
+初期取得は現在選択stepを含む20件境界の1ページ、baseline選択時は最新ページとする。「前の20件」「後の20件」で必要なページだけ追加し、最大200 metadata rowまで表示可能。commit時は枝切り／pruneに備えて1ページを更新する。Undo／Redo／jumpは既存cacheを使い、選択stepが範囲外になった場合だけ対象ページを取得する。毎回全200件を再取得しない。再open／Session再生成後もSQLite metadataから選択pageとRedo範囲を復元する。
+
+### coordinator共有状態・移動の保存順序
+
+| 状態 | owner・更新条件・不変条件 |
+|---|---|
+| `RawRecipeSave.history` | B2のack／current一致後に更新するcursor／length／selected UUID。SQLiteが正本であり、Frontendでは移動を予測しない |
+| `steps`／`historyOffset`／`historyLoading`／`historyError` | 同じcoordinator内の最大200件の表示metadata cache。ページ結合はrecipe revision／fingerprint・cursor／length／selected UUID一致が必要。snapshotや別の永続履歴を保持しない |
+| `moveIntent` | 先行gestureの確定前に受理したaction／target UUIDだけ。gesture保存失敗時もintentを保持する。RPC送信時には既存 `retryRequest` slotへ移し、別のretry機構を作らない |
+| `moving`／`historyOperation` | 重複入力を防ぐlockと `prepareSave()` が待つ完了fence。同じownership queueの保存処理を待つだけで、第二queue／dispatcherではない |
+| `retryRequest` | B3-1の単一immutable要求をundo／redo／jumpへ拡張。native revision／fingerprint、expected SQLite revision、saveId、action／UUIDまたはbaseline nullを固定して再送する |
+
+移動は入力lock→最終desired flush→既存queueでgesture readback／commit ack→移動可能範囲とtarget UUID再確認→B2 undo／redo／jump→native適用・readback・DB cursor更新ack→最新controls／保存revision／fingerprint／History metadata採用→Preview更新の順。全体を一つの既存queue保存処理へ同期的に予約し、受理直後のunmount cleanupが途中へ割り込まないようにした。
+
+baselineは `targetStepId: null`、行選択はstable UUIDを送る。positionは表示と行選択の対応にだけ使用する。先行gestureの有効commit後に表示cacheから外れても、選択UUIDが削除されたとは判断せず同じUUIDをBackendへ渡す。枝切り／pruneで実際に消えた対象への初回 `409 raw_history_target_missing` はB2のnative適用・receipt作成前の既知の拒否なので、そのtarget要求だけを解除し、保存済みgestureを保って再取得・再選択を案内する。別position／baselineへ置き換えず、結果不明の保存へこの例外を適用しない。Redo可否も先行commit後に再評価する。Undo／Redo／jumpそのものを通常commitとして追加しない。同一設定でnative revisionが変化しないcursor移動も、保存revisionと選択metadataに従って正しく採用する。
+
+移動失敗・保存結果不明ではimmutable要求と旧controls／cursorを保持し、編集・他のHistory操作・切替・終了・再生成を止める。元ackだけでは採用せず、`historyPending=false`／同期native／`nativeMatchesRecipe=true`／最新recipe・選択metadataとackの一致を検証する。既存Retry／Stayを使い、同一saveId・bodyを再送する。先行gesture保存だけが失敗した場合も、Retryでその保存を解決してから受理済み移動へ進む。黙った破棄・自動rebase・別snapshot上書きは追加しない。
+
+metadata GETだけの失敗はDB保存失敗と区別し、既存cacheを残して一覧取得エラーを表示、History操作を無効化する。再取得buttonはGETだけを行う。保存済みcursorの採用後、Preview／decodeだけが失敗してもDB・cursorを巻き戻さず、既存RAWエラー／Preview retryで扱う。
+
+### shortcut仲裁・切替・200 mutation
+
+`useAssetEdits` の既存単一keydown handlerに現在engineへのcallbackを追加した。Filmstrip除外Undo→RAW History→既存JPEG dispatchの順で仲裁し、RAWが選択されたイベントをJPEGでも二重処理しない。処理中／非対応RAWでは操作を開始せず、そのイベントをRAW側で扱う。registry bindingとPrimary修飾、native入力・IME・repeat・defaultPrevented・modal等の抑止条件は維持した。新しいglobal shortcut handler／hard-coded command matchingを追加していない。RAW編集でも既存のworkspace edit境界を通して除外Undoを失効させる。
+
+`prepareSave()` はHistory完了fenceを待ってから従来のsettle／保存guardへ進む。RAW↔RAW／JPEG、Gallery、Filmstrip除外、通常Windows終了の既存呼出しを維持する。History未確定のままrelease／再生成せず、C3-Dの200 mutationに到達した確定移動は保存・Preview処理完了後に既存再生成へ進む。再生成でstepを作らず、再open後にSQLiteからcursor／Redo範囲を読み直す。asset／handle／generation／tokenと既存frame検証により旧ownerの応答を新documentへ反映しない。
+
+### テスト・限定監査・停止範囲
+
+- Frontend focused 14ファイル654件成功：`rawApi`、`rawControls`、`rawRecipeSave`、`rawHistorySave`、`useRawDocument`、`AnshitsuRawPreview`、`AnshitsuPage`、`AnshitsuPersistence`、`useAssetEdits`、`editControls`、`editShortcuts`、`AnshitsuClipboard`、`AnshitsuExportQueue`、`Filmstrip`。監査修正とKelvin／Tint表示テスト追加後は影響範囲のRAW 6ファイル153件成功（実行範囲に重複あり）。
+- Backend `test_raw_history_api.py`：repo Python 3.14、Fake LightCraft／一時SQLiteで33件成功。metadata、native restore／readback、cursor保存・SQL失敗・receipt再送の既存契約を確認。Backendソース・schemaは変更していない。
+- TypeScript `tsc --noEmit`、Frontend production build成功。FilmstripテストのReact `act` warningと500 kB超chunkのbuild warningは残る。成功件数にskip／失敗はない。全Frontend／Backend suite・Docker Smoke Testは実行していない。
+- 新規／更新テストは、未編集baseline・保存済み履歴／日時／選択、20件単位・200件・21件端数・選択page復元、Undo／Redo／任意UUID／baseline、境界無効化、同設定異cursor、移動後controls／Preview、Redo保持と有効commit時だけの枝切り、先行gesture確定、未知保存／native失敗後の同一要求Retry、二重click／shortcut、除外Undo優先・JPEG分岐・入力／IME／modal抑止、即時unmount・stale応答・切替／Windows close待機・200再生成を対象とした。
+- 限定diff監査で、共通ViewModelとJPEG境界、SQLite由来metadataとcacheの責任、重複要求・gesture／retry順序、Preview・controls同期、ページ容量、世代／終了競合を確認した。受理直後unmountのqueue予約、保存後cache外の有効UUID保持とB2による対象消失拒否の区別、保存済み選択pageへの復帰、metadata取得と保存失敗の分離を補強して関連テストを再実行した。修正後もtypecheck／production build成功。未解決High／Mediumはない。
+
+`git diff --check`成功。実LightCraft／GPU・Windows実機UI・ブラウザ動的確認は未実施。B3-1実機保存確認とB3-2の自動fake成功を混同しない。RAWカテゴリON/OFF・各Reset・Before/After・JPEGカテゴリ統合／個別ON/OFF削除・RAW Export／サムネイル・History手動整理／圧縮は変更していない。SQLite schema v8・200件保持・LightCraft固定version、README／CHANGELOGも維持する。
+
+設計書・architectureを更新してCommit／Push後、C4-B3-2で停止する。B3-3統合検証とC4-C以降へは進まない。

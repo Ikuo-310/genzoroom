@@ -1,3 +1,4 @@
+import { HistoryList } from './HistoryList';
 import { useTranslation } from 'react-i18next';
 import { basicHistoryControl } from './basicControls';
 import {
@@ -21,10 +22,7 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
   onMenu?: (cursor: number, trigger: HTMLElement, x?: number, y?: number) => void;
 }) {
   const { t } = useTranslation();
-  const newestFirst = history.map((entry, index) => ({ entry, index })).reverse();
-
-  return <ol className="edit-history">
-    {newestFirst.map(({ entry, index }) => {
+  const rows = history.map((entry, index) => {
       const control = basicHistoryControl(entry.kind);
       let description: string;
       switch (entry.kind) {
@@ -123,27 +121,9 @@ export function EditHistory({ history, cursor, disabled = false, onJump = () => 
           break;
         }
       }
-      const className = [index >= cursor ? 'undone' : '', index + 1 === cursor ? 'current' : ''].filter(Boolean).join(' ') || undefined;
-      return <li key={index} value={index + 1} className={className}
-        title={entry.kind === 'paste' ? description : undefined}
-      >
-        <button type="button" disabled={disabled} aria-current={index + 1 === cursor ? 'step' : undefined}
-          onContextMenu={(event) => { if (!disabled && onMenu) { event.preventDefault(); onMenu(index + 1, event.currentTarget, event.clientX, event.clientY); } }}
-          onKeyDown={(event) => { if (!disabled && onMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
-            event.preventDefault(); onMenu(index + 1, event.currentTarget);
-          } }}
-          onClick={() => onJump(index + 1)}>
-          {entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description}
-        </button>
-      </li>;
-    })}
-    <li className={`initial-state${cursor === 0 ? ' current' : ''}`}>
-      <button type="button" disabled={disabled} aria-current={cursor === 0 ? 'step' : undefined}
-        onContextMenu={(event) => { if (!disabled && onMenu) { event.preventDefault(); onMenu(cursor, event.currentTarget, event.clientX, event.clientY); } }}
-        onKeyDown={(event) => { if (!disabled && onMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
-          event.preventDefault(); onMenu(cursor, event.currentTarget);
-        } }}
-        onClick={() => onJump(0)}>{t('workspace.initialState')}</button>
-    </li>
-  </ol>;
+      return { id: String(index), position: index + 1,
+        title: entry.kind === 'paste' ? description : undefined,
+        description: entry.kind === 'paste' ? <span className="edit-history-paste">{description}</span> : description };
+    });
+  return <HistoryList rows={rows} cursor={cursor} disabled={disabled} onJump={onJump} onMenu={onMenu} />;
 }

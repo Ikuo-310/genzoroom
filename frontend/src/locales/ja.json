@@ -267,6 +267,13 @@
   },
   "workspace": {
     "rawPreview": {
+      "historyPosition": "履歴 {{cursor}} / {{count}}",
+      "historyLoading": "RAW履歴を読み込んでいます…",
+      "historyFailed": "RAW履歴を確認できませんでした。再試行して一覧を更新してください。",
+      "historyTargetMissing": "選択した履歴は直前の編集で保持範囲から外れました。編集は保存済みです。履歴を再取得して選び直してください。",
+      "retryHistory": "RAW履歴を再取得",
+      "moreHistory": "前の20件を読み込む",
+      "newerHistory": "後の20件を読み込む",
       "regenerating": "RAW編集セッションを保存・再生成しています…",
       "regenerationFailed": "RAW編集セッションの再生成に失敗しました。編集の保存状態を保持しています。再試行してください。",
       "retryRegeneration": "セッション再生成を再試行",

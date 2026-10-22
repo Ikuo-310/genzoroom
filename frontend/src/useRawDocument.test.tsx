@@ -5,12 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRawDocument } from './useRawDocument';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
-  saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
 let root: Root;
 let current: ReturnType<typeof useRawDocument>;
@@ -21,6 +21,7 @@ async function render(id: string | null) { await act(async () => { root.render(<
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 beforeEach(() => {
+  vi.mocked(api.readRawHistory).mockReset().mockImplementation(async (doc, offset) => rawHistoryPage(doc, offset));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   root = createRoot(document.createElement('div'));
   vi.clearAllMocks(); decode = async () => {};
@@ -211,6 +212,87 @@ describe('RAW document lifetime', () => {
     await act(async () => gate.resolve(rawHistoryResult(request)));
     await transition; await flush();
     expect(current?.assetId).toBe('b'); expect(current?.saveError).toBeUndefined();
+  });
+});
+
+describe('RAW History document integration', () => {
+  function backend(attempts = 0) {
+    const model = fakeRawHistory(2, 2, attempts);
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => model.settings(doc));
+    vi.mocked(api.saveRawHistory).mockImplementation(async request => model.save(request));
+    vi.mocked(api.readRawHistory).mockImplementation(async (doc, offset) => model.page(doc, offset));
+    return model;
+  }
+  it('publishes SQLite cursor, controls and a fresh Preview after moving', async () => {
+    const model = backend(); await render('a'); await flush();
+    expect(current?.history?.cursor).toBe(2); expect(current?.historySteps).toHaveLength(2);
+    act(() => current!.undo()); await flush();
+    expect(current?.history?.cursor).toBe(1); expect(current?.settings?.values['light.exposure']).toBe(1);
+    expect(current?.url).toBe('blob:raw-2'); expect(current?.canRedo).toBe(true); expect(current?.dirty).toBe(false);
+    act(() => current!.jumpHistory(null)); await flush(); expect(current?.history?.cursor).toBe(0);
+    expect(current?.canUndo).toBe(false); expect(current?.history?.length).toBe(2);
+    act(() => current!.redo()); await flush(); expect(current?.history?.cursor).toBe(1);
+    expect(model.entries).toHaveLength(2);
+  });
+  it('waits for a cursor save before departure and suppresses repeated moves', async () => {
+    const model = backend(); await render('a'); await flush();
+    const pending = deferred<api.RawHistoryResult>(); vi.mocked(api.saveRawHistory).mockReturnValueOnce(pending.promise);
+    act(() => current!.undo()); await flush(); const request = vi.mocked(api.saveRawHistory).mock.calls[1][0];
+    act(() => { current!.undo(); current!.redo(); current!.jumpHistory(null); });
+    let departing!: Promise<void>; act(() => { departing = current!.prepareSave(); }); await flush();
+    expect(current?.locked).toBe(true); expect(api.saveRawHistory).toHaveBeenCalledTimes(2);
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    await act(async () => { pending.resolve(model.save(request)); await departing; }); await flush();
+    expect(current?.history?.cursor).toBe(1); expect(current?.dirty).toBe(false);
+  });
+  it('keeps a failed History move locked and replays its immutable request on Retry', async () => {
+    const model = backend(); await render('a'); await flush();
+    vi.mocked(api.saveRawHistory).mockImplementationOnce(async request => {
+      model.save(request); throw new api.RawSaveError('raw_history_save_failed', 'unknown');
+    });
+    act(() => current!.undo()); await flush();
+    const request = vi.mocked(api.saveRawHistory).mock.calls[1][0];
+    expect(current?.saveError).toBe('raw_history_save_failed'); expect(current?.history?.cursor).toBe(2);
+    await act(async () => { await current!.retrySave(); }); await flush();
+    expect(vi.mocked(api.saveRawHistory).mock.calls[2][0]).toEqual(request);
+    expect(current?.history?.cursor).toBe(1); expect(current?.locked).toBe(false);
+  });
+  it('refreshes History from SQLite after a move reaches 200 and renews the session', async () => {
+    backend(199); let generation = 1;
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+      generation, handle: `handle-${generation}`, documentToken: `token-${generation}`, revision: 1 }));
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async () => { generation++; });
+    await render('a'); await flush();
+    act(() => current!.undo());
+    await act(async () => { for (let i = 0; i < 160; i++) await Promise.resolve(); });
+    expect(current?.document?.generation).toBe(2); expect(current?.history?.cursor).toBe(1); expect(current?.canRedo).toBe(true);
+    expect(current?.historySteps).toHaveLength(2); expect(api.readRawHistory).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'undo', 'initialize']);
+  });
+  it('never publishes a late History move or its Preview into the successor document', async () => {
+    const model = backend(); await render('a'); await flush(); const old = current!;
+    const pending = deferred<api.RawHistoryResult>(); vi.mocked(api.saveRawHistory).mockReturnValueOnce(pending.promise);
+    act(() => current!.undo()); await flush(); const request = vi.mocked(api.saveRawHistory).mock.calls[1][0];
+    await render('b');
+    await act(async () => pending.resolve(model.save(request))); await flush();
+    expect(current?.assetId).toBe('b'); expect(current?.saveError).toBeUndefined();
+    const count = vi.mocked(api.saveRawHistory).mock.calls.length;
+    act(() => old.undo()); await flush(); expect(api.saveRawHistory).toHaveBeenCalledTimes(count);
+    expect(api.rawPreview).toHaveBeenCalledTimes(2);
+  });
+  it('reserves the move on the queue even when unmounted in the same event', async () => {
+    backend(); await render('a'); await flush();
+    act(() => { current!.undo(); root.render(<Harness id="b" />); }); await flush();
+    expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => [r.doc.assetId, r.action])).toEqual([
+      ['a', 'initialize'], ['a', 'undo'], ['b', 'initialize']]);
+    expect(current?.assetId).toBe('b'); expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+  });
+  it('keeps a confirmed cursor save when only its Preview fails', async () => {
+    backend(); await render('a'); await flush();
+    vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawApiError('raw_render_failed'));
+    act(() => current!.undo()); await flush();
+    expect(current?.history?.cursor).toBe(1); expect(current?.dirty).toBe(false);
+    expect(current?.editError).toBe('raw_render_failed'); expect(current?.saveError).toBeUndefined();
   });
 });
 

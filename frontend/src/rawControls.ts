@@ -106,6 +106,16 @@ export class RawControls {
       if (!this.unsettled && !this.queued) return this.confirmed;
     }
   }
+  async refreshPreview() {
+    const serial = ++this.serial;
+    try {
+      await this.options.preview(this.confirmed, () => this.active && serial === this.serial);
+      if (this.active) this.error = undefined;
+    } catch (cause) {
+      if (this.active) this.error = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+    }
+    if (this.active) this.options.changed();
+  }
   dispose() { this.active = false; clearTimeout(this.timer); }
   get unsettled() { return this.busy || Object.keys(this.desired).length > 0; }
 }

@@ -22,17 +22,23 @@ export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: numbe
 export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
   documentRevision: number; settingsFingerprint: string };
 export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
-export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit'; control?: RawControlId };
+export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump';
+  control?: RawControlId; targetStepId?: string | null };
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset';
+  metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
   historyPending: boolean; nativeState: string; nativeMatchesRecipe: boolean; replayed: boolean;
   ack: { saveId: string; revision: number; settingsFingerprint: string; updatedAt: string;
     historyCursor: number; historyLength: number; stepId: string | null };
 };
+export type RawHistoryPage = RawDocument & Pick<RawHistoryResult, 'history' | 'historyPending' | 'nativeState' | 'nativeMatchesRecipe'> & {
+  recipeRevision: number; recipeFingerprint: string | null; offset: number; limit: number; hasMore: boolean; steps: RawHistoryStep[] };
 const fingerprint = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const opaque = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const uuid = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id);
 
 async function readBounded(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer>> {
   const reader = response.body?.getReader();
@@ -68,10 +74,10 @@ async function request(path: string, init: RequestInit = {}) {
   return response;
 }
 
-async function json(path: string, init?: RequestInit) {
+async function json(path: string, init?: RequestInit, limit = 4096) {
   const response = await request(path, init);
   if (response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response');
-  try { return JSON.parse(new TextDecoder().decode(await readBounded(response, 4096))); }
+  try { return JSON.parse(new TextDecoder().decode(await readBounded(response, limit))); }
   catch { throw new RawApiError('raw_invalid_response'); }
 }
 const post = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -160,16 +166,16 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
 }
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
-  const { doc, action, expectedRecipeRevision, saveId, control } = request;
+  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId } = request;
   let accepted = false;
   try {
     const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
-      ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}) }));
+      ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}),
+      ...(action === 'jump' ? { targetStepId } : {}) }));
     accepted = true;
     settings(value, doc);
     const h = value.history, ack = value.ack;
-    const uuid = (id: unknown) => typeof id === 'string' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id);
     if (!h || h.initialized !== true || !integer(h.cursor) || !integer(h.length) || h.cursor > h.length
       || h.length > 200 || (h.cursor === 0 ? h.selectedStepId !== null : !uuid(h.selectedStepId))
       || typeof value.historyPending !== 'boolean' || typeof value.nativeMatchesRecipe !== 'boolean'
@@ -183,6 +189,43 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
     const error = cause instanceof RawApiError ? cause : new RawApiError('raw_connection_failed');
     throw new RawSaveError(error.code, accepted || !error.status || error.status >= 500 || error.status === 408 ? 'unknown' : 'rejected', error.status);
   }
+}
+export async function readRawHistory(doc: RawDocument, offset: number): Promise<RawHistoryPage> {
+  if (!integer(offset) || offset > 200) throw new RawApiError('raw_invalid_request');
+  const value = await json(`/documents/${doc.handle}/history?offset=${offset}&limit=20`, { headers: {
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 16384);
+  document(value, doc.workspaceId, doc.assetId);
+  const h = value.history;
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || value.revision !== doc.revision || !fingerprint(value.settingsFingerprint)
+    || !integer(value.recipeRevision) || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
+    || !h || typeof h.initialized !== 'boolean' || !integer(h.cursor) || !integer(h.length) || h.length > 200 || h.cursor > h.length
+    || (h.cursor === 0 ? h.selectedStepId !== null : !uuid(h.selectedStepId))
+    || typeof value.historyPending !== 'boolean' || typeof value.nativeMatchesRecipe !== 'boolean'
+    || !['synced', 'desynchronized'].includes(value.nativeState) || value.offset !== offset || value.limit !== 20
+    || value.hasMore !== (offset + 20 < h.length) || !Array.isArray(value.steps)
+    || value.steps.length !== Math.min(20, Math.max(0, h.length - offset))) throw new RawApiError('raw_invalid_response');
+  const ids = new Set<string>();
+  for (const step of value.steps) {
+    const m = step?.metadata;
+    if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
+      || !m || typeof m !== 'object' || Array.isArray(m)
+      || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
+        : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !['light', 'color'].includes(m.section) || typeof m.enabled !== 'boolean'
+        : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !['light', 'color'].includes(m.section)
+        : step.kind !== 'allReset' || Object.keys(m).length !== 0)) throw new RawApiError('raw_invalid_response');
+    ids.add(step.stepId);
+  }
+  if (h.cursor > offset && h.cursor <= offset + value.steps.length && value.steps[h.cursor - offset - 1].stepId !== h.selectedStepId)
+    throw new RawApiError('raw_invalid_response');
+  // Keep only the display contract, even if a server accidentally adds internal fields.
+  return { workspaceId: value.workspaceId, handle: value.handle, assetId: value.assetId, generation: value.generation,
+    documentToken: value.documentToken, revision: value.revision, settingsFingerprint: value.settingsFingerprint,
+    recipeRevision: value.recipeRevision, recipeFingerprint: value.recipeFingerprint,
+    history: { initialized: h.initialized, cursor: h.cursor, length: h.length, selectedStepId: h.selectedStepId },
+    historyPending: value.historyPending, nativeState: value.nativeState, nativeMatchesRecipe: value.nativeMatchesRecipe,
+    offset, limit: 20, hasMore: value.hasMore, steps: value.steps.map((step: RawHistoryStep) => ({ stepId: step.stepId,
+      kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt })) };
 }
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal): Promise<RawFrame> {
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,

@@ -65,6 +65,7 @@ function freshRecord(assetId: string): AssetEditRecord {
 export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked = false, workspaceActions: {
   onEdit?: () => void;
   undo?: () => boolean;
+  history?: (action: 'undo' | 'redo') => boolean;
 } = {}) {
   const workspaceActionsRef = useRef(workspaceActions);
   workspaceActionsRef.current = workspaceActions;
@@ -277,6 +278,7 @@ export function useAssetEdits(assetId: string, enabled: boolean, keyboardBlocked
         event.preventDefault();
         return;
       }
+      if (workspaceActionsRef.current.history?.(type)) { event.preventDefault(); return; }
       if (!enabled) return;
       event.preventDefault();
       dispatch({ type });

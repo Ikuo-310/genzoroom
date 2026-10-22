@@ -13,6 +13,7 @@ import { ExportQueueApiError } from './exportQueueApi';
 import { HomeTitle } from './HomeTitle';
 import { ImageViewer } from './ImageViewer';
 import { EditHistory } from './EditHistory';
+import { RawEditHistory } from './RawEditHistory';
 import { Filmstrip } from './Filmstrip';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { formatPhotoDate, type AppLanguage } from './i18n';
@@ -133,6 +134,11 @@ export function AnshitsuPage() {
     recipeChangeRevision,
     saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor, retainForUndo } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked, {
       onEdit: clearExclusionUndo, undo: () => undoExclusionRef.current(),
+      history: type => {
+        if (!activeDetail?.is_raw) return false;
+        rawHistoryAction(type);
+        return true; // RAW claims the event even when unavailable; JPEG must not also dispatch it.
+      },
     });
   const editable = canEdit && loadStatus === 'ready';
   const seenSaveRevisions = useRef(new Map<string, number>());
@@ -234,6 +240,13 @@ export function AnshitsuPage() {
     return () => window.removeEventListener('keydown', keydown);
   }, [assetId, workspaceKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
+  const rawHistoryEnabled = !!activeDetail?.is_raw && rawDocument?.status === 'ready' && !!rawDocument.history
+    && !rawDocument.locked && !rawDocument.historyLoading && !rawDocument.historyError && !workspaceKeyboardBlocked;
+  function rawHistoryAction(type: 'undo' | 'redo') {
+    if (!rawHistoryEnabled || !rawDocument || !(type === 'undo' ? rawDocument.canUndo : rawDocument.canRedo)) return;
+    clearExclusionUndo();
+    rawDocument[type]();
+  }
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
   const lastFocusedAdjustment = useRef<AdjustmentId | null>(null);
@@ -692,11 +705,16 @@ export function AnshitsuPage() {
           disabled={!historyEnabled} aria-label={t('workspace.historyMenu')} aria-haspopup="menu" aria-expanded={!!historyMenu}
           onClick={(event) => { if (historyMenu) closeHistoryMenu(); else openHistoryMenu(undefined, event.currentTarget); }}>⋯</button>}>
           <div className="edit-actions">
-            <button className="tool-button" title={shortcut.title(t('workspace.undo'), 'undo')} disabled={!historyEnabled || !canUndo} onClick={() => dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
-            <button className="tool-button" title={shortcut.title(t('workspace.redo'), 'redo')} disabled={!historyEnabled || session.cursor >= session.history.length || !!session.pending} onClick={() => dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
+            <button className="tool-button" title={shortcut.title(t('workspace.undo'), 'undo')}
+              disabled={activeDetail?.is_raw ? !rawHistoryEnabled || !rawDocument?.canUndo : !historyEnabled || !canUndo}
+              onClick={() => activeDetail?.is_raw ? rawHistoryAction('undo') : dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+            <button className="tool-button" title={shortcut.title(t('workspace.redo'), 'redo')}
+              disabled={activeDetail?.is_raw ? !rawHistoryEnabled || !rawDocument?.canRedo : !historyEnabled || session.cursor >= session.history.length || !!session.pending}
+              onClick={() => activeDetail?.is_raw ? rawHistoryAction('redo') : dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           <div className="history-scroll-region">
-          {session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
+          {activeDetail?.is_raw && rawDocument ? <RawEditHistory raw={rawDocument} disabled={workspaceKeyboardBlocked} />
+            : session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
             : <EditHistory history={session.history} cursor={session.cursor} disabled={!historyEnabled}
               onMenu={(cursor, trigger, x, y) => openHistoryMenu(cursor, trigger, x, y)}
               onJump={(cursor) => { if (historyEnabled) dispatch({ type: 'jumpToHistory', cursor }); }} />}
@@ -809,7 +827,10 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : rawDocument ? <RawAdjustmentControls raw={rawDocument} disabled={workspaceKeyboardBlocked} /> : <p>{t('workspace.jpegOnly')}</p>}
+          </div> : rawDocument ? <RawAdjustmentControls raw={{ ...rawDocument, changeControls: values => {
+            if (!rawDocument.locked && !workspaceKeyboardBlocked) clearExclusionUndo();
+            rawDocument.changeControls(values);
+          } }} disabled={workspaceKeyboardBlocked} /> : <p>{t('workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip
