@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C3-C：Autosaveと写真切替・通常終了保存（2026-10-22）
+
+C3-B完了Commit `5bdffb955103c2dcdfb36b9f20ca33c785c30915`から、Windows RAW recipe GET／PUTとFrontend保存ownerを接続した。Backendはworkspace／document／generation／tokenとnative revisionを確認し、LightCraftの完全な確定readbackだけを既存SQLite保存層へ渡す。Frontendは設定本文を送らず、native document revisionとSQLite recipe revisionを分け、完全設定のfingerprintでdirtyを判定する。schema v7、C3-Aのtransaction／saveId規約、C3-Bの原本・engine互換性検証と復元、C1 cleanup所有権は維持する。
+
+RAW専用`RawRecipeSave`が確定readback後5秒でAutosaveし、保存中の追加編集は後続保存する。結果不明では同一revision・saveIdのimmutable requestを保持し、明示再試行で先にreplayする。Backendもactive documentの直近readbackを1件保持し、追加入力後でも元payloadで再送を照合する。recipe競合はDB metadataを再同期し、自動上書きせずユーザーの再試行を待つ。古いdocumentの応答やshutdown中のcommitは成功状態に採用しない。設定本文・原本path・PhotoId・資格情報はAPI／診断へ追加しない。
+
+RAWからの写真切替、Gallery復帰、active写真のFilmstrip除外、Windows通常終了は、入力停止→最後のdesired flush→readback確定→保存ack→clean確認を待つ。失敗は写真・編集を保持して移動／終了を止め、再試行・stayを提供する。Gallery再入場・アプリ再起動時はSQLiteから復元し、訪問写真のmemory snapshot storeは追加しない。JPEG Autosave／History／現像済み判定／Export Queueは分離したまま。パネルに未保存・保存中・失敗と再試行を追加し、旧一時編集の注意書きをAutosave／終了保存の説明に更新した。
+
+検証：repo Python 3.14／cwd backendの関連8ファイル291件＋41 subtests成功。RAW保存API／SQLite／復元／controls／native sessionと既存JPEG保存・Queueを確認した。Frontend関連10ファイル236件成功後、RAW→RAWの保存待機とGallery再入場復元を追加し、変更した暗室テスト13件も成功（最終関連範囲は計237件）。制御timer／gateでAutosave、追加入力、応答消失再送、競合、切替・終了失敗阻止と再試行、stale応答、DBからの新Backend復元を検証した。`npm run build`のTypeScript check・production build成功。既存500 kB超chunk警告あり。`git diff --check`成功。
+
+C3-Dの多数RAW resident最適化・256試行上限前の世代再生成・長時間cache管理、C4のBefore／After・Reset・ON/OFF・History・Undo／Redo、RAW Exportは未実装。既存Session hard limitと写真切替時の再download／再importを維持する。ブラウザー強制離脱・OS異常終了時の最後の操作は保証せず、dirty／unsettled時のbeforeunload警告のみを追加した。新しいbrowser Back／reload非同期guardはない。全体suite・実LightCraft／GPU／Immich・Windows画面操作は実施していない。実画面受入はユーザー側で行う。README／CHANGELOGは変更していない。
+
 ## RAW現像統合 Phase 1C-C3-B：SQLiteレシピのLightCraft復元（2026-10-22）
 
 Windowsの既存document openに、import→実content hash／engine/schema照合→SQLite lookup→全DevelopSettings適用→readback一致確認を接続した。C3-Aの正規化・JSON検証・256 KiB上限・receipt検証を再利用する。完全一致レシピだけを使い、当該Assetの行なしなら従来初期状態、原本やengineが異なる場合は区別した固定エラーでopenを拒否する。DB行・receiptの書換え／削除は行わない。

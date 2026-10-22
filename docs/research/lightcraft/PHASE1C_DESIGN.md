@@ -142,7 +142,7 @@ WBの注意：`wb.scale=legacy`は省略可能で、旧相対値とKelvinの意�
 
 ### 7.1 Windows専用の最小HTTP契約
 
-以下はC3全体の契約案である。C3-Bでは既存`POST /documents`内部のSQLiteレシピ復元だけを接続し、以下のrecipe GET／PUTやsession reset APIは未実装のまま。C1／C2の既存endpointはWindows専用`/api/raw`配下であり、認証・所有確認を再利用する。C3でも原本path、PhotoId、任意commandやDevelopSettings本文をFrontend requestから受け付けない。JSONは型・件数・byte上限を検証する。
+以下はC3全体の契約である。C3-Bで`POST /documents`内部のSQLiteレシピ復元、C3-Cでrecipe GET／PUTとAutosave・保存guardを接続した。session reset API／容量管理はC3-Dであり未実装。C1／C2の既存endpointはWindows専用`/api/raw`配下であり、認証・所有確認を再利用する。C3でも原本path、PhotoId、任意commandやDevelopSettings本文をFrontend requestから受け付けない。JSONは型・件数・byte上限を検証する。
 
 | API案 | 入出力・責務 |
 |---|---|
@@ -150,8 +150,8 @@ WBの注意：`wb.scale=legacy`は省略可能で、旧相対値とKelvinの意�
 | `POST /documents` | Asset ID＋workspace ID→opaque document。原本import・LightCraft content hash確認後、互換するSQLite RAWレシピがあれば復元・readbackしてからreadyを返す。UUID／Asset detailを再確認 |
 | `GET /documents/{handle}` | workspaceの確定snapshot／revision／状態を取得。選択変更やimportは行わず、response消失後の再同期にも使用 |
 | `POST /documents/{handle}/settings`／`POST .../controls` | C2実装済み。native DevelopSettingsのreadback／allowlist control更新。document revisionとSQLite recipe revisionは別管理 |
-| `GET /documents/{handle}/recipe` | 現在documentのAsset ID／LightCraft content hash／engine tupleに一致する保存レシピを取得・再同期。別原本／非互換設定を適用しない |
-| `PUT /documents/{handle}/recipe` | workspace／generation／document token、expected recipe revision、saveId、confirmed document revisionだけ受け付け、Backendがnative readbackから得た完全DevelopSettingsを保存。任意設定値を受け付けない |
+| `GET /documents/{handle}/recipe` | C3-C実装済み。現在documentのAsset ID／LightCraft content hash／engine tupleに一致する保存metadataを再同期。設定本文は返さず、別原本／非互換設定を適用しない |
+| `PUT /documents/{handle}/recipe` | C3-C実装済み。workspace／generation／document token、expected recipe revision、saveId、confirmed document revisionだけ受け付け、Backendがnative readbackから得た完全DevelopSettingsを保存。任意設定値を受け付けない |
 | `POST /documents/{handle}/preview` | expectedRevision、client selection serial／request serial、maxSide→PNG bytes＋一致確認用response headers。Supersededは204、画像なし |
 | `POST /session/reset` | workspace ID＋expectedGeneration、明示復旧／安全な世代再生成。新handle対応表を返す |
 | `DELETE /workspaces/{id}` | 明示破棄／終了。要求を無効化し、Engineから参照がなくなってからowned RAW fileを回収。JPEG処理を停止しない |
@@ -231,13 +231,13 @@ nativeの個別evictionやinteraction／history整理を公開する案は改善
 
 **事実：** JPEGはRecipe v18、`useAssetEdits`のAsset別record、`editState.ts`のvalidation／migration、Backend保存revision／save ID、autosave・retry／conflictを持つ。LightCraftはDevelopSettingsのschema `version`と描画`process`が別で、さらにengine version／commitがある。
 
-**C3設計（保存層はC3-A、document openでの復元はC3-Bで実装済み）：** C3の初回から既存SQLite DBへRAWレシピを永続化する。JPEGの`asset_edit_states`とRecipe v18／History形式は変更せず、別の`asset_raw_recipes` tableを加えた。確定した主キーは`(asset_id, source_content_hash, engine_name, engine_version, engine_commit, settings_schema_version)`。これにより同一Asset IDの原本差替えや非互換engine recipeを上書きせず保持し、Asset ID単位の取得時に現在のcontent hashと互換engine tupleで絞り込める。旧recipeの削除・自動上書き・暗黙変換はしない。暗室からの保存・Autosave接続はC3-C以降である。
+**C3設計（保存層はC3-A、document openでの復元はC3-Bで実装済み）：** C3の初回から既存SQLite DBへRAWレシピを永続化する。JPEGの`asset_edit_states`とRecipe v18／History形式は変更せず、別の`asset_raw_recipes` tableを加えた。確定した主キーは`(asset_id, source_content_hash, engine_name, engine_version, engine_commit, settings_schema_version)`。これにより同一Asset IDの原本差替えや非互換engine recipeを上書きせず保持し、Asset ID単位の取得時に現在のcontent hashと互換engine tupleで絞り込める。旧recipeの削除・自動上書き・暗黙変換はしない。暗室からの保存・Autosave・写真切替／通常終了保存guardはC3-Cで接続した。
 
 行にはAsset ID、正規化したLightCraft content hash、engine名／version／固定commit、DevelopSettings schema version、LightCraft readbackから得た完全DevelopSettings JSON（未対応field、`process`、WB scaleを含む）、独立した`recipe_revision`、`updated_at`、`last_save_id`を保存する。handle、PhotoId、cache path、source fingerprint、認証情報は保存しない。raw content hashを同一性の根拠とし、file fingerprintは再download間で同じとは仮定しない。
 
 `backend/edit_store.py`のSQLite接続・WAL／FULL・transaction／optimistic revisionと冪等saveId規約、`backend/storage.py`のDB検証を再利用し、C3-AでRAW tableを追加するschema migration v7を実装した。RAW CRUDはJPEGの`put_edit_state_with_recipe_change`を呼ばない。このJPEG関数はJPEG現像状態とExport Queue副作用を扱うため、RAW保存はqueue／JPEG edited判定へ作用しない独立transactionにする。Dockerも共通DB migrationで空tableを持ち得るが、Windows専用RAW API／capabilityは追加せずRAW利用可能と表示しない。
 
-既存JPEGからは保存規約を再利用する。`useAssetEdits`／`editStateApi`のAsset別autosave、dirty/clean、revision競合、saveIdによる同一request再送、応答不明後のreplay、写真切替／離脱前にclean ackを待ち失敗時に移動を止める挙動を、エンジン非依存の最小autosave coordinatorとして共有する案を推奨する。JPEG／RAW adapterは別のsnapshot validator・serializer・API・tableを保ち、JPEG Recipe v18、`EditStateSnapshot`、History本文をRAWへcastしない。保存失敗／競合時に新しいsnapshotへすり替えてsaveIdを再利用しない。
+既存JPEGからは保存規約を再利用する。`useAssetEdits`／`editStateApi`のAsset別autosave、dirty/clean、revision競合、saveIdによる同一request再送、応答不明後のreplay、写真切替／離脱前にclean ackを待ち失敗時に移動を止める挙動を、最小RAW専用save coordinatorへ適用した。JPEG保存ownerは変更せず、saveId生成helperと保存規約を再利用する。JPEG／RAW adapterは別のsnapshot validator・serializer・API・tableを保ち、JPEG Recipe v18、`EditStateSnapshot`、History本文をRAWへcastしない。保存失敗／競合時に新しいsnapshotへすり替えてsaveIdを再利用しない。
 
 RAWは`confirmed` readbackだけをautosave対象とし、desired／in-flight値を確定値として保存しない。RAWごとにAsset ID／hash／engine tupleのrecordをloadし、A→B→C→A、RAW→JPEG→RAW、Gallery再入場、アプリ再起動のいずれもSQLiteから復元する。画面終了時はJPEG同様にflush＋save ackを待ち、失敗時は画面遷移／終了を止めて再試行可能にする。SQLiteは現在のrecipe一件を保持し、C3ではHistory・履歴容量管理・Undo snapshotを保存しない。
 
@@ -271,7 +271,7 @@ Undo／RedoはRAW snapshot IDのrestore→readback成功後にcursorを更新し
 |---|---|---|---|---|
 | C1: 既存送信→Preview | 新`backend/windows_raw_api.py`／`raw_source.py`、`windows_local.py`、RAW専用Immich取得追加、`frontend/src/rawApi.ts`／`useRawDocument.ts`、`AnshitsuPage.tsx`、`ImageViewer.tsx`、必要な翻訳 | 既存resolver／形式選択は変更不要。JPEG source・処理は維持。RAW時のcapabilityとbinary frame分岐のみ | 偽Immich stream→file→fake RAW session→PNG API、認証・path拒否・size／timeout／cleanup、Frontend RAW分岐・stale表示・URL破棄、JPEG非呼出し回帰 | 既存バッジでRAW指定→暗室内にLightCraft Preview。JPEG／混在Filmstrip順序維持。API未設定でもJPEG利用可。最初は2枚制限内。前提: 1B |
 | C2: Slider接続 | `useRawDocument.ts`、新`RawAdjustmentControls.tsx`、既存Sliderの必要最小adapter、API controls、RAW hook state | P1基本6項目→P2 WB／色。JPEG reducerと設定値は変更しない。copy／bypass等はRAW無効 | gate付きPATCH中連続desired、readback補正、revision衝突、commit flush、古いPreview、WB mode／scaleを検証 | 入力停止後に最後の設定のPreview。Slider数値とreadback一致。WBは能力判定したRAWだけ。前提: C1 |
-| C3: 永続Recipe・Filmstrip・容量 | `backend/edit_store.py`／`storage.py`（additive v7 RAW table）、Windows RAW recipe API、`lightcraft_raw.py`の検証済みDB復元、RAW autosave adapter／最小shared save coordinator、`useRawDocument.ts`／暗室切替・復帰、source cache | JPEG `asset_edit_states`／Recipe v18／Queueは変更せず、SQLite保存規約と切替guardを再利用。3枚以上・長時間Sessionを実用化 | migration v1–v6、RAW row／engine/hash分離、revision/saveId replay/conflict、confirmedのみ保存、再import異fingerprint同hash復元、mismatch／非互換保持、切替・restart復元、3枚以上A→B→C→A、256超試行、cleanup | 3枚以上巡回・多数変更で保存値保持、原本／engine変更で誤適用しない、DB保存失敗で編集を保ち遷移拒否、JPEG edited／Queue不変。前提: C2 |
+| C3: 永続Recipe・Filmstrip・容量 | `backend/edit_store.py`／`storage.py`（additive v7 RAW table）、Windows RAW recipe API、`lightcraft_raw.py`の検証済みDB復元、RAW autosave adapter／RAW専用save coordinator、`useRawDocument.ts`／暗室切替・復帰、source cache | JPEG `asset_edit_states`／Recipe v18／Queueは変更せず、SQLite保存規約と切替guardを再利用。3枚以上・長時間Sessionを実用化 | migration v1–v6、RAW row／engine/hash分離、revision/saveId replay/conflict、confirmedのみ保存、再import異fingerprint同hash復元、mismatch／非互換保持、切替・restart復元、3枚以上A→B→C→A、256超試行、cleanup | 3枚以上巡回・多数変更で保存値保持、原本／engine変更で誤適用しない、DB保存失敗で編集を保ち遷移拒否、JPEG edited／Queue不変。前提: C2 |
 | C4: 操作整合 | RAW History／baseline Before／Reset／ON/OFF、`EditHistory.tsx`のview adapter、`ImageViewer.tsx`、`AnshitsuPage.tsx`、既存shortcut registry | JPEG Undo／保存／Queueを維持。C3 SQLiteはcurrent RAW recipeを維持し、C4の履歴操作結果もreadback後autosave。Beforeは同engineのbaseline | gesture単位、Undo／Redo／枝切りと復元・保存失敗、Before frame identity、zoom維持、キーguard、切替失敗、close／復帰、RAW Queue不可 | JPEG/RAW混在で操作がactive engineだけに作用、Gallery復帰・再起動でcurrent RAW recipe復元、保存失敗で編集と再試行を保持。前提: C3 |
 | C5: 完了確認 | 変更diffと影響境界レビュー、focused回帰、必要な設計文書追随 | Windows RAW追加とDocker JPEG維持の確認 | 関連Frontend unit／integration、TS check／production build、関連Backend（repo Python3.14・cwd backend）、git diff --check。全suiteはfocusedで不足する理由がある場合のみ | ユーザーによるWindows/Tauri・WebView2実画面、長時間・終了・復旧、既存Docker JPEG/NAS/Firefox確認。実施していない項目は未検証として明示。前提: C1–C4 |
 
@@ -529,3 +529,42 @@ document応答に`recipeStatus=none|restored`、`recipeRevision=0|保存行revis
 repo `.venv` Python 3.14／cwd backendで関連7ファイル275件＋41 subtests成功。Fake LightCraft＋一時SQLiteを用い、未保存、別Asset無視、全設定適用、同hash／異fingerprint復元、hash大小文字正規化、原本／engine名・version・commit・schema不一致、C3-A JSON検証再利用、WB legacy省略、適用失敗・readback不一致・通信結果不明、HTTP cancel、復元中切替、lookup中世代更新、lookup／復元中shutdown、保存行不変を確認した。既存Phase 1B RAW動作、C1 cleanup失敗worker／再open制限、C2 controls／Preview、JPEG保存・Export Queueも回帰成功。Windows起動前importでDBが早期bindされないことを別Python processのテストで確認した。
 
 `git diff --check`成功。Frontend変更・テスト・build、実LightCraft・GPU・Immich・Windows画面試験は実施していない。C3-C／DのFrontend RAW Autosave、写真切替・終了保存guard、Gallery復帰状態、多数resident・世代再生成・mutation容量対策には着手していない。RAW History／Undo／Redo／Reset・Exportも未実装。C2で新たに変更した値は、引き続き永続保存されない。
+
+
+## Phase 1C-C3-C実装結果（2026-10-22）
+
+C3-B完了Commit `5bdffb955103c2dcdfb36b9f20ca33c785c30915`から実装。C3-A／BとC1／C2の記録は上記時点の履歴として保持する。LightCraft v0.10.0、schema v7、完全DevelopSettings保存規約、既存の原本identity／engine互換性確認・復元経路は変更していない。
+
+### 保存契約と共有状態
+
+Windows RAW APIへrecipe GET／PUTを追加。PUTはworkspaceId／opaque handle／generation／documentTokenを検証し、`documentRevision`・`expectedRecipeRevision`・UUID `saveId`だけを受理する。LightCraftから現在の完全readbackを取得し、native revision一致を確認して`put_raw_recipe()`へ渡す。Frontendのdesired値やDevelopSettings本文は受け付けない。GETは同じ所有情報のheaderを検証し、SQLite保存metadataのみを返す。任意MCP、原本path／content hash／PhotoId、認証情報は返さない。既存LocalHostの認証・Host／Origin、JSON 4 KiB上限、no-store、同時要求上限を再利用し、Dockerへendpointを追加しない。
+
+| 状態 | 所有者・更新条件・不変条件 |
+|---|---|
+| native `revision`／confirmed | LightCraft document／RawControls。readback成功でのみ更新。SQLite revisionと比較しない |
+| `settingsFingerprint` | Backendが完全readbackのcanonical JSONをSHA-256化。Sliderにないfieldも比較対象。Frontendは本文を保持しない |
+| `recipeRevision`／`recipeFingerprint` | SQLite保存ack／再同期metadata。未保存documentのopening baselineは初期readback、SQLite revisionは0。保存済みfingerprintとconfirmedとの差がdirty |
+| desired／pending／serial | 既存RawControlsが保持。未確定値を保存済みにしない。切替前flushで送信完了・readbackを待つ |
+| saveId／immutable retry request | 現在documentのRawRecipeSaveが1件だけ保持。応答不明は同じnative revision・expectedRecipeRevision・saveIdの再送を優先。新しい設定でIDを使い回さない |
+| Backend `_recipe_save` | 同一active documentの直近request＋取得済み完全readbackを1件だけ保持。再送中に新しいnative編集があっても元payloadで冪等照合。次saveId／releaseで置換・解放。非active写真のsnapshot storeではない |
+| locked／save error | useRawDocumentが切替・終了準備で新規操作を停止。clean ackまで維持し、失敗時は再試行またはstayで解除。離脱後の応答は後続ownerへ反映しない |
+
+DB処理はthreadpoolで既存transaction／receiptを使用する。保存要求のHTTP waiter切断は送信済み処理をcancelしない。shutdownはowned taskのDB完了を待ち、native参照を解放してからcacheを回収する。commit後にclosing／owner喪失を検出した場合は502 `raw_recipe_save_unknown`として成功扱いしない。C1 cleanup worker／再open制限は維持する。
+
+保存競合は409 `raw_recipe_revision_conflict`、異payloadへのsaveId再利用は409 `raw_recipe_save_id_reused`、不正入力は400、DB書込失敗は503 `raw_recipe_save_failed`、読込失敗は503 `raw_recipe_unavailable`。通信断／timeout／不正ack／5xxは結果不明として元requestを保持し、明示再試行で先にreplayする。元requestの再送がbusy等で拒否されても、初回が未commitだったとは判断しない。recipe競合時はmetadataを再取得してlocal confirmedを保持し、自動上書きしない。ユーザーの再試行で改めて再同期し、新しいrecipe revisionに対して未保存local設定を保存する。
+
+### Autosave・写真切替・通常終了
+
+`RawRecipeSave`はJPEGのuseAssetEditsを改造せず、5秒Autosave、dirty比較、revision／saveId、明示再試行という既存規約をRAW専用ownerへ適用した。saveId生成helperは共用するが、JPEG Recipe v18／History／EditStateSnapshotはRAWに渡さない。native操作・Previewと同じ所有queueで保存を逐次処理し、readback確定後だけ保存。保存中の追加入力は最新confirmedを後続保存し、古い保存ackで新しい編集をcleanにしない。
+
+`prepareSave()`は入力停止→Autosave pause→最後のdesired flush→queue barrierでreadback完了確認→SQLite保存ack→dirty／unsettledなし確認の順に進む。RAW→RAW／JPEG、Galleryへ戻る操作、active RAWのFilmstrip除外、通常Windows終了へ接続した。保存失敗時は現在写真と編集を保持し、切替／終了を拒否して再試行・stayを提供する。Windows hostへは保存失敗を通知し、再試行後に再度通常終了できる。JPEG→RAWと残存JPEG保存は既存保証を維持し、RAWはJPEGの現像済み判定・History・Queueへ混入しない。
+
+RAW→JPEG→RAW、Gallery再入場・新Backend/session後の再openはC3-BのSQLite復元を使用する。新しいmemory snapshot storeはない。UIは未保存／保存中／保存失敗と再試行を表示し、旧「写真切替・終了で失われる」をAutosaveと通常終了待機の説明へ変更した。C2配色・表示順・shortcut・disabled C4ボタンは維持する。
+
+ブラウザー強制離脱・OS異常終了では最後の未保存操作まで保証できない。dirty／unsettledのbeforeunload警告を追加したが、非同期保存保証は上記アプリ操作境界とWindows通常終了に限定する。browser Back／reloadの新規非同期route guardは追加していない。
+
+### 検証と残る境界
+
+Fake LightCraft・一時SQLiteとHTTPでreadback保存、冪等再送／異payload拒否、競合再同期、readback revision不一致、書込失敗、HTTP切断、shutdown中commit／旧owner失効、再open・新BackendでのDB復元、認証・Host／Originを検証。Frontendは制御timer／gateで5秒Autosave、保存中の追加編集、結果不明の同一saveId再送と後続保存、競合時の非自動上書き、旧document応答拒否、最終desired flush、RAW→JPEG／RAW／Galleryと通常Windows終了の保存待機・失敗阻止・再試行、再入場復元を確認する。実行結果はdevelopment notesに記録する。
+
+C3-Dの3枚以上resident最適化・mutation上限前の世代再生成・長時間Session/cache性能改善は未実装。既存2枚／generation 256試行のhard limit、写真切替の再download／再importを維持する。多数RAW・長時間編集を本工程の受入完了とはしない。C4のBefore／After・Reset・ON/OFF・History・Undo／Redo、RAW Exportにも着手しない。実GPU・Immich・Windows画面操作、全体suiteは実施しない。

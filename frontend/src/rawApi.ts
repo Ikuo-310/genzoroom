@@ -1,17 +1,27 @@
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
+  recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string;
 };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number };
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export type RawValues = Record<RawControlId, number>;
-export type RawSettings = RawDocument & { values: RawValues; process: number;
+export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  values: RawValues; process: number;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
-  constructor(public readonly code: string) { super(code); }
+  constructor(public readonly code: string, public readonly status?: number) { super(code); }
 }
+export class RawSaveError extends RawApiError {
+  constructor(code: string, public readonly outcome: 'unknown' | 'rejected', status?: number) { super(code, status); }
+}
+export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: number; saveId: string };
+export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
+  documentRevision: number; settingsFingerprint: string };
+export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
+const fingerprint = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const opaque = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
@@ -45,7 +55,7 @@ async function request(path: string, init: RequestInit = {}) {
       const value = JSON.parse(new TextDecoder().decode(await readBounded(response, 4096)));
       if (typeof value.code === 'string' && /^raw_[a-z_]{1,60}$/.test(value.code)) code = value.code;
     } catch { /* Arbitrary upstream text must not become user-facing diagnostics. */ }
-    throw new RawApiError(code);
+    throw new RawApiError(code, response.status);
   }
   return response;
 }
@@ -89,6 +99,8 @@ export async function releaseRawWorkspace(workspaceId: string) {
 function settings(value: RawSettings, doc: RawDocument): RawSettings {
   document(value, doc.workspaceId, doc.assetId);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || !fingerprint(value.settingsFingerprint) || !integer(value.recipeRevision)
+    || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
     || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
@@ -106,6 +118,36 @@ export async function setRawControls(doc: RawDocument, values: Partial<RawValues
   const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values })), doc);
   if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
   return result;
+}
+export async function readRawRecipe(doc: RawDocument): Promise<RawRecipeState> {
+  const value = await json(`/documents/${doc.handle}/recipe`, { headers: { 'X-Raw-Workspace': doc.workspaceId,
+    'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
+  document(value, doc.workspaceId, doc.assetId);
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || !integer(value.recipeRevision) || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
+    || (value.recipeRevision === 0 ? value.recipeFingerprint !== null || value.lastSaveId !== null || value.updatedAt !== null
+      : !fingerprint(value.recipeFingerprint) || typeof value.lastSaveId !== 'string'
+        || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.lastSaveId)
+        || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt)))) throw new RawApiError('raw_invalid_response');
+  return value;
+}
+export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecipeAck> {
+  const { doc, expectedRecipeRevision, saveId } = request;
+  let accepted = false;
+  try {
+    const value = await json(`/documents/${doc.handle}/recipe`, { ...post({ ...identityBody(doc),
+      documentRevision: doc.revision, expectedRecipeRevision, saveId }), method: 'PUT' });
+    accepted = true;
+    document({ ...value, revision: value.documentRevision }, doc.workspaceId, doc.assetId);
+    if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+      || value.documentRevision !== doc.revision || value.settingsFingerprint !== doc.settingsFingerprint
+      || !integer(value.recipeRevision) || value.recipeRevision !== expectedRecipeRevision + 1 || value.saveId !== saveId
+      || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) throw new RawApiError('raw_invalid_response');
+    return value;
+  } catch (cause) {
+    const error = cause instanceof RawApiError ? cause : new RawApiError('raw_connection_failed');
+    throw new RawSaveError(error.code, accepted || !error.status || error.status >= 500 || error.status === 408 ? 'unknown' : 'rejected', error.status);
+  }
 }
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal): Promise<RawFrame> {
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,

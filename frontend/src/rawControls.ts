@@ -70,8 +70,8 @@ export class RawControls {
       }
     });
   }
-  retry() {
-    if (!this.active || this.busy || this.queued || !this.error) return;
+  retry(force = false) {
+    if (!this.active || this.busy || this.queued || !this.error && !force) return;
     this.queued = true;
     this.options.schedule(async () => {
       this.queued = false;
@@ -90,6 +90,18 @@ export class RawControls {
         if (this.active) { this.options.changed(); this.flush(); }
       }
     });
+  }
+  async settle(): Promise<RawSettings> {
+    for (;;) {
+      if (!this.active) throw new RawApiError('raw_document_closed');
+      if (this.error && Object.keys(this.desired).length) throw new RawApiError(this.error);
+      this.flush();
+      // A queue barrier waits for transmitted mutations and their final readback, not just debounce.
+      await new Promise<void>(resolve => this.options.schedule(async () => { resolve(); }));
+      if (!this.active) throw new RawApiError('raw_document_closed');
+      if (this.error && Object.keys(this.desired).length) throw new RawApiError(this.error);
+      if (!this.unsettled && !this.queued) return this.confirmed;
+    }
   }
   dispose() { this.active = false; clearTimeout(this.timer); }
   get unsettled() { return this.busy || Object.keys(this.desired).length > 0; }

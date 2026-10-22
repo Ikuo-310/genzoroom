@@ -15,15 +15,22 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Adjust
   { category: 'color', controls: ['color.vibrance', 'color.saturation'], ids: ['vibrance', 'saturation'] },
 ];
 
-export function RawAdjustmentControls({ raw }: { raw: NonNullable<ReturnType<typeof useRawDocument>> }) {
+export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
   const { t } = useTranslation();
   const settings = raw.settings;
   const actionsUnavailable = t('workspace.rawPreview.actionsUnavailable');
   return <div className="raw-adjustment-controls">
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
+    {raw.saving && <p role="status">{t('workspace.rawPreview.saving')}</p>}
+    {raw.dirty && !raw.saving && !raw.saveError && <p role="status">{t('workspace.rawPreview.unsaved')}</p>}
+    {raw.saveError && <div role="alert"><p>{t(raw.saveError === 'raw_recipe_revision_conflict'
+      ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.locked}
+        onClick={() => { void raw.retrySave(); }}>{t('workspace.rawPreview.retrySave')}</button></div>}
     {raw.pending && !raw.editError && <p role="status">{t('workspace.rawPreview.updating')}</p>}
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
-      <button className="tool-button" type="button" onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
+      <button className="tool-button" type="button" disabled={disabled || raw.locked}
+        onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category} unavailableLabel={actionsUnavailable}>
       {category === 'whiteBalance' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
@@ -39,7 +46,7 @@ export function RawAdjustmentControls({ raw }: { raw: NonNullable<ReturnType<typ
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(`workspace.${id}Reset`)} valueLabel={t(`workspace.${id}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
-          disabled={!!raw.editError || raw.status !== 'ready' || control.startsWith('wb.') && !settings.wb.available}
+          disabled={disabled || raw.locked || !!raw.editError || raw.status !== 'ready' || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={raw.flushControls} />;
       })}
     </RawCategory>)}

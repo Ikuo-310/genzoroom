@@ -8,7 +8,8 @@ import { rawSettings } from './test/rawSettings';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn() }));
+  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(),
+  saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 let root: Root;
 let current: ReturnType<typeof useRawDocument>;
 const createURL = vi.fn(), revokeURL = vi.fn();
@@ -32,10 +33,14 @@ beforeEach(() => {
   vi.mocked(api.readRawDocument).mockImplementation(async doc => doc);
   vi.mocked(api.readRawSettings).mockImplementation(async doc => rawSettings(doc));
   vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
+    settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } }));
+  vi.mocked(api.saveRawRecipe).mockImplementation(async request => ({ documentRevision: request.doc.revision,
+    recipeRevision: request.expectedRecipeRevision + 1, settingsFingerprint: request.doc.settingsFingerprint,
+    saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
   vi.mocked(api.releaseRawWorkspace).mockResolvedValue();
 });
-afterEach(async () => { act(() => root.unmount()); await flush(); vi.unstubAllGlobals(); });
+afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('RAW document lifetime', () => {
   it('rejects old slider callbacks after a successor RAW document has opened', async () => {
     await render('a'); await flush(); const old = current!;
@@ -119,5 +124,48 @@ describe('RAW document lifetime', () => {
     expect(current?.status).toBe('error'); expect(current?.url).toBeUndefined();
     expect(revokeURL).toHaveBeenCalledWith('blob:raw-1');
     expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
+  });
+  it('autosaves confirmed RAW edits after five seconds and keeps the same Preview ownership', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+    expect(current?.dirty).toBe(true);
+    const url = current?.url;
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(api.saveRawRecipe).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); }); await flush();
+    expect(api.saveRawRecipe).toHaveBeenCalledOnce(); expect(current?.dirty).toBe(false); expect(current?.url).toBe(url);
+  });
+  it('freezes input, flushes desired values, waits for readback and SQLite acknowledgement before leaving', async () => {
+    await render('a'); await flush();
+    const mutation = deferred<api.RawSettings>(), saving = deferred<api.RawRecipeAck>();
+    vi.mocked(api.setRawControls).mockReturnValueOnce(mutation.promise);
+    vi.mocked(api.saveRawRecipe).mockReturnValueOnce(saving.promise);
+    act(() => current!.changeControls({ 'light.exposure': 2 }));
+    let transition!: Promise<void>;
+    act(() => { transition = current!.prepareSave(); }); await flush();
+    expect(current?.locked).toBe(true); expect(api.saveRawRecipe).not.toHaveBeenCalled();
+    act(() => current!.changeControls({ 'light.exposure': 4 }));
+    const confirmed = { ...current!.settings!, revision: 2, settingsFingerprint: '2'.repeat(64),
+      values: { ...current!.settings!.values, 'light.exposure': 2 } };
+    await act(async () => mutation.resolve(confirmed)); await flush();
+    expect(api.saveRawRecipe).toHaveBeenCalledOnce(); expect(current?.saving).toBe(true);
+    const request = vi.mocked(api.saveRawRecipe).mock.calls[0][0];
+    await act(async () => saving.resolve({ documentRevision: 2, settingsFingerprint: confirmed.settingsFingerprint,
+      recipeRevision: 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
+    await act(async () => transition); expect(current?.dirty).toBe(false);
+    expect(api.setRawControls).toHaveBeenCalledOnce();
+  });
+  it('ignores the save completion for a document that has been replaced', async () => {
+    await render('a'); await flush();
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+    const gate = deferred<api.RawRecipeAck>(); vi.mocked(api.saveRawRecipe).mockReturnValueOnce(gate.promise);
+    let transition!: Promise<unknown>;
+    act(() => { transition = current!.prepareSave().catch(error => error); }); await flush();
+    const request = vi.mocked(api.saveRawRecipe).mock.calls[0][0];
+    await render('b');
+    await act(async () => gate.resolve({ documentRevision: request.doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
+      recipeRevision: 1, saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' }));
+    await transition; await flush();
+    expect(current?.assetId).toBe('b'); expect(current?.saveError).toBeUndefined();
   });
 });

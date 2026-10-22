@@ -1,6 +1,7 @@
-"""Windows-only RAW Preview, C2 controls and persisted recipe restore; no save or Export."""
+"""Windows-only RAW editing and durable recipes; no RAW History or Export."""
 
 import asyncio
+import hashlib
 import json
 import secrets
 from time import monotonic
@@ -12,7 +13,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from lightcraft_mcp import LightCraftError
-from lightcraft_raw import MAX_IMAGE_BYTES, SUPERSEDED
+from lightcraft_raw import MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
 from raw_controls import controls_state, validate_controls
@@ -35,6 +36,7 @@ class RawPreviewApi:
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
+        self._recipe_save = None
         self.app = Starlette(routes=[
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
@@ -44,6 +46,7 @@ class RawPreviewApi:
             Route("/documents/{handle}/preview", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
         ])
 
     def bind(self, raw, manager):
@@ -82,7 +85,7 @@ class RawPreviewApi:
 
     async def endpoint(self, request):
         try:
-            body = await self._body(request) if request.method == "POST" else {}
+            body = await self._body(request) if request.method in {"POST", "PUT"} else {}
             if self._closing or len(self._tasks) >= 2:
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
@@ -93,11 +96,12 @@ class RawPreviewApi:
         except (LightCraftError, TimeoutError) as error:
             code = error.code if isinstance(error, LightCraftError) else "raw_request_timeout"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
-                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable"} else
-                      503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable"} else
+                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid"} else
+                      503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed"} else
                       409 if code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
-                                      "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible"} else 502)
+                                      "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
+                                      "raw_recipe_revision_conflict", "raw_recipe_save_id_reused"} else 502)
             return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
         except Exception:
             lightcraft_log("raw.http.failed", level="error", errorCode="raw_operation_failed")
@@ -144,7 +148,7 @@ class RawPreviewApi:
                 self._touched = monotonic()
                 self._lease_task = asyncio.create_task(self._expire(), name="windows-raw-lease")
                 return JSONResponse({"workspaceId": self.workspace})
-            workspace = body.get("workspaceId") if method == "POST" else request.headers.get("x-raw-workspace")
+            workspace = body.get("workspaceId") if method in {"POST", "PUT"} else request.headers.get("x-raw-workspace")
             if "workspace" in request.path_params:
                 workspace = request.path_params["workspace"]
             self._owner(workspace)
@@ -178,6 +182,9 @@ class RawPreviewApi:
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
                                  "recipeStatus": recipe_status, "recipeRevision": recipe_revision}
+                self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
+                self.document["recipeFingerprint"] = self.document["settingsFingerprint"]
+                self._recipe_save = None
                 self._raw_handle = handle
                 self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
                 self._touched = monotonic()
@@ -186,6 +193,8 @@ class RawPreviewApi:
                 return JSONResponse(self.document)
             settings_request = path.endswith("/settings")
             doc = self._document(request.path_params["handle"], resync=settings_request)
+            if path.endswith("/recipe"):
+                return await self._recipe(request, body, doc)
             if settings_request or path.endswith("/controls"):
                 required = {"workspaceId", "generation", "documentToken"}
                 if not settings_request:
@@ -203,6 +212,7 @@ class RawPreviewApi:
                     snapshot = await self.raw.set_controls(self._raw_handle, values, doc["revision"])
                 confirmed = controls_state(snapshot)
                 doc["revision"] = snapshot.revision
+                doc["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self._wb_available = confirmed["wb"]["available"]
                 lightcraft_log("raw.controls.confirmed", level="debug", generation=doc["generation"], revision=doc["revision"])
                 return JSONResponse({**doc, **confirmed})
@@ -228,6 +238,82 @@ class RawPreviewApi:
                            generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data))
             self._touched = monotonic()
             return Response(frame.data, media_type="image/png", headers=headers)
+
+    @staticmethod
+    def _fingerprint(settings):
+        return hashlib.sha256(_settings_json(settings).encode("utf-8")).hexdigest()
+
+    async def _recipe(self, request, body, doc):
+        from raw_recipe_store import get_raw_recipe, put_raw_recipe, InvalidRawRecipe, StoreConflict, StoreUnavailable
+
+        def verify():
+            if self._closing or self._document(doc["handle"]) is not doc:
+                raise LightCraftError("raw_stale_handle")
+
+        if request.method == "GET":
+            if request.headers.get("x-raw-generation") != str(doc["generation"]) or \
+                    request.headers.get("x-raw-token") != doc["documentToken"]:
+                raise LightCraftError("raw_stale_handle")
+            try:
+                saved = await run_in_threadpool(get_raw_recipe, self.raw.recipe_identity(self._raw_handle))
+            except (StoreUnavailable, InvalidRawRecipe):
+                raise LightCraftError("raw_recipe_unavailable") from None
+            verify()
+            present = saved["recipe"] is not None
+            fingerprint = self._fingerprint(saved["recipe"]["settings"]) if present else None
+            return JSONResponse({**doc, "recipeRevision": saved["revision"] if present else 0,
+                "recipeFingerprint": fingerprint, "lastSaveId": saved.get("lastSaveId"), "updatedAt": saved.get("updatedAt")})
+
+        if set(body) != {"workspaceId", "generation", "documentToken", "documentRevision", "expectedRecipeRevision", "saveId"} \
+                or any(type(body.get(key)) is not int or not 0 <= body[key] < 2**53
+                       for key in ("generation", "documentRevision", "expectedRecipeRevision")):
+            raise LightCraftError("raw_invalid_request")
+        if any(body[key] != doc[key] for key in ("generation", "documentToken")):
+            raise LightCraftError("raw_stale_handle")
+        try:
+            if not isinstance(body["saveId"], str) or len(body["saveId"]) > 45:
+                raise ValueError()
+            body = {**body, "saveId": str(UUID(body["saveId"]))}
+        except ValueError:
+            raise LightCraftError("raw_invalid_request") from None
+        pending = self._recipe_save
+        if pending and pending["request"]["saveId"] == body["saveId"]:
+            if pending["request"] != body:
+                raise LightCraftError("raw_recipe_save_id_reused")
+        else:
+            if body["documentRevision"] != doc["revision"]:
+                raise LightCraftError("raw_revision_conflict")
+            snapshot = await self.raw.get_settings(self._raw_handle)
+            verify()
+            doc["revision"] = snapshot.revision
+            doc["settingsFingerprint"] = self._fingerprint(snapshot.settings)
+            if snapshot.revision != body["documentRevision"]:
+                raise LightCraftError("raw_revision_conflict")
+            # One immutable transport retry belongs to this document, not a photo snapshot store.
+            pending = {"request": body, "settings": snapshot.settings,
+                       "identity": self.raw.recipe_identity(self._raw_handle), "fingerprint": doc["settingsFingerprint"]}
+            self._recipe_save = pending
+        try:
+            result = await run_in_threadpool(put_raw_recipe, pending["identity"], body["expectedRecipeRevision"],
+                                             body["saveId"], pending["settings"])
+        except StoreConflict as error:
+            raise LightCraftError("raw_recipe_save_id_reused" if error.code == "save_id_reused"
+                                  else "raw_recipe_revision_conflict") from None
+        except InvalidRawRecipe:
+            raise LightCraftError("raw_recipe_invalid") from None
+        except StoreUnavailable:
+            raise LightCraftError("raw_recipe_save_failed") from None
+        try:
+            verify()
+        except LightCraftError:
+            # The DB may already have committed; stale ownership is not proof of a rejected save.
+            raise LightCraftError("raw_recipe_save_unknown") from None
+        doc["recipeRevision"] = result["revision"]
+        doc["recipeFingerprint"] = pending["fingerprint"]
+        lightcraft_log("raw.recipe.saved", level="debug", assetId=doc["assetId"], revision=result["revision"])
+        return JSONResponse({**{key: doc[key] for key in ("workspaceId", "handle", "assetId", "generation", "documentToken")},
+            "documentRevision": body["documentRevision"], "settingsFingerprint": pending["fingerprint"],
+            "recipeRevision": result["revision"], "saveId": result["lastSaveId"], "updatedAt": result["updatedAt"]})
 
     async def _restore_document(self, handle, snapshot):
         # Persistence must bind only after Windows has selected its profile and initialized storage.
@@ -264,6 +350,7 @@ class RawPreviewApi:
         if self.workspace is None:
             return
         self.document = None
+        self._recipe_save = None
         self._workspace_state = "releasing"
         try:
             # A cleanup retry must not restart the Engine or admit new source references.
@@ -323,4 +410,5 @@ class RawPreviewApi:
             raise
         self.cache = None
         self.workspace = self.document = None
+        self._recipe_save = None
         self._workspace_state = "empty"

@@ -25,6 +25,7 @@ import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './C
 import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
 import { useJpegOriginal } from './useJpegOriginal';
 import { useRawDocument } from './useRawDocument';
+import { RawApiError } from './rawApi';
 import { RawAdjustmentControls } from './RawAdjustmentControls';
 import type { JpegProfile } from './jpegProfile';
 import type { AssetHistograms, ImageHistograms } from './histogram';
@@ -106,10 +107,10 @@ export function AnshitsuPage() {
   const [viewerShowsBefore, setViewerShowsBefore] = useState(false);
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
-  const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
+  const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string; raw?: boolean } | null>(null);
   const [exitSaving, setExitSaving] = useState(false);
   const exitRef = useRef(false);
-  const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string } | null>(null);
+  const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string; raw?: boolean } | null>(null);
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
   const [categoryMenu, setCategoryMenu] = useState<AdjustmentCategoryMenuTarget | null>(null);
@@ -395,10 +396,22 @@ export function AnshitsuPage() {
     navigate(workspacePath(nextState.activeAssetId), { state: nextState });
   }
 
-  async function activateAsset(nextId: string) {
-    if (nextId === assetId || switchingRef.current || exclusionBusy.current || exitRef.current || failedSwitch
+  async function activateAsset(nextId: string, retryRaw = false) {
+    if (nextId === assetId || switchingRef.current || exclusionBusy.current || exitRef.current || failedSwitch && !retryRaw
       || excludedIdsRef.current.has(nextId)) return;
     clearExclusionUndo();
+    if (activeDetail?.is_raw && rawDocument) {
+      switchingRef.current = true;
+      setSwitching(true);
+      setFailedSwitch(null);
+      try {
+        await rawDocument.prepareSave(retryRaw);
+        if (queueMounted.current && activeRouteRef.current === assetId) navigateToAsset(nextId);
+      } catch (cause) {
+        setFailedSwitch({ nextId, error: 'unexpected', raw: true, code: cause instanceof RawApiError ? cause.code : 'raw_connection_failed' });
+      } finally { switchingRef.current = false; setSwitching(false); }
+      return;
+    }
     if (!editable) { navigateToAsset(nextId); return; }
     switchingRef.current = true;
     pauseAutosave(assetId);
@@ -425,12 +438,21 @@ export function AnshitsuPage() {
     }
   }
 
-  async function exitToHome() {
-    if (exitRef.current || switchingRef.current || exclusionBusy.current || failedSwitch) return;
+  async function exitToHome(retryRaw = false) {
+    if (exitRef.current && !retryRaw || switchingRef.current || exclusionBusy.current || failedSwitch) return;
     clearExclusionUndo();
     exitRef.current = true;
     setExitSaving(true);
+    if (retryRaw) setExitFailure(null);
     try {
+      if (activeDetail?.is_raw && rawDocument) {
+        try { await rawDocument.prepareSave(retryRaw); }
+        catch (cause) {
+          setExitFailure({ assetId, error: 'unexpected', raw: true, code: cause instanceof RawApiError ? cause.code : 'raw_connection_failed' });
+          setExitSaving(false);
+          return;
+        }
+      }
       const result = await saveEditedAssetsForExit();
       if (!result.ok) {
         setExitFailure({ assetId: result.assetId, error: result.error.kind, code: result.error.code });
@@ -450,6 +472,7 @@ export function AnshitsuPage() {
     if (!desktopExit.current) return;
     desktopExit.current = false;
     resumeAfterExitFailure();
+    rawDocument?.resumeEditing();
     exitRef.current = false;
     setExitSaving(false);
   };
@@ -460,6 +483,7 @@ export function AnshitsuPage() {
       exitRef.current = true;
       setExitSaving(true);
       try {
+        if (activeDetail?.is_raw) await rawDocument?.prepareSave();
         const result = await saveEditedAssetsForExit();
         if (result.ok) return true;
       } catch { /* The host retains the window and retries the existing save path. */ }
@@ -471,6 +495,7 @@ export function AnshitsuPage() {
 
   function stayInAnshitsu() {
     resumeAfterExitFailure();
+    rawDocument?.resumeEditing();
     exitRef.current = false;
     setExitFailure(null);
     setExitSaving(false);
@@ -494,6 +519,7 @@ export function AnshitsuPage() {
     pauseAutosave(id);
     logExclusion('start', { assetId: id });
     try {
+      if (id === assetId && activeDetail?.is_raw) await rawDocument?.prepareSave();
       // Unvisited assets have no local edits to save. Validated inactive records use the same save boundary.
       const local = localStateFor(id);
       if (local.dirty && !local.canSave) throw new EditStateApiError('invalid_state');
@@ -525,6 +551,7 @@ export function AnshitsuPage() {
       });
     } finally {
       resumeAutosave(id);
+      if (id === assetId) rawDocument?.resumeEditing();
       exclusionBusy.current = false;
       if (queueMounted.current) setExcluding(false);
     }
@@ -782,7 +809,7 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : rawDocument ? <RawAdjustmentControls raw={rawDocument} /> : <p>{t('workspace.jpegOnly')}</p>}
+          </div> : rawDocument ? <RawAdjustmentControls raw={rawDocument} disabled={workspaceKeyboardBlocked} /> : <p>{t('workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip
@@ -864,26 +891,32 @@ export function AnshitsuPage() {
     {failedSwitch && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
       aria-labelledby="save-failure-title" className="workspace-save-dialog">
       <h2 id="save-failure-title">{t('workspace.editStateSaveFailed')}</h2>
-      <p>{t(failedSwitch.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${failedSwitch.error}`)}</p>
+      <p>{t(failedSwitch.raw ? failedSwitch.code === 'raw_recipe_revision_conflict' ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed'
+        : failedSwitch.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${failedSwitch.error}`)}</p>
       <div className="edit-actions">
         <button type="button" autoFocus className="tool-button" onClick={() => {
           setFailedSwitch(null);
           resumeAutosave(assetId);
+          rawDocument?.resumeEditing();
         }}>{t('workspace.stayOnPhoto')}</button>
-        <button type="button" className="tool-button" onClick={() => {
+        {failedSwitch.raw ? <button type="button" className="tool-button" onClick={() => {
+          void activateAsset(failedSwitch.nextId, true);
+        }}>{t('workspace.rawPreview.retrySave')}</button> : <button type="button" className="tool-button" onClick={() => {
           discard(assetId);
           navigateToAsset(failedSwitch.nextId);
           setFailedSwitch(null);
-        }}>{t('workspace.moveWithoutSaving')}</button>
+        }}>{t('workspace.moveWithoutSaving')}</button>}
       </div>
     </section></div>}
     {exitFailure && <div className="workspace-save-backdrop"><section role="alertdialog" aria-modal="true"
       aria-labelledby="exit-save-failure-title" className="workspace-save-dialog">
       <h2 id="exit-save-failure-title">{t('workspace.exitSaveFailed')}</h2>
-      <p>{t(exitFailure.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${exitFailure.error}`)}</p>
+      <p>{t(exitFailure.raw ? exitFailure.code === 'raw_recipe_revision_conflict' ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed'
+        : exitFailure.code === 'save_id_reused' ? 'workspace.saveError.saveIdConflict' : `workspace.saveError.${exitFailure.error}`)}</p>
       <div className="edit-actions">
         <button type="button" autoFocus className="tool-button" onClick={stayInAnshitsu}>{t('workspace.stayInAnshitsu')}</button>
-        <button type="button" className="tool-button" onClick={returnToHome}>{t('workspace.exitWithoutSaving')}</button>
+        {exitFailure.raw ? <button type="button" className="tool-button" onClick={() => { void exitToHome(true); }}>{t('workspace.rawPreview.retrySave')}</button>
+          : <button type="button" className="tool-button" onClick={returnToHome}>{t('workspace.exitWithoutSaving')}</button>}
       </div>
     </section></div>}
   </main>;

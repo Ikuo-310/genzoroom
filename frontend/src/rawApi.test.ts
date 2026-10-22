@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { rawCapability, rawPreview, readRawSettings, setRawControls, type RawDocument } from './rawApi';
+import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, readRawRecipe, RawSaveError, type RawDocument } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
@@ -13,6 +13,37 @@ function response(patch: Record<string, string> = {}, bytes = png) {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('bounded RAW binary contract', () => {
+  it('sends metadata only for RAW saves and validates the exact acknowledged revision/fingerprint/saveId', async () => {
+    const request = { doc: rawSettings(doc), expectedRecipeRevision: 3, saveId: '00000000-0000-4000-8000-000000000001' };
+    const ack = { ...doc, documentRevision: doc.revision, recipeRevision: 4, settingsFingerprint: request.doc.settingsFingerprint,
+      saveId: request.saveId, updatedAt: '2026-10-22T00:00:00.000Z' };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(ack), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    expect((await saveRawRecipe(request)).recipeRevision).toBe(4);
+    const options = vi.mocked(globalThis.fetch).mock.calls[0][1]!;
+    expect(options.method).toBe('PUT'); expect(JSON.parse(options.body as string)).toEqual({ workspaceId: doc.workspaceId,
+      generation: doc.generation, documentToken: doc.documentToken, documentRevision: doc.revision,
+      expectedRecipeRevision: 3, saveId: request.saveId });
+    for (const patch of [{ generation: 99 }, { recipeRevision: 3 }, { saveId: 'wrong' }, { settingsFingerprint: '0'.repeat(64) }]) {
+      fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ ...ack, ...patch }), { headers: { 'Content-Type': 'application/json' } }));
+      await expect(saveRawRecipe(request)).rejects.toMatchObject({ outcome: 'unknown' });
+    }
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ code: 'raw_recipe_revision_conflict' }), { status: 409 }));
+    await expect(saveRawRecipe(request)).rejects.toMatchObject({ outcome: 'rejected', code: 'raw_recipe_revision_conflict' });
+    fetch.mockRejectedValueOnce(new Error('lost'));
+    await expect(saveRawRecipe(request)).rejects.toBeInstanceOf(RawSaveError);
+  });
+  it('reads persisted metadata with document token/generation authentication', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ...doc, recipeRevision: 0, recipeFingerprint: null,
+      lastSaveId: null, updatedAt: null }), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    expect((await readRawRecipe(doc)).recipeRevision).toBe(0);
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]!.headers).toMatchObject({ 'X-Raw-Token': doc.documentToken,
+      'X-Raw-Generation': String(doc.generation), 'X-Raw-Workspace': doc.workspaceId });
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ ...doc, recipeRevision: 0,
+      recipeFingerprint: 'a'.repeat(64), lastSaveId: null, updatedAt: null }), { headers: { 'Content-Type': 'application/json' } }));
+    await expect(readRawRecipe(doc)).rejects.toThrow('raw_invalid_response');
+  });
   it('resynchronizes settings and sends allowlisted changes with the confirmed expectedRevision', async () => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1 }),
       { headers: { 'Content-Type': 'application/json' } }));
