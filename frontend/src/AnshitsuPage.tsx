@@ -610,9 +610,12 @@ export function AnshitsuPage() {
   };
   function enterSelectedOperationPanel(event: KeyboardEvent) {
     const panel = selectedOperationPanel.element;
+    // RAW has no JPEG History session, but its ready temporary controls still need the shared focus entry.
+    const rawPanelReady = rawDocument?.status === 'ready' && !workspaceKeyboardBlocked
+      && selection === null && historyConfirmation === null && !failedSwitch;
     if (!panel || (event.target instanceof Node && panel.contains(event.target)) || !event.shiftKey || !['ArrowUp', 'ArrowDown'].includes(event.key)
       || event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey
-      || isNativeEditingTarget(event.target) || !historyEnabled || switchingRef.current || exitRef.current
+      || isNativeEditingTarget(event.target) || (!historyEnabled && !rawPanelReady) || switchingRef.current || exitRef.current
       || historyMenu || categoryMenu || sliderMenu || rangeMenu
       || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
     if (selectedOperationPanel.restoreFocus()) event.preventDefault();
@@ -731,6 +734,8 @@ export function AnshitsuPage() {
         <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
+          : rawDocument ? <button type="button" className="tool-button workspace-section-action raw-action-unavailable" disabled
+            title={t('workspace.rawPreview.actionsUnavailable')} aria-label={t('workspace.rawPreview.actionsUnavailable')}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
             <AdjustmentCategory categoryId="whiteBalance" onOpenContextMenu={openCategoryMenu}

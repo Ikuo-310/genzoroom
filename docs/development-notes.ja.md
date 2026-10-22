@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## RAW現像統合 Phase 1C-C2：RAWスライダーパネル仕上げ（2026-10-22）
+
+JPEG暗室とパネル配置を揃え、RAWのTemperature／Tintに既存JPEG gradientを適用した。基本補正の表示順をExposure → Contrast → Highlights → Whites → Shadows → Blacksへ変更し、RAW native control ID・値・現像処理は維持する。個別／カテゴリ／全体のON/OFF・ResetボタンはC4実装までdisabledで配置し、「RAWでは準備中」と示す。クリックやキー操作ではRAW設定を変更しない。
+
+RAW暗室から未フォーカス状態で`Shift+↑／↓`を押した際、JPEG Historyを持たないRAWは従来の入口条件から除外されていた。RAW documentがreadyで操作を遮る画面状態がない場合に、JPEGと共通のフォーカス復帰を許可した。無効なWB rangeは候補から除外され、基本補正の移動は画面の行順に従う。Sliderの左右／上下step、wheel、数値入力、確定方法とJPEG動作は共有部品の既存処理を維持する。
+
+検証：関連Frontend 4ファイル201件成功。未フォーカス時の初期focus、WB unavailableのskip、表示順、disabledボタンの非作用、gradient、RAW設定変更、JPEG White Balance／Color／Slider／暗室focus回帰を確認した。`npm run build`（TypeScript checkを含む）と`git diff --check`成功。既存の500 kB超chunk警告あり。実画面確認は未実施。
+
 ## RAW現像統合 Phase 1C-C2：LightCraftスライダー接続（2026-10-22）
 
 開始HEAD `f21f3354c74c2193e504e17dd5b397245df3bfe3`、作業ツリーcleanから実装した。ユーザーによるC1のWindows/Tauri実機確認は完了。LightCraft画像と識別表示、および原本取得・`raw.document.ready`・`preview.completed`・`raw.preview.complete`の成功を確認済みの基盤として再利用した。LightCraft v0.10.0／固定commitを維持する。

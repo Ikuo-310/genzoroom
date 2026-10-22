@@ -21,6 +21,8 @@ type Props = {
   onOpenContextMenu?: OpenAdjustmentSliderMenu;
   disabled?: boolean;
   actions?: boolean;
+  actionsDisabled?: boolean;
+  actionsUnavailableLabel?: string;
   trackGradient?: string;
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
@@ -231,19 +233,21 @@ export function AdjustmentSlider(props: Props) {
         props.onChange(Number(event.target.value));
         if (interaction.current !== 'pointer') scheduleCommit();
       }} />
-    <div className="adjustment-value-controls">
+    <div className="adjustment-value-controls" title={props.actionsDisabled ? props.actionsUnavailableLabel : undefined}>
       <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
         onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-      {props.actions !== false && <><button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}`}
-        aria-pressed={props.enabled} aria-label={toggleLabel} title={toggleLabel}
+      {props.actions !== false && <><button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}${props.actionsDisabled ? ' is-unavailable' : ''}`}
+        aria-pressed={props.enabled} aria-label={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel} title={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        onClick={props.onToggle}>⏻</button>
-      <button type="button" className="adjustment-reset" onClick={props.onReset}
+        disabled={props.actionsDisabled} onClick={props.onToggle}>⏻</button>
+      <button type="button" className={`adjustment-reset${props.actionsDisabled ? ' is-unavailable' : ''}`} onClick={props.onReset}
         onFocus={focusAdjustmentCategory}
         onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        disabled={props.disabled || props.value === props.defaultValue} aria-label={props.resetLabel} title={props.resetLabel}>↺</button></>}
+        disabled={props.actionsDisabled || props.disabled || props.value === props.defaultValue}
+        aria-label={props.actionsDisabled ? props.actionsUnavailableLabel : props.resetLabel}
+        title={props.actionsDisabled ? props.actionsUnavailableLabel : props.resetLabel}>↺</button></>}
     </div>
   </div>;
 }

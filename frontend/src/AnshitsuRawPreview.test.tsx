@@ -73,9 +73,19 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders).toHaveLength(10);
+  expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
+    'temperature', 'tint', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks', 'vibrance', 'saturation',
+  ]);
   expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
   expect(sliders[1].min).toBe('-150'); expect(sliders[2].step).toBe('0.01');
-  expect(host.querySelector('.adjustment-power')).toBeNull(); expect(host.querySelector('.adjustment-reset')).toBeNull();
+  expect(sliders[0].classList.contains('has-gradient')).toBe(true);
+  expect(sliders[0].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4e8ed9');
+  expect(sliders[0].style.getPropertyValue('--adjustment-track-gradient')).toContain('#d86943');
+  expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
+  expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
+  const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
+  expect(actions).toHaveLength(27);
+  expect(actions.every(button => button.disabled && button.title === i18n.t('workspace.rawPreview.actionsUnavailable'))).toBe(true);
   const number = sliders[2].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -84,8 +94,39 @@ it('binds engine control specs to shared sliders and commits RAW values without 
     number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   }); await flush();
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
+  const mutationCount = vi.mocked(rawApi.setRawControls).mock.calls.length;
+  act(() => actions.forEach(button => button.click())); await flush();
+  expect(rawApi.setRawControls).toHaveBeenCalledTimes(mutationCount);
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
   expect(number.value).toBe('1.25'); expect(host.textContent).toContain('RAW edits are temporary');
+});
+it('enters RAW slider focus from the Viewer and follows the displayed row order', async () => {
+  await mount();
+  const viewer = host.querySelector<HTMLElement>('.viewer-panel')!;
+  const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  expect(document.activeElement).not.toBe(sliders[0]);
+  act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(sliders[0]);
+  const moveDown = (target: HTMLElement) => act(() => target.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true,
+  })));
+  moveDown(sliders[0]); expect(document.activeElement).toBe(sliders[1]);
+  const basicTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(2) .adjustment-category-title')!;
+  moveDown(sliders[1]); expect(document.activeElement).toBe(basicTitle);
+  moveDown(basicTitle); expect(document.activeElement).toBe(sliders[2]);
+  for (let index = 3; index < 8; index++) {
+    moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
+  }
+  expect(sliders.slice(2, 8).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+});
+it('skips unavailable WB sliders when acquiring initial RAW focus', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), wb: { available: false, mode: 'asShot', scale: 'legacy' } }));
+  await mount();
+  const viewer = host.querySelector<HTMLElement>('.viewer-panel')!;
+  const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
+  expect(sliders[0].disabled).toBe(true); expect(sliders[1].disabled).toBe(true);
+  expect(document.activeElement).toBe(sliders[2]);
 });
 it('disables only WB when Kelvin capability is unknown', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), wb: { available: false, mode: 'asShot', scale: 'legacy' } }));

@@ -409,7 +409,7 @@ Windows実画面確認へ進める状態と判断する。ただし今回もfake
 | `wb.tint` | -150..150 | 1／0 | native Tint。JPEG相対値と同一視しない |
 | `color.vibrance`／`color.saturation` | -100..100 | 1／0 | native readback、整数 |
 
-`backend/raw_controls.py`は固定v0.10.0の`crates/develop/src/controls.rs`の上記specだけをallowlist化する。`RawAdjustmentControls.tsx`は既存右パネルと`AdjustmentSlider`のrange・数値入力・keyboard／wheel・確定方法を使用する。共通Sliderへ追加した`actions=false`はRAWでbypass／resetだけを省き、JPEG既定動作を変更しない。UI focus用AdjustmentIdは再利用するが、値のbindingはnative control IDに分離し、JPEG reducer／Recipe・clipboardへ渡さない。WB・基本・色の3カテゴリのみを表示し、RAW Color Gradingは追加しない。
+`backend/raw_controls.py`は固定v0.10.0の`crates/develop/src/controls.rs`の上記specだけをallowlist化する。`RawAdjustmentControls.tsx`は既存右パネルと`AdjustmentSlider`のrange・数値入力・keyboard／wheel・確定方法を使用する。共通Sliderの個別bypass／resetとカテゴリ・全体の操作ボタンはRAWにも配置するが、C4まではdisabledとし、現像設定を変更しない。UI focus用AdjustmentIdは再利用するが、値のbindingはnative control IDに分離し、JPEG reducer／Recipe・clipboardへ渡さない。WB・基本・色の3カテゴリのみを表示し、RAW Color Gradingは追加しない。
 
 WBは`photo.inspect.as_shot_wb`の有限な範囲内2値と、設定の明示`wb.scale=kelvin`を確認できた場合だけ有効とする。この肯定的な証拠がない素材、scale省略（v0.10.0のlegacy表現）やlegacy素材はWBのみ無効。matrix／camera名から独自推測せず、Kelvinと旧相対値を変換しない。既存`develop.set`が行うscale正規化とAsShot→Customを利用し、readbackのmode／scaleを表示する。現段階でAsShotへ戻すReset操作は追加しない。判定不能素材でWBが無効になる制限は明示する。
 
@@ -440,3 +440,11 @@ WBは`photo.inspect.as_shot_wb`の有限な範囲内2値と、設定の明示`wb
 `appSettings.ts`の固定ロックを廃止し、保存値はread／update時にraw／bothを含めて保持する。Settingsの3選択肢はそのまま、Windows LightCraft capabilityがtrueのときだけRAW／両方を有効化する。Gallery／Stack badgeの実効presetは同じcapabilityでNon-RAWへfallbackし、手動選択優先・RAW-only等の従来fallbackを維持する。Dockerの404はunavailableであり、RAW編集対応と表示しない。保存値を書き換えないためcapability回復時にraw／bothが戻る。
 
 最終関連検証はBackend 4ファイル139件、Frontend 15ファイル384件成功。Backendはrepo Python 3.14／cwd backendで、fake MCPを使用したcontrol mapping・readback・WB mode／scale、revision／所有拒否、切断後もownedなmutation、readback失敗resync、C1 cleanup／Windows認証を確認した。Frontendはgateと制御timerでdesired集約、commit flush、逐次処理、revision衝突・結果不明、古いPreview／callback破棄、切替、WBのみ無効、RAW／JPEG経路分離、capability前ロック・失敗／404・回復・保存値保持、既存Slider／Viewer／保存・Stack選択回帰を確認した。TypeScript checkを含む`npm run build`成功、既存500 kB超chunk警告あり。全suite・実GPU・実Immich・Windows画面操作は実施していない。C2のSlider操作とreadback／Preview、JPEG往復のWindows実画面受入はユーザーが行う。
+
+### C2 RAWスライダーパネル仕上げ
+
+JPEGとの画面比較を受け、RAWカテゴリ見出しと個別SliderにJPEGと同じdisabled ON/OFF・Reset配置を追加し、全体Resetも無効ボタンとして表示する。ツールチップ・aria-labelはRAWでは準備中と示し、すべての操作はdisabledでLightCraft設定を変更しない。色温度とTintのtrackはJPEG共有gradientを用いる。RAW値域・native mapping/readbackは変えない。基本補正の表示をJPEG同様に「Highlights→Whites→Shadows」とし、RAW IDはそれぞれhighlights／whites／shadowsのまま。
+
+初期フォーカス不能の原因は、暗室から操作パネルへ入る`Shift+↑／↓`の入口がJPEG用`historyEnabled`を必須としていたこと。RAWは一時編集でJPEG Historyを所有しないため、フォーカス復帰が拒否されていた。RAW documentがreadyで操作を遮る画面状態がない場合に、同じ`restoreAdjustmentFocus()`を許可する。無効なWB rangeは既存focus registryが除外し、カテゴリ見出し・表示行を通じた移動はDOM順に従う。range上の矢印、wheel、数値入力と確定処理は共通Sliderを維持する。
+
+回帰検証は関連Frontend 4ファイル201件成功。JPEGと同じ基本補正順、未フォーカス時のViewerからの初期focus、無効WBの除外、ボタン全27件disabled・クリック非作用、Temperature/Tint gradient、RAW値変更経路を確認した。`npm run build`（TypeScript checkを含む）成功。既存500 kB超chunk警告あり。JPEG側の共通Slider既定ボタン動作もfocused回帰で確認した。`git diff --check`成功。

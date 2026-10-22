@@ -285,6 +285,7 @@
       "updating": "Updating RAW settings and Preview (unconfirmed)…",
       "editFailed": "RAW settings or Preview could not be confirmed. Resync and retry; reopen the photo if recovery fails.",
       "retry": "Resync and retry",
+      "actionsUnavailable": "Coming later for RAW",
       "wbUnavailable": "Kelvin WB capability could not be confirmed for this RAW. Only WB is disabled.",
       "actualSize": "Preview 100%"
     },

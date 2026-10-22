@@ -1,40 +1,75 @@
+import { useId, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
+import { focusAdjustmentCategory, navigateAdjustments } from './adjustmentFocus';
 import type { AdjustmentId } from './editing';
+import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import type { RawControlId } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
-const bindings: [string, RawControlId[], AdjustmentId[]][] = [
-  ['whiteBalance', ['wb.temp', 'wb.tint'], ['temperature', 'tint']],
-  ['basic', ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks'],
-    ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks']],
-  ['color', ['color.vibrance', 'color.saturation'], ['vibrance', 'saturation']],
+type RawCategoryId = 'whiteBalance' | 'basic' | 'color';
+const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: AdjustmentId[] }[] = [
+  { category: 'whiteBalance', controls: ['wb.temp', 'wb.tint'], ids: ['temperature', 'tint'] },
+  { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
+    ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
+  { category: 'color', controls: ['color.vibrance', 'color.saturation'], ids: ['vibrance', 'saturation'] },
 ];
 
 export function RawAdjustmentControls({ raw }: { raw: NonNullable<ReturnType<typeof useRawDocument>> }) {
   const { t } = useTranslation();
   const settings = raw.settings;
-  return <>
+  const actionsUnavailable = t('workspace.rawPreview.actionsUnavailable');
+  return <div className="raw-adjustment-controls">
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
     {raw.pending && !raw.editError && <p role="status">{t('workspace.rawPreview.updating')}</p>}
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
       <button className="tool-button" type="button" onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
-    {settings && bindings.map(([category, controls, ids]) => <section key={category} className="adjustment-category">
-      <header className="adjustment-category-header"><h3>{t(`workspace.${category}`)}</h3></header>
+    {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category} unavailableLabel={actionsUnavailable}>
       {category === 'whiteBalance' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
       {controls.map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = ids[index];
         const value = raw.desired?.[control] ?? settings.values[control];
-        return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} actions={false}
+        const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
+        // C4 owns RAW bypass and reset semantics; disabled placeholders keep the JPEG panel layout consistent.
+        return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} actionsDisabled
+          actionsUnavailableLabel={actionsUnavailable} trackGradient={trackGradient}
           label={t(`workspace.${id}`)} enabled onToggle={() => {}} onReset={() => {}} onBegin={() => {}}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
-          defaultValue={spec.default} resetLabel="" valueLabel={t(`workspace.${id}Value`)}
+          defaultValue={spec.default} resetLabel={t(`workspace.${id}Reset`)} valueLabel={t(`workspace.${id}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={!!raw.editError || raw.status !== 'ready' || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={raw.flushControls} />;
       })}
-    </section>)}
-  </>;
+    </RawCategory>)}
+  </div>;
+}
+
+function RawCategory({ category, unavailableLabel, children }: { category: RawCategoryId; unavailableLabel: string; children: ReactNode }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(true);
+  const contentId = useId();
+  const title = t(`workspace.${category}`);
+  const titleKey = category[0].toUpperCase() + category.slice(1);
+  return <section className="adjustment-category raw-adjustment-category">
+    <div className="adjustment-category-header">
+      <h3><button type="button" className="adjustment-category-title" aria-expanded={expanded}
+        aria-controls={contentId} aria-label={t(`workspace.${expanded ? 'collapse' : 'expand'}${titleKey}`)}
+        onClick={() => setExpanded(value => !value)} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+        <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+        <span className="adjustment-category-label">{title}</span>
+      </button></h3>
+      <div className="adjustment-category-actions" title={unavailableLabel}>
+        <button type="button" className="adjustment-category-icon raw-action-unavailable" disabled
+          aria-label={unavailableLabel} title={unavailableLabel} onFocus={focusAdjustmentCategory}
+          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>⏻</button>
+        <button type="button" className="adjustment-category-reset raw-action-unavailable" disabled
+          aria-label={unavailableLabel} title={unavailableLabel} onFocus={focusAdjustmentCategory}
+          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>
+      </div>
+    </div>
+    {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}
+  </section>;
 }

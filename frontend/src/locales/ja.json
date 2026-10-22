@@ -276,6 +276,7 @@
       "updating": "RAW設定・プレビューを更新しています（未確定）…",
       "editFailed": "RAW設定またはプレビューを確定できませんでした。再同期して再試行してください。失敗が続く場合は写真を開き直してください。",
       "retry": "再同期して再試行",
+      "actionsUnavailable": "RAWでは準備中です",
       "wbUnavailable": "このRAWのKelvin WB能力を確認できないため、WBのみ操作できません。",
       "actualSize": "プレビュー100%"
     },
