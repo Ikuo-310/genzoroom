@@ -1231,3 +1231,11 @@ High 0件、Medium 2件を修正し、未解決High／Mediumなし。
 自動検証はFake native transport／一時SQLite／React DOMによるもの。実LightCraft／GPU／Immich、現行Windows WebViewの狭幅表示、5桁＋K、数値入力からResetの実pointerイベント順、実画像のbypass／As Shot復帰は未実施。旧インストーラー版で代替確認しない。実機ではこれらと通常終了・再起動後の復元を確認する必要がある。
 
 設計書とarchitectureを更新してCommit／Push後、C4-Cで停止する。C4-D Before／After、C4-E JPEG UI統合、C4-F全体監査へ進まない。
+
+## RAW数値入力欄・Kelvin表示の配置調整（2026-10-23）
+
+C4-C後のRAW操作パネルで、数値欄を66 px固定にしていたため5桁表示に対して幅が過剰であり、温度行だけ`K`を別flex項目として配置していたためスライダー終端が他行と揃わなかった。共通`AdjustmentSlider`の数値欄を装飾用wrapperで包み、通常表示では`display: contents`としてJPEGのレイアウトを維持する。RAWではタブラー数字の`5ch`とK表示分を基準に入力幅を決め、Kをnumber inputの内側右端へ重ねる。inputの値と編集イベントは数値のまま保ち、Kの領域だけ右paddingで空ける。
+
+RAW全10行の数値wrapperとReset列を同じ幅にし、gridの右列をその幅へ固定する。これにより色温度を含む全スライダーの開始・終了位置、数値欄、Resetを揃え、従来の別K列分をrangeへ戻す。5桁分の幅は固定pxではなく`ch`と`em`から算出する。CSSでspinlineを隠す現行指定を維持し、Windows Chromiumのnumber入力で表示桁とKが重ならない余白を含める。狭いパネルでは従来同様label列が縮み、rangeが残余幅を使う。キーボード入力、Enter／Escape、Reset、JPEGの既定Slider構造は変更しない。
+
+自動UIテストではRAW 10行の数値欄／Reset列の構造、5桁温度とKのDOM上の内包関係、数値のみのEnter／Escape編集、WB Resetを確認する。React DOMは実フォント計測やWebViewの実レイアウトを行わないため、幅の算出根拠はCSSで確認し、Windows実機の狭幅表示は手動確認事項とする。

@@ -176,7 +176,7 @@ it('disables only WB when Kelvin capability is unknown', async () => {
   expect(sliders.slice(2).every(slider => !slider.disabled)).toBe(true);
 });
 
-it('shows a five-digit temperature and a separate K suffix while WB Reset updates both fields', async () => {
+it('shows a five-digit temperature with an overlaid K suffix while WB Reset updates both fields', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc),
     values: { ...rawSettings(doc).values, 'wb.temp': 11000, 'wb.tint': 26 } }));
   commitHistory.mockImplementation(async request => {
@@ -191,6 +191,12 @@ it('shows a five-digit temperature and a separate K suffix while WB Reset update
   expect(input.value).toBe('11000');
   expect(host.querySelectorAll('.adjustment-number-suffix')).toHaveLength(1);
   expect(temp.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
+  expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
+  expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
+  const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
+  expect(rows).toHaveLength(10);
+  expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
+    && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
   expect(reset.title).toBe(i18n.t('workspace.rawPreview.wbResetAsShot'));
   const pointer = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
@@ -235,7 +241,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)![0].operation).toEqual({ kind: 'sectionReset', metadata: { section: 'light' } });
 });
 
-it('keeps the suffix outside the numeric temperature value during Enter and Escape editing', async () => {
+it('keeps the overlaid suffix outside the numeric temperature value during Enter and Escape editing', async () => {
   await mount();
   const row = host.querySelector('[data-adjustment-id="temperature"]')!.closest('.adjustment-control')!;
   const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -248,7 +254,8 @@ it('keeps the suffix outside the numeric temperature value during Enter and Esca
   expect(input.value).toBe('11000');
   expect(vi.mocked(rawApi.setRawControls).mock.calls.at(-1)![1]).toEqual({ 'wb.temp': 11000 });
   enterValue('12000', 'Escape'); await flush();
-  expect(input.value).toBe('11000'); expect(row.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
+  expect(input.value).toBe('11000');
+  expect(input.parentElement?.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
 });
 it('does not show an Immich image as the result of failed native rendering', async () => {
   vi.mocked(rawApi.rawPreview).mockRejectedValue(new rawApi.RawApiError('raw_render_failed'));

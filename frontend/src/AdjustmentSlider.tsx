@@ -268,11 +268,13 @@ export function AdjustmentSlider(props: Props) {
         if (interaction.current !== 'pointer') scheduleCommit();
       }} />
     <div className="adjustment-value-controls" title={props.actionsDisabled ? props.actionsUnavailableLabel : undefined}>
-      <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
-        value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
-        onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
-        onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-      {props.valueSuffix && <span className="adjustment-number-suffix" aria-hidden="true">{props.valueSuffix}</span>}
+      <span className={`adjustment-number-wrap${props.valueSuffix ? ' has-suffix' : ''}`}>
+        <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
+          value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
+          onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
+          onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
+        {props.valueSuffix && <span className="adjustment-number-suffix" aria-hidden="true">{props.valueSuffix}</span>}
+      </span>
       {props.actions !== false && <>{!props.hideToggle && <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}${props.actionsDisabled ? ' is-unavailable' : ''}`}
         aria-pressed={props.enabled} aria-label={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel} title={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
