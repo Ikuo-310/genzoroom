@@ -8,6 +8,7 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  sections: { light: boolean; color: boolean };
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
   values: RawValues; process: number;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
@@ -22,8 +23,12 @@ export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: numbe
 export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
   documentRevision: number; settingsFingerprint: string };
 export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
-export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump';
-  control?: RawControlId; targetStepId?: string | null };
+export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
+  | { kind: 'sectionReset'; metadata: { section: 'light' | 'color' } }
+  | { kind: 'sectionToggle'; metadata: { section: 'light' | 'color'; enabled: boolean } }
+  | { kind: 'allReset'; metadata: Record<string, never> };
+export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
+  control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset';
   metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
@@ -119,6 +124,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
+    || !value.sections || typeof value.sections.light !== 'boolean' || typeof value.sections.color !== 'boolean'
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
     || new Set(value.controls.map(c => c.id)).size !== RAW_CONTROL_IDS.length
@@ -167,12 +173,13 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
 }
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
-  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId } = request;
+  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation } = request;
   let accepted = false;
   try {
     const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
       ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}),
+      ...(action === 'operate' ? operation : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }));
     accepted = true;
     settings(value, doc);

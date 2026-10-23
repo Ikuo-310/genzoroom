@@ -318,6 +318,28 @@ describe('bounded RAW session renewal', () => {
     return { saved: () => saved };
   }
   async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
+  it('saves a compound Reset before renewal and restores its WB, category state and History cursor', async () => {
+    renewal();
+    let saved: api.RawHistoryResult | undefined;
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), mutationAttempts: doc.generation === 1 ? 199 : 1,
+      ...(saved ? { values: saved.values, sections: saved.sections, settingsFingerprint: saved.settingsFingerprint,
+        recipeFingerprint: saved.recipeFingerprint, recipeRevision: saved.recipeRevision } : {}) }));
+    vi.mocked(api.saveRawHistory).mockImplementation(async request => {
+      if (request.action === 'initialize') return rawHistoryResult(request, saved ? { history: saved.history } : {});
+      const next = { ...request.doc, revision: request.doc.revision + 1, mutationAttempts: 201,
+        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false },
+        values: { ...request.doc.values, 'wb.temp': 4875, 'wb.tint': 13 } };
+      saved = rawHistoryResult({ ...request, doc: next }, { history: { initialized: true, length: 1, cursor: 1, selectedStepId: request.saveId } });
+      return saved;
+    });
+    await render('a'); await drain();
+    act(() => current!.operate({ kind: 'sectionReset', metadata: { section: 'color' } })); await drain();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(current?.document?.generation).toBe(2);
+    expect(current?.settings?.sections.color).toBe(false);
+    expect(current?.settings?.values['wb.temp']).toBe(4875);
+    expect(current?.history?.cursor).toBe(1); expect(current?.locked).toBe(false); expect(current?.dirty).toBe(false);
+  });
   async function threshold() {
     await render('a'); await drain();
     act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });

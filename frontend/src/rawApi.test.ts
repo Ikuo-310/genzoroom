@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
-  RawSaveError, type RawDocument, type RawHistoryRequest } from './rawApi';
+  RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryPage } from './test/rawHistory';
 
@@ -15,6 +15,23 @@ function response(patch: Record<string, string> = {}, bytes = png) {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('RAW History transport', () => {
+  it.each<RawHistoryOperation>([
+    { kind: 'controlReset', metadata: { control: 'wb.tint' } },
+    { kind: 'sectionToggle', metadata: { section: 'color', enabled: false } },
+    { kind: 'sectionReset', metadata: { section: 'light' } },
+    { kind: 'allReset', metadata: {} },
+  ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
+    const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
+      expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(rawHistoryResult(request)), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    await saveRawHistory(request);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/history/operate');
+    expect(JSON.parse(init.body as string)).toEqual({ workspaceId: doc.workspaceId, generation: doc.generation,
+      documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
+      expectedRecipeRevision: 4, saveId: request.saveId, ...operation });
+  });
   const historyRequest = (action: 'initialize' | 'commit'): RawHistoryRequest => ({ doc: rawSettings(doc),
     action, control: action === 'commit' ? 'light.exposure' : undefined,
     expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' });

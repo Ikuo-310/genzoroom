@@ -11,6 +11,19 @@ let mousePosition: { x: number; y: number } | null = null;
 
 export function focusAdjustmentCategory() { activeAdjustment = null; }
 
+export function commitAdjustmentEdits(scope: Element) {
+  for (const [element, commit] of adjustments) if (scope.contains(element)) commit();
+}
+
+export function preserveAdjustmentNumberFocus(event: { button: number; currentTarget: HTMLElement; preventDefault: () => void }) {
+  const input = document.activeElement;
+  if (event.button === 0 && input instanceof HTMLInputElement && input.matches('.adjustment-number')
+    && event.currentTarget.closest('.develop-panel')?.contains(input)) {
+    // Admit the action before blur can disable its button via the gesture's save lock.
+    event.preventDefault();
+  }
+}
+
 export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing' | 'defaultPrevented' | 'target' | 'preventDefault'>, current: HTMLElement) {
   if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey
     || (isNativeEditingTarget(event.target) && !(event.target === current && current.matches('.adjustment-number')))

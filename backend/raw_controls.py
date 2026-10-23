@@ -25,7 +25,11 @@ def controls_state(snapshot):
             raise LightCraftError("raw_invalid_settings")
         values[control] = value
     wb = settings.get("wb", {})
-    return {"values": values, "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
+    disabled = settings.get("disabled_sections", [])
+    if type(disabled) is not list or any(type(section) is not str for section in disabled):
+        raise LightCraftError("raw_invalid_settings")
+    return {"values": values, "sections": {section: section not in disabled for section in ("light", "color")},
+            "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
             "wb": {"available": snapshot.wb_kelvin and wb.get("scale") == "kelvin",
                    "mode": wb.get("mode", "asShot"), "scale": wb.get("scale", "legacy")}, "process": settings["process"]}
@@ -43,3 +47,18 @@ def validate_controls(values, wb_available):
         if key.startswith("wb.") and not wb_available:
             raise LightCraftError("raw_wb_unavailable")
     return values
+
+
+def validate_history_operation(kind, metadata):
+    if type(metadata) is not dict:
+        raise LightCraftError("raw_invalid_request")
+    valid = (kind == "controlReset" and set(metadata) == {"control"}
+             and type(metadata["control"]) is str and metadata["control"] in CONTROLS
+             or kind == "sectionReset" and set(metadata) == {"section"}
+             and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
+             or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
+             and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
+             and type(metadata["enabled"]) is bool
+             or kind == "allReset" and not metadata)
+    if not valid:
+        raise LightCraftError("raw_invalid_request")

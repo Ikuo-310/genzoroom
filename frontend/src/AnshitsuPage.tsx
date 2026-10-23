@@ -2,7 +2,7 @@ import { useAppSettings } from './appSettings';
 import { useWorkspaceGpu } from './useWorkspaceGpu';
 import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
-import { activeAdjustmentId, focusAdjustmentCategory, navigateAdjustments, restoreAdjustmentFocus } from './adjustmentFocus';
+import { activeAdjustmentId, commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -780,8 +780,14 @@ export function AnshitsuPage() {
         <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
         <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
-          : rawDocument ? <button type="button" className="tool-button workspace-section-action raw-action-unavailable" disabled
-            title={t('workspace.rawPreview.actionsUnavailable')} aria-label={t('workspace.rawPreview.actionsUnavailable')}>{t('workspace.allReset')}</button>
+          : rawDocument ? <button type="button" className="tool-button workspace-section-action"
+            disabled={workspaceKeyboardBlocked || rawDocument.status !== 'ready' || rawDocument.locked || !!rawDocument.editError
+              || rawDocument.historyLoading || !!rawDocument.historyError || !rawDocument.history || !rawDocument.settings?.wb.available}
+            onPointerDown={preserveAdjustmentNumberFocus} onClick={event => {
+              const panel = event.currentTarget.closest('.develop-panel');
+              if (panel) commitAdjustmentEdits(panel);
+              rawDocument.operate({ kind: 'allReset', metadata: {} });
+            }}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
             <AdjustmentCategory categoryId="whiteBalance" onOpenContextMenu={openCategoryMenu}

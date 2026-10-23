@@ -18,7 +18,7 @@ from lightcraft_mcp import LightCraftError
 from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
-from raw_controls import CONTROLS, controls_state, validate_controls
+from raw_controls import CONTROLS, controls_state, validate_controls, validate_history_operation
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
@@ -62,7 +62,7 @@ class RawPreviewApi:
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
             Route("/documents/{handle}/history", self.endpoint, methods=["GET"]),
             *[Route(f"/documents/{{handle}}/history/{action}", self.endpoint, methods=["POST"])
-              for action in ("initialize", "commit", "undo", "redo", "jump", "recover")],
+              for action in ("initialize", "commit", "undo", "redo", "jump", "recover", "operate")],
         ])
 
     def bind(self, raw, manager):
@@ -402,7 +402,8 @@ class RawPreviewApi:
     def _history_changes(step, before_settings, after_settings):
         metadata = step["metadata"]
         if step["kind"] in ("control", "controlReset"):
-            controls = [metadata["control"]]
+            controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
+                        and metadata["control"].startswith("wb.") else [metadata["control"]])
         elif step["kind"] in ("sectionToggle", "sectionReset"):
             section = metadata["section"]
             controls = [control for control in CONTROLS if control.startswith(f"{section}.")
@@ -447,7 +448,7 @@ class RawPreviewApi:
                     "expectedRecipeRevision", "settingsFingerprint"}
         if action != "recover":
             required.add("saveId")
-        if action == "commit":
+        if action in ("commit", "operate"):
             required |= {"kind", "metadata"}
         elif action == "jump":
             required.add("targetStepId")
@@ -473,6 +474,12 @@ class RawPreviewApi:
             if (body["kind"] != "control" or type(metadata) is not dict or set(metadata) != {"control"}
                     or type(metadata["control"]) is not str or metadata["control"] not in CONTROLS):
                 raise LightCraftError("raw_invalid_request")
+        elif action == "operate":
+            validate_history_operation(body["kind"], body["metadata"])
+            kind, metadata = body["kind"], body["metadata"]
+            if not self._wb_available and (kind == "allReset" or kind == "sectionReset" and metadata["section"] == "color"
+                    or kind == "controlReset" and metadata["control"].startswith("wb.")):
+                raise LightCraftError("raw_wb_unavailable")
         return body
 
     async def _history(self, request, body, doc):
@@ -539,24 +546,27 @@ class RawPreviewApi:
                         and self._fingerprint(state["recipe"]["settings"]) != doc["settingsFingerprint"]):
                     raise LightCraftError("raw_history_commit_required")
                 target = None
-                if action in {"undo", "redo", "jump"}:
+                if action in {"undo", "redo", "jump", "operate"}:
                     if self._fingerprint(state["recipe"]["settings"]) != doc["settingsFingerprint"]:
                         raise LightCraftError("raw_history_commit_required")
                     history = state["history"]
                     cursor = history["cursor"]
-                    if action == "undo":
+                    if action == "operate":
+                        selected = state["recipe"]["settings"]
+                    elif action == "undo":
                         cursor = max(0, cursor - 1)
                         target = history["steps"][cursor - 1]["stepId"] if cursor else None
                     elif action == "redo":
                         cursor = min(len(history["steps"]), cursor + 1)
                         target = history["steps"][cursor - 1]["stepId"] if cursor else None
-                    else:
+                    elif action == "jump":
                         target = body["targetStepId"]
                         matches = [i for i, step in enumerate(history["steps"], 1) if step["stepId"] == target]
                         if target is not None and not matches:
                             raise LightCraftError("raw_history_target_missing")
                         cursor = matches[0] if target is not None else 0
-                    selected = history["steps"][cursor - 1]["settings"] if cursor else history["baselineSettings"]
+                    if action != "operate":
+                        selected = history["steps"][cursor - 1]["settings"] if cursor else history["baselineSettings"]
                 else:
                     selected = state["recipe"]["settings"] if action == "initialize" and state["recipe"] else None
                 pending = {"request": body, "action": action, "stage": "readback", "settings": None,
@@ -587,9 +597,14 @@ class RawPreviewApi:
                         {**pending["identity"], "settings": pending["selected"]}, snapshot.revision)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
+                if action == "operate":
+                    pending["stage"] = "applying"
+                    snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
+                    self._history_verify(doc)
+                    self._confirmed(doc, snapshot)
                 # Keep supported legacy omission of WB scale in saved snapshots; the adapter has
                 # verified their complete normalized engine representation, as in C3-B restore.
-                pending["settings"] = pending["selected"] if pending["selected"] is not None else snapshot.settings
+                pending["settings"] = pending["selected"] if pending["selected"] is not None and action != "operate" else snapshot.settings
                 pending["stage"] = "save"
             self._history_verify(doc)
             if self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
@@ -598,7 +613,7 @@ class RawPreviewApi:
             args = (pending["identity"], body["expectedRecipeRevision"], body["saveId"], pending["settings"])
             if action == "initialize":
                 result = await run_in_threadpool(initialize_raw_history, *args, **kwargs)
-            elif action == "commit":
+            elif action in ("commit", "operate"):
                 result = await run_in_threadpool(append_raw_history, *args, kind=body["kind"], metadata=body["metadata"], **kwargs)
             else:
                 result = await run_in_threadpool(move_raw_history_cursor, *args, target_step_id=pending["target"], **kwargs)

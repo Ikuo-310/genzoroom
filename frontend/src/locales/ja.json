@@ -293,6 +293,8 @@
       "retry": "再同期して再試行",
       "actionsUnavailable": "RAWでは準備中です",
       "wbUnavailable": "このRAWのKelvin WB能力を確認できないため、WBのみ操作できません。",
+      "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
+      "colorCategory": "カラー",
       "actualSize": "プレビュー100%"
     },
     "historyRetained": "編集履歴あり",

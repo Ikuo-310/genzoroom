@@ -20,6 +20,7 @@ from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 
 
 DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "tint": 0., "scale": "kelvin"},
+           "disabled_sections": [],
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
            "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
            "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
@@ -66,6 +67,9 @@ class RawProcess(FakeProcess):
         self.bad_image = False
         self.raw_tool_error = False
         self.as_shot_wb = None
+        self.fail_commands = set()
+        self.wb_mismatch = False
+        self.wb_override = {}
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -103,6 +107,8 @@ class RawProcess(FakeProcess):
             return
         command, params = args["id"], args["params"]
         self.commands.append((command, copy.deepcopy(params)))
+        if command in self.fail_commands:
+            return self.tool(message, error=True)
         if command == "app.memoryBudget":
             value = {"budget": params["mb"] * 1024 * 1024}
         elif command == "library.import":
@@ -135,6 +141,28 @@ class RawProcess(FakeProcess):
         elif command == "develop.reset":
             self.photos[self.active]["settings"] = copy.deepcopy(DEFAULT)
             value = {"ok": True}
+        elif command == "develop.sectionEnabled":
+            settings = self.photos[self.active]["settings"]
+            sections = [section for section in settings["disabled_sections"] if section != params["section"]]
+            settings["disabled_sections"] = sections + ([] if params["enabled"] else [params["section"]])
+            value = {"ok": True}
+        elif command == "develop.resetControl":
+            group, key = params["control"].split(".")
+            self.photos[self.active]["settings"][group][key] = DEFAULT[group][key]
+            value = {"ok": True}
+        elif command == "develop.resetSection":
+            settings = self.photos[self.active]["settings"]
+            section = params["section"]
+            settings[section] = copy.deepcopy(DEFAULT[section])
+            if section == "color":
+                settings["wb"].update(mode="asShot", temp=6500., tint=0.)
+            value = {"ok": True}
+        elif command == "develop.wb":
+            temp, tint = self.as_shot_wb or [5500., 0.]
+            self.photos[self.active]["settings"]["wb"].update(mode="asShot", temp=temp if not self.wb_mismatch else 6500.,
+                                                             tint=tint, scale="kelvin")
+            self.photos[self.active]["settings"]["wb"].update(self.wb_override)
+            value = {"temp": temp, "tint": tint}
         elif command in ("develop.set", "develop.merge"):
             settings = self.photos[self.active]["settings"]
             if command == "develop.set":

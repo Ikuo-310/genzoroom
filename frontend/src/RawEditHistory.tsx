@@ -20,11 +20,13 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     `${formatters[change.control](change.before)} → ${formatters[change.control](change.after)}`;
   if (control) {
     const label = t(`workspace.${labels[control]}${reset ? 'Reset' : ''}`);
+    if (reset && step.changes?.length && (step.changes.length > 1 || step.changes[0].control !== control))
+      return `${label}: ${step.changes.map(change => `${name(change.control)} ${pair(change)}`).join('、')}`;
     const change = step.changes?.find(item => item.control === control);
     return label + (change ? ` ${pair(change)}` : '');
   }
   const operation = step.kind === 'allReset' ? t('workspace.allReset')
-    : t(`workspace.${step.metadata.section === 'light' ? 'basic' : 'color'}`)
+    : t(step.metadata.section === 'light' ? 'workspace.basic' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;
   return operation + (changes?.length ? `: ${changes.map(change => `${name(change.control)} ${pair(change)}`).join('、')}` : '');

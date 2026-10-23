@@ -33,6 +33,32 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+it('commits the active gesture before a Reset and retries the exact accepted operation after response loss', async () => {
+  const { saver, controls } = owner(); await saver.save();
+  let lost: api.RawHistoryRequest | undefined;
+  vi.mocked(api.saveRawHistory).mockImplementation(async request => {
+    if (request.action !== 'operate') return rawHistoryResult(request);
+    if (!lost) { lost = structuredClone(request); throw new api.RawSaveError('raw_connection_failed', 'unknown'); }
+    expect(request).toEqual(lost);
+    const settings = { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: fp(99),
+      recipeFingerprint: fp(99), values: { ...request.doc.values, 'light.exposure': 0 } };
+    return rawHistoryResult({ ...request, doc: settings });
+  });
+  saver.begin('light.exposure'); saver.change('light.exposure', 1);
+  saver.end();
+  const intent: api.RawHistoryOperation = { kind: 'controlReset', metadata: { control: 'light.exposure' } };
+  const pending = saver.operate(intent);
+  intent.metadata.control = 'light.contrast';
+  await expect(pending).rejects.toThrow('raw_connection_failed');
+  expect(api.saveRawHistory).toHaveBeenCalledTimes(3);
+  const calls = vi.mocked(api.saveRawHistory).mock.calls.map(([request]) => request);
+  expect(calls[1].action).toBe('commit'); expect(calls[2].action).toBe('operate');
+  expect(calls[2].operation?.metadata).toEqual({ control: 'light.exposure' });
+  expect(saver.dirty).toBe(true); expect(saver.locked).toBe(true);
+  await saver.save(true);
+  expect(saver.dirty).toBe(false); expect(controls.confirmed.values['light.exposure']).toBe(0);
+});
+
 it.each(['unsaved', 'recipe', 'history'])('initializes %s before controls and only once per document', async mode => {
   const settings = initial();
   if (mode !== 'unsaved') Object.assign(settings, { recipeRevision: 7, recipeFingerprint: settings.settingsFingerprint });
@@ -167,6 +193,17 @@ it('rejects current cursor metadata that differs from the acknowledged checkpoin
     history: { initialized: true, cursor: 0, length: 1, selectedStepId: null } }));
   saver.change('light.exposure', 1); saver.end(); await drain();
   expect(saver.dirty).toBe(true); expect(saver.revision).toBe(1); expect(saver.error).toBe('raw_save_unconfirmed');
+});
+
+it('rejects an operation ack whose settings fingerprint does not certify the resulting readback', async () => {
+  const { saver } = owner(); await saver.save();
+  vi.mocked(api.saveRawHistory).mockImplementationOnce(async request => {
+    const result = rawHistoryResult(request);
+    return { ...result, ack: { ...result.ack, settingsFingerprint: 'f'.repeat(64) } };
+  });
+  await expect(saver.operate({ kind: 'allReset', metadata: {} })).rejects.toThrow('raw_save_unconfirmed');
+  expect(saver.dirty).toBe(true); expect(saver.locked).toBe(true); expect(saver.revision).toBe(1);
+  await saver.save(true); expect(saver.dirty).toBe(false);
 });
 
 function historyBackend(length = 3, cursor = length, sameSettings = false) {

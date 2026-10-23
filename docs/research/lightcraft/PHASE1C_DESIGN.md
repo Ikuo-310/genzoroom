@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作API、C4-B3-1保存coordinatorとC4-B3-2 RAW History UIは実装済み。C4-B3-3の統合自動検証・限定監査を完了した。実機受入の未実施範囲と完了条件は末尾のB3-3記録を参照し、C4-C以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1〜B3のRAW History基盤・UI・自動統合監査、およびC4-CのRAWカテゴリON/OFF・Resetを実装済み。現行仕様と実機未確認範囲は末尾のC4-C記録を参照する。C4-D以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -1182,3 +1182,52 @@ SQLite保存内容は変更しない。Backendは既存の検証済み`get_raw_h
 - 限定監査でHigh／Mediumなし。Backendがsnapshot値を一つでも安全に数値化できない場合はそのstepの差分を`null`とし、UIは操作名のみを表示する。推測値を補わない。
 
 コード上の検証であり、Windows WebViewでの実画面確認は未実施。C4-CのカテゴリON/OFF・Reset、C4-D以降は開始していない。LightCraft v0.10.0、SQLite schema v8、Recipe v18とB1〜B3の保存／Undo／Redo契約を維持する。
+
+## Phase 1C-C4-C 実装結果（2026-10-23）
+
+開始HEAD `d8e9b7ff4326b6191a9d28918fddee3206814f4a`、`feature/lightcraft-integration`、作業ツリーclean。LightCraft固定ソースHEAD `a2a41383c4fd62fa85a46ccd00998639221f2d3c`を再確認した。過去節のC4-C未実装記述は当時の記録として保持し、本節を最新仕様とする。
+
+### 操作・保存契約
+
+RAWパネルは最上部カラー（色温度、色かぶり補正、自然な彩度、彩度）、次に基本補正（露光量、コントラスト、ハイライト、ホワイト、シャドウ、ブラック）へ統合した。折りたたみとShift＋カーソルは表示順へ追随する。個別ON/OFFを表示せず、数値inputを66 pxへ広げ、温度だけ独立した`K`ラベルを常時表示する。inputのvalueには数値だけを保持する。RAWに限定したgridではlabel／rangeが縮み、数値欄／単位／Resetを縮めない。共通Sliderの追加propは任意であり、JPEGの既存表示を維持する。
+
+新しいWindows専用`POST /history/operate`は既存owner、認証、4 KiB body／応答制限を共用する。共通History要求に既存kind／bounded metadataだけを加え、任意native commandやSettingsを受理しない。中間slider更新用`commit`と新操作`operate`を区別し、後者もB1の同じappend writer／receipt／CASへ接続する。SQLite schema v8、200件保持、UUID、no-op時のRedo保持、immutable retryを変更しない。
+
+| 操作kind | native実行とreadback検証 |
+|---|---|
+| `sectionToggle` | `develop.sectionEnabled`のlight／colorのみ。元値を含む完全設定が期待するdisabled_sections変更以外で変化しないことを確認する。light bypassのCurve、color bypassのmixer／grading等のnative境界を維持 |
+| `controlReset`（WB以外） | `develop.resetControl`で既定値へ戻し、他の全設定が変化しないことを検証 |
+| `controlReset`（温度／Tint） | どちらも`develop.wb {mode:"asShot"}`。測定した撮影時temp／tint、mode、kelvin scaleの一致とその他の全設定保持を検証。tooltipで両方が戻ることを説明 |
+| `sectionReset` light | `develop.resetSection light`。UIの6値を既定値として確認し、Light／HDR以外の全設定保持を検証。CurveはResetしない |
+| `sectionReset` color | `develop.resetSection color`→`develop.wb asShot`。WB／Color以外の全設定、disabled_sections、撮影時WBを検証 |
+| `allReset` | `develop.reset`→`develop.wb asShot`→`develop.merge`で元のdisabled_sectionsを復帰。import lookが持つOFF状態も元状態を上書きしないよう、元が空配列でも復帰する。全設定readbackと撮影時WB、全カテゴリOFF状態保持を確認 |
+
+カテゴリOFF中の各Resetも可能。native mutation commandは新操作ごとに1／2／3回を実際の送信試行ごとに計上し、複合操作開始前に256上限の残予算を確認する。SQLite Historyは有効な全体変更だけ1件とする。200 soft thresholdでの保存後再生成を維持する。既存C3のsnapshot復元におけるattempt単位は変更しない。
+
+### 状態所有・失敗とRetry
+
+| 状態 | 所有者・不変条件 |
+|---|---|
+| `_Photo.as_shot_wb` | adapterがimport時の検証済み`photo.inspect.as_shot_wb`を私有保持する。範囲内の測定値かつKelvinを確認できない場合、WBを伴うResetを実行前に拒否。DB保存fieldやFrontend公開値は追加しない |
+| `RawSettings.sections` | 完全readbackのdisabled_sectionsからlight／colorのboolだけを公開。Frontendは楽観更新せず、Undo／Redo・再openも同じ読取値を使う。hiddenカテゴリIDは公開しない |
+| `RawRecipeSave.moveIntent`／`historyOperation` | gestureの確定保存からReset／toggleまでを同じ既存queueとfenceで所有する。直前gestureの保存が開始済みでも、そのgestureに続く1件の操作を予約する。受理時の操作metadataはcloneして固定する |
+| `_history_save.selected`／`stage` | `operate`では元の検証済みSQLite checkpointを保持。適用・readback成功後は`save`として結果を固定し、DB失敗や応答喪失のRetryでnative操作を再実行しない |
+
+As Shotの代替値は推測せず、4要素の不一致は成功・History追加にしない。native複合操作の途中失敗／検証不一致は、予算・deadline内で元の完全snapshotへreset＋mergeし、完全一致を確認する。rollback成功時は元のdocument revisionを保ち、同じ要求をRetryできる。rollbackが失敗または残予算不足ならdesync／編集lockを維持する。Retryは既存readback／保存checkpoint復元を通してから同じ操作を再実行する。保存・CAS競合を黙った破棄や上書きで解決しない。
+
+操作後はcontrols／Preview／History cacheを更新する。WBの個別Resetも`changes`に温度とTint両方の変更を返し、対象ボタンと異なるWB項目だけが変わる場合も正しい項目名・数値を表示する。カテゴリtoggleでは値が同じでもON／OFFの操作内容を表示する。日時は引き続き表示しない。
+
+### 限定監査・検証
+
+High 0件、Medium 2件を修正し、未解決High／Mediumなし。
+
+1. 数値inputからResetをクリックした際、先行blurが保存lockを作ってResetを失う可能性があった。RAW actionのpointer downでは数値focusの移動を抑え、click時に共通登録callbackでdraftを正規化・確定してから、同じ保存ownerに後続操作を予約する。通常保存中のdisabled仕様を変えず、gesture保存中の操作予約／応答喪失Retryを回帰検証した。
+2. 新しいnative操作は要求前後でsettings fingerprintが変わるため、ackが確定readbackを証明することを明示的に確認する必要があった。coordinatorでack fingerprintと結果fingerprintの一致を追加し、不一致をcleanにしないテストを追加した。
+
+- Frontend focused 13ファイル **430件成功**。RAW API／controls／保存coordinator／hook／History／画面、共有SliderのJPEG各カテゴリ、JPEG Clipboard／ショートカット／navigationを確認。数値input中のReset、5桁とK、Enter／Escape、OFF→ONの値保持、OFF中Reset、200到達操作の保存→再生成→WB／カテゴリ／cursor復元を含む。
+- Backend focused 9ファイル **347件成功**。B1〜B3のAPI／SQLite／adapter／runtime／復元を確認。監査補正後のadapter／操作88件、hiddenカテゴリ／Curve保持と全10値を含むAll Resetの20行ページ／16 KiB上限を追加確認した操作30件も成功（重複分は合算しない）。200件保持は既存保存層、199→202および254→256／超過拒否は新操作で確認。
+- TypeScript typecheckを含むproduction build、変更Backend 6ファイルのPython 3.14 `py_compile`、`git diff --check`成功。buildの既存500 kB超chunk警告は失敗と区別する。
+
+自動検証はFake native transport／一時SQLite／React DOMによるもの。実LightCraft／GPU／Immich、現行Windows WebViewの狭幅表示、5桁＋K、数値入力からResetの実pointerイベント順、実画像のbypass／As Shot復帰は未実施。旧インストーラー版で代替確認しない。実機ではこれらと通常終了・再起動後の復元を確認する必要がある。
+
+設計書とarchitectureを更新してCommit／Push後、C4-Cで停止する。C4-D Before／After、C4-E JPEG UI統合、C4-F全体監査へ進まない。

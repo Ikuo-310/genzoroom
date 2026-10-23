@@ -528,7 +528,8 @@ class LightCraftManager:
 
     async def _raw_command(self, generation, command, params, *, timeout):
         if command not in {"library.import", "library.select", "photo.inspect", "develop.get", "develop.set",
-                           "develop.merge", "develop.reset", "app.memoryBudget", "library.memory"}:
+                           "develop.merge", "develop.reset", "develop.sectionEnabled", "develop.resetControl",
+                           "develop.resetSection", "develop.wb", "app.memoryBudget", "library.memory"}:
             raise LightCraftError("lightcraft_unsupported_raw_command")
         session = self._raw_session(generation)
         result = await session.client.call_tool("command_run", {"id": command, "params": params}, timeout=timeout)

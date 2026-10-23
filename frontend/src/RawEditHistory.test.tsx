@@ -53,7 +53,16 @@ describe('RAW History display', () => {
         createdAt: '2026-10-23T11:14:52Z', changes: [{ control: 'light.exposure', before: .3, after: 0 }] },
     ];
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 2) as never} disabled={false} />);
-    expect(markup).toContain('色補正 リセット: 色かぶり補正 +8 → 0、自然な彩度 +20 → 0');
+    expect(markup).toContain('カラー リセット: 色かぶり補正 +8 → 0、自然な彩度 +20 → 0');
     expect(markup).toContain('すべてリセット: 露光量 +0.30 → 0.00');
+  });
+
+  it('includes both WB values when either WB Reset changes temperature and tint', () => {
+    const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind: 'controlReset',
+      metadata: { control: 'wb.tint' }, createdAt: '2026-10-23T11:14:53Z', changes: [
+        { control: 'wb.temp', before: 11000, after: 4875 }, { control: 'wb.tint', before: 26, after: 13 }] };
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} />);
+    expect(markup).toContain('色温度 11000 K → 4875 K');
+    expect(markup).toContain('色かぶり補正 +26 → +13');
   });
 });

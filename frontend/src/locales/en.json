@@ -302,6 +302,8 @@
       "retry": "Resync and retry",
       "actionsUnavailable": "Coming later for RAW",
       "wbUnavailable": "Kelvin WB capability could not be confirmed for this RAW. Only WB is disabled.",
+      "wbResetAsShot": "Reset both temperature and tint to As Shot",
+      "colorCategory": "Color",
       "actualSize": "Preview 100%"
     },
     "historyRetained": "Edit history retained",

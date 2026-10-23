@@ -499,6 +499,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-reset:disabled, .grading-range-reset:disabled { cursor: default; opacity: 0.35; }
 .raw-adjustment-controls .raw-action-unavailable, .raw-adjustment-controls .adjustment-value-controls button:disabled { color: #a5a5a8; background: #242426; opacity: 0.72; cursor: not-allowed; }
 .raw-adjustment-controls .adjustment-value-controls button:disabled:hover { background: #242426; }
+.raw-adjustment-controls .adjustment-number { width: 66px; flex-shrink: 0; }
+.raw-adjustment-controls .adjustment-number-suffix { flex-shrink: 0; margin-left: -2px; color: #bdbdc0; }
+.raw-adjustment-controls .adjustment-control { grid-template-columns: minmax(0, clamp(40px, calc(50% - 60px), 90px)) minmax(0, 1fr) auto; }
 .workspace-section-action.raw-action-unavailable:disabled { color: #a5a5a8; opacity: 0.72; cursor: not-allowed; }
 .adjustment-range { min-width: 0; width: 100%; min-height: 28px; margin: 0; accent-color: #bbb; }
 /* Opt-in track only: existing Basic ranges retain their native appearance. */

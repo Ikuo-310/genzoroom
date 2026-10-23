@@ -114,19 +114,20 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders).toHaveLength(10);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
-    'temperature', 'tint', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks', 'vibrance', 'saturation',
+    'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
   ]);
   expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
-  expect(sliders[1].min).toBe('-150'); expect(sliders[2].step).toBe('0.01');
+  expect(sliders[1].min).toBe('-150'); expect(sliders[4].step).toBe('0.01');
   expect(sliders[0].classList.contains('has-gradient')).toBe(true);
   expect(sliders[0].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4e8ed9');
   expect(sliders[0].style.getPropertyValue('--adjustment-track-gradient')).toContain('#d86943');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(27);
-  expect(actions.every(button => button.disabled && button.title === i18n.t('workspace.rawPreview.actionsUnavailable'))).toBe(true);
-  const number = sliders[2].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  expect(actions).toHaveLength(15);
+  expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
+  expect(actions.every(button => !button.disabled)).toBe(true);
+  const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '1.25');
@@ -134,9 +135,6 @@ it('binds engine control specs to shared sliders and commits RAW values without 
     number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   }); await flush();
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
-  const mutationCount = vi.mocked(rawApi.setRawControls).mock.calls.length;
-  act(() => actions.forEach(button => button.click())); await flush();
-  expect(rawApi.setRawControls).toHaveBeenCalledTimes(mutationCount);
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
   expect(number.value).toBe('1.25'); expect(host.textContent).toContain('RAW recipes are autosaved');
 });
@@ -151,13 +149,15 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
     key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true,
   })));
   moveDown(sliders[0]); expect(document.activeElement).toBe(sliders[1]);
+  moveDown(sliders[1]); expect(document.activeElement).toBe(sliders[2]);
+  moveDown(sliders[2]); expect(document.activeElement).toBe(sliders[3]);
   const basicTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(2) .adjustment-category-title')!;
-  moveDown(sliders[1]); expect(document.activeElement).toBe(basicTitle);
-  moveDown(basicTitle); expect(document.activeElement).toBe(sliders[2]);
-  for (let index = 3; index < 8; index++) {
+  moveDown(sliders[3]); expect(document.activeElement).toBe(basicTitle);
+  moveDown(basicTitle); expect(document.activeElement).toBe(sliders[4]);
+  for (let index = 5; index < 10; index++) {
     moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
   }
-  expect(sliders.slice(2, 8).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+  expect(sliders.slice(4).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
 });
 it('skips unavailable WB sliders when acquiring initial RAW focus', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), wb: { available: false, mode: 'asShot', scale: 'legacy' } }));
@@ -174,6 +174,81 @@ it('disables only WB when Kelvin capability is unknown', async () => {
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders.slice(0, 2).every(slider => slider.disabled)).toBe(true);
   expect(sliders.slice(2).every(slider => !slider.disabled)).toBe(true);
+});
+
+it('shows a five-digit temperature and a separate K suffix while WB Reset updates both fields', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc),
+    values: { ...rawSettings(doc).values, 'wb.temp': 11000, 'wb.tint': 26 } }));
+  commitHistory.mockImplementation(async request => {
+    if (request.action !== 'operate') return rawHistoryResult(request);
+    const settings = { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: '8'.repeat(64),
+      recipeFingerprint: '8'.repeat(64), values: { ...request.doc.values, 'wb.temp': 4875, 'wb.tint': 13 } };
+    return rawHistoryResult({ ...request, doc: settings });
+  });
+  await mount();
+  const temp = host.querySelector('[data-adjustment-id="temperature"]')!.closest('.adjustment-control')!;
+  const input = temp.querySelector<HTMLInputElement>('input[type="number"]')!;
+  expect(input.value).toBe('11000');
+  expect(host.querySelectorAll('.adjustment-number-suffix')).toHaveLength(1);
+  expect(temp.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
+  const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+  expect(reset.title).toBe(i18n.t('workspace.rawPreview.wbResetAsShot'));
+  const pointer = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+  act(() => {
+    input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '12000');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    reset.dispatchEvent(pointer);
+  });
+  expect(pointer.defaultPrevented).toBe(true);
+  act(() => reset.click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit', 'operate']);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)![0]).toMatchObject({ action: 'operate',
+    operation: { kind: 'controlReset', metadata: { control: 'wb.temp' } } });
+  expect(input.value).toBe('4875');
+  expect(host.querySelector('[data-adjustment-id="tint"]')!.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('13');
+});
+
+it('retains values across category OFF/ON and permits Reset while OFF on the same History owner', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc),
+    values: { ...rawSettings(doc).values, 'light.exposure': 1 } }));
+  commitHistory.mockImplementation(async request => {
+    const next = structuredClone(request.doc);
+    next.revision++; next.settingsFingerprint = String(next.revision).padStart(64, '0'); next.recipeFingerprint = next.settingsFingerprint;
+    const operation = request.operation!;
+    if (operation.kind === 'sectionToggle') next.sections[operation.metadata.section] = operation.metadata.enabled;
+    else if (operation.kind === 'sectionReset') next.values['light.exposure'] = 0;
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  const categories = host.querySelectorAll('.raw-adjustment-category');
+  expect(categories).toHaveLength(2);
+  expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Color');
+  const toggle = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
+  const reset = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+  act(() => toggle.click()); await flush();
+  expect(exposure().disabled).toBe(true); expect(exposure().value).toBe('1'); expect(reset.disabled).toBe(false);
+  act(() => toggle.click()); await flush();
+  expect(exposure().disabled).toBe(false); expect(exposure().value).toBe('1');
+  act(() => toggle.click()); await flush();
+  act(() => reset.click()); await flush();
+  expect(exposure().disabled).toBe(true); expect(exposure().value).toBe('0');
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)![0].operation).toEqual({ kind: 'sectionReset', metadata: { section: 'light' } });
+});
+
+it('keeps the suffix outside the numeric temperature value during Enter and Escape editing', async () => {
+  await mount();
+  const row = host.querySelector('[data-adjustment-id="temperature"]')!.closest('.adjustment-control')!;
+  const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const enterValue = (value: string, key: string) => act(() => {
+    input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+  enterValue('11000', 'Enter'); await flush();
+  expect(input.value).toBe('11000');
+  expect(vi.mocked(rawApi.setRawControls).mock.calls.at(-1)![1]).toEqual({ 'wb.temp': 11000 });
+  enterValue('12000', 'Escape'); await flush();
+  expect(input.value).toBe('11000'); expect(row.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
 });
 it('does not show an Immich image as the result of failed native rendering', async () => {
   vi.mocked(rawApi.rawPreview).mockRejectedValue(new rawApi.RawApiError('raw_render_failed'));

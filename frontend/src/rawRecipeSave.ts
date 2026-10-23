@@ -1,7 +1,7 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
 import { RawApiError, RawSaveError, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
-  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep } from './rawApi';
+  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
@@ -27,7 +27,7 @@ export class RawRecipeSave {
   historyError?: string;
   moving = false;
   private historyOperation?: Promise<void>;
-  private moveIntent?: { action: 'undo' | 'redo' | 'jump'; targetStepId?: string | null };
+  private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
   private gesture?: { control: RawControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -53,6 +53,18 @@ export class RawRecipeSave {
     this.moving = true;
     this.moveIntent = { action, targetStepId };
     // Reserve the entire commit->move sequence on the existing queue before cleanup can enter.
+    const operation = this.save().finally(() => {
+      this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
+    });
+    this.historyOperation = operation;
+    return operation;
+  }
+  operate(intent: RawHistoryOperation): Promise<void> {
+    const finishingGesture = !!this.operation && !!this.gesture && !this.moving && !this.error;
+    if (!this.active || this.locked && !finishingGesture || this.historyLoading || this.historyError || !this.history) return Promise.resolve();
+    this.moving = true;
+    this.moveIntent = { action: 'operate', operation: structuredClone(intent) };
+    // Share the History fence with navigation and renewal; an accepted Reset drains its gesture first.
     const operation = this.save().finally(() => {
       this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
     });
@@ -98,15 +110,15 @@ export class RawRecipeSave {
     if (!this.moveIntent) return;
     if (this.historyError) await this.loadHistoryPage();
     if (this.historyError) throw new RawApiError(this.historyError);
-    const { action, targetStepId } = this.moveIntent;
+    const { action, targetStepId, operation } = this.moveIntent;
     // Cache refresh can hide a still-valid UUID. Let SQLite validate membership; never
     // infer deletion from a page miss or retarget a removed UUID by position.
-    const available = action === 'undo' ? this.canUndo : action === 'redo' ? this.canRedo
-      : targetStepId !== this.history?.selectedStepId;
+    const available = action === 'operate' || (action === 'undo' ? this.canUndo : action === 'redo' ? this.canRedo
+      : targetStepId !== this.history?.selectedStepId);
     this.moveIntent = undefined;
     if (!available) return;
     this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
-      saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}) };
+      saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
       if (!(cause instanceof RawSaveError) || cause.outcome !== 'rejected' || cause.status !== 409
@@ -222,7 +234,7 @@ export class RawRecipeSave {
       if (!('action' in request)) throw new RawApiError('raw_save_unconfirmed');
       const result = await saveRawHistory(request);
       if (!this.active) throw new RawApiError('raw_document_closed');
-      const moving = request.action === 'undo' || request.action === 'redo' || request.action === 'jump';
+      const moving = request.action === 'undo' || request.action === 'redo' || request.action === 'jump' || request.action === 'operate';
       // A valid old receipt does not certify the current native or SQLite checkpoint.
       if (result.generation !== this.confirmed.generation || result.documentToken !== this.confirmed.documentToken
         || result.handle !== this.confirmed.handle || result.workspaceId !== this.confirmed.workspaceId
@@ -231,6 +243,7 @@ export class RawRecipeSave {
           || result.settingsFingerprint !== this.confirmed.settingsFingerprint) || result.historyPending
         || result.nativeState !== 'synced' || !result.nativeMatchesRecipe
         || result.recipeFingerprint !== result.settingsFingerprint || result.recipeRevision !== result.ack.revision
+        || result.ack.settingsFingerprint !== result.settingsFingerprint
         || result.history.cursor !== result.ack.historyCursor || result.history.length !== result.ack.historyLength
         || result.history.selectedStepId !== result.ack.stepId
         || result.ack.saveId !== request.saveId) throw new RawApiError('raw_save_unconfirmed');
@@ -243,7 +256,7 @@ export class RawRecipeSave {
       this.confirmed = controls.confirmed = result;
       this.history = result.history;
       // Metadata pages are a bounded display cache. Any new commit can prune/replace UUIDs.
-      if (!moving || this.historyError) await this.loadHistoryPage();
+      if (!moving || request.action === 'operate' || this.historyError) await this.loadHistoryPage();
       else if (result.history.cursor > 0 && (result.history.cursor <= this.historyOffset
         || result.history.cursor > this.historyOffset + this.steps.length))
         await this.loadHistoryPage(Math.floor((result.history.cursor - 1) / 20) * 20);

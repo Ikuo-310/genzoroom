@@ -109,6 +109,7 @@ class _Photo:
     requested_revision: int = 0
     sync: str = "synced"
     wb_kelvin: bool = False
+    as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
 
 
 class PreviewTicket:
@@ -531,6 +532,8 @@ class LightCraftRawSession:
                                and all(type(v) in (int, float) and math.isfinite(v) for v in white)
                                and 2000 <= white[0] <= 50000 and -150 <= white[1] <= 150
                                and json.loads(settings).get("wb", {}).get("scale") == "kelvin")
+            if photo.wb_kelvin:
+                photo.as_shot_wb = tuple(white)
             if previous is not None:
                 settings = await self._restore(photo, previous.settings_json, deadline)
             self._commit(photo, settings)
@@ -635,19 +638,25 @@ class LightCraftRawSession:
 
         return await self._submit(action, self._timeouts.command)
 
-    async def _restore(self, photo, encoded, deadline):
+    async def _restore(self, photo, encoded, deadline, *, count_attempts=False):
+        if count_attempts:
+            self._edits += 1
         await self._command("develop.reset", {"ids": [photo.photo_id]}, deadline)
+        if count_attempts:
+            self._edits += 1
         await self._command("develop.merge", {"settings": json.loads(encoded)}, deadline)
         actual = await self._read_settings(photo, deadline)
         if actual != encoded:
             raise LightCraftError("raw_restore_mismatch")
         return actual
 
-    async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None):
+    async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None,
+                      *, commands=None, check=None):
         photo = self._photo(handle, active=True)
+        cost = len(commands) if commands is not None else 1
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
             raise LightCraftError("raw_revision_conflict")
-        if self._edits >= MAX_EDITS:
+        if self._edits + cost > MAX_EDITS:
             raise LightCraftError("raw_session_edit_limit")
         if sum(not t.done() for t in self._operations) >= 2:
             raise LightCraftError("raw_busy")
@@ -662,7 +671,7 @@ class LightCraftRawSession:
                 current = self._photo(handle, active=True)
                 if expected_revision != current.applied_revision:
                     raise LightCraftError("raw_revision_conflict")
-                if self._edits >= MAX_EDITS:
+                if self._edits + cost > MAX_EDITS:
                     raise LightCraftError("raw_session_edit_limit")
                 if verify is not None:
                     verify()
@@ -670,16 +679,34 @@ class LightCraftRawSession:
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
                 sent = True
                 # Count attempts too: a failed readback must not permit unbounded native History.
-                self._edits += 1
-                if restored is not None:
+                if commands is not None:
+                    for native_command, native_params in commands:
+                        self._edits += 1
+                        await self._command(native_command, native_params, deadline)
+                    actual = await self._read_settings(photo, deadline)
+                    check(json.loads(actual))
+                elif restored is not None:
+                    self._edits += 1
                     actual = await self._restore(photo, restored, deadline)
                 else:
+                    self._edits += 1
                     await self._command(command, params, deadline)
                     actual = await self._read_settings(photo, deadline)
                 if verify is not None:
                     verify()
                 return self._commit(photo, actual, reserved)
             except BaseException:
+                if sent and commands is not None and self._edits + 2 <= MAX_EDITS:
+                    try:
+                        # A compound Reset is never a partially accepted edit. Only an exact
+                        # rollback keeps the original revision available for immutable retry.
+                        await self._restore(photo, photo.settings_json, deadline, count_attempts=True)
+                        sent = False
+                        lightcraft_log("raw.operation.rolledBack", level="warn", generation=self._generation,
+                                       mutationAttempts=self._edits)
+                    except BaseException:
+                        lightcraft_log("raw.operation.rollbackFailed", level="error", generation=self._generation,
+                                       mutationAttempts=self._edits)
                 if sent:
                     photo.sync = "desynchronized"
                 raise
@@ -695,6 +722,71 @@ class LightCraftRawSession:
         if not values or any(not isinstance(k, str) or type(v) not in (float, int) for k, v in values.items()):
             raise LightCraftError("raw_invalid_controls")
         return await self._mutate(handle, "develop.set", {"values": values}, expected_revision)
+
+    async def apply_history_operation(self, handle, kind, metadata, expected_revision):
+        from raw_controls import CONTROLS, validate_history_operation
+        validate_history_operation(kind, metadata)
+        photo = self._photo(handle, active=True)
+        before = photo.settings_json
+        original = json.loads(before)
+        disabled = original.get("disabled_sections", [])
+        needs_wb = (kind == "allReset" or kind == "sectionReset" and metadata["section"] == "color"
+                    or kind == "controlReset" and metadata["control"].startswith("wb."))
+        if needs_wb and photo.as_shot_wb is None:
+            raise LightCraftError("raw_wb_unavailable")
+        if kind == "sectionToggle":
+            commands = [("develop.sectionEnabled", metadata)]
+        elif kind == "controlReset":
+            commands = [("develop.wb", {"mode": "asShot"})] if needs_wb else [("develop.resetControl", metadata)]
+        else:
+            commands = [("develop.reset", {"ids": [photo.photo_id]})] if kind == "allReset" else [("develop.resetSection", metadata)]
+            if needs_wb:
+                commands.append(("develop.wb", {"mode": "asShot"}))
+            if kind == "allReset":
+                # An import look may carry bypass flags; preserve even an originally empty list.
+                commands.append(("develop.merge", {"settings": {"disabled_sections": disabled}}))
+
+        def check(actual):
+            for control in CONTROLS:
+                group, key = control.split(".")
+                values = actual.get(group)
+                if type(values) is not dict or type(values.get(key)) not in (int, float):
+                    raise LightCraftError("raw_operation_readback_mismatch")
+            expected_disabled = ([section for section in disabled if section != metadata["section"]]
+                                 + ([] if metadata["enabled"] else [metadata["section"]])) if kind == "sectionToggle" else disabled
+            if actual.get("disabled_sections", []) != expected_disabled:
+                raise LightCraftError("raw_operation_readback_mismatch")
+            if needs_wb:
+                wb = actual.get("wb", {})
+                temp, tint = photo.as_shot_wb
+                if any(wb.get(key) != value for key, value in
+                       (("mode", "asShot"), ("temp", temp), ("tint", tint), ("scale", "kelvin"))):
+                    raise LightCraftError("raw_as_shot_mismatch")
+            if kind in ("sectionToggle", "controlReset"):
+                expected = json.loads(before)
+                if kind == "sectionToggle":
+                    expected["disabled_sections"] = expected_disabled
+                elif needs_wb:
+                    expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
+                else:
+                    group, key = metadata["control"].split(".")
+                    expected[group][key] = CONTROLS[metadata["control"]][3]
+                # Native defaults can encode 0 as 0.0; compare full values, not numeric JSON spelling.
+                if actual != expected:
+                    raise LightCraftError("raw_operation_readback_mismatch")
+            elif kind == "sectionReset":
+                section = metadata["section"]
+                reset_groups = {"light", "hdr"} if section == "light" else {"color", "wb"}
+                if ({key: value for key, value in actual.items() if key not in reset_groups}
+                        != {key: value for key, value in original.items() if key not in reset_groups}):
+                    raise LightCraftError("raw_operation_readback_mismatch")
+                for control, spec in CONTROLS.items():
+                    if control.startswith(f"{section}."):
+                        group, key = control.split(".")
+                        if actual.get(group, {}).get(key) != spec[3]:
+                            raise LightCraftError("raw_operation_readback_mismatch")
+
+        return await self._mutate(handle, None, None, expected_revision, commands=commands, check=check)
 
     async def merge_settings(self, handle, partial, expected_revision):
         partial = json.loads(_object_json(partial, MAX_PATCH_BYTES))

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, readRawDocument, readRawSettings,
   releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
-  type RawHistoryResult, type RawHistoryStep } from './rawApi';
+  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
@@ -317,6 +317,10 @@ export function useRawDocument(assetId: string | null) {
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   return visible && { ...visible, undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
+    operate: (operation: RawHistoryOperation) => {
+      if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>
+        log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
+    },
     jumpHistory: (stepId: string | null) => moveHistory('jump', stepId),
     loadMoreHistory: (retry = false, newer = false) => { if (callbackEditor() && !frozen.current) saverRef.current?.loadMoreHistory(retry, newer); },
     changeControls: (values: Partial<RawValues>) => {
