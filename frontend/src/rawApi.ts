@@ -1,8 +1,10 @@
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
   recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string;
+  beforeKey?: string | null;
 };
-export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number };
+export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string };
+const RAW_PREVIEW_MAX_SIDE = 1024;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
@@ -119,7 +121,7 @@ export async function releaseRawWorkspace(workspaceId: string) {
 function settings(value: RawSettings, doc: RawDocument): RawSettings {
   document(value, doc.workspaceId, doc.assetId);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || !fingerprint(value.settingsFingerprint) || !integer(value.recipeRevision)
+    || !fingerprint(value.settingsFingerprint) || value.beforeKey != null && !fingerprint(value.beforeKey) || !integer(value.recipeRevision)
     || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
     || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
@@ -244,9 +246,9 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
       kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
       changes: step.changes?.map(change => ({ ...change })) ?? null })) };
 }
-export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal): Promise<RawFrame> {
+export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after'): Promise<RawFrame> {
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,
-    generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial }),
+    generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial, ...(kind === 'before' ? { kind } : {}) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
   const numeric = (name: string) => {
     const text = response.headers.get(`x-raw-${name}`);
@@ -257,16 +259,19 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     signal.throwIfAborted();
     if (response.status !== 200 || response.headers.get('content-type') !== 'image/png'
       || numeric('generation') !== doc.generation || numeric('revision') !== doc.revision
-      || numeric('serial') !== serial || response.headers.get('x-raw-token') !== doc.documentToken)
+      || numeric('serial') !== serial || response.headers.get('x-raw-token') !== doc.documentToken
+      || (response.headers.get('x-raw-kind') ?? 'after') !== kind
+      || kind === 'before' && (!fingerprint(doc.beforeKey) || response.headers.get('x-raw-before-key') !== doc.beforeKey))
       throw new RawApiError('raw_stale_handle');
   };
   check();
   const width = numeric('width'), height = numeric('height'), epoch = numeric('epoch'), sequence = numeric('sequence');
-  if (!width || !height || Math.max(width, height) > 1024 || width * height > 1_048_576) throw new RawApiError('raw_invalid_response');
+  if (!width || !height || Math.max(width, height) > RAW_PREVIEW_MAX_SIDE || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
   const bytes = await readBounded(response, MAX_IMAGE_BYTES);
   check();
   if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
-  return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence };
+  return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
+    kind, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
 }
 
 /** A repeated DELETE can lose its ack; only an observed empty owner permits moving on. */

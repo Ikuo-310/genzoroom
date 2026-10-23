@@ -1,0 +1,194 @@
+From: GenzoRoom integration
+Subject: [PATCH] Expose native import Before through headless MCP
+Upstream-Version: 0.10.0
+Upstream-Base: a2a41383c4fd62fa85a46ccd00998639221f2d3c
+Purpose: Optional boolean Before, typed image metadata, native render and compatibility tests.
+Targets: crates/mcp/src/tools.rs; crates/mcp/src/headless.rs; crates/mcp/tests/e2e.rs
+
+diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
+index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd6c9536ba 100644
+--- a/crates/mcp/src/headless.rs
++++ b/crates/mcp/src/headless.rs
+@@ -53,7 +53,14 @@ impl Headless {
+     pub fn render(&mut self, p: &Value, default_size: u64) -> Result<Rgba8, String> {
+         let id = self.photo_or_active(p)?;
+         let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(default_size).clamp(16, 16384) as usize;
+-        Ok(self.session.render_now(id, size, size)?.image)
++        if p.get("before").and_then(Value::as_bool).unwrap_or(false) {
++            let job = self.session.render_job(id, size, size, true, true).ok_or("no such photo")?;
++            let result = job.run();
++            self.session.accept(&result);
++            Ok(result.rendered?.image)
++        } else {
++            Ok(self.session.render_now(id, size, size)?.image)
++        }
+     }
+ 
+     /// The UI command `app.export`, emulated with the same parameters as the desktop app
+@@ -130,7 +137,13 @@ impl Backend for Headless {
+                 if id == "app.export" {
+                     return self.export(&params);
+                 }
+-                self.session.execute(id, &params).map_err(|e| e.to_string())
++                let mut value = self.session.execute(id, &params).map_err(|e| e.to_string())?;
++                if id == "beforeAfter.setBefore" && params.get("source").and_then(Value::as_str) == Some("import") {
++                    let photo_id = self.photo_or_active(&json!({}))?;
++                    let photo = self.session.catalog.photo(photo_id).ok_or("no such photo")?;
++                    value["beforeFingerprint"] = json!(format!("{:016x}", photo.import_defaults().hash64()));
++                }
++                Ok(value)
+             }
+             "engine.commands" => {
+                 let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
+@@ -140,14 +153,27 @@ impl Backend for Headless {
+                 Ok(Value::Array(v))
+             }
+             "ui.render" => {
++                let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
++                let id = self.photo_or_active(&p)?;
++                let photo = self.session.catalog.photo(id).ok_or("no such photo")?;
++                let settings = self.session.before_settings(photo);
++                let mut meta = json!({"kind": if before { "before" } else { "after" }});
++                if before {
++                    meta["beforeFingerprint"] = json!(format!("{:016x}", photo.import_defaults().hash64()));
++                    meta["effectiveBeforeFingerprint"] = json!(format!("{:016x}", settings.hash64()));
++                    meta["geometry"] = json!({"crop": settings.crop, "orientation": settings.orientation});
++                }
+                 let img = self.render(&p, 1600)?;
++                meta["width"] = json!(img.width);
++                meta["height"] = json!(img.height);
+                 match p.get("path").and_then(Value::as_str) {
+                     Some(path) => {
+                         self.session.check_write_target(path)?;
+                         write_image(Path::new(path), &img, 92)?;
+-                        Ok(json!({"path": path, "width": img.width, "height": img.height}))
++                        meta["path"] = json!(path);
++                        Ok(meta)
+                     }
+-                    None => Ok(json!({"width": img.width, "height": img.height})),
++                    None => Ok(meta),
+                 }
+             }
+             "app.export" => self.export(&p),
+@@ -206,6 +232,31 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn genzoroom_before_keeps_native_geometry_without_copying_after_optics() {
++        let mut h = Headless::demo();
++        let id = h.session.active().unwrap();
++        let import = h.session.catalog.photo(id).unwrap().import_defaults();
++        let mut after = (*h.session.catalog.photo(id).unwrap().develop).clone();
++        after.optics.distortion = 25.0;
++        after.light.exposure = 1.5;
++        h.session.set_develop(id, after, "fixture").unwrap();
++        h.session.execute("crop.set", &json!({"rect":[0.1,0.2,0.9,0.8]})).unwrap();
++        h.session.execute("photo.rotateRight", &json!({})).unwrap();
++        h.call("command", json!({"id":"beforeAfter.setBefore","params":{"source":"import"}})).unwrap();
++        let before = h.session.render_job(id, 64, 64, true, true).unwrap();
++        let after = h.session.render_job(id, 64, 64, false, true).unwrap();
++        assert_eq!(before.settings.crop, after.settings.crop);
++        assert_eq!(before.settings.orientation, after.settings.orientation);
++        assert_eq!(before.settings.optics.distortion, import.optics.distortion);
++        assert_eq!(before.settings.light.exposure, import.light.exposure);
++        assert_eq!(serde_json::to_value(before.settings.wb).unwrap(), serde_json::to_value(import.wb).unwrap());
++        let meta = h.call("ui.render", json!({"id":id.0,"size":64,"before":true})).unwrap();
++        assert_eq!(meta["geometry"]["crop"], serde_json::to_value(after.settings.crop).unwrap());
++        assert_eq!(meta["geometry"]["orientation"], serde_json::to_value(after.settings.orientation).unwrap());
++        assert_eq!(meta["effectiveBeforeFingerprint"], format!("{:016x}",before.settings.hash64()));
++    }
++
+     /// Headless sessions look for the SAM 3 model where the desktop app does, and `segment.model.status` reports it (issue #619).
+     #[test]
+     fn headless_sessions_get_the_sam3_model_folder() {
+diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
+index 3265b36f9b4c2653a57468113c4b9179d527b4db..9aa2c47151f402da8d0182662516ba112a1b523c 100644
+--- a/crates/mcp/src/tools.rs
++++ b/crates/mcp/src/tools.rs
+@@ -118,6 +118,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+             "Render a photo with its current develop settings (cropped) and return it as an image (`max_side` is the long edge; does not change selection or save a file).",
+             json!({
+                 "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
++                "before": {"type": "boolean", "default": false, "description": "Native import Before, with current crop/orientation (GenzoRoom preview v1)"},
+                 "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
+                 "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
+             }),
+@@ -514,10 +515,19 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+     let Some(id) = id else { return ToolResult::error("no active photo: import or select one, or pass `id`") };
+     let file = temp_path("render");
+     let path = file.to_string_lossy().to_string();
+-    let meta = match b.call("ui.render", json!({"id": id, "size": size, "path": path})) {
++    let before = match args.get("before") {
++        None => false,
++        Some(Value::Bool(value)) => *value,
++        _ => return ToolResult::error("before must be boolean"),
++    };
++    let meta = match b.call("ui.render", json!({"id": id, "size": size, "path": path, "before": before})) {
+         Ok(m) => m,
+         Err(e) => return ToolResult::error(e),
+     };
++    // A remote backend may ignore unknown arguments; never label its After image as Before.
++    if before && meta.get("kind").and_then(Value::as_str) != Some("before") {
++        return ToolResult::error("backend does not support native Before rendering");
++    }
+     let mut meta = meta;
+     meta["id"] = json!(id);
+     image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
+@@ -618,7 +628,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+         }
+         "doc_inspect" => ToolResult::from(doc_inspect(b)),
+         "render_preview" => {
+-            let mut a = obj(args, &["id", "format"]);
++            let mut a = obj(args, &["id", "format", "before"]);
+             if let Some(m) = args.get("max_side") {
+                 a["size"] = m.clone();
+             }
+diff --git a/crates/mcp/tests/e2e.rs b/crates/mcp/tests/e2e.rs
+index 8b039649011089caf195ca6dbc0b183d9ef24775..10f583c8262f4bf12308fdd30b802ded6782523b 100644
+--- a/crates/mcp/tests/e2e.rs
++++ b/crates/mcp/tests/e2e.rs
+@@ -316,3 +316,43 @@ fn export_without_token_finishes_after_eof() {
+     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+     std::fs::remove_dir_all(dir).unwrap();
+ }
++
++/// GenzoRoom's extension keeps After compatible and renders import Before without mutations.
++#[test]
++fn genzoroom_native_before_preview() {
++    let mut server = Server::new(Box::new(Headless::demo()));
++    let setup = session(&mut server, &[
++        json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
++        call(2, "query_photos", json!({"limit":1})),
++    ]);
++    let tools = setup[0]["result"]["tools"].as_array().unwrap();
++    let preview = tools.iter().find(|t| t["name"] == "render_preview").unwrap();
++    assert_eq!(preview["inputSchema"]["properties"]["before"]["type"], "boolean");
++    let id = setup[1]["result"]["structuredContent"]["photos"][0]["id"].as_u64().unwrap();
++    let images = session(&mut server, &[
++        call(3, "run_command", json!({"command":"library.select", "params":{"ids":[id],"active":id,"mode":"replace"}})),
++        call(4, "run_command", json!({"command":"beforeAfter.setBefore", "params":{"source":"import"}})),
++        call(5, "render_preview", json!({"id":id,"max_side":64})),
++        call(6, "set_develop", json!({"id":id,"values":{"light.exposure":1.5}})),
++        call(7, "render_preview", json!({"id":id,"max_side":64,"before":true})),
++        call(8, "render_preview", json!({"id":id,"max_side":64,"before":false})),
++        call(9, "get_develop", json!({"id":id})),
++    ]);
++    for item in &images { assert_eq!(item["result"]["isError"], false, "{item}"); }
++    let meta = |index:usize| -> Value {
++        let text = images[index]["result"]["content"].as_array().unwrap().iter().find(|c|c["type"] == "text").unwrap();
++        serde_json::from_str(text["text"].as_str().unwrap()).unwrap()
++    };
++    assert_eq!(meta(2)["kind"], "after");
++    assert_eq!(meta(4)["kind"], "before");
++    assert_eq!(meta(5)["kind"], "after");
++    assert_eq!(meta(4)["beforeFingerprint"], images[1]["result"]["structuredContent"]["beforeFingerprint"]);
++    assert!(meta(4)["effectiveBeforeFingerprint"].is_string());
++    let original = mean_of(&images[2]["result"]);
++    let before = mean_of(&images[4]["result"]);
++    let after = mean_of(&images[5]["result"]);
++    assert_eq!(original, before);
++    assert!(after.0 > before.0);
++    assert_eq!((before.1,before.2),(after.1,after.2));
++    assert_eq!(images[6]["result"]["structuredContent"]["light"]["exposure"], 1.5);
++}

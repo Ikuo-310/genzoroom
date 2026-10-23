@@ -1,5 +1,6 @@
 param(
     [string]$PythonPath,
+    [string]$LightCraftExe,
     [switch]$Smoke,
     [switch]$Release
 )
@@ -24,6 +25,12 @@ $packagePython = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'
 function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
     & $Executable @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Build command failed ($LASTEXITCODE): $Executable" }
+}
+
+# LightCraft remains externally configured; an engine selected for this build must have verified provenance.
+if (-not $LightCraftExe) { $LightCraftExe = $env:GENZOROOM_LIGHTCRAFT_EXE }
+if ($LightCraftExe) {
+    Invoke-Checked $PythonPath @((Join-Path $repository 'native/lightcraft/build.py'),'--binary',$LightCraftExe)
 }
 
 # Restore build-only environment even if freezing or Cargo fails.

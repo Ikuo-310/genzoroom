@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, readRawDocument, readRawSettings,
   releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
-  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
+  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
-  url?: string; document?: RawDocument; code?: string; settings?: RawSettings;
+  url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
   saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
   history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[]; historyOffset?: number;
@@ -20,8 +20,30 @@ function log(code: string, event = 'preview.failed') {
   catch { /* Diagnostics cannot change Preview ownership. */ }
 }
 
-export function useRawDocument(assetId: string | null) {
+async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
+  const image = new Image();
+  const url = URL.createObjectURL(frame.blob);
+  let removeAbort = () => {};
+  try {
+    image.src = url;
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+    await Promise.race([image.decode(), new Promise<never>((_, reject) => {
+      const abort = () => reject(new RawApiError('raw_decode_cancelled'));
+      bounded.addEventListener('abort', abort, { once: true });
+      removeAbort = () => bounded.removeEventListener('abort', abort);
+      if (bounded.aborted) abort();
+    })]);
+    if (image.naturalWidth !== frame.width || image.naturalHeight !== frame.height) throw new RawApiError('raw_invalid_response');
+    return url;
+  } catch (error) { URL.revokeObjectURL(url); throw error; }
+  finally { removeAbort(); image.removeAttribute('src'); }
+}
+
+export function useRawDocument(assetId: string | null, beforeRequested = false) {
   const [state, setState] = useState<RawState | null>(null);
+  const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number } | null>(null);
+  const requestBeforeRef = useRef<(retry?: boolean) => void>(() => {});
+  const beforeSerial = useRef(0);
   const serial = useRef(0);
   const identity = useRef(assetId);
   const editorRef = useRef<RawControls | null>(null);
@@ -63,30 +85,15 @@ export function useRawDocument(assetId: string | null) {
       try {
         const frame = await rawPreview(doc, ++frameSerial, controller.signal);
         if (!valid()) return;
-        candidate = URL.createObjectURL(frame.blob);
-        const image = new Image();
-        image.src = candidate;
-        try {
-          const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
-          let removeAbort = () => {};
-          try {
-            await Promise.race([image.decode(), new Promise<never>((_, reject) => {
-              const abort = () => reject(new RawApiError('raw_decode_cancelled'));
-              signal.addEventListener('abort', abort, { once: true });
-              removeAbort = () => signal.removeEventListener('abort', abort);
-              if (signal.aborted) abort();
-            })]);
-          } finally { removeAbort(); }
-          if (!valid()) return;
-          if (image.naturalWidth !== frame.width || image.naturalHeight !== frame.height) throw new RawApiError('raw_invalid_response');
-        } finally { image.removeAttribute('src'); }
+        candidate = await decodeFrame(frame, controller.signal);
+        if (!valid()) return;
         // Recheck engine identity after decode, before publishing a native result.
         await readRawDocument(doc, controller.signal);
         if (!valid()) return;
         revoke();
         url = candidate;
         candidate = undefined;
-        setState(previous => ({ ...previous, assetId, status: 'ready', url, document: doc }));
+        setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height, document: doc }));
       } finally { if (candidate) URL.revokeObjectURL(candidate); }
     };
     const notify = () => {
@@ -273,8 +280,51 @@ export function useRawDocument(assetId: string | null) {
     window.addEventListener('beforeunload', beforeUnload);
     return () => { window.removeEventListener('pagehide', pagehide); window.removeEventListener('beforeunload', beforeUnload); dispose(); };
   }, [assetId]);
-  // A route change hides the old image before effect cleanup runs.
+  // A comparison toggle and ordinary After revisions do not own the native Before cache lifetime.
+  const beforeKey = state?.assetId === assetId ? state.document?.beforeKey : null;
+  const generation = state?.document?.generation, token = state?.document?.documentToken;
+  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}`;
+  useEffect(() => {
+    const controller = new AbortController();
+    let url: string | undefined, operation = false, failed = false;
+    const valid = () => !controller.signal.aborted && identity.current === assetId && !frozen.current
+      && editorRef.current?.confirmed.beforeKey === beforeKey
+      && editorRef.current?.confirmed.generation === generation && editorRef.current?.confirmed.documentToken === token;
+    requestBeforeRef.current = (retry = false) => {
+      const editor = editorRef.current;
+      if (!beforeKey || !editor || !valid() || operation || url && !retry || failed && !retry || editor.unsettled || saverRef.current?.locked) return;
+      if (url) { URL.revokeObjectURL(url); url = undefined; }
+      operation = true; failed = false;
+      setBefore({ owner: beforeOwner, key: beforeKey, status: 'loading' });
+      void (async () => {
+        let candidate: string | undefined;
+        try {
+          const frame = await rawPreview(editor.confirmed, ++beforeSerial.current, controller.signal, 'before');
+          if (!valid()) return;
+          if (frame.kind !== 'before' || frame.key !== beforeKey) throw new RawApiError('raw_invalid_response');
+          candidate = await decodeFrame(frame, controller.signal);
+          if (!valid()) return;
+          url = candidate; candidate = undefined;
+          setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height });
+        } catch (cause) {
+          if (!valid()) return;
+          failed = true;
+          setBefore({ owner: beforeOwner, key: beforeKey, status: 'error' });
+          try { frontendLogger.add({ level: 'warn', component: 'raw', event: 'before.failed', context: {
+            errorCode: cause instanceof RawApiError ? cause.code : 'raw_connection_failed', generation: generation ?? null } }); } catch { /* Optional diagnostics. */ }
+        } finally { operation = false; if (candidate) URL.revokeObjectURL(candidate); }
+      })();
+    };
+    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [assetId, generation, token, beforeKey, beforeOwner]);
+  useEffect(() => {
+    if (beforeRequested && state?.status === 'ready' && !state.pending && !state.locked) requestBeforeRef.current();
+  }, [beforeRequested, beforeKey, state?.status, state?.pending, state?.locked]);
+
+  // Hide old ownership synchronously, before passive effects revoke its URLs.
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
+  const beforeMatches = before?.owner === beforeOwner && before?.key === beforeKey;
+  const beforeSizeMatches = beforeMatches && before?.width === visible?.width && before?.height === visible?.height;
   // A departing slider's commit callback must never flush the successor document's owner.
   const activeEditor = () => identity.current === assetId && editorRef.current?.confirmed.assetId === assetId ? editorRef.current : null;
   const callbackEditor = () => {
@@ -316,7 +366,11 @@ export function useRawDocument(assetId: string | null) {
     if (!callbackEditor() || frozen.current) return;
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
-  return visible && { ...visible, undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
+  return visible && { ...visible, beforeAvailable: !!beforeKey,
+    beforeUrl: beforeMatches && beforeSizeMatches ? before?.url : undefined,
+    beforeStatus: beforeMatches ? before?.status === 'ready' && !beforeSizeMatches ? 'error' as const : before?.status : undefined,
+    retryBefore: () => requestBeforeRef.current(true),
+    undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
     operate: (operation: RawHistoryOperation) => {
       if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>
         log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));

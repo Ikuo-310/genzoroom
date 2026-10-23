@@ -304,7 +304,10 @@
       "wbUnavailable": "Kelvin WB capability could not be confirmed for this RAW. Only WB is disabled.",
       "wbResetAsShot": "Reset both temperature and tint to As Shot",
       "colorCategory": "Color",
-      "actualSize": "Preview 100%"
+      "actualSize": "Preview 100%",
+      "beforeLoading": "Preparing RAW Before; showing After.",
+      "beforeFailed": "RAW Before could not be compared; showing After.",
+      "beforeRetry": "Retry Before"
     },
     "historyRetained": "Edit history retained",
     "name": "Develop",

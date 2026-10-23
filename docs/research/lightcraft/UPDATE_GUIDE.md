@@ -1,0 +1,50 @@
+# LightCraft 更新・GenzoRoomパッチ管理
+
+この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の本家基準は **v0.10.0 / `a2a41383c4fd62fa85a46ccd00998639221f2d3c`**。C4-Dで本家versionは変更していない。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。
+
+## 管理対象
+
+| パッチ | 目的・変更対象 |
+|---|---|
+| `0001-native-before.patch` | `crates/mcp/src/tools.rs`：optional boolean `before` schemaと引数転送、非対応backendの誤表示拒否。`headless.rs`：native `render_job(..., true, true)`、import Before基準・有効Before fingerprint／geometry／画像kind metadata。`tests/e2e.rs`：Before画像、After互換性、read-only性の機能テスト |
+
+`render_now()`のAfter動作や現像アルゴリズムは変更しない。Beforeはnative `before_settings()`がcrop／orientationだけを現在値に揃える。Afterの手動歪曲補正等を転写しない。hash64はnativeの既存settings hashであり、画像checksumや暗号学的出自証明として扱わない。
+
+## 再現可能な準備・ビルド
+
+1. 本家から上記commitの**未変更**checkoutを用意する。既存の利用者変更をreset／上書きしない。作業前にHEAD・statusを確認する。
+2. GenzoRoomのリポジトリPythonから準備scriptを実行する（PowerShell例、`$source`は専用checkoutの絶対path）。
+
+```powershell
+$source = 'I:\code\raw-test\lightcraft-v0.10.0-gpu-poc'
+.\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
+.\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target\release\lightcraft-cli.exe"
+```
+
+`--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。
+
+`--build`は検証後に`cargo test --locked -p lightcraft-mcp -- --test-threads=1`、`cargo build --release --locked --no-default-features -p lightcraft-cli`を実行し、**生成したbinary自身**へMCP handshake／tools schema／synthetic PNG import／Beforeと省略時Afterのrenderを要求する。kind、native import fingerprint、PNG header実寸を検査した場合だけ、隣接する`lightcraft-cli.genzoroom.json`を生成する。receiptはversion／本家commit／patch digest一覧／binary SHA-256／Before契約versionを持つ。全工程は非zero exitで中止し、receiptを成功前に発行しない。
+
+binaryの差替え検出には`--binary`を使う。現在のmanifest、receiptと実ファイルのSHA-256を一致確認した後、実binaryのschemaとrenderを再検査する。version文字列だけ、古いreceiptだけ、patchを適用したsourceだけではbinaryを承認しない。receiptは署名済みサプライチェーン証明ではなく、管理されたbuildとローカルファイルの照合記録である。
+
+## 開発・Windows配布との接続
+
+現行GenzoRoomはLightCraftをinstallerに同梱せず、`GENZOROOM_LIGHTCRAFT_EXE`で外部の絶対pathを指定する構成。開発用にも上記scriptでbuild・検証したbinaryを指定する。汎用のTauri開発buildそのものにLightCraftを新たに同梱したり、自動download／本家更新を追加したりしない。
+
+`desktop/packaging/build.ps1`は`-LightCraftExe`または`GENZOROOM_LIGHTCRAFT_EXE`が指定されている場合、packaging開始前に`--binary`を必須実行する。失敗時は配布buildを続行しない。未設定の場合は従来の外部engineなしbuildが可能で、RAW Before対応binaryを含む配布とは扱わない。将来MCPを同梱する場合は、この検証済みbinaryとreceiptを一組としてstageし、bundle検証でも同じ`--binary`を実行する。未検証ファイルを直接copyする経路を作らない。
+
+runtimeはMCPの`render_preview.inputSchema.properties.before.type == boolean`を世代ごとに調べ、Before応答の`kind`、native import fingerprint、geometry、PNG実寸を検証する。schema非対応やBefore基準を確認できないbinaryでは`beforeKey=null`とし比較操作を無効にする。After／RAW編集は従来どおり利用できる。対応schemaだけを持ち、AfterをBeforeとして返すbinaryは画像検証で拒否し、Beforeだけを失敗にする。runtimeのSHA-256診断とbuild receiptで未変更本家binaryと管理buildを識別する。全配布先で既知hashの登録を強制する方式には変更しない。
+
+## 将来のエンジン更新
+
+1. 新version／commitと上流の変更・ライセンス・設定schema互換性を調査する。先に現行固定値を置き換えて配布しない。
+2. 専用の新clean checkoutに対してpatchの`git apply --check`を実行する。衝突する場合は`tools.rs`→`ui.render`→headless→native render jobの接続とmetadata契約を確認し、差分を調整する。本家の現像式は独自に移植しない。
+3. 新commit基準のGit patch、manifestの対象commit／version／digest／変更対象を同じ変更で更新する。未対応の余分なdiffを承認しない。
+4. 上記scriptでnativeテスト・CLI build・実binary Before／After probeを実施する。旧After省略契約、import基準、crop／orientation、Before失敗時のAfter継続を検証する。
+5. GenzoRoomのadapter／runtime／Windows RAW API／復元／History・Reset、Frontend RAW API／hook／Viewer／JPEG比較・ショートカットの関連回帰、typecheck／production build／Python構文検査を行う。engine tupleと保存済みRecipeの互換性・非互換時の保持方針を再確認する。
+6. 実RAW／GPU／WebViewの比較、zoom／pan、再入場／再生成、エラー回復を確認し、実機未実施範囲を明記する。検証後にadapter固定tuple、manifest、研究／architecture文書を一括更新する。新receiptを発行し、配布対象の実binaryを再検査する。
+
+## 上流に同等機能が入った場合
+
+独自patchを削除する前に、上流binaryのboolean Before schema、import基準、kind・fingerprint・geometry、PNG／After互換性を同じnative／GenzoRoom回帰とbinary probeで確認する。契約名が異なる場合は最小のadapter変換で同じ保証を満たし、画像種別を推測しない。互換性確認後、manifestの`patches`を空にしてpatchを削除し、nativeの機能テストが上流側にあるかGenzoRoom管理のprobeで代替されることを記録する。clean upstream buildでも`--build`／`--binary`検証とreceiptを維持する。patch不在を理由に能力検査を省かない。

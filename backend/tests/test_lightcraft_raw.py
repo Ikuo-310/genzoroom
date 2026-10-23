@@ -70,6 +70,8 @@ class RawProcess(FakeProcess):
         self.fail_commands = set()
         self.wb_mismatch = False
         self.wb_override = {}
+        self.before_supported = False
+        self.before_wrong_kind = False
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -78,6 +80,9 @@ class RawProcess(FakeProcess):
         reply(self.stdout, message, result)
 
     def respond(self, message):
+        if message["method"] == "tools/list":
+            return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
+                "properties": {"before": {"type": "boolean"}} if self.before_supported else {}}}]})
         if message["method"] != "tools/call":
             return super().respond(message)
         args = message["params"]["arguments"]
@@ -95,6 +100,13 @@ class RawProcess(FakeProcess):
                         self.tool(message, error=True)
                     else:
                         result = image_result(args["id"])
+                        if args.get("before"):
+                            settings = self.photos[args["id"]]["settings"]
+                            metadata = {"id": args["id"], "width": 16, "height": 12,
+                                        "kind": "after" if self.before_wrong_kind else "before",
+                                        "beforeFingerprint": "b" * 16, "effectiveBeforeFingerprint": "e" * 16,
+                                        "geometry": {name: settings.get(name) for name in ("crop", "orientation")}}
+                            result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
                         reply(self.stdout, message, result)
@@ -134,6 +146,9 @@ class RawProcess(FakeProcess):
         elif command == "library.select":
             self.active = params["active"]
             value = {"selected": 1}
+        elif command == "beforeAfter.setBefore":
+            assert params == {"source": "import"}
+            value = {"before": "import", **({"beforeFingerprint": "b" * 16} if self.before_supported else {})}
         elif command == "develop.get":
             if self.fail_get:
                 return self.tool(message, error=True)

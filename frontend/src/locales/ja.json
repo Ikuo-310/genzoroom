@@ -295,7 +295,10 @@
       "wbUnavailable": "このRAWのKelvin WB能力を確認できないため、WBのみ操作できません。",
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
       "colorCategory": "カラー",
-      "actualSize": "プレビュー100%"
+      "actualSize": "プレビュー100%",
+      "beforeLoading": "RAW Beforeを準備中です。Afterを表示しています。",
+      "beforeFailed": "RAW Beforeを比較できませんでした。Afterを表示しています。",
+      "beforeRetry": "Beforeを再試行"
     },
     "historyRetained": "編集履歴あり",
     "name": "暗室",

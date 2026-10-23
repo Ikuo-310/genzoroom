@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from lightcraft_mcp import LightCraftError
-from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
+from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
 from raw_controls import CONTROLS, controls_state, validate_controls, validate_history_operation
@@ -80,7 +80,7 @@ class RawPreviewApi:
                              "state": status.state if status else "disabled", "version": "0.10.0",
                              "workspaceState": self._workspace_state,
                              "cleanupPending": bool(self.cache and self.cache.cleanup_pending),
-                             "maxSide": 1024, "maxImageBytes": MAX_IMAGE_BYTES}, headers={"Cache-Control": "no-store"})
+                             "maxSide": MAX_PREVIEW_SIDE, "maxImageBytes": MAX_IMAGE_BYTES}, headers={"Cache-Control": "no-store"})
 
     async def _body(self, request):
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
@@ -105,7 +105,9 @@ class RawPreviewApi:
             if self._closing or self._history_draining or len(self._tasks) >= 2:
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
-            task = asyncio.create_task(self._execute(request, body), name="windows-raw-request")
+            handler = self._preview if request.url.path.endswith("/preview") else self._execute
+            task = asyncio.create_task(handler(request, body), name="windows-raw-before"
+                                       if handler == self._preview and body.get("kind") == "before" else "windows-raw-request")
             self._tasks.add(task)
             if request.method == "POST" and "/history/" in request.url.path:
                 self._history_tasks.add(task)
@@ -140,7 +142,7 @@ class RawPreviewApi:
             rejection |= code in HISTORY_CONFLICTS
             if code in {"raw_history_revision_conflict", "raw_history_readback_mismatch", "raw_history_baseline_mismatch"}:
                 rejection &= not (self._history_save and self._history_save["stage"] != "complete")
-            lightcraft_log("raw.operation.failed", level="warn" if rejection else "error", errorCode=code)
+            lightcraft_log("raw.operation.failed", level="warn" if rejection or task.get_name() == "windows-raw-before" else "error", errorCode=code)
 
     def _owner(self, workspace):
         if self.workspace is None or workspace != self.workspace:
@@ -201,6 +203,7 @@ class RawPreviewApi:
                     # Import may have partially registered the source; reap before deleting it.
                     await self._release()
                     raise
+                self._raw_handle = handle
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
@@ -211,7 +214,6 @@ class RawPreviewApi:
                 self._recipe_save = None
                 self._history_save = None
                 self._history_enabled = False
-                self._raw_handle = handle
                 self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
                 self._touched = monotonic()
                 lightcraft_log("raw.document.ready", assetId=str(asset_id), generation=handle.generation,
@@ -251,30 +253,55 @@ class RawPreviewApi:
                 return JSONResponse({**doc, **confirmed})
             if method == "GET":
                 return JSONResponse({**doc, "state": self.raw.status().state})
-            if set(body) != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
+            raise LightCraftError("raw_invalid_request")
+
+    async def _preview(self, request, body):
+        async with self._lock:
+            self._owner(body.get("workspaceId"))
+            doc = self._document(request.path_params["handle"])
+            kind = body.get("kind", "after")
+            if set(body) - {"kind"} != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
+                    or kind not in ("before", "after") \
                     or any(type(body.get(key)) is not int for key in ("generation", "revision")) \
                     or any(body.get(key) != doc[key] for key in ("generation", "documentToken", "revision")) \
                     or type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1:
                 raise LightCraftError("raw_revision_conflict")
-            frame = await self.raw.request_preview(self._raw_handle, doc["revision"])
-            if frame is SUPERSEDED:
-                return Response(status_code=204)
-            if self._document(doc["handle"]) is not doc or frame.handle != self._raw_handle \
-                    or frame.revision != doc["revision"] or len(frame.data) > MAX_IMAGE_BYTES:
-                raise LightCraftError("raw_stale_handle")
-            headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
-                       "X-Raw-Revision": str(frame.revision), "X-Raw-Epoch": str(frame.selection_epoch),
-                       "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
-                       "X-Raw-Width": str(frame.width), "X-Raw-Height": str(frame.height),
-                       "Cache-Control": "no-store"}
-            lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
-                           generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data))
-            self._touched = monotonic()
-            return Response(frame.data, media_type="image/png", headers=headers)
+            handle = self._raw_handle
+            ticket = self.raw.request_preview(handle, doc["revision"], **({"kind": kind} if kind == "before" else {}))
+            if kind == "after":
+                # Preserve the existing After/cleanup barrier; only optional Before releases admission.
+                frame = await ticket
+                return self._preview_response(frame, doc, body, kind, handle)
+        # Optional Before must not hold the HTTP mutation-admission lock.
+        frame = await ticket
+        async with self._lock:
+            return self._preview_response(frame, doc, body, kind, handle)
+
+    def _preview_response(self, frame, doc, body, kind, handle):
+        if frame is SUPERSEDED:
+            return Response(status_code=204)
+        if self._document(doc["handle"]) is not doc or frame.handle != self._raw_handle \
+                or frame.kind != kind or len(frame.data) > MAX_IMAGE_BYTES \
+                or (kind == "after" and frame.revision != doc["revision"]) \
+                or (kind == "before" and frame.key != self.raw.before_key(handle)):
+            raise LightCraftError("raw_stale_handle")
+        headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
+                   "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
+                   "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
+                   "X-Raw-Width": str(frame.width), "X-Raw-Height": str(frame.height),
+                   "Cache-Control": "no-store"}
+        headers["X-Raw-Kind"] = frame.kind
+        if frame.key:
+            headers["X-Raw-Before-Key"] = frame.key
+        lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
+                       generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data), kind=kind)
+        self._touched = monotonic()
+        return Response(frame.data, media_type="image/png", headers=headers)
 
     def _edit_budget(self):
         # The soft boundary leaves 56 attempts for final flush, resync and failed readbacks.
-        return {"mutationAttempts": self.raw.status().edits, "mutationLimit": MAX_EDITS,
+        return {"beforeKey": self.raw.before_key(self._raw_handle) if getattr(self, "_raw_handle", None) else None,
+                "mutationAttempts": self.raw.status().edits, "mutationLimit": MAX_EDITS,
                 "regenerationThreshold": REGENERATE_AFTER_EDITS}
 
     @staticmethod

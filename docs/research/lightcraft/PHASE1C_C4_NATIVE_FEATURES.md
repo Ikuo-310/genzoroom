@@ -210,3 +210,13 @@ LightCraft MCP helperの一般画像toolは`tools.rs::render_preview`→`render_
 - 将来候補一覧の各項目をheadless commandから利用できるか、GenzoRoom recipe policyに合うかは未調査。
 
 本書作成では文書以外を変更せず、テスト・buildを行わない。差分の空白検査には `git diff --check` を使う。
+
+## C4-D実装補記（2026-10-23）
+
+上記は未変更の本家固定commitを読んだ時点の調査記録として保持する。C4-Dでは同じv0.10.0／`a2a41383c4fd62fa85a46ccd00998639221f2d3c`に対し、GenzoRoom管理の[`0001-native-before.patch`](../../../native/lightcraft/patches/0001-native-before.patch)だけを追加した。v0.12.0以降へ更新していない。現在の実装仕様・受入結果は[Phase 1C設計のC4-D完了記録](PHASE1C_DESIGN.md)と[更新ガイド](UPDATE_GUIDE.md)を優先する。
+
+- `render_preview`のschemaにoptional boolean `before`（省略時false）を追加。`render_photo`が`ui.render`へ伝達し、headlessのBefore分岐は既存native `render_job(..., true, true)`を実行する。Afterの`render_now()`を変更しない。
+- 応答metadataに実画像の`kind`を追加。Beforeはnative import defaultsのhash64、crop／orientation適用後のsettings hash64、実際のgeometryを返す。Beforeを要求したのにbackendがkindを証明しない応答はMCP側でも拒否する。既存PNG／PhotoId／寸法metadataを維持する。
+- headlessの`beforeAfter.setBefore {source:"import"}`応答へnative import fingerprintを付加する。GenzoRoomはimportごとに基準を明示し、History／Recipe／ResetからBeforeを擬似生成しない。native Beforeの既存import WB・crop／orientation処理をそのまま利用する。
+- Rust fixtureはAfterの露光量・手動歪曲と独立したimport Before、crop／orientationの一致、WB、実画像寸法、read-only性とAfter省略呼出しを確認する。MCP関連55件成功、既存shutdown補助1件ignore。CLI release buildとsynthetic PNGによる実binaryのschema／Before／After probeにも成功した。実RAW／GPU／WebView画像比較の成功を意味しない。
+- patchの対象commit／目的／変更対象／SHA-256をmanifestに記録する。未変更固定sourceへの再適用と二重適用拒否を確認し、build後の実binaryもdigest receiptとschema／kindで検証する。上流更新・同等機能の取り込み後にpatchを外す手順をUPDATE_GUIDEへ記録し、ルートAGENTS.mdから必須化する。

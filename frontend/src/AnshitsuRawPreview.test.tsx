@@ -109,6 +109,31 @@ it('shows the viewing Preview only with an explicit unavailable label', async ()
   expect(host.textContent).toContain('showing Immich viewing preview');
   expect(rawApi.openRawDocument).not.toHaveBeenCalled();
 });
+it('wires native Before into the shared Viewer lazily without changing RAW edits or History', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64) }));
+  const urls = vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce('blob:after').mockReturnValueOnce('blob:before');
+  let resolveBefore!: (frame: rawApi.RawFrame) => void;
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, _serial, _signal, kind = 'after') => kind === 'before'
+    ? new Promise(resolve => { resolveBefore = resolve; })
+    : { blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1 });
+  await mount();
+  expect(rawApi.rawPreview).toHaveBeenCalledTimes(1);
+  const saves = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Before and after adjustments"]')!;
+  expect(toggle.disabled).toBe(false);
+  act(() => toggle.click()); await flush();
+  expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:after');
+  expect(host.textContent).toContain('Preparing RAW Before');
+  await act(async () => resolveBefore({ blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1,
+    kind: 'before', key: 'b'.repeat(64) })); await flush();
+  expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:before');
+  act(() => toggle.click()); act(() => toggle.click()); await flush();
+  expect(rawApi.rawPreview).toHaveBeenCalledTimes(2);
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
+  expect(rawApi.setRawControls).not.toHaveBeenCalled();
+  expect(adjusted).not.toHaveBeenCalled();
+  urls.mockRestore();
+});
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];

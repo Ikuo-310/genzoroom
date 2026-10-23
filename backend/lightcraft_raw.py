@@ -2,7 +2,8 @@
 
 import asyncio
 import base64
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import hashlib
 import io
 import json
 import math
@@ -30,6 +31,7 @@ MAX_PATCH_BYTES = 64 * 1024
 MAX_SETTINGS_BYTES = 256 * 1024
 MAX_RAW_FILES = 2
 MAX_EDITS = 256
+MAX_PREVIEW_SIDE = 1024
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,8 @@ class PreviewFrame:
     height: int
     data: bytes = field(repr=False)
     mime_type: str = "image/png"
+    kind: str = "after"
+    key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,12 +114,14 @@ class _Photo:
     sync: str = "synced"
     wb_kelvin: bool = False
     as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
+    before_fingerprint: str | None = None
 
 
 class PreviewTicket:
-    def __init__(self, handle, epoch, revision, sequence, max_side):
+    def __init__(self, handle, epoch, revision, sequence, max_side, kind="after", key=None):
         self.handle, self.epoch, self.revision = handle, epoch, revision
         self.sequence, self.max_side = sequence, max_side
+        self.kind, self.key = kind, key
         self.abandoned = False
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
@@ -125,7 +131,8 @@ class PreviewTicket:
             # Cancelling a UI waiter must never cancel a transmitted engine operation.
             return await asyncio.shield(self._future)
         except asyncio.CancelledError:
-            self.abandoned = True
+            if self.kind != "before":
+                self.abandoned = True
             raise
 
     def __await__(self):
@@ -209,7 +216,7 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
-def _validate_png(result, photo_id, max_side):
+def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None):
     try:
         content = result["content"]
         if len(content) != 2 or any(not isinstance(c, dict) for c in content):
@@ -225,12 +232,24 @@ def _validate_png(result, photo_id, max_side):
                 len(text) > MAX_METADATA_BYTES or len(text.encode("utf-8")) > MAX_METADATA_BYTES:
             raise ValueError()
         metadata = _decode(text.encode("utf-8"))
-        if not isinstance(metadata, dict) or set(metadata) != {"id", "width", "height"} or \
+        allowed = {"id", "width", "height"}
+        if kind == "before":
+            allowed |= {"kind", "beforeFingerprint", "effectiveBeforeFingerprint", "geometry"}
+        elif isinstance(metadata, dict) and "kind" in metadata:
+            allowed.add("kind")
+        if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
+            raise ValueError()
+        if metadata.get("kind", "after") != kind:
+            raise ValueError()
+        if kind == "before" and (metadata["beforeFingerprint"] != before_fingerprint
+                or not isinstance(metadata["effectiveBeforeFingerprint"], str)
+                or not re.fullmatch(r"[0-9a-f]{16}", metadata["effectiveBeforeFingerprint"])
+                or _object_json(metadata["geometry"], MAX_METADATA_BYTES) != _object_json(geometry, MAX_METADATA_BYTES)):
             raise ValueError()
         w, h = metadata["width"], metadata["height"]
         if type(w) is not int or type(h) is not int or min(w, h) <= 0 or \
-                max(w, h) > max_side or w * h > 1024 * 1024:
+                max(w, h) > max_side or w * h > MAX_PREVIEW_SIDE * MAX_PREVIEW_SIDE:
             raise ValueError()
         raw = base64.b64decode(data, validate=True)
         if len(raw) > MAX_IMAGE_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -323,6 +342,8 @@ class LightCraftRawSession:
         self._epoch = self._sequence = self._revision = self._edits = 0
         self._operations = set()
         self._worker = self._pending = self._running = None
+        self._before_pending = self._before_cache = None
+        self._before_sequence = 0
         self._validation = None
         self._file_thread = None
         self._resetting = False
@@ -343,7 +364,7 @@ class LightCraftRawSession:
                  "lost" if self._lost else "desynchronized" if self._desynchronized else
                  self._phase or (photo.sync if photo else "empty"))
         return RawStatus(state, self._generation, self._epoch, len(self._resident), self._edits,
-                         self._running is not None, self._pending is not None)
+                         self._running is not None, self._pending is not None or self._before_pending is not None)
 
     def _available(self, *, allow_desync=False):
         if self._stop.is_set():
@@ -380,11 +401,18 @@ class LightCraftRawSession:
         if self._pending is not None:
             self._pending._finish(error=error)
             self._pending = None
+        if error and self._before_pending is not None:
+            self._before_pending._finish(error=error)
+            self._before_pending = None
 
     def _invalidate(self, *, selection=False):
         self._sequence += 1
         if selection:
             self._epoch += 1
+            self._before_cache = None
+            if self._before_pending is not None:
+                self._before_pending._finish()
+                self._before_pending = None
         self._discard_pending()
 
     def _remaining(self, deadline):
@@ -525,6 +553,17 @@ class LightCraftRawSession:
             handle = RawHandle(key, uuid.uuid4().hex, self._generation)
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
+            # Import defaults are native Session state, never a copy of the persisted After recipe.
+            try:
+                supported = await self.manager._raw_before_supported(self._generation)
+                before = await self._command("beforeAfter.setBefore", {"source": "import"}, deadline)
+                if supported and isinstance(before, dict) and isinstance(before.get("beforeFingerprint"), str) \
+                        and re.fullmatch(r"[0-9a-f]{16}", before["beforeFingerprint"]):
+                    photo.before_fingerprint = before["beforeFingerprint"]
+            except LightCraftError as error:
+                if isinstance(error, MCPTransportError):
+                    raise
+                lightcraft_log("before.unavailable", level="warn", generation=self._generation, errorCode=error.code)
             settings = await self._read_settings(photo, deadline)
             # Only expose Kelvin editing when the engine supplies a measured as-shot white.
             white = info.get("as_shot_wb")
@@ -858,17 +897,50 @@ class LightCraftRawSession:
                     "raw_recipe_restore_failed")
             raise LightCraftError(code) from None
 
-    def request_preview(self, handle, expected_revision, max_side=1024):
+    @staticmethod
+    def _before_geometry(photo):
+        settings = json.loads(photo.settings_json)
+        return {name: settings.get(name) for name in ("crop", "orientation")}
+
+    def before_key(self, handle, max_side=MAX_PREVIEW_SIDE):
         photo = self._photo(handle, active=True)
-        if type(max_side) is not int or not 16 <= max_side <= 1024:
+        if photo.before_fingerprint is None:
+            return None
+        # The native import fingerprint and current geometry describe the effective Before;
+        # After exposure/WB/lens edits must not invalidate this read-only comparison image.
+        value = {"source": [photo.content_hash, list(photo.fingerprint)], "document": [handle.source_key,
+                 handle.document_token, handle.generation], "engine": ["0.10.0", ENGINE_COMMIT, "before-v1"],
+                 "import": photo.before_fingerprint, "process": json.loads(photo.settings_json).get("process"),
+                 "geometry": self._before_geometry(photo), "maxSide": max_side}
+        return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
+
+    def request_preview(self, handle, expected_revision, max_side=MAX_PREVIEW_SIDE, *, kind="after"):
+        photo = self._photo(handle, active=True)
+        if kind not in ("before", "after") or type(max_side) is not int or not 16 <= max_side <= MAX_PREVIEW_SIDE:
             raise LightCraftError("raw_invalid_preview_size")
         if type(expected_revision) is not int or photo.applied_revision != expected_revision or \
                 photo.requested_revision != photo.applied_revision:
             raise LightCraftError("raw_revision_conflict")
-        self._sequence += 1
-        self._discard_pending()
-        ticket = PreviewTicket(handle, self._epoch, expected_revision, self._sequence, max_side)
-        self._pending = ticket
+        if kind == "before":
+            key = self.before_key(handle, max_side)
+            if key is None:
+                raise LightCraftError("raw_before_unsupported")
+            for pending in (self._before_pending, self._running):
+                if pending and pending.kind == "before" and pending.key == key and self._ticket_current(pending):
+                    return pending
+            self._before_sequence += 1
+            ticket = PreviewTicket(handle, self._epoch, expected_revision, self._before_sequence, max_side, kind, key)
+            if self._before_cache is not None and self._before_cache.key == key:
+                ticket._finish(replace(self._before_cache, revision=expected_revision, sequence=ticket.sequence))
+                return ticket
+            if self._before_pending:
+                self._before_pending._finish()
+            self._before_pending = ticket
+        else:
+            self._sequence += 1
+            self._discard_pending()
+            ticket = PreviewTicket(handle, self._epoch, expected_revision, self._sequence, max_side)
+            self._pending = ticket
         if self._worker is None or self._worker.done():
             self._worker = asyncio.create_task(self._previews(), name="lightcraft-preview-worker")
         return ticket
@@ -876,13 +948,15 @@ class LightCraftRawSession:
     def _ticket_current(self, ticket):
         try:
             photo = self._photo(ticket.handle, active=True)
+            if ticket.kind == "before":
+                return ticket.epoch == self._epoch and ticket.key == self.before_key(ticket.handle, ticket.max_side)
             return not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence and \
                 ticket.revision == photo.applied_revision == photo.requested_revision
         except LightCraftError:
             return False
 
-    async def _image(self, result, photo_id, max_side):
-        _, future = _thread_job(_validate_png, result, photo_id, max_side)
+    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None):
+        _, future = _thread_job(_validate_png, result, photo_id, max_side, kind, before_fingerprint, geometry)
         self._validation = future
         cancelled = False
         try:
@@ -904,8 +978,12 @@ class LightCraftRawSession:
 
     async def _previews(self):
         try:
-            while self._pending is not None and not self._stop.is_set() and not self._resetting:
-                ticket, self._pending = self._pending, None
+            while (self._pending is not None or self._before_pending is not None) and not self._stop.is_set() and not self._resetting:
+                # After has its own latest-wins slot and priority; Before never supersedes it.
+                if self._pending is not None:
+                    ticket, self._pending = self._pending, None
+                else:
+                    ticket, self._before_pending = self._before_pending, None
                 self._running = ticket
                 try:
                     if not self._ticket_current(ticket):
@@ -917,21 +995,33 @@ class LightCraftRawSession:
                         if not self._ticket_current(ticket):
                             ticket._finish()
                             continue
+                        if ticket.kind == "before" and self._pending is not None:
+                            if self._before_pending is None:
+                                self._before_pending = ticket
+                            else:
+                                ticket._finish()
+                            continue
                         photo = self._photo(ticket.handle, active=True)
+                        args = {"before": True} if ticket.kind == "before" else {}
                         result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
-                                                                 timeout=self._timeouts.preview)
-                        data, w, h = await self._image(result, photo.photo_id, ticket.max_side)
+                                                                 timeout=self._timeouts.preview, **args)
+                        data, w, h = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
+                                                     photo.before_fingerprint, self._before_geometry(photo))
                         del result
                         deadline = asyncio.get_running_loop().time() + self._timeouts.command
-                        settings = await self._read_settings(photo, deadline)
-                        if settings != photo.settings_json:
-                            self._commit(photo, settings)
+                        if ticket.kind == "after":
+                            settings = await self._read_settings(photo, deadline)
+                            if settings != photo.settings_json:
+                                self._commit(photo, settings)
                         if self._ticket_current(ticket):
-                            ticket._finish(PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
-                                                        ticket.sequence, w, h, data))
+                            frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
+                                                 ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key)
+                            if ticket.kind == "before":
+                                self._before_cache = frame
+                            ticket._finish(frame)
                             lightcraft_log("preview.completed", level="debug", generation=self._generation,
                                            revision=ticket.revision, sequence=ticket.sequence, payloadBytes=len(data),
-                                           width=w, height=h)
+                                           width=w, height=h, kind=ticket.kind)
                         else:
                             ticket._finish()
                         del data
@@ -947,16 +1037,17 @@ class LightCraftRawSession:
                 except TimeoutError:
                     ticket._finish(error="raw_busy_timeout")
                 except LightCraftError as error:
-                    if isinstance(error, MCPTransportError) and error.code != "lightcraft_busy_timeout" or \
-                            error.code in ("lightcraft_invalid_preview", "lightcraft_preview_validation_timeout"):
+                    if (isinstance(error, MCPTransportError) and error.code != "lightcraft_busy_timeout") or \
+                            (ticket.kind == "after" and error.code in ("lightcraft_invalid_preview", "lightcraft_preview_validation_timeout")):
                         self.manager._abort_raw(ticket.handle.generation, error.code)
                         self._lost = True
                         self._discard_pending("raw_session_lost")
                     ticket._finish(error=error.code)
                 except Exception:
-                    self.manager._abort_raw(ticket.handle.generation, "lightcraft_preview_failed")
-                    self._lost = True
-                    self._discard_pending("raw_session_lost")
+                    if ticket.kind == "after":
+                        self.manager._abort_raw(ticket.handle.generation, "lightcraft_preview_failed")
+                        self._lost = True
+                        self._discard_pending("raw_session_lost")
                     ticket._finish(error="lightcraft_preview_failed")
                 finally:
                     self._running = None

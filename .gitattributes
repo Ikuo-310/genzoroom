@@ -1,2 +1,5 @@
 # Publishing scripts must remain executable by Bash after Windows checkouts.
 release/*.sh text eol=lf
+# Patch digests must survive Windows checkouts byte-for-byte.
+# Unified diff blank context lines contain a required space prefix.
+native/lightcraft/patches/*.patch text eol=lf whitespace=-blank-at-eol

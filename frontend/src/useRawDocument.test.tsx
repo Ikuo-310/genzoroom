@@ -16,8 +16,8 @@ let root: Root;
 let current: ReturnType<typeof useRawDocument>;
 const createURL = vi.fn(), revokeURL = vi.fn();
 let decode: () => Promise<void>;
-function Harness({ id }: { id: string | null }) { current = useRawDocument(id); return <span>{current?.url}</span>; }
-async function render(id: string | null) { await act(async () => { root.render(<Harness id={id} />); }); }
+function Harness({ id, before = false }: { id: string | null; before?: boolean }) { current = useRawDocument(id, before); return <span>{current?.url}</span>; }
+async function render(id: string | null, before = false) { await act(async () => { root.render(<Harness id={id} before={before} />); }); }
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 beforeEach(() => {
@@ -45,6 +45,65 @@ beforeEach(() => {
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+function enableBefore() {
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64) }));
+  vi.mocked(api.rawPreview).mockImplementation(async (doc, _serial, _signal, kind = 'after') => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1, kind,
+    ...(kind === 'before' ? { key: doc.beforeKey! } : {}) }));
+}
+
+describe('RAW native Before cache', () => {
+  it('loads lazily, reuses across edits and toggles, and releases on document change', async () => {
+    enableBefore();
+    await render('a'); await flush();
+    expect(api.rawPreview).toHaveBeenCalledTimes(1);
+    const saves = vi.mocked(api.saveRawHistory).mock.calls.length;
+    await render('a', true); await flush();
+    const before = current?.beforeUrl;
+    expect(before).toBeTruthy(); expect(current?.beforeStatus).toBe('ready');
+    expect(api.rawPreview).toHaveBeenCalledTimes(2);
+    expect(api.saveRawHistory).toHaveBeenCalledTimes(saves);
+    expect(current?.dirty).toBe(false);
+    await render('a', false); await render('a', true); await flush();
+    expect(api.rawPreview).toHaveBeenCalledTimes(2);
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(1);
+    expect(current?.beforeUrl).toBe(before);
+    await render('b', false); await flush();
+    expect(current?.beforeUrl).toBeUndefined();
+    await render('b', true); await flush();
+    expect(revokeURL).toHaveBeenCalledWith(before);
+    expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(2);
+  });
+
+  it('keeps After editing usable when Before fails or decoded dimensions do not match', async () => {
+    enableBefore(); await render('a'); await flush();
+    const after = current?.url;
+    vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawApiError('raw_before_unsupported'));
+    await render('a', true); await flush();
+    expect(current?.beforeStatus).toBe('error'); expect(current?.url).toBe(after);
+    expect(current?.editError).toBeUndefined(); expect(current?.locked).toBe(false);
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+    expect(current?.settings?.values['light.exposure']).toBe(1); expect(current?.dirty).toBe(false);
+    vi.mocked(api.rawPreview).mockResolvedValueOnce({ blob: new Blob(), width: 17, height: 12,
+      epoch: 1, sequence: 1, kind: 'before', key: 'b'.repeat(64) });
+    act(() => current?.retryBefore()); await flush();
+    expect(current?.beforeStatus).toBe('error'); expect(current?.beforeUrl).toBeUndefined();
+  });
+
+  it('discards a Before result decoded after its document was replaced', async () => {
+    enableBefore(); await render('a'); await flush();
+    const pending = deferred<void>(); decode = () => pending.promise;
+    await render('a', true); await flush();
+    const candidate = `blob:raw-${createURL.mock.calls.length}`;
+    decode = async () => {};
+    await render('b'); await flush();
+    await act(async () => pending.resolve()); await flush();
+    expect(current?.assetId).toBe('b'); expect(current?.beforeUrl).toBeUndefined();
+    expect(revokeURL).toHaveBeenCalledWith(candidate);
+  });
+});
 describe('RAW document lifetime', () => {
   it('drains an accepted adjacent control when departure freezes a pending first commit', async () => {
     await render('a'); await flush();
@@ -318,6 +377,24 @@ describe('bounded RAW session renewal', () => {
     return { saved: () => saved };
   }
   async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
+  it('reacquires native Before after renewal and revokes the previous generation URL', async () => {
+    renewal();
+    const readSettings = vi.mocked(api.readRawSettings).getMockImplementation()!;
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...await readSettings(doc),
+      beforeKey: String(doc.generation).padStart(64, '0') }));
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, _serial, _signal, kind = 'after') => ({
+      blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1, kind,
+      ...(kind === 'before' ? { key: doc.beforeKey! } : {}) }));
+    await render('a', true); await drain();
+    const before = current?.beforeUrl;
+    expect(before).toBeTruthy();
+    act(() => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await drain();
+    expect(current?.document?.generation).toBe(2);
+    expect(revokeURL).toHaveBeenCalledWith(before);
+    expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(2);
+    expect(current?.beforeUrl).toBeTruthy(); expect(current?.beforeUrl).not.toBe(before);
+    expect(current?.dirty).toBe(false);
+  });
   it('saves a compound Reset before renewal and restores its WB, category state and History cursor', async () => {
     renewal();
     let saved: api.RawHistoryResult | undefined;

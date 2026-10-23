@@ -128,7 +128,7 @@ export function AnshitsuPage() {
     || switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null;
   const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
   const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
-  const rawDocument = useRawDocument(activeDetail?.is_raw ? assetId : null);
+  const rawDocument = useRawDocument(activeDetail?.is_raw ? assetId : null, viewerShowsBefore);
   const canEdit = !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     recipeChangeRevision,
@@ -735,7 +735,10 @@ export function AnshitsuPage() {
           statusNote={rawDocument ? rawDocument.pending && !rawDocument.editError ? undefined
             : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
-          beforeAvailable={!activeDetail.is_raw}
+          beforeAvailable={!activeDetail.is_raw || !!rawDocument?.beforeAvailable}
+          beforeSrc={activeDetail.is_raw ? rawDocument?.beforeUrl : undefined}
+          beforeStatus={activeDetail.is_raw ? rawDocument?.beforeStatus : undefined}
+          onBeforeRetry={activeDetail.is_raw ? rawDocument?.retryBefore : undefined}
           editSource={editable ? jpegOriginal.source : undefined}
           originalStatus={jpegOriginal.status}
           showingOriginal={jpegOriginal.showingOriginal}

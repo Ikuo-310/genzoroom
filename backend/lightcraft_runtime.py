@@ -56,6 +56,7 @@ class _Session:
     temp_directory: Path | None = None
     temp_root: Path | None = None
     temp_lock: threading.Lock = field(default_factory=threading.Lock)
+    before_preview: bool | None = None
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -529,18 +530,36 @@ class LightCraftManager:
     async def _raw_command(self, generation, command, params, *, timeout):
         if command not in {"library.import", "library.select", "photo.inspect", "develop.get", "develop.set",
                            "develop.merge", "develop.reset", "develop.sectionEnabled", "develop.resetControl",
-                           "develop.resetSection", "develop.wb", "app.memoryBudget", "library.memory"}:
+                           "develop.resetSection", "develop.wb", "beforeAfter.setBefore", "app.memoryBudget", "library.memory"}:
             raise LightCraftError("lightcraft_unsupported_raw_command")
         session = self._raw_session(generation)
         result = await session.client.call_tool("command_run", {"id": command, "params": params}, timeout=timeout)
         self._check_raw_session(session)
         return result
 
-    async def _raw_preview(self, generation, photo_id, max_side, *, timeout):
+    async def _raw_before_supported(self, generation):
         session = self._raw_session(generation)
+        if session.before_preview is None:
+            result = await session.client.request("tools/list", timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            def supports(tool):
+                if not isinstance(tool, dict) or tool.get("name") != "render_preview":
+                    return False
+                schema = tool.get("inputSchema")
+                properties = schema.get("properties") if isinstance(schema, dict) else None
+                before = properties.get("before") if isinstance(properties, dict) else None
+                return isinstance(before, dict) and before.get("type") == "boolean"
+            session.before_preview = isinstance(tools, list) and any(supports(tool) for tool in tools)
+        return session.before_preview
+
+    async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False):
+        session = self._raw_session(generation)
+        if before and not await self._raw_before_supported(generation):
+            raise LightCraftError("raw_before_unsupported")
         try:
             result = await session.client.call_tool_result("render_preview", {
-                "id": photo_id, "max_side": max_side, "format": "png"}, timeout=timeout)
+                "id": photo_id, "max_side": max_side, "format": "png", **({"before": True} if before else {})}, timeout=timeout)
             self._check_raw_session(session)
             return result
         finally:

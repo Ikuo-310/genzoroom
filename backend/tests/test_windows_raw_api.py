@@ -44,6 +44,40 @@ def preview_body(doc, serial=1):
     return {key: doc[key] for key in ("workspaceId", "generation", "documentToken", "revision")} | {"serial": serial}
 
 
+def test_native_before_http_identity_cache_and_after_edit_independence(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].before_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                key, revision = doc["beforeKey"], doc["revision"]
+                url = f'/api/raw/documents/{doc["handle"]}'
+                response = await http.post(url + "/preview", json=preview_body(doc) | {"kind": "before"})
+                assert response.status_code == 200, response.text
+                assert response.headers["x-raw-kind"] == "before"
+                assert response.headers["x-raw-before-key"] == key
+                assert response.headers["cache-control"] == "no-store"
+                assert api.document["revision"] == revision and api.document["recipeRevision"] == 0
+                identity = {name: doc[name] for name in ("workspaceId", "generation", "documentToken")}
+                changed = await http.post(url + "/controls", json=identity | {
+                    "expectedRevision": revision, "values": {"light.exposure": 1.25}})
+                assert changed.status_code == 200, changed.text
+                doc = changed.json()
+                assert doc["beforeKey"] == key
+                response = await http.post(url + "/preview", json=preview_body(doc, 2) | {"kind": "before"})
+                assert response.status_code == 200
+                assert response.headers["x-raw-revision"] == str(doc["revision"])
+                assert children[0].render_count == 1
+                response = await http.post(url + "/preview", json=preview_body(doc, 3))
+                assert response.status_code == 200 and response.headers["x-raw-kind"] == "after"
+                assert children[0].render_count == 2
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeypatch):
     async def run():
         api, manager, children, cache_root = await setup(tmp_path, local, monkeypatch)
@@ -58,7 +92,7 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                 workspace, doc = await open_document(http)
                 assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId",
                                     "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint",
-                                    "mutationAttempts", "mutationLimit", "regenerationThreshold"}
+                                    "mutationAttempts", "mutationLimit", "regenerationThreshold", "beforeKey"}
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})
                 assert state.json()["revision"] == doc["revision"]

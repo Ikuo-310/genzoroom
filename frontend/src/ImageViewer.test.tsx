@@ -118,6 +118,13 @@ function PanelToggleHarness() {
     onToggleLeft={() => setLeftOpen(value => !value)} onToggleRight={() => setRightOpen(value => !value)} />;
 }
 
+function RawComparisonHarness({ beforeSrc, beforeStatus }: { beforeSrc?: string; beforeStatus?: 'loading' | 'ready' | 'error' }) {
+  const [persistent, setPersistent] = useState(false);
+  return <ImageViewer src="blob:after" documentKey="raw-document" beforeSrc={beforeSrc} beforeStatus={beforeStatus}
+    alt="raw" leftOpen rightOpen previewPixels persistentBeforeAdjustments={persistent}
+    onBeforeAdjustmentsChange={setPersistent} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
+}
+
 function key(type: 'keydown' | 'keyup', target: EventTarget = window, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent(type, { key: '\\', code: 'Backslash', bubbles: true, cancelable: true, ...init });
   act(() => target.dispatchEvent(event));
@@ -208,6 +215,42 @@ describe('Viewer edit settings context menu', () => {
     expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('0px');
     act(() => host.querySelector('img')!.dispatchEvent(new Event('load')));
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+  });
+
+  it('compares native frames in the same image element and transform, keeping After during loading or failure', () => {
+    const renders = mockImage.renders;
+    act(() => root.render(<RawComparisonHarness beforeStatus="loading" />));
+    const image = host.querySelector('img')!;
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 600 });
+    act(() => image.dispatchEvent(new Event('load')));
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true,
+      deltaY: -100, clientX: 300, clientY: 150 })));
+    const zoom = host.querySelector('.zoom-controls output')!.textContent;
+    const pan = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
+    key('keydown');
+    expect(image.getAttribute('src')).toBe('blob:after');
+    expect(host.textContent).toContain('Preparing RAW Before');
+    act(() => root.render(<RawComparisonHarness beforeSrc="blob:before" beforeStatus="ready" />));
+    expect(host.querySelector('img')).toBe(image);
+    expect(image.getAttribute('src')).toBe('blob:before');
+    key('keyup'); expect(image.getAttribute('src')).toBe('blob:after');
+    click(comparisonToggle()); expect(image.getAttribute('src')).toBe('blob:before');
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(pan);
+    act(() => root.render(<RawComparisonHarness beforeStatus="error" />));
+    expect(image.getAttribute('src')).toBe('blob:after');
+    expect(host.textContent).toContain('RAW Before could not be compared');
+    expect(mockImage.renders).toBe(renders);
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 200 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 100 });
+    act(() => image.dispatchEvent(new Event('load')));
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('0px');
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
   });
   it('wires the Settings GPU switch and runtime fallback without changing source, History, or Recipe', async () => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });

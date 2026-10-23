@@ -1,0 +1,16 @@
+{
+  "patches": [
+    {
+      "targets": [
+        "crates/mcp/src/tools.rs",
+        "crates/mcp/src/headless.rs",
+        "crates/mcp/tests/e2e.rs"
+      ],
+      "file": "patches/0001-native-before.patch",
+      "purpose": "Native import Before preview with typed metadata and MCP capability schema",
+      "sha256": "7536727b570ac9cb47c9f2e0ad5c3f25f94b9082cf63408f9dcea59daa5425a3"
+    }
+  ],
+  "commit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",
+  "version": "0.10.0"
+}

@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1〜B3のRAW History基盤・UI・自動統合監査、およびC4-CのRAWカテゴリON/OFF・Resetを実装済み。現行仕様と実機未確認範囲は末尾のC4-C記録を参照する。C4-D以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1〜B3のRAW History基盤・UI・自動統合監査、C4-CのRAWカテゴリON/OFF・Reset、およびC4-Dのnative Before/Afterを実装済み。現行仕様と実機未確認範囲は末尾の各完了記録を参照する。C4-E以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -1283,3 +1283,48 @@ React DOMはChromiumがnative disabled controlからfocusを外す挙動を実�
 - 修正前に追加したRAW回帰テストはResetがdisabledになるため失敗し、修正後は成功した。さらに編集値を開始値へ戻した場合にControls readback／History no-opを維持するテストを追加した。`AnshitsuRawPreview.test.tsx` 49件、`editControls.test.tsx` 65件、`whiteBalanceControls.test.tsx` 58件が成功。
 
 自動テストはReact DOMで実行しており、Windows WebView実機のfocus挙動は未確認。C4-D以降には進まない。
+
+## Phase 1C-C4-D RAW Before/After実装結果（2026-10-23）
+
+開始HEADは`b2ac99ed1771f0833ba1b5e246b40c6c12eeb0b7`、`feature/lightcraft-integration`、作業ツリーclean。LightCraft参照checkoutもv0.10.0／`a2a41383c4fd62fa85a46ccd00998639221f2d3c`／cleanを確認して開始した。以下を§6・§8のC4-D判断と§9の実装結果として優先する。C4-B/Cの保存・操作設計は変更しない。
+
+### Native拡張と更新管理
+
+本家commitと独自変更を分離し、`native/lightcraft/manifest.json`、`patches/0001-native-before.patch`、`build.py`で管理する。対象はMCPの`tools.rs`、`headless.rs`と関連Rustテストだけ。`render_preview`に省略時falseのboolean `before`を追加し、`render_photo`→`ui.render`→headlessへ伝達する。Afterは既存`render_now()`のまま、Beforeだけ既存`session.render_job(id, size, size, true, true)`と同じaccept経路を使う。render_nowや現像pipeline・GPU判定は改変しない。
+
+headlessの応答metadataは実際にrenderした`kind`を持つ。Beforeにはnative import defaultsの`beforeFingerprint`、crop／orientationを反映した`effectiveBeforeFingerprint`、nativeから得た`geometry`を付加する。Before要求時にbackendがkindを証明しない場合、MCP側も成功にしない。既存Afterの省略呼出しとPNG／id／寸法を維持し、GenzoRoom adapterは旧After metadataと新`kind:after`を受理する。
+
+各native importで`beforeAfter.setBefore {source:"import"}`を明示する。headless応答のnative import fingerprintを内部保持し、現在RecipeやHistoryのbaselineをBeforeへコピーしない。新Session・再入場でも同じimport基準を選び直す。nativeの既存`before_settings()`にcrop／orientationの整列を任せ、Afterの歪曲補正等を独自転写しない。Reset／Undo／RedoにBefore設定変更を接続していない。
+
+パッチ準備scriptは固定HEAD・patch SHA-256・source diff完全一致を検査し、部分適用・二重適用・tracked／staged／未追跡source変更・適用失敗で停止する。native関連test→release CLI build→実binaryのschema／Before／省略時After probeに成功した場合だけSHA-256 receiptを生成する。`--binary`はreceipt／現manifestと実ファイルdigestを確認し、実binaryへ同じ機能probeを実行する。Windows packagingはengine pathが指定されている場合、この検査に失敗すると停止する。現行の外部engine構成は維持し、installerへの同梱は追加しない。
+
+更新・再適用・将来の配布・上流対応後のpatch廃止手順は[UPDATE_GUIDE.md](UPDATE_GUIDE.md)へ記録し、ルートAGENTS.mdから必須ルールとしてリンクした。未変更の固定commitを別の一時cloneにcheckoutし、管理patchの適用・一致検証・二重適用拒否を実際に確認した。参照native checkoutは固定HEADに管理patchだけを適用した状態となる。
+
+### API・キャッシュ・所有状態
+
+| 状態 | 所有者と不変条件 |
+|---|---|
+| `_Session.before_preview` | managerがtools/listのboolean Before schemaを世代単位で検査。versionだけで推定しない。未拡張binaryはAfterを継続し、Before keyを発行しない |
+| `_Photo.before_fingerprint` | native import基準のhash。Backend内部だけで保持し、設定／History保存へ追加しない |
+| `beforeKey` | Backendがsource内容・file identity・document token／generation・engine tuple／Before契約・import fingerprint・process・native crop／orientation・要求寸法からSHA-256を導出。Frontendにはopaque keyだけを返す。After露光量／WB／彩度／bypassはkeyに含めない |
+| `_before_pending`／`_before_cache` | 同じ既存Preview workerで処理するBefore専用の待機枠とPNG1件。同key要求を集約・再利用し、Afterのlatest-wins枠を失効させない。未送信AfterがあればBeforeより先に処理する。既に送信したnative処理は途中で放棄しない |
+| hookの`before`／`beforeSerial` | 初回比較要求時だけ取得・decodeする。URLはclientのasset／generation／token／keyへ所有付けし、単なる比較切替や同keyのAfter revisionでは再生成しない。候補・差替え・document切替・再生成・unmount・decode失敗でURLを回収。Before serialはAfterと独立し、相互失効させない |
+| Afterの`width/height`とBefore frame | PNG metadataと実decode寸法を照合後、両frameの実寸を一致確認する。不一致時は比較を保留しAfterとエラー／Retryを表示する。新key／native ownerの反映時点で旧Beforeを同期的に非表示にする |
+
+既存Preview HTTPへoptional `kind:before|after`を追加し、省略時Afterを維持する。Before応答にも既存owner／generation／token／serial／revision／epoch／sequenceの確認とkind／opaque keyを課す。同keyのBeforeは通常のAfter変更を越えて再利用できるが、source／geometry／native ownerが変わった結果を表示しない。Before待機中はHTTP mutation受付lockを解放する一方、Afterの従来cleanup barrierは維持する。managerの送信直列化、PNG上限5 MiB、認証、no-store、4 KiB requestは維持する。Beforeのkind／metadata／PNG不一致はBeforeだけを失敗にし、正常なAfter編集を停止しない。
+
+最大辺は現在1024の内部constantとして維持する。出力要求寸法をkeyへ含め、将来変更可能とする。disk cache・写真間共有cacheは追加していない。BeforeはPNG比較だけであり、Recipe、History/cursor、保存revision、dirty、現在のAfter Settingsを変更しない。
+
+### 共通Viewer
+
+AnshitsuPageの既存persistent選択とImageViewerの既存Backslash／JIS／IME・入力・menu／dialog guardを共用する。別listenerは追加しない。JPEGは従来のAdjustedImage比較を維持する。RAWのplain imgは同一stageとtransform内でsrcだけを選択し、Before URLやkindをdocumentKeyに含めない。Before loading／error時はAfterを維持し、Viewer内へ状態を表示する。native crop／orientationで実寸が変わった場合は同じViewerのfitを更新し、必要な場合だけpanを新しい画像範囲へclampする。同寸法のBefore/After切替ではzoom／panを変更しない。
+
+### 限定監査・検証
+
+実装中のMediumは、(1) HTTP Preview待機のlock変更による既存After解放barrierの回帰、(2) 再open時のkey導出に旧handleを参照する更新順、(3) native keyに加えてclient側でもBefore URLのdocument所有を明示する必要性、を修正した。Afterの既存cancel／解放テスト、200試行Session再生成とReset再入場、同keyを返すfake Backendでのdocument切替を含め再検証済み。未解決High／Mediumはない。nativeBefore key／geometry／PNG、optional Before失敗のAfter継続、Blob回収、JPEG比較・shortcut、patchとbinary能力の照合を監査対象とした。
+
+- Rust MCP関連：55件成功、既存のshutdown補助1件ignore。省略After互換、Before native伝達、schema、native crop／orientation／import WB、After歪曲非転写、設定不変、実画像寸法を確認。Windows TCPテストの並列実行で一時的なconnection resetがあり、対象単独確認とserial全体実行で成功したためbuild scriptもserialにする。
+- release CLI build成功。synthetic PNGを使う実binary probeとSHA-256 receipt検証成功。検証binary SHA-256は`352379f41ac434d3fe19cfe4bd17eab7930bbbb5c40ec2cf65ef389fda327769`。native source再適用、既存patch二重適用拒否、partial／foreign diff／不正digest／binary差替え検出も確認済み。
+- 関連Frontend 256件・Backend 207件成功。最終patch形式への変更後もpatch管理3件を再実行して成功。TypeScript typecheck・production build・Python構文検査・packaging PowerShell構文検査・`git diff --check`に成功。管理patchの空context行に必要なspace prefixはpatch専用attributeで扱い、適用後のnative source自体もdiff checkした。全suiteの自動実行はせず、変更したadapter／API／hook／ViewerとRAW History・Reset／JPEG比較・shortcutsの依存境界へ限定する。
+
+実RAWと実GPUのBefore画素・色、WebViewの待機表示・Backslash／JIS実キー、zoom／pan、crop／orientation、混在Filmstrip・再生成・再入場・通常終了の実画面確認、installer／NAS実行は未実施。native demo／synthetic PNG、Fake native／一時SQLite、React DOMの成功と区別する。C4-Dの自動検証・実装とpatch更新管理を完了対象とし、実機受入は上記項目を残す。C4-EのJPEG UI統合、C4-Fの別工程監査、RAW Scope／Export、Crop／Lens UIには進まない。

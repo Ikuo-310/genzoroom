@@ -14,6 +14,22 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+it.each<Record<string, string>>([
+  { 'X-Raw-Kind': 'after', 'X-Raw-Before-Key': 'b'.repeat(64) },
+  { 'X-Raw-Kind': 'before', 'X-Raw-Before-Key': 'c'.repeat(64) },
+  { 'X-Raw-Before-Key': 'b'.repeat(64) },
+])('rejects Before responses with a wrong kind or cache key: %j', async headers => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(headers)));
+  await expect(rawPreview({ ...doc, beforeKey: 'b'.repeat(64) }, 3, new AbortController().signal, 'before')).rejects.toThrow();
+});
+it('sends Before kind and validates its opaque key separately from After', async () => {
+  const fetch = vi.fn(async () => response({ 'X-Raw-Kind': 'before', 'X-Raw-Before-Key': 'b'.repeat(64) }));
+  vi.stubGlobal('fetch', fetch);
+  const frame = await rawPreview({ ...doc, beforeKey: 'b'.repeat(64) }, 3, new AbortController().signal, 'before');
+  expect(frame.kind).toBe('before'); expect(frame.key).toBe('b'.repeat(64));
+  const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
+  expect(JSON.parse(init.body as string).kind).toBe('before');
+});
 describe('RAW History transport', () => {
   it.each<RawHistoryOperation>([
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },

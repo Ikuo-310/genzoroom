@@ -88,6 +88,8 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 
 ## Development workflow
 
+- When updating LightCraft, follow [the update guide](docs/research/lightcraft/UPDATE_GUIDE.md): verify the pinned upstream commit and every GenzoRoom patch, fail on partial/duplicate application, then build and test native Before/After capability and affected GenzoRoom behavior. Verify the actual binary's schema, response kind and SHA-256 receipt; version alone is insufficient. Retire a patch only after upstream equivalents pass the same compatibility checks.
+
 - Do not commit or push changes unless explicitly requested. The user performs Git operations, deployment, and NAS/Firefox verification.
 - Use Conventional Commits with an English type prefix and a Japanese change summary after the colon, for example `fix: RAWスライダーのフォーカスを維持`. Keep existing commits unchanged.
 - Do not deploy to the NAS or claim to have performed manual browser testing.

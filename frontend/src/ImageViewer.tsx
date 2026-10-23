@@ -18,6 +18,9 @@ type ImageViewerProps = {
   statusNote?: string;
   previewPixels?: boolean;
   beforeAvailable?: boolean;
+  beforeSrc?: string;
+  beforeStatus?: 'loading' | 'ready' | 'error';
+  onBeforeRetry?: () => void;
   editSource?: EditImageSource;
   originalStatus?: 'loading' | 'ready' | 'error';
   showingOriginal?: boolean;
@@ -47,7 +50,7 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 
-export function ImageViewer({ src, documentKey, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -66,6 +69,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
+  const previousNativeSize = useRef<{ identity: string; x: number; y: number } | null>(null);
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   useLayoutEffect(() => {
@@ -147,6 +151,20 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [fitMode, imageSize]);
+
+  useLayoutEffect(() => {
+    const previous = previousNativeSize.current;
+    previousNativeSize.current = { identity: imageIdentity, ...imageSize };
+    const viewport = viewportRef.current;
+    if (!previewPixels || !viewport || fitMode || !imageSize.x || !imageSize.y || !previous
+      || previous.identity !== imageIdentity || !previous.x || !previous.y
+      || previous.x === imageSize.x && previous.y === imageSize.y) return;
+    // Native crop/orientation can change frame dimensions; identical comparison frames keep their exact pan.
+    const x = Math.max(0, (imageSize.x * scale - viewport.clientWidth) / 2);
+    const y = Math.max(0, (imageSize.y * scale - viewport.clientHeight) / 2);
+    previousTransform.current = null;
+    setPan(current => ({ x: Math.max(-x, Math.min(x, current.x)), y: Math.max(-y, Math.min(y, current.y)) }));
+  }, [previewPixels, imageIdentity, imageSize.x, imageSize.y, fitMode, scale]);
 
   // Explicit view controls discard the return point instead of reviving an older zoom.
   function fit() {
@@ -309,7 +327,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setLoadedImage({ identity: imageIdentity, status: 'ready', size: { x: width, y: height } }); }}
           onError={() => { setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE }); onImageError?.(); }} /> : src && !previewStatus ? <img
-          src={src}
+          src={showBeforeAdjustments && beforeSrc ? beforeSrc : src}
           alt={alt}
           draggable="false"
           style={{ width: imageSize.x ? `${imageSize.x * scale}px` : undefined }}
@@ -321,7 +339,12 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
           onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })}
         /> : null}
       </div>
-      {statusNote && <p className="raw-preview-note" role="status">{statusNote}</p>}
+      {statusNote && !(previewPixels && showBeforeAdjustments && !editSource && !beforeSrc) && <p className="raw-preview-note" role="status">{statusNote}</p>}
+      {previewPixels && showBeforeAdjustments && !editSource && !beforeSrc && <p className="raw-preview-note" role="status">
+        {t(beforeStatus === 'error' ? 'workspace.rawPreview.beforeFailed' : 'workspace.rawPreview.beforeLoading')}
+        {beforeStatus === 'error' && onBeforeRetry && <button type="button" className="tool-button" onClick={onBeforeRetry}>
+          {t('workspace.rawPreview.beforeRetry')}</button>}
+      </p>}
       {(previewStatus || imageState !== 'ready') && <p className={`viewer-image-status${(previewStatus ?? imageState) === 'error' ? ' error-text' : ''}`}>
         {t((previewStatus ?? imageState) === 'error' ? 'workspace.previewFailed' : 'workspace.loading')}
       </p>}
