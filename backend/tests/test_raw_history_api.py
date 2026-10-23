@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import io
 import json
 import sqlite3
 import threading
@@ -7,8 +8,10 @@ from contextlib import closing
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
 import edit_store
+import main
 import raw_recipe_store as store
 from lightcraft_mcp import LightCraftError
 from tests.test_windows_local import local, client, authenticate
@@ -18,6 +21,9 @@ from tests.test_raw_recipe_restore import open_asset
 from tests.test_raw_recipe_restore import hold_merge, seed
 from tests.test_raw_controls import identity
 from tests.test_lightcraft_mcp import until
+from tests import test_lightcraft_raw as fake_native
+from tests.test_windows_raw_api import preview_body
+from windows_local import LocalHost
 
 
 def url(doc, action=None):
@@ -673,3 +679,114 @@ def test_fresh_undo_readback_change_is_rejected_before_native_restore(local, tmp
         finally:
             await api.close()
     asyncio.run(run())
+
+
+def test_history_lifecycle_restores_preview_cursor_across_switch_renewal_and_restart(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        child_groups = [children]
+        image_result = fake_native.image_result
+
+        def exposure_png(exposure):
+            output = io.BytesIO()
+            Image.new("RGBA", (16, 12), (100 + round(exposure * 20), 50, 80, 255)).save(output, "PNG")
+            return output.getvalue()
+
+        def render_selected_settings(photo=1, **_):
+            # An independent color marker detects rendering the wrong native snapshot, not GPU fidelity.
+            exposure = children[-1].photos[photo]["settings"]["light"]["exposure"]
+            return image_result(photo, data=exposure_png(exposure))
+
+        monkeypatch.setattr(fake_native, "image_result", render_selected_settings)
+
+        async def verify(http, doc, step_ids, cursor, exposure):
+            response = await http.get(url(doc), headers=headers(doc))
+            assert response.status_code == 200
+            page = response.json()
+            assert page["history"] == {"initialized": True, "cursor": cursor, "length": len(step_ids),
+                                       "selectedStepId": step_ids[cursor - 1] if cursor else None}
+            assert [step["stepId"] for step in page["steps"]] == step_ids
+            assert page["nativeMatchesRecipe"] and not page["historyPending"]
+            stored = store.get_raw_history(api._history_identity)
+            selected = stored["history"]["steps"][cursor - 1]["settings"] if cursor else stored["history"]["baselineSettings"]
+            snapshot = await api.raw.get_settings(api._raw_handle)
+            assert stored["recipe"]["settings"] == selected == snapshot.settings
+            assert selected["light"]["exposure"] == doc["values"]["light.exposure"] == exposure
+            assert stored["revision"] == page["recipeRevision"] == doc["recipeRevision"]
+            frame = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
+            assert frame.status_code == 200 and frame.content == exposure_png(exposure)
+            assert frame.headers["x-raw-token"] == doc["documentToken"]
+            assert frame.headers["x-raw-revision"] == str(doc["revision"])
+
+        async def reopen(http, asset_id):
+            workspace, response = await open_asset(http, asset_id)
+            assert response.status_code == 200, response.text
+            return workspace, await operation(http, response.json(), "initialize")
+
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                asset_id = doc["assetId"]
+                doc = await operation(http, doc, "initialize")
+                ids = []
+                await verify(http, doc, ids, 0, 0.)
+                for gesture in ((.25, .5, 1.), (1.25, 1.5, 2.), (2.25, 2.5, 3.)):
+                    for exposure in gesture:
+                        doc = await change(http, doc, exposure)
+                        assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == len(ids)
+                    doc = await operation(http, doc, "commit", commit_body(doc))
+                    ids.append(doc["ack"]["stepId"])
+                    assert len(set(ids)) == len(ids)
+                    await verify(http, doc, ids, len(ids), gesture[-1])
+                doc = await operation(http, doc, "undo")
+                await verify(http, doc, ids, 2, 2.)
+                doc = await operation(http, doc, "redo")
+                await verify(http, doc, ids, 3, 3.)
+                for target, cursor, exposure in ((None, 0, 0.), (ids[0], 1, 1.), (ids[1], 2, 2.)):
+                    doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": target})
+                    await verify(http, doc, ids, cursor, exposure)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                assert not doc["ack"]["changed"]
+                await verify(http, doc, ids, 2, 2.)
+                doc = await change(http, doc, 2.25)
+                doc = await change(http, doc, 2.5)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                removed = ids.pop()
+                ids.append(doc["ack"]["stepId"])
+                assert removed not in ids
+                await verify(http, doc, ids, 3, 2.5)
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": ids[0]})
+                await verify(http, doc, ids, 1, 1.)
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                workspace, other = await reopen(http, str(uuid4()))
+                other = await change(http, other, .75)
+                other = await operation(http, other, "commit", commit_body(other))
+                await verify(http, other, [other["ack"]["stepId"]], 1, .75)
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                workspace, doc = await reopen(http, asset_id)
+                await verify(http, doc, ids, 1, 1.)
+                generation, token = doc["generation"], doc["documentToken"]
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                workspace, doc = await reopen(http, asset_id)
+                assert doc["generation"] > generation and doc["documentToken"] != token
+                await verify(http, doc, ids, 1, 1.)
+            await api.close()
+            assert manager.status().state == "stopped"
+            # A fresh host and adapter share only SQLite, not the previous document or Python owner.
+            restarted = LocalHost(main.app, dist=tmp_path / "dist")
+            restart_root = tmp_path / "restart"
+            restart_root.mkdir()
+            api, manager, children, _ = await setup(restart_root, restarted, monkeypatch)
+            child_groups.append(children)
+            async with client(restarted) as http:
+                await authenticate(http, restarted)
+                _, doc = await reopen(http, asset_id)
+                await verify(http, doc, ids, 1, 1.)
+                doc = await operation(http, doc, "redo")
+                await verify(http, doc, ids, 2, 2.)
+            assert all(command not in {"edit.undo", "edit.redo", "history.restore"}
+                       for group in child_groups for child in group for command, _ in child.commands)
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 30))

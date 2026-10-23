@@ -366,6 +366,39 @@ contract. B3-3 integrated acceptance and C4-C Reset/category work remain separat
 B3-1 Windows save/restore acceptance is retained as prior evidence; B3-2 real Windows/GPU
 acceptance remains to be performed.
 
+### C4-B3-3: integrated automated acceptance and audit
+
+C4-B3 is complete within the implementation and automated-audit boundary. The current record
+and test counts are in `docs/research/lightcraft/PHASE1C_DESIGN.md`. Earlier B3-3 pending statements
+describe the preceding phase; current Windows/WebView, GPU/RAW and Immich acceptance remains
+manual and unverified. LightCraft stays pinned to v0.10.0; schema v8, Recipe v18, normal save-time
+disabled behavior and the single persistence owner/queue are unchanged.
+
+A new Windows ASGI lifecycle test follows one real temporary SQLite History through multiple
+multi-update gestures, Undo/Redo, UUID/baseline jumps, no-op Redo preservation, effective branch
+replacement, photo switching, same-photo session renewal, normal close and a new host/adapter
+opening the same database. At each checkpoint it compares current Recipe, selected snapshot,
+adapter readback and cursor/UUID/revision. The native transport/source are fake; a settings-derived
+PNG marker checks that Preview uses the selected settings, not real GPU output fidelity. A fresh
+host in the same Python process does not constitute a real desktop process-restart test. Frontend
+React/coordinator tests use API fakes separately; no browser-to-real-Backend E2E was performed.
+
+`adjustmentFocus` owns the logical range target and whether Shift navigation established keyboard
+ownership. During a RAW save lock, `keyboardAdjustment()` still excludes disabled ranges. A
+disabled blur of that keyboard target retains a pending focus return even when a stationary pointer
+overlaps it: keyboard ownership must be checked before the hover early return. Unlock restores
+the same registered, connected range with `preventScroll` only if focus remains on the document.
+Focus entering another element or leaving the window cancels the return and clears the old logical
+target. The audit adds regression coverage for stationary hover, intentional window departure and
+DOM-node identity; mouse targeting, save locks and JPEG interactions retain their existing behavior.
+
+Full Backend testing also exposed outdated v4/v5 test fixtures that retained v8 History tables;
+only those fixtures now remove the newer tables when constructing their old schemas. The Gallery
+RAW/JPEG resume fixture now explicitly supplies RAW capability in its supported case. No runtime
+migration, data format or Gallery selection policy changed. Full Frontend tests run with four workers
+on this host to avoid load-dependent Gallery timeouts, without increasing timeouts or weakening
+assertions. The final full suites and scoped reruns leave no unresolved High/Medium findings.
+
 ## Gallery manual refresh
 
 The four Gallery browsing tabs are refreshable: Recent, Favorites, Album list/detail, and Calendar year/month/date detail. The leftmost Toolbar `Reload` button and the `homeRefreshPhotos` binding in the central `editShortcuts.ts` registry refresh only the current view. Shift+R uses the existing Home guards and shortcut-label formatter; R still opens Recent, while Ctrl+R / Command+R remain browser reload. STACK management, Export management, and inactive Home do not show or run Gallery Reload.

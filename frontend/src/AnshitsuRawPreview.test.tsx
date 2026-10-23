@@ -529,7 +529,7 @@ function simulateChromiumRangeDisableBlur(range: HTMLInputElement) {
   range.disabled = true;
 }
 
-it.each(['Shift navigation', 'mouse focus'] as const)('records RAW slider focus across a History commit after %s', async method => {
+it.each(['Shift navigation', 'Shift navigation under stationary pointer', 'mouse focus'] as const)('records RAW slider focus across a History commit after %s', async method => {
   vi.useFakeTimers();
   let resolve!: () => void;
   let pendingRequest!: rawApi.RawHistoryRequest;
@@ -541,9 +541,11 @@ it.each(['Shift navigation', 'mouse focus'] as const)('records RAW slider focus 
   const before: Array<{ phase: string; activeElement: Element | null; logicalTarget: Element | null; registered: boolean; disabled: boolean }> = [];
   const record = (phase: string) => before.push({ phase, activeElement: document.activeElement,
     logicalTarget: keyboardAdjustment(), registered: isRegisteredAdjustment(range), disabled: range.disabled });
-  if (method === 'Shift navigation') {
+  if (method.startsWith('Shift navigation')) {
     const category = host.querySelector<HTMLButtonElement>('.raw-adjustment-category .adjustment-category-title')!;
     act(() => category.focus()); historyKey('ArrowDown', { ctrlKey: false, shiftKey: true }, category);
+    if (method === 'Shift navigation under stationary pointer')
+      act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
   } else {
     act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
     act(() => range.focus());
@@ -561,8 +563,9 @@ it.each(['Shift navigation', 'mouse focus'] as const)('records RAW slider focus 
   await act(async () => resolve()); await flush();
   record('commit acknowledged');
   expect(range.isConnected).toBe(true); expect(range.disabled).toBe(false);
+  expect(host.querySelector('[data-adjustment-id="temperature"]')).toBe(range);
   expect(keyboardAdjustment()).toBe(range);
-  if (method === 'Shift navigation') expect(document.activeElement).toBe(range);
+  if (method.startsWith('Shift navigation')) expect(document.activeElement).toBe(range);
   else expect(document.activeElement).toBe(document.body);
   expect(before.map(({ phase, activeElement, logicalTarget, registered, disabled }) => ({
     phase, activeElement: activeElement === range ? 'range' : activeElement?.tagName ?? null,
@@ -570,18 +573,18 @@ it.each(['Shift navigation', 'mouse focus'] as const)('records RAW slider focus 
   }))).toEqual([
     { phase: 'before input', activeElement: 'range', logicalTarget: 'range', registered: true, disabled: false },
     { phase: 'commit pending', activeElement: 'BODY', logicalTarget: null, registered: true, disabled: true },
-    { phase: 'commit acknowledged', activeElement: method === 'Shift navigation' ? 'range' : 'BODY',
+    { phase: 'commit acknowledged', activeElement: method.startsWith('Shift navigation') ? 'range' : 'BODY',
       logicalTarget: 'range', registered: true, disabled: false },
   ]);
   const value = range.getAttribute('aria-valuetext');
-  historyKey('ArrowRight', { ctrlKey: false }, method === 'Shift navigation' ? range : document.activeElement!);
+  historyKey('ArrowRight', { ctrlKey: false }, method.startsWith('Shift navigation') ? range : document.activeElement!);
   expect(range.getAttribute('aria-valuetext')).not.toBe(value);
   act(() => vi.advanceTimersByTime(500)); await flush();
   expect(pendingRequest.action).toBe('commit');
   await act(async () => resolve()); await flush();
 });
 
-it('does not reclaim a RAW slider after the user moves focus elsewhere during a save lock', async () => {
+it.each(['another element', 'another window'])('does not reclaim a RAW slider after focus moves to %s during a save lock', async destination => {
   vi.useFakeTimers();
   let resolve!: () => void;
   let pendingRequest!: rawApi.RawHistoryRequest;
@@ -597,9 +600,9 @@ it('does not reclaim a RAW slider after the user moves focus elsewhere during a 
   expect(pendingRequest.action).toBe('commit'); expect(range.disabled).toBe(true);
   simulateChromiumRangeDisableBlur(range);
   const external = document.createElement('button'); document.body.append(external);
-  act(() => external.focus());
+  act(() => destination === 'another element' ? external.focus() : window.dispatchEvent(new Event('blur')));
   await act(async () => resolve()); await flush();
-  expect(document.activeElement).toBe(external);
+  expect(document.activeElement).toBe(destination === 'another element' ? external : document.body);
   expect(keyboardAdjustment()).toBeNull();
   external.remove();
 });

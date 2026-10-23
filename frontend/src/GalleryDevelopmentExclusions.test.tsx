@@ -14,7 +14,8 @@ import { frontendLogger } from './frontendLogging';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 
 const api = vi.hoisted(() => ({ photos: vi.fn(), albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(),
-  statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), exclusions: vi.fn(), save: vi.fn() }));
+  statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn(), exclusions: vi.fn(), save: vi.fn(), rawCapability: vi.fn() }));
+vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(), rawCapability: api.rawCapability }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.photos, fetchFavoriteAssets: api.photos, fetchAlbumAssets: api.photos,
   fetchCalendarDayAssets: api.photos, fetchAlbums: api.albums, fetchCalendarMinYear: api.minYear,
@@ -78,6 +79,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en'); resetFilters(); clearWorkspaceSession(); updateSetting('showKeyboardShortcuts', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   Object.values(api).forEach(mock => mock.mockReset()); items = []; excluded = new Set();
+  api.rawCapability.mockResolvedValue(false);
   api.exclusions.mockImplementation(async (targets: { kind: string; id: string }[]) => targets.map(t => ({ ...t, excluded: excluded.has(t.id), configuration: t.kind === 'stack' ? 'confirmed' : 'single' })));
   api.save.mockImplementation(async (target: { id: string }, on: boolean) => { if (on) excluded.add(target.id); else excluded.delete(target.id); });
   api.photos.mockResolvedValue(photos); api.albums.mockResolvedValue([album]);
@@ -199,6 +201,7 @@ describe('cross-phase exclusion session regressions', () => {
     expect(host.querySelector('[data-testid="stack-session"]')?.getAttribute('data-draft')).toBe('edited');
   });
   it('resumes expanded Stack members after clearing Gallery selection', async () => {
+    api.rawCapability.mockResolvedValue(true);
     expandedFamily(); updateSetting('anshitsuInitialSelection', 'both'); await mount('recent', false, true); await select(); await pressD();
     const previous = host.querySelector('.workspace-probe')?.getAttribute('data-assets');
     expect(previous).toBe(ids.slice(0, 2).join(','));

@@ -16,6 +16,8 @@ def failed_registration(asset_id):
 
 
 def downgrade_to_v5(connection):
+    for table in ('asset_raw_history_steps', 'asset_raw_histories', 'raw_history_saves'):
+        connection.execute(f'DROP TABLE {table}')
     connection.execute('DROP TABLE asset_raw_recipes')
     connection.execute('DROP TABLE raw_recipe_saves')
     connection.execute('DROP INDEX export_registration_retries')

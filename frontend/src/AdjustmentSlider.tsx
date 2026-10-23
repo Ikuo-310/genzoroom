@@ -239,13 +239,14 @@ export function AdjustmentSlider(props: Props) {
       }}
       onBlur={(event) => {
         const element = range.current;
-        if (hovered.current) return;
         const related = event.relatedTarget;
+        // Stationary pointer overlap must not override ownership established by Shift navigation.
         if (props.disabled && element && isKeyboardNavigationTarget(element)
           && (!related || related === document.body || related === document.documentElement)) {
           restoreKeyboardFocusAfterLock.current = true;
           return;
         }
+        if (hovered.current) return;
         restoreKeyboardFocusAfterLock.current = false;
         blurAdjustmentRange(element);
       }}

@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作API、C4-B3-1保存coordinatorとC4-B3-2 RAW History UIは実装済み。C4-A確定設計と各実装記録は末尾を参照し、B3-3の統合検証・C4-C以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1永続化層、C4-B2 Backend操作API、C4-B3-1保存coordinatorとC4-B3-2 RAW History UIは実装済み。C4-B3-3の統合自動検証・限定監査を完了した。実機受入の未実施範囲と完了条件は末尾のB3-3記録を参照し、C4-C以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -1108,3 +1108,52 @@ Windows実機での操作時に、`raw.saving`・`raw.dirty`・`raw.pending`に�
 保存失敗、編集失敗、Session再生成失敗と各Retry操作は維持し、調整カテゴリ群の後ろへ配置した。Session再生成中の状態表示も末尾へ移したため、エラー／状態通知が現れても調整項目の位置は変化しない。`raw.locked`等の編集制限、History commit、Autosave、readback、Session再生成、JPEG状態表示には変更を加えていない。
 
 `AnshitsuRawPreview.test.tsx`で保存中・保存後に正常状態文言が存在しないこと、native編集pending中もViewer status noteがなくスライダー要素が維持されること、保存失敗時に末尾のエラーとRetryが残り、入力がlockされることを確認する。FrontendのHistory／RAW保存関連テスト、TypeScript typecheck、production build、`git diff --check`を実行する。Windows実機での配置確認は依頼範囲のコード検証とは分け、未実施ならその旨を報告する。
+
+## Phase 1C-C4-B3-3 統合検証・完了監査（2026-10-23）
+
+開始HEAD `571526fe312ceec6a7f7de2fd56037d3b9ea01de`、`feature/lightcraft-integration`、作業ツリーclean。B1〜B3、直近の状態表示／フォーカス修正、C4 native機能調査、architecture、JPEG History／Recipe／shortcutを対象とした。既存のB1 transaction／B2障害注入／B3 gesture・UIテストは再実装せずに利用し、今回は両全スイートで改めて実行した。直前の181件や過去のfocused件数を今回の成功件数へ加算しない。
+
+### 同じ履歴を追う統合検証と境界
+
+`test_raw_history_api.py::test_history_lifecycle_restores_preview_cursor_across_switch_renewal_and_restart`を追加した。Windows LocalHost認証付きASGI HTTP→実Windows History API→実LightCraft manager／MCP adapter→実一時SQLiteを同じテストで通す。native child transportとRAW画像sourceだけを既存Fakeに置き換える。Previewは選択されたnative snapshotの露出値に応じた独立のPNG色markerを返し、応答bytes・token・revisionを確認する。実GPUの画質を検証したものではない。
+
+RAW open→initialize→中間更新3回を含むgestureを3回commit→UUID／順序／cursorの再取得→Undo／Redo→baseline／任意UUID jump→no-op commitでもRedo保持→有効編集でのみ枝切り→過去stepへ戻る→別RAWを編集して元RAWへ復帰→同じRAWのSession解放・再生成→正常close→新LocalHost／manager／adapterから同じSQLiteを再open→Redo、まで連続確認した。各checkpointでSQLite current Recipe、選択snapshot、実adapter readbackの完全Settings一致、件数・UUID・cursor・revision、Preview markerを照合する。初期化／移動／再生成で架空stepを追加せず、native `edit.undo`／`edit.redo`／`history.restore`を使用しないことも全再生成childで確認した。正常close／再openは同じPythonテスト内の新ownerによる復元であり、OS process／WebViewの実終了・起動ではない。
+
+FrontendのReact／coordinatorテストはAPI Fakeを使う別境界として扱う。実Frontendから上記ASGIを直接呼ぶブラウザE2Eは実施していない。既存テストと上記Backend統合テストを対応づけ、HTTP契約・保存順序・UI公開の各責任を確認した。
+
+| 監査対象 | 確認した不変条件と主なテスト |
+|---|---|
+| gesture・保存順序 | `rawHistorySave`／`useRawDocument`で最終desired flush→同一ownership queue→native/readback確定→B2 commit→B1 transaction→ackを確認。中間native更新でstepを作らず、有効gestureだけが1stepとなる |
+| current／cursor・冪等性 | History store／APIで選択snapshotとcurrentを同一transactionに保存し、saveId receiptとCASを検証。旧ackと最新currentを分離し、Frontendは最新cursor／revision／fingerprintとの一致後だけcleanにする |
+| 不明結果・障害回復 | API／storeで応答喪失、同一body再送、SQLite実writer lock／SQLITE_FULL／commit失敗とrollback、native apply／readback不一致・desync、CAS外部writer、postcommit旧ownerを確認。失敗時はimmutable要求と入力lockを保持し、自動破棄／上書きしない |
+| metadata GET | `rawHistorySave`でGET失敗と保存失敗を区別。保存成功を戻さず旧表示cacheを保持し、再取得はGETだけ。20件ページ、21件端数、最大200件、baseline／選択page再取得を確認 |
+| 競合・ライフサイクル | gesture中Undo／Redo／jump、即時unmount、RAW↔RAW／JPEG、Filmstrip除外、通常終了待機、HTTP cancelを確認。generation／token／handle／assetが旧ownerの結果を新documentへ公開しない |
+| 200 step／200・256 mutation | storeの200／201 stepでbaseline繰上げ・UUID保持・cursor整合を確認。APIの200到達再生成、hookの200でgesture hold→最終flush→保存成功後renewal、adapterの256到達後は新mutation未送信を確認。step数とmutation試行数を混同しない |
+| RAW／JPEG・shortcut | History表示を分離しJPEG Recipe v18を維持。単一Undo／Redo dispatch、Filmstrip除外Undo優先、入力欄／IME／repeat／modal抑止を確認 |
+| focus・状態表示 | Shift移動／静止pointer重なり／mouseのcommit前・lock中・ack後のDOM focus、論理対象、登録、disabled、同一DOM nodeを確認。別要素／別windowへの意図的移動では復帰しない。正常状態文言の非描画と末尾エラー／RetryのDOM構造を確認。実画面のpixel位置は未測定 |
+
+### Findingと修正
+
+| severity | Finding・影響 | 対応・結果 |
+|---|---|---|
+| High | 該当なし | 未解決なし |
+| Medium | Shift移動で選んだrangeに静止pointerが重なると、`hovered`の早期returnが保存解除後のDOM focus復帰を飛ばす | 失敗する回帰テストで再現後、`AdjustmentSlider.onBlur`でキーボード所有権をhoverより先に評価した。`raw.locked`／disabled／Retry条件は変更しない。静止hover、mouse、別要素／window移動の回帰が成功 |
+| Medium（テスト） | 既存v4／v5 migration fixtureがv8 Historyテーブルを残してuser_versionだけを下げ、再migration時にtable already existsとなる。Export既存データ保持の回帰検証を妨げる | 2つの旧schema fixtureから後発のHistory 3テーブルも取り除き、旧schemaを正確に構成。production schema／migrationは変更せず、一時DBのテストのみ修正。全Backend成功 |
+| Low（テスト） | GalleryのRAW＋JPEG再開テストがRAW capabilityを提供せず、正しい非対応時filterを誤って失敗と判定する | fixtureで既定false／該当ケースtrueを明示。Galleryの製品動作は変更しない |
+| Low（実行条件） | 全Frontendの高並列実行では重いGalleryテストが5秒timeoutになり、未完了処理が後続assertionへ影響した | 同じ3件の単独成功を確認後、`--maxWorkers=4`で全件成功。timeout／assertion／テスト件数を緩めず、既定configは変更しない。この環境の全suite監査では並列数4を使用する |
+
+### 実行結果と完了判定
+
+- Frontend全体：`npx vitest run --maxWorkers=4`、139ファイル、**3154 passed／2 skipped／0 failed**。skipは実WebGPU比較2件。最終実行でReact `act`警告は出ていない。
+- Backend全体：repo `.venv` **Python 3.14.5**、cwd `backend`、`python -m pytest -q -rs`、**1768 passed／21 skipped／0 failed、326 subtests passed**。skipはWindows onedir配布artifact／native smoke buildが必要なケースであり、RAW HistoryのFakeテストskipではない。
+- focused確認：Frontend UI／Gallery 121件と負荷切分け3件、Backend lifecycle／旧schema fixture 5件が成功。全suite後のlifecycle assertion補強は当該1件を再実行し成功。これらは全suiteと重複するので合算しない。
+- TypeScript `tsc --noEmit`を含む`npm run build`、関連Backend 8ファイルの`py_compile`、`git diff --check`成功。production buildの既存500 kB超chunk警告は残るが失敗ではない。
+- テストは既知のsandbox一時領域制限を避けて権限付き実行し、一時DB・Fake sourceだけを操作した。実profile／Immichデータへの書込・migration・デプロイは行っていない。
+
+**C4-B3は実装・自動統合検証・全suite・限定監査の範囲で完了と判定する。未解決High／Mediumはない。** 以下の実機受入は今回未実施であり、自動成功をもって成功扱いしない。
+
+- 現行開発ビルドのWindows WebViewで、mouse／Shift＋カーソルの連続操作、静止pointer重なり、保存lock解除時のfocus、別入力欄／別windowへの移動、正常状態更新時の実レイアウト位置、エラー／Retryを確認する。インストーラーの旧版で代替確認しない。
+- 実LightCraft v0.10.0／実GPU／実RAWで、Undo／Redo／jumpの画像内容、復元の色・WB・その他完全Settings、連続gestureと200 mutation再生成を確認する。Fake Preview markerは実画質一致の証拠ではない。
+- 実Immichに接続した写真切替・Filmstrip除外・通常Windows終了とprocess再起動、選択profileの実SQLiteからの復元を確認する。native bundle／process smokeの21 skipも別途artifactが必要。
+
+LightCraftは引き続きv0.10.0（固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`）、SQLite schema v8、JPEG Recipe v18。v0.12.0更新・正常保存中disabledの再設計・History手動整理／圧縮・C4-CのカテゴリON/OFF／Reset・C4-D以降は実装しない。設計書とarchitectureを更新し、英語prefix＋日本語概要でCommit／Push後、C4-B3-3で停止する。
