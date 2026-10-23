@@ -318,3 +318,187 @@ cacheはentry数とencoded/decoded bytesの両方で上限、LRU等で破棄、�
 本書の根拠はローカル製品コード、既存調査・C4設計／architecture、管理patch/manifest/build scriptと既存テスト本文の静的確認。参照pathと関数名、要件と工程・受入の対応、文書差分の空白を確認する。build・テスト・実binary probe・実機RAW/GPU・ブラウザ動的確認・Immich書込みは実施しない。
 
 変更対象はこの文書のみ。`git diff --check`と追加文書のstaged差分を確認後、この文書のみCommitし、指定された`origin/feature/lightcraft-integration`へPushして停止する。R2以降のコード実装には進まない。
+
+## 13. A1確定契約（2026-10-24）
+
+開始HEAD `944b0f4a3b1b63e189b588e021f36145f761f34e`、branch `feature/lightcraft-integration`、作業ツリーclean。**§1〜12はR1時点の記録として保持し、A2/A3の実装契約には本節を優先する。** A1も文書更新のみであり、以下の「確定」は実装・実機検証済みを意味しない。LC固定commit、SQLite v8、JPEG Recipe v18、既存C4完了記録は変更しない。
+
+追加確認は既存owner・lock・strict metadataと、geometry/StageCache接続に不足した型・関数に限定した。LC参照sourceの`RenderJob/RenderResult/DecodedSource`、`pipeline::plan/Frame/StageCache`、eguiのstage計量を読んだが、checkoutのGit情報はsandboxから取得できず、固定HEAD・patch diffの再検証はしていない。LCの根拠は既存固定commit調査を主とし、以下の追加接続方法はA2で固定sourceに対して確認する。build・テスト・実機操作は未実施。
+
+### 13.1 MCP品質・応答・互換性
+
+**採用：既存`render_preview`を拡張する。** wholeを別toolへ移さず、工程Cでは`render_region`を追加し、以下の品質・frame・画像envelopeを共用する。A2/A3ではregionは非対応として広告・拒否し、4組対応の完了とはしない。
+
+| `render_preview`引数 | A2契約 |
+|---|---|
+| `id`, `max_side`, `format`, `before` | 既存意味を維持。GenzoRoomはidを明示し、format=`png`のみ使用。`before`省略false、max_sideの既存default/clampと公開上限は維持。A3から送る値は事前に16〜1024の整数として検証する |
+| `quality?` | enum `"draft" | "full"`、省略`full`。null/boolean/数値/大文字/未知文字列を拒否。schemaと実引数parser双方で検証 |
+| `preview_contract?` | integer、対応値は`1`だけ。型違い・未知versionを拒否。追加metadataの明示opt-in。GenzoRoomは常に1を送る |
+| `stage_cache?` | enum `"off" | "on"`、省略off。測定用native実行optionで、品質・Recipeではない。on時のbudget指定は§13.7 |
+| `stage_cache_budget_bytes?` | on時のみ必須の正の整数。off時の指定は拒否。engine memory budgetを超える値・overflowを拒否。Frontendから任意値を転送しない |
+
+`quality`、`preview_contract`、`stage_cache`のいずれかを明示した呼出しをadaptive契約1とする。qualityだけを指定した一般MCP clientにも実qualityを返す。すべて省略した旧呼出しはFull、旧metadata形状を維持する。これは旧GenzoRoom `_validate_png`が未知metadata keyを拒否するために必要な互換境界であり、無条件に追加fieldを返して旧adapterを壊さない。quality省略＋preview_contract=1の場合もmetadataで`full`を確認できる。
+
+実行はBefore/Afterとも`Session::render_job(id,size,size,before,true)`、Draftなら`.draft()`、任意の`.with_stages(...)`、`run()`、`session.accept(&result)`。Fullは通常job。native interaction/history command、現像式、source選択を品質のために変更しない。`render_photo`共通helperにも同じoptional引数とparserを接続し、`call_tool`の引数抽出で落とさない。headless以外のbackendが契約を証明しない場合、明示quality要求を成功扱いしない。
+
+成功は従来どおり`isError:false`、image content 1個＋JSON text metadata 1個、`structuredContent`なし。adaptive時のmetadataは既存`id/width/height/kind`とBefore追加fieldを保ち、次を加える（数値は型名を示し、解像度仕様ではない）。
+
+```text
+previewContract: 1
+quality: "draft" | "full"             # 実行したjob.request.quality
+mode: "whole"                        # Cでは"region"も許可
+frame: {
+  geometryId: <opaque lowercase hex64>,
+  nativeWidth: <positive integer>, nativeHeight: <positive integer>,
+  aspect: <finite positive number>,
+  fullWidth: <positive integer>, fullHeight: <positive integer>,
+  window: null                       # Cでは{x,y,width,height}
+}
+stageCache: {
+  mode: "off" | "on", applied: <boolean>, reason: "none" | "budget",
+  cpuBytes: <nonnegative integer>, gpuBytes: <nonnegative integer>,
+  retainedBytes: <nonnegative integer>, budgetBytes: <nonnegative integer>
+}
+```
+
+wholeでは`fullWidth/Height=width/height`、window=null。native寸法は表示bitmap寸法ではない。Beforeの既存`geometry:{crop,orientation}`、`beforeFingerprint/effectiveBeforeFingerprint`は削除・改名せず、追加の`frame`と区別する。hashは画像出自の署名ではない。diagnostic fieldを追加する場合も契約のallowlistを同時更新する。
+
+エラーはMCP tool error（`isError:true`）、画像なし、固定JSON text `{"code":"…"}`とする。新契約のcodeは`preview_invalid_quality`、`preview_invalid_contract`、`preview_invalid_stage_cache`、`preview_unsupported`、`preview_geometry_unavailable`、`preview_geometry_mismatch`、`preview_budget_exceeded`、`preview_render_failed`。不正qualityはjob生成前に拒否する。既存photo/IO失敗等を無制限なupstream文言とともに返さない。汎用RPC／transport errorは既存経路を維持する。
+
+GenzoRoomの`MCPToolError/call_tool_result`は、**このallowlistのcodeだけ**を新契約失敗から抽出できる最小拡張を行う。任意のtextをUI/logへ流さず、旧／不明errorは従来`lightcraft_tool_error`。HTTPは不正入力400 `raw_invalid_preview_request`、非対応503 `raw_preview_unsupported`、geometry未取得／取得失敗502 `raw_preview_geometry_unavailable`、正常stale/supersededは204、予算超過413 `raw_preview_budget_exceeded`、画像不正502 `raw_invalid_preview`へ写す。既存owner/revision conflictとtransport失敗のcode/意味は維持する。
+
+capabilityはgenerationごとの`tools/list`でquality enum、preview_contract=1、Before boolean、cache引数schemaを検査し、実応答もpreviewContract/kind/quality/frameを検証する。schema単独を実行証拠にしない。旧binaryはadaptive=falseとして従来Full wholeを利用し、quality等の新引数を送らない。旧metadataからnative frameを作らず従来PNG尺度の限定動作とする。Before capabilityは独立に保持し、Before非対応だけではAfter編集を停止しない。新schemaを広告して不正metadataを返すbinaryは黙ってlegacyへ格下げしない。
+
+**patch方針を確定**：A2は既存`0001-native-before.patch`にMCP拡張を統合し、名前は維持、manifestのpurpose/targets/digestとprobe/receipt契約を更新する。別の重複hunk patch列は作らない。既存Before機能・省略After互換fixtureを保持する。実binaryで省略Full、明示Draft/Full、Before両品質、metadata、cache off/onをprobeし、成功後だけreceiptへ`previewContract:1`を記録する。現行Before receiptだけで新契約対応と認定しない。これらはA2の変更でありA1では触らない。
+
+### 13.2 Geometry取得方式と実装確認gate
+
+**採用：render応答の`frame`に付帯し、専用geometry queryはA2/A3に追加しない。** queryはsourceのlazy loadとeffective settings解決を別途行う必要があり、query後のrenderとの対応付け・追加native往復が増える。render付帯なら同じjob snapshotとsourceを根拠にできる。初回Full wholeがbootstrapし、frame取得まではRAWの新しい論理尺度を未確定として扱う。操作ACKごとに別のgeometry queryを待たせない。
+
+geometryの正本はLCが使用した実frame。A2のheadless helperは、jobのsourceを一度loadし、`DecodedSource.image_for(job.settings.denoise_amount())`、`info_or(job.info)`、`pipeline::plan`が解決するeffective settings／frameを取得する。renderにも同じdecoded sourceを`SourceRef::Loaded`として渡し、metadata取得のためにRAWを二重decodeしない。既存`run/accept`と同じsource cache挿入・As Shot学習を維持する。`Frame::new`、sensor公称値、PNG自然寸法からの単純倍率逆算で代替しない。
+
+ここにはR1から具体化した**実装確認gate**がある。`Rendered`はimage/histogram/deepしか持たず、`RenderResult`も実frameを公開していない。さらに`pipeline::plan`はprofile/Uprightの解決、`frame_for`はlens/automatic CAを含む。したがってjob.settingsだけの`Frame::with_lens`を実frameと呼べない。
+
+- 出力座標の根拠は上記実Planのframe、native寸法の根拠はLC importで確認されたEXIF-oriented original width/heightと、**同Planで解決したgeometry条件・decoded lens情報**によるnative座標のFrameとする。native frameの`native_size()`をLCの丸め規約（finite、正値、四捨五入）で整数化し、連続frame aspectを別に返す。Preview sourceのwidth/heightをnativeとせず、`native_long`だけから短辺を推測しない。
+- geometryIdは契約version＋source内容identity＋native寸法＋effectiveなorientation/crop/flip/warp/lens/CAの座標変換記述から作るSHA-256 opaque値。quality、色調値、要求maxSide、region window、renderSerialは入力にしない。色調変更だけで無効化しない。source level依存の推定で**実際の変換が変わった場合**は新geometryとする。
+- MCP helperから既存公開APIだけでnative座標への同じ変換を正確に取り出せるか、A2でfixture確認する。native dimensionsでのlens/warp再構成、Planとの一致、rounding、source学習の保存方法が確認対象。profile/Upright/CA推定を独自実装したり、Full sourceを無条件追加decodeして辻褄を合わせたりしない。
+- 取り出せない場合は`preview_geometry_unavailable`として新契約を未達とし、**metadata観測用の最小accessor/sidecarをEngine/pipelineへ追加する案と影響範囲を報告してから再判断**する。現像アルゴリズム変更や未知geometryを推定値で成功にする契約は確定しない。このgateは保存整合性の未解決を隠すためのものではなく、現状に実frame getterがないという明示的なA2実装条件である。
+
+GenzoRoomのnative revisionはLCへ新設しない。Backendがrender送信前に確定revision/settings snapshotへ束縛し、`run/accept`後の完全settings readbackを同じnative区間内で確認する。readbackが変化した場合は既存`_commit`に従ってrevisionを更新し、当該画像を旧revisionへ配信しない。204には固定値の`X-Raw-Superseded-Reason: revision | replaced | cancelled`を付け、A3はrevisionの場合だけ既存owner queueでsettings再同期を1回行い、現在revisionへの新intentを作る。replaced/cancelledは再同期せず最新slotの処理へ戻る。mutationや未知保存requestを勝手に再送せず、再同期でretryRequestや保存checkpointを上書きしない。繰返し不一致は表示errorとし無限再描画しない。
+
+Beforeにも同じ取得方法を適用するが、settingsはnative import Before（現crop/orientation整列）である。Before/Afterで別geometryId・native寸法を返す。A2/A3では同geometryかつ同品質の比較pairを成立条件とし、不一致はAfter＋比較準備不可／Retry表示で保持し、画像stretchで整列済みとしない。R1§8の異geometryの比較mappingは工程C前の仕様判断として残す。これは4組・高画素・比較の最終要件を削るものではなく、A段階の明示的な制限である。
+
+### 13.3 HTTP・render identityと採否
+
+HTTP `/api/raw/documents/{handle}/preview`は既存owner fieldを維持し、adaptive時に次を受ける。stage cache設定は内部測定設定からruntimeが付与し、HTTPから指定させない。
+
+```text
+workspaceId, generation, documentToken, revision, serial, kind
+quality: "draft" | "full"
+mode: "whole"
+maxSide: integer
+viewGeneration: integer
+geometryId: hex64 | null
+```
+
+serialは既存renderSerialとしてkind別に単調増加し、現在の31-bit検証を維持、使い切る前にdocumentを安全に再openする（wrapしない）。viewGenerationも非負safe integerで、viewport/DPR/zoom/pan/geometryの新targetに進める。新しい永続versionではない。geometryId=nullはそのkind/ownerで初回bootstrapまたはsettings変更後のgeometry未確認要求に限り、**座標を指定しないwhole**で使える。regionはnull不可。Backendはnullを送信時に実jobへ束縛し、応答で実geometryを確定する。
+
+identityは`(workspace, handle, documentToken, generation, nativeRevision, kind, serial, quality, mode, requestedSize, expectedGeometry, viewGeneration)`。Backendのepoch/sequenceも引き続き検証する。MCPへGenzoRoomのopaque ownerやDB revisionは渡さない。工程CのregionはrequestedSizeを仮想fullWidth/fullHeight、windowへ拡張するだけで同じidentityを使う。windowは最終現像full frame内の整数pixel座標、返却実full frame/windowを正本としsensor座標へ変更しない。
+
+HTTP応答は既存`X-Raw-*`owner/revision/serial/epoch/sequence/kindを維持し、`X-Raw-Quality/Mode/View-Generation`と`X-Raw-Frame`（§13.1のframeをASCII JSON化）を加える。frame metadataは既存16KiB以内、数値・field allowlist・PNG実寸との整合を検証する。BackendはMCP geometryIdにsource/document/generationを束縛したopaque geometryIdをHTTPへ返す。MCP内部source hash・native PhotoId・pathをFrontendへ渡さない。
+
+採否はHTTP受付／native送信直前／native回収後／PNG検証後／decode後／URL公開直前で行う。
+
+1. owner/generation/tokenと現在documentが一致し、native状態がsyncedであること。pending mutation／History未確定中のrenderは保留し、確定revisionを飛び越えない。
+2. Afterは現在confirmed nativeRevision一致、kindごとの最新serial・viewGeneration・quality・mode・要求size/window・geometry一致。bootstrap nullだけは返却geometryを当該targetに採用できる。
+3. 同revisionのDraft→Fullでもserialが異なるので別要求。qualityを除いたrevisionだけでdeduplicateしない。Full公開後に旧Draftが上書きすることはない。新begin/changeで旧Full/Draftの採用資格を即時失効させる。
+4. Before cacheはAfter revisionを跨いで再利用できるが、現在ownerと基準key（import/process/実geometry）に合うこと。cache画像を現在ticket revision/serial/viewへ再束縛し、After pairとのgeometry/qualityも確認する。
+5. 正常な旧結果は204／superseded扱い、表示error・save errorにしない。異常な応答の品質偽装、PNG不正、transport破損は別の失敗として扱い、URL候補を解放する。
+
+### 13.4 Schedulerの最小責任分界
+
+**Frontendはintent集約、Backendは送信直前のnative admission。既存の二つの所有構造を拡張し、別のnative dispatch queueは追加しない。**
+
+Frontendは`useRawDocument`内のdocument ownerに表示slotを追加する。各kindにlatest未送信intent 1件、進行中fetch/decode 1件。任意のframe配列やsettings snapshot履歴を持たない。`RawControls.serial`はmutation intent世代、renderSerialは表示要求世代として区別する。Backendは現行`_pending/_before_pending/_running`と`_worker`を拡張し、それぞれ最新1件・実行1件を維持する。Frontend slotは操作イベントをACKへ束縛するため、Backend slotは複数HTTP到着・native lock待ちを制御するために必要であり、同じnative操作を二重実行しない。
+
+| 契機 | 確定する発行規則 |
+|---|---|
+| begin/change | 表示interaction世代を進め、未送信Fullと旧画像候補を失効。変更は従来のdebounce/最新patchへ渡す。ACKされた中間値が現在intentならDraftを1件残す |
+| end | 既存`flushControls`と同時に表示終了意思を記録。gestureがHistory ACKまで残ってもDraft扱いを続けない。最終patchのreadbackを待ち、保存fenceがあればその後に最終Fullを1件発行。pending空・no-opでもDraft表示からFullへ戻る |
+| number/keyboard/wheel | 共通Sliderの既存begin/change/commitを使う。Enter/blur、Escapeの元値復帰、500ms静止、focus移動/unmountを維持。独自のFull確定timerを増やさない |
+| Reset/category | `operate`のnative操作＋History ACK検証後にFullのみ。失敗中は古い画像を最新結果として示さない |
+| Undo/Redo/jump | 既存gesture commit→move→readback→DB ackを優先。成功settingsへFull。旧revisionのDraft/Full候補を破棄 |
+| view更新 | 操作中Draft、それ以外Full。同revisionでserial/viewGenerationを進めて集約。A2/A3のsizeは既存安全範囲内。最終的な解像度policyは未決定 |
+| Before | 比較要求時のみ、Afterより低優先で同geometry/quality/sizeを要求。未送信Beforeは最新keyへ置換。Before失敗はAfter編集・保存を止めない |
+| 写真切替/再生成/離脱 | 新inputをfreeze、未送信表示を破棄、mutation/History保存fenceを完了。旧ownerが送信済みnativeを回収しrelease。候補URLは即時非表示・解放し、新ownerへ移さない |
+
+同一controlのactiveなbeginはidempotentとし、保存lock/旧owner等で拒否されたcallbackは表示interactionも開始しない。既存handoffで受け付けた次controlは前gestureのACK後に同じcoordinatorから有効化し、前revisionを次controlのDraftとして発行しない。表示側が保存coordinatorと別の「受理済み編集」を推測しない。
+
+**未送信Fullの遠隔失効**：UIでの破棄だけでは、すでにHTTPからBackend pendingへ入ったFullを止められない。A3では同じdocumentの`POST /preview/cancel`を最小追加し、bodyを`workspaceId/generation/documentToken/kind/serial`に限定する。現在ownerかつ同ticketだけをabandonedにし、pendingなら204で完了、runningなら採用資格だけ失効してnative処理は回収する。cancelはnative/HTTP mutation lock待ちをせずevent loop上の短いowner検査で実行し、画像枠を消費しない。未知の古いserialは同owner内でno-op、別ownerは既存conflict。不正bodyは400。これはnative preemption APIではない。
+
+begin/change、view置換、離脱で既存進行中serialのcancelをbest-effort送信する。応答が失われてもFrontendはその結果を採用しない。cancelがserverへ届く前にnative送信したjobは回収対象となる限界を明示する。新要求を送るために送信済みMCPをabortしない。通常fetchのabortだけでBackend ticketが取消済みと仮定しない。cancel専用の再送履歴・永続状態は作らない。
+
+### 13.5 待機境界・lock・保存fence
+
+| 区間 | ownerと待機保証 |
+|---|---|
+| ① mutation/readback/History transaction | Frontend既存ownership queue、HTTP制御owner、adapter `_submit`。保存成功はこのreadbackとCAS/receipt/current検証で決める |
+| ② RenderJob〜MCP応答回収 | adapter既存worker＋native lock、MCP transport lock。同期処理完了を必ず回収。**PNG encode/Base64/pipe応答の受信も現行inline方式ではここに含まれる** |
+| ③ PNG検証/HTTP body/decode | Backend画像owner／hook表示slot。native/保存queueから分離。Pillow workerのjoinは維持 |
+| ④ Viewer公開 | hook/Viewer。owner・最新target確認後にURL/frameを交換。保存の成否を変えない |
+
+具体変更は次で確定する。
+
+- **`RawControls.flush/retry/settle`**：busy/unsettled/errorはmutation/readbackへ限定。readback通知で表示intentを同期登録し、flushは画像Promiseを保持しない。表示Promiseはhook slotが責任をもってcatch/finally回収する。`settle`は従来queue barrierとaccepted handoffを待つ。画像失敗をcontrols.errorへ書かない。
+- **`RawRecipeSave`**：同じ保存queue、retryRequest、saveId、CAS、current/ack照合を維持。`sendHistory`の`await controls.refreshPreview()`を、成功settingsへのFull intent通知へ変更。gesture／operation/movingの解除は画像ではなく従来の保存条件に従う。変更途中のgesture保存を画質更新で増やさない。
+- **`useRawDocument`**：既存`ownership/enqueue`はmutation/save/open/releaseだけを直列化。初回openもsettings/restore/History初期化を画像公開と分け、first Fullを表示slotで処理する。display errorとsave/native errorを別stateにし、画像取得失敗時でもACK済み編集の保存を継続できる。decode後の`readRawDocument`は表示slot内に残すが、既存queueへjoinさせない。`prepareSave`はdisplay slotを待たない。
+- **HTTP admission**：`_execute`の制御直列化は維持。`_preview`は短いowner検査・ticket登録後にlockを解放し、PNG待機後に短く再取得して応答検証。制御taskは既存最大2枠を維持し、画像taskをその2枠から除外する。通常の画像slotはrunningまたはvalidationの1件＋After pending1件＋Before pending1件。同workerのrunning/validationは排他的、旧pending置換時に即204で解放する。HTTP bodyへ移譲したticketも送信完了／切断まで同じ画像leaseを保持し、pending/実行/validation/転送を合計した画像ownerは最大3件とする。空きがなく旧pendingも置換できなければ`raw_busy`で拒否する。同ticketへ無制限にwaiterを追加しない。body転送はnative owner解放後に行い、transport側の切断/deadline回収は画像枠だけへ作用し、制御枠を占有しない。
+- **制御fence**：HTTP制御受付時、adapterへ短いcontrol reservationを登録し、制御task完了まで保持する。特にHistoryはreadback→SQLite transaction→receipt/current確認の**全区間**で保持する。この間、新renderを開始しない。native readback後にrenderの`accept`が割り込み、保存対象settingsを変える競合を避ける。受付済みmutation/lifecycleも同様。予約はfinallyで解放し既存workerをwakeする。別のFIFO native queueは作らない。
+- **`LightCraftRawSession._previews/_submit`**：既存native lockを維持。render workerはcontrol reservation/待機中`_submit`があれば送信を保留し、lock取得後にも再確認する。確認から送信ownership確保まではevent loop内で競合しないようにする。native占有はrender応答回収→完全settings readback→ticket snapshot/整合判定まで。その後lockを解放して`_image`へ渡す。Beforeの`accept`もAs Shot学習を起こし得るため、Beforeにも同じ整合確認を行う。
+- **画像owner**：既存workerはlock解放後も1件の`_image`を所有し、validation終了/joinまで次renderを始めない。新mutation/保存は進められる。PNG metadata/CRC/Pillow検証を緩めない。検証中にrevisionが進んだ画像はstaleとして捨てる。native checkのためにvalidation完了を待ち戻さない。
+- **`LightCraftMCP.request`**：送信〜応答lock、送信後timeout/cancelの接続喪失規約は変更しない。アプリ都合のstaleはticketの採用資格で処理する。③をMCP transport ownerへ戻さない。
+
+**lock順序**：HTTP制御lock→adapter native lock→MCP lockは既存順を維持する。render workerはnative lockを持ったままHTTP lockを取得しない（逆順deadlock禁止）。render readbackのsnapshotはadapter内で確定し、HTTP応答／次の`_document`取得時に短い同期reconcileでdoc revision/fingerprintへ反映する。reconcileは同raw handle・同generation・synced・完全readback済みのsnapshotだけを使い、DB recipeRevision/receiptを更新しない。History pendingを解決済みと見なさない。相違時の既存revision conflict/unknown処理を維持する。
+
+release/close/resetは表示の未送信slotを止め、制御fenceと送信済みnativeをdrainし、validation worker・一時file所有を回収してからsource/sessionを解放する。`_history_checkpoint`をPNG結果で代用しない。save成功通知は③④を待たないが、**資源解放のためのclose待機**は別に残る。③のAfter不正画像で現行fail-closed規則によりSessionが失われた場合、確定済みSQLite receiptは取り消さず、進行中保存は既存owner/current照合でunknown/失敗を判定する。画像成功で保存成功へ昇格させない。
+
+保存fence・新編集は未送信Full/Beforeより優先する。一方、送信済みFullの②が終わるまで次のnative確認は待つ。A工程はこの待機をゼロにするものではない。MCPのPNG/Base64搬出まで分離するには別transport変更が必要であり、A2/A3では実装しない。
+
+### 13.6 初期安全上限・将来regionへの接続
+
+A2/A3はGenzoRoomの長辺1024/pixels≤1024²、PNG5MiB、Base64上限、metadata16KiB、MCP line8MiB、通常line1MiB、request4KiBと既存timeoutを維持して測定を開始する。これらは**初期実装の安全枠**であってDraft/Fullの製品画素数・最終予算ではない。qualityごとに解像度を固定せず、測定時に同寸法比較も可能にする。
+
+new metadataが16KiBを超えたら応答失敗にし、無制限に拡張しない。A2のMCP自体の既存4096clampも変更せず、A3の要求はより狭い既存制約に従う。PNG→Base64→lineの整合、pre-decode pixel検査とPillow worker回収を維持する。容量緩和・file転送はB以降の測定判断とし、必要なら§9.2の検証・disk/file所有・quotaと同時に行う。disk cacheを禁止する決定ではない。
+
+工程Cの`render_region`もquality/preview_contract/stage_cache/Before/envelopeを共有し、仮想full frame寸法とwindowだけを追加する。geometryIdはwindowを含まない、render identityはwindowを含む。返却windowはfull frame座標、tile bitmapとは独立。領域専用の別native ownerや保存queueを作らない。Draft/Full両regionが最終必須であり、A2/A3で非対応を広告することを最終完了と混同しない。
+
+### 13.7 StageCache：A工程で比較可能にする確定方針
+
+**A2でoff/onの評価経路を用意し、最終採用はAのWindows測定で決める。** no-cacheを必須の製品方針にも、常時cacheを必須にもせず、A工程中に有効性が確認できれば採用できる。A3の内部developer測定設定から`stage_cache`と試験用budgetを指定できるようにし、通常UIの品質buttonやRecipe設定は追加しない。defaultは従来どおりoff、on設定には明示的な有限budgetを必須とする。
+
+- Headlessがactive photoのAfter用／Before用の`Arc<StageCache>`を各1個保持し、`with_stages`へ渡す。quality別には分けず、同じsideでDraft→Fullのnative再利用を可能にする。size別entry管理は既存StageCache（既定2件）へ任せ、windowごとの無制限mapを作らない。Cでwhole/regionを別slotにする場合もpool総予算を共有する。
+- offはjobにstagesを渡さず、Headlessのstage pool全体をclearする。mode/budgetを変更する時も両sideをclearしてから新条件で開始する。LCのsource cache・元RAW取得cacheはoffでも維持する。sourceとStageCacheを同時に無効化した比較を「StageCacheの効果」と呼ばない。
+- settingsの色調変更だけで全clearせず、既存source/frame/size/lin/pre-NR/plane keyに再利用判定を任せる。Fullは通常Full jobで計算し、Draftの近似planeを無条件にFullへ昇格しない。NR Draftに意図された近似はoffと画素完全一致するとは限らない。
+- photo/source内容/generationの変更、geometryまたはBefore基準変更、cache mode/budget変更、reset/close、memory pressureでclearする。BeforeとAfterのstageを共有しない。Undo/Resetではnative keyが有効性を判定するが、geometry等が変われば上記clearを優先する。
+- retention予算はAfter+Before全体で一つ。`StageCache::bytes()`のCPU分だけでなく既存`lightcraft_engine::gpu::stage_bytes()`のdevice分を加算し、shared GPU sourceは`shared_source_bytes()`等で別計量してpeakへ含める。CPU源bufferの全寿命が`StageCache::bytes()`に含まれると誤認しない。
+- on時budgetは実験ごとに明示し、既存engine budget（GenzoRoom設定1GiB）以下で検証する。これは追加1GiB使用許可ではない。追加保持がengineの既存memory gateに自動算入されるとは仮定しない。job前に不要sideをclear、checkedな保守的見積りでbudget内のcache利用だけを許し、見積不能なら`applied:false/reason:budget`でoff実行する。job後にCPU/GPU保持を再計量し、超過は非使用side→使用sideの順でclearしbudget内へ戻す。retainedBytesはtrim後、cpuBytes/gpuBytesはtrim前観測値とする。mode offはapplied=false/reason=none/budgetBytes=0。
+- これはretention上限であり、現像中source/一時bufferのhard RSS/VRAM上限ではない。事前見積り・GPU/source計量・clear保証を固定sourceで実装できない場合、onは非対応として評価を保留し、必要な最小観測点を報告する。bytesを測れないままonを有効化しない。
+
+測定は同source/同settings系列/同size/同backendでoff→onとon→offを取り、cold/warm source条件を別に記録する。Afterのtone/露光/NR変更→Draft連続→最終Full、Before両品質、size変更、clear後、GPU fallbackを含める。native処理・PNG encode/MCP・validation・decode/公開と、CPU RSS/VRAM/retained bytesを分けて測る。
+
+正確性は最終FullをoffのFull（同backend/同revision/geometry/size）と比較し、CPU同条件fixtureでは画像一致、GPUは既存許容差方針に従い差分を記録する。NR Draftは近似再利用を許す既存native回帰を用い、最後のFullで精確な結果へ戻ることを検証する。誤ったsource/Before/geometry/sizeからのreuseは不合格。cache hitだけで速度・画質を保証しない。メモリ・ディスクcacheを一律禁止せず、今回新しい永続cache基盤を必須化しない。
+
+### 13.8 A2/A3の変更境界・受入と持越し
+
+| 工程 | 変更対象／依存 | 受入と停止条件 |
+|---|---|---|
+| A2：LC MCP拡張 | `tools.rs` schema/parser/helper、`headless.rs` job/metadata/stages、native fixture、管理Before patch/manifest、`build.py` probe/receipt、必要な更新手順。A1契約を入力とする | 旧省略Full/Before互換、同寸法Draft/Full両kind、型不正拒否、実quality/frame、geometry gate、stage off/onまたは明示非対応、固定source patch/実binary照合。実frame取得や正しいsource acceptがMCP内だけで成立しなければ§13.2 gateで停止し報告。現像式変更へ進まない |
+| A3：GenzoRoom接続 | runtime/MCP typed capability/error、adapter ticket/worker/validation/control reservation、HTTP preview/cancel/admission/reconcile、rawApi、hook表示slot、RawControls/RawRecipeSave通知、RAW Viewer frame descriptor。A2実binary契約に依存 | 最終ACKへのFull、同revision品質切替、未送信集約/取消、stale破棄、PNG検証/decode停止中の保存完了、readback→SQLiteのrender割込み防止、旧owner回収、Before失敗時After継続、JPEG回帰なし。saveId/CAS/unknown/History200/再生成・終了保証を維持。画像errorと保存errorを分ける |
+
+自動テストはR1§10の関連suiteを再利用し、追加gateを設ける。Backend fakeは②render/応答、native readback、③validation、SQLite transactionを独立gateで止め、**validationを止めたまま保存が完了すること、DB確定中には新renderが始まらないこと、renderがnative lock保持中でもHTTP cancelが完了すること、releaseがlock逆順でdeadlockしないこと**を確認する。Frontendは同revision Draft→Full、begin対pending Full、遅い画像/decode、no-op/Escape、Reset/move、unknown save再送、旧owner callbackとJPEG切替を検証する。既存fakeの成功をnative frame・実GPUの成功に拡張しない。
+
+実機測定はA2/A3の最小縦接続と必要な自動検証後に開始する。初期安全枠の同寸法off/on・Draft/Fullで比較し、保存/新編集が同期Full応答を待つ残余時間も測定する。測定前に固定しない項目は、Draft/Full画素数、whole/region閾値、最終PNG/MCP/cache容量・timeout、高画素whole上限、cache最終構成、CPU/GPU性能保証。実frame観測方法・stage計量の実装gate、異geometry比較mapping、B/Cの資源緩和とregion実装は持越す。
+
+### 13.9 A1の確認・停止範囲
+
+今回の変更は本書へのA1契約追記と優先順位注記のみ。参照先、既存C4保証と各新契約の対応、型／metadata／lock順／callback所有の整合を静的確認し、`git diff --check`を実施する。build・テスト・実binary検証・Windows測定・ブラウザ操作は行わない。指定のCommitメッセージは`docs: RAW適応型プレビューA1のAPI・所有権契約を確定`。本書だけCommitして`origin/feature/lightcraft-integration`へPushし、A1で停止する。A2の実装には進まない。
