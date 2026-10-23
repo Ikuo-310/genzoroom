@@ -89,7 +89,9 @@ describe('localized resources', () => {
     expect(i18n.t('photos.openSelectedCompact', { lng: 'en' })).toBe('Develop');
     expect(i18n.t('photos.openWorkspace', { lng: 'en', filename: 'photo.jpg' })).toBe('Open photo.jpg for development');
     expect(i18n.t('workspace.actualSize', { lng: 'en' })).toBe('1:1');
-    expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍');
+    expect(i18n.t('workspace.actualSize', { lng: 'ja' })).toBe('等倍表示');
+    expect(i18n.exists('workspace.rawPreview.actualSize', { lng: 'en' })).toBe(false);
+    expect(i18n.exists('workspace.rawPreview.actualSize', { lng: 'ja' })).toBe(false);
     expect(i18n.t('workspace.highlights', { lng: 'en' })).toBe('Highlights');
     expect(i18n.t('workspace.highlights', { lng: 'ja' })).toBe('ハイライト');
     expect(i18n.t('workspace.whites', { lng: 'en' })).toBe('Whites');

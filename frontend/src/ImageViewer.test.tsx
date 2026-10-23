@@ -205,7 +205,7 @@ describe('Viewer edit settings context menu', () => {
     Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 800 });
     Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 600 });
     act(() => image.dispatchEvent(new Event('load')));
-    click([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Preview 100%')!);
+    click([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '1:1')!);
     const zoom = host.querySelector('.zoom-controls output')!.textContent;
     await render('blob:raw-2', 'document-a');
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);

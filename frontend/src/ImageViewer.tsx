@@ -243,7 +243,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
       <div className="zoom-controls" role="group" aria-label={t('workspace.zoomControls')}>
         <button type="button" className="tool-button" onClick={fit}
           title={fitShortcut ? t('workspace.fitShortcutHint', { shortcut: fitShortcut }) : t('workspace.fit')}>{t('workspace.fit')}</button>
-        <button type="button" className="tool-button" onClick={setActualSize}>{t(previewPixels ? 'workspace.rawPreview.actualSize' : 'workspace.actualSize')}</button>
+        <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
         <output aria-live="polite">{Math.round(scale * 100)}%</output>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>

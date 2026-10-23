@@ -295,7 +295,6 @@
       "wbUnavailable": "このRAWのKelvin WB能力を確認できないため、WBのみ操作できません。",
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
       "colorCategory": "カラー",
-      "actualSize": "プレビュー100%",
       "beforeLoading": "RAW Beforeを準備中です。Afterを表示しています。",
       "beforeFailed": "RAW Beforeを比較できませんでした。Afterを表示しています。",
       "beforeRetry": "Beforeを再試行"
@@ -353,7 +352,7 @@
     "fit": "全体表示",
     "fitShortcutHint": "全体表示（{{shortcut}}で全体表示と直前のズーム・パンを切り替え）",
     "beforeHoldShortcutHint": "補正前後の比較（{{shortcut}}長押しで補正前を表示）",
-    "actualSize": "等倍",
+    "actualSize": "等倍表示",
     "zoomControls": "ズーム操作",
     "beforeAfter": "補正前後の比較",
     "before": "補正前",
