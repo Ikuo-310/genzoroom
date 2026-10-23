@@ -399,6 +399,12 @@ migration, data format or Gallery selection policy changed. Full Frontend tests 
 on this host to avoid load-dependent Gallery timeouts, without increasing timeouts or weakening
 assertions. The final full suites and scoped reruns leave no unresolved High/Medium findings.
 
+### RAW History numeric rows
+
+`GET /history` derives display-only control deltas from the already verified SQLite baseline and ordered step snapshots. The first retained step compares against the current retained baseline, including after branch replacement or 200-step pruning; every other step compares against its predecessor, independent of the requested page offset. Each row returns only changed allowlisted control IDs with finite `before` and `after` values. A missing or invalid value marks that row's projection unavailable, so the UI shows its operation label without inventing numbers. Future section and all-reset operations use the same bounded list for multiple controls. Complete DevelopSettings never crosses this API boundary, and the existing 20-step / 16 KiB response limits remain enforced.
+
+The RAW History view reuses JPEG's numeric formatters for matching controls, appends Kelvin units to both temperature values, and omits timestamps while preserving row positions, cursor classes, baseline selection, UUID jumps and paging. The response retains `createdAt` for contract compatibility; the RAW view does not pass it to the shared History list. This adds no stored values, SQLite schema change, migration, or JPEG behavior change.
+
 ## Gallery manual refresh
 
 The four Gallery browsing tabs are refreshable: Recent, Favorites, Album list/detail, and Calendar year/month/date detail. The leftmost Toolbar `Reload` button and the `homeRefreshPhotos` binding in the central `editShortcuts.ts` registry refresh only the current view. Shift+R uses the existing Home guards and shortcut-label formatter; R still opens Recent, while Ctrl+R / Command+R remain browser reload. STACK management, Export management, and inactive Home do not show or run Gallery Reload.

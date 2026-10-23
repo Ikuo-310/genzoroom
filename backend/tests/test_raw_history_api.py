@@ -205,12 +205,60 @@ def test_auth_pagination_and_no_arbitrary_settings(local, tmp_path, monkeypatch)
                 response = await http.get(url(doc), headers=headers(doc))
                 assert len(response.content) <= 16384 and len(response.json()["steps"]) == 20
                 assert response.json()["hasMore"]
+                first = response.json()["steps"][0]
+                assert first["changes"] == [{"control": "light.exposure", "before": 0, "after": .1}]
                 last = (await http.get(url(doc) + "?offset=20", headers=headers(doc))).json()
                 assert len(last["steps"]) == 2 and not last["hasMore"]
+                assert last["steps"][0]["changes"] == [{"control": "light.exposure", "before": 2., "after": 2.1}]
                 assert not {"settings", "sourceContentHash", "baselineSettings"} & set(last)
+                assert all(set(step) == {"stepId", "kind", "metadata", "createdAt", "changes"} for step in last["steps"])
         finally:
             await api.close()
     asyncio.run(run())
+
+
+def test_history_page_diffs_follow_rolled_baseline_and_new_branch(local, tmp_path, monkeypatch):
+    import raw_recipe_store
+
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        monkeypatch.setattr(raw_recipe_store, "HISTORY_LIMIT", 2)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                ids = []
+                for exposure in (1., 2., 3.):
+                    doc = await change(http, doc, exposure)
+                    doc = await operation(http, doc, "commit", commit_body(doc))
+                    ids.append(doc["history"]["selectedStepId"])
+
+                rolled = (await http.get(url(doc), headers=headers(doc))).json()
+                assert rolled["history"]["length"] == rolled["history"]["cursor"] == 2
+                assert [step["stepId"] for step in rolled["steps"]] == ids[1:]
+                assert rolled["steps"][0]["changes"] == [{"control": "light.exposure", "before": 1., "after": 2.}]
+
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": None})
+                doc = await change(http, doc, .5)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                branched = (await http.get(url(doc), headers=headers(doc))).json()
+                assert branched["history"]["length"] == branched["history"]["cursor"] == 1
+                assert branched["steps"][0]["changes"] == [{"control": "light.exposure", "before": 1., "after": .5}]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_history_change_projection_fails_closed_for_unusable_snapshots():
+    from windows_raw_api import RawPreviewApi
+
+    step = {"kind": "control", "metadata": {"control": "light.exposure"}}
+    valid = {"light": {"exposure": .7}}
+    assert RawPreviewApi._history_changes(step, valid, {"light": {"exposure": .6}}) == [
+        {"control": "light.exposure", "before": .7, "after": .6}]
+    for broken in ({"light": {"exposure": True}}, {"light": {"exposure": float("nan")}}, {"light": []}, {}):
+        assert RawPreviewApi._history_changes(step, broken, valid) is None
 
 
 @pytest.mark.parametrize("failure", ["busy", "full", "commit", "unknown"])

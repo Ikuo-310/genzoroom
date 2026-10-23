@@ -21,7 +21,8 @@ export function rawHistoryPage(doc: RawDocument, offset: number): RawHistoryPage
     hasMore: offset + 20 < history.length, steps: Array.from({ length: Math.min(20, Math.max(0, history.length - offset)) }, (_, i) => ({
       stepId: offset + i + 1 === history.cursor && history.selectedStepId ? history.selectedStepId
         : `00000000-0000-4000-8000-${String(offset + i + 1).padStart(12, '0')}`,
-      kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z' })) };
+      kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z',
+      changes: [{ control: 'light.exposure', before: offset + i, after: offset + i + 1 }] })) };
 }
 
 /** Test transport model: metadata/snapshots belong to this fake Backend, never the hook. */
@@ -56,7 +57,9 @@ export function fakeRawHistory(count = 2, initialCursor = count, attempts = 0) {
       revision = result.recipeRevision; receipts.set(request.saveId, result); return result;
     },
     page: (doc: RawDocument, offset: number): RawHistoryPage => ({ ...rawHistoryPage(doc, offset), recipeRevision: revision,
-      history: metadata(), hasMore: offset + 20 < entries.length, steps: entries.slice(offset, offset + 20).map(entry => ({ stepId: entry.id,
-        kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z' })) }),
+      history: metadata(), hasMore: offset + 20 < entries.length, steps: entries.slice(offset, offset + 20).map((entry, index) => ({ stepId: entry.id,
+        kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z',
+        changes: [{ control: 'light.exposure', before: offset + index ? entries[offset + index - 1].exposure : 0,
+          after: entry.exposure }] })) }),
   };
 }

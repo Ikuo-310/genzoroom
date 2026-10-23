@@ -25,7 +25,8 @@ export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump';
   control?: RawControlId; targetStepId?: string | null };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset';
-  metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string };
+  metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string;
+  changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
   historyPending: boolean; nativeState: string; nativeMatchesRecipe: boolean; replayed: boolean;
@@ -213,7 +214,15 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
       || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !['light', 'color'].includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !['light', 'color'].includes(m.section)
-        : step.kind !== 'allReset' || Object.keys(m).length !== 0)) throw new RawApiError('raw_invalid_response');
+        : step.kind !== 'allReset' || Object.keys(m).length !== 0)
+      || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
+        && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
+          const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;
+          return !!item && RAW_CONTROL_IDS.includes(item.control as RawControlId)
+            && typeof item.before === 'number' && Number.isFinite(item.before)
+            && typeof item.after === 'number' && Number.isFinite(item.after)
+            && changes.findIndex(other => (other as { control?: unknown } | null)?.control === item.control) === index;
+        }))) throw new RawApiError('raw_invalid_response');
     ids.add(step.stepId);
   }
   if (h.cursor > offset && h.cursor <= offset + value.steps.length && value.steps[h.cursor - offset - 1].stepId !== h.selectedStepId)
@@ -225,7 +234,8 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
     history: { initialized: h.initialized, cursor: h.cursor, length: h.length, selectedStepId: h.selectedStepId },
     historyPending: value.historyPending, nativeState: value.nativeState, nativeMatchesRecipe: value.nativeMatchesRecipe,
     offset, limit: 20, hasMore: value.hasMore, steps: value.steps.map((step: RawHistoryStep) => ({ stepId: step.stepId,
-      kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt })) };
+      kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
+      changes: step.changes?.map(change => ({ ...change })) ?? null })) };
 }
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal): Promise<RawFrame> {
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,

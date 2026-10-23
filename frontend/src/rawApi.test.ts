@@ -63,25 +63,28 @@ describe('RAW History transport', () => {
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
       expectedRecipeRevision: 4, saveId: request.saveId, ...(action === 'jump' ? { targetStepId: null } : {}) });
   });
-  it('reads only 20 metadata rows within the History-only 16 KiB boundary', async () => {
+  it('reads 20 display-diff rows within the History-only 16 KiB boundary without exposing snapshots', async () => {
     const result = rawHistoryResult(historyRequest('commit'), { history: { initialized: true, cursor: 200, length: 200,
       selectedStepId: historyRequest('commit').saveId } });
     const page = rawHistoryPage(result, 180);
     const fetch = vi.fn(async () => new Response(JSON.stringify({ ...page, internal: 'excluded', settings: { private: true } }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);
-    const value = await readRawHistory(result, 180); expect(value.steps).toHaveLength(20); expect(value).not.toHaveProperty('settings');
+    const value = await readRawHistory(result, 180); expect(value.steps).toHaveLength(20);
+    expect(value.steps[0].changes).toEqual([{ control: 'light.exposure', before: 180, after: 181 }]);
+    expect(value).not.toHaveProperty('settings');
     expect(value).not.toHaveProperty('internal');
     const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(path).toBe(`/api/raw/documents/${doc.handle}/history?offset=180&limit=20`);
     expect(init.headers).toEqual({ 'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': '1', 'X-Raw-Token': doc.documentToken });
   });
-  it.each(['generation', 'rows', 'cursor', 'metadata', 'oversize'])('rejects invalid History %s', async invalid => {
+  it.each(['generation', 'rows', 'cursor', 'metadata', 'changes', 'oversize'])('rejects invalid History %s', async invalid => {
     const result = rawHistoryResult(historyRequest('commit')), page = rawHistoryPage(result, 0);
     if (invalid === 'generation') page.generation++;
     if (invalid === 'rows') page.steps.push(page.steps[0]);
     if (invalid === 'cursor') page.history = { ...page.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
     if (invalid === 'metadata') page.steps[0].metadata.control = 'native.unknown' as never;
+    if (invalid === 'changes') page.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
     const content = invalid === 'oversize' ? JSON.stringify(page) + ' '.repeat(16384) : JSON.stringify(page);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result, 0)).rejects.toThrow('raw_invalid_response');

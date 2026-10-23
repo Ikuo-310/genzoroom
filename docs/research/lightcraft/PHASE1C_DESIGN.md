@@ -1157,3 +1157,28 @@ FrontendのReact／coordinatorテストはAPI Fakeを使う別境界として扱
 - 実Immichに接続した写真切替・Filmstrip除外・通常Windows終了とprocess再起動、選択profileの実SQLiteからの復元を確認する。native bundle／process smokeの21 skipも別途artifactが必要。
 
 LightCraftは引き続きv0.10.0（固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`）、SQLite schema v8、JPEG Recipe v18。v0.12.0更新・正常保存中disabledの再設計・History手動整理／圧縮・C4-CのカテゴリON/OFF／Reset・C4-D以降は実装しない。設計書とarchitectureを更新し、英語prefix＋日本語概要でCommit／Push後、C4-B3-3で停止する。
+
+## Phase 1C-C4 RAW History数値表示（2026-10-23）
+
+RAW History行をJPEG Historyと同じ「操作項目 before → after」にする。露光量は既存`formatExposure`（符号付き小数2桁）、その他の数値controlは既存JPEG formatterと同じprecisionを使う。色温度は各値に`K`を付ける。RAWの行には操作日時を表示しない。History番号、現在位置、undone表示、baseline、UUIDによる行選択、20件ページングは維持する。JPEG Historyの表示・動作は変更しない。
+
+### GET表示値の導出
+
+SQLite保存内容は変更しない。Backendは既存の検証済み`get_raw_history()`結果からページを組み立て、stepごとに次のsnapshotだけを参照する。
+
+- `before`：先頭stepなら保持中`baselineSettings`、それ以外は直前stepの完全snapshot。
+- `after`：対象stepの完全snapshot。
+- `changes`：step kindと既存control IDに従って対象controlを限定し、有限な数値が異なるものだけを`{control, before, after}`で返す。通常controlは1項目、将来のカテゴリ／全Resetは複数controlへ拡張できる形。表示可能な変更がないと確認できた空配列と、対象snapshot値が欠落・型不正・非有限で表示を確定できない`null`を区別する。
+
+ページは全保持Historyから導出するため、ページ先頭でもページ外の直前stepを使う。枝切り後は枝のstep順を、200件上限でbaselineが繰り上がった後は新baselineと保持stepを使う。Frontendへ完全DevelopSettings、baseline、各snapshotを送らない。保存済みHistoryの書換え、schema／migration、追加保存fieldはない。
+
+`GET /history`は従来の最大20step／16 KiB応答上限を維持し、差分追加後の実応答も同じ上限で検査する。既存`createdAt`契約は応答に残すが、RAW UIは`HistoryList`へ渡さず日時を描画しない。未実装のカテゴリON/OFF／Reset操作は追加せず、将来の複数control行に同じ`changes`構造を使う。
+
+### 検証と監査
+
+- Backend `test_raw_history_api.py`／`test_raw_history_store.py`：Python 3.14で136件成功。baseline先頭、offset=20のページ先頭、枝切り、baseline繰上げ、有限値抽出と不正値fail-closed、200件保持層を確認した。history GETは16 KiB制限内であり、snapshot類が応答rootへ露出しない。
+- Frontendの`rawApi.test.ts` 36件、`RawEditHistory.test.tsx` 3件、`rawHistorySave.test.ts` 39件、`AnshitsuRawPreview.test.tsx` 39件、JPEG History表示を含む`AnshitsuPage.test.tsx` 34件が成功。符号／小数、Kelvin、日時なし、cursor／undone／baseline、API値検証、複数control操作表示、既存coordinator／History操作、JPEG表示回帰を確認した。JPEG側コード変更はない。
+- TypeScript `tsc --noEmit`を含む`npm run build`、対象Backendソース／テストの`py_compile`、`git diff --check`を確認。production buildの既存500 kB超chunk警告はあるがbuildは成功。
+- 限定監査でHigh／Mediumなし。Backendがsnapshot値を一つでも安全に数値化できない場合はそのstepの差分を`null`とし、UIは操作名のみを表示する。推測値を補わない。
+
+コード上の検証であり、Windows WebViewでの実画面確認は未実施。C4-CのカテゴリON/OFF・Reset、C4-D以降は開始していない。LightCraft v0.10.0、SQLite schema v8、Recipe v18とB1〜B3の保存／Undo／Redo契約を維持する。

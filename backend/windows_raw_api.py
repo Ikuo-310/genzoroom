@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import math
 import re
 import secrets
 from time import monotonic
@@ -17,7 +18,7 @@ from lightcraft_mcp import LightCraftError
 from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from raw_source import RawSourceCache
-from raw_controls import controls_state, validate_controls
+from raw_controls import CONTROLS, controls_state, validate_controls
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
@@ -398,6 +399,32 @@ class RawPreviewApi:
                     and doc["settingsFingerprint"] == (saved or doc["recipeFingerprint"])}
 
     @staticmethod
+    def _history_changes(step, before_settings, after_settings):
+        metadata = step["metadata"]
+        if step["kind"] in ("control", "controlReset"):
+            controls = [metadata["control"]]
+        elif step["kind"] in ("sectionToggle", "sectionReset"):
+            section = metadata["section"]
+            controls = [control for control in CONTROLS if control.startswith(f"{section}.")
+                        or section == "color" and control.startswith("wb.")]
+        else:
+            controls = list(CONTROLS)
+
+        changes = []
+        for control in controls:
+            group, key = control.split(".", 1)
+            before_group, after_group = before_settings.get(group), after_settings.get(group)
+            if type(before_group) is not dict or type(after_group) is not dict:
+                return None
+            before, after = before_group.get(key), after_group.get(key)
+            if (type(before) not in (int, float) or not math.isfinite(before)
+                    or type(after) not in (int, float) or not math.isfinite(after)):
+                return None
+            if before != after:
+                changes.append({"control": control, "before": before, "after": after})
+        return changes
+
+    @staticmethod
     def _history_json(payload, limit=MAX_JSON_BYTES):
         response = JSONResponse(payload, headers={"Cache-Control": "no-store"})
         if len(response.body) > limit:
@@ -465,11 +492,16 @@ class RawPreviewApi:
             except ValueError:
                 raise LightCraftError("raw_invalid_request") from None
             state = await self._history_load(doc)
-            steps = state["history"]["steps"] if state["history"] else []
+            history = state["history"]
+            steps = history["steps"] if history else []
+            baseline = history["baselineSettings"] if history else None
+            page_steps = []
+            for index, step in enumerate(steps[offset:offset + limit], offset):
+                before = baseline if index == 0 else steps[index - 1]["settings"]
+                page_steps.append({key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
+                                  | {"changes": self._history_changes(step, before, step["settings"])})
             return self._history_json({**doc, **self._history_public(doc, state), "offset": offset,
-                "limit": limit, "hasMore": offset + limit < len(steps), "steps": [
-                    {key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
-                    for step in steps[offset:offset + limit]]}, MAX_HISTORY_RESPONSE_BYTES)
+                "limit": limit, "hasMore": offset + limit < len(steps), "steps": page_steps}, MAX_HISTORY_RESPONSE_BYTES)
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)
         fingerprint = hashlib.sha256(json.dumps([doc["handle"], action, body], sort_keys=True,

@@ -412,14 +412,15 @@ const history = () => host.querySelector<HTMLOListElement>('.edit-history')!;
 const historyButton = (position: number) => position === 0 ? history().querySelector<HTMLButtonElement>('.initial-state button')!
   : history().querySelector<HTMLButtonElement>(`li[value="${position}"] button`)!;
 
-it('displays baseline for an unedited RAW and saved History timestamps/selection for an edited RAW', async () => {
+it('displays baseline and numeric RAW History rows without operation timestamps', async () => {
   await mount(); expect(historyButton(0).getAttribute('aria-current')).toBe('step');
   expect([...host.querySelectorAll<HTMLButtonElement>('.edit-actions button')].every(button => button.disabled)).toBe(true);
   act(() => root.unmount()); await flush(); root = createRoot(host);
   historyBackend(); await mount();
   expect(history().querySelectorAll('li')).toHaveLength(3); expect(historyButton(2).getAttribute('aria-current')).toBe('step');
-  expect(history().querySelector('time')?.dateTime).toBe('2026-10-23T00:00:00Z');
-  expect(history().textContent).toContain('Exposure'); expect(historyButton(0).textContent).toBe('Initial State');
+  expect(history().querySelector('time')).toBeNull();
+  expect(history().textContent).toContain('Exposure'); expect(history().textContent).toContain('→');
+  expect(historyButton(0).textContent).toBe('Initial State');
 });
 
 it('shares the History presentation while mapping rows to stable RAW UUIDs and baseline null', async () => {
@@ -515,11 +516,12 @@ it('labels RAW temperature in Kelvin without inventing unavailable before/after 
   const model = historyBackend();
   vi.mocked(rawApi.readRawHistory).mockImplementation(async (doc, offset) => {
     const page = model.page(doc, offset);
-    page.steps[0].metadata.control = 'wb.temp'; page.steps[1].metadata.control = 'wb.tint'; return page;
+    page.steps[0].metadata.control = 'wb.temp'; page.steps[0].changes = [{ control: 'wb.temp', before: 4500, after: 5000 }];
+    page.steps[1].metadata.control = 'wb.tint'; page.steps[1].changes = [{ control: 'wb.tint', before: 0, after: -10 }]; return page;
   });
   await mount();
-  expect(history().textContent).toContain(`${i18n.t('workspace.temperature')} (K)`);
-  expect(history().textContent).toContain(i18n.t('workspace.tint')); expect(history().textContent).not.toContain('→');
+  expect(history().textContent).toContain(`${i18n.t('workspace.temperature')} 4500 K → 5000 K`);
+  expect(history().textContent).toContain(`${i18n.t('workspace.tint')} 0 → -10`);
 });
 
 function simulateChromiumRangeDisableBlur(range: HTMLInputElement) {

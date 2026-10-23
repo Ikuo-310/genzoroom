@@ -200,7 +200,8 @@ function historyBackend(length = 3, cursor = length, sameSettings = false) {
     receipts.set(request.saveId, result); return result;
   });
   vi.mocked(api.readRawHistory).mockImplementation(async (doc, offset) => ({ ...rawHistoryPage(doc, offset),
-    steps: entries.slice(offset, offset + 20).map(e => ({ stepId: e.id, kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z' })) }));
+    steps: entries.slice(offset, offset + 20).map((e, index) => ({ stepId: e.id, kind: 'control', metadata: { control: 'light.exposure' },
+      createdAt: '2026-10-23T00:00:00Z', changes: [{ control: 'light.exposure', before: index ? entries[offset + index - 1].value : 0, after: e.value }] })) }));
   return { settings, entries, position: () => position };
 }
 
