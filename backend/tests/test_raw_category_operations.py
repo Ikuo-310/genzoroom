@@ -6,10 +6,10 @@ import pytest
 import raw_recipe_store as store
 from edit_store import StoreUnavailable
 from tests.test_windows_local import local, client, authenticate
-from tests.test_windows_raw_api import setup, open_document
+from tests.test_windows_raw_api import setup, open_document, preview_body
 from tests.test_raw_recipe_api import headers
 from tests.test_raw_controls import identity
-from tests.test_raw_history_api import url, body, operation
+from tests.test_raw_history_api import url, body, operation, rows
 from tests.test_raw_recipe_restore import open_asset
 
 
@@ -28,6 +28,69 @@ async def patch(http, doc, values):
 
 async def edit(http, doc, kind, metadata):
     return await operation(http, doc, "operate", body(doc) | {"kind": kind, "metadata": metadata})
+
+
+def test_before_cache_is_read_only_across_category_reset_and_history_branch(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        child.before_supported = True
+        child.as_shot_wb = [4875., 13.]
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                key = doc["beforeKey"]
+                serial = 0
+                before_png = None
+
+                async def compare(current):
+                    nonlocal serial, before_png
+                    serial += 1
+                    durable = rows()
+                    document = copy.deepcopy(api.document)
+                    settings = copy.deepcopy(child.photos[child.active]["settings"])
+                    attempts = api.raw.status().edits
+                    response = await http.post(f'/api/raw/documents/{current["handle"]}/preview',
+                        json=preview_body(current, serial) | {"kind": "before"})
+                    assert response.status_code == 200, response.text
+                    assert response.headers["x-raw-kind"] == "before"
+                    assert response.headers["x-raw-before-key"] == key == current["beforeKey"]
+                    assert response.headers["x-raw-revision"] == str(current["revision"])
+                    if before_png is None:
+                        before_png = response.content
+                    assert response.content == before_png and child.render_count == 1
+                    # A cached comparison must not touch even receipts or the native mutation budget.
+                    assert rows() == durable and api.document == document
+                    assert child.photos[child.active]["settings"] == settings
+                    assert api.raw.status().edits == attempts
+
+                await compare(doc)
+                doc = await patch(http, doc, {"light.exposure": 1.25, "wb.temp": 11000., "color.vibrance": 15.})
+                doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
+                await compare(doc)
+                for kind, metadata in (("sectionToggle", {"section": "color", "enabled": False}),
+                        ("controlReset", {"control": "wb.temp"}),
+                        ("sectionReset", {"section": "color"}), ("allReset", {})):
+                    length = doc["history"]["length"]
+                    doc = await edit(http, doc, kind, metadata)
+                    assert doc["history"]["length"] == length + 1
+                    await compare(doc)
+                for action in ("undo", "redo"):
+                    doc = await operation(http, doc, action)
+                    await compare(doc)
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": None})
+                await compare(doc)
+                doc = await patch(http, doc, {"light.exposure": .5})
+                doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
+                assert doc["history"]["cursor"] == doc["history"]["length"] == 1
+                await compare(doc)
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc, serial + 1))
+                assert response.status_code == 200 and response.headers["x-raw-kind"] == "after"
+                assert child.render_count == 2
+                assert child.photos[child.active]["settings"] == store.get_raw_history(api._history_identity)["recipe"]["settings"]
+        finally:
+            await api.close()
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("control", ["light.exposure", "light.contrast", "light.highlights", "light.whites",

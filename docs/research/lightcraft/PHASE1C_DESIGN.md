@@ -1,6 +1,6 @@
 # RAW現像統合 Phase 1C 実装前調査・設計
 
-本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-B1〜B3のRAW History基盤・UI・自動統合監査、C4-CのRAWカテゴリON/OFF・Reset、およびC4-Dのnative Before/Afterを実装済み。現行仕様と実機未確認範囲は末尾の各完了記録を参照する。C4-E以降は未実施**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
+本書はPhase 1Cの設計・完了記録（2026-10-22〜23、Asia/Tokyo）。**C1〜C3-D、C4-BのRAW History、C4-CのRAWカテゴリON/OFF・Reset、C4-Dのnative Before/After、C4-EのJPEG UI統合を実装済み。C4-Fの自動回帰・横断監査も完了。現行仕様とユーザー実機確認済み／未確認の範囲は末尾の各完了記録を参照する**。初期設計と各工程の完了記録は当時の内容として保持し、現行仕様は後続記録を優先する。既存のRAW／JPEG暗室送信機能を再実装せず、その送信結果をWindows版のLightCraft RAW処理へ接続する。以下では「事実」「確定仕様」「推奨」「未決定／未検証」を区別する。
 
 ## 1. 調査基準と参照コード
 
@@ -1338,3 +1338,41 @@ Recipe v18の16個の`adjustmentEnabled` field、SQLite schema、History形式�
 既存`whiteBalanceEnabled`と`colorEnabled`を統合カラー状態としてANDで評価し、新しいカラーtoggleは両fieldを同期した`colorToggle`一件として記録する。カラーResetは4数値をまとめて初期値へ戻し、Reset直前の2 fieldのANDへ両fieldを同期する`colorReset`一件とした。Undo／Redo／History jumpは既存のsnapshot復元経路を維持する。個別Resetは従来どおり対象数値だけを戻し、Recipe version、DB schema、JPEG Before／After、Export、補正済みサムネイルの保存契約を変更していない。
 
 Focused Frontend回帰15ファイル640件が成功し、1件をskipした（UI／state／shortcut／clipboard 11ファイル432件、WebGPU model／ImageViewer／worker 4ファイル208件）。Backend関連5ファイル93件と114 subtestsが成功した。TypeScript typecheck、production build、Python構文検査、`git diff --check`も成功した。production buildには既存の500 kB超chunk警告、React testsには既存の`act(...)`警告がある。ブラウザ実画面の手動確認は行っていない。C4-Eで停止し、C4-Fは実施していない。
+
+## Phase 1C-C4-F 横断監査・最終回帰確認（2026-10-23）
+
+開始HEAD `daefe03fd0174ea008088e8a2e0d1e9bcac95f33`、`feature/lightcraft-integration`、作業ツリーclean。C4-B〜Eと直近の等倍ラベル統一を読み取り中心に監査した。初期設計・各工程の記録は保持し、本節を今回の完了判断とする。
+
+### 接続境界と検証の対応
+
+| 対象 | 確認結果・証拠 |
+|---|---|
+| A：History・保存 | `rawRecipeSave`→Windows History API→adapter readback→SQLite transaction／receipt→ack検証を追跡。currentとcursorの一致、immutable retry／CAS、結果不明・旧ack・世代排除、200件繰上げ／枝切り／no-opを既存B3監査とHistory APIテストへ対応づけた。gesture中のPreviewは既存Controls経路で更新し、History移動／Resetでは保存ack検証後にPreview更新する。画像の表示を保存成功の根拠にはしない |
+| B：カテゴリ・Reset | 全10個別Reset、OFF中Reset、As Shotのtemp／tint／mode／scale、複合操作rollback、1操作1step、199→202／254→256境界を既存categoryテストで確認。hookの200到達Reset→保存→再生成→WB／カテゴリ／cursor復元も再実行。native操作／保存仕様の変更なし |
+| C：Before/After | import基準と現像式不変を管理patch／adapterから確認。schema・kind・fingerprint／geometry／PNG寸法、key再利用／無効化、After優先、stale排除、Blob回収、再生成・再入場、zoom／pan、失敗時After継続を既存API／hook／Viewerテストへ対応づけた。下記の不足していた接続テストを追加 |
+| D：パッチ管理 | 固定v0.10.0／commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`、manifestとpatch SHA-256 `7536727b570ac9cb47c9f2e0ad5c3f25f94b9082cf63408f9dcea59daa5425a3`の一致を再確認。source完全diff／部分・二重適用拒否、receiptとbinary digest／probe、packagingの指定engine検証、AGENTS→UPDATE_GUIDEをコードで確認。外部engine未指定のbuildはBefore対応engine同梱を意味しない |
+| E：JPEG | カラー4項目・2flag AND／同期・Resetの1 History、個別flag保持と描画無視、個別Reset・clipboard／Undo／Redo／jumpをUI・reducer・両validatorで確認。CPU／Workerは`adjustmentPipeline`、WebGPUは`effectiveAdjustments`、Backendは`JpegRenderer`の同じカテゴリ方針。Export `_artifact`とthumbnail `_render_preview`は既存`JpegRenderer`を共用。画素式・永続形式の変更なし |
+| F：共通境界・診断 | RAW/JPEG切替、Filmstrip選択・除外Undo優先、shortcut単一dispatch／入力・IME・modal抑止、Viewer／History所有、通常終了・離脱save guardを画面テストで確認。LocalHost認証・owner、4 KiB要求／通常JSON・16 KiB History・5 MiB PNG上限を維持。既存loggerは固定errorCode／ID／revision等を記録し、Settings／History本文・画像・認証・pathを出さず、失敗は本処理へ伝播しない。追加ログは不要と判断 |
+
+### 追加検証・Finding
+
+`test_raw_category_operations.py::test_before_cache_is_read_only_across_category_reset_and_history_branch`を追加。認証付きHTTP→Windows API→実adapter→一時SQLiteを通し、native transport／画像sourceだけをFakeにした。編集commit、カラーOFF、As Shot個別Reset、カラーReset、All Reset、Undo／Redo、baseline jump、Redo枝切りを同一documentで実行する。各段階のBefore取得でDB全RAW関連行（receipt含む）・document metadata・native Settings・mutation件数が不変、PNGとkeyを再利用しnative renderが1回のまま、最後のAfterが利用可能でnative SettingsがSQLite currentと一致することを確認した。実GPU画質の検証ではない。
+
+Findingは**High 0／Medium 0／Low 1（文書）**。Lowは冒頭のC4-E未実施要約とarchitectureの旧等倍ラベル記載の取り残しで、現行仕様へ更新した。実装上の修正は不要。未解決High／Mediumなし。Slider・focus・保存coordinator・Backend production code・native patch・schema・Recipeの変更はない。
+
+### 今回の実行結果と再利用
+
+- Frontend：`npm exec -- vitest run --no-file-parallelism`、`AnshitsuRawPreview`／`useRawDocument`／`rawHistorySave`／`rawApi`／`RawEditHistory`／`ImageViewer`／`editControls`／`sliderBypass`／`editState`／`AnshitsuClipboard`／`Filmstrip`の11ファイル、**494 passed、skip／failureなし**。C4-E後の共通UIとRAW保存・比較・切替の接続を最終コードで確認するため実行した。
+- Backend：repo `.venv` Python **3.14.5**、cwd `backend`、`pytest -q -rs`で`test_raw_history_api`／`test_raw_category_operations`／`test_raw_before`／`test_windows_raw_api`／`test_jpeg_renderer`／`test_edit_state`の6ファイル、**137 passed、99 subtests passed、skip／failureなし**。新しい統合テストの単独成功はこの件数へ重複加算しない。
+- TypeScript `tsc --noEmit`を含むproduction build、対象Backend／追加テスト／native build scriptの`py_compile`、`git diff --check`成功。buildの既存500 kB超chunk警告は残る。今回の成功したFrontend実行にReact `act(...)`／font警告はない。
+- sandbox内ではVitest変換cacheの`ENOENT`、pytest一時directory作成エラーで一部suiteが起動できなかった。同じ限定テストを通常の一時領域で再実行して上記全件成功。製品assertion失敗と区別し、テスト期待値・既定configは変更していない。
+- B3のFrontend全体3154 passed／2 skipped、Backend全体1768 passed／21 skipped／326 subtests、およびC4-C／D／Eの工程別結果を再利用した。今回の変更は接続テストと文書だけで、追加の全suiteは不要と判断。未変更のJPEG WebGPU／Worker・Export／thumbnail個別回帰、保存層のSQLite full／transaction rollback詳細は各工程の成功記録と現在の呼出し経路を確認し、再実行していない。
+- native patch再適用／二重適用試験、Rust MCP 55 passed／1 ignored、release CLI build、synthetic PNG実binary probe／receiptはC4-D記録を再利用。patch・manifest・native実装に変更がないため、native再ビルド・再適用・GPU probeを無条件に繰り返していない。
+
+### 実機確認と完了範囲
+
+C4-F依頼で引き継いだ**ユーザーによるWindows実機確認済み範囲**は、RAW History・Undo／Redo、カテゴリON/OFF・Reset、スライダー／focus、Before/After表示・比較、JPEGカラー統合・個別ON/OFF廃止と既存暗室操作、JPEG／RAW等倍表示ラベルである。過去節の「当該実装時点でエージェント未確認」を理由に、これらを未確認へ戻さない。今回エージェントが実機・ブラウザ操作を行ったという意味ではなく、全障害条件／長時間試験まで確認済みとは扱わない。
+
+未確認として残す範囲：実機長時間連続操作・History上限到達、保存失敗Retry・結果不明／CAS競合の実環境再現、GPU高負荷・障害・画質、原本欠落／engine不一致、強制終了、installer／配布artifact、NAS／Firefox。通常終了・再生成／混在Filmstripの全競合タイミング、狭幅実フォント／JIS実キーなどの詳細条件も、自動Fake／React DOMの成功だけで実機成功へ拡張しない。Docker全体Smoke Test、NASデプロイ、実Immichデータ操作、ブラウザ動的検証は実施していない。
+
+**C4-Fは横断監査・自動最終回帰の範囲で完了。** SQLite schema v8、JPEG Recipe v18、LightCraft v0.10.0固定と独自patch管理を維持する。既存仕様の変更や大規模設計変更を要する問題は見つかっていない。README／CHANGELOG／AGENTS／UPDATE_GUIDEは変更せず、Commit／Push後に停止する。次Phase・engine更新へ進まない。
