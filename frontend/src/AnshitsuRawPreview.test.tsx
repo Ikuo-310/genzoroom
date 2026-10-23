@@ -257,6 +257,116 @@ it('keeps the overlaid suffix outside the numeric temperature value during Enter
   expect(input.value).toBe('11000');
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
 });
+
+it('navigates RAW category controls in title, toggle, Reset order without activating them', async () => {
+  await mount();
+  const header = host.querySelector<HTMLElement>('.raw-adjustment-category .adjustment-category-header')!;
+  const title = header.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  const toggle = header.querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
+  const reset = header.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+  const enabled = toggle.getAttribute('aria-pressed');
+  const historyCount = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const move = (element: HTMLElement, key: string) => historyKey(key, { ctrlKey: false, shiftKey: true }, element);
+  act(() => title.focus()); move(title, 'ArrowRight'); expect(document.activeElement).toBe(toggle);
+  move(toggle, 'ArrowRight'); expect(document.activeElement).toBe(reset);
+  move(reset, 'ArrowLeft'); expect(document.activeElement).toBe(toggle);
+  move(toggle, 'ArrowLeft'); expect(document.activeElement).toBe(title);
+  expect(toggle.getAttribute('aria-pressed')).toBe(enabled);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyCount);
+});
+
+it.each(['Enter', ' '])('leaves RAW Reset activation to the native %s button action', async key => {
+  const model = historyBackend(0);
+  await mount();
+  const header = host.querySelector<HTMLElement>('.raw-adjustment-category .adjustment-category-header')!;
+  const title = header.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  const reset = header.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+  act(() => title.focus());
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, title);
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, document.activeElement as HTMLElement);
+  expect(document.activeElement).toBe(reset);
+  const before = vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action);
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  act(() => reset.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(false);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(before);
+  act(() => reset.click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)?.[0].operation).toEqual({
+    kind: 'sectionReset', metadata: { section: 'color' },
+  });
+  expect(model.cursor()).toBe(0);
+});
+
+it('keeps focus on a RAW individual Reset after Shift navigation settles a numeric edit', async () => {
+  vi.useFakeTimers();
+  const model = historyBackend(0);
+  await mount();
+  let resolveCommit!: () => void;
+  let pendingRequest: rawApi.RawHistoryRequest | undefined;
+  const trace: string[] = [];
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => request.action === 'initialize' ? Promise.resolve(model.save(request))
+    : new Promise(resolve => { pendingRequest = request; trace.push(`history.${request.action}`); resolveCommit = () => resolve(model.save(request)); }));
+  const row = exposure().closest('.adjustment-control')!;
+  const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const reset = row.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+  input.addEventListener('blur', () => trace.push('number.blur'));
+  reset.addEventListener('focus', () => trace.push('reset.focus'));
+  reset.addEventListener('blur', () => trace.push('reset.blur'));
+  act(() => input.focus()); inputValue(input, '1.25');
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, input);
+  await flush();
+  expect(pendingRequest?.action).toBe('commit');
+  expect(trace.indexOf('reset.focus')).toBeGreaterThanOrEqual(0);
+  expect(trace.indexOf('number.blur')).toBeGreaterThanOrEqual(0);
+  expect(trace.indexOf('number.blur')).toBeLessThan(trace.indexOf('reset.focus'));
+  expect(trace.indexOf('number.blur')).toBeLessThan(trace.indexOf('history.commit'));
+  expect(reset.disabled).toBe(true);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit']);
+
+  // Chromium drops focus when a focused native button becomes disabled; jsdom does not.
+  if (document.activeElement === reset) {
+    reset.disabled = false; act(() => reset.blur()); reset.disabled = true;
+  }
+  expect(trace.indexOf('reset.blur')).toBeGreaterThan(trace.indexOf('reset.focus'));
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => resolveCommit()); await flush();
+  expect(reset.disabled).toBe(false);
+  expect(document.activeElement).toBe(reset);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit']);
+
+  const activation = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  act(() => reset.dispatchEvent(activation));
+  expect(activation.defaultPrevented).toBe(false);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit']);
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => Promise.resolve(model.save(request)));
+  act(() => reset.click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit', 'operate']);
+});
+
+it('does not restore a RAW Reset focus after the user moves elsewhere during the save lock', async () => {
+  const model = historyBackend(0);
+  await mount();
+  let resolveCommit!: () => void;
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => request.action === 'initialize' ? Promise.resolve(model.save(request))
+    : new Promise(resolve => { resolveCommit = () => resolve(model.save(request)); }));
+  const row = exposure().closest('.adjustment-control')!;
+  const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const reset = row.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+  act(() => input.focus()); inputValue(input, '1.25');
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, input);
+  await flush();
+  expect(reset.disabled).toBe(true);
+  if (document.activeElement === reset) {
+    reset.disabled = false; act(() => reset.blur()); reset.disabled = true;
+  }
+  const external = document.createElement('button'); document.body.append(external);
+  act(() => external.focus());
+  await act(async () => resolveCommit()); await flush();
+  expect(document.activeElement).toBe(external);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit']);
+  external.remove();
+});
+
 it('does not show an Immich image as the result of failed native rendering', async () => {
   vi.mocked(rawApi.rawPreview).mockRejectedValue(new rawApi.RawApiError('raw_render_failed'));
   await mount();

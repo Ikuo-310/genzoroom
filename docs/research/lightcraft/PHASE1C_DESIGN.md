@@ -1239,3 +1239,26 @@ C4-C後のRAW操作パネルで、数値欄を66 px固定にしていたため5�
 RAW全10行の数値wrapperとReset列を同じ幅にし、gridの右列をその幅へ固定する。これにより色温度を含む全スライダーの開始・終了位置、数値欄、Resetを揃え、従来の別K列分をrangeへ戻す。5桁分の幅は固定pxではなく`ch`と`em`から算出する。CSSでspinlineを隠す現行指定を維持し、Windows Chromiumのnumber入力で表示桁とKが重ならない余白を含める。狭いパネルでは従来同様label列が縮み、rangeが残余幅を使う。キーボード入力、Enter／Escape、Reset、JPEGの既定Slider構造は変更しない。
 
 自動UIテストではRAW 10行の数値欄／Reset列の構造、5桁温度とKのDOM上の内包関係、数値のみのEnter／Escape編集、WB Resetを確認する。React DOMは実フォント計測やWebViewの実レイアウトを行わないため、幅の算出根拠はCSSで確認し、Windows実機の狭幅表示は手動確認事項とする。
+
+## RAW暗室キーボードフォーカス移動修正（2026-10-23）
+
+### 原因
+
+RAWカテゴリのON/OFFは共通ナビゲーションが検索する`data-category-switch`属性を持たず、カテゴリ名からResetへ飛んでいた。属性をJPEGと揃え、見出し→ON/OFF→カテゴリResetの既存順序へ戻す。
+
+個別Resetでは、数値欄からShift＋右で移動すると、`navigateAdjustments()`の共通commit callbackが数値draftを確定して保存ownerへ`commit`を予約した後、DOM focusをResetへ移していた。FrontendのHistory保存要求は数値欄のblur／Reset focus後に発行される。保存開始でRAWの`locked`がtrueになり、Resetがnative `disabled`になると、Windows Chromiumがfocusを文書bodyへ落とす。Reset clickやHistory `operate`は発生しておらず、Historyへ追加されたのは数値編集の`commit`だけである。JPEGはこのRAW保存lock遷移を持たず、ボタン操作後の既存focus挙動にも変更を加えない。
+
+### 対応と不変条件
+
+RAW数値欄から個別Resetへキーボード移動した場合だけ、共通ナビゲーションが移動先を一時記録する。RAW操作がdisabledの間はdisabledボタンへ再focusせず、保存lockとHistory操作制限が解除され、focusがbodyに残っている場合に同じResetへ戻して記録を消す。documentの`focusin`やwindow blurで利用者が別要素へ移ったことを検出した場合は記録を破棄し、focusを奪わない。ResetのEnter／Spaceによるnative clickでは一時記録を消し、Reset実行後のfocusを保持しない。保存／Retry／History操作やResetの発火条件は変えない。フォーカス管理は既存`adjustmentFocus.ts`とRAW panelの操作制限状態を使い、別ナビゲーション機構は追加しない。
+
+### 回帰検証
+
+- RAWカテゴリ見出し→ON/OFF→Resetの左右移動で、toggle／History操作が副作用なく、Enter／Space時のみボタンclick経路が動く。
+- 数値欄からResetへ移動するイベント順は、数値blur→Reset focus→History `commit`。保存中にResetがdisabledになってbodyへfocusが移るChromium遷移をテストで再現し、ack後はResetへ戻ることを確認する。Shift移動時にHistory `operate`は発生せず、キー移動だけではResetされない。Enter／Space後のnative activationをReset実行経路として確認する。
+- lock中に他要素へfocusを移した場合、ack後もその要素を保持する。
+- JPEG category／controlの既存左右ナビゲーションとnative Enter／Space activationを含む関連回帰テストを実施する。
+
+React DOMはChromiumがnative disabled controlからfocusを外す挙動を実装しないため、テストではfocus中buttonのdisabled blurを明示的に再現する。Windows WebView実機の最終操作確認は別途必要であり、今回は未実施。
+
+関連Frontend 4ファイル176件、TypeScript typecheckを含むproduction build、`git diff --check`成功。buildの既存500 kB超chunk警告は残る。限定diff監査ではHigh／Mediumの未解決事項なし。

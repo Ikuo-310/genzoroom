@@ -8,6 +8,37 @@ let activeAdjustment: HTMLInputElement | null = null;
 // Scrolling can emit pointer enter/leave without mouse movement. Keep keyboard ownership until it moves.
 let keyboardNavigation = false;
 let mousePosition: { x: number; y: number } | null = null;
+// A RAW commit can disable the focused Reset button; restore it only if focus stayed on the document.
+let pendingAdjustmentFocus: HTMLElement | null = null;
+
+function clearPendingAdjustmentFocus() {
+  if (!pendingAdjustmentFocus) return;
+  pendingAdjustmentFocus = null;
+  document.removeEventListener('focusin', cancelPendingAdjustmentFocus);
+  window.removeEventListener('blur', clearPendingAdjustmentFocus);
+}
+
+function cancelPendingAdjustmentFocus(event: Event) {
+  if (event.target !== pendingAdjustmentFocus) clearPendingAdjustmentFocus();
+}
+
+export function clearAdjustmentFocusTarget(target: HTMLElement) {
+  if (pendingAdjustmentFocus === target) clearPendingAdjustmentFocus();
+}
+
+export function restorePendingAdjustmentFocus(scope: Element) {
+  const target = pendingAdjustmentFocus;
+  if (!target) return;
+  if (!scope.contains(target) || !target.isConnected) { clearPendingAdjustmentFocus(); return; }
+  if (target.matches(':disabled') || target.closest('[hidden], [inert]')) return;
+  if (document.activeElement === target) { clearPendingAdjustmentFocus(); return; }
+  if (document.activeElement === document.body || document.activeElement === document.documentElement) {
+    target.focus({ preventScroll: true });
+    clearPendingAdjustmentFocus();
+    return;
+  }
+  clearPendingAdjustmentFocus();
+}
 
 export function focusAdjustmentCategory() { activeAdjustment = null; }
 
@@ -45,16 +76,23 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const destination = horizontal ? horizontalAdjustmentTarget(current, event.key === 'ArrowRight' ? 1 : -1)
     : adjacent;
   if (destination) {
-    focusAdjustmentTarget(destination, !horizontal);
+    const preserveRawReset = current.matches('.adjustment-number') && !!current.closest('.raw-adjustment-controls')
+      && destination.matches('.adjustment-reset');
+    focusAdjustmentTarget(destination, !horizontal, preserveRawReset);
   }
   return true;
 }
 
-function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean) {
+function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean, preserveIfTemporarilyDisabled = false) {
   const scope = destination.closest('.workspace-side-panel') ?? destination.ownerDocument;
   for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
   keyboardNavigation = true;
   activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
+  if (preserveIfTemporarilyDisabled) {
+    pendingAdjustmentFocus = destination;
+    document.addEventListener('focusin', cancelPendingAdjustmentFocus);
+    window.addEventListener('blur', clearPendingAdjustmentFocus);
+  }
   destination.focus({ preventScroll: true });
   if (reveal) revealAdjustment(destination);
 }
@@ -115,7 +153,7 @@ export function registerAdjustment(element: HTMLInputElement, commit: () => void
 export function unregisterAdjustment(element: HTMLInputElement | null) {
   if (element) adjustments.delete(element);
   if (activeAdjustment === element) activeAdjustment = null;
-  if (adjustments.size === 0) { keyboardNavigation = false; mousePosition = null; }
+  if (adjustments.size === 0) { keyboardNavigation = false; mousePosition = null; clearPendingAdjustmentFocus(); }
 }
 
 export function isRegisteredAdjustment(element: HTMLInputElement): boolean {

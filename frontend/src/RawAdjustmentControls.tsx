@@ -1,7 +1,8 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
-import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus } from './adjustmentFocus';
+import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
+  restorePendingAdjustmentFocus } from './adjustmentFocus';
 import type { AdjustmentId } from './editing';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import type { RawControlId, RawHistoryOperation } from './rawApi';
@@ -24,6 +25,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   };
   const locked = disabled || !!raw.locked || !!raw.editError || raw.status !== 'ready';
   const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
+  useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
   return <div className="raw-adjustment-controls" ref={panel} onPointerDownCapture={event => {
     if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button'))
       preserveAdjustmentNumberFocus(event);
@@ -88,7 +90,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onR
         <span className="adjustment-category-label">{title}</span>
       </button></h3>
       <div className="adjustment-category-actions">
-        <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} disabled={disabled}
+        <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} data-category-switch disabled={disabled}
           aria-pressed={enabled} onClick={onToggle} aria-label={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)}
           title={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>⏻</button>

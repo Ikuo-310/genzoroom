@@ -3,7 +3,7 @@ import type { AdjustmentId } from './editing';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 import {
   activateFromMouse, blurAdjustmentRange, enterAdjustmentRange, focusAdjustmentCategory,
-  focusAdjustmentRange, isRegisteredAdjustment, keyboardAdjustment, leaveAdjustmentRange,
+  focusAdjustmentRange, isRegisteredAdjustment, keyboardAdjustment, leaveAdjustmentRange, clearAdjustmentFocusTarget,
   isKeyboardNavigationTarget, moveOverAdjustmentRange, navigateAdjustments, registerAdjustment, startAdjustmentPointer,
   unregisterAdjustment,
 } from './adjustmentFocus';
@@ -279,7 +279,10 @@ export function AdjustmentSlider(props: Props) {
         aria-pressed={props.enabled} aria-label={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel} title={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
         disabled={props.actionsDisabled} onClick={props.onToggle}>⏻</button>}
-      <button type="button" className={`adjustment-reset${props.actionsDisabled ? ' is-unavailable' : ''}`} onClick={props.onReset}
+      <button type="button" className={`adjustment-reset${props.actionsDisabled ? ' is-unavailable' : ''}`} onClick={(event) => {
+        clearAdjustmentFocusTarget(event.currentTarget);
+        props.onReset();
+      }}
         onFocus={focusAdjustmentCategory}
         onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
         disabled={props.actionsDisabled || (props.resetDisabled ?? (props.disabled || props.value === props.defaultValue))}
