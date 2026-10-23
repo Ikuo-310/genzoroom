@@ -73,3 +73,35 @@ def test_replaced_binary_is_rejected_before_execution(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "probe", lambda _: pytest.fail("a replaced binary must not run"))
     with pytest.raises(ValueError, match="receipt mismatch"):
         build.main()
+
+
+def test_managed_new_source_joins_diff_without_admitting_untracked_files(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(source), *args])
+    git("init", "-q")
+    (source / "base.txt").write_text("upstream\n", encoding="utf-8")
+    git("add", "base.txt")
+    git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
+    commit = git("rev-parse", "HEAD").decode().strip()
+    added = source / "managed.rs"
+    added.write_text("managed source\n", encoding="utf-8")
+    git("add", "--intent-to-add", "managed.rs")
+    patch = git("diff", "--binary", "--full-index", "--no-ext-diff", "--no-color")
+    git("rm", "--cached", "-f", "managed.rs")
+    added.unlink()
+    patches = tmp_path / "patches"
+    patches.mkdir()
+    (patches / "fixture.patch").write_bytes(patch)
+    monkeypatch.setattr(build, "ROOT", patches)
+    value = {"version": "fixture", "commit": commit, "patches": [
+        {"file": "fixture.patch", "sha256": hashlib.sha256(patch).hexdigest()}]}
+    assert build.prepare(source, value, apply=True) == "patched"
+    assert not git("diff", "--cached", "--name-only").strip()
+    assert not git("ls-files", "--others", "--exclude-standard").strip()
+    with pytest.raises(ValueError, match="already applied"):
+        build.prepare(source, value, apply=True)
+    (source / "unmanaged.rs").write_text("not managed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="untracked source"):
+        build.source_state(source, value)

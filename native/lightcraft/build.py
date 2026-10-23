@@ -1,8 +1,10 @@
 """Fail-closed preparation/build/probe for the pinned LightCraft source and local patch set."""
 
 import argparse
+import base64
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -53,7 +55,8 @@ def prepare(source, spec, apply=False):
             args = ["git", "-C", str(source), "apply"]
             path = str(ROOT / patch["file"])
             run([*args, "--check", path])
-            run([*args, path])
+            # Managed new sources join the working-tree diff without staging their contents.
+            run([*args, "--intent-to-add", path])
         if source_state(source, spec) != "patched":
             raise ValueError("patch verification failed")
     return source_state(source, spec)
@@ -79,7 +82,33 @@ def probe(binary):
             tool(5, "command_run", {"id": "beforeAfter.setBefore", "params": {"source": "import"}}),
             tool(6, "render_preview", {"id": 1, "max_side": 16, "before": True}),
             tool(7, "render_preview", {"id": 1, "max_side": 16}),
+            tool(8, "command_run", {"id": "app.memoryBudget", "params": {"mb": 1024}}),
+            tool(9, "get_develop", {"id": 1}),
+            tool(10, "render_preview", {"id": 1, "max_side": 16, "preview_contract": 1}),
+            tool(11, "render_preview", {"id": 1, "max_side": 16, "quality": "draft"}),
+            tool(12, "render_preview", {"id": 1, "max_side": 16, "quality": "full", "before": True}),
+            tool(13, "render_preview", {"id": 1, "max_side": 16, "quality": "draft", "before": True}),
+            tool(14, "render_preview", {"id": 1, "max_side": 16, "quality": "draft",
+                "stage_cache": "on", "stage_cache_budget_bytes": 1024**3}),
+            tool(15, "render_preview", {"id": 1, "max_side": 16, "quality": "full",
+                "stage_cache": "on", "stage_cache_budget_bytes": 1024**3}),
+            tool(16, "render_preview", {"id": 1, "max_side": 16, "quality": "full", "stage_cache": "off"}),
+            tool(17, "render_preview", {"id": 1, "max_side": 16, "quality": "full",
+                "stage_cache": "on", "stage_cache_budget_bytes": 1}),
+            tool(18, "get_develop", {"id": 1}),
         ]
+        invalid = []
+        for field, values, code in (
+            ("quality", (None, True, 1, "FULL", "fast"), "preview_invalid_quality"),
+            ("preview_contract", (None, True, 1.0, 2), "preview_invalid_contract"),
+            ("before", (None, 0, "true"), "preview_invalid_contract"),
+            ("stage_cache", (None, True, "reuse", "on"), "preview_invalid_stage_cache"),
+            ("stage_cache_budget_bytes", (None, True, 0, -1), "preview_invalid_stage_cache"),
+        ):
+            for value in values:
+                index = 20 + len(invalid)
+                invalid.append((index, code))
+                messages.append(tool(index, "render_preview", {"id": 1, "max_side": 16, field: value}))
         # Private TEMP also contains the MCP helper's transient PNGs; no source/photo paths are logged.
         environment = {**os.environ, "TEMP": folder, "TMP": folder}
         process = subprocess.run([str(binary), "mcp", "--headless", "--compact"],
@@ -93,26 +122,72 @@ def probe(binary):
         if server.get("name") != "lightcraft" or server.get("version") != manifest()["version"]:
             raise ValueError("binary version mismatch")
         preview = next(t for t in replies[2]["result"]["tools"] if t["name"] == "render_preview")
-        if preview["inputSchema"]["properties"].get("before", {}).get("type") != "boolean":
-            raise ValueError("binary lacks Before schema")
-        for index, kind in ((6, "before"), (7, "after")):
+        properties = preview["inputSchema"]["properties"]
+        if properties.get("before", {}).get("type") != "boolean" \
+                or properties.get("quality", {}).get("enum") != ["draft", "full"] \
+                or properties.get("preview_contract", {}).get("type") != "integer" \
+                or properties.get("preview_contract", {}).get("enum") != [1] \
+                or properties.get("stage_cache", {}).get("enum") != ["off", "on"] \
+                or properties.get("stage_cache_budget_bytes", {}).get("minimum") != 1:
+            raise ValueError("binary lacks adaptive preview schema")
+        metadata_by_id, images = {}, {}
+        for index, kind, quality in ((6, "before", None), (7, "after", None),
+                (10, "after", "full"), (11, "after", "draft"), (12, "before", "full"),
+                (13, "before", "draft"), (14, "after", "draft"), (15, "after", "full"),
+                (16, "after", "full"), (17, "after", "full")):
             result = replies[index]["result"]
             if result.get("isError") is not False:
                 raise ValueError("binary render probe failed")
             metadata = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
             image = next(c for c in result["content"] if c["type"] == "image")
-            import base64
             png = base64.b64decode(image["data"], validate=True)
             if metadata["kind"] != kind or image["mimeType"] != "image/png" or png[:8] != b"\x89PNG\r\n\x1a\n" \
                     or tuple(struct.unpack(">II", png[16:24])) != (metadata["width"], metadata["height"]):
                 raise ValueError("binary image kind/dimensions mismatch")
             if kind == "before" and metadata["beforeFingerprint"] != replies[5]["result"]["structuredContent"]["beforeFingerprint"]:
                 raise ValueError("binary Before baseline mismatch")
+            legacy = {"id", "width", "height", "kind"}
+            if kind == "before":
+                legacy |= {"beforeFingerprint", "effectiveBeforeFingerprint", "geometry"}
+            if quality is None:
+                if set(metadata) != legacy:
+                    raise ValueError("legacy metadata changed")
+            else:
+                if set(metadata) != legacy | {"previewContract", "quality", "mode", "frame", "stageCache"} \
+                        or metadata["previewContract"] != 1 or metadata["quality"] != quality or metadata["mode"] != "whole":
+                    raise ValueError("adaptive metadata mismatch")
+                frame, cache = metadata["frame"], metadata["stageCache"]
+                if set(frame) != {"geometryId", "nativeWidth", "nativeHeight", "aspect", "fullWidth", "fullHeight", "window"} \
+                        or any(type(frame[k]) is not int or frame[k] != 16 for k in ("nativeWidth", "nativeHeight", "fullWidth", "fullHeight")) \
+                        or not isinstance(frame["geometryId"], str) or len(frame["geometryId"]) != 64 \
+                        or any(c not in "0123456789abcdef" for c in frame["geometryId"]) \
+                        or type(frame["aspect"]) not in (int, float) or not math.isfinite(frame["aspect"]) \
+                        or frame["aspect"] != 1 or frame["window"] is not None:
+                    raise ValueError("binary frame mismatch")
+                if any(type(cache[k]) is not int or cache[k] < 0 for k in ("cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes")) \
+                        or cache["retainedBytes"] > cache["budgetBytes"] or type(cache["applied"]) is not bool:
+                    raise ValueError("cache budget mismatch")
+                if index in (14, 15) and (cache["mode"] != "on" or not cache["applied"] or cache["retainedBytes"] <= 0):
+                    raise ValueError("cache comparison unavailable")
+                if index == 17 and (cache["applied"] or cache["reason"] != "budget" or cache["retainedBytes"] != 0):
+                    raise ValueError("small cache budget was not enforced")
+            metadata_by_id[index], images[index] = metadata, png
+        if any(metadata_by_id[i]["frame"]["geometryId"] != metadata_by_id[10]["frame"]["geometryId"] for i in range(11, 18)) \
+                or any(images[i] != images[7] for i in (10, 15, 16)):
+            raise ValueError("quality/cache changed Full geometry or pixels")
+        if replies[9]["result"]["structuredContent"] != replies[18]["result"]["structuredContent"]:
+            raise ValueError("render changed develop settings")
+        for index, code in invalid:
+            result = replies[index]["result"]
+            if result.get("isError") is not True or len(result.get("content", [])) != 1 \
+                    or result["content"][0].get("type") != "text" \
+                    or json.loads(result["content"][0]["text"]) != {"code": code}:
+                raise ValueError("malformed preview options were not rejected")
 
 
 def receipt(binary, spec):
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
-            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1}
+            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1}
 
 
 def main():
@@ -139,7 +214,7 @@ def main():
             if receipt(binary, spec) != verified:
                 raise ValueError("binary changed during probe")
             binary.with_suffix(".genzoroom.json").write_text(json.dumps(verified, indent=2) + "\n", encoding="utf-8")
-            print("Before/After binary verified; SHA-256 receipt written")
+            print("Adaptive Before/After binary verified; SHA-256 receipt written")
     elif args.apply or args.build:
         parser.error("--source is required")
     if args.binary:
@@ -150,7 +225,7 @@ def main():
         probe(args.binary)
         if receipt(args.binary, spec) != actual:
             raise ValueError("binary changed during probe")
-        print("Before/After binary capability and SHA-256 verified")
+        print("Adaptive Before/After binary capability and SHA-256 verified")
     if not args.source and not args.binary:
         parser.error("provide --source or --binary")
 

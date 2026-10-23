@@ -502,3 +502,55 @@ new metadataが16KiBを超えたら応答失敗にし、無制限に拡張しな
 ### 13.9 A1の確認・停止範囲
 
 今回の変更は本書へのA1契約追記と優先順位注記のみ。参照先、既存C4保証と各新契約の対応、型／metadata／lock順／callback所有の整合を静的確認し、`git diff --check`を実施する。build・テスト・実binary検証・Windows測定・ブラウザ操作は行わない。指定のCommitメッセージは`docs: RAW適応型プレビューA1のAPI・所有権契約を確定`。本書だけCommitして`origin/feature/lightcraft-integration`へPushし、A1で停止する。A2の実装には進まない。
+
+## 14. A2実装結果（2026-10-24）
+
+開始HEAD `7fd31d18fc77c7782b01aac7234afc760ef6bf93`、`feature/lightcraft-integration`、作業ツリーclean。LC参照checkoutは固定`a2a41383c4fd62fa85a46ccd00998639221f2d3c`、既存Before変更3ファイルを確認・保護した。専用ローカルコピーを固定commitから作成し、従来管理patch適用後に変更した。upstream更新・fetch/pull/reset、実Immich書込みは行っていない。以下はA2の実装・自動検証記録であり、§13の未決定な性能仕様を確定するものではない。
+
+### 14.1 Geometry gate：通過、実Planの観測sidecarを採用
+
+公開APIで別の`pipeline::plan`を実行する案では、CPU/GPUで適用されるsection bypass／rendition／profile／Upright／automatic CAと、成功した実Planの同一性を戻り値から確認できなかった。そのため許可された最小metadata accessorとして、`Rendered.frame: Option<geometry::Frame>`を追加した。CPUとGPUの成功経路が**実際にsampleへ使ったPlanのframeをclone**して返す。失敗してCPU fallbackした場合は成功したCPU側のframeとなる。画像演算、設定解決、GPU選択・fallback、source選択は変更していない。thumbnail/slide/cached stand-inの既存constructorはNoneとし、実geometryの証拠にはしない。UI側の変更は既存テストconstructorへのfield追随だけで、UI動作変更はない。
+
+headlessは既存`render_job → run → accept`の戻り値からframeを取得する。metadataのための別decode、追加Full-source decode、別の自動geometry推定は行わない。`Frame::native_size_at(original_w, original_h)`は**実Planで確定済みのnormalized crop**を、LC importで把握したEXIF-oriented原本gridへorientation込みで投影する。再度lens/constrain/Uprightを計算せず、PNG寸法やnative_longから原本短辺を推測しない。source levelに依存した推定差がある場合は、そのrenderの実変換を返す。aspectは実frameの連続aspect、nativeWidth/Heightは原本gridの論理寸法の丸め、fullWidth/Heightは実bitmap寸法である。
+
+geometryIdはsource内容identity、原本grid、実source aspect、orientation、実crop/straighten/flip、実perspective/distortion/CA/embedded lens warpからSHA-256で生成する。要求size、quality、色調値、gain-only vignettingは含めない。座標値の非finiteを拒否し、window frameはA2では明示的に未対応とする。Beforeはnative import Beforeのframeを返し、After opticsを転写しない。工程Cではfull frameとwindowの追加観測が必要だが、既存品質／owner／座標契約は維持する。
+
+native fixtureでcrop/rotation/flip/straighten、embedded lens、constrain、automatic CA/Upright、bypass後の実Plan一致を確認した。奇数の原本寸法を使い、Preview source寸法との独立を検証。Engine fixtureでは1回のdecode後に`accept`して次jobがLoaded sourceを再利用することを確認した。synthetic GPU fixtureも実行され、返却frame／実寸とGPU Planの一致・保持source計量が成功した。実RAWのgeometryを全機種・全設定で実機受入済みとする記録ではない。
+
+### 14.2 品質・互換・エラー
+
+`render_preview`と共通`render_photo` helperへA1のquality/preview_contract/stage_cache/budget parser・schemaを追加した。quality省略はFull、Draftだけ`.draft()`を付与する。応答qualityは要求文字列のechoではなく、実行する`job.request.quality`から取得する。Before/After両方で成立し、品質操作によるnative History/interaction/settings更新はない。
+
+従来引数のみなら既存Fullとmetadata形状を完全に維持する。adaptive時だけpreviewContract/quality/mode/frame/stageCacheを追加し、従来Beforeのkind/fingerprint/geometry fieldは維持する。headless以外は明示capabilityのないbackendを描画前に`preview_unsupported`として拒否する。新契約の失敗は固定JSON codeへ正規化し、upstream例外・temp pathを返さない。adaptive画像のpath metadataは除去する。
+
+`obj()`がnull引数を落とす既存共通動作に依存しないよう、元引数を転送前に検証する。quality/contract/cacheの型違い・未知値・null、budgetの欠落/zero/負値/非整数/過大値をjob前に拒否。beforeの非booleanも拒否する。MCP helperの既存4096 clampは維持し、adaptive PNG5MiB・metadata16KiBを追加検査する。これらはA工程の安全枠であり最終解像度・容量仕様ではない。
+
+### 14.3 StageCache off/onと有限retention budget
+
+Headlessの`StagePool`はAfter/Before各1 cache、各cacheの既存2-size retentionを利用する。quality別には分離せず、同sideのDraft→Fullで再利用できる。offはpool全体をclearしstagesを渡さない。onは明示的な有限budgetが必須で、native memory budget超過の要求を拒否する。source/写真、geometry、Before基準、mode/budget、library lifecycle・memory budget変更で適切にclearし、失敗時もpoolを解放する。同じ写真への`library.select`、`library.state/memory`はcacheを消さず、実source変更はrender時のsource keyで失効する。source cacheはoff/on双方で維持する。
+
+追加した計量はCPUのchroma bufferとstageがpinするsource、GPUのchroma/device bufferとhost source参照を含む。別cache／CPU-GPU間で同じsourceを共有する場合も各ownerへ保守的に課金するため、pool計量は重複共有分を含む**安全側のbuffer保持上界**でありRSS値ではない。nativeの共有source cache／driver pool／現像中の一時bufferは別のowner・予算であり、これをプロセス全体のhard memory capとは扱わない。
+
+checkedな事前見積りが予算内の場合だけstagesを付与し、見積不能／予算不足ならoff描画へfallbackして`applied:false, reason:budget`を返す。現在の見積りは2-sizeのCPU/GPU planeとsource参照を安全側に見積もるため、実際には収まる要求でもcacheを使わない場合がある。描画後もAfter/Before合計を再計量し、超過時は非使用side→使用sideの順で破棄する。cpuBytes/gpuBytesはtrim前、retainedBytesはtrim後、budgetBytesは要求されたpool上限。metadataにCPU/GPU/source retentionが含まれていることをA3の計測でも維持する。
+
+unit/MCP/実binaryでoff/on、同side reuse、Before/After独立、source変更、tiny budget fallback、post-render eviction、chroma/pinned-source計上、NR Draft後の最終Fullとuncached Fullの一致を確認した。StageCacheの最終採用、速度向上率、最終budget、実RAW/GPUのpeak RAM/VRAMは未測定である。
+
+### 14.4 管理patch・build・検証
+
+管理対象は既存`0001-native-before.patch`1本へ統合した。manifestのnative targetsは17件だが、Engine/pipeline/GPUの変更はmetadata sidecar・buffer計量とfixture、stand-in constructor追随に限定し、現像アルゴリズムを改変していない。新規`preview.rs`を完全diffへ含めるため、`build.py --apply`は`git apply --intent-to-add`を使う。管理外untracked source／staged内容／部分適用／二重適用の拒否と、source完全diff照合を維持する。
+
+- 最終patch SHA-256：`3ac3bab2e024d1226ffe536a2325959d228635558e0fdcfafb1c84fd1e5eba70`。
+- 最終release CLI SHA-256：`b0fbade4ab598614e03af4c29fecfe0a3f0f000642072d602495ae8b15d78aeb`。
+- `build.py --build`：MCP回帰、release CLI build、生成binaryのschema／legacy Full／Before／4品質組合せ／frame／cache off/on/tiny budget／不正引数／settings不変probe成功後、beforeContract=1・previewContract=1のreceiptを生成した。
+- 別の固定commit clean copyへ最終patchを適用し、manifest/source完全一致、native `git diff --check`、二重適用拒否を確認した。`--binary`でreceipt/digest/能力を再検証する手順も更新・実行した。
+- native MCP：**63 passed、既存補助1 ignored**（unit 53、e2e 10）。pipelineのgeometry/計量2件、Engineのdecode/accept1件、synthetic GPUのframe/計量1件も成功。途中のRust fixture借用エラーはfixture修正後、対象focused testで解消した。
+- 管理patch Python回帰：repo Python 3.14、cwd backend、`tests/test_lightcraft_patch.py` **4 passed**。新規sourceのintent-to-addと管理外untracked拒否を追加した。製品Backend/Frontend全suite、Docker Smoke Testは実行していない。
+- build環境にはcraft-fonts未埋込みの既存警告がある。今回のRAW pixel/geometry契約とは別のCJK文字描画制約であり、このCLIの日本語文字合成機能を検証済みとはしない。改行変換警告はpatchのLF digest・完全diff照合で管理した。
+
+限定監査は品質引数の転送、旧strict metadata互換、実Plan/sidecar、source cache/accept、Before非転写、cacheのbuffer計上・破棄、typed error、patch/receiptを対象とした。nullが転送前に省略される問題、source/chromaの計上不足、応答qualityの実job参照、post-render evictionの検証を補強した。完了監査では同一写真の再選択／memory診断でもstageを消してしまうMediumを修正し、既存RAWの操作経路との接続回帰を追加した。MCP回帰・release build・実binary probe／receipt・最終clean適用を再検証し、未解決High/Mediumはない。全機能・全障害の網羅監査を行ったという意味ではない。
+
+### 14.5 A3への引継ぎと停止
+
+GenzoRoom製品Backend/Frontend、SQLite、Recipe/History、既存C4完了記録、README/CHANGELOGは未変更。`backend/tests/test_lightcraft_patch.py`の変更はnative build管理回帰のみ。実binaryとreceiptはignored専用checkout `.tmp/lightcraft-a2/target/release/`に保持し、既存参照checkoutのbinary／環境設定を置き換えていない。
+
+A3ではquality/frame/stageCacheの世代capabilityとstrict検証、HTTP preview/cancel、control reservation、PNG検証・decodeと保存fenceの分離、表示intent・RAW論理尺度を接続する。Beforeの異geometry mappingは未解決事項のまま明示し、region APIは工程CでDraft/Full両方へ拡張する。実RAWの性能、stage cache効果、色・細部、Windows表示条件、長時間・メモリ受入はA工程の実機測定へ残す。A2で停止し、A3接続や領域描画の実装には進まない。

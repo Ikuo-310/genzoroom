@@ -2,13 +2,27 @@
   "patches": [
     {
       "targets": [
-        "crates/mcp/src/tools.rs",
+        "Cargo.lock",
+        "crates/engine/src/media.rs",
+        "crates/engine/src/slide_title.rs",
+        "crates/gpu/src/lib.rs",
+        "crates/gpu/src/render.rs",
+        "crates/gpu/tests/equivalence.rs",
+        "crates/mcp/Cargo.toml",
+        "crates/mcp/src/backend.rs",
         "crates/mcp/src/headless.rs",
-        "crates/mcp/tests/e2e.rs"
+        "crates/mcp/src/lib.rs",
+        "crates/mcp/src/preview.rs",
+        "crates/mcp/src/tools.rs",
+        "crates/mcp/tests/e2e.rs",
+        "crates/pipeline/src/geometry.rs",
+        "crates/pipeline/src/lib.rs",
+        "crates/pipeline/src/tests.rs",
+        "crates/ui-egui/src/render.rs"
       ],
       "file": "patches/0001-native-before.patch",
-      "purpose": "Native import Before preview with typed metadata and MCP capability schema",
-      "sha256": "7536727b570ac9cb47c9f2e0ad5c3f25f94b9082cf63408f9dcea59daa5425a3"
+      "purpose": "Native import Before and opt-in adaptive quality, observed frame metadata and bounded StageCache comparison",
+      "sha256": "3ac3bab2e024d1226ffe536a2325959d228635558e0fdcfafb1c84fd1e5eba70"
     }
   ],
   "commit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",

@@ -6,9 +6,11 @@
 
 | パッチ | 目的・変更対象 |
 |---|---|
-| `0001-native-before.patch` | `crates/mcp/src/tools.rs`：optional boolean `before` schemaと引数転送、非対応backendの誤表示拒否。`headless.rs`：native `render_job(..., true, true)`、import Before基準・有効Before fingerprint／geometry／画像kind metadata。`tests/e2e.rs`：Before画像、After互換性、read-only性の機能テスト |
+| `0001-native-before.patch` | MCPのBefore＋adaptive品質・frame・StageCache契約。pipeline/GPUの実Plan sidecarとbuffer計量、Engine/stand-inの戻り値追随、MCP/native fixtureを含む。全targets・digestはmanifestで管理 |
 
-`render_now()`のAfter動作や現像アルゴリズムは変更しない。Beforeはnative `before_settings()`がcrop／orientationだけを現在値に揃える。Afterの手動歪曲補正等を転写しない。hash64はnativeの既存settings hashであり、画像checksumや暗号学的出自証明として扱わない。
+A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_contract`／`stage_cache`と有限budgetの検証、headless job実行・typed metadata、CPU/GPUの実Planを返す`Rendered.frame` sidecar、原本gridへのnative寸法投影、stage保持bufferの計量を含む。`preview.rs`は新規のMCP helperであり、独立した現像／永続cache基盤ではない。変更対象一覧とSHA-256の正本はmanifest。新規依存はworkspaceですでに固定された`sha2`をMCPでも使うためのCargo.toml／lock追記のみで、upstream versionは変えない。
+
+従来引数だけならFull・既存metadata形状を維持する。明示quality、preview_contract=1、stage_cacheのopt-inでは実quality／frame／stageCacheを返す。CPU/GPUアルゴリズム、`run/accept`とsource cache、Before import基準は維持する。stand-inの`Rendered.frame=None`は実geometryの証拠にしない。Beforeはnative `before_settings()`がcrop／orientationだけを現在値に揃え、Afterの手動歪曲補正等を転写しない。hash64はnativeの既存settings hashであり、画像checksumや暗号学的出自証明として扱わない。
 
 ## 再現可能な準備・ビルド
 
@@ -22,9 +24,9 @@ $source = 'I:\code\raw-test\lightcraft-v0.10.0-gpu-poc'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target\release\lightcraft-cli.exe"
 ```
 
-`--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。
+`--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。新規管理sourceを完全diffへ含めるため、適用時は`--intent-to-add`を使用する。これは内容のstageではなく、`git diff --cached`が空である制約を維持する。管理外の未追跡sourceは引き続き拒否する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。
 
-`--build`は検証後に`cargo test --locked -p lightcraft-mcp -- --test-threads=1`、`cargo build --release --locked --no-default-features -p lightcraft-cli`を実行し、**生成したbinary自身**へMCP handshake／tools schema／synthetic PNG import／Beforeと省略時Afterのrenderを要求する。kind、native import fingerprint、PNG header実寸を検査した場合だけ、隣接する`lightcraft-cli.genzoroom.json`を生成する。receiptはversion／本家commit／patch digest一覧／binary SHA-256／Before契約versionを持つ。全工程は非zero exitで中止し、receiptを成功前に発行しない。
+`--build`は検証後に`cargo test --locked -p lightcraft-mcp -- --test-threads=1`、`cargo build --release --locked --no-default-features -p lightcraft-cli`を実行し、**生成したbinary自身**へMCP handshake／tools schema／synthetic PNG import／Beforeと省略時Afterのrenderを要求する。A2 probeはAfter/Beforeそれぞれの明示Draft/Full、品質省略＋契約1のFull、legacy metadataの完全形状、geometryId/native寸法/実PNG寸法、cache off/on/tiny budget、最終Fullの画像一致・settings不変と、不正quality/contract/cache引数の固定code拒否も検査する。成功時だけ隣接する`lightcraft-cli.genzoroom.json`を生成する。receiptはversion／本家commit／patch digest一覧／binary SHA-256／`beforeContract:1`／`previewContract:1`を持つ。旧Before receiptだけではA2対応と認定しない。全工程は非zero exitで中止し、receiptを成功前に発行しない。
 
 binaryの差替え検出には`--binary`を使う。現在のmanifest、receiptと実ファイルのSHA-256を一致確認した後、実binaryのschemaとrenderを再検査する。version文字列だけ、古いreceiptだけ、patchを適用したsourceだけではbinaryを承認しない。receiptは署名済みサプライチェーン証明ではなく、管理されたbuildとローカルファイルの照合記録である。
 
@@ -35,6 +37,8 @@ binaryの差替え検出には`--binary`を使う。現在のmanifest、receipt�
 `desktop/packaging/build.ps1`は`-LightCraftExe`または`GENZOROOM_LIGHTCRAFT_EXE`が指定されている場合、packaging開始前に`--binary`を必須実行する。失敗時は配布buildを続行しない。未設定の場合は従来の外部engineなしbuildが可能で、RAW Before対応binaryを含む配布とは扱わない。将来MCPを同梱する場合は、この検証済みbinaryとreceiptを一組としてstageし、bundle検証でも同じ`--binary`を実行する。未検証ファイルを直接copyする経路を作らない。
 
 runtimeはMCPの`render_preview.inputSchema.properties.before.type == boolean`を世代ごとに調べ、Before応答の`kind`、native import fingerprint、geometry、PNG実寸を検証する。schema非対応やBefore基準を確認できないbinaryでは`beforeKey=null`とし比較操作を無効にする。After／RAW編集は従来どおり利用できる。対応schemaだけを持ち、AfterをBeforeとして返すbinaryは画像検証で拒否し、Beforeだけを失敗にする。runtimeのSHA-256診断とbuild receiptで未変更本家binaryと管理buildを識別する。全配布先で既知hashの登録を強制する方式には変更しない。
+
+A2はnative契約までで、GenzoRoom runtime／HTTP／Frontendはまだadaptive引数を送らない。現行runtimeは旧metadata互換経路を利用する。A3で初めて新品質・geometryのcapability／strict metadata／schedulerを接続する。領域描画、最終解像度・容量・timeout・cache採用、実RAWのCPU/GPU性能・peak memoryは別の受入であり、synthetic probe成功と混同しない。
 
 ## 将来のエンジン更新
 

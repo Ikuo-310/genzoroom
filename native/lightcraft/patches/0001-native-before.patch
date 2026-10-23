@@ -1,15 +1,236 @@
 From: GenzoRoom integration
-Subject: [PATCH] Expose native import Before through headless MCP
+Subject: [PATCH] Expose native Before and adaptive headless preview metadata
 Upstream-Version: 0.10.0
 Upstream-Base: a2a41383c4fd62fa85a46ccd00998639221f2d3c
-Purpose: Optional boolean Before, typed image metadata, native render and compatibility tests.
-Targets: crates/mcp/src/tools.rs; crates/mcp/src/headless.rs; crates/mcp/tests/e2e.rs
+Purpose: Opt-in Draft/Full, observed render frames and bounded stage-cache comparison; legacy Before compatibility.
+Targets: Cargo.lock; crates/engine/src/media.rs; crates/engine/src/slide_title.rs; crates/gpu/src/lib.rs; crates/gpu/src/render.rs; crates/gpu/tests/equivalence.rs; crates/mcp/Cargo.toml; crates/mcp/src/backend.rs; crates/mcp/src/headless.rs; crates/mcp/src/lib.rs; crates/mcp/src/preview.rs; crates/mcp/src/tools.rs; crates/mcp/tests/e2e.rs; crates/pipeline/src/geometry.rs; crates/pipeline/src/lib.rs; crates/pipeline/src/tests.rs; crates/ui-egui/src/render.rs
 
+diff --git a/Cargo.lock b/Cargo.lock
+index a49ec38db9ce30d8e717eccf0f57ecfc670b762b..06fa9989ebecb0182e8110dc019f464904cb1e09 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3356,6 +3356,7 @@ dependencies = [
+  "lightcraft-raster",
+  "log",
+  "serde_json",
++ "sha2",
+ ]
+ 
+ [[package]]
+diff --git a/crates/engine/src/media.rs b/crates/engine/src/media.rs
+index 22d76528d664fde5c77916434c2dea7931ae694c..004563ff5376e3ed775a336dfcc4137ecf69301c 100644
+--- a/crates/engine/src/media.rs
++++ b/crates/engine/src/media.rs
+@@ -925,7 +925,7 @@ impl RenderJob {
+                 photo: self.photo,
+                 level: self.level,
+                 key: self.key,
+-                rendered: Ok(Rendered { image, histogram, deep: None }),
++                rendered: Ok(Rendered { frame: None, image, histogram, deep: None }),
+                 gpu_fallback: None,
+                 loaded: None,
+                 quick: None,
+@@ -945,7 +945,7 @@ impl RenderJob {
+                 photo: self.photo,
+                 level: self.level,
+                 key: self.key,
+-                rendered: Ok(Rendered { image, histogram, deep: None }),
++                rendered: Ok(Rendered { frame: None, image, histogram, deep: None }),
+                 gpu_fallback: None,
+                 loaded: None,
+                 quick: None,
+@@ -1130,7 +1130,7 @@ impl QuickJob {
+         };
+         let rendered = |image: Rgba8| {
+             let histogram = Histogram::of_srgb8(&image);
+-            Ok(Rendered { image, histogram, deep: None })
++            Ok(Rendered { frame: None, image, histogram, deep: None })
+         };
+         for (cache, k) in &self.cached {
+             if let Some(img) = cache.get(*k) {
+@@ -2294,4 +2294,29 @@ mod tests {
+         assert_ne!(pv.key, s.render_job(id, 800, 600, false, true).unwrap().key);
+         assert_eq!(*pv.settings, a);
+     }
++
++    #[test]
++    fn genzoroom_frame_sidecar_preserves_single_decode_and_source_accept() {
++        use std::sync::atomic::{AtomicUsize,Ordering};
++        let mut session=crate::Session::with_demo();
++        let id=session.active().unwrap();
++        let mut job=session.render_job(id,32,32,false,true).unwrap();
++        let calls=Arc::new(AtomicUsize::new(0));
++        let count=calls.clone();
++        job.source=SourceRef::File { path:"synthetic-fixture".into(), max_edge:32,
++            loader:Some(Arc::new(move |_,_| {count.fetch_add(1,Ordering::SeqCst);
++                Ok((Rgb32f::from_fn(32,24,|_,_| [0.1;3]),SourceInfo::default()))})),
++            fallback:None,denoise:None };
++        let result=job.run();
++        assert!(result.loaded.is_some());
++        assert!(result.rendered.as_ref().unwrap().frame.is_some());
++        session.accept(&result);
++        let next=session.render_job(id,32,32,false,true).unwrap();
++        assert!(matches!(next.source,SourceRef::Loaded(_)));
++        let again=next.run();
++        assert!(again.loaded.is_none());
++        assert!(again.rendered.unwrap().frame.is_some());
++        assert_eq!(calls.load(Ordering::SeqCst),1);
++    }
++
+ }
+diff --git a/crates/engine/src/slide_title.rs b/crates/engine/src/slide_title.rs
+index 5885463b1c5d4c99881af62a19eae09a480a5379..25eedb9f05786147e5a91197a2f5700eeefa4050 100644
+--- a/crates/engine/src/slide_title.rs
++++ b/crates/engine/src/slide_title.rs
+@@ -358,7 +358,7 @@ impl TitleCompose {
+             photo: lightcraft_catalog::PhotoId(0),
+             level: crate::media::SourceLevel::Preview,
+             key: self.key(),
+-            rendered: Ok(lightcraft_pipeline::Rendered { image, histogram, deep: None }),
++            rendered: Ok(lightcraft_pipeline::Rendered { frame: None, image, histogram, deep: None }),
+             loaded: None,
+             quick: None,
+             display: None,
+diff --git a/crates/gpu/src/lib.rs b/crates/gpu/src/lib.rs
+index b0409962da58b457fcdf39386ea20a3922697eda..33b5ce510a1f64e8c5022a58b196ade0dfffdf8b 100644
+--- a/crates/gpu/src/lib.rs
++++ b/crates/gpu/src/lib.rs
+@@ -420,6 +420,14 @@ pub fn source_uploads() -> u64 {
+     }
+ }
+ 
++/// Host source bytes pinned by a view's GPU stages; separate from its device buffers.
++pub fn stage_host_bytes(stages: &StageCache) -> usize {
++    #[cfg(not(target_arch = "wasm32"))]
++    { stages.peek_extension::<GpuStages>().map(|g| g.host_source_bytes()).unwrap_or(0) }
++    #[cfg(target_arch = "wasm32")]
++    { let _ = stages; 0 }
++}
++
+ /// Device bytes held by a view's GPU stages (kept with its [`StageCache`]); 0 when it has none.
+ pub fn stage_bytes(stages: &StageCache) -> usize {
+     #[cfg(not(target_arch = "wasm32"))]
+diff --git a/crates/gpu/src/render.rs b/crates/gpu/src/render.rs
+index b747e0d327f49d626f6ed9c13592a170beb5702e..47c4ac7a617f1a074b4950b9b336019f6cb22208 100644
+--- a/crates/gpu/src/render.rs
++++ b/crates/gpu/src/render.rs
+@@ -106,6 +106,7 @@ impl GpuStages {
+             p.clarity.iter().for_each(|(_, b)| add(b));
+             p.texture.iter().for_each(|(_, b)| add(b));
+             p.dark.iter().for_each(|(_, b, _)| add(b));
++            p.chroma.iter().for_each(|(_, b)| add(b));
+         }
+         if let Some((_, b)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
+             add(b);
+@@ -113,6 +114,22 @@ impl GpuStages {
+         total
+     }
+ 
++    /// Host source references also pin memory after the media cache evicts its own reference.
++    pub fn host_source_bytes(&self) -> usize {
++        let mut sources = Vec::new();
++        for e in self.lock().iter() {
++            sources.push(e.src.clone());
++        }
++        if let Some((src, _)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
++            sources.push(src.clone());
++        }
++        let mut seen = Vec::new();
++        sources.iter().filter(|s| {
++            let p = Arc::as_ptr(s);
++            if seen.contains(&p) { false } else { seen.push(p); true }
++        }).map(|s| s.data.len() * 12).sum()
++    }
++
+     /// Drop everything (e.g. when memory is needed).
+     pub fn clear(&self) {
+         self.lock().clear();
+@@ -778,7 +795,7 @@ pub fn render(
+     if let Some(k) = plan.keep {
+         image = image.crop(k.x, k.y, k.w, k.h);
+     }
+-    Some(Rendered { image, histogram, deep: None })
++    Some(Rendered { frame: Some(plan.frame.clone()), image, histogram, deep: None })
+ }
+ 
+ /// Pixels whose alpha is not 255 (cheap: no early exit, so it vectorizes).
+diff --git a/crates/gpu/tests/equivalence.rs b/crates/gpu/tests/equivalence.rs
+index c877e3d9d8157a62fc96293e60e06897b8af6f54..131bbbd9e431e482ab7b8fc5e8a3a3c915a6fee2 100644
+--- a/crates/gpu/tests/equivalence.rs
++++ b/crates/gpu/tests/equivalence.rs
+@@ -877,3 +877,27 @@ fn windows_of_a_big_photo_share_one_uploaded_source() {
+     lightcraft_gpu::render(&src, &info, &s, &at(1000), Some(&after)).expect("gpu render");
+     assert_eq!(lightcraft_gpu::source_uploads() - start, 2);
+ }
++
++
++#[test]
++fn genzoroom_gpu_sidecar_is_the_plan_that_rendered_the_pixels() {
++    if !gpu() { return; }
++    let src=scene(0,96,64);
++    let info=SourceInfo::default();
++    let mut s=DevelopSettings::default();
++    s.orientation=Orientation::Rotate90;
++    s.crop.flip_v=true;
++    s.crop.geometry.angle=5.0;
++    s.optics.distortion=12.0;
++    s.optics.remove_ca=true;
++    let req=RenderRequest::fit(64,64);
++    let cache=StageCache::default();
++    let r=lightcraft_gpu::render(&src,&info,&s,&req,Some(&cache)).expect("synthetic GPU render");
++    let effective=s.effective();
++    let rendition=lightcraft_pipeline::settings_for(&effective,&req);
++    let p=lightcraft_pipeline::plan(&src,&info,&rendition,&req);
++    assert_eq!(r.frame.as_ref().unwrap(),&p.frame);
++    assert_eq!((r.image.width,r.image.height),(p.w,p.h));
++    assert!(lightcraft_gpu::stage_bytes(&cache)>0);
++    assert!(lightcraft_gpu::stage_host_bytes(&cache)>=src.data.len()*12);
++}
+diff --git a/crates/mcp/Cargo.toml b/crates/mcp/Cargo.toml
+index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fdd4618fc1 100644
+--- a/crates/mcp/Cargo.toml
++++ b/crates/mcp/Cargo.toml
+@@ -13,4 +13,5 @@ lightcraft-engine = { workspace = true }
+ lightcraft-codecs = { workspace = true }
+ lightcraft-raster = { workspace = true }
+ serde_json = { workspace = true }
++sha2 = { workspace = true }
+ log = { workspace = true }
+diff --git a/crates/mcp/src/backend.rs b/crates/mcp/src/backend.rs
+index 0c59afa6a84b0d5425fb74105bebd819ca553c4d..667aba09006d6024be1e4799a2aaa8bf5823d24d 100644
+--- a/crates/mcp/src/backend.rs
++++ b/crates/mcp/src/backend.rs
+@@ -16,6 +16,8 @@ pub trait Backend {
+     fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
+     /// True when a real UI is attached (`ui.inspect`, `ui.clickWidget`, `ui.pointer` … work).
+     fn has_ui(&self) -> bool;
++    /// Explicit support; a remote backend must not silently ignore adaptive arguments.
++    fn preview_contract(&self) -> bool { false }
+     /// Short human description ("headless", "remote 127.0.0.1:7980").
+     fn describe(&self) -> String;
+     /// Progress/cancellation for the next headless batch export. Other backends ignore it.
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd6c9536ba 100644
+index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a66f74768f 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -53,7 +53,14 @@ impl Headless {
+@@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
+ pub struct Headless {
+     pub session: Session,
+     progress: Option<ProgressHook>,
++    stages: crate::preview::StagePool,
+ }
+ 
+ impl Drop for Headless {
+@@ -36,7 +37,7 @@ impl Default for Headless {
+ 
+ impl Headless {
+     pub fn new(session: Session) -> Self {
+-        Self { session, progress: None }
++        Self { session, progress: None, stages: Default::default() }
+     }
+ 
+     /// A headless session with the procedurally generated demo library.
+@@ -53,7 +54,62 @@ impl Headless {
      pub fn render(&mut self, p: &Value, default_size: u64) -> Result<Rgba8, String> {
          let id = self.photo_or_active(p)?;
          let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(default_size).clamp(16, 16384) as usize;
@@ -22,14 +243,68 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd
 +        } else {
 +            Ok(self.session.render_now(id, size, size)?.image)
 +        }
++    }
++
++    fn adaptive_render(&mut self, p: &Value, options: crate::preview::Options) -> Result<Value, String> {
++        let mut run = || -> Result<Value, &'static str> {
++            let id = self.photo_or_active(p).map_err(|_| "preview_render_failed")?;
++            let size = p.get("size").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as usize;
++            let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
++            let photo = self.session.catalog.photo(id).ok_or("preview_render_failed")?;
++            let original = (photo.width as usize, photo.height as usize);
++            let baseline = photo.import_defaults().hash64();
++            let before_settings = self.session.before_settings(photo);
++            let mut job = self.session.render_job(id, size, size, before, true).ok_or("preview_render_failed")?;
++            if options.draft { job = job.draft(); }
++            let quality = if job.request.quality == lightcraft_engine::pipeline::Quality::Draft { "draft" } else { "full" };
++            let source_key = format!("{:?}", job.source_key.ok_or("preview_geometry_unavailable")?);
++            self.stages.source(&format!("{}:{source_key}", id.0));
++            let signature = format!("{}:{source_key}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}", id.0,
++                job.settings.crop, job.settings.orientation, job.settings.optics, job.settings.geometry,
++                job.settings.profile, if before { baseline } else { 0 });
++            let side = usize::from(before);
++            let (cache, applied) = self.stages.prepare(side, &signature, options.budget, size, original);
++            if let Some(cache) = cache { job = job.with_stages(cache); }
++            let result = job.run();
++            self.session.accept(&result);
++            let rendered = result.rendered.map_err(|_| "preview_render_failed")?;
++            let image = rendered.image;
++            let frame = rendered.frame.as_ref().ok_or("preview_geometry_unavailable")?;
++            let metadata = crate::preview::frame_metadata(frame, original, &source_key, image.width, image.height)?;
++            self.stages.geometry(side, metadata["geometryId"].as_str().ok_or("preview_geometry_unavailable")?);
++            let cache_meta = self.stages.finish(side, options.budget, applied);
++            let mut meta = json!({"previewContract":1, "quality":quality,
++                "mode":"whole", "kind":if before {"before"} else {"after"}, "frame":metadata,
++                "stageCache":cache_meta, "width":image.width, "height":image.height});
++            if before {
++                meta["beforeFingerprint"] = json!(format!("{baseline:016x}"));
++                meta["effectiveBeforeFingerprint"] = json!(format!("{:016x}", before_settings.hash64()));
++                meta["geometry"] = json!({"crop":before_settings.crop,"orientation":before_settings.orientation});
++            }
++            if let Some(path) = p.get("path").and_then(Value::as_str) {
++                self.session.check_write_target(path).map_err(|_| "preview_render_failed")?;
++                write_image(Path::new(path), &image, 92).map_err(|_| "preview_render_failed")?;
++                meta["path"] = json!(path);
++            }
++            Ok(meta)
++        };
++        let result = run();
++        if result.is_err() { self.stages.clear(); }
++        result.map_err(str::to_string)
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -130,7 +137,13 @@ impl Backend for Headless {
+@@ -130,7 +186,19 @@ impl Backend for Headless {
                  if id == "app.export" {
                      return self.export(&params);
                  }
 -                self.session.execute(id, &params).map_err(|e| e.to_string())
++                // Controls reselect the same photo and diagnostics read memory between renders.
++                // The render source key handles actual selection changes without cooling a drag.
++                if (id.starts_with("library.") && !matches!(id, "library.select" | "library.state" | "library.memory"))
++                    || matches!(id, "photo.reload" | "beforeAfter.setBefore" | "app.memoryBudget") {
++                    self.stages.clear();
++                }
 +                let mut value = self.session.execute(id, &params).map_err(|e| e.to_string())?;
 +                if id == "beforeAfter.setBefore" && params.get("source").and_then(Value::as_str) == Some("import") {
 +                    let photo_id = self.photo_or_active(&json!({}))?;
@@ -40,10 +315,15 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -140,14 +153,27 @@ impl Backend for Headless {
+@@ -140,14 +208,32 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
++                let options = crate::preview::Options::parse(&p).map_err(str::to_string)?;
++                if options.adaptive {
++                    return self.adaptive_render(&p, options);
++                }
++                self.stages.clear();
 +                let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
 +                let id = self.photo_or_active(&p)?;
 +                let photo = self.session.catalog.photo(id).ok_or("no such photo")?;
@@ -70,10 +350,40 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd
                  }
              }
              "app.export" => self.export(&p),
-@@ -206,6 +232,31 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
+@@ -158,6 +244,8 @@ impl Backend for Headless {
+         }
+     }
+ 
++    fn preview_contract(&self) -> bool { true }
++
+     fn has_ui(&self) -> bool {
+         false
+     }
+@@ -206,6 +294,52 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
  mod tests {
      use super::*;
  
++    #[test]
++    fn genzoroom_reselection_and_memory_diagnostics_preserve_warm_stages() {
++        use std::sync::Arc;
++        use lightcraft_engine::{develop::DevelopSettings, pipeline::{self, RenderRequest, SourceInfo}};
++        use lightcraft_raster::Rgb32f;
++        let mut h = Headless::demo();
++        let id = h.session.active().unwrap();
++        let (cache, applied) = h.stages.prepare(0, "fixture", Some(lightcraft_engine::memory::budget()), 32, (32, 32));
++        assert!(applied);
++        let cache = cache.unwrap();
++        let src = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.1; 3]));
++        let _ = pipeline::render_cached(&src, &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(32, 32), &cache);
++        assert_eq!(cache.len(), 1);
++        h.call("command", json!({"id":"library.select", "params":{"ids":[id.0],"active":id.0,"mode":"replace"}})).unwrap();
++        h.call("command", json!({"id":"library.memory", "params":{}})).unwrap();
++        h.call("command", json!({"id":"library.state", "params":{}})).unwrap();
++        assert_eq!(cache.len(), 1);
++        h.call("command", json!({"id":"beforeAfter.setBefore", "params":{"source":"import"}})).unwrap();
++        assert!(cache.is_empty());
++    }
++
 +    #[test]
 +    fn genzoroom_before_keeps_native_geometry_without_copying_after_optics() {
 +        let mut h = Headless::demo();
@@ -102,19 +412,450 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..9e4ee89d29815b511afcbdd2938ce3dd
      /// Headless sessions look for the SAM 3 model where the desktop app does, and `segment.model.status` reports it (issue #619).
      #[test]
      fn headless_sessions_get_the_sam3_model_folder() {
+diff --git a/crates/mcp/src/lib.rs b/crates/mcp/src/lib.rs
+index f632f145bb387212b8d7e463c23490f0028975a1..2065919eaa4d941854461c5ede6b2d37ae820d03 100644
+--- a/crates/mcp/src/lib.rs
++++ b/crates/mcp/src/lib.rs
+@@ -19,6 +19,7 @@
+ mod backend;
+ mod base64;
+ mod headless;
++mod preview;
+ mod server;
+ mod tools;
+ 
+diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042cdd7b9b1
+--- /dev/null
++++ b/crates/mcp/src/preview.rs
+@@ -0,0 +1,344 @@
++//! GenzoRoom's opt-in preview envelope; legacy callers keep the original image contract.
++use std::sync::Arc;
++
++use lightcraft_engine::{
++    gpu, memory,
++    pipeline::{StageCache, geometry::Frame},
++};
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++
++#[derive(Clone, Copy)]
++pub(crate) struct Options {
++    pub adaptive: bool,
++    pub draft: bool,
++    pub budget: Option<usize>,
++}
++
++impl Options {
++    pub fn parse(p: &Value) -> Result<Self, &'static str> {
++        if p.get("before").is_some_and(|v| !v.is_boolean()) {
++            return Err("preview_invalid_contract");
++        }
++        let adaptive = ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"].iter().any(|k| p.get(k).is_some());
++        let draft = match p.get("quality") {
++            None => false,
++            Some(Value::String(s)) if s == "full" => false,
++            Some(Value::String(s)) if s == "draft" => true,
++            _ => return Err("preview_invalid_quality"),
++        };
++        if let Some(v) = p.get("preview_contract") {
++            if v.as_u64() != Some(1) {
++                return Err("preview_invalid_contract");
++            }
++        }
++        let on = match p.get("stage_cache") {
++            None => false,
++            Some(Value::String(s)) if s == "off" => false,
++            Some(Value::String(s)) if s == "on" => true,
++            _ => return Err("preview_invalid_stage_cache"),
++        };
++        let budget = if on {
++            let n = p
++                .get("stage_cache_budget_bytes")
++                .and_then(Value::as_u64)
++                .and_then(|n| usize::try_from(n).ok())
++                .filter(|n| *n > 0 && *n <= memory::budget())
++                .ok_or("preview_invalid_stage_cache")?;
++            Some(n)
++        } else {
++            if p.get("stage_cache_budget_bytes").is_some() {
++                return Err("preview_invalid_stage_cache");
++            }
++            None
++        };
++        Ok(Self { adaptive, draft, budget })
++    }
++}
++
++pub(crate) fn error(code: &str) -> crate::tools::ToolResult {
++    let safe = match code {
++        "preview_invalid_quality"
++        | "preview_invalid_contract"
++        | "preview_invalid_stage_cache"
++        | "preview_unsupported"
++        | "preview_geometry_unavailable"
++        | "preview_geometry_mismatch"
++        | "preview_budget_exceeded"
++        | "preview_render_failed" => code,
++        _ => "preview_render_failed",
++    };
++    crate::tools::ToolResult::error(json!({"code":safe}).to_string())
++}
++
++pub(crate) fn frame_metadata(f: &Frame, original: (usize, usize), source: &str, width: usize, height: usize) -> Result<Value, &'static str> {
++    let (nw, nh) = f.native_size_at(original.0, original.1).ok_or("preview_geometry_unavailable")?;
++    let aspect = f.aspect();
++    let mut coordinates = vec![f.ow, f.oh, f.crop.angle, f.crop.rect.x0, f.crop.rect.y0, f.crop.rect.x1, f.crop.rect.y1];
++    if let Some(w) = &f.warp {
++        coordinates.extend([w.w, w.h, w.k1, w.lens_dist]);
++        coordinates.extend(w.ca);
++        coordinates.extend(w.persp.0);
++        if let Some(lens) = &w.lens {
++            if let Some(l) = &lens.warp {
++                coordinates.extend([l.center.x, l.center.y, l.radius]);
++                coordinates.extend(l.planes.iter().flatten().copied());
++            }
++            for l in lens.stages.iter().flatten() {
++                coordinates.extend([l.center.x, l.center.y, l.radius]);
++                coordinates.extend(l.planes.iter().flatten().copied());
++            }
++        }
++    }
++    if !aspect.is_finite()
++        || aspect <= 0.0
++        || width == 0
++        || height == 0
++        || f.src_w == 0
++        || f.src_h == 0
++        || f.fit(width, height) != (width, height)
++        || coordinates.iter().any(|n| !n.is_finite())
++    {
++        return Err("preview_geometry_mismatch");
++    }
++    // Vignetting changes gain, not coordinates. Do not invalidate geometry for a gain-only edit.
++    let warp = f.warp.as_ref().filter(|w| w.moves_pixels()).map(|w| {
++        let mut lens = w.lens;
++        if let Some(l) = &mut lens {
++            l.vignette = None;
++        }
++        json!({"perspective":w.persp,"k1":w.k1,"ca":w.ca,
++            "lens":if w.lens_dist == 0.0 {None} else {lens},"lensDist":w.lens_dist})
++    });
++    let descriptor = json!({"contract":1,"source":source,"original":[original.0,original.1],
++        "sourceAspect":f.src_w as f64 / f.src_h as f64,
++        "orientation":f.orient,"crop":f.crop,"flip":[f.flip_h,f.flip_v],"warp":warp});
++    let bytes = serde_json::to_vec(&descriptor).map_err(|_| "preview_geometry_unavailable")?;
++    let id = format!("{:x}", Sha256::digest(bytes));
++    Ok(json!({"geometryId":id,"nativeWidth":nw.round().max(1.0) as u64,
++        "nativeHeight":nh.round().max(1.0) as u64,"aspect":aspect,
++        "fullWidth":width,"fullHeight":height,"window":null}))
++}
++
++#[derive(Default)]
++pub(crate) struct StagePool {
++    slots: [Option<Arc<StageCache>>; 2],
++    signatures: [String; 2],
++    geometries: [String; 2],
++    budget: Option<usize>,
++    source: String,
++}
++
++impl StagePool {
++    pub fn source(&mut self, key: &str) {
++        if self.source != key {
++            self.clear();
++            self.source = key.to_string();
++        }
++    }
++
++    pub fn clear(&mut self) {
++        for cache in self.slots.iter().flatten() {
++            cache.clear();
++        }
++        self.slots = Default::default();
++        self.signatures = Default::default();
++        self.geometries = Default::default();
++    }
++
++    fn sizes(&self) -> (usize, usize) {
++        self.slots.iter().flatten().fold((0usize, 0usize), |(cpu, device), c| {
++            // Cross-cache/shared-source references are conservatively charged to each owner.
++            (cpu.saturating_add(c.retained_bytes()).saturating_add(gpu::stage_host_bytes(c)), device.saturating_add(gpu::stage_bytes(c)))
++        })
++    }
++
++    pub fn prepare(
++        &mut self,
++        side: usize,
++        signature: &str,
++        budget: Option<usize>,
++        edge: usize,
++        original: (usize, usize),
++    ) -> (Option<Arc<StageCache>>, bool) {
++        if self.budget != budget || budget.is_none() {
++            self.clear();
++            self.budget = budget;
++        }
++        let Some(limit) = budget else { return (None, false) };
++        if self.signatures[side] != signature {
++            self.slots[side] = None;
++            self.geometries[side].clear();
++            self.signatures[side] = signature.to_string();
++        }
++        // Two retained sizes per view; allow CPU+GPU planes and pinned host/device source copies.
++        // This bounds admission, not the renderer's transient working memory or process RSS.
++        let estimate = edge.checked_mul(edge).and_then(|n| n.checked_mul(512)).and_then(|n| {
++            original.0.checked_mul(original.1).map(|s| s.max(2560 * 2560)).and_then(|s| s.checked_mul(36)).and_then(|s| n.checked_add(s))
++        });
++        let (cpu, device) = self.sizes();
++        if estimate.and_then(|n| n.checked_add(cpu)?.checked_add(device)).is_none_or(|n| n > limit) {
++            self.slots[side] = None;
++            return (None, false);
++        }
++        let cache = self.slots[side].get_or_insert_with(|| Arc::new(StageCache::default())).clone();
++        (Some(cache), true)
++    }
++
++    pub fn geometry(&mut self, side: usize, id: &str) {
++        if !self.geometries[side].is_empty() && self.geometries[side] != id {
++            if let Some(c) = &self.slots[side] {
++                c.clear();
++            }
++        }
++        self.geometries[side] = id.to_string();
++    }
++
++    pub fn finish(&mut self, side: usize, budget: Option<usize>, applied: bool) -> Value {
++        let (cpu, device) = self.sizes();
++        let limit = budget.unwrap_or(0);
++        for slot in [1 - side, side] {
++            let (c, g) = self.sizes();
++            if c.saturating_add(g) <= limit {
++                break;
++            }
++            self.slots[slot] = None;
++        }
++        let (retained_cpu, retained_gpu) = self.sizes();
++        json!({"mode":if budget.is_some(){"on"}else{"off"},"applied":applied,
++            "reason":if budget.is_some() && !applied {"budget"} else {"none"},
++            "cpuBytes":cpu,"gpuBytes":device,"retainedBytes":retained_cpu.saturating_add(retained_gpu),"budgetBytes":limit})
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use lightcraft_engine::{
++        develop::DevelopSettings,
++        pipeline::{self, RenderRequest, SourceInfo},
++    };
++    use lightcraft_raster::Rgb32f;
++
++    #[test]
++    fn genzoroom_rejects_malformed_options_before_rendering() {
++        for value in [Value::Null, json!(true), json!(1), json!("DRAFT"), json!("fast")] {
++            assert!(matches!(Options::parse(&json!({"quality":value})), Err("preview_invalid_quality")));
++        }
++        for value in [Value::Null, json!(true), json!(1.0), json!(2), json!(-1)] {
++            assert!(matches!(Options::parse(&json!({"preview_contract":value})), Err("preview_invalid_contract")));
++        }
++        for value in [Value::Null, json!(true), json!(0), json!("reuse")] {
++            assert!(matches!(Options::parse(&json!({"stage_cache":value})), Err("preview_invalid_stage_cache")));
++        }
++        for value in [Value::Null, json!(true), json!(0), json!(-1), json!(1.0), json!(u64::MAX)] {
++            assert!(matches!(Options::parse(&json!({"stage_cache":"on","stage_cache_budget_bytes":value})), Err("preview_invalid_stage_cache")));
++        }
++        assert!(Options::parse(&json!({"stage_cache":"on"})).is_err());
++        assert!(Options::parse(&json!({"stage_cache":"off","stage_cache_budget_bytes":1})).is_err());
++        assert!(!Options::parse(&json!({})).unwrap().adaptive);
++        let full = Options::parse(&json!({"preview_contract":1})).unwrap();
++        assert!(full.adaptive && !full.draft && full.budget.is_none());
++        assert!(!error("upstream path or secrets").content[0]["text"].as_str().unwrap().contains("upstream"));
++    }
++
++    #[test]
++    fn genzoroom_geometry_tracks_coordinates_not_tone_quality_or_size() {
++        let src = Rgb32f::from_fn(96, 64, |x, y| [0.03 + (x + y) as f32 / 600.0; 3]);
++        let mut s = DevelopSettings::default();
++        let info = SourceInfo::default();
++        let render_meta = |s: &DevelopSettings, edge, draft| {
++            let mut req = RenderRequest::fit(edge, edge);
++            if draft {
++                req.quality = pipeline::Quality::Draft;
++            }
++            let r = pipeline::render(&src, &info, s, &req);
++            frame_metadata(r.frame.as_ref().unwrap(), (6001, 4001), "source-one", r.image.width, r.image.height).unwrap()
++        };
++        let full = render_meta(&s, 32, false);
++        assert_eq!(full["nativeWidth"], 6001);
++        assert_eq!(full["nativeHeight"], 4001);
++        s.light.exposure = 1.0;
++        s.optics.vignetting = 20.0;
++        assert_eq!(full["geometryId"], render_meta(&s, 64, true)["geometryId"]);
++        s.crop.flip_h = true;
++        assert_ne!(full["geometryId"], render_meta(&s, 32, false)["geometryId"]);
++        s.crop.flip_h = false;
++        s.optics.distortion = 20.0;
++        assert_ne!(full["geometryId"], render_meta(&s, 32, false)["geometryId"]);
++        let r = pipeline::render(&src, &info, &s, &RenderRequest::fit(32, 32));
++        let frame = r.frame.as_ref().unwrap();
++        let other = frame_metadata(frame, (6001, 4001), "source-two", r.image.width, r.image.height).unwrap();
++        assert_ne!(other["geometryId"], render_meta(&s, 32, false)["geometryId"]);
++        let mut invalid = frame.clone();
++        invalid.crop.angle = f64::NAN;
++        assert!(matches!(frame_metadata(&invalid, (6001, 4001), "source-two", r.image.width, r.image.height), Err("preview_geometry_mismatch")));
++    }
++
++    #[test]
++    fn genzoroom_stage_pool_reuses_separates_and_enforces_the_total_budget() {
++        let mut pool = StagePool::default();
++        pool.source("source-one");
++        let limit = memory::budget();
++        let (after, applied) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        assert!(applied);
++        let after = after.unwrap();
++        let src = Arc::new(Rgb32f::from_fn(32, 32, |x, y| [0.03 + (x + y) as f32 / 500.0; 3]));
++        let req = RenderRequest::fit(32, 32);
++        let mut s = DevelopSettings::default();
++        let first = pipeline::render_cached(&src, &SourceInfo::default(), &s, &req, &after);
++        assert_eq!(after.len(), 1);
++        let (same, _) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        assert!(Arc::ptr_eq(&after, &same.unwrap()));
++        let (before, _) = pool.prepare(1, "before-import", Some(limit), 32, (32, 32));
++        assert!(!Arc::ptr_eq(&after, &before.unwrap()));
++        let mut draft = req;
++        draft.quality = pipeline::Quality::Draft;
++        s.detail.nr_luminance = 30.0;
++        let _ = pipeline::render_cached(&src, &SourceInfo::default(), &s, &draft, &after);
++        let final_full = pipeline::render_cached(&src, &SourceInfo::default(), &s, &req, &after);
++        let uncached = pipeline::render(&src, &SourceInfo::default(), &s, &req);
++        assert_eq!(final_full.image.data, uncached.image.data);
++        assert_ne!(first.image.data.len(), 0);
++        drop(after);
++        let retained = pool.finish(0, Some(limit), true);
++        assert!(retained["retainedBytes"].as_u64().unwrap() > 0);
++        assert!(retained["retainedBytes"].as_u64().unwrap() <= limit as u64);
++        // Exercise post-render eviction independently of the conservative admission estimate.
++        assert_eq!(pool.finish(0, Some(1), true)["retainedBytes"], 0);
++        assert!(pool.slots.iter().all(Option::is_none));
++        // Lowering the configured limit clears both sides before any new cache admission.
++        let (none, applied) = pool.prepare(0, "geometry-one", Some(1), 32, (32, 32));
++        assert!(none.is_none() && !applied);
++        assert_eq!(pool.finish(0, Some(1), false)["retainedBytes"], 0);
++        let _ = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        pool.source("source-two");
++        assert!(pool.slots.iter().all(Option::is_none));
++        let _ = pool.prepare(0, "geometry-one", None, 32, (32, 32));
++        assert_eq!(pool.finish(0, None, false)["retainedBytes"], 0);
++    }
++}
++
++#[cfg(test)]
++mod remote_tests {
++    use super::*;
++    use crate::Backend;
++    struct RemoteFixture;
++    impl Backend for RemoteFixture {
++        fn call(&mut self, _: &str, _: Value) -> Result<Value, String> {
++            Err("private filesystem path".into())
++        }
++        fn has_ui(&self) -> bool {
++            true
++        }
++        fn describe(&self) -> String {
++            "remote".into()
++        }
++    }
++    #[test]
++    fn genzoroom_remote_does_not_silently_accept_quality() {
++        let result = crate::tools::call_tool(&mut RemoteFixture, "render_preview", &json!({"quality":"draft"}));
++        assert!(result.is_error);
++        assert_eq!(result.content[0]["text"], json!({"code":"preview_unsupported"}).to_string());
++    }
++}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 3265b36f9b4c2653a57468113c4b9179d527b4db..9aa2c47151f402da8d0182662516ba112a1b523c 100644
+index 3265b36f9b4c2653a57468113c4b9179d527b4db..34d6b061ccb73dc2c2749f4f1cfb9b6ff14f9b0d 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
-@@ -118,6 +118,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -118,6 +118,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              "Render a photo with its current develop settings (cropped) and return it as an image (`max_side` is the long edge; does not change selection or save a file).",
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
 +                "before": {"type": "boolean", "default": false, "description": "Native import Before, with current crop/orientation (GenzoRoom preview v1)"},
++
++                "quality": {"type":"string","enum":["draft","full"],"default":"full"},
++                "preview_contract": {"type":"integer","enum":[1]},
++                "stage_cache": {"type":"string","enum":["off","on"],"default":"off"},
++                "stage_cache_budget_bytes": {"type":"integer","minimum":1},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
-@@ -514,10 +515,19 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -217,6 +223,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+             "Render a photo with its current develop settings (cropped) and return it as an image so you can look at the result.",
+             json!({
+                 "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
++
++                "quality": {"type":"string","enum":["draft","full"],"default":"full"},
++                "preview_contract": {"type":"integer","enum":[1]},
++                "stage_cache": {"type":"string","enum":["off","on"],"default":"off"},
++                "stage_cache_budget_bytes": {"type":"integer","minimum":1},
++                "before": {"type":"boolean","default":false},
+                 "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
+                 "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
+                 "path": {"type": "string", "description": "Also save the rendered file here"}
+@@ -445,6 +457,11 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
+ /// Read a PNG the backend wrote, optionally downscale / re-encode as JPEG, and wrap it as image
+ /// content (+ a text block with the metadata).
+ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
++    let adaptive = meta.get("previewContract").is_some();
++    if adaptive && std::fs::metadata(file).map_or(true, |m| m.len() > 5 * 1024 * 1024) {
++        let _ = std::fs::remove_file(file);
++        return crate::preview::error("preview_budget_exceeded");
++    }
+     let bytes = match std::fs::read(file) {
+         Ok(b) => b,
+         Err(e) => return ToolResult::error(format!("cannot read rendered image {}: {e}", file.display())),
+@@ -484,6 +501,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
+     } else if let Some(o) = info.as_object_mut() {
+         o.remove("path");
+     }
++    if adaptive {
++        if let Some(o) = info.as_object_mut() { o.remove("path"); }
++        if bytes.len() > 5 * 1024 * 1024 || info.to_string().len() > 16 * 1024 {
++            return crate::preview::error("preview_budget_exceeded");
++        }
++    }
+     ToolResult {
+         content: vec![json!({"type": "image", "data": base64_encode(&bytes), "mimeType": mime}), json!({"type": "text", "text": info.to_string()})],
+         is_error: false,
+@@ -500,6 +523,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+ }
+ 
+ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
++    let options = match crate::preview::Options::parse(args) {
++        Ok(value) => value,
++        Err(code) => return crate::preview::error(code),
++    };
++    let result = render_photo_inner(b, args);
++    if options.adaptive && result.is_error {
++        let code = result.content.first().and_then(|c| c["text"].as_str())
++            .and_then(|text| serde_json::from_str::<Value>(text).ok())
++            .and_then(|v| v["code"].as_str().map(str::to_string));
++        crate::preview::error(code.as_deref().unwrap_or("preview_render_failed"))
++    } else { result }
++}
++
++fn render_photo_inner(b: &mut dyn Backend, args: &Value) -> ToolResult {
++    let options = match crate::preview::Options::parse(args) {
++        Ok(value) => value,
++        Err(code) => return crate::preview::error(code),
++    };
++    if options.adaptive && !b.preview_contract() { return crate::preview::error("preview_unsupported"); }
+     if let Err(e) = check_save_path(b, args) {
+         return ToolResult::error(e);
+     }
+@@ -514,13 +556,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
      let Some(id) = id else { return ToolResult::error("no active photo: import or select one, or pass `id`") };
      let file = temp_path("render");
      let path = file.to_string_lossy().to_string();
@@ -124,31 +865,52 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..9aa2c47151f402da8d0182662516ba11
 +        Some(Value::Bool(value)) => *value,
 +        _ => return ToolResult::error("before must be boolean"),
 +    };
-+    let meta = match b.call("ui.render", json!({"id": id, "size": size, "path": path, "before": before})) {
++    let mut params = json!({"id": id, "size": size, "path": path, "before": before});
++    for key in ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"] {
++        if let Some(value) = args.get(key) { params[key] = value.clone(); }
++    }
++    let meta = match b.call("ui.render", params) {
          Ok(m) => m,
-         Err(e) => return ToolResult::error(e),
+-        Err(e) => return ToolResult::error(e),
++        Err(e) => {
++            let _ = std::fs::remove_file(&file);
++            return if options.adaptive { crate::preview::error(&e) } else { ToolResult::error(e) };
++        }
      };
++    if options.adaptive && (meta["previewContract"] != 1 || meta["mode"] != "whole"
++        || meta["quality"] != if options.draft {"draft"} else {"full"}
++        || meta["kind"] != if before {"before"} else {"after"}) {
++        let _ = std::fs::remove_file(&file);
++        return crate::preview::error("preview_unsupported");
++    }
 +    // A remote backend may ignore unknown arguments; never label its After image as Before.
 +    if before && meta.get("kind").and_then(Value::as_str) != Some("before") {
 +        return ToolResult::error("backend does not support native Before rendering");
 +    }
      let mut meta = meta;
      meta["id"] = json!(id);
-     image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
-@@ -618,7 +628,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+-    image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
++    let result = image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta);
++    result
+ }
+ 
+ fn screenshot(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -618,7 +683,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
-+            let mut a = obj(args, &["id", "format", "before"]);
++            // obj() deliberately omits nulls for legacy helpers; validate opt-in fields first.
++            if let Err(code) = crate::preview::Options::parse(args) { return crate::preview::error(code); }
++            let mut a = obj(args, &["id", "format", "before", "quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }
 diff --git a/crates/mcp/tests/e2e.rs b/crates/mcp/tests/e2e.rs
-index 8b039649011089caf195ca6dbc0b183d9ef24775..10f583c8262f4bf12308fdd30b802ded6782523b 100644
+index 8b039649011089caf195ca6dbc0b183d9ef24775..a64383f6f3c9f770d83c19ccf6dca97ba554c101 100644
 --- a/crates/mcp/tests/e2e.rs
 +++ b/crates/mcp/tests/e2e.rs
-@@ -316,3 +316,43 @@ fn export_without_token_finishes_after_eof() {
+@@ -316,3 +316,135 @@ fn export_without_token_finishes_after_eof() {
      assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
      std::fs::remove_dir_all(dir).unwrap();
  }
@@ -192,3 +954,256 @@ index 8b039649011089caf195ca6dbc0b183d9ef24775..10f583c8262f4bf12308fdd30b802ded
 +    assert_eq!((before.1,before.2),(after.1,after.2));
 +    assert_eq!(images[6]["result"]["structuredContent"]["light"]["exposure"], 1.5);
 +}
++
++
++fn preview_metadata(result: &Value) -> Value {
++    assert_eq!(result["isError"],false,"{result}");
++    serde_json::from_str(result["content"].as_array().unwrap().iter()
++        .find(|c| c["type"]=="text").unwrap()["text"].as_str().unwrap()).unwrap()
++}
++
++#[test]
++fn genzoroom_adaptive_quality_geometry_and_legacy_contract() {
++    let h=Headless::demo();
++    let id=h.session.active().unwrap().0;
++    let p=h.session.catalog.photo(lightcraft_engine::catalog::PhotoId(id)).unwrap();
++    let original=(p.width as u64,p.height as u64);
++    let mut server=Server::new(Box::new(h));
++    let replies=session(&mut server,&[
++        call(1,"render_preview",json!({"id":id,"max_side":32})),
++        call(2,"render_preview",json!({"id":id,"max_side":32,"preview_contract":1})),
++        call(3,"render_preview",json!({"id":id,"max_side":32,"quality":"draft"})),
++        call(4,"render_preview",json!({"id":id,"max_side":32,"quality":"full","before":true})),
++        call(5,"render_preview",json!({"id":id,"max_side":32,"quality":"draft","before":true})),
++        call(6,"get_develop",json!({"id":id})),
++        call(7,"set_develop",json!({"id":id,"values":{"light.exposure":1.5}})),
++        call(8,"render_preview",json!({"id":id,"max_side":64,"quality":"full"})),
++        call(9,"render_preview",json!({"id":id,"max_side":32,"before":true})),
++    ]);
++    let old=preview_metadata(&replies[0]["result"]);
++    assert_eq!(old.as_object().unwrap().keys().cloned().collect::<Vec<_>>(),["height","id","kind","width"]);
++    let full=preview_metadata(&replies[1]["result"]);
++    assert_eq!(full["frame"]["nativeWidth"],original.0);
++    assert_eq!(full["frame"]["nativeHeight"],original.1);
++    assert_eq!(full["frame"]["fullWidth"],full["width"]);
++    assert!(full["frame"]["window"].is_null());
++    assert!(full["frame"]["nativeWidth"].as_u64().unwrap()>full["width"].as_u64().unwrap());
++    assert_eq!(replies[0]["result"]["content"][0],replies[1]["result"]["content"][0]);
++    for (i,kind,quality) in [(1,"after","full"),(2,"after","draft"),(3,"before","full"),(4,"before","draft")] {
++        let meta=preview_metadata(&replies[i]["result"]);
++        assert_eq!(meta["previewContract"],1);
++        assert_eq!(meta["kind"],kind);
++        assert_eq!(meta["quality"],quality);
++        assert_eq!(meta["frame"]["geometryId"],full["frame"]["geometryId"]);
++        assert_eq!(meta["stageCache"]["retainedBytes"],0);
++        assert!(meta.get("path").is_none());
++        assert_eq!(mean_of(&replies[i]["result"]).1 as u64,meta["width"].as_u64().unwrap());
++    }
++    assert_eq!(full["frame"]["geometryId"],preview_metadata(&replies[7]["result"])["frame"]["geometryId"]);
++    assert!(preview_metadata(&replies[8]["result"]).get("previewContract").is_none());
++    assert_eq!(replies[5]["result"]["structuredContent"]["light"]["exposure"],0.0);
++}
++
++#[test]
++fn genzoroom_malformed_preview_values_fail_closed_over_mcp() {
++    let mut server=Server::new(Box::new(Headless::demo()));
++    for (field,values,code) in [
++        ("quality",vec![Value::Null,json!(false),json!(1),json!("FULL")],"preview_invalid_quality"),
++        ("preview_contract",vec![Value::Null,json!(false),json!(1.0),json!(2)],"preview_invalid_contract"),
++        ("before",vec![Value::Null,json!(0),json!("true")],"preview_invalid_contract"),
++        ("stage_cache",vec![Value::Null,json!(false),json!("reuse"),json!("on")],"preview_invalid_stage_cache"),
++        ("stage_cache_budget_bytes",vec![Value::Null,json!(false),json!(0),json!(-1)],"preview_invalid_stage_cache"),
++    ] {
++        for value in values {
++            let mut args=json!({"max_side":16});
++            args[field]=value;
++            let result=session(&mut server,&[call(1,"render_preview",args)]).remove(0)["result"].clone();
++            assert_eq!(result["isError"],true,"{result}");
++            assert_eq!(result["content"].as_array().unwrap().len(),1);
++            let body:Value=serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
++            assert_eq!(body,json!({"code":code}));
++        }
++    }
++}
++
++#[test]
++fn genzoroom_cache_budget_and_full_after_draft_match_uncached() {
++    let mut server=Server::new(Box::new(Headless::demo()));
++    let budget=lightcraft_engine::memory::budget();
++    let r=session(&mut server,&[
++        call(1,"render_preview",json!({"max_side":32,"quality":"draft","stage_cache":"on","stage_cache_budget_bytes":budget})),
++        call(2,"render_preview",json!({"max_side":32,"quality":"full","stage_cache":"on","stage_cache_budget_bytes":budget})),
++        call(3,"render_preview",json!({"max_side":32,"quality":"full","stage_cache":"off"})),
++        call(4,"render_preview",json!({"max_side":32,"quality":"full","stage_cache":"on","stage_cache_budget_bytes":1})),
++    ]);
++    for result in &r {
++        let meta=preview_metadata(&result["result"]);
++        assert!(meta["stageCache"]["retainedBytes"].as_u64().unwrap()<=meta["stageCache"]["budgetBytes"].as_u64().unwrap());
++    }
++    assert_eq!(r[1]["result"]["content"][0],r[2]["result"]["content"][0]);
++    let tiny=preview_metadata(&r[3]["result"]);
++    assert_eq!(tiny["stageCache"]["applied"],false);
++    assert_eq!(tiny["stageCache"]["reason"],"budget");
++    assert_eq!(tiny["stageCache"]["retainedBytes"],0);
++}
+diff --git a/crates/pipeline/src/geometry.rs b/crates/pipeline/src/geometry.rs
+index 3f2766750c3c7f036ff9c4a066176ef51f53e522..4b520482bd65e63b3970d756dedd233c36998de2 100644
+--- a/crates/pipeline/src/geometry.rs
++++ b/crates/pipeline/src/geometry.rs
+@@ -175,6 +175,18 @@ impl Frame {
+         r.width().max(1.0) / r.height().max(1.0)
+     }
+ 
++    /// The resolved, normalized crop on the original's EXIF-oriented pixel grid.
++    /// Use decoder/import dimensions, never dimensions inferred from an output bitmap.
++    pub fn native_size_at(&self, original_w: usize, original_h: usize) -> Option<(f64, f64)> {
++        if original_w == 0 || original_h == 0 || self.view.is_some() {
++            return None;
++        }
++        let (w, h) = if self.orient.swaps_axes() { (original_h, original_w) } else { (original_w, original_h) };
++        let rect = self.crop.rect_px(w as f64, h as f64);
++        let size = (rect.width(), rect.height());
++        (size.0.is_finite() && size.1.is_finite() && size.0 > 0.0 && size.1 > 0.0).then_some(size)
++    }
++
+     /// Size of the (cropped) output at the source's own resolution, in pixels.
+     pub fn native_size(&self) -> (f64, f64) {
+         let r = self.crop.rect_px(self.ow, self.oh);
+diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
+index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1ac5ace68b 100644
+--- a/crates/pipeline/src/lib.rs
++++ b/crates/pipeline/src/lib.rs
+@@ -189,6 +189,8 @@ impl RenderRequest {
+ }
+ 
+ pub struct Rendered {
++    /// The exact plan used by the successful renderer; stand-ins have no geometric proof.
++    pub frame: Option<geometry::Frame>,
+     /// The result, 8-bit (for deep renders: `deep` reduced to 8 bits, display-encoded).
+     pub image: Rgba8,
+     pub histogram: Histogram,
+@@ -288,6 +290,15 @@ impl StageCache {
+     /// Bytes of the intermediate images held (each buffer counted once; the sources they were
+     /// made from belong to their owner and are not counted).
+     pub fn bytes(&self) -> usize {
++        self.count_bytes(false)
++    }
++
++    /// Includes source buffers pinned by these entries, even if their original owner evicts them.
++    pub fn retained_bytes(&self) -> usize {
++        self.count_bytes(true)
++    }
++
++    fn count_bytes(&self, include_sources: bool) -> usize {
+         fn size<T>(i: &lightcraft_raster::Image<T>) -> usize {
+             i.data.len() * std::mem::size_of::<T>()
+         }
+@@ -300,6 +311,12 @@ impl StageCache {
+             }
+         };
+         for e in self.lock().iter() {
++            if include_sources {
++                add(Arc::as_ptr(&e.src) as usize, size(&e.src));
++            }
++            if let Some((_, chroma)) = &e.planes.chroma {
++                add(Arc::as_ptr(chroma) as usize, size(chroma));
++            }
+             add(Arc::as_ptr(&e.sampled) as usize, size(&e.sampled));
+             if let Some((_, l)) = &e.lin {
+                 add(Arc::as_ptr(l) as usize, size(l));
+@@ -601,7 +618,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+         let image = deep.to_rgba8();
+         let histogram = Histogram::of_srgb8(&image);
+         lap("finish (deep)", &mut t);
+-        return Rendered { image, histogram, deep: Some(deep) };
++        return Rendered { frame: Some(frame.clone()), image, histogram, deep: Some(deep) };
+     }
+     let image = finish::finish(&prep, s, frame, info, req.space, req.display.as_ref(), req.proof);
+     lap("finish", &mut t);
+@@ -627,7 +644,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+         }
+         lap("visualize hdr", &mut t);
+     }
+-    Rendered { image, histogram, deep: None }
++    Rendered { frame: Some(frame.clone()), image, histogram, deep: None }
+ }
+ 
+ /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
+diff --git a/crates/pipeline/src/tests.rs b/crates/pipeline/src/tests.rs
+index 910705497e9d6112fecbd52112493626cfdd417d..8f6c52c32ee4c23b6431aed004437c9e304e59d7 100644
+--- a/crates/pipeline/src/tests.rs
++++ b/crates/pipeline/src/tests.rs
+@@ -790,3 +790,60 @@ fn sliver_crops_render_quickly_with_wide_stages_on() {
+         assert!(r.image.width >= 1 && r.image.height >= 1, "{rect:?}");
+     }
+ }
++
++#[test]
++fn genzoroom_render_frame_is_the_effective_plan_without_a_second_decode() {
++    use lightcraft_geom::{Orientation, Point, Rect};
++    use lightcraft_develop::{EmbeddedLens, EmbeddedWarp, Upright};
++    let src = scene();
++    let info = SourceInfo { lens: Some(EmbeddedLens {
++        warp: Some(EmbeddedWarp { planes:[[1.0,0.01,0.0,0.0,0.001,0.002];3], center:Point::new(0.4,0.5),radius:0.6 }),
++        ..Default::default()
++    }), ..Default::default() };
++    let mut s = DevelopSettings::default();
++    s.crop.geometry.rect = Rect { x0: 0.1, y0: 0.2, x1: 0.9, y1: 0.8 };
++    s.crop.geometry.angle = 7.0;
++    s.crop.flip_h = true;
++    s.orientation = Orientation::Rotate90;
++    s.optics.distortion = 20.0;
++    s.optics.remove_ca = true;
++    s.geometry.constrain_crop = true;
++    s.geometry.upright = Upright::Level;
++    let req = RenderRequest::fit(96, 96);
++    let effective = s.effective();
++    let rendition = crate::settings_for(&effective, &req);
++    let expected = crate::plan(&src, &info, &rendition, &req);
++    let rendered = render(&src, &info, &s, &req);
++    let actual = rendered.frame.as_ref().unwrap();
++    assert_eq!(actual, &expected.frame);
++    assert_eq!((rendered.image.width, rendered.image.height), (expected.w, expected.h));
++    // Original dimensions are an independent decoder fact, including odd native dimensions.
++    let native = actual.native_size_at(6001, 4001).unwrap();
++    assert_eq!(native, (actual.crop.rect.width() * 4001.0, actual.crop.rect.height() * 6001.0));
++    let mut disabled = s.clone();
++    disabled.disabled_sections.push("optics".to_string());
++    let r = render(&src, &info, &disabled, &req);
++    let e = disabled.effective();
++    let rendition = crate::settings_for(&e, &req);
++    let p = crate::plan(&src, &info, &rendition, &req);
++    assert_eq!(r.frame.as_ref().unwrap(), &p.frame);
++}
++
++#[test]
++fn genzoroom_stage_bytes_include_chroma_and_unique_pinned_sources() {
++    use std::sync::Arc;
++    let src = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.1; 3]));
++    let cache = crate::StageCache::default();
++    let s = DevelopSettings::default();
++    let info = SourceInfo::default();
++    let _ = crate::render_cached(&src, &info, &s, &RenderRequest::fit(32, 32), &cache);
++    let base = cache.bytes();
++    let chroma = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.2; 3]));
++    cache.lock()[0].planes.chroma = Some((0, chroma.clone()));
++    assert_eq!(cache.bytes(), base + chroma.data.len() * 12);
++    let _ = crate::render_cached(&src, &info, &s, &RenderRequest::fit(16, 16), &cache);
++    assert_eq!(cache.len(), 2);
++    assert_eq!(cache.retained_bytes(), cache.bytes() + src.data.len() * 12);
++    cache.clear();
++    assert_eq!(cache.retained_bytes(), 0);
++}
+diff --git a/crates/ui-egui/src/render.rs b/crates/ui-egui/src/render.rs
+index 64ab067b7d75aeb21e921b865737a7b661d7d77a..a9d43a278c7568f3ffe7481412d86663d33f4268 100644
+--- a/crates/ui-egui/src/render.rs
++++ b/crates/ui-egui/src/render.rs
+@@ -1663,7 +1663,7 @@ mod color_image_tests {
+             display: None,
+         };
+         let histogram = Histogram::of_srgb8(&image);
+-        let ok = Renderer::run_for(|| result(Ok(lightcraft_pipeline::Rendered { image: image.clone(), histogram, deep: None })), &None);
++        let ok = Renderer::run_for(|| result(Ok(lightcraft_pipeline::Rendered { frame: None, image: image.clone(), histogram, deep: None })), &None);
+         assert_eq!(ok.color.map(|c| c.pixels.clone()), Some(color_image(&image).pixels));
+         let failed = Renderer::run_for(|| result(Err("unreadable".into())), &None);
+         assert!(failed.color.is_none());
