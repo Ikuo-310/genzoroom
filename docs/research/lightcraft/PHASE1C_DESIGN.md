@@ -1328,3 +1328,13 @@ AnshitsuPageの既存persistent選択とImageViewerの既存Backslash／JIS／IM
 - 関連Frontend 256件・Backend 207件成功。最終patch形式への変更後もpatch管理3件を再実行して成功。TypeScript typecheck・production build・Python構文検査・packaging PowerShell構文検査・`git diff --check`に成功。管理patchの空context行に必要なspace prefixはpatch専用attributeで扱い、適用後のnative source自体もdiff checkした。全suiteの自動実行はせず、変更したadapter／API／hook／ViewerとRAW History・Reset／JPEG比較・shortcutsの依存境界へ限定する。
 
 実RAWと実GPUのBefore画素・色、WebViewの待機表示・Backslash／JIS実キー、zoom／pan、crop／orientation、混在Filmstrip・再生成・再入場・通常終了の実画面確認、installer／NAS実行は未実施。native demo／synthetic PNG、Fake native／一時SQLite、React DOMの成功と区別する。C4-Dの自動検証・実装とpatch更新管理を完了対象とし、実機受入は上記項目を残す。C4-EのJPEG UI統合、C4-Fの別工程監査、RAW Scope／Export、Crop／Lens UIには進まない。
+
+### C4-E JPEG調整UI統合の実装結果
+
+JPEG暗室のカテゴリをカラー（色温度、Tint、自然な彩度、彩度）、基本補正、カラーグレーディングの順に統合した。個別スライダーのON/OFFボタンとコンテキストメニュー項目を除き、個別Reset、カテゴリON/OFF、カラーグレーディングの範囲ON/OFFを維持した。共通Sliderでは、数値入力・Reset・キーボード移動の処理を変えず、個別powerを隠す既存propを使った。水平ナビゲーション対象からも個別powerを除いた。powerを隠した行でrangeがdisabledでもコンテキストメニューを開けるよう、復帰focus先だけを既存Resetボタンへ移した。
+
+Recipe v18の16個の`adjustmentEnabled` field、SQLite schema、History形式と現像演算式は維持した。Frontendのeffective recipeとBackend JPEG rendererはこれらの個別flagを補正へ反映しない。個別flagだけで現像済み扱いせず、古い個別toggle History entryも単独なら編集状態を立てない。新しい個別toggle actionはFrontend reducerでno-opとし、新規Historyに保存しない。
+
+既存`whiteBalanceEnabled`と`colorEnabled`を統合カラー状態としてANDで評価し、新しいカラーtoggleは両fieldを同期した`colorToggle`一件として記録する。カラーResetは4数値をまとめて初期値へ戻し、Reset直前の2 fieldのANDへ両fieldを同期する`colorReset`一件とした。Undo／Redo／History jumpは既存のsnapshot復元経路を維持する。個別Resetは従来どおり対象数値だけを戻し、Recipe version、DB schema、JPEG Before／After、Export、補正済みサムネイルの保存契約を変更していない。
+
+Focused Frontend回帰15ファイル640件が成功し、1件をskipした（UI／state／shortcut／clipboard 11ファイル432件、WebGPU model／ImageViewer／worker 4ファイル208件）。Backend関連5ファイル93件と114 subtestsが成功した。TypeScript typecheck、production build、Python構文検査、`git diff --check`も成功した。production buildには既存の500 kB超chunk警告、React testsには既存の`act(...)`警告がある。ブラウザ実画面の手動確認は行っていない。C4-Eで停止し、C4-Fは実施していない。

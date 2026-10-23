@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom';
 
 export type AdjustmentMenuPosition = { trigger: HTMLElement; x: number; y: number };
 
-export function AdjustmentContextMenu({ target, menuLabel, className, enabled, resetDisabled, pasteDisabled,
+export function AdjustmentContextMenu({ target, menuLabel, className, enabled, resetDisabled, pasteDisabled, hideToggle,
   enableLabel, disableLabel, resetLabel, copyLabel, pasteLabel, onToggle, onReset, onCopy, onPaste, onClose }: {
   target: AdjustmentMenuPosition; menuLabel: string; className: string;
-  enabled: boolean; resetDisabled: boolean; pasteDisabled: boolean;
+  enabled: boolean; resetDisabled: boolean; pasteDisabled: boolean; hideToggle?: boolean;
   enableLabel: string; disableLabel: string; resetLabel: string; copyLabel: string; pasteLabel: string;
-  onToggle: () => void; onReset: () => void; onCopy: () => void; onPaste: () => void; onClose: () => void;
+  onToggle?: () => void; onReset: () => void; onCopy: () => void; onPaste: () => void; onClose: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: target.x, top: target.y });
@@ -54,7 +54,7 @@ export function AdjustmentContextMenu({ target, menuLabel, className, enabled, r
     <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onCopy)}>{copyLabel}</button>
     <button type="button" className="workspace-menu-item" role="menuitem" disabled={pasteDisabled} onClick={() => invoke(onPaste)}>{pasteLabel}</button>
     <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />
-    <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onToggle)}>{enabled ? disableLabel : enableLabel}</button>
+    {!hideToggle && onToggle && <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onToggle)}>{enabled ? disableLabel : enableLabel}</button>}
     <button type="button" className="workspace-menu-item" role="menuitem" disabled={resetDisabled} onClick={() => invoke(onReset)}>{resetLabel}</button>
   </div>, document.body);
 }

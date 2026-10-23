@@ -1370,6 +1370,14 @@ In explicit `--environment-backend` diagnostics, `WindowsConnection.metadata()` 
 
 The validation workflow is to develop locally, copy or deploy the required files to the target Docker host, start them with Docker Compose (or Portainer when used), and verify actual behavior there. Successful Windows checks alone do not constitute completed runtime validation.
 
+### JPEG adjustment categories and legacy individual flags (Phase 1C-C4-E)
+
+The JPEG Anshitsu panel presents Color first (Temperature, Tint, Vibrance and Saturation), then Basic, then the independent Color Grading category. Slider-level bypass controls and their context-menu actions are absent; individual Reset, category bypass and Color Grading range bypass remain. The shared `AdjustmentSlider` number editing, Reset and keyboard navigation paths remain unchanged. When a disabled range opens its context menu, focus returns to the existing Reset button because the former power button is no longer available.
+
+Recipe v18 and the SQLite edit-state schema retain all sixteen `adjustmentEnabled` fields for stored-state shape compatibility, but Frontend effective adjustments, Backend JPEG rendering and edited-state checks ignore those fields. New individual-toggle actions are ignored and therefore cannot create new saved bypass states or History entries. The fields are neither migrated nor rewritten in existing recipes.
+
+`whiteBalanceEnabled` and `colorEnabled` remain persisted fields and jointly gate the integrated Color category (`AND`). New category toggles synchronize both fields in one `colorToggle` History entry. Color Reset resets Temperature, Tint, Vibrance and Saturation in one `colorReset` entry, synchronizing both fields to their pre-reset effective state. Existing JPEG individual Reset behavior and History snapshot restoration remain in place; Recipe v18, SQLite schema, pixel formulas, Before/After, Export and rendered-thumbnail contracts are unchanged.
+
 The deployment runtime check is to open the Web UI, confirm `Backend: Connected`, `Immich: Connected`, and up to 100 recent thumbnails, obtain `{"status":"ok"}` from `/api/health`, and obtain a connected result from `/api/immich/status`. Also verify the empty and failed photo-list states, missing Immich settings, rejected credentials, and the backend stopped. Container builds, nginx routing, real Immich photo and thumbnail access, and restart behavior still require target-environment validation; static checks alone cannot establish them.
 
 ## Native RAW Before/After (Phase 1C-C4-D)

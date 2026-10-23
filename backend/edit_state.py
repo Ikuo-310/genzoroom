@@ -57,7 +57,6 @@ def has_non_default_recipe(state: dict) -> bool:
     recipe = state["currentRecipe"]
     return any(recipe["adjustments"][key] != 0 for key in BOUNDS) \
         or any(not recipe[key] for key in FLAGS) \
-        or any(not flag for flag in recipe.get("adjustmentEnabled", {}).values())
 
 
 def has_edits(state: dict) -> bool:
@@ -131,8 +130,16 @@ def _entry(value: object, state_format_version: int, recipe_version: int) -> dic
         valid = not flags and bool(values) and values <= set(ids)
     elif kind in SCALAR_KINDS:
         valid = not flags and values <= {kind}
+    elif kind == "colorToggle":
+        valid = not values and bool(flags) and flags <= {"whiteBalanceEnabled", "colorEnabled"} \
+            and after["whiteBalanceEnabled"] == after["colorEnabled"]
     elif kind in TOGGLE_FIELDS:
         valid = not values and flags <= {TOGGLE_FIELDS[kind]}
+    elif kind == "colorReset":
+        color_values = {"temperature", "tint", "vibrance", "saturation"}
+        category_enabled = before["whiteBalanceEnabled"] and before["colorEnabled"]
+        valid = values <= color_values and flags <= {"whiteBalanceEnabled", "colorEnabled"} \
+            and after["whiteBalanceEnabled"] == category_enabled and after["colorEnabled"] == category_enabled
     else:
         valid = not flags and values <= RESET_FIELDS[kind] if kind != "allReset" else True
     if not valid:

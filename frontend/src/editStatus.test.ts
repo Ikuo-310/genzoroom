@@ -27,12 +27,19 @@ describe('edit status (shared frontend/backend cases)', () => {
     } else expect(hasEdits(session)).toBe(test.edited);
   });
 
-  it.each(ADJUSTMENT_IDS)('includes saved values and individual bypass for %s', id => {
+  it.each(ADJUSTMENT_IDS)('counts saved values but ignores legacy individual bypass for %s', id => {
     const session = newSession();
     session.recipe.adjustments[id] = 1;
     expect(hasEdits(session)).toBe(true);
     session.recipe.adjustments[id] = 0; session.recipe.adjustmentEnabled[id] = false;
-    expect(hasEdits(session)).toBe(true);
+    expect(hasEdits(session)).toBe(false);
+  });
+
+  it('ignores a persisted legacy individual toggle when it is the only edit', () => {
+    const before = defaultRecipe();
+    const after = { ...defaultRecipe(), adjustmentEnabled: { ...defaultRecipe().adjustmentEnabled, temperature: false } };
+    const session = { ...newSession(), recipe: after, history: [{ kind: 'temperatureToggle' as const, before, after }] };
+    expect(hasEdits(session)).toBe(false);
   });
 
   it('keeps History clear edited, includes pending edits and clears a full reset', () => {

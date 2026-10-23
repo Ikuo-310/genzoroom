@@ -33,7 +33,7 @@ vi.mock('./ImageViewer', () => ({
 let host: HTMLDivElement;
 let root: Root;
 const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!.textContent!);
-const category = (index = 0) => host.querySelectorAll<HTMLElement>('.adjustment-category')[index];
+const category = (index = 0) => host.querySelector<HTMLButtonElement>(`.adjustment-category-title[data-adjustment-category-id="${index === 1 ? 'basic' : index === 3 ? 'colorGrading' : 'color'}"]`)!.closest<HTMLElement>('.adjustment-category')!;
 const slider = (index = 0) => category(index).querySelector<HTMLInputElement>('input[type="range"]')!;
 const tintSlider = () => category().querySelectorAll<HTMLInputElement>('input[type="range"]')[1]!;
 const number = (index = 0) => category().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
@@ -142,7 +142,7 @@ describe('production White Balance controls', () => {
       const beforeHistory = history();
       act(() => source.focus());
       navigate('ArrowUp');
-      expect(document.activeElement).toBe(tintSlider());
+      expect(document.activeElement).toBe(category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3]);
       act(() => source.focus());
       navigate('ArrowDown');
       expect(document.activeElement).toBe(slider(1));
@@ -157,7 +157,7 @@ describe('production White Balance controls', () => {
     act(() => reset.focus());
     expect(key(value, reset).defaultPrevented).toBe(false);
     expect(recipe().adjustments.temperature).toBe(0);
-    expect(history()).toEqual(['Reset White Balance adjustments', 'Temperature 0 → +10']);
+    expect(history()).toEqual(['Reset Color adjustments', 'Temperature 0 → +10']);
   });
 
   it('navigates from category Reset while its sliders are disabled', () => {
@@ -171,10 +171,10 @@ describe('production White Balance controls', () => {
     const beforeHistory = history();
     act(() => reset.focus());
     navigate('ArrowUp');
-    expect(document.activeElement).toBe(tintSlider());
+    expect(document.activeElement).toBe(category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3]);
     act(() => reset.focus());
     navigate('ArrowDown');
-    expect(document.activeElement).toBe(category(2).querySelector('.adjustment-category-title'));
+    expect(document.activeElement).toBe(category(3).querySelector('.adjustment-category-title'));
     expect(recipe()).toEqual(before);
     expect(history()).toEqual(beforeHistory);
   });
@@ -241,7 +241,7 @@ describe('production White Balance controls', () => {
       toggle.click();
     });
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
-    expect(history()).toEqual(['White Balance OFF']);
+    expect(history()).toEqual(['Color OFF']);
     expect(category().querySelector('.adjustment-category-title')?.getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -268,11 +268,11 @@ describe('production White Balance controls', () => {
     const beforeHistory = history();
     act(() => toggle.focus());
     navigate('ArrowUp');
-    expect(document.activeElement).toBe(tintSlider());
+    expect(document.activeElement).toBe(category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3]);
     act(() => toggle.focus());
     navigate('ArrowDown');
     expect(document.activeElement).toBe(mode === 'expanded' ? slider(1)
-      : category(2).querySelector('.adjustment-category-title'));
+      : category(3).querySelector('.adjustment-category-title'));
     navigate('ArrowUp');
     expect(document.activeElement).toBe(title);
     expect(recipe()).toEqual(before);
@@ -297,7 +297,7 @@ describe('production White Balance controls', () => {
   ] as const)('reveals switch navigation destination %s at %s..%s only within the list', (direction, top, bottom, expected) => {
     const scroll = host.querySelector<HTMLElement>('.develop-scroll-region')!;
     const toggle = category(1).querySelector<HTMLButtonElement>('[data-category-switch]')!;
-    const destination = direction === 'ArrowDown' ? slider(1) : tintSlider();
+    const destination = direction === 'ArrowDown' ? slider(1) : category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3];
     Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 200 });
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 300 } as DOMRect);
     vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue({ top, bottom } as DOMRect);
@@ -392,7 +392,7 @@ describe('production White Balance controls', () => {
     expect(document.activeElement).toBe(items[1]);
     pointer('pointerover', items[3]);
     expect(document.activeElement).not.toBe(items[1]);
-    expect(activeAdjustmentId()).toBe('contrast');
+    expect(activeAdjustmentId()).toBe('saturation');
     key('ArrowRight', document.activeElement!);
     expect(items[3].value).toBe('1');
   });
@@ -498,7 +498,7 @@ describe('production White Balance controls', () => {
     pointer('pointerover', items[8]);
     key('ArrowDown', items[1], { shiftKey: true });
     expect(document.activeElement).toBe(items[9]);
-    expect(history()[0]).toBe('Contrast 0 → +10');
+    expect(history()[0]).toBe('Saturation 0 → +10');
     advance();
     expect(history()).toHaveLength(3);
     key('z', items[9], { ctrlKey: true });
@@ -524,17 +524,17 @@ describe('production White Balance controls', () => {
     click(category(1).querySelector<HTMLElement>(mode === 'collapse' ? '[aria-expanded]' : '[aria-pressed]')!);
     const before = recipe();
     const beforeHistory = history();
-    act(() => tintSlider().focus());
+    act(() => category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3].focus());
     navigate('ArrowDown');
     expect(document.activeElement).toBe(category(1).querySelector('.adjustment-category-title'));
     navigate('ArrowDown');
-    expect(document.activeElement).toBe(category(2).querySelector('.adjustment-category-title'));
+    expect(document.activeElement).toBe(category(3).querySelector('.adjustment-category-title'));
     navigate('ArrowDown');
-    expect(document.activeElement).toBe(slider(2));
+    expect(document.activeElement).toBe(category(3).querySelector('.grading-range-title'));
     navigate('ArrowUp');
     navigate('ArrowUp');
     navigate('ArrowUp');
-    expect(document.activeElement).toBe(tintSlider());
+    expect(document.activeElement).toBe(category().querySelectorAll<HTMLInputElement>('.adjustment-range')[3]);
     advance();
     expect(recipe()).toEqual(before);
     expect(history()).toEqual(beforeHistory);
@@ -546,10 +546,11 @@ describe('production White Balance controls', () => {
     items[2].closest<HTMLElement>('.adjustment-control')!.hidden = true;
     act(() => items[0].focus());
     navigate('ArrowDown');
-    expect(document.activeElement).toBe(category(1).querySelector('.adjustment-category-title'));
-    navigate('ArrowDown');
     expect(document.activeElement).toBe(items[3]);
     click(category(1).querySelector<HTMLElement>('[aria-expanded]')!);
+    act(() => items[3].focus());
+    navigate('ArrowDown');
+    expect(document.activeElement).toBe(category(1).querySelector('.adjustment-category-title'));
     const before = recipe();
     key('ArrowUp', window);
     expect(recipe()).toEqual(before);
@@ -561,7 +562,7 @@ describe('production White Balance controls', () => {
   it('places White Balance above Basic with unitless Temperature and Tint gradients', () => {
     expect(TEMPERATURE_TRACK_GRADIENT)
       .toBe('linear-gradient(to right, #4e8ed9 0%, #b6b6b6 50%, #d86943 100%)');
-    expect(Array.from(host.querySelectorAll('.adjustment-category-label'), item => item.textContent)).toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
+    expect(Array.from(host.querySelectorAll('.adjustment-category-label'), item => item.textContent)).toEqual(['Color', 'Basic', 'Color Grading']);
     expect(category().querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
     expect(category().querySelectorAll('.adjustment-category-actions > button')).toHaveLength(2);
     expect(category().querySelector('.adjustment-category-chevron')?.getAttribute('aria-hidden')).toBe('true');
@@ -574,8 +575,8 @@ describe('production White Balance controls', () => {
     }
     expect([slider().min, slider().max, slider().step, slider().value]).toEqual(['-100', '100', '1', '0']);
     expect([tintSlider().min, tintSlider().max, tintSlider().step, tintSlider().value]).toEqual(['-100', '100', '1', '0']);
-    expect(Array.from(category().querySelectorAll('label'), item => item.textContent)).toEqual(['Temperature', 'Tint']);
-    expect(category().querySelectorAll('.adjustment-power')).toHaveLength(2);
+    expect(Array.from(category().querySelectorAll('label'), item => item.textContent)).toEqual(['Temperature', 'Tint', 'Vibrance', 'Saturation']);
+    expect(category().querySelectorAll('.adjustment-power')).toHaveLength(0);
     expect(slider().style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(tintSlider().style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider().classList.contains('has-gradient')).toBe(true);
@@ -689,13 +690,13 @@ describe('production White Balance controls', () => {
     advance();
     expect(history().slice(0, 2)).toEqual(['Reset Basic adjustments', 'Temperature +10 → 0']);
   });
-  it('keeps category toggles independent and commits pending before disabling', () => {
+  it('keeps the integrated Color category toggle synchronized and commits pending before disabling', () => {
     const collapse = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;
     expect(collapse.getAttribute('aria-expanded')).toBe('true');
     wheel(-1);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
     expect(collapse.getAttribute('aria-expanded')).toBe('true');
-    expect(history()).toEqual(['White Balance OFF', 'Temperature 0 → +10']);
+    expect(history()).toEqual(['Color OFF', 'Temperature 0 → +10']);
     expect(recipe().whiteBalanceEnabled).toBe(false);
     expect(recipe().basicEnabled).toBe(true);
     expect(slider().disabled).toBe(true);
@@ -712,7 +713,7 @@ describe('production White Balance controls', () => {
     expect(recipe().adjustments.exposure).toBe(0.1);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
     expect(collapse.getAttribute('aria-expanded')).toBe('true');
-    expect(history()[0]).toBe('White Balance ON');
+    expect(history()[0]).toBe('Color ON');
     expect(slider().value).toBe('10');
     click(category(1).querySelector<HTMLElement>('[aria-pressed]')!);
     expect(slider(1).disabled).toBe(true);
@@ -740,14 +741,14 @@ describe('production White Balance controls', () => {
     expect(header.querySelector('button')?.textContent).toBe('Reset all');
     expect(scroll.contains(header)).toBe(false);
     expect(scroll.contains(scope)).toBe(false);
-    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(4);
+    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(3);
     const left = host.querySelector('.left-panel')!;
     expect(left.querySelector('.history-scroll-region')).not.toBeNull();
     expect(left.querySelector('.exif-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(left.querySelector('.develop-scroll-region')).toBeNull();
     const initialRecipe = recipe();
     click(category().querySelector<HTMLElement>('.adjustment-category-title')!);
-    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(4);
+    expect(scroll.querySelectorAll('.adjustment-category')).toHaveLength(3);
     expect(category().querySelector('input')).toBeNull();
     expect(recipe()).toEqual(initialRecipe);
     click(category().querySelector<HTMLElement>('.adjustment-category-title')!);
@@ -766,7 +767,7 @@ describe('production White Balance controls', () => {
     expect(recipe().adjustments.tint).toBe(0);
     expect(recipe().whiteBalanceEnabled).toBe(false);
     expect(recipe().adjustments.exposure).toBe(0.1);
-    expect(history()[0]).toBe('Reset White Balance adjustments');
+    expect(history()[0]).toBe('Reset Color adjustments');
     click(button('Undo'));
     expect(recipe().adjustments.temperature).toBe(10);
     click(button('Redo'));
@@ -812,9 +813,9 @@ describe('production White Balance controls', () => {
     wheel(-1, false, tintSlider());
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
     click(category().querySelector<HTMLElement>('.adjustment-category-reset')!);
-    expect(history()).toEqual(['色温度補正をリセット', '色温度補正 OFF', '色かぶり補正 0 → +10', '色温度 0 → -10']);
+    expect(history()).toEqual(['色補正をリセット', '色補正 OFF', '色かぶり補正 0 → +10', '色温度 0 → -10']);
     click(category().querySelector<HTMLElement>('[aria-pressed]')!);
-    expect(history()[0]).toBe('色温度補正 ON');
-    expect(Array.from(category().querySelectorAll('label'), item => item.textContent)).toEqual(['色温度', '色かぶり補正']);
+    expect(history()[0]).toBe('色補正 ON');
+    expect(Array.from(category().querySelectorAll('label'), item => item.textContent)).toEqual(['色温度', '色かぶり補正', '自然な彩度', '彩度']);
   });
 });

@@ -451,6 +451,33 @@ class EditStateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.request("GET").json()["state"], saved)
 
+    def test_integrated_color_toggle_and_reset_validate_as_single_operations(self):
+        saved = self.v18_state()
+        saved["history"] = []
+        saved["historyCursor"] = 0
+        current = saved["currentRecipe"] = copy.deepcopy(self.v18_state()["history"][0]["before"])
+        current["adjustments"].update(temperature=25, tint=-15, vibrance=30, saturation=-20)
+
+        disabled = copy.deepcopy(current)
+        disabled["whiteBalanceEnabled"] = disabled["colorEnabled"] = False
+        saved["history"].append({"kind": "colorToggle", "before": current, "after": disabled})
+
+        reset = copy.deepcopy(disabled)
+        for key in ("temperature", "tint", "vibrance", "saturation"):
+            reset["adjustments"][key] = 0
+        saved["history"].append({"kind": "colorReset", "before": disabled, "after": reset})
+        saved["currentRecipe"] = reset
+        saved["historyCursor"] = 2
+
+        self.assertEqual(validate_snapshot(saved, ASSET_ID), saved)
+        response = self.request("PUT", payload(saved))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.request("GET").json()["state"], saved)
+
+        invalid = copy.deepcopy(saved)
+        invalid["history"][0]["after"]["colorEnabled"] = True
+        self.assertEqual(self.request("PUT", payload(invalid, revision=1)).status_code, 422)
+
     def test_v18_strict_flag_validation_and_history_semantics_do_not_overwrite_saved_v17(self):
         original = self.request("PUT", payload()).json()
         invalid_states = []

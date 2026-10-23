@@ -17,7 +17,7 @@ type Props = {
   adjustmentId: AdjustmentId;
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
-  enabled: boolean; onToggle: () => void; operationName?: string;
+  enabled: boolean; onToggle?: () => void; operationName?: string;
   onOpenContextMenu?: OpenAdjustmentSliderMenu;
   disabled?: boolean;
   actions?: boolean;
@@ -219,7 +219,8 @@ export function AdjustmentSlider(props: Props) {
     onContextMenu={(event) => {
       if (!props.onOpenContextMenu || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
       event.preventDefault();
-      const trigger = range.current && !range.current.disabled ? range.current : power.current;
+      const trigger = range.current && !range.current.disabled ? range.current
+        : power.current ?? event.currentTarget.querySelector<HTMLButtonElement>('.adjustment-reset');
       if (trigger) props.onOpenContextMenu({ adjustmentId: props.adjustmentId, trigger, x: event.clientX, y: event.clientY });
     }}>
     <label id={labelId} htmlFor={rangeId}>{props.label}</label>
@@ -275,7 +276,7 @@ export function AdjustmentSlider(props: Props) {
           onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
         {props.valueSuffix && <span className="adjustment-number-suffix" aria-hidden="true">{props.valueSuffix}</span>}
       </span>
-      {props.actions !== false && <>{!props.hideToggle && <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}${props.actionsDisabled ? ' is-unavailable' : ''}`}
+      {props.actions !== false && <>{!props.hideToggle && props.onToggle && <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}${props.actionsDisabled ? ' is-unavailable' : ''}`}
         aria-pressed={props.enabled} aria-label={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel} title={props.actionsDisabled ? props.actionsUnavailableLabel : toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
         disabled={props.actionsDisabled} onClick={props.onToggle}>⏻</button>}

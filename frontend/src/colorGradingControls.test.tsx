@@ -32,7 +32,7 @@ vi.mock('./ImageViewer', () => ({
 let host: HTMLDivElement;
 let root: Root;
 const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!.textContent!);
-const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')[3];
+const grading = () => host.querySelector<HTMLButtonElement>('.adjustment-category-title[data-adjustment-category-id="colorGrading"]')!.closest<HTMLElement>('.adjustment-category')!;
 const slider = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="range"]')[index]!;
 const number = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
 const rangeToggle = (index: number) => grading().querySelectorAll<HTMLButtonElement>('.grading-range-toggle')[index]!;
@@ -139,7 +139,7 @@ describe('Color Grading controls', () => {
 
   it('renders Temperature/Tint in each Shadows, Midtones, and Highlights group', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
-      .toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
+      .toEqual(['Color', 'Basic', 'Color Grading']);
     expect(Array.from(grading().querySelectorAll('.adjustment-subsection-title'), (item) => item.textContent)).toEqual(['Shadows', 'Midtones', 'Highlights']);
     expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['Temperature', 'Tint', 'Temperature', 'Tint', 'Temperature', 'Tint']);
     for (const control of [slider(), slider(1), slider(2), slider(3), slider(4), slider(5)]) {
@@ -152,7 +152,8 @@ describe('Color Grading controls', () => {
     expect(slider(3).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider(4).style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(slider(5).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
-    expect(grading().querySelectorAll('.adjustment-power')).toHaveLength(6);
+    expect(grading().querySelectorAll('.adjustment-power')).toHaveLength(0);
+    expect(grading().querySelectorAll('.grading-range-toggle')).toHaveLength(3);
   });
 
   it('localizes the Shadows section label in Japanese', async () => {

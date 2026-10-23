@@ -23,7 +23,7 @@ import { WhiteBalanceAdjustmentControls } from './WhiteBalanceAdjustmentControls
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import { ColorAdjustmentControls } from './ColorAdjustmentControls';
 import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './ColorGradingAdjustmentControls';
-import { isWhiteBalanceDefault, isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
+import { isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
 import { useJpegOriginal } from './useJpegOriginal';
 import { useRawDocument } from './useRawDocument';
 import { RawApiError } from './rawApi';
@@ -332,7 +332,6 @@ export function AnshitsuPage() {
 
   function toggleAdjustmentCategory(categoryId: AdjustmentCategoryId) {
     const actions = {
-      whiteBalance: () => dispatch({ type: 'toggleWhiteBalance' }),
       basic: () => dispatch({ type: 'toggleBasic' }),
       color: () => dispatch({ type: 'toggleColor' }),
       colorGrading: () => dispatch({ type: 'toggleColorGrading' }),
@@ -342,7 +341,6 @@ export function AnshitsuPage() {
 
   function resetAdjustmentCategory(categoryId: AdjustmentCategoryId) {
     const actions = {
-      whiteBalance: () => dispatch({ type: 'whiteBalanceReset' }),
       basic: () => dispatch({ type: 'basicReset' }),
       color: () => dispatch({ type: 'colorReset' }),
       colorGrading: () => dispatch({ type: 'colorGradingReset' }),
@@ -637,9 +635,10 @@ export function AnshitsuPage() {
   const categoryMenuPasteDisabled = !categoryMenuDefinition || !categoryMenuClipboard
     || !categoryMenuDefinition.ids.some((id) => Object.hasOwn(categoryMenuClipboard.values, id));
   const categoryMenuState = categoryMenu ? {
-    whiteBalance: { enabled: session.recipe.whiteBalanceEnabled, resetDisabled: isWhiteBalanceDefault(session.recipe.adjustments), enableLabel: 'workspace.enableWhiteBalance', disableLabel: 'workspace.disableWhiteBalance' },
     basic: { enabled: session.recipe.basicEnabled, resetDisabled: basicResetDisabled, enableLabel: 'workspace.enableBasic', disableLabel: 'workspace.disableBasic' },
-    color: { enabled: session.recipe.colorEnabled, resetDisabled: colorResetDisabled, enableLabel: 'workspace.enableColor', disableLabel: 'workspace.disableColor' },
+    color: { enabled: session.recipe.whiteBalanceEnabled && session.recipe.colorEnabled,
+      resetDisabled: colorResetDisabled && session.recipe.whiteBalanceEnabled === session.recipe.colorEnabled,
+      enableLabel: 'workspace.enableColor', disableLabel: 'workspace.disableColor' },
     colorGrading: { enabled: session.recipe.colorGradingEnabled, resetDisabled: colorGradingResetDisabled, enableLabel: 'workspace.enableColorGrading', disableLabel: 'workspace.disableColorGrading' },
   }[categoryMenu.categoryId] : undefined;
   const summary = detail ? detailToRecent(detail) : selectedAssets.find((asset) => asset.id === assetId);
@@ -793,15 +792,16 @@ export function AnshitsuPage() {
             }}>{t('workspace.allReset')}</button>
           : undefined}>
           {editable ? <>
-            <AdjustmentCategory categoryId="whiteBalance" onOpenContextMenu={openCategoryMenu}
-              title={t('workspace.whiteBalance')} enabled={session.recipe.whiteBalanceEnabled}
-              resetDisabled={isWhiteBalanceDefault(session.recipe.adjustments)}
-              enableLabel={t('workspace.enableWhiteBalance')} disableLabel={t('workspace.disableWhiteBalance')}
-              expandLabel={t('workspace.expandWhiteBalance')} collapseLabel={t('workspace.collapseWhiteBalance')}
+            <AdjustmentCategory categoryId="color" onOpenContextMenu={openCategoryMenu}
+              title={t('workspace.color')} enabled={session.recipe.whiteBalanceEnabled && session.recipe.colorEnabled}
+              resetDisabled={colorResetDisabled && session.recipe.whiteBalanceEnabled === session.recipe.colorEnabled}
+              enableLabel={t('workspace.enableColor')} disableLabel={t('workspace.disableColor')}
+              expandLabel={t('workspace.expandColor')} collapseLabel={t('workspace.collapseColor')}
               resetLabel={t('workspace.reset')}
-              onToggle={() => dispatch({ type: 'toggleWhiteBalance' })}
-              onReset={() => dispatch({ type: 'whiteBalanceReset' })}>
+              onToggle={() => dispatch({ type: 'toggleColor' })}
+              onReset={() => dispatch({ type: 'colorReset' })}>
               <WhiteBalanceAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
+              <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <AdjustmentCategory categoryId="basic" onOpenContextMenu={openCategoryMenu}
               title={t('workspace.basic')} enabled={session.recipe.basicEnabled}
@@ -812,16 +812,6 @@ export function AnshitsuPage() {
               onToggle={() => dispatch({ type: 'toggleBasic' })}
               onReset={() => dispatch({ type: 'basicReset' })}>
               <BasicAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
-            </AdjustmentCategory>
-            <AdjustmentCategory categoryId="color" onOpenContextMenu={openCategoryMenu}
-              title={t('workspace.color')} enabled={session.recipe.colorEnabled}
-              resetDisabled={colorResetDisabled}
-              enableLabel={t('workspace.enableColor')} disableLabel={t('workspace.disableColor')}
-              expandLabel={t('workspace.expandColor')} collapseLabel={t('workspace.collapseColor')}
-              resetLabel={t('workspace.reset')}
-              onToggle={() => dispatch({ type: 'toggleColor' })}
-              onReset={() => dispatch({ type: 'colorReset' })}>
-              <ColorAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} />
             </AdjustmentCategory>
             <AdjustmentCategory categoryId="colorGrading" onOpenContextMenu={openCategoryMenu}
               title={t('workspace.colorGrading')} enabled={session.recipe.colorGradingEnabled}
@@ -877,12 +867,12 @@ export function AnshitsuPage() {
       onCopy={() => { copySettings(rangeDefinition.ids); }} onPaste={() => { pasteSettings(rangeDefinition.ids); }} onClose={closeRangeMenu} />}
     {sliderMenu && historyEnabled && <AdjustmentContextMenu target={sliderMenu}
       className="adjustment-slider-context-menu" menuLabel={t('workspace.adjustmentMenu')}
+      hideToggle
       enabled={session.recipe.adjustmentEnabled[sliderMenu.adjustmentId]}
       resetDisabled={session.recipe.adjustments[sliderMenu.adjustmentId] === defaultRecipe().adjustments[sliderMenu.adjustmentId]}
       pasteDisabled={!Object.hasOwn(readEditClipboard()?.values ?? {}, sliderMenu.adjustmentId)}
       enableLabel={t('workspace.enableAdjustmentMenu')} disableLabel={t('workspace.disableAdjustmentMenu')}
       resetLabel={t('workspace.resetAdjustment')} copyLabel={t('workspace.copyAdjustment')} pasteLabel={t('workspace.pasteAdjustment')}
-      onToggle={() => dispatch({ type: 'toggleAdjustment', id: sliderMenu.adjustmentId })}
       onReset={() => dispatch({ type: `${sliderMenu.adjustmentId}Reset` })}
       onCopy={() => { copySettings([sliderMenu.adjustmentId]); }}
       onPaste={() => { pasteSettings([sliderMenu.adjustmentId]); }} onClose={closeSliderMenu} />}

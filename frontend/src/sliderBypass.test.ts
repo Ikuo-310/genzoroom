@@ -44,111 +44,71 @@ function legacyEffective(recipe: ReturnType<typeof legacySnapshot>['currentRecip
   return values;
 }
 
-describe('individual adjustment bypass', () => {
-  it('starts with exactly sixteen enabled flags', () => {
-    expect(Object.keys(defaultRecipe().adjustmentEnabled)).toEqual([...ADJUSTMENT_IDS]);
-    expect(Object.values(defaultRecipe().adjustmentEnabled)).toEqual(Array(16).fill(true));
-  });
-
-  it.each(ADJUSTMENT_IDS)('%s retains values, bypasses only itself, and supports Undo/Redo', (id) => {
+describe('legacy individual flags and integrated Color category', () => {
+  it('keeps all sixteen v18 fields but ignores them in effective and pixel rendering', () => {
     const recipe = defaultRecipe();
     for (const key of ADJUSTMENT_IDS) recipe.adjustments[key] = key === 'exposure' ? 1 : 20;
-    const initial = { ...newSession(), recipe };
-    const off = editSession(initial, { type: 'toggleAdjustment', id });
-    expect(off.history).toHaveLength(1);
-    expect(off.history[0].kind).toBe(`${id}Toggle`);
-    expect(off.recipe.adjustments).toEqual(recipe.adjustments);
-    expect(effectiveAdjustments(off.recipe)).toEqual({ ...recipe.adjustments, [id]: 0 });
-    const expected = { ...recipe, adjustments: { ...recipe.adjustments, [id]: 0 } };
-    expect(renderAdjustments(pixels, off.recipe)).toEqual(renderAdjustments(pixels, expected));
-    expect(editSession(off, { type: 'undo' }).recipe).toEqual(recipe);
-    expect(editSession(editSession(off, { type: 'undo' }), { type: 'redo' }).recipe).toEqual(off.recipe);
-    expect(editSession(off, { type: 'toggleAdjustment', id }).recipe).toEqual(recipe);
-    expect(validateEditStateSnapshot(snapshot(off)).ok).toBe(true);
-    const reset = editSession(off, { type: `${id}Reset` });
-    expect(reset.recipe.adjustments[id]).toBe(0);
-    expect(reset.recipe.adjustmentEnabled[id]).toBe(false);
-    const changed = editSession(off, { type: id, value: id === 'exposure' ? 2 : 30 });
-    expect(changed.recipe.adjustmentEnabled[id]).toBe(false);
-    expect(effectiveAdjustments(changed.recipe)[id]).toBe(0);
+    const expected = { ...recipe.adjustments };
+    for (const id of ADJUSTMENT_IDS) recipe.adjustmentEnabled[id] = false;
+    expect(Object.keys(recipe.adjustmentEnabled)).toEqual([...ADJUSTMENT_IDS]);
+    expect(effectiveAdjustments(recipe)).toEqual(expected);
+    expect(renderAdjustments(pixels, recipe)).toEqual(renderAdjustments(pixels, { ...defaultRecipe(), adjustments: expected }));
+    expect(editSession({ ...newSession(), recipe }, { type: 'toggleAdjustment', id: 'exposure' })).toEqual({ ...newSession(), recipe });
   });
 
-  it.each([
-    ['temperature', 'toggleWhiteBalance', 'whiteBalanceReset'], ['exposure', 'toggleBasic', 'basicReset'],
-    ['vibrance', 'toggleColor', 'colorReset'], ['shadowsTint', 'toggleColorGrading', 'colorGradingReset'],
-  ] as const)('combines %s with category bypass and preserves individual flags on category reset', (id, toggle, reset) => {
-    let session = editSession(newSession(), { type: id, value: 2 });
-    session = editSession(session, { type: 'toggleAdjustment', id });
-    const categoryOff = editSession(session, { type: toggle });
-    const categoryOn = editSession(categoryOff, { type: toggle });
-    expect(categoryOn.recipe.adjustmentEnabled[id]).toBe(false);
-    expect(categoryOn.recipe.adjustments[id]).toBe(2);
-    expect(effectiveAdjustments(categoryOn.recipe)[id]).toBe(0);
-    expect(editSession(categoryOff, { type: reset }).recipe.adjustmentEnabled).toEqual(categoryOff.recipe.adjustmentEnabled);
-    expect(editSession(categoryOff, { type: 'allReset' }).recipe).toEqual(defaultRecipe());
-  });
-
-  it.each([
-    ['shadowsTemperature', 'shadowsTint', 'toggleGradingShadows'],
-    ['midtonesTemperature', 'midtonesTint', 'toggleGradingMidtones'],
-    ['highlightsTemperature', 'highlightsTint', 'toggleGradingHighlights'],
-  ] as const)('combines range bypass with %s and %s independently', (temperature, tint, toggle) => {
+  it('toggles the four Color controls and both stored flags in one undoable operation', () => {
     let session = newSession();
-    session = editSession(session, { type: temperature, value: 20 });
-    session = editSession(session, { type: tint, value: 30 });
-    session = editSession(session, { type: 'toggleAdjustment', id: tint });
-    const off = editSession(session, { type: toggle });
-    expect(effectiveAdjustments(off.recipe)).toMatchObject({ [temperature]: 0, [tint]: 0 });
-    const on = editSession(off, { type: toggle });
-    expect(effectiveAdjustments(on.recipe)).toMatchObject({ [temperature]: 20, [tint]: 0 });
+    session = editSession(session, { type: 'temperature', value: 25 });
+    session = editSession(session, { type: 'tint', value: -15 });
+    session = editSession(session, { type: 'vibrance', value: 30 });
+    session = editSession(session, { type: 'saturation', value: -20 });
+    session = editSession(session, { type: 'toggleColor' });
+    expect(session.history.at(-1)?.kind).toBe('colorToggle');
+    expect(session.recipe.whiteBalanceEnabled).toBe(false);
+    expect(session.recipe.colorEnabled).toBe(false);
+    expect(effectiveAdjustments(session.recipe)).toMatchObject({ temperature: 0, tint: 0, vibrance: 0, saturation: 0 });
+    expect(session.history).toHaveLength(5);
+    const off = session;
+    session = editSession(session, { type: 'toggleColor' });
+    expect(session.recipe.whiteBalanceEnabled).toBe(true);
+    expect(session.recipe.colorEnabled).toBe(true);
+    expect(session.recipe.adjustments).toMatchObject({ temperature: 25, tint: -15, vibrance: 30, saturation: -20 });
+    const undone = editSession(session, { type: 'undo' });
+    expect(undone.recipe).toEqual(off.recipe);
+    expect(editSession(undone, { type: 'redo' }).recipe).toEqual(session.recipe);
   });
 
-  it('keeps pending edits, cursor jumps, partial deletion and separate toggle targets consistent', () => {
-    let session = editSession(newSession(), { type: 'exposure', value: 1 });
-    session = editSession(session, { type: 'toggleAdjustment', id: 'exposure' });
-    session = editSession(session, { type: 'toggleAdjustment', id: 'contrast' });
-    expect(session.history.map((entry) => entry.kind)).toEqual(['exposure', 'exposureToggle', 'contrastToggle']);
-    const jumped = editSession(session, { type: 'jumpToHistory', cursor: 1 });
-    const compacted = compactEditSession(jumped, source);
-    expect(compacted.ok).toBe(true);
-    if (!compacted.ok) return;
-    expect(compacted.value).toEqual(jumped);
-    const trimmed = editSession(jumped, { type: 'trimHistory', cursor: 1 });
-    expect(trimmed.cursor).toBe(0);
-    expect(editSession(trimmed, { type: 'redo' }).recipe.adjustmentEnabled.exposure).toBe(false);
-    expect(validateEditStateSnapshot(snapshot(trimmed)).ok).toBe(true);
-    const paired = editSession(editSession(newSession(), { type: 'toggleAdjustment', id: 'tint' }), { type: 'toggleAdjustment', id: 'tint' });
-    const compactPair = compactEditSession(paired, source);
-    expect(compactPair).toMatchObject({ ok: true, value: { history: [], cursor: 0, recipe: defaultRecipe() } });
-    const acrossCursor = editSession(paired, { type: 'undo' });
-    const preserved = compactEditSession(acrossCursor, source);
-    expect(preserved).toMatchObject({ ok: true, value: { history: acrossCursor.history, cursor: 1, recipe: acrossCursor.recipe } });
+  it('resets all Color values and synchronizes legacy flags in one History step, including Undo/Redo/jump', () => {
+    let session = newSession();
+    for (const [id, value] of [['temperature', 25], ['tint', -15], ['vibrance', 30], ['saturation', -20]] as const)
+      session = editSession(session, { type: id, value });
+    const beforeReset = session.recipe;
+    session = editSession(session, { type: 'colorReset' });
+    expect(session.history.at(-1)?.kind).toBe('colorReset');
+    expect(session.history.at(-1)?.before).toEqual(beforeReset);
+    expect(session.recipe.adjustments).toMatchObject({ temperature: 0, tint: 0, vibrance: 0, saturation: 0 });
+    expect(session.recipe.whiteBalanceEnabled).toBe(true);
+    expect(session.recipe.colorEnabled).toBe(true);
+    expect(session.history).toHaveLength(5);
+    expect(editSession(session, { type: 'undo' }).recipe).toEqual(beforeReset);
+    expect(editSession(editSession(session, { type: 'undo' }), { type: 'redo' }).recipe).toEqual(session.recipe);
+    expect(editSession(session, { type: 'jumpToHistory', cursor: 4 }).recipe).toEqual(beforeReset);
+
+    const mismatched = { ...newSession(), recipe: { ...defaultRecipe(), whiteBalanceEnabled: true, colorEnabled: false,
+      adjustments: { ...defaultRecipe().adjustments, temperature: 5 } } };
+    const synchronized = editSession(mismatched, { type: 'colorReset' });
+    expect(synchronized.recipe.whiteBalanceEnabled).toBe(false);
+    expect(synchronized.recipe.colorEnabled).toBe(false);
+    expect(synchronized.history).toHaveLength(1);
+    expect(editSession(synchronized, { type: 'undo' }).recipe).toEqual(mismatched.recipe);
+    expect(editSession(synchronized, { type: 'redo' }).recipe).toEqual(synchronized.recipe);
+    expect(editSession(synchronized, { type: 'jumpToHistory', cursor: 0 }).recipe).toEqual(mismatched.recipe);
   });
 
-  it('copies stored numbers while OFF and pastes without changing any enabled state', () => {
-    const from = defaultRecipe(); from.adjustments.tint = 20; from.adjustmentEnabled.tint = false;
-    copyEditSettings(from, 'source', 'source.jpg');
-    const clipboard = readEditClipboard()!;
-    expect(clipboard.values.tint).toBe(20);
-    expect(clipboard).not.toHaveProperty('adjustmentEnabled');
-    let to = editSession(newSession(), { type: 'toggleAdjustment', id: 'tint' });
-    to = editSession(to, { type: 'toggleWhiteBalance' });
-    const before = to.recipe;
-    const pasted = editSession(to, { type: 'paste', ...clipboard });
-    expect(pasted.recipe.adjustmentEnabled).toEqual(before.adjustmentEnabled);
-    expect(pasted.recipe.whiteBalanceEnabled).toBe(false);
-    expect(pasted.history.length).toBe(to.history.length + 1);
-    expect(editSession(pasted, { type: 'undo' }).recipe).toEqual(before);
-  });
-
-  it('passes the same effective recipe to Worker rendering', () => {
-    const recipe = defaultRecipe(); recipe.adjustments.exposure = 2; recipe.adjustmentEnabled.exposure = false;
-    let output: Uint8ClampedArray | undefined;
-    handleAdjustmentWorkerMessage({ assetGeneration: 1, source: pixels, width: 2, height: 1 },
-      { type: 'render', recipe, requestId: 1, assetGeneration: 1 }, (response) => {
-        if (response.type === 'result') output = new Uint8ClampedArray(response.pixelBuffer);
-      });
-    expect(output).toEqual(renderAdjustments(pixels, defaultRecipe()));
+  it('continues to apply Color adjustments when legacy individual flags are false', () => {
+    const recipe = defaultRecipe(); recipe.adjustments.temperature = 100; recipe.adjustmentEnabled.temperature = false;
+    const rendered = renderAdjustments(pixels, recipe);
+    expect(rendered).toEqual(renderAdjustments(pixels, { ...recipe, adjustmentEnabled: defaultRecipe().adjustmentEnabled }));
   });
 });
 
@@ -177,8 +137,7 @@ describe('recipe v17 migration and v18 validation', () => {
     expect(restoreEditSession(saved)).toEqual(restored);
     const redone = editSession(restored.value, { type: 'redo' });
     expect(redone.recipe.adjustments).toEqual(old.history[old.historyCursor].after.adjustments);
-    const edited = editSession(redone, { type: 'toggleAdjustment', id: 'tint' });
-    expect(restoreEditSession(snapshot(edited))).toMatchObject({ ok: true, value: edited });
+    expect(restoreEditSession(snapshot(redone))).toMatchObject({ ok: true, value: redone });
   });
 
   it('rejects malformed, mixed-version, or discontinuous old data instead of repairing it', () => {
@@ -191,7 +150,7 @@ describe('recipe v17 migration and v18 validation', () => {
   });
 
   it('strictly rejects missing/extra/nonboolean v18 flags and unrelated changes in History', () => {
-    const saved = snapshot(editSession(newSession(), { type: 'toggleAdjustment', id: 'temperature' }));
+    const saved = snapshot(editSession(newSession(), { type: 'temperature', value: 2 }));
     for (const flags of [undefined, {}, { ...saved.currentRecipe.adjustmentEnabled, extra: true }, { ...saved.currentRecipe.adjustmentEnabled, tint: 1 }]) {
       expect(validateEditStateSnapshot({ ...saved, currentRecipe: { ...saved.currentRecipe, adjustmentEnabled: flags } }).ok).toBe(false);
     }

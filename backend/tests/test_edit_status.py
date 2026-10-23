@@ -81,7 +81,7 @@ class EditStatusTests(unittest.TestCase):
     def test_all_numeric_and_enabled_fields(self):
         for key in BOUNDS:
             self.assertTrue(has_edits(validate_snapshot(snapshot({'adjustments': {key: 1}}))))
-            self.assertTrue(has_edits(validate_snapshot(snapshot({'adjustmentEnabled': {key: False}}))))
+            self.assertFalse(has_edits(validate_snapshot(snapshot({'adjustmentEnabled': {key: False}}))))
         for key in FLAGS:
             self.assertTrue(has_edits(validate_snapshot(snapshot({'flags': {key: False}}))))
 

@@ -198,7 +198,7 @@ def test_queue_eligibility_uses_current_recipe_with_or_without_history(db):
     assert with_history.value.code == "asset_not_eligible"
 
 
-@pytest.mark.parametrize("field", ["numeric", "category", "individual"])
+@pytest.mark.parametrize("field", ["numeric", "category"])
 def test_any_non_default_current_recipe_field_is_queue_eligible(db, field):
     state = snapshot(edited=False)
     if field == "numeric":
@@ -207,17 +207,15 @@ def test_any_non_default_current_recipe_field_is_queue_eligible(db, field):
         state["currentRecipe"]["adjustmentEnabled"]["temperature"] = False
     elif field == "category":
         state["currentRecipe"]["whiteBalanceEnabled"] = False
-    else:
-        state["currentRecipe"]["adjustmentEnabled"]["temperature"] = False
     edit_store.put_edit_state(A, 0, uuid4(), state)
     assert enqueue(A).status_code == 200
 
 
-def test_queue_eligibility_uses_disabled_recipe_flags_and_current_edits(db):
+def test_queue_eligibility_ignores_legacy_individual_flags_but_uses_current_edits(db):
     state = snapshot(edited=False)
     state["currentRecipe"]["adjustmentEnabled"]["temperature"] = False
     edit_store.put_edit_state(A, 0, uuid4(), state)
-    assert enqueue(A).status_code == 200
+    assert enqueue(A).status_code == 422
     state = snapshot(B, edited=False)
     before, after = copy.deepcopy(state["currentRecipe"]), copy.deepcopy(state["currentRecipe"])
     after["adjustments"]["temperature"] = 12
