@@ -2,6 +2,8 @@
 
 調査日：2026-10-23（Asia/Tokyo）。静的ソース調査と資料収録のみ。以下の推奨は実装方式を選ぶための判断材料であり、新工程の開始・仕様確定・実装完了を意味しない。
 
+> **追加調査の読み方：** §1〜11は前回調査commit `f32db26468f8c6f0265dc9d777bd5586247221cf`の記録を保持する。今回の要件（明示Draft／Full、表示依存解像度、4096px超の等倍）に対する再評価は§12以降。前回B案の「低解像度Full＋高解像度Full／追加patch不要」は今回のDraft要件を満たさない。1280pxは固定値ではなく、4096pxは現行MCP helperの制限にすぎない。
+
 ## 1. 対象・証拠・結論
 
 - LightCraft本家：v0.10.0、commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`（[固定ソース](https://github.com/storytold/lightcraft/tree/a2a41383c4fd62fa85a46ccd00998639221f2d3c)、以降LC）。ソース参照はこのcommitのファイル／1始まりの行番号。Web版からの推測ではなく、native eguiのEdit → detail Viewer → Renderer → JobPool → Engine／GPU／CPUを追跡した。
@@ -208,3 +210,157 @@ Bで性能が不足した場合に、StageCache継続利用や大画像の一時
 - ファイル返却／JPEG転送／ROI／Draft／StageCacheが必要かの判断と、必要なら既存patch管理・schema・receipt契約への影響。
 
 今回実施した検証は固定commit／ブランチ／作業ツリー／patch digestの確認、関連コードと文書の静的追跡、追加Markdownの読直し、`git diff --check`のみ。ビルド・ベンチマーク・自動テスト・MCP実接続・ブラウザ／アプリ実動作・画像生成・SQLite変更は行わない。LCソース、GenzoRoom製品コード、MCP patch、既存C4設計／完了記録、README／CHANGELOGは変更しない。本書だけをCommit／Pushして停止し、実装へ進まない。
+
+## 12. 追加調査：対象と推奨の再評価（2026-10-23）
+
+追加調査開始時のGenzoRoomは`feature/lightcraft-integration`、HEAD `f32db26468f8c6f0265dc9d777bd5586247221cf`、作業ツリーclean。LCは前回と同じ固定commit `a2a41383c4fd62fa85a46ccd00998639221f2d3c`、既存MCP変更3ファイルを保持。§2〜8の既知の処理経路・定数を再調査するのではなく、qualityを受け渡す境界、quality依存処理、windowのgeometry、C4の描画／保存待機境界を追加で追跡した。以下のLC行番号は固定commit、GenzoRoom行番号は追加調査開始HEAD（製品コードはC4-Fのまま）。既存patchの位置は本家位置とpatch hunkで区別する。
+
+**再評価した推奨（案）：GenzoRoomは操作境界と表示要求を所有し、LightCraftはDraft／Full現像・source／stage cache・geometry・必要時のregion描画を担当する。** まずRenderJobの品質指定をMCPへ最小公開する。egui Viewer全体の移植も、低解像度FullだけでDraftを代替する方式も前提としない。
+
+前回のAは「desktopの適応Viewer制御全体を使う」、Bは「GenzoRoomが候補1280pxと高解像度の要求を出す」を主に比較していた。今回の推奨は**Bの操作所有権を維持しつつ、Aで利用したいnative RenderJob／geometryを小さなMCP APIで公開する構成**であり、A／Bの二択ではない。1280は不要な固定条件、4096は最終的な細部表示限界として扱わない。品質は常にDraft／Fullの2種類で、解像度・全体／windowは独立した要求属性とする。
+
+### 12.1 Draft／Fullで何が変わるか（追加確認した事実）
+
+| 処理 | 確認結果・根拠 |
+|---|---|
+| quality自体 | `RenderJob::draft()`はrequestのqualityとjob keyだけを変更する (`media.rs:785-792`)。通常`render_job`はFull、同じmax_w/max_h、before、cropでjobを作り、その後Draftにできる。`.draft()`によるsource level／寸法／設定値の変更はない |
+| toneの空間処理 | `pipeline/src/local.rs::plane_sigmas:491-502`でtone有効時のbase sigmaをDraftは24以下にする。CPU `prepare:522-567`、GPU `gpu/src/render.rs::prepare:859-885`とも同じsigma計算を利用。従ってGPUにもDraftの意味があるが、すべての段階を省略する品質ではない |
+| NR変更中の近似 | `pipeline/src/lib.rs:582-591`はStageCacheのpre-NR keyが一致するDraftに限って既存の広域planeを再利用。`local.rs::Planes::for_other_nr:413-436`はkeyを0にし、Fullがその代用品を一致cacheとして採用しない構造。StageCacheなしの最小MCP変更だけではこの継続cache最適化は得られない |
+| Fullへの復帰 | CPUのbase planeはsigma／process／detail radiusで識別 (`local.rs:439-455,532-546`)。GPUも`local::base_key`を利用 (`gpu/src/render.rs:862-879`)。qualityフラグだけを独自変更して近似結果をFullと呼ぶ必要はなく、`.draft()`と通常jobで既存の再計算条件を使う |
+| HDR histogram | `pipeline/src/lib.rs::hdr_histogram:499-518`はDraftでは追加HDR histogram描画を行わない。通常SDR画像のhistogramまで常に省略するという意味ではない |
+| 最終画像cache | `RenderJob::run_photo` (`media.rs:977-995`) はview cacheへFullのみ保存。通常`render_job`はthumbnail result cache／view cacheとも無し (`1251-1269`)。Draft／Fullでsource cacheは共有でき、qualityだけで別RAWをdecodeする必要はない |
+
+差が出る処理が無い設定／寸法ではDraftとFullが同じ画素になる場合があり、常に速い／見た目が必ず変わるとは断言できない。NRやsharpenを一律OFFにする、JPEG圧縮率で品質を代替する、といった独自近似は不要。
+
+既存回帰の根拠：`pipeline/src/tests.rs::drafts_keep_wide_planes_across_a_noise_reduction_change_and_full_renders_do_not` (230-255) はDraftの再利用と最後のFullの正確さを検査する。本追加調査ではテスト本文を参照しただけで実行していない。
+
+### 12.2 MCP品質指定の最小変更案（未実装）
+
+例として`quality?: "draft" | "full"`（省略は従来Full）を`render_preview`へ追加する。以下は変更箇所の評価であり、パッチ・API仕様の確定ではない。
+
+1. `crates/mcp/src/tools.rs::helper_tools`のschema (116-126) → `call_tool`の`render_preview`引数抽出 (620-625) → `render_photo` (502-524) → backend `ui.render`へqualityを転送する。legacy `render_photo`を共用するなら、そのschemaにも指定を追加するか公開対象を明示する。`check_args:394-413`は未知key検査でありenum／型の完全検証ではないので、未知文字列・boolean・null等を明示拒否する必要がある。
+2. `crates/mcp/src/headless.rs::Headless::render`（本家52-57、既存Before patchの同hunk）で、品質指定を検証し、`Session::render_job(id,size,size,before,true)`を作る → Draft時だけ`.draft()` → `job.run()` → `session.accept(&result)` → imageを返す。After側も同APIを使えばBeforeと共通化可能。既存Full Afterは`render_now`が行うのと同じjob/run/acceptの意味を維持する。Engine／pipeline／GPUアルゴリズムの変更は不要。
+3. 管理patchが追加済みのBefore fingerprint／effective fingerprint／geometry／kindを維持し、応答には実際に適用したqualityを確認できるmetadataを追加する案。schema capabilityを世代ごとに検査し、Draft非対応の旧binaryへ要求を黙ってFullとして通さない。`--connect` backendは別契約であり、quality未対応時は明示拒否が必要。今回の最小対象はGenzoRoomが使うheadless。
+
+Beforeも同じ`RenderJob`なのでDraft／Full両方を指定できる。native `beginInteraction/endInteraction`を品質切替のためだけに呼ぶ必要はない。これらはnative History集約にも影響するため、C4のHistory境界を品質APIで代替しない。
+
+**cache／sourceとの関係：** `build_job`でサイズ・crop等に応じたsource選択を終えてから`.draft()`を付けるため、Draftでも要求が大きい／cropが狭いならFull sourceを読む。qualityを下げても原寸sourceのメモリが減る保証はない。§4.2のSourceLevelは引き続き品質とは独立。MCPに結果cacheを加える場合はquality／before／寸法／window／settings／content等を分離し、同revisionのDraftをFull要求のhitとして扱わない。
+
+**任意の追加最適化：** `RenderJob::with_stages(Arc<StageCache>)` (`media.rs:847-851`) を使い、HeadlessがAfter／Before／window等のviewごとにcacheを保持することは可能。これはDraftへ到達するための必須条件ではない。`Headless`の現行状態はSessionとprogressのみ（本家`headless.rs:13-17`）。追加時はphoto／generation切替、geometry／source変化、予算・破棄条件を持ち、無制限なwindow単位cacheを作らない。既存native cache key／GPU extensionを使い、GenzoRoom Pythonに現像段階を移植しない。
+
+**既存patchへの影響：** `0001-native-before.patch`の`tools.rs:118,514,618`と`headless.rs:53,140`付近を新品質公開が共有する。単純な別patchの重ね掛けが常に成功するとはいえない。将来実装時は既存patchに統合するか順序付き追加patchを管理し、manifest digest／実binary SHA-256 receipt／capability probeを更新する（`native/lightcraft/build.py::probe/receipt:62-115,131-152`、`UPDATE_GUIDE.md`）。既存Before契約と省略Full互換は維持する。今回はpatch、manifest、build script、receiptを一切変更しない。
+
+### 12.3 連続Draft、Draft→Full、処理中Fullの制約（事実と案）
+
+**事実：** headless MCPはdesktop JobPoolではなく同期`Backend.call`。`mcp/src/progress.rs:109-136`のserver loopは1要求を処理してから次へ進む。GenzoRoom `LightCraftMCP.request` (`backend/lightcraft_mcp.py:183-203`) もlockを応答受信まで保持する。品質引数を追加しただけではpriority／latest-wins／計算中断は増えない。
+
+- 全Draftを送信済みにすれば送信順に処理される。Fullが来ても処理中Draftが終了するまで待ち、既に先行する要求も勝手には消えない。
+- 処理中Fullのあとに新しい編集Draftを要求しても、Fullを追い越せない。古いFullの応答を表示しないことと、その計算時間を回収することは別。
+- adapterは既存のAfter pending 1件・Before別pending、After優先を持つが、HTTP After待機lock／Frontend owner queueが先に直列化しているため、Frontendで並行fetchを始めるだけでは集約を活用できない (`windows_raw_api.py:161-162,258-278`、`lightcraft_raw.py:917-1055`、`rawControls.ts:33-78`)。
+
+**最小方針案：** 送信前の描画intentを集約し、編集中は最新Draft、確定後は最終ACK済みrevisionのFullを1件だけ残す。未送信Fullは新編集で無効化する。送信済みjobは所有者が完了を回収し、古い結果を採用しない。quality変更でsettings revisionを増やす必要はないが、`renderSerial`等を別に進める。要求identity候補はdocument owner／generation／native revision／quality／size／geometry／view generation（window時はfull frameと矩形も）である。
+
+同revisionにDraft→Fullがあるため「revisionが変わらないなら再描画しない」は不可。新たな編集に対して古いFullを優先するのも不可。一方、同一表示intentのFullを受け入れた後に、その古いDraft完了で上書きしない。これはrequest sequenceと品質の照合で保証する案であり、新しい永続状態ではない。
+
+単一同期MCPのまま、送信済みFullが全ての後続native操作を一切待たせない保証はできない。長いFullを避ける解像度／window選択、未送信要求の集約で負担を抑える。真のpreemptionは別のnative協調cancel等が必要で、最小qualityパッチには含めない。`asyncio.cancel`／timeoutで毎回sessionを破棄する方式は採らない（既存の送信後abort動作は§8）。
+
+## 13. 追加調査：品質と独立した解像度／高画素RAW
+
+### 13.1 表示に必要な画素数と再利用（事実・計算案）
+
+**事実：** LCの`region::plan`、`AppSettings::loupe_edge/window_frame_edge`、`window_for`は§3のとおり既存の計算処理。`region.rs`は公開module (`ui-egui/src/lib.rs:35`) だが`ViewSizes`の計画は`crate::state::AppSettings`を受け、同ファイルにはegui型を受ける関数もあり、`ui-egui/Cargo.toml:6,25`はL5／egui依存を持つ。「そのままheadless Engine APIとして使える独立crate」ではない。`RenderJob`／`region_job`はEngineで既に独立している。
+
+**計算案：** Viewerの実画像rectをCSS pixelで`R`、実測DPRを`d`、現像後の論理native frameを`N=(Nw,Nh)`とする。必要な全体出力長辺は`min(max(R.width,R.height) × d, max(Nw,Nh))`を基礎に、丸め／資源予算／source capで選ぶ。Fitはpaneに収まるrect、拡大時はzoom適用後のrectを使う。physical 1:1は`R.width × d = Nw`が基準。倍率はPreview PNGのnaturalWidthではなく論理native frameに対するものとして定義し、DPRを二重乗算しない。Browserのpage zoom／Windows scaling下では実測DPR・rectを使う。これはFrontend接続案で実機未確認。
+
+全体画像方式ならこのサイズで既存Full／Draft jobを要求すればよく、固定1280や常時原寸は不要。Draft時だけさらにscaleを下げることは可能だが、品質と解像度のpolicyを混同しない。同じ寸法のDraft→Fullも有効である。LCの64px丸め、native cap、256px grid、margin、size holdを再利用候補とする一方、16ms／0.6の適応はdesktopの表示frame観測を前提とするため、MCP往復時間にそのまま当てはめない。
+
+**再利用の選択肢：** 全体サイズの基礎計算だけなら既存Frontendの`viewerMath.ts::calculateFitScale/zoomAroundPoint` (6-23) と表示rectから求め、現像geometryはLCから取得するのが小さい。desktopと同じwindow計画が必要になった時は、`region::plan/window_for`と必要な上限定義をRustのUI非依存helperへ切り出し、egui／headless双方から呼ぶ案を優先する。これはLC側の局所的な構成変更であり最小quality公開には不要。PythonとTypeScriptに同じplannerを別々に再実装する案や、MCPがegui Viewer全体を保持する案は推奨しない。
+
+`pipeline::native_output_size` (`pipeline/src/lib.rs:226-229`) と`geometry::Frame::native_size/fit` (`geometry.rs:178-195`) は既存計算。ただし`native_output_size`は`Frame::new`で、実現像の`frame_for` (`lib.rs:232-239`) は埋込lensとautomatic CA等を扱う。公称sensor幅／高さだけからGenzoRoomがframeを推測するのは避け、LCが使用した設定・geometryに対応するnative寸法／aspectと実出力寸法を返す必要がある。desktopも`Frame::with_lens`から`output_px` (`detail.rs:245-248,470`) を得ている。geometry metadata公開は現行MCPには不足している。
+
+### 13.2 全体画像方式の範囲と4096超（評価）
+
+全体描画方式はFitと中程度の拡大だけでなく、**出力全体がnative寸法を保持でき、予算内なら等倍表示にも使える**。現行`render_preview`の4096clampを超える公開サイズが必要だが、これはEngineの細部限界ではない。headlessには既に16384clamp、EngineにはFull source＋任意boxのjobがある。全体上限の緩和にはpixel数／PNG／MCP line／Pillow／Frontend／GPU buffer／一時画像保持の予算を一体で扱い、巨大無制限要求を受けない。16384も全RAWの普遍的な上限／対応保証ではない。
+
+既存PoCのPentax DNGは現像後5472×3648 (`GPU_POC_V0.10.0.md`)。この寸法の全体Fullを取得できれば細部を等倍で表示できる見込みがあるが、4096画像を単に5472相当に拡大するだけではその細部は得られない。より高画素のPentaxを含む未検証素材でも、crop／orientation後のnative frameを基準に同じ判断をする。
+
+例の5472×3648（19,961,856 pixels）だけでもRGBA8一枚76.15MiB、RGB32f一枚228.45MiB（概算）。Before／After、GPU／CPU中間、decode／転送が重なるpeakはさらに大きい。現行5MiB PNG／8MiB JSON lineでは全体原寸を安定返却できる保証がない。画素数が増えると原寸全体のencode・decode／転送がviewportとは無関係に増えるため、全体方式の成否は実機測定で判断する。
+
+**領域描画を選ぶ条件：** 必要な物理解像度が保持する全体画像を上回り、全体サイズ拡大が時間・メモリ・転送・texture等の予算を超える場合。LC desktopの`frame_edge > main_edge × 1.25`は既存切替policyとして再利用候補であり、4096超だから常にROI必須という条件ではない。高画素RAWの等倍要件を全体方式で満たせなければ、領域描画を省略して等倍対応済みとしない。
+
+### 13.3 region_jobの公開範囲（事実と最小API案）
+
+**事実：** `Session::region_job/region_job_before` (`media.rs:1421-1442`) は`id, full_w, full_h, PixelWindow, apply_crop`を受ける。返ったjobへ`.draft()`を付けられるため、全体／windowとDraft／Fullは組合せ可能。`region_job_of:1444-1476`は`render_job`を基に、spot／Auto Mask read範囲を検査し、windowをrequestとkeyへ加える。
+
+`PixelWindow` (`pipeline/src/lib.rs:152-171`) の座標はsensorの未回転座標ではなく、crop／straighten／flip等を反映した**最終出力frame内のpixel座標**。`pipeline::plan:395-443`は実際にfitしたfull_w/full_hにclampし、frame.windowを作り、空間効果のscaleは全体サイズを維持する。dehazeでは384px proxyから全体airlightを求め、spotで必要なら作業領域を拡張し出力を要求矩形に戻す。`geometry::Frame::window:123-140`がflipを含む座標変換を持つ。部分画像を普通のcrop画像として現像する実装は不要であり、そうするとradiusやvignette等が一致しない。
+
+**API案（未確定）：** `render_region`等として、`id/before/quality`、仮想full frameの寸法、可視矩形（またはmargin込みwindow）を受け、既存region jobを実行する。qualityの共通処理は§12.2を使う。4096clampを仮想frameへ適用せず、仮想寸法と返却tile pixel数／spanに別の上限を設ける。validated integer／finite座標・checked演算・上限を境界で検証する。
+
+必要な返却metadataの候補：source／document／revision identity、実quality／before kind、native frame寸法とaspect、実際にfitした`fullWidth/fullHeight`、返却windowの`x/y/width/height`、画像実寸、geometry identity（crop／orientationに加え実際のframeに影響するlens／transform等）、Beforeの既存fingerprint。要求boxと実際のframeが異なるとclamp座標も変わるため、受信側は実frameと返却windowに基づき配置する。原寸センサー値から矩形を組み立てない。
+
+windowにmarginを付けて現像し、Viewerはその内側の必要領域だけ表示する。`region::window_for:336-362`は可視範囲の拡張・snap・frame内clampを既に持つが、最大spanを超える場合は中央寄せで切る。極端なviewportで一枚が全可視範囲を覆う保証はない。初期は覆える範囲へ制限するか、必要時に複数tile化する判断が必要。margin／画質の保証は既存テスト範囲を超えて断言しない。
+
+`region_job`の`None`は必ずしも写真欠落ではなく遠距離readによる拒否も含む。MCPは拒否を構造化して返し、全体画像を維持する／予算内の全体描画へ戻る必要がある。無条件の巨大原寸fallbackは避ける。BeforeとAfterでlens／optics基準が異なる可能性もあるため、同じcrop／orientationだけでtile geometryが必ず同一になると仮定しない。
+
+既存検査根拠（今回未実行）：`media.rs::one_to_one_window_pixels_are_export_pixels:2196-2224`、`pipeline/src/tests_window.rs:24-59,72-82,138-145,182-209,348-376`（全体との比較、margin内、NR／mask／spot等）。CPU／GPU差、DNG機種差、全設定でのpixel完全一致を保証する記録ではない。
+
+### 13.4 高画素RAWのコストとViewer接続（案・未検証）
+
+window renderは出力の原寸全体bufferを避ける。**原寸source全体のdecode／保持／GPU uploadもROI化する機能ではない**。§4.2のFull sourceは残り、GPUのsource共有やstage再利用も効果を左右する。`docs/gpu-pipeline.md:293`は大sourceをview間で共有する設計を記録しているが、MCPへの最小region公開だけでdesktopの寿命管理が全て得られるわけではない。source／stage cacheの予算と破棄、After／Beforeの重複decode抑制も確認対象。
+
+Viewerは小さな全体画像を背景に保ち、tileを共通論理frameの矩形へ重ねる方式がLCに近い。pan／zoomではgeometryを変えずview generationを進め、同一snap windowを再利用し、画面外／古い倍率のtileを不適切に重ねない。photo／session切替では別ownerとして無効化。crop／orientation／lens／History復元等でframeが変わればgeometry generationを更新し、旧tileを即無効化する。
+
+品質交換・全体画像の解像度交換はdocument identityや論理native frameを変えず、zoom／panを維持する。現在の`ImageViewer`はPNGのnatural sizeを表示尺度に使うため（§9.3）、この論理frameと取得bitmap寸法を分離するFrontend変更が必要。物理等倍と既存Preview pixel等倍の意味を混同しない。Beforeも同じ論理基準で配置し、quality／resolution／window／geometryをcache keyへ含める。tileが準備中は全体画像を維持するが、Before欠落時にAfterをBeforeとして表示しない。
+
+## 14. 追加調査：C4操作・保存との接続
+
+### 14.1 表示品質を操作境界へ接続する案
+
+| 契機 | 現行の所有者・追加する表示intent（案） |
+|---|---|
+| pointer開始／変更／終了 | `RawAdjustmentControls.tsx:49-57` → `useRawDocument.ts:381-385` → `RawRecipeSave.begin/change/end:134-155`を維持。開始で未送信Fullを無効化、ACK済み中間値のDraftを集約、終了意思を記録して最終ACK済みrevisionへFull |
+| 数値／keyboard／wheel | `AdjustmentSlider.tsx:73-154`のbegin／commit（Enter／Escape／静止timer等）を利用。pointer releaseだけに依存しない。Escapeで元値へ戻す現行C4の意味も保持 |
+| カテゴリON/OFF・Reset | `RawRecipeSave.operate:62-77,sendMoveIntent:109-133`の既存操作・History ACK後のsettingsへFull。連続gestureでない単発操作のため無理にDraftを1枚挟まない |
+| Undo／Redo／History jump | `move:49-60`は既存gesture commit→moveのfenceを持ち、`sendHistory:235-263`でnative／DB整合を検証して`controls.refreshPreview()`。復元後Fullを新revision／geometryとして要求、移動前のDraft／Fullを無効化 |
+| 同revision Draft→Full | settings／Historyは更新せず、描画request identityのみ進める。現行`RawControls.flush`はpending空なら終了するので、品質更新の契機を別に渡す必要あり |
+| Before/After | import基準とkind/fingerprint検証を維持。Before cacheにqualityも加える（現行の描画属性はmaxSideのみ、source等の基準identityも含む。§9.2）。同geometry・同寸法を基本とし、両側同品質を要求するかBefore Full固定を許すかを明示。Full Before固定はdesktop全体Beforeに近いが、Draft Afterとの差を画像補正差と取り違えない表示／評価が必要 |
+| RAW切替／再生成／離脱 | `useRawDocument.ts:150-194,248-269,340-362`のsave→release→openとowner queueを維持。未送信描画を破棄し、送信済み描画は旧所有者が回収。新generationへ旧cache／tileを渡さない。画面から不要な画像URLは解放する |
+
+`gesturing`はHistory ACKまでの状態と保存operationの有無を含む (`rawRecipeSave.ts:45,153-155,255`)。描画品質はこれをそのまま使用せず、操作終了の意思・確認済みnative revision・view intentを組み合わせる。§9.1の指摘をDraft／Fullにも適用する。
+
+### 14.2 保存を描画完了待ちに結び付けない範囲と限界
+
+**現行の事実：** `RawControls.flush`はPreviewをawaitしてbusyを下ろす (`rawControls.ts:63-78`)。`RawRecipeSave.save`は同queueの後ろへ保存処理を置き、`sendHistory`はcontrols.unsettledを拒否、native／SQLite／receipt整合を検証する (`166-184,221-269`)。HTTPの`_execute`とAfter `_preview`は同じadmission lockを使い、adapterもnative操作とPreviewに同じlockを使う (`windows_raw_api.py:161-162,258-278`、`lightcraft_raw.py:476-499,992-1034`)。Frontendのawaitを外すだけでは保存が止まらない保証はできない。
+
+**最小案：** mutation ACK／settings readback／History・保存receiptを待つfenceと、PNG decode／表示反映を待つfenceを分離する。描画intentは表示専用の状態とし、Full完了をDB保存の成功条件に追加しない。未送信Fullより確定mutation／保存／移動を優先し、native read-only renderを開始する前に現在revisionを検証し、応答後もrevisionとrender identityを再検証する。
+
+これは新しい独立native Sessionを作るという意味ではない。native送信は引き続き単一所有者で直列化し、送信済みjobの回収／release barrierは保つ。HTTP lockを待機中に解放するならownerのsnapshotと応答時検証が必要で、mutationとrenderのreadbackを無保護に並列化しない。SQLiteへの保存で必要な現行native同期確認を省略したり、古いsettings snapshotだけで保存成功にしたりしない。既存`_previews`のAfter settings readbackでrevisionが変化する可能性も保持する (`lightcraft_raw.py:1011-1015`)。
+
+**限界：** 単一同期MCPで既にFullを実行中なら、保存に必要なnative確認がその後ろで待つ可能性は残る。既存CAS／receipt保証を保ちながらこれを完全ゼロにすることは品質引数だけでは達成できない。まず不要な表示decode待機・未送信Full待機を除き、実行時間は表示依存サイズ／必要時windowで抑える。独立worker／不変settingsを持つ非同期job／協調cancel等は測定後に必要と判明した場合の別範囲であり、最初から必須化しない。
+
+**永続契約：** `backend/edit_store.py:14`のschema v8、`raw_recipe_store.py:232-291`のCAS／save receipt、`HISTORY_LIMIT=200` (`294`)、`RawRecipeSave.sendHistory:235-269`のACK・cursor・fingerprint・unknown retryを変更しない。quality／viewport／window／render sequenceはRecipe、History step、saveId、永続fingerprintの入力にしない。表示再生成だけでHistory操作数やnative mutation試行数を消費しない。新機能でも既存C4-F完了記録は維持する。
+
+## 15. 最小変更範囲・実装順序の再評価（未実装）
+
+次の3区分は技術範囲の比較であり、品質を3段階にするものでも、工程開始の承認済み計画でもない。
+
+| 範囲 | LC Engine／pipeline・UI helper | LC MCP／管理patch | GenzoRoom Backend | GenzoRoom Frontend |
+|---|---|---|---|---|
+| 1：明示Draft／Full | 現像処理変更不要、既存`render_job/.draft/run/accept`使用。stage継続は追加最適化 | quality schema・検証・転送・headless job選択、実quality応答／capability。Before patchと統合、probe／receipt追随 | runtime引数／schema能力検査、ticket／cache／PNG metadata検証にquality追加。同revision切替と所有権・集約、保存と描画待機の整理 | C4操作境界からDraft／Full intent、同revisionでもrequest serial更新、古いFull排除。比較品質と表示失敗の扱い |
+| 2：表示依存の解像度 | native frame計算を再利用。desktop plannerの厳密共用が必要なら純計算部分だけ切出す（必須ではない） | max_sideとqualityを独立、native／実geometry寸法を公開。4096超を全体方式で扱うならclamp・pixel予算と応答経路を拡張 | HTTPサイズ入力／広告／上限、pixel／PNG／Base64／line／validation予算、サイズ別Before key。巨大応答経路は測定で選択 | viewport／DPR／zoomの測定、logical frameとbitmap分離、zoom/pan保持、サイズ変化の要求集約 |
+| 3：高画素等倍で必要時ROI | `region_job/_before`、`PixelWindow`、既存frame／window／margin計算を再利用。source全体decodeは残る | region API、仮想frameと返却tileの別上限、拒否・quality・座標／geometry metadata。必要ならstage寿命管理 | tile要求／cache／最新view照合、After優先・Before整合、部分画像のpixel／byte予算 | 全体画像＋tile配置／clip、pan/zoom再要求、geometry変更／photo切替で旧tile無効化 |
+
+**推奨順序：** 最初に1のnative品質公開とC4表示intent／保存待機の境界を小さく成立させる。最小検証では既存サイズを使ってqualityの効果を解像度変更から切り離せるが、1024pxを製品の最終上限にする意味ではない。2の全体サイズ選択・geometry公開・表示尺度修正は1と共通するrequest identity／cache／比較契約が多いため、実装時に一つのまとまりで行う方が単純なら分割を強制しない。初期からdesktop適応planner全体やtile合成を持ち込まない。
+
+高画素等倍は**全体原寸が予算内なら4096超の全体Full公開で成立させ、予算外なら3のregion APIを追加する**。全体方式に固執して無条件に巨大PNG上限を上げることも、等倍要件を4096で打ち切ることも推奨しない。native Draft／Full＋表示依存の要求制御を基本構成とし、regionは等倍要件と実機予算から必要性を判断する。GPU／CPUの現像式、source level選択、空間効果、Before基準はLCを再利用し、GenzoRoomでは再実装しない。
+
+### 15.1 未確認事項・将来必要な測定
+
+- Draft／Fullの同寸法比較（tone／NR／WB／各C4 control、CPU／GPU、cold／warm）。StageCacheなし／継続ありでどの効果が得られるか。Draftだから一定の高速化が得られると仮定しない。
+- 画面rect／DPR／zoomを変えたE2E遅延。nativeだけでなくencode・MCP・validation・HTTP・decode・表示まで測定し、連続Draft中の最終値Full到着時間、処理中Full後の新編集の待機時間を含める。
+- Pentax等の4096超DNG／さらに高画素素材で全体原寸とwindowを比較。pixel実寸、細部、NR／sharpen／dehaze／lens／crop／orientation、tile境界margin、GPU fallback、source再decode／upload、CPU RAM／VRAM peak、PNG容量を確認。
+- 全体画像・Before・tile・旧画像の同時保持、byte上限超過時の可視エラー／回復、window拒否とfallback。現行5MiB／8MiBのままで大画像を保証しない。
+- 同revision Draft→Full、新編集vs Full、pan/zoomとHistory移動、カテゴリ操作、写真切替・再生成・離脱、保存失敗Retry／CAS／unknown receiptとrender完了の競合。qualityが永続状態／History 200操作／native mutation budgetへ影響しないこと。
+- 最小パッチ実装後には省略Full／Before後方互換、enum誤入力、実binary capability／quality echo、patch順序・digest・receiptの検証が必要。今回これらのパッチ適用・build・probe・テストは実施していない。
+
+本追加調査の実施範囲は既存資料の読込み、上記差分の静的追跡、文書の整合確認、`git diff --check`のみ。変更対象はこのMarkdown1件。LCソース・GenzoRoom製品コード・MCP patch・SQLite／Recipe／History・C4完了記録・README／CHANGELOGは変更せず、ビルド・実機試験・ブラウザ確認は行わない。文書のみCommit／Pushして停止し、実装へ進まない。
