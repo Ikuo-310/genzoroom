@@ -271,7 +271,7 @@ export function AdjustmentSlider(props: Props) {
       <span className={`adjustment-number-wrap${props.valueSuffix ? ' has-suffix' : ''}`}>
         <input className="adjustment-number" type="number" min={props.min} max={props.max} step={props.step}
           value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
-          onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
+          onFocus={() => { focusAdjustmentCategory(); updateDraft(formatNumber(latest.current.value)); }}
           onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
         {props.valueSuffix && <span className="adjustment-number-suffix" aria-hidden="true">{props.valueSuffix}</span>}
       </span>

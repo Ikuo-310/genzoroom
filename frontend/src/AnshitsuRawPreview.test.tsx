@@ -275,6 +275,27 @@ it('navigates RAW category controls in title, toggle, Reset order without activa
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyCount);
 });
 
+it('moves through an unchanged RAW number input without starting a save or History commit', async () => {
+  await mount();
+  const range = exposure();
+  const row = range.closest('.adjustment-control')!;
+  const input = row.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const reset = row.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+  const historyCalls = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const historyReads = vi.mocked(rawApi.readRawHistory).mock.calls.length;
+
+  act(() => range.focus());
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, range);
+  expect(document.activeElement).toBe(input);
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, input);
+
+  expect(document.activeElement).toBe(reset);
+  expect(reset.disabled).toBe(false);
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyCalls);
+  expect(vi.mocked(rawApi.readRawHistory).mock.calls).toHaveLength(historyReads);
+});
+
 it.each(['Enter', ' '])('leaves RAW Reset activation to the native %s button action', async key => {
   const model = historyBackend(0);
   await mount();
@@ -554,6 +575,23 @@ it.each(['Enter', 'blur'])('commits a numeric edit on %s only once', async endin
   else act(() => number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   await flush(); act(() => number.blur()); await flush();
   expect(commitHistory).toHaveBeenCalledOnce(); expect(commitHistory.mock.calls[0][0].doc.values['light.exposure']).toBe(1.25);
+});
+
+it('keeps the RAW History no-op when a numeric edit returns to its starting value', async () => {
+  const model = historyBackend(0);
+  await mount();
+  const number = exposure().closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  act(() => number.focus());
+  inputValue(number, '1.25');
+  inputValue(number, '0.00');
+  act(() => number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await flush();
+
+  expect(vi.mocked(rawApi.setRawControls)).toHaveBeenCalledOnce();
+  expect(vi.mocked(rawApi.setRawControls).mock.calls[0][1]).toEqual({ 'light.exposure': 0 });
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize', 'commit']);
+  expect(model.cursor()).toBe(0);
+  expect(model.entries).toHaveLength(0);
 });
 
 it.each(['keyboard', 'wheel'])('uses the existing 500ms %s commit boundary', async kind => {

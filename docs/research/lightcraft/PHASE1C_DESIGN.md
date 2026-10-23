@@ -1262,3 +1262,24 @@ RAW数値欄から個別Resetへキーボード移動した場合だけ、共通
 React DOMはChromiumがnative disabled controlからfocusを外す挙動を実装しないため、テストではfocus中buttonのdisabled blurを明示的に再現する。Windows WebView実機の最終操作確認は別途必要であり、今回は未実施。
 
 関連Frontend 4ファイル176件、TypeScript typecheckを含むproduction build、`git diff --check`成功。buildの既存500 kB超chunk警告は残る。限定diff監査ではHigh／Mediumの未解決事項なし。
+
+## 数値入力欄の未変更focusによるRAW保存抑止（2026-10-23）
+
+### 原因と変更
+
+共通`AdjustmentSlider`は数値欄の`focus`だけで`beginNumberEdit()`を呼んでいた。RAWではこれがHistory gestureとなり、Shift＋左右で欄を離れると、数値を変更していない場合も確定時の`onChange`が同値をControlsへ送り、History `commit`と保存lockを開始していた。lock中にResetボタンがnative `disabled`になると、Chromiumがそのfocusを外し、ack後の復帰処理が必要になる。
+
+数値欄の`onFocus`はフォーカス管理と表示draftの初期化だけを行い、`beginNumberEdit()`は実際のinput `onChange`から開始する。編集開始前にblurやShiftナビゲーションが起きた場合、interactionは`idle`のままなのでcommit／change callbackは呼ばれない。実編集時は最初の変更を処理する前に現在値を`numberStartValue`へ記録し、Enter・Escape・blurによる従来のgesture確定／取消を維持する。値を編集後に元へ戻した操作も従来どおりControls readbackとHistory no-op判定に通し、保存整合性を変更しない。RAW coordinator、Backend、adapter、SQLite schemaは変更しない。
+
+### フォーカス復帰の再評価
+
+未変更値ではgestureもsave lockも発生しなくなり、Resetへ移動したfocusを復帰させる必要がなくなる。一方、実際に値を変更してResetへ移動する場合はHistory commitが必要で、既存lockがResetを一時disabledにする。共通`adjustmentFocus.ts`の`pendingAdjustmentFocus`とRAW lock解除後の条件付き復帰は、この実編集時のChromium focus喪失に引き続き必要なため維持する。利用者が別要素へ移動した場合にfocusを奪わないガードも維持する。RAWカテゴリ見出し→ON/OFF→Resetの`data-category-switch`ナビゲーションも変更していない。
+
+### 回帰検証
+
+- RAWでは範囲→数値欄→個別ResetのShift＋右で、未変更時にResetへfocusし続け、Controls API、追加History commit、History再取得を発生させず、Resetを実行しないことを確認。
+- 実編集後のHistory commit、保存lock中のReset disabled、ack後の条件付きfocus復帰、および利用者が別要素へ移動した場合のfocus保護を既存RAW画面テストで確認。Enter／Escape、Reset click、カテゴリナビゲーションも関連テストで確認。
+- JPEGでは保存済み値を用い、数値欄を通過するだけでpending editやHistory stepを増やさず、Resetまでfocus移動できることを確認。実編集後のEnter／Escape／Shift確定とHistory Undo／Redoを含む既存`editControls`テストを維持。
+- 修正前に追加したRAW回帰テストはResetがdisabledになるため失敗し、修正後は成功した。さらに編集値を開始値へ戻した場合にControls readback／History no-opを維持するテストを追加した。`AnshitsuRawPreview.test.tsx` 49件、`editControls.test.tsx` 65件、`whiteBalanceControls.test.tsx` 58件が成功。
+
+自動テストはReact DOMで実行しており、Windows WebView実機のfocus挙動は未確認。C4-D以降には進まない。

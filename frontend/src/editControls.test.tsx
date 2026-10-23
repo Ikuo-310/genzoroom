@@ -165,6 +165,24 @@ describe('edit controls DOM interaction', () => {
     expect(document.documentElement.scrollTop).toBe(0);
   });
 
+  it('does not begin a JPEG number edit when Shift navigation only focuses the input', () => {
+    const reset = host.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+    act(() => number().focus()); changeNumber('0.47'); key('Enter', number());
+    expect(reset.disabled).toBe(false);
+    const history = session().history;
+    act(() => range().focus());
+    key('ArrowRight', range(), { shiftKey: true });
+    expect(document.activeElement).toBe(number());
+    expect(session().pending).toBeNull();
+    key('ArrowRight', number(), { shiftKey: true });
+    const power = host.querySelector<HTMLButtonElement>('.adjustment-power')!;
+    expect(document.activeElement).toBe(power);
+    key('ArrowRight', power, { shiftKey: true });
+    expect(document.activeElement).toBe(reset);
+    expect(session().pending).toBeNull();
+    expect(session().history).toEqual(history);
+  });
+
   it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])
     ('commits a numeric draft once via blur on Shift+%s', (direction) => {
       act(() => number().focus());
