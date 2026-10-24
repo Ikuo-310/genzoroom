@@ -6,7 +6,7 @@
 
 | パッチ | 目的・変更対象 |
 |---|---|
-| `0001-native-before.patch` | MCPのBefore＋adaptive品質・frame・StageCache契約。pipeline/GPUの実Plan sidecarとbuffer計量、Engine/stand-inの戻り値追随、MCP/native fixtureを含む。全targets・digestはmanifestで管理 |
+| `0001-native-before.patch` | MCPのBefore＋adaptive品質・frame・StageCacheおよび独立Region plan/render契約。pipeline/GPUの実Plan sidecarとbuffer計量、Engine/stand-inの戻り値追随、MCP/native fixtureを含む。全targets・digestはmanifestで管理 |
 
 A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_contract`／`stage_cache`と有限budgetの検証、headless job実行・typed metadata、CPU/GPUの実Planを返す`Rendered.frame` sidecar、原本gridへのnative寸法投影、stage保持bufferの計量を含む。`preview.rs`は新規のMCP helperであり、独立した現像／永続cache基盤ではない。変更対象一覧とSHA-256の正本はmanifest。新規依存はworkspaceですでに固定された`sha2`をMCPでも使うためのCargo.toml／lock追記のみで、upstream versionは変えない。
 
@@ -26,7 +26,7 @@ $source = 'I:\code\raw-test\lightcraft-v0.10.0-gpu-poc'
 
 `--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。新規管理sourceを完全diffへ含めるため、適用時は`--intent-to-add`を使用する。これは内容のstageではなく、`git diff --cached`が空である制約を維持する。管理外の未追跡sourceは引き続き拒否する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。
 
-`--build`は検証後に`cargo test --locked -p lightcraft-mcp -- --test-threads=1`、`cargo build --release --locked --no-default-features -p lightcraft-cli`を実行し、**生成したbinary自身**へMCP handshake／tools schema／synthetic PNG import／Beforeと省略時Afterのrenderを要求する。A2 probeはAfter/Beforeそれぞれの明示Draft/Full、品質省略＋契約1のFull、legacy metadataの完全形状、geometryId/native寸法/実PNG寸法、cache off/on/tiny budget、最終Fullの画像一致・settings不変と、不正quality/contract/cache引数の固定code拒否も検査する。成功時だけ隣接する`lightcraft-cli.genzoroom.json`を生成する。receiptはversion／本家commit／patch digest一覧／binary SHA-256／`beforeContract:1`／`previewContract:1`を持つ。旧Before receiptだけではA2対応と認定しない。全工程は非zero exitで中止し、receiptを成功前に発行しない。
+`--build`は検証後に`cargo test --locked -p lightcraft-mcp -- --test-threads=1`、`cargo build --release --locked --no-default-features -p lightcraft-cli`を実行し、**生成したbinary自身**へMCP handshake／tools schema／synthetic PNG import／Beforeと省略時Afterのrenderを要求する。A2 probeはAfter/Beforeそれぞれの明示Draft/Full、品質省略＋契約1のFull、legacy metadataの完全形状、geometryId/native寸法/実PNG寸法、cache off/on/tiny budget、最終Fullの画像一致・settings不変と、不正quality/contract/cache引数の固定code拒否も検査する。成功時だけ隣接する`lightcraft-cli.genzoroom.json`を生成する。receiptはversion／本家commit／patch digest一覧／binary SHA-256／`beforeContract:1`／`previewContract:1`／`regionContract:1`を持つ。旧Before receiptだけではA2対応と認定しない。全工程は非zero exitで中止し、receiptを成功前に発行しない。
 
 binaryの差替え検出には`--binary`を使う。現在のmanifest、receiptと実ファイルのSHA-256を一致確認した後、実binaryのschemaとrenderを再検査する。version文字列だけ、古いreceiptだけ、patchを適用したsourceだけではbinaryを承認しない。receiptは署名済みサプライチェーン証明ではなく、管理されたbuildとローカルファイルの照合記録である。
 
@@ -62,3 +62,14 @@ A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Fronten
 ## 上流に同等機能が入った場合
 
 独自patchを削除する前に、上流binaryのboolean Before schema、import基準、kind・fingerprint・geometry、PNG／After互換性を同じnative／GenzoRoom回帰とbinary probeで確認する。契約名が異なる場合は最小のadapter変換で同じ保証を満たし、画像種別を推測しない。互換性確認後、manifestの`patches`を空にしてpatchを削除し、nativeの機能テストが上流側にあるかGenzoRoom管理のprobeで代替されることを記録する。clean upstream buildでも`--build`／`--binary`検証とreceiptを維持する。patch不在を理由に能力検査を省かない。
+
+
+## C1 Region検証の追加（2026-10-25）
+
+固定upstreamは変更しない。同じ管理patchに `region.rs` とtests、C0のschema/contract/fixture artifactを含める。prepareはNative artifactがFrontend正本と一致すること、およびBackend schemaの一致を確認し、不一致ならbuildを中止する。既存Before/Whole tool schemaを拡張せず、独立 `render_region_preview` の `region_contract:1` を検出する。
+
+`--build` は従来の全MCP試験・release build・B1 probeに続けて `region_probe.py` を実行し、成功後のみRegion contract入りreceiptを発行する。`--binary` も同じ実probeを行う。CPUと独立DX12 processで実Plan、Full/Draft、Before baseline、cache OFF/ON/tiny拒否後継続、Whole→Region→Whole、unknown schema/operation/version/oversized拒否、高entropy PNG、Full source選択、settings不変を確認する。GPU adapter不在は明示skipとする。このWindows実測ではDX12を実行した。probeはBackendのmethod-aware bounded transport/validatorを利用するため、repository Python環境とPillowが必要。
+
+C1 EXE：`I:\code\genzoroom\.tmp\lightcraft-c1\target\release\lightcraft-cli.exe`、SHA-256 `2c7b7f01e366c56151dedffa0fc2b2af3496a035e3bba5a384a3fdcc1ac26812`。patch digest `e00ef2754b072076c54da746f145d7edbd87b331fa557f9ca38fd9b5948cc26e`。隣接receiptのupstream commit/digest/SHAとbefore/preview/region各contract1を実ファイルへ照合する。旧B1 EXE/receiptは変更せず残す。
+
+C1初期Region budgetはPNG9 MiB / line13 MiB / metadata16 KiB / 2048軸・2,097,152 pixels。Whole17 MiB / 24 MiBとは分離する。実entropy PNG6,293,375 bytesの転送と超過拒否の境界試験を実施した。source/StagePool capacityをRSS/VRAMと混同しない。DehazeのWhole proxy由来差、実RAW memory peak、overlayの実機画質は別受入。詳細は[Region設計§12](RAW_REGION_PREVIEW_DESIGN.md#12-c1完了region-nativebackend2026-10-25)。現在のViewerはWholeのままで、C1 binaryの検証成功はC2の有効化を意味しない。

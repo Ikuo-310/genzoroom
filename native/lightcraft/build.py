@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -59,7 +60,18 @@ def prepare(source, spec, apply=False):
             run([*args, "--intent-to-add", path])
         if source_state(source, spec) != "patched":
             raise ValueError("patch verification failed")
-    return source_state(source, spec)
+    state = source_state(source, spec)
+    if state == 'patched' and spec['version'] == '0.10.0':
+        shared = ROOT.parents[1]
+        for native, original in [('region_schema.json','frontend/src/rawRegion.schema.json'),
+                ('region_contract.json','frontend/src/rawRegionContract.json'),
+                ('region_fixtures.json','frontend/src/test-fixtures/raw-region-v1.json')]:
+            expected = (shared/original).read_bytes().replace(b'\r\n',b'\n')
+            if (source/'crates/mcp/src'/native).read_bytes().replace(b'\r\n',b'\n') != expected:
+                raise ValueError('Region shared contract artifact mismatch')
+        if (shared/'backend/raw_region_schema.json').read_bytes().replace(b'\r\n',b'\n') != (shared/'frontend/src/rawRegion.schema.json').read_bytes().replace(b'\r\n',b'\n'):
+            raise ValueError('Backend Region schema mismatch')
+    return state
 
 
 def probe(binary):
@@ -219,6 +231,10 @@ def probe(binary):
 
     probe_gpu(binary)
     probe_whole_bytes(binary)
+    region_spec = importlib.util.spec_from_file_location('genzoroom_region_probe', ROOT/'region_probe.py')
+    region_module = importlib.util.module_from_spec(region_spec)
+    region_spec.loader.exec_module(region_module)
+    region_module.probe_region(binary)
 
 
 def valid_execution(value):
@@ -340,7 +356,7 @@ def probe_gpu(binary):
 
 def receipt(binary, spec):
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
-            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1}
+            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1}
 
 
 def main():

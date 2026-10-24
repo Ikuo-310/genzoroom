@@ -58,6 +58,7 @@ class _Session:
     temp_lock: threading.Lock = field(default_factory=threading.Lock)
     before_preview: bool | None = None
     adaptive_preview: bool | None = None
+    region_preview: bool | None = None
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -582,6 +583,35 @@ class LightCraftManager:
                     and props["stage_cache"].get("enum") == ["off", "on"]
                     and props["stage_cache_budget_bytes"].get("type") == "integer")
         return session.adaptive_preview
+
+    async def _raw_region_supported(self, generation):
+        from raw_region import supports_region
+        session = self._raw_session(generation)
+        if session.region_preview is None:
+            tools = await session.client.request('tools/list', timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            session.region_preview = supports_region(tools)
+        return session.region_preview
+
+    async def _raw_region(self, generation, photo_id, operation, target, *, timeout, stage_cache='off', stage_cache_budget_bytes=None):
+        from raw_region import validate_target
+        validate_target(target, operation)
+        session = self._raw_session(generation)
+        if not await self._raw_region_supported(generation):
+            raise LightCraftError('raw_region_unsupported')
+        args = {'id':str(photo_id), 'region_contract':1, 'operation':operation, 'target':target, 'stage_cache':stage_cache}
+        if stage_cache == 'on':
+            args['stage_cache_budget_bytes'] = stage_cache_budget_bytes
+        try:
+            result = await session.client.call_tool_result('render_region_preview', args, timeout=timeout)
+            self._check_raw_session(session)
+            return result
+        finally:
+            if self._current(session) and self._state == 'ready' and not session.client.failure.done():
+                try:
+                    await _bounded_temp_io(_remove_preview_files, session, timeout=self._timeouts.temp_io)
+                except LightCraftError as error:
+                    lightcraft_log('region.tempCleanupFailed', level='warn', generation=generation, errorCode=error.code)
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
                            quality=None, stage_cache="off", stage_cache_budget_bytes=None):

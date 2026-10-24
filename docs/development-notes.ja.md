@@ -1,5 +1,12 @@
 # GenzoRoom 開発ノート
 
+## 工程C1：Region Native/Backend完了（2026-10-25）
+
+C0 `e0e442c`を基準に固定LC v0.10.0へ独立Region tool、実Plan preflight、厳密schema/PNG/work budget、共有StagePool、既存ownerへ合流するBackend adapterとoptional capabilityを追加した。C0共有fixtureをNativeでも利用し、旧B1実binaryのWhole継続を確認。C2のHTTP Region route、Viewer overlay、Pan要求は未接続。
+
+Native MCP66成功/既存ignore1、e2e10成功、CPU/DX12実release probe・receipt/SHA照合成功。Backend関連は重複除外269成功、Frontend関連4ファイル136成功、型検査込みproduction build成功、Python構文/差分検査実施。既存chunk警告あり。全suite・ブラウザ・PyInstaller配布build・実RAW性能受入は未実施。限定監査High0/Medium0/Low1：Dehazeはupstream Whole proxyにより有効域最大3 LSB差があり、overlay受入はC2/C3で判断する。RSS/VRAM peakは未測定。詳細、binary SHA/patch digest、各容量とC2開始条件は[設計§12](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#12-c1完了region-nativebackend2026-10-25)。C1で停止し、C2開始は次の明示依頼待ち。
+
+
 ## 工程C0：Region契約固定完了（2026-10-24）
 
 基準`0b3e6127f217e1bdbb22e53ae28b093b84e8d635`。正本[Region設計§11](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#11-c0完了region契約固定2026-10-24)へC0完了契約を追記。純planner、request/response・preflightのJSON Schemaと型、独立Region capabilityの純判定、実Whole密度不足率、content key／再利用／同geometry比較、running1＋latest pending1の有限descriptor状態遷移を追加した。通常Viewer/API/workerからは未接続。FはNative preflightで確定し、FrontendでLCのaspect丸めを推測しない。markerは`region_contract=1`、既存`preview_contract`やprotocol versionは変更しない。

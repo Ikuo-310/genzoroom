@@ -7,6 +7,7 @@ import json
 MAX_LINE_BYTES = 1024 * 1024
 # Base64 for the 17 MiB PNG envelope plus bounded metadata/JSON stays below 24 MiB.
 MAX_PREVIEW_LINE_BYTES = 24 * MAX_LINE_BYTES
+MAX_REGION_LINE_BYTES = 13 * MAX_LINE_BYTES
 PROTOCOL_VERSION = "2025-06-18"
 
 
@@ -181,7 +182,7 @@ class LightCraftMCP:
             draining.cancel()
             await asyncio.gather(draining, return_exceptions=True)
 
-    async def request(self, method, params=None, *, timeout=5, _preview_response=False):
+    async def request(self, method, params=None, *, timeout=5, _preview_response=False, _region_response=False):
         future = None
         request_id = None
         sent = False
@@ -197,7 +198,7 @@ class LightCraftMCP:
                     encoded = json.dumps(packet, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
                     future = asyncio.get_running_loop().create_future()
                     self._pending[request_id] = future
-                    self._response_limits[request_id] = MAX_PREVIEW_LINE_BYTES if _preview_response else MAX_LINE_BYTES
+                    self._response_limits[request_id] = MAX_REGION_LINE_BYTES if _region_response else MAX_PREVIEW_LINE_BYTES if _preview_response else MAX_LINE_BYTES
                     sent = True
                     self.writer.write(encoded)
                     await self._drain()
@@ -270,12 +271,22 @@ class LightCraftMCP:
     async def call_tool_result(self, name, arguments, *, timeout=5):
         # Only the image helper receives a larger budget; callers cannot enlarge arbitrary RPCs.
         result = await self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout,
-                                    _preview_response=name == "render_preview")
+                                    _preview_response=name == "render_preview",
+                                    _region_response=name == "render_region_preview" and arguments.get("operation") == "render")
         if not isinstance(result, dict) or type(result.get("isError")) is not bool or \
                 not isinstance(result.get("content"), list):
             self.abort("lightcraft_invalid_tool_response")
             raise MCPTransportError("lightcraft_invalid_tool_response")
         if result["isError"]:
+            if name == "render_region_preview" and len(result['content']) == 1:
+                try:
+                    text = result['content'][0]['text']
+                    code = _decode(text.encode())['code'] if type(text) is str and len(text) <= 256 else None
+                    if code in {'region_invalid_request','region_unsupported','region_geometry_mismatch','region_budget_exceeded',
+                                'region_work_budget_exceeded','region_render_failed'}:
+                        raise MCPToolError('raw_' + code)
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    pass
             if name == "render_preview" and len(result["content"]) == 1 and "structuredContent" not in result:
                 item = result["content"][0]
                 try:

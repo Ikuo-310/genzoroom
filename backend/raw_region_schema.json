@@ -1,0 +1,776 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GenzoRoom Region contract 1 (C0, C1 validation budget)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/frameRequest"
+    },
+    {
+      "$ref": "#/$defs/frameResponse"
+    }
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "mode",
+        "quality",
+        "geometryId",
+        "fullWidth",
+        "fullHeight",
+        "window",
+        "validRegion",
+        "context",
+        "prefetch",
+        "identity",
+        "documentRevision",
+        "viewGeneration",
+        "requestId"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "mode": {
+          "const": "region"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "full"
+          ]
+        },
+        "geometryId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fullWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "fullHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "w",
+            "h"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "w": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            }
+          }
+        },
+        "validRegion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "w",
+            "h"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "w": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            }
+          }
+        },
+        "context": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "prefetch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "revision"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "after"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "beforeKey"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "before"
+                },
+                "beforeKey": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "documentRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "viewGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "mode",
+        "quality",
+        "geometryId",
+        "fullWidth",
+        "fullHeight",
+        "window",
+        "validRegion",
+        "context",
+        "prefetch",
+        "identity",
+        "documentRevision",
+        "viewGeneration",
+        "requestId",
+        "width",
+        "height",
+        "kind"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "mode": {
+          "const": "region"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "full"
+          ]
+        },
+        "geometryId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fullWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "fullHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "w",
+            "h"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "w": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            }
+          }
+        },
+        "validRegion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "w",
+            "h"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "w": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2048
+            }
+          }
+        },
+        "context": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "prefetch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "revision"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "after"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "beforeKey"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "before"
+                },
+                "beforeKey": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "documentRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "viewGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2048
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2048
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "after",
+            "before"
+          ]
+        }
+      }
+    },
+    "frameRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "mode",
+        "quality",
+        "geometryId",
+        "identity",
+        "documentRevision",
+        "viewGeneration",
+        "requestId",
+        "desiredLongEdge"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "mode": {
+          "const": "region"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "full"
+          ]
+        },
+        "geometryId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "revision"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "after"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "beforeKey"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "before"
+                },
+                "beforeKey": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "documentRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "viewGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "desiredLongEdge": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 65536
+        }
+      }
+    },
+    "frameResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "mode",
+        "quality",
+        "geometryId",
+        "identity",
+        "documentRevision",
+        "viewGeneration",
+        "requestId",
+        "desiredLongEdge",
+        "nativeWidth",
+        "nativeHeight",
+        "fullWidth",
+        "fullHeight",
+        "kind"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "mode": {
+          "const": "region"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "full"
+          ]
+        },
+        "geometryId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "identity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "revision"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "after"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "assetId",
+                "sourceId",
+                "generation",
+                "documentToken",
+                "kind",
+                "beforeKey"
+              ],
+              "properties": {
+                "assetId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "generation": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "documentToken": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "kind": {
+                  "const": "before"
+                },
+                "beforeKey": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "documentRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "viewGeneration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "desiredLongEdge": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 65536
+        },
+        "nativeWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "nativeHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "fullWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "fullHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "after",
+            "before"
+          ]
+        }
+      }
+    }
+  }
+}

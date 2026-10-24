@@ -1,6 +1,6 @@
 # RAW Region Preview：工程C 実装前設計
 
-2026-10-24（Asia/Tokyo）。初回調査基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。§1〜10は初回設計、**C0契約固定の完了記録・厳密な規則は§11を正本**とする。Region描画・管理patch追加・工程C binary buildは未実装。閾値や性能目標の候補を受入済み仕様と読まないこと。
+2026-10-24（Asia/Tokyo）。初回調査基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。§1〜10は初回設計、**C0契約固定の完了記録・厳密な規則は§11を正本**とする。**C1 Native/Backendの実装・管理patch・release binary検証は§12で完了。C2のViewer統合は未実装。**閾値や性能目標の候補を受入済み仕様と読まないこと。
 
 ## 1. 調査根拠と確認済み事実
 
@@ -216,3 +216,65 @@ C2ではこのdescriptor遷移に既存owner/readback/ACK採用/gesture/geometry
 Frontend関連8ファイルは最終成功300件（C0最終77＋変更のないB1関連223、再実行の重複を加算しない）。Backendは新規のRegion未送信/Whole維持回帰と既存adaptiveの2ファイル43件。TypeScript込みproduction build成功、`git diff --check`実施。既存500 kB超chunk警告あり。初回sandboxのFrontend一時cache ENOENTとBackend一時dir作成失敗は通常環境で再実行して解消した。C0の試験は純関数／DOM／fake native境界であり、Native Region実装やWindows実機の成功を示さない。全suite、ブラウザ動的操作、LightCraft patch変更／Region binary buildは実施しない。
 
 限定監査は座標単位・順序・上限・未知mode、schema/DTO意味検証、独立capabilityとB1 fallback、Before/After identity、Pan reuseと配送staleの分離、running回収とpending上限、既存P1/History/save/JPEGへの接続有無を確認。unknown modeとplan内のBefore key／Region geometry混在を拒否するguardを追加し、影響範囲を再検証した。**未解決High0／Medium0／Low0**。既知のC1/C2未実装とC3候補は監査済み実動作ではなく後続工程の受入条件として残す。C1開始は明示依頼待ちで、C0で停止する。
+
+
+## 12. C1完了：Region Native/Backend（2026-10-25）
+
+基準GenzoRoom `e0e442c41ef7205690a5047750110d67f11531ce`。固定LightCraftは引き続きv0.10.0 / `a2a41383c4fd62fa85a46ccd00998639221f2d3c`。§11のschema・座標fixture・契約値を変更せず、管理patch内の独立tool `render_region_preview` とBackendの未接続adapterを実装した。通常暗室はB1 Wholeのまま。以下はC1の実装・検証記録であり、§1〜11の過去時点の未実装記述を更新する。
+
+### 12.1 実Plan・source・window
+
+Nativeは `region_contract:1` / `operation:plan|render` / 文字列photo `id` / `target` を厳密検証する。未知field/version、operationとtarget型の不一致、非finite、integer/overflow、identity、F/W/validRegion/context/prefetchをfail closedで拒否する。C0 schema・定数・座標fixtureをNativeへ同一内容で取り込み、build時にFrontend正本およびBackend schemaとの一致を検証する。独自のsensor座標変換は追加しない。
+
+planはPNGを生成せず、実sourceとeffective settings/uprightからLC共通pipeline Planを作り、window適用前のB1 frame metadataと同じgeometryId、Native寸法、実Fを返す。Frontendのfit/rounding推測には依存しない。論理Native frameに対して非upscaleを確認し、overscan cropでNative frameが物理sourceより広がる場合も物理長辺で早期制限しない。実試験では2048×1536→F2048×1536、Full source3072×2304→F2800×2100を確認。合成source選択試験はThumb512 / Preview1536 / Full2600、自動upright、source aspect/analysis不一致を含む。render時のgeometry/F不一致は固定 `region_geometry_mismatch` で拒否し、別windowへ黙って変更しない。C2はWhole維持または再preflightする。
+
+renderは既存 `region_job` / `region_job_before`、`Frame::window`、共通CPU/GPU Planを利用する。要求W、内部work W、実出力Wを区別し、workの包含・Full境界・各軸/面積上限を実行前に検査する。遠距離spot等の拡張が収まらなければ `region_work_budget_exceeded`。context削減や出力縮小による成功扱いはしない。responseは実jobのquality/kind、実Planのgeometry/F、実jobのW、実PNG寸法を返す。carrierは `{response, diagnostics}`、planは一致するtext/structuredContent、renderはimageとtextである。
+
+preflightによるDevelop/History変更を避けるためsource受入は画像cacheのみ。cold RAWで未登録as-shot WBを通常renderが学習する必要がある場合、その前にcacheして通常学習を飛ばさない。WB回帰とsettings不変を試験した。Beforeはimport baseline/beforeKeyを維持し、Afterのexposureを転写しない。Before/After FullとDraftの実F/W/bitmap寸法一致、画素の相違を確認した。異geometryのmappingは実装しない。
+
+### 12.2 Whole Fullとの画素比較
+
+合成linear RGB・合成RAW SourceInfoを用い、CPU/DX12それぞれ中央・四隅、画像境界、crop、0/90/180/270、flip、straighten、exposure、NR、Dehaze、perspective/distortion、local maskを比較した。全150比較。これは実RAW decoderによるカメラ機種別受入ではない。値は8bit RGBの絶対差（LSB）、innerはcontextを除いた有効域である。
+
+| 条件 | CPU / DX12結果 |
+|---|---|
+| 基本補正・geometry・local・RAW info | 有効域最大差0〜1。多くは完全一致 |
+| NR context24 / 64 | 有効域最大差1以下。context64のDX12は0。外周を含む最大差5 |
+| Dehaze context24 | 有効域最大差3、最大平均差CPU0.043811 / DX12 0.043764。外周を含む最大差13 |
+| Dehaze context64 | 有効域最大差3、最大平均差CPU0.041043 / DX12 0.041088。外周を含む最大差8 |
+| 実release binary、2048×1536 noise、512×384 Region/context64 | CPU/DX12ともWhole Full cropとの有効域最大差0 |
+
+Dehazeの有効域差はcontext増加だけでは消えない。固定upstream `pipeline/src/lib.rs` の `AIRLIGHT_PROXY_EDGE=384` によりwindow経路はWhole proxyからairlightを得る一方、通常Wholeはfull-frame統計を使う。全画像をWとしたwindowでも通常Wholeに対して最大差3を再現し、同じproxy経路のreferenceとのRegion有効域差は最大1。外周の空間filter差も別にある。upstream `tests_window.rs` は空間処理/Dehazeに非zero許容差を持つが、その許容値をGenzoRoomの製品基準として採用していない。**Low：Dehazeのoverlay境界に微小な色差が出る可能性**を残し、C2の表示方針・C3実測で判断する。完全一致やcontextだけで解消すると主張しない。GPU成功の実測に加え、GPU OOM注入によるCPU fallbackと回復をNative試験で確認した。
+
+### 12.3 所有・budget・transport
+
+WholeとRegionは同じHeadless StagePool、512 MiB finite予算とP2 capacity admissionを共有し、別Region cache予算を追加しない。cache OFF/ONのFull PNG一致、tiny budget拒否後の描画継続、Whole→Region→Whole、Region反復/異なるwindow、Draft→Full、Before/Afterを確認。window変更時の空間stage再利用は保証しない。
+
+実probeのretainedBytesはCPU43,253,760 bytes（41.25 MiB）、DX12 81,002,496 bytes（77.25 MiB、CPU36 MiB＋GPU41.25 MiB）。選択sourceのhost capacityは2048×1536で37,748,736 bytes（36 MiB）、3072×2304 Fullで84,934,656 bytes（81 MiB）。sourceのallocation ownershipを維持し、media cache計上とStagePoolのcapacity診断を区別する。未cache Full decodeは物理source pixels×36の保守予約を既存Native memory budgetへ照合してから開始する。これらは**RSS/VRAM peakやhard capの測定ではない**。実RAWのdecode peak・driver OOM/device lossは未受入。
+
+C1初期検証budgetはNative/virtual各軸65536、要求/内部work各軸2048、面積2,097,152、PNG9 MiB、MCP line13 MiB、metadata16 KiB。製品確定値ではない。NativeはPNG stat/readをbase64化前に制限し、JSON ToolResult＋4096 bytesのenvelope予約も確認する。Backendはmethod/operationごとのread上限とresponse ID別上限、base64/PNG/header/CRC/decode/metadata/実寸を再検証する。planは通常1 MiB transport枠。WholeのPNG17 MiB / line24 MiBは維持する。
+
+高entropy2048×1024 Regionの実PNGは6,293,375 bytes、base64＋metadata＋4096の保守envelope見積りは約8.40 MBで、実13 MiB制限のreaderを通過した。これはline実測値ではない。9 MiB超PNG拒否をNative fake-backend/file境界で、13 MiB超line拒否をBackend transportで自動試験した。面積上限内のRGBA8 entropy PNGが必ず9 MiBを超えるという前提は置かない。
+
+### 12.4 Backend境界・配送・旧binary
+
+`raw_region.py` がC0 schema/意味検証とNative carrierを検証する。schemaはfrozen Backendのdataにも含める。generationごとの独立capability検出と `/api/raw/capabilities` のoptional `regionContract:1` を追加した。旧B1実EXE（SHA `09d38369d4cbe0274fe363862d139097be063845f65a31a2bbd3931d4357a02e`）ではRegionを送らずunsupportedとなり、その後もWhole Full成功・Session readyを確認した。不完全capabilityは省略し、WholeのavailableをRegion未対応だけでfalseにしない。
+
+`LightCraftRawSession.request_region` は未接続の内部境界。既存worker/native lock/validation threadへ合流し、running 1、未送信latest pending相当で置換する。Region Beforeも同じpending枠を使う。既存legacy Whole Beforeの独立pending挙動は変更しない。100 view置換、cancel後readback/validation回収、timeoutでprocess終了、旧generation拒否、reset/photo change/shutdown joinを試験した。Region専用worker/Session、HTTP Region routeは追加しない。
+
+sourceIdは既存source content hash、generation/revision/beforeKeyは既存ownerから構築・照合する。内部RawHandle tokenとHTTP公開document tokenは異なるため、将来のHTTP ownerが検証したtokenだけを明示的にadapterへ渡せる境界を設けた。省略時は内部tokenで照合する。**C2は公開documentのowner/leaseを先に検証し、source identityを必要なDTOへ安全に公開してから接続する責任を持つ**。現行routeの `mode:region` は拒否のまま。structured diagnosticsはoperation/quality/kind/revision/generation/geometry/F/W/valid/requestId、native/validation時間、PNG bytes、source容量、execution/cache/rejectを扱い、path・画像・Recipe本文を記録しない。
+
+### 12.5 配布物・検証・限定監査
+
+- release EXE：`I:\code\genzoroom\.tmp\lightcraft-c1\target\release\lightcraft-cli.exe`
+- binary SHA-256：`2c7b7f01e366c56151dedffa0fc2b2af3496a035e3bba5a384a3fdcc1ac26812`
+- 管理patch digest：`e00ef2754b072076c54da746f145d7edbd87b331fa557f9ca38fd9b5948cc26e`
+- 隣接 `lightcraft-cli.genzoroom.json`：固定upstream commit・patch digest・実binary SHA・beforeContract/previewContract/regionContract各1。旧B1 EXEは変更しない。
+
+固定upstreamへのclean apply、全diff一致、重複適用拒否、共有artifact一致を確認。管理buildのNative MCP試験66成功・既存ignore1、e2e10成功。Region7試験には共有fixture、150画素比較、source/work/geometry/quality/Before、GPU fallback、PNG上限、cold RAW WBを含む。release CPU/DX12 probeとreceipt/SHA再probeを実行した。
+
+Backend関連10ファイルの成功267件を基礎に、Region最終追加2件で同ファイルを15件再実行、patch管理4件も再実行した。重複除外で関連成功269件。Frontend純planner/contract/schedule/APIの4ファイル136件成功、型検査込みproduction build成功（既存500 kB超chunk警告）。Python構文検査と `git diff --check` を実施。全suite、PyInstaller配布build、Docker Smoke Test、ブラウザ動的操作、通常ViewerのRegion実機確認は行わない。frozen schema同梱設定は自動試験で確認し、変更不要のrelease smoke期待値も確認した。
+
+限定監査はgeometry/source/window/work/overflow、PNG/MCP bounds、CPU/GPU、共有StagePool、Before baseline、cancel/cleanup、旧binaryとsettings不変を対象とした。cold RAW WB学習の抑止、実metadataのecho依存、論理Native frameの早期制限を修正して再検証した。**未解決High0 / Medium0 / Low1（上記Dehaze画素差）**。
+
+**C2開始条件：** C0/C1契約・共有fixture・実binary receiptを維持し、明示的なC2依頼を受けること。C2実装へ進める状態だが、Dehazeを含むoverlayの画質受入は未完了。C2ではpublic owner/lease、有限plan、ACK済みrevision、stale/readback、URL回収、同geometry pairを接続し、P1 courtesy/gesture終了Full/History/saveを保持する。C3はthreshold、context/prefetch、集約間隔、製品予算、latency、実RAW/RSS/VRAM実測を決める。C1ではViewer overlay、Pan送信、自動Region切替、Export、Scopeを実装せず停止する。

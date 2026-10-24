@@ -91,11 +91,19 @@ class RawPreviewApi:
 
     async def capabilities(self, _request):
         status = self.manager.status() if self.manager else None
+        region = {}
+        if status and status.state == 'ready' and not self._closing:
+            try:
+                if await self.manager._raw_region_supported(status.generation):
+                    region = {'regionContract':1}
+            except LightCraftError:
+                # Optional Region negotiation must not hide healthy B1 Whole availability.
+                pass
         return JSONResponse({"available": bool(status and status.state == "ready" and not self._closing),
                              "state": status.state if status else "disabled", "version": "0.10.0",
                              "workspaceState": self._workspace_state,
                              "cleanupPending": bool(self.cache and self.cache.cleanup_pending),
-                             "maxSide": MAX_PREVIEW_SIDE, "maxImageBytes": MAX_IMAGE_BYTES}, headers={"Cache-Control": "no-store"})
+                             "maxSide": MAX_PREVIEW_SIDE, "maxImageBytes": MAX_IMAGE_BYTES, **region}, headers={"Cache-Control": "no-store"})
 
     async def _body(self, request):
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":

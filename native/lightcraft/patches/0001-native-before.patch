@@ -1,10 +1,3 @@
-From: GenzoRoom integration
-Subject: [PATCH] Expose native Before and adaptive headless preview metadata
-Upstream-Version: 0.10.0
-Upstream-Base: a2a41383c4fd62fa85a46ccd00998639221f2d3c
-Purpose: Opt-in Draft/Full, observed render frames and bounded stage-cache comparison; legacy Before compatibility.
-Targets: Cargo.lock; crates/engine/src/media.rs; crates/engine/src/slide_title.rs; crates/gpu/src/lib.rs; crates/gpu/src/render.rs; crates/gpu/tests/equivalence.rs; crates/mcp/Cargo.toml; crates/mcp/src/backend.rs; crates/mcp/src/headless.rs; crates/mcp/src/lib.rs; crates/mcp/src/preview.rs; crates/mcp/src/tools.rs; crates/mcp/tests/e2e.rs; crates/pipeline/src/geometry.rs; crates/pipeline/src/lib.rs; crates/pipeline/src/tests.rs; crates/ui-egui/src/render.rs
-
 diff --git a/Cargo.lock b/Cargo.lock
 index a49ec38db9ce30d8e717eccf0f57ecfc670b762b..9fa8cbd6919b0d440c28108cbb16090bcddec90f 100644
 --- a/Cargo.lock
@@ -21,7 +14,7 @@ index a49ec38db9ce30d8e717eccf0f57ecfc670b762b..9fa8cbd6919b0d440c28108cbb16090b
  
  [[package]]
 diff --git a/crates/engine/src/media.rs b/crates/engine/src/media.rs
-index 22d76528d664fde5c77916434c2dea7931ae694c..a3d10b89f7ffbc3cd876b8e941171063e386f777 100644
+index 22d76528d664fde5c77916434c2dea7931ae694c..d318b6d0d0a184816c158bc16550f0e29f878f36 100644
 --- a/crates/engine/src/media.rs
 +++ b/crates/engine/src/media.rs
 @@ -925,7 +925,7 @@ impl RenderJob {
@@ -79,7 +72,30 @@ index 22d76528d664fde5c77916434c2dea7931ae694c..a3d10b89f7ffbc3cd876b8e941171063
          };
          for (cache, k) in &self.cached {
              if let Some(img) = cache.get(*k) {
-@@ -2294,4 +2310,58 @@ mod tests {
+@@ -1558,6 +1574,22 @@ impl crate::Session {
+         }
+     }
+ 
++    /// Preflight may retain a decoded source, but must not learn WB or create an edit/History step.
++    pub fn accept_preview_source(&mut self, job: &RenderJob, source: DecodedSource) {
++        // Caching a cold RAW before WB discovery would make the next regular job look already loaded,
++        // suppressing its existing accept()/learn_as_shot_wb() bookkeeping. Leave that decode to it.
++        let needs_wb = source.info.as_ref().is_some_and(|info| self.catalog.photo(job.photo).is_some_and(|p| {
++            info.raw && !info.relative_wb && p.develops_raw() && !p.relative_wb()
++                && info.as_shot_temp.is_finite() && info.as_shot_tint.is_finite()
++                && p.as_shot_wb != Some((info.as_shot_temp, info.as_shot_tint))
++        }));
++        if needs_wb { return; }
++        if job.source_key.is_some_and(|key| self.catalog.photo(job.photo)
++            .is_some_and(|p| Hasher128::new().str(&content_key(p)).finish() == key)) {
++            self.media.insert_source(job.photo, job.level, source);
++        }
++    }
++
+     /// Record the as-shot white balance a decode of photo `id`'s file read (`info`) when the catalog has another:
+     /// a raw imported before its camera's matrices gave it a Kelvin scale keeps 6500 / 0 (the relative scale's
+     /// reference) until its file is next decoded (issue #730). Bookkeeping, not an undo step; the look does not
+@@ -2294,4 +2326,58 @@ mod tests {
          assert_ne!(pv.key, s.render_job(id, 800, 600, false, true).unwrap().key);
          assert_eq!(*pv.settings, a);
      }
@@ -497,27 +513,28 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..d461c3241df03e058e32a29ffe644def
 +[dev-dependencies]
 +lightcraft-testkit = { workspace = true }
 diff --git a/crates/mcp/src/backend.rs b/crates/mcp/src/backend.rs
-index 0c59afa6a84b0d5425fb74105bebd819ca553c4d..667aba09006d6024be1e4799a2aaa8bf5823d24d 100644
+index 0c59afa6a84b0d5425fb74105bebd819ca553c4d..c2c2d8b3d91faf46beb7f47e42e9272e252868aa 100644
 --- a/crates/mcp/src/backend.rs
 +++ b/crates/mcp/src/backend.rs
-@@ -16,6 +16,8 @@ pub trait Backend {
+@@ -16,6 +16,9 @@ pub trait Backend {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
      /// True when a real UI is attached (`ui.inspect`, `ui.clickWidget`, `ui.pointer` … work).
      fn has_ui(&self) -> bool;
 +    /// Explicit support; a remote backend must not silently ignore adaptive arguments.
 +    fn preview_contract(&self) -> bool { false }
++    fn region_contract(&self) -> bool { false }
      /// Short human description ("headless", "remote 127.0.0.1:7980").
      fn describe(&self) -> String;
      /// Progress/cancellation for the next headless batch export. Other backends ignore it.
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 7c9af704d160b07ea652507e488fb66b5a57ef58..fe86dbc17624be5fea55e0a4e49e963789578d77 100644
+index 7c9af704d160b07ea652507e488fb66b5a57ef58..261bc803c549b3c52b474d4baa3eb644a4cddb32 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
 @@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
  pub struct Headless {
      pub session: Session,
      progress: Option<ProgressHook>,
-+    stages: crate::preview::StagePool,
++    pub(crate) stages: crate::preview::StagePool,
  }
  
  impl Drop for Headless {
@@ -615,7 +632,14 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..fe86dbc17624be5fea55e0a4e49e9637
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -130,7 +207,19 @@ impl Backend for Headless {
+@@ -124,13 +201,26 @@ impl Backend for Headless {
+     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+         let p = if params.is_null() { json!({}) } else { params };
+         match method {
++            "ui.region" => crate::region::execute(self, &p).map_err(str::to_string),
+             "engine.execute" | "ui.menu.invoke" | "command" => {
+                 let id = p.get("command").or(p.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+                 let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
                  if id == "app.export" {
                      return self.export(&params);
                  }
@@ -636,7 +660,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..fe86dbc17624be5fea55e0a4e49e9637
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -140,14 +229,32 @@ impl Backend for Headless {
+@@ -140,14 +230,32 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -671,16 +695,17 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..fe86dbc17624be5fea55e0a4e49e9637
                  }
              }
              "app.export" => self.export(&p),
-@@ -158,6 +265,8 @@ impl Backend for Headless {
+@@ -158,6 +266,9 @@ impl Backend for Headless {
          }
      }
  
 +    fn preview_contract(&self) -> bool { true }
++    fn region_contract(&self) -> bool { true }
 +
      fn has_ui(&self) -> bool {
          false
      }
-@@ -206,6 +315,75 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
+@@ -206,6 +317,75 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
  mod tests {
      use super::*;
  
@@ -757,14 +782,15 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..fe86dbc17624be5fea55e0a4e49e9637
      #[test]
      fn headless_sessions_get_the_sam3_model_folder() {
 diff --git a/crates/mcp/src/lib.rs b/crates/mcp/src/lib.rs
-index f632f145bb387212b8d7e463c23490f0028975a1..2065919eaa4d941854461c5ede6b2d37ae820d03 100644
+index f632f145bb387212b8d7e463c23490f0028975a1..123fcc7bdc5c9b1daf3e3d0defcfca22ecd6f5c7 100644
 --- a/crates/mcp/src/lib.rs
 +++ b/crates/mcp/src/lib.rs
-@@ -19,6 +19,7 @@
+@@ -19,6 +19,8 @@
  mod backend;
  mod base64;
  mod headless;
 +mod preview;
++mod region;
  mod server;
  mod tools;
  
@@ -1271,8 +1297,2534 @@ index 0000000000000000000000000000000000000000..705b17d63e5c871c1e923eabf53c542a
 +        assert_eq!(result.content[0]["text"], json!({"code":"preview_unsupported"}).to_string());
 +    }
 +}
+diff --git a/crates/mcp/src/region.rs b/crates/mcp/src/region.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef44ec66a2c
+--- /dev/null
++++ b/crates/mcp/src/region.rs
+@@ -0,0 +1,337 @@
++//! Independent, fail-closed Region contract. The caller owns view planning, LC owns effective geometry.
++use crate::{Backend, Headless, ToolResult};
++use lightcraft_engine::{
++    catalog::PhotoId,
++    media::SourceRef,
++    pipeline::{self, PixelWindow},
++};
++use serde_json::{Value, json};
++use std::time::Instant;
++
++pub(crate) const PNG_LIMIT: usize = 9 * 1024 * 1024;
++pub(crate) const LINE_LIMIT: usize = 13 * 1024 * 1024;
++const MAX_SIDE: usize = 2048;
++const MAX_PIXELS: usize = 2_097_152;
++
++pub(crate) fn schema() -> Value {
++    serde_json::from_str(include_str!("region_schema.json")).unwrap_or(Value::Null)
++}
++pub(crate) fn tool() -> Value {
++    let defs = schema();
++    json!({"name":"render_region_preview","title":"Region preview","description":"Plan or render an explicit window; never changes selection or develop settings.",
++        "inputSchema":{"type":"object","additionalProperties":false,"required":["id","region_contract","operation","target"],
++        "properties":{"id":{"type":"string"},"region_contract":{"type":"integer","enum":[1]},
++        "operation":{"type":"string","enum":["plan","render"]},
++        "target":{"oneOf":[defs["$defs"]["frameRequest"],defs["$defs"]["request"]]},
++        "stage_cache":{"type":"string","enum":["off","on"]},"stage_cache_budget_bytes":{"type":"integer","minimum":1}}}})
++}
++
++// Only the small vocabulary in the checked-in C0 schemas is implemented; unknown schemas fail closed.
++pub(crate) fn validate(v: &Value, s: &Value) -> bool {
++    let Some(spec) = s.as_object() else { return false };
++    if spec.keys().any(|k| {
++        !["oneOf", "const", "enum", "type", "properties", "required", "additionalProperties", "minimum", "maximum", "exclusiveMinimum", "pattern"]
++            .contains(&k.as_str())
++    }) {
++        return false;
++    }
++    if let Some(one) = s.get("oneOf").and_then(Value::as_array) {
++        return one.iter().filter(|s| validate(v, s)).count() == 1;
++    }
++    if let Some(c) = s.get("const") {
++        return v == c;
++    }
++    if let Some(e) = s.get("enum").and_then(Value::as_array) {
++        if !e.contains(v) {
++            return false;
++        }
++    }
++    match s["type"].as_str() {
++        Some("object") => {
++            if s["additionalProperties"] != false {
++                return false;
++            }
++            let (Some(o), Some(p), Some(r)) = (v.as_object(), s["properties"].as_object(), s["required"].as_array()) else { return false };
++            r.iter().all(|k| k.as_str().is_some_and(|k| o.contains_key(k))) && o.iter().all(|(k, v)| p.get(k).is_some_and(|s| validate(v, s)))
++        }
++        Some("integer") | Some("number") => {
++            let Some(n) = v.as_f64().filter(|n| n.is_finite()) else { return false };
++            (s["type"] != "integer" || v.as_u64().is_some())
++                && s.get("minimum").and_then(Value::as_f64).is_none_or(|m| n >= m)
++                && s.get("maximum").and_then(Value::as_f64).is_none_or(|m| n <= m)
++                && s.get("exclusiveMinimum").and_then(Value::as_f64).is_none_or(|m| n > m)
++        }
++        Some("string") => {
++            let Some(t) = v.as_str() else { return false };
++            match s.get("pattern").and_then(Value::as_str) {
++                None => true,
++                Some("^[a-f0-9]{64}$") => hex(t, 64),
++                Some("^[a-f0-9]{32}$") => hex(t, 32),
++                Some("^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$") => {
++                    t.len() == 36
++                        && t.bytes()
++                            .enumerate()
++                            .all(|(i, c)| if [8, 13, 18, 23].contains(&i) { c == b'-' } else { c.is_ascii_digit() || (b'a'..=b'f').contains(&c) })
++                }
++                _ => false,
++            }
++        }
++        _ => false,
++    }
++}
++fn hex(s: &str, n: usize) -> bool {
++    s.len() == n && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
++}
++fn n(v: &Value, k: &str) -> usize {
++    v[k].as_u64().unwrap_or(usize::MAX as u64) as usize
++}
++fn win(v: &Value) -> PixelWindow {
++    PixelWindow { x: n(v, "x"), y: n(v, "y"), w: n(v, "w"), h: n(v, "h") }
++}
++fn wjson(w: PixelWindow) -> Value {
++    json!({"x":w.x,"y":w.y,"w":w.w,"h":w.h})
++}
++fn bounded(w: PixelWindow) -> bool {
++    w.w > 0 && w.h > 0 && w.w <= MAX_SIDE && w.h <= MAX_SIDE && w.w.checked_mul(w.h).is_some_and(|p| p <= MAX_PIXELS)
++}
++pub(crate) fn target_valid(t: &Value, plan: bool) -> bool {
++    let name = if plan { "frameRequest" } else { "request" };
++    if !validate(t, &schema()["$defs"][name]) {
++        return false;
++    }
++    if t["identity"]["kind"] == "after" && t["identity"]["revision"] != t["documentRevision"] {
++        return false;
++    }
++    if plan {
++        return true;
++    }
++    let (w, v, c, fw, fh) = (win(&t["window"]), win(&t["validRegion"]), n(t, "context"), n(t, "fullWidth"), n(t, "fullHeight"));
++    if !bounded(w) || w.x.checked_add(w.w).is_none_or(|x| x > fw) || w.y.checked_add(w.h).is_none_or(|y| y > fh) {
++        return false;
++    }
++    let x = w.x + if w.x == 0 { 0 } else { c };
++    let y = w.y + if w.y == 0 { 0 } else { c };
++    let Some(right) = (w.x + w.w).checked_sub(if w.x + w.w == fw { 0 } else { c }) else { return false };
++    let Some(bottom) = (w.y + w.h).checked_sub(if w.y + w.h == fh { 0 } else { c }) else { return false };
++    right > x && bottom > y && v == PixelWindow { x, y, w: right - x, h: bottom - y }
++}
++fn error(code: &str) -> ToolResult {
++    let code = match code {
++        "region_invalid_request"
++        | "region_unsupported"
++        | "region_geometry_mismatch"
++        | "region_budget_exceeded"
++        | "region_work_budget_exceeded"
++        | "region_render_failed" => code,
++        _ => "region_render_failed",
++    };
++    ToolResult::error(json!({"code":code}).to_string())
++}
++pub(crate) fn call(b: &mut dyn Backend, args: &Value) -> ToolResult {
++    if !b.region_contract() {
++        return error("region_unsupported");
++    }
++    let Some(o) = args.as_object() else { return error("region_invalid_request") };
++    if o.keys().any(|k| !["id", "region_contract", "operation", "target", "stage_cache", "stage_cache_budget_bytes"].contains(&k.as_str()))
++        || args["region_contract"].as_u64() != Some(1)
++        || !matches!(args["operation"].as_str(), Some("plan" | "render"))
++        || args["id"].as_str().and_then(|s| s.parse::<u64>().ok()).is_none()
++        || !target_valid(&args["target"], args["operation"] == "plan")
++    {
++        return error("region_invalid_request");
++    }
++    if crate::preview::Options::parse(args).is_err() {
++        return error("region_invalid_request");
++    }
++    let path = crate::tools::temp_path("region");
++    let mut p = args.clone();
++    p["path"] = json!(path.to_string_lossy());
++    let result = b.call("ui.region", p);
++    let output = match result {
++        Err(e) => error(&e),
++        Ok(meta) if args["operation"] == "plan" => {
++            if meta.to_string().len() <= 16 * 1024 {
++                ToolResult::json(meta)
++            } else {
++                error("region_budget_exceeded")
++            }
++        }
++        Ok(meta) => {
++            let read = std::fs::metadata(&path)
++                .ok()
++                .filter(|m| m.len() <= PNG_LIMIT as u64)
++                .and_then(|_| std::fs::read(&path).ok())
++                .filter(|bytes| bytes.len() <= PNG_LIMIT);
++            match read {
++                None => error("region_budget_exceeded"),
++                Some(bytes) if meta.to_string().len() <= 16 * 1024 => {
++                    let r = ToolResult {
++                        is_error: false,
++                        structured: None,
++                        content: vec![
++                            json!({"type":"image","mimeType":"image/png","data":crate::base64_encode(&bytes)}),
++                            json!({"type":"text","text":meta.to_string()}),
++                        ],
++                    };
++                    if r.to_value().to_string().len() + 4096 <= LINE_LIMIT { r } else { error("region_budget_exceeded") }
++                }
++                _ => error("region_budget_exceeded"),
++            }
++        }
++    };
++    let _ = std::fs::remove_file(path);
++    output
++}
++
++pub(crate) fn execute(h: &mut Headless, p: &Value) -> Result<Value, &'static str> {
++    let result = lightcraft_engine::guard::catch("region preview", || execute_inner(h, p)).unwrap_or(Err("region_render_failed"));
++    if result.is_err() {
++        h.stages.clear();
++    }
++    result
++}
++fn execute_inner(h: &mut Headless, p: &Value) -> Result<Value, &'static str> {
++    let started = Instant::now();
++    let t = &p["target"];
++    let planning = p["operation"] == "plan";
++    if !target_valid(t, planning) {
++        return Err("region_invalid_request");
++    }
++    let id = PhotoId(p["id"].as_str().and_then(|s| s.parse().ok()).ok_or("region_invalid_request")?);
++    let before = t["identity"]["kind"] == "before";
++    let photo = h.session.catalog.photo(id).ok_or("region_render_failed")?;
++    let original = (photo.width as usize, photo.height as usize);
++    let baseline = photo.import_defaults().hash64();
++    let size = if planning {
++        t["desiredLongEdge"].as_f64().ok_or("region_invalid_request")?.ceil() as usize
++    } else {
++        n(t, "fullWidth").max(n(t, "fullHeight"))
++    };
++    // Overscan crop can enlarge the logical Native frame; cap against its actual Plan below.
++    let size = size.max(1);
++    let mut job = h
++        .session
++        .render_job(id, if planning { size } else { n(t, "fullWidth") }, if planning { size } else { n(t, "fullHeight") }, before, true)
++        .ok_or("region_render_failed")?;
++    if t["quality"] == "draft" {
++        job = job.draft();
++    }
++    let source_key = format!("{:?}", job.source_key.ok_or("region_geometry_mismatch")?);
++    // Window output bounds do not bound a full RAW decode. Reject impossible source reservations first.
++    if job.level == lightcraft_engine::media::SourceLevel::Full
++        && !matches!(job.source, SourceRef::Loaded(_))
++        && original.0.checked_mul(original.1).and_then(|n| n.checked_mul(36)).is_none_or(|n| n > lightcraft_engine::memory::budget())
++    {
++        return Err("region_budget_exceeded");
++    }
++    let decoded = job.source.load_source().map_err(|_| "region_render_failed")?;
++    let source = decoded.image_for(job.settings.denoise_amount());
++    let info = decoded.info_or(job.info.clone());
++    let mut whole = pipeline::plan(&source, &info, &job.settings, &job.request);
++    let native = whole.frame.native_size_at(original.0, original.1).ok_or("region_geometry_mismatch")?;
++    let (nw, nh) = (native.0.round().max(1.0) as usize, native.1.round().max(1.0) as usize);
++    if nw > 65536 || nh > 65536 {
++        return Err("region_budget_exceeded");
++    }
++    if planning && (whole.w > nw || whole.h > nh) {
++        drop(whole);
++        job.request.max_w = job.request.max_w.min(nw);
++        job.request.max_h = job.request.max_h.min(nh);
++        whole = pipeline::plan(&source, &info, &job.settings, &job.request);
++    }
++    let meta = crate::preview::frame_metadata(&whole.frame, original, &source_key, whole.w, whole.h).map_err(|_| "region_geometry_mismatch")?;
++    if meta["geometryId"] != t["geometryId"] || whole.w > nw || whole.h > nh {
++        return Err("region_geometry_mismatch");
++    }
++    let (fw, fh) = (whole.w, whole.h);
++    drop(whole);
++    h.session.accept_preview_source(&job, decoded.clone());
++    let mut response = t.clone();
++    response["contractVersion"] = json!(1);
++    response["mode"] = json!("region");
++    response["kind"] = json!(if before { "before" } else { "after" });
++    response["quality"] = json!(if job.request.quality == pipeline::Quality::Draft { "draft" } else { "full" });
++    response["geometryId"] = meta["geometryId"].clone();
++    response["fullWidth"] = json!(fw);
++    response["fullHeight"] = json!(fh);
++    let mut diagnostics = json!({"sourceLevel":format!("{:?}",job.level),"sourceHostBytes":source.data.capacity().saturating_mul(std::mem::size_of::<[f32;3]>()),
++        "sourceCacheBytes":h.session.media.held(),"nativeMs":0});
++    if before {
++        diagnostics["beforeFingerprint"] = json!(format!("{baseline:016x}"));
++        diagnostics["effectiveBeforeFingerprint"] = json!(format!("{:016x}", job.settings.hash64()));
++    }
++    if planning {
++        response["nativeWidth"] = json!(nw);
++        response["nativeHeight"] = json!(nh);
++        response["fullWidth"] = json!(fw);
++        response["fullHeight"] = json!(fh);
++        diagnostics["nativeMs"] = json!(started.elapsed().as_secs_f64() * 1000.0);
++        return Ok(json!({"response":response,"diagnostics":diagnostics}));
++    }
++    if (fw, fh) != (n(t, "fullWidth"), n(t, "fullHeight")) {
++        return Err("region_geometry_mismatch");
++    }
++    let w = win(&t["window"]);
++    let mut region = if before { h.session.region_job_before(id, fw, fh, w, true) } else { h.session.region_job(id, fw, fh, w, true) }
++        .ok_or("region_work_budget_exceeded")?;
++    if t["quality"] == "draft" {
++        region = region.draft();
++    }
++    // Return the job's actual contract, never silently relabel a different quality/window.
++    if response["quality"] != if region.request.quality == pipeline::Quality::Draft { "draft" } else { "full" } || region.request.window != Some(w) {
++        return Err("region_geometry_mismatch");
++    }
++    response["window"] = wjson(region.request.window.ok_or("region_geometry_mismatch")?);
++    region.source = SourceRef::Loaded(Box::new(decoded.clone()));
++    region.info = info.clone();
++    let actual = pipeline::plan(&source, &info, &region.settings, &region.request);
++    let work = PixelWindow {
++        x: w.x.checked_sub(actual.keep.map_or(0, |k| k.x)).ok_or("region_work_budget_exceeded")?,
++        y: w.y.checked_sub(actual.keep.map_or(0, |k| k.y)).ok_or("region_work_budget_exceeded")?,
++        w: actual.w,
++        h: actual.h,
++    };
++    if !bounded(work)
++        || work.x.checked_add(work.w).is_none_or(|r| r > fw || r < w.x + w.w)
++        || work.y.checked_add(work.h).is_none_or(|b| b > fh || b < w.y + w.h)
++    {
++        return Err("region_work_budget_exceeded");
++    }
++    drop(actual);
++    let options = crate::preview::Options::parse(p).map_err(|_| "region_invalid_request")?;
++    h.stages.source(&format!("{}:{source_key}", id.0));
++    h.stages.configure(options.budget);
++    let signature = format!(
++        "{}:{source_key}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
++        id.0,
++        region.settings.crop,
++        region.settings.orientation,
++        region.settings.optics,
++        region.settings.geometry,
++        region.settings.profile,
++        if before { baseline } else { 0 }
++    );
++    let side = usize::from(before);
++    let input = crate::preview::CpuStageInput { source: &source, info: &info, settings: &region.settings, request: &region.request };
++    let (cache, applied) = h.stages.prepare(side, &signature, options.budget, w.w.max(w.h), original, Some(input));
++    if let Some(cache) = cache {
++        region = region.with_stages(cache);
++    }
++    let rendered = region.run().rendered.map_err(|_| "region_render_failed")?;
++    if (rendered.image.width, rendered.image.height) != (w.w, w.h) {
++        return Err("region_geometry_mismatch");
++    }
++    h.stages.geometry(side, meta["geometryId"].as_str().ok_or("region_geometry_mismatch")?);
++    diagnostics["stageCache"] = h.stages.finish(side, options.budget, applied);
++    diagnostics["execution"] = serde_json::to_value(rendered.execution.ok_or("region_render_failed")?).map_err(|_| "region_render_failed")?;
++    diagnostics["workWindow"] = wjson(work);
++    diagnostics["nativeMs"] = json!(started.elapsed().as_secs_f64() * 1000.0);
++    response["width"] = json!(rendered.image.width);
++    response["height"] = json!(rendered.image.height);
++    crate::write_image(std::path::Path::new(p["path"].as_str().ok_or("region_render_failed")?), &rendered.image, 92)
++        .map_err(|_| "region_render_failed")?;
++    Ok(json!({"response":response,"diagnostics":diagnostics}))
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/mcp/src/region/tests.rs b/crates/mcp/src/region/tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..866e8ec1f379a10531076b3655139249e938d487
+--- /dev/null
++++ b/crates/mcp/src/region/tests.rs
+@@ -0,0 +1,418 @@
++use super::*;
++use lightcraft_engine::{
++    Session,
++    catalog::{Op, Photo, Source},
++    develop::DevelopSettings,
++    media::SourceLevel,
++};
++use lightcraft_raster::{Rgb32f, Rgba8};
++use std::sync::Arc;
++
++fn host(settings: DevelopSettings) -> Headless {
++    host_size(settings, 512, 384)
++}
++fn host_size(settings: DevelopSettings, width: usize, height: usize) -> Headless {
++    host_kind(settings, width, height, false)
++}
++fn host_kind(settings: DevelopSettings, width: usize, height: usize, raw: bool) -> Headless {
++    let mut s = Session::new();
++    let mut p = Photo::new(PhotoId(1), Source::File { path: "unused-fixture.png".into() }, "fixture.png", "PNG", width as u32, height as u32, "");
++    if raw {
++        p.kind = lightcraft_engine::catalog::MediaKind::Raw;
++        p.format = "DNG".into();
++        p.as_shot_wb = Some((5500.0, 7.0));
++    }
++    p.develop = Arc::new(settings);
++    s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
++    let source = Arc::new(Rgb32f::from_fn(width, height, |x, y| {
++        [(0.03 + x as f32 / (width + 28) as f32), 0.1 + y as f32 / (height + 66) as f32, 0.2 + ((x * 7 + y * 13) % 61) as f32 / 130.0]
++    }));
++    for level in [SourceLevel::Thumb, SourceLevel::Preview, SourceLevel::Full] {
++        s.media.insert(PhotoId(1), level, source.clone());
++    }
++    Headless::new(s)
++}
++fn target(h: &mut Headless, before: bool) -> Value {
++    let p = h.session.catalog.photo(PhotoId(1)).unwrap();
++    let original = (p.width as usize, p.height as usize);
++    let mut job = h.session.render_job(PhotoId(1), 512, 512, before, true).unwrap();
++    let loaded = job.source.load_source().unwrap();
++    let src = loaded.image_for(job.settings.denoise_amount());
++    let info = loaded.info_or(job.info.clone());
++    let plan = pipeline::plan(&src, &info, &job.settings, &job.request);
++    let source_key = format!("{:?}", job.source_key.unwrap());
++    let meta = crate::preview::frame_metadata(&plan.frame, original, &source_key, plan.w, plan.h).unwrap();
++    drop(plan);
++    job.source = SourceRef::Loaded(Box::new(loaded));
++    let identity = if before { json!({"kind":"before","beforeKey":"f".repeat(64)}) } else { json!({"kind":"after","revision":2}) };
++    let mut i = json!({"assetId":"12345678-1234-4234-9234-123456789abc","sourceId":"b".repeat(64),"generation":1,"documentToken":"c".repeat(32)});
++    i.as_object_mut().unwrap().extend(identity.as_object().unwrap().clone());
++    json!({"contractVersion":1,"mode":"region","quality":"full","geometryId":meta["geometryId"],"identity":i,
++        "documentRevision":2,"viewGeneration":3,"requestId":"d".repeat(32),"desiredLongEdge":512})
++}
++fn render_target(q: &Value, fw: usize, fh: usize, w: PixelWindow, context: usize) -> Value {
++    let mut t = q.clone();
++    t.as_object_mut().unwrap().remove("desiredLongEdge");
++    t["fullWidth"] = json!(fw);
++    t["fullHeight"] = json!(fh);
++    t["window"] = wjson(w);
++    t["context"] = json!(context);
++    t["prefetch"] = json!(0);
++    let x = w.x + if w.x == 0 { 0 } else { context };
++    let y = w.y + if w.y == 0 { 0 } else { context };
++    let right = w.x + w.w - if w.x + w.w == fw { 0 } else { context };
++    let bottom = w.y + w.h - if w.y + w.h == fh { 0 } else { context };
++    t["validRegion"] = json!({"x":x,"y":y,"w":right-x,"h":bottom-y});
++    t
++}
++fn tool_args(op: &str, t: Value) -> Value {
++    json!({"id":"1","region_contract":1,"operation":op,"target":t})
++}
++fn pixels(r: &ToolResult) -> Rgba8 {
++    assert!(!r.is_error, "{:?}", r.content);
++    let bytes = crate::base64_decode(r.image().unwrap().0).unwrap();
++    lightcraft_codecs::decode(&bytes, Default::default()).unwrap().to_srgb8()
++}
++#[test]
++fn c0_shared_coordinate_fixtures() {
++    let fixtures: Value = serde_json::from_str(include_str!("../region_fixtures.json")).unwrap();
++    let contract: Value = serde_json::from_str(include_str!("../region_contract.json")).unwrap();
++    assert_eq!(contract["c1InitialBudget"]["maxPngBytes"], PNG_LIMIT);
++    assert_eq!(contract["c1InitialBudget"]["maxMcpLineBytes"], LINE_LIMIT);
++    assert_eq!(contract["c1InitialBudget"]["maxSide"], MAX_SIDE);
++    assert_eq!(contract["c1InitialBudget"]["maxPixels"], MAX_PIXELS);
++    for f in fixtures.as_array().unwrap() {
++        let i = &f["input"];
++        let g = &i["geometry"];
++        let v = &i["view"];
++        let full = &i["full"];
++        let (nw, nh, s, vw, vh) = (
++            g["nativeWidth"].as_f64().unwrap(),
++            g["nativeHeight"].as_f64().unwrap(),
++            v["scale"].as_f64().unwrap(),
++            v["width"].as_f64().unwrap(),
++            v["height"].as_f64().unwrap(),
++        );
++        let l = (vw - nw * s) / 2.0 + v["panX"].as_f64().unwrap();
++        let top = (vh - nh * s) / 2.0 + v["panY"].as_f64().unwrap();
++        let r = [(-l / s).max(0.0), (-top / s).max(0.0), ((vw - l) / s).min(nw), ((vh - top) / s).min(nh)];
++        for (k, a) in ["x0", "y0", "x1", "y1"].into_iter().zip(r) {
++            assert!((a - f["expected"]["nativeVisibleRect"][k].as_f64().unwrap()).abs() < 1e-9, "{}", f["name"]);
++        }
++        let fw = full["fullWidth"].as_f64().unwrap();
++        let fh = full["fullHeight"].as_f64().unwrap();
++        let grid = i["budget"]["grid"].as_f64().unwrap();
++        let margin = i["context"].as_f64().unwrap() + i["prefetch"].as_f64().unwrap();
++        let x = (((r[0] * fw / nw - margin).floor() / grid).floor() * grid).max(0.0);
++        let y = (((r[1] * fh / nh - margin).floor() / grid).floor() * grid).max(0.0);
++        let right = (((r[2] * fw / nw + margin).ceil() / grid).ceil() * grid).min(fw);
++        let bottom = (((r[3] * fh / nh + margin).ceil() / grid).ceil() * grid).min(fh);
++        assert_eq!(
++            json!({"x":x as usize,"y":y as usize,"w":(right-x) as usize,"h":(bottom-y) as usize}),
++            f["expected"]["contextWindow"],
++            "{}",
++            f["name"]
++        );
++    }
++}
++#[test]
++fn strict_schema_plan_and_settings_are_immutable() {
++    assert!(!validate(&json!(1), &json!({"type":"integer","unknownConstraint":true})));
++    let mut h = host(DevelopSettings::default());
++    let q = target(&mut h, false);
++    let tools = crate::tool_definitions(&mut h, false);
++    assert_eq!(tools.iter().find(|t| t["name"] == "render_region_preview").unwrap()["annotations"]["readOnlyHint"], true);
++    let before = h.session.develop_of(PhotoId(1)).unwrap().hash64();
++    let r = call(&mut h, &tool_args("plan", q.clone()));
++    assert!(!r.is_error);
++    let meta = r.structured.unwrap();
++    assert_eq!(meta["response"]["nativeWidth"], 512);
++    assert_eq!(meta["response"]["fullWidth"], 512);
++    assert_eq!(h.session.develop_of(PhotoId(1)).unwrap().hash64(), before);
++    let mut up = q.clone();
++    up["desiredLongEdge"] = json!(65536);
++    let rr = call(&mut h, &tool_args("plan", up));
++    assert!(!rr.is_error);
++    assert_eq!(rr.structured.unwrap()["response"]["fullWidth"], 512);
++    let mut overscan = DevelopSettings::default();
++    overscan.crop.geometry.rect = serde_json::from_value(json!({"x0":-0.1,"y0":-0.1,"x1":1.1,"y1":1.1})).unwrap();
++    let mut expanded = host(overscan);
++    let mut query = target(&mut expanded, false);
++    query["desiredLongEdge"] = json!(614);
++    let result = call(&mut expanded, &tool_args("plan", query));
++    assert!(!result.is_error, "{:?}", result.content);
++    let response = result.structured.unwrap()["response"].clone();
++    assert!(n(&response, "fullWidth") > 512);
++    assert!(n(&response, "fullWidth") <= n(&response, "nativeWidth"));
++    assert!(n(&response, "fullHeight") <= n(&response, "nativeHeight"));
++    for patch in [json!({"region_contract":2}), json!({"operation":"unknown"}), json!({"extra":true}), json!({"id":1}), json!({"stage_cache":"bad"})]
++    {
++        let mut a = tool_args("plan", q.clone());
++        a.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
++        assert!(call(&mut h, &a).is_error);
++    }
++    let mut bad = q.clone();
++    bad["extra"] = json!(true);
++    assert!(call(&mut h, &tool_args("plan", bad)).is_error);
++    assert!(call(&mut h, &tool_args("render", q)).is_error);
++}
++#[test]
++fn c1_cpu_gpu_pixels_and_geometry_matrix() {
++    for gpu in [false, true] {
++        lightcraft_engine::gpu::set_enabled(gpu);
++        if gpu && !lightcraft_engine::gpu::available() {
++            lightcraft_testkit::skip!(Gpu, "Region real device pixel comparisons require an adapter");
++            continue;
++        }
++        for case in [
++            "plain",
++            "exposure",
++            "crop",
++            "rotate90",
++            "rotate180",
++            "rotate270",
++            "flip",
++            "straighten",
++            "nr",
++            "dehaze",
++            "perspective",
++            "local",
++            "rawInfo",
++        ] {
++            let mut s = DevelopSettings::default();
++            match case {
++                "exposure" => s.light.exposure = 0.7,
++                "crop" => s.crop.geometry.rect = serde_json::from_value(json!({"x0":0.1,"y0":0.1,"x1":0.9,"y1":0.9})).unwrap(),
++                "rotate90" => s.orientation = serde_json::from_value(json!("Rotate90")).unwrap(),
++                "rotate180" => s.orientation = serde_json::from_value(json!("Rotate180")).unwrap(),
++                "rotate270" => s.orientation = serde_json::from_value(json!("Rotate270")).unwrap(),
++                "flip" => s.crop.flip_h = true,
++                "straighten" => s.crop.geometry.angle = 7.0,
++                "nr" => {
++                    s.detail.nr_luminance = 40.0;
++                    s.detail.nr_color = 25.0;
++                }
++                "dehaze" => s.effects.dehaze = 30.0,
++                "perspective" => {
++                    s.geometry.vertical = 15.0;
++                    s.optics.distortion = 0.1;
++                }
++                _ => {}
++            }
++            if case == "rawInfo" {
++                s = DevelopSettings::for_raw(5500.0, 7.0);
++            }
++            if case == "local" {
++                let mut mask = lightcraft_engine::develop::Mask::default();
++                mask.adjust.exposure = 0.6;
++                mask.components =
++                    serde_json::from_value(json!([{"shape":{"kind":"linear","start":{"x":0.1,"y":0.2},"end":{"x":0.8,"y":0.9}}}])).unwrap();
++                s.masks.push(mask);
++            }
++            let mut h = host_kind(s, 512, 384, case == "rawInfo");
++            let q = target(&mut h, false);
++            let hash = h.session.develop_of(PhotoId(1)).unwrap().hash64();
++            let plan = call(&mut h, &tool_args("plan", q.clone())).structured.unwrap()["response"].clone();
++            let (fw, fh) = (n(&plan, "fullWidth"), n(&plan, "fullHeight"));
++            let whole = h.session.render_job(PhotoId(1), fw, fh, false, true).unwrap().run().rendered.unwrap().image;
++            let proxy_whole = if case == "dehaze" {
++                Some(h.session.region_job(PhotoId(1), fw, fh, PixelWindow { x: 0, y: 0, w: fw, h: fh }, true).unwrap().run().rendered.unwrap().image)
++            } else {
++                None
++            };
++            if let Some(proxy) = &proxy_whole {
++                let max = whole.data.iter().zip(&proxy.data).flat_map(|(a, b)| (0..3).map(move |c| a[c].abs_diff(b[c]))).max().unwrap();
++                println!("region dehaze wholeProxy gpu={gpu} max={max}");
++            }
++            for context in if ["nr", "dehaze"].contains(&case) { vec![24, 64] } else { vec![24] } {
++                let (ww, hh) = if context == 64 { (256, 256) } else { (160, 128) };
++                for (x, y) in [(fw / 2 - ww / 2, fh / 2 - hh / 2), (0, 0), (fw - ww, 0), (0, fh - hh), (fw - ww, fh - hh)] {
++                    let w = PixelWindow { x, y, w: ww, h: hh };
++                    let t = render_target(&q, fw, fh, w, context);
++                    let mut args = tool_args("render", t.clone());
++                    args["stage_cache"] = json!("on");
++                    args["stage_cache_budget_bytes"] = json!(512 << 20);
++                    let rendered = call(&mut h, &args);
++                    let image = pixels(&rendered);
++                    let meta: Value = serde_json::from_str(rendered.content[1]["text"].as_str().unwrap()).unwrap();
++                    let valid = win(&t["validRegion"]);
++                    let (mut worst, mut inner, mut changed, mut proxy_inner) = (0u8, 0u8, 0usize, 0u8);
++                    let mut inner_sum = 0u64;
++                    for yy in 0..w.h {
++                        for xx in 0..w.w {
++                            for c in 0..3 {
++                                let d = image.data[yy * w.w + xx][c].abs_diff(whole.data[(yy + y) * fw + xx + x][c]);
++                                worst = worst.max(d);
++                                if xx + x >= valid.x && xx + x < valid.x + valid.w && yy + y >= valid.y && yy + y < valid.y + valid.h {
++                                    inner = inner.max(d);
++                                    inner_sum += d as u64;
++                                    if d > 0 {
++                                        changed += 1;
++                                    }
++                                    if let Some(proxy) = &proxy_whole {
++                                        proxy_inner = proxy_inner.max(image.data[yy * w.w + xx][c].abs_diff(proxy.data[(yy + y) * fw + xx + x][c]));
++                                    }
++                                }
++                            }
++                        }
++                    }
++                    let mae = inner_sum as f64 / (valid.w * valid.h * 3) as f64;
++                    println!(
++                        "region pixels gpu={gpu} case={case} context={context} x={x} y={y} allMax={worst} innerMax={inner} innerMae={mae:.6} proxyInner={proxy_inner} changedChannels={changed} execution={} cache={}",
++                        meta["diagnostics"]["execution"], meta["diagnostics"]["stageCache"]
++                    );
++                    if gpu {
++                        assert_eq!(meta["diagnostics"]["execution"]["outcome"], "gpu_success");
++                    }
++                    // A geometry error is not an allowable spatial-filter boundary difference.
++                    // Fixture regression bounds follow measured results, not a general overlay acceptance threshold.
++                    assert!(inner <= if case == "dehaze" { 3 } else { 1 }, "{case} gpu={gpu} inner={inner}");
++                    assert_eq!(h.session.develop_of(PhotoId(1)).unwrap().hash64(), hash);
++                }
++            }
++        }
++    }
++    lightcraft_engine::gpu::set_enabled(true);
++}
++
++#[test]
++fn region_before_draft_full_cache_and_cpu_fallback() {
++    lightcraft_engine::gpu::set_enabled(true);
++    let mut settings = DevelopSettings::default();
++    settings.light.exposure = 0.7;
++    let mut h = host(settings);
++    let q = target(&mut h, false);
++    let before_q = target(&mut h, true);
++    assert_eq!(q["geometryId"], before_q["geometryId"]);
++    let w = PixelWindow { x: 128, y: 96, w: 256, h: 192 };
++    let full = render_target(&q, 512, 384, w, 32);
++    let before = render_target(&before_q, 512, 384, w, 32);
++    let after_pixels = pixels(&call(&mut h, &tool_args("render", full.clone())));
++    let before_pixels = pixels(&call(&mut h, &tool_args("render", before.clone())));
++    assert_eq!((after_pixels.width, after_pixels.height), (before_pixels.width, before_pixels.height));
++    assert_ne!(after_pixels, before_pixels);
++    let mut draft = full.clone();
++    draft["quality"] = json!("draft");
++    let d = call(&mut h, &tool_args("render", draft));
++    assert!(!d.is_error);
++    let meta: Value = serde_json::from_str(d.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(meta["response"]["window"], full["window"]);
++    assert_eq!(meta["response"]["quality"], "draft");
++    let mut tiny = tool_args("render", full.clone());
++    tiny["stage_cache"] = json!("on");
++    tiny["stage_cache_budget_bytes"] = json!(1);
++    let t = call(&mut h, &tiny);
++    assert_eq!(pixels(&t), after_pixels);
++    let meta: Value = serde_json::from_str(t.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(meta["diagnostics"]["stageCache"]["reason"], "budget");
++    if !lightcraft_engine::gpu::available() {
++        lightcraft_testkit::skip!(Gpu, "Region fault injection requires an adapter");
++        return;
++    }
++    lightcraft_engine::gpu::inject_fault(lightcraft_engine::gpu::Fault::OutOfMemory);
++    let failed_gpu = call(&mut h, &tool_args("render", full));
++    assert!(!failed_gpu.is_error);
++    let meta: Value = serde_json::from_str(failed_gpu.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(meta["diagnostics"]["execution"]["outcome"], "cpu_fallback");
++    lightcraft_engine::gpu::reset_failures();
++    assert!(!call(&mut h, &tool_args("render", before)).is_error);
++}
++
++#[test]
++fn source_levels_auto_upright_and_work_budget_are_checked() {
++    let mut settings = DevelopSettings::default();
++    settings.geometry.upright = serde_json::from_value(json!("auto")).unwrap();
++    let mut h = host_size(settings, 4000, 3000);
++    let q = target(&mut h, false);
++    let old = h.session.develop_of(PhotoId(1)).unwrap().hash64();
++    for (edge, level) in [(512, "Thumb"), (1536, "Preview"), (2600, "Full")] {
++        let mut query = q.clone();
++        query["desiredLongEdge"] = json!(edge);
++        let r = call(&mut h, &tool_args("plan", query));
++        assert!(!r.is_error, "{:?}", r);
++        let m = r.structured.unwrap();
++        assert_eq!(m["diagnostics"]["sourceLevel"], level);
++        println!(
++            "region preflight edge={edge} level={level} F={}x{} sourceBytes={}",
++            m["response"]["fullWidth"], m["response"]["fullHeight"], m["diagnostics"]["sourceHostBytes"]
++        );
++        assert_eq!(h.session.develop_of(PhotoId(1)).unwrap().hash64(), old);
++    }
++    // A rounded preview with different aspect/auto analysis must never reuse the old geometry id.
++    h.session.media.insert(PhotoId(1), SourceLevel::Preview, Arc::new(Rgb32f::from_fn(2560, 1921, |_, _| [0.3; 3])));
++    let mut changed = q.clone();
++    changed["desiredLongEdge"] = json!(1536);
++    let r = call(&mut h, &tool_args("plan", changed));
++    assert!(r.is_error);
++    assert!(r.content[0]["text"].as_str().unwrap().contains("region_geometry_mismatch"));
++    drop(h);
++    let mut s = DevelopSettings::default();
++    s.spots = serde_json::from_value(json!([{"points":[{"x":0.1,"y":0.5}],"size":0.01,"source_offset":{"x":0.85,"y":0.0}}])).unwrap();
++    let mut h = host_size(s, 2560, 1920);
++    let q = target(&mut h, false);
++    let t = render_target(&q, 2560, 1920, PixelWindow { x: 128, y: 800, w: 256, h: 256 }, 16);
++    let r = call(&mut h, &tool_args("render", t));
++    assert!(r.is_error);
++    assert!(r.content[0]["text"].as_str().unwrap().contains("region_work_budget_exceeded"));
++}
++
++#[test]
++fn png_file_limit_and_oversized_target_fail_closed() {
++    struct Oversized;
++    impl Backend for Oversized {
++        fn call(&mut self, _: &str, p: Value) -> Result<Value, String> {
++            std::fs::write(p["path"].as_str().unwrap(), vec![0; PNG_LIMIT + 1]).unwrap();
++            Ok(json!({}))
++        }
++        fn has_ui(&self) -> bool {
++            false
++        }
++        fn region_contract(&self) -> bool {
++            true
++        }
++        fn describe(&self) -> String {
++            "fixture".into()
++        }
++    }
++    let mut h = host(DevelopSettings::default());
++    let q = target(&mut h, false);
++    let t = render_target(&q, 512, 384, PixelWindow { x: 0, y: 0, w: 128, h: 128 }, 0);
++    let r = call(&mut Oversized, &tool_args("render", t.clone()));
++    assert!(r.is_error);
++    assert!(r.content[0]["text"].as_str().unwrap().contains("region_budget_exceeded"));
++    let mut bad = t;
++    bad["window"]["w"] = json!(2049);
++    assert!(call(&mut h, &tool_args("render", bad)).is_error);
++    let huge = Photo::new(PhotoId(2), Source::File { path: "must-not-decode.raw".into() }, "large", "DNG", 65536, 65536, "");
++    h.session.catalog.apply(Op::AddPhoto { photo: Box::new(huge) }).unwrap();
++    let mut query = q;
++    query["desiredLongEdge"] = json!(65536);
++    let mut args = tool_args("plan", query);
++    args["id"] = json!("2");
++    let r = call(&mut h, &args);
++    assert!(r.is_error);
++    assert!(r.content[0]["text"].as_str().unwrap().contains("region_budget_exceeded"));
++}
++
++#[test]
++fn cold_raw_preflight_does_not_suppress_regular_wb_discovery() {
++    use lightcraft_engine::media::DecodedSource;
++    let mut session = Session::new();
++    let mut photo = Photo::new(PhotoId(1), Source::File { path: "cold-fixture.DNG".into() }, "cold", "DNG", 640, 480, "");
++    photo.kind = lightcraft_engine::catalog::MediaKind::Raw;
++    session.catalog.apply(Op::AddPhoto { photo: Box::new(photo) }).unwrap();
++    let job = session.render_job(PhotoId(1), 640, 480, false, true).unwrap();
++    let info = pipeline::SourceInfo { raw: true, relative_wb: false, as_shot_temp: 5500.0, as_shot_tint: 7.0, ..Default::default() };
++    let decoded = DecodedSource::new(Arc::new(Rgb32f::from_fn(640, 480, |_, _| [0.2; 3])), Some(info));
++    let before = session.develop_of(PhotoId(1)).unwrap().hash64();
++    session.accept_preview_source(&job, decoded.clone());
++    assert_eq!(session.develop_of(PhotoId(1)).unwrap().hash64(), before);
++    assert!(!session.media.has_source(PhotoId(1), job.level));
++    let mut regular = job.clone();
++    regular.source = SourceRef::Loaded(Box::new(decoded.clone()));
++    let mut result = regular.run();
++    result.loaded = Some(decoded);
++    session.accept(&result);
++    assert_eq!(session.catalog.photo(PhotoId(1)).unwrap().as_shot_wb, Some((5500.0, 7.0)));
++    assert!(session.media.has_source(PhotoId(1), job.level));
++}
+diff --git a/crates/mcp/src/region_contract.json b/crates/mcp/src/region_contract.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa4df4ced7d7fca25585e1e8331304d97a5a4cd1
+--- /dev/null
++++ b/crates/mcp/src/region_contract.json
+@@ -0,0 +1,18 @@
++{
++  "contractVersion": 1,
++  "capability": { "tool": "render_region_preview", "marker": "region_contract", "version": 1 },
++  "c1InitialBudget": {
++    "maxFullSide": 65536,
++    "maxSide": 2048,
++    "maxPixels": 2097152,
++    "maxPngBytes": 9437184,
++    "maxMcpLineBytes": 13631488,
++    "maxMetadataBytes": 16384,
++    "grid": 256,
++    "maxPlanItems": 6
++  },
++  "requestFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId"],
++  "responseFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId", "width", "height", "kind"],
++  "coordinateOrder": ["visible", "prefetch/context", "floor/ceil", "grid-snap", "clamp", "budget-center", "context-inset"],
++  "outputProfile": "srgb-u8"
++}
+diff --git a/crates/mcp/src/region_fixtures.json b/crates/mcp/src/region_fixtures.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e27c95a5ac2b6e1ce63c5f24fd41929324e7154
+--- /dev/null
++++ b/crates/mcp/src/region_fixtures.json
+@@ -0,0 +1,947 @@
++[
++  {
++    "name": "100-percent-center",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "top-left",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 1600,
++        "panY": 1200
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 0,
++        "y0": 0,
++        "x1": 800,
++        "y1": 600
++      },
++      "contextWindow": {
++        "x": 0,
++        "y": 0,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "top-right",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": -1600,
++        "panY": 1200
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 3200,
++        "y0": 0,
++        "x1": 4000,
++        "y1": 600
++      },
++      "contextWindow": {
++        "x": 3200,
++        "y": 0,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "bottom-left",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 1600,
++        "panY": -1200
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 0,
++        "y0": 2400,
++        "x1": 800,
++        "y1": 3000
++      },
++      "contextWindow": {
++        "x": 0,
++        "y": 2400,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "bottom-right",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": -1600,
++        "panY": -1200
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 3200,
++        "y0": 2400,
++        "x1": 4000,
++        "y1": 3000
++      },
++      "contextWindow": {
++        "x": 3200,
++        "y": 2400,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "pan-crosses-image-edge",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 1900,
++        "panY": 1400
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 0,
++        "y0": 0,
++        "x1": 500,
++        "y1": 400
++      },
++      "contextWindow": {
++        "x": 0,
++        "y": 0,
++        "w": 500,
++        "h": 400
++      }
++    }
++  },
++  {
++    "name": "above-100-percent",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 2,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1800,
++        "y0": 1350,
++        "x1": 2200,
++        "y1": 1650
++      },
++      "contextWindow": {
++        "x": 1800,
++        "y": 1350,
++        "w": 400,
++        "h": 300
++      }
++    }
++  },
++  {
++    "name": "fit",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 0.2,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 1000,
++        "fullHeight": 750
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 0,
++        "y0": 0,
++        "x1": 4000,
++        "y1": 3000
++      },
++      "contextWindow": {
++        "x": 0,
++        "y": 0,
++        "w": 1000,
++        "h": 750
++      }
++    }
++  },
++  {
++    "name": "fractional-scale",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1.25,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1680,
++        "y0": 1260,
++        "x1": 2320,
++        "y1": 1740
++      },
++      "contextWindow": {
++        "x": 1680,
++        "y": 1260,
++        "w": 640,
++        "h": 480
++      }
++    }
++  },
++  {
++    "name": "orientation-0-landscape",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "orientation-180-landscape",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "2222222222222222222222222222222222222222222222222222222222222222"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "2222222222222222222222222222222222222222222222222222222222222222",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "flip-already-in-native-frame",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 1600,
++        "panY": 1200
++      },
++      "full": {
++        "geometryId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 0,
++        "y0": 0,
++        "x1": 800,
++        "y1": 600
++      },
++      "contextWindow": {
++        "x": 0,
++        "y": 0,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "orientation-90-portrait",
++    "input": {
++      "geometry": {
++        "nativeWidth": 3000,
++        "nativeHeight": 4000,
++        "geometryId": "1111111111111111111111111111111111111111111111111111111111111111"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "1111111111111111111111111111111111111111111111111111111111111111",
++        "fullWidth": 3000,
++        "fullHeight": 4000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1100,
++        "y0": 1700,
++        "x1": 1900,
++        "y1": 2300
++      },
++      "contextWindow": {
++        "x": 1100,
++        "y": 1700,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "orientation-270-portrait",
++    "input": {
++      "geometry": {
++        "nativeWidth": 3000,
++        "nativeHeight": 4000,
++        "geometryId": "3333333333333333333333333333333333333333333333333333333333333333"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "3333333333333333333333333333333333333333333333333333333333333333",
++        "fullWidth": 3000,
++        "fullHeight": 4000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1100,
++        "y0": 1700,
++        "x1": 1900,
++        "y1": 2300
++      },
++      "contextWindow": {
++        "x": 1100,
++        "y": 1700,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "crop-effective-frame",
++    "input": {
++      "geometry": {
++        "nativeWidth": 2000,
++        "nativeHeight": 1200,
++        "geometryId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++        "fullWidth": 2000,
++        "fullHeight": 1200
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 600,
++        "y0": 300,
++        "x1": 1400,
++        "y1": 900
++      },
++      "contextWindow": {
++        "x": 600,
++        "y": 300,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "straighten-effective-frame",
++    "input": {
++      "geometry": {
++        "nativeWidth": 3900,
++        "nativeHeight": 2800,
++        "geometryId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++        "fullWidth": 3900,
++        "fullHeight": 2800
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1550,
++        "y0": 1100,
++        "x1": 2350,
++        "y1": 1700
++      },
++      "contextWindow": {
++        "x": 1550,
++        "y": 1100,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "fixed-css-scale-dpr-1",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "fixed-css-scale-dpr-1.25",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1.25,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "fixed-css-scale-dpr-1.5",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1.5,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "fixed-css-scale-dpr-2",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 2,
++        "scale": 1,
++        "panX": 0,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600,
++        "y0": 1200,
++        "x1": 2400,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 800,
++        "h": 600
++      }
++    }
++  },
++  {
++    "name": "pixel-edge-half-open",
++    "input": {
++      "geometry": {
++        "nativeWidth": 4000,
++        "nativeHeight": 3000,
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++      },
++      "view": {
++        "width": 800,
++        "height": 600,
++        "dpr": 1,
++        "scale": 1,
++        "panX": -0.5,
++        "panY": 0
++      },
++      "full": {
++        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++        "fullWidth": 4000,
++        "fullHeight": 3000
++      },
++      "context": 0,
++      "prefetch": 0,
++      "budget": {
++        "maxFullSide": 65536,
++        "maxSide": 2048,
++        "maxPixels": 2097152,
++        "grid": 1
++      }
++    },
++    "expected": {
++      "nativeVisibleRect": {
++        "x0": 1600.5,
++        "y0": 1200,
++        "x1": 2400.5,
++        "y1": 1800
++      },
++      "contextWindow": {
++        "x": 1600,
++        "y": 1200,
++        "w": 801,
++        "h": 600
++      }
++    }
++  }
++]
+diff --git a/crates/mcp/src/region_schema.json b/crates/mcp/src/region_schema.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..c989e855fd86155f1e67681bbdf368e730162379
+--- /dev/null
++++ b/crates/mcp/src/region_schema.json
+@@ -0,0 +1,776 @@
++{
++  "$schema": "https://json-schema.org/draft/2020-12/schema",
++  "title": "GenzoRoom Region contract 1 (C0, C1 validation budget)",
++  "oneOf": [
++    {
++      "$ref": "#/$defs/request"
++    },
++    {
++      "$ref": "#/$defs/response"
++    },
++    {
++      "$ref": "#/$defs/frameRequest"
++    },
++    {
++      "$ref": "#/$defs/frameResponse"
++    }
++  ],
++  "$defs": {
++    "request": {
++      "type": "object",
++      "additionalProperties": false,
++      "required": [
++        "contractVersion",
++        "mode",
++        "quality",
++        "geometryId",
++        "fullWidth",
++        "fullHeight",
++        "window",
++        "validRegion",
++        "context",
++        "prefetch",
++        "identity",
++        "documentRevision",
++        "viewGeneration",
++        "requestId"
++      ],
++      "properties": {
++        "contractVersion": {
++          "const": 1
++        },
++        "mode": {
++          "const": "region"
++        },
++        "quality": {
++          "type": "string",
++          "enum": [
++            "draft",
++            "full"
++          ]
++        },
++        "geometryId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{64}$"
++        },
++        "fullWidth": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "fullHeight": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "window": {
++          "type": "object",
++          "additionalProperties": false,
++          "required": [
++            "x",
++            "y",
++            "w",
++            "h"
++          ],
++          "properties": {
++            "x": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "y": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "w": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            },
++            "h": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            }
++          }
++        },
++        "validRegion": {
++          "type": "object",
++          "additionalProperties": false,
++          "required": [
++            "x",
++            "y",
++            "w",
++            "h"
++          ],
++          "properties": {
++            "x": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "y": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "w": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            },
++            "h": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            }
++          }
++        },
++        "context": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 65536
++        },
++        "prefetch": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 65536
++        },
++        "identity": {
++          "oneOf": [
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "revision"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "after"
++                },
++                "revision": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                }
++              }
++            },
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "beforeKey"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "before"
++                },
++                "beforeKey": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                }
++              }
++            }
++          ]
++        },
++        "documentRevision": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "viewGeneration": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "requestId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{32}$"
++        }
++      }
++    },
++    "response": {
++      "type": "object",
++      "additionalProperties": false,
++      "required": [
++        "contractVersion",
++        "mode",
++        "quality",
++        "geometryId",
++        "fullWidth",
++        "fullHeight",
++        "window",
++        "validRegion",
++        "context",
++        "prefetch",
++        "identity",
++        "documentRevision",
++        "viewGeneration",
++        "requestId",
++        "width",
++        "height",
++        "kind"
++      ],
++      "properties": {
++        "contractVersion": {
++          "const": 1
++        },
++        "mode": {
++          "const": "region"
++        },
++        "quality": {
++          "type": "string",
++          "enum": [
++            "draft",
++            "full"
++          ]
++        },
++        "geometryId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{64}$"
++        },
++        "fullWidth": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "fullHeight": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "window": {
++          "type": "object",
++          "additionalProperties": false,
++          "required": [
++            "x",
++            "y",
++            "w",
++            "h"
++          ],
++          "properties": {
++            "x": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "y": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "w": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            },
++            "h": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            }
++          }
++        },
++        "validRegion": {
++          "type": "object",
++          "additionalProperties": false,
++          "required": [
++            "x",
++            "y",
++            "w",
++            "h"
++          ],
++          "properties": {
++            "x": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "y": {
++              "type": "integer",
++              "minimum": 0,
++              "maximum": 65535
++            },
++            "w": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            },
++            "h": {
++              "type": "integer",
++              "minimum": 1,
++              "maximum": 2048
++            }
++          }
++        },
++        "context": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 65536
++        },
++        "prefetch": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 65536
++        },
++        "identity": {
++          "oneOf": [
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "revision"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "after"
++                },
++                "revision": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                }
++              }
++            },
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "beforeKey"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "before"
++                },
++                "beforeKey": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                }
++              }
++            }
++          ]
++        },
++        "documentRevision": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "viewGeneration": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "requestId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{32}$"
++        },
++        "width": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 2048
++        },
++        "height": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 2048
++        },
++        "kind": {
++          "type": "string",
++          "enum": [
++            "after",
++            "before"
++          ]
++        }
++      }
++    },
++    "frameRequest": {
++      "type": "object",
++      "additionalProperties": false,
++      "required": [
++        "contractVersion",
++        "mode",
++        "quality",
++        "geometryId",
++        "identity",
++        "documentRevision",
++        "viewGeneration",
++        "requestId",
++        "desiredLongEdge"
++      ],
++      "properties": {
++        "contractVersion": {
++          "const": 1
++        },
++        "mode": {
++          "const": "region"
++        },
++        "quality": {
++          "type": "string",
++          "enum": [
++            "draft",
++            "full"
++          ]
++        },
++        "geometryId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{64}$"
++        },
++        "identity": {
++          "oneOf": [
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "revision"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "after"
++                },
++                "revision": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                }
++              }
++            },
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "beforeKey"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "before"
++                },
++                "beforeKey": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                }
++              }
++            }
++          ]
++        },
++        "documentRevision": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "viewGeneration": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "requestId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{32}$"
++        },
++        "desiredLongEdge": {
++          "type": "number",
++          "exclusiveMinimum": 0,
++          "maximum": 65536
++        }
++      }
++    },
++    "frameResponse": {
++      "type": "object",
++      "additionalProperties": false,
++      "required": [
++        "contractVersion",
++        "mode",
++        "quality",
++        "geometryId",
++        "identity",
++        "documentRevision",
++        "viewGeneration",
++        "requestId",
++        "desiredLongEdge",
++        "nativeWidth",
++        "nativeHeight",
++        "fullWidth",
++        "fullHeight",
++        "kind"
++      ],
++      "properties": {
++        "contractVersion": {
++          "const": 1
++        },
++        "mode": {
++          "const": "region"
++        },
++        "quality": {
++          "type": "string",
++          "enum": [
++            "draft",
++            "full"
++          ]
++        },
++        "geometryId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{64}$"
++        },
++        "identity": {
++          "oneOf": [
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "revision"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "after"
++                },
++                "revision": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                }
++              }
++            },
++            {
++              "type": "object",
++              "additionalProperties": false,
++              "required": [
++                "assetId",
++                "sourceId",
++                "generation",
++                "documentToken",
++                "kind",
++                "beforeKey"
++              ],
++              "properties": {
++                "assetId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$"
++                },
++                "sourceId": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                },
++                "generation": {
++                  "type": "integer",
++                  "minimum": 0,
++                  "maximum": 9007199254740991
++                },
++                "documentToken": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{32}$"
++                },
++                "kind": {
++                  "const": "before"
++                },
++                "beforeKey": {
++                  "type": "string",
++                  "pattern": "^[a-f0-9]{64}$"
++                }
++              }
++            }
++          ]
++        },
++        "documentRevision": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "viewGeneration": {
++          "type": "integer",
++          "minimum": 0,
++          "maximum": 9007199254740991
++        },
++        "requestId": {
++          "type": "string",
++          "pattern": "^[a-f0-9]{32}$"
++        },
++        "desiredLongEdge": {
++          "type": "number",
++          "exclusiveMinimum": 0,
++          "maximum": 65536
++        },
++        "nativeWidth": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "nativeHeight": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "fullWidth": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "fullHeight": {
++          "type": "integer",
++          "minimum": 1,
++          "maximum": 65536
++        },
++        "kind": {
++          "type": "string",
++          "enum": [
++            "after",
++            "before"
++          ]
++        }
++      }
++    }
++  }
++}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5e00b330c 100644
+index 3265b36f9b4c2653a57468113c4b9179d527b4db..3ca8d49d9cacfe4fa2e588ea1d7a344bf1f434db 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -118,6 +118,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
@@ -1301,7 +3853,32 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
-@@ -445,6 +457,11 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
+@@ -376,6 +388,7 @@ fn annotations(name: &str, title: &str) -> Value {
+             | "list_commands"
+             | "doc_inspect"
+             | "render_preview"
++            | "render_region_preview"
+             | "query_photos"
+             | "list_controls"
+             | "get_develop"
+@@ -414,6 +427,7 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
+ /// All tools: helpers, plus the generated command tools when `with_commands`.
+ pub fn tool_definitions(backend: &mut dyn Backend, with_commands: bool) -> Vec<Value> {
+     let mut v = helper_tools(backend.has_ui());
++    if backend.region_contract() { v.push(crate::region::tool()); }
+     if with_commands {
+         v.extend(command_tools(backend));
+     }
+@@ -437,7 +451,7 @@ fn activate(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+     Ok(())
+ }
+ 
+-fn temp_path(tag: &str) -> std::path::PathBuf {
++pub(crate) fn temp_path(tag: &str) -> std::path::PathBuf {
+     static N: AtomicU64 = AtomicU64::new(0);
+     std::env::temp_dir().join(format!("lightcraft-mcp-{}-{}-{tag}.png", std::process::id(), N.fetch_add(1, Ordering::Relaxed)))
+ }
+@@ -445,6 +459,11 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
  /// Read a PNG the backend wrote, optionally downscale / re-encode as JPEG, and wrap it as image
  /// content (+ a text block with the metadata).
  fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
@@ -1313,7 +3890,7 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5
      let bytes = match std::fs::read(file) {
          Ok(b) => b,
          Err(e) => return ToolResult::error(format!("cannot read rendered image {}: {e}", file.display())),
-@@ -484,6 +501,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
+@@ -484,6 +503,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
      } else if let Some(o) = info.as_object_mut() {
          o.remove("path");
      }
@@ -1326,7 +3903,7 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5
      ToolResult {
          content: vec![json!({"type": "image", "data": base64_encode(&bytes), "mimeType": mime}), json!({"type": "text", "text": info.to_string()})],
          is_error: false,
-@@ -500,6 +523,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+@@ -500,6 +525,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
  }
  
  fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
@@ -1352,7 +3929,7 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5
      if let Err(e) = check_save_path(b, args) {
          return ToolResult::error(e);
      }
-@@ -514,13 +556,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -514,13 +558,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
      let Some(id) = id else { return ToolResult::error("no active photo: import or select one, or pass `id`") };
      let file = temp_path("render");
      let path = file.to_string_lossy().to_string();
@@ -1392,7 +3969,15 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5
  }
  
  fn screenshot(b: &mut dyn Backend, args: &Value) -> ToolResult {
-@@ -618,7 +683,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -563,6 +630,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+         return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
+     }
+     match name {
++        "render_region_preview" => return crate::region::call(b, args),
+         "list_commands" | "command_list" => {
+             let filter = s("filter").unwrap_or("").to_lowercase();
+             let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
+@@ -618,7 +686,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {

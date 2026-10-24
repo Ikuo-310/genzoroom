@@ -16,6 +16,15 @@ function response(patch: Record<string, string> = {}, bytes = png) {
 }
 afterEach(() => vi.unstubAllGlobals());
 
+it.each([undefined, 1, 2])('keeps Whole availability independent of optional Region capability %s', async regionContract => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ available: true, version: '0.10.0',
+    ...(regionContract === undefined ? {} : { regionContract }) }), { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await rawCapability()).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]?.[0]).toBe('/api/raw/capabilities');
+});
+
 const adaptiveTarget = { quality: 'draft' as const, mode: 'whole' as const, maxSide: 1024, viewGeneration: 4, geometryId: null };
 it('accepts an actual larger bitmap and rejects responses larger than their requested target', async () => {
   const frame = { ...geometry, fullWidth: 1600, fullHeight: 1200 };

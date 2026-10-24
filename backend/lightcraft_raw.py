@@ -103,6 +103,17 @@ class Superseded:
     pass
 
 
+@dataclass(frozen=True)
+class RegionResult:
+    handle: RawHandle
+    data: bytes = field(repr=False)
+    _metadata: str = field(repr=False)
+
+    @property
+    def metadata(self):
+        return json.loads(self._metadata)
+
+
 SUPERSEDED = Superseded()
 
 
@@ -145,6 +156,9 @@ class PreviewTicket:
         self.view_generation = 0
         self.geometry_id = None
         self.adaptive = False
+        self.region_operation = None
+        self.region_target = None
+        self.region_document_token = None
         self.reason = "replaced"
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
@@ -1034,9 +1048,50 @@ class LightCraftRawSession:
             self._worker = asyncio.create_task(self._previews(), name="lightcraft-preview-worker")
         return ticket
 
+    def region_identity(self, handle, kind='after', *, document_token=None):
+        photo = self._photo(handle, active=True)
+        identity = {'assetId':handle.source_key, 'sourceId':photo.content_hash, 'generation':handle.generation,
+                    'documentToken':handle.document_token if document_token is None else document_token, 'kind':kind}
+        if kind == 'before':
+            identity['beforeKey'] = self.before_key(handle)
+        else:
+            identity['revision'] = photo.applied_revision
+        return identity
+
+    def request_region(self, handle, target, *, operation='render', document_token=None):
+        """Unconnected C1 boundary: use the existing owner/worker, never a Region worker."""
+        from raw_region import validate_target
+        validate_target(target, operation)
+        photo = self._photo(handle, active=True)
+        # A future HTTP owner may attest its public document token; RawHandle still owns native lifetime.
+        if target['identity'] != self.region_identity(handle, target['identity']['kind'], document_token=document_token) \
+                or target['documentRevision'] != photo.applied_revision or photo.requested_revision != photo.applied_revision:
+            raise LightCraftError('raw_revision_conflict')
+        snapshot = json.loads(_object_json(target, 4096))
+        self._sequence += 1
+        self._discard_pending()
+        if self._before_pending is not None:
+            self._before_pending._finish()
+            self._before_pending = None
+        # Queue ownership is After-like latest-wins, independently of the target's image kind.
+        ticket = PreviewTicket(handle, self._epoch, photo.applied_revision, self._sequence, MAX_PREVIEW_SIDE)
+        ticket.region_operation, ticket.region_target = operation, snapshot
+        ticket.region_document_token = document_token
+        ticket.quality = snapshot['quality']
+        ticket.view_generation = snapshot['viewGeneration']
+        self._pending = ticket
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.create_task(self._previews(), name='lightcraft-preview-worker')
+        return ticket
+
     def _ticket_current(self, ticket):
         try:
             photo = self._photo(ticket.handle, active=True)
+            if ticket.region_operation is not None:
+                return not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence \
+                    and ticket.revision == photo.applied_revision == photo.requested_revision \
+                    and ticket.region_target['identity'] == self.region_identity(ticket.handle, ticket.region_target['identity']['kind'],
+                                                                                document_token=ticket.region_document_token)
             if ticket.kind == "before":
                 key = self.before_key(ticket.handle, ticket.max_side)
                 if ticket.adaptive and key is not None:
@@ -1047,9 +1102,10 @@ class LightCraftRawSession:
         except LightCraftError:
             return False
 
-    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None):
+    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, *, _validation_job=None):
         args = (quality,) if quality is not None else ()
-        _, future = _thread_job(_validate_png, result, photo_id, max_side, kind, before_fingerprint, geometry, *args)
+        function, parameters = _validation_job or (_validate_png, (result, photo_id, max_side, kind, before_fingerprint, geometry, *args))
+        _, future = _thread_job(function, *parameters)
         self._validation = future
         cancelled = False
         try:
@@ -1114,8 +1170,13 @@ class LightCraftRawSession:
                                         stage_cache_budget_bytes=self._stage_budget)
                         native_started = monotonic()
                         try:
-                            result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
-                                                                     timeout=self._timeouts.preview, **args)
+                            if ticket.region_operation is not None:
+                                result = await self.manager._raw_region(self._generation, photo.photo_id,
+                                    ticket.region_operation, ticket.region_target, timeout=self._timeouts.preview,
+                                    stage_cache=self._stage_mode, stage_cache_budget_bytes=self._stage_budget)
+                            else:
+                                result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
+                                                                         timeout=self._timeouts.preview, **args)
                         except MCPToolError:
                             # A helper can reject metadata after accept() has learned native defaults.
                             await self._preview_readback(photo, ticket)
@@ -1127,6 +1188,35 @@ class LightCraftRawSession:
                     # The worker still owns the result/validation, while native controls can proceed.
                     native_ms = (monotonic() - native_started) * 1000
                     validation_started = monotonic()
+                    if ticket.region_operation is not None:
+                        from raw_region import validate_result
+                        fingerprint = photo.before_fingerprint if ticket.region_target['identity']['kind'] == 'before' else None
+                        data, metadata = await self._image(result, photo.photo_id, ticket.max_side,
+                            _validation_job=(validate_result, (result,ticket.region_target,ticket.region_operation,photo.photo_id,fingerprint)))
+                        del result
+                        diagnostics = metadata['diagnostics']
+                        if ticket.region_operation == 'render' and (diagnostics['stageCache']['mode'] != self._stage_mode
+                                or self._stage_mode == 'on' and diagnostics['stageCache']['budgetBytes'] != self._stage_budget):
+                            raise LightCraftError('raw_invalid_region_response')
+                        t = ticket.region_target
+                        lightcraft_log('region.completed', level='debug', operation=ticket.region_operation, generation=self._generation,
+                            revision=ticket.revision, quality=t['quality'], kind=t['identity']['kind'], geometryId=t['geometryId'],
+                            fullWidth=metadata['response']['fullWidth'], fullHeight=metadata['response']['fullHeight'],
+                            window=t.get('window'), validRegion=t.get('validRegion'), requestId=t['requestId'],
+                            nativeMs=native_ms, validationMs=(monotonic()-validation_started)*1000,
+                            renderMs=diagnostics['nativeMs'], workWindow=diagnostics.get('workWindow'),
+                            sourceLevel=diagnostics['sourceLevel'], sourceHostBytes=diagnostics['sourceHostBytes'],
+                            sourceCacheBytes=diagnostics['sourceCacheBytes'], payloadBytes=len(data),
+                            execution=diagnostics.get('execution'),stageCache=diagnostics.get('stageCache'))
+                        if diagnostics.get('execution',{}).get('outcome') == 'cpu_fallback':
+                            lightcraft_log('region.gpuFallback', level='warn', generation=self._generation,
+                                revision=ticket.revision, requestId=t['requestId'], execution=diagnostics['execution'])
+                        if self._ticket_current(ticket):
+                            ticket._finish(RegionResult(ticket.handle, data, json.dumps(metadata)))
+                        else:
+                            ticket._finish()
+                        del data, metadata
+                        continue
                     image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
                                               photo.before_fingerprint, geometry,
                                               *([ticket.quality] if ticket.adaptive else []))
@@ -1183,6 +1273,10 @@ class LightCraftRawSession:
                 except TimeoutError:
                     ticket._finish(error="raw_busy_timeout")
                 except LightCraftError as error:
+                    if ticket.region_operation is not None:
+                        fatal = isinstance(error,MCPTransportError) and error.code != 'lightcraft_busy_timeout'
+                        lightcraft_log('region.failed' if fatal else 'region.rejected', level='error' if fatal else 'warn', generation=self._generation,
+                            operation=ticket.region_operation, revision=ticket.revision, errorCode=error.code)
                     if (isinstance(error, MCPTransportError) and error.code != "lightcraft_busy_timeout") or \
                             (ticket.kind == "after" and error.code in ("lightcraft_invalid_preview", "lightcraft_preview_validation_timeout")):
                         self.manager._abort_raw(ticket.handle.generation, error.code)
