@@ -1600,3 +1600,8 @@ workerが遅れて終了しただけでは再openを許可しない。既存DELE
 新規回帰9ケースではgate／イベントで競合順序を固定した。監査経路の再open拒否、cleanup timeout／I/O失敗／cancel、遅延directory作成、worker起動失敗、別ownerの原本保護、shutdownと回収再試行、native解放失敗時の削除禁止を確認した。Backend関連6ファイル212件成功に加え、最後に追加したnative解放失敗回帰を含むRAW APIテスト22件成功。既存FrontendのAPI client／document hook 19件も成功。既知のWindows sandbox制約を避けてrepo Python 3.14／cwd backendで権限付き実行した。全suite・Frontend buildは変更範囲上不要と判断し未実施。`git diff --check`成功。
 
 差分と直接依存する所有・回収境界の限定再監査はHigh 0／Medium 0／Low 0。監査Mediumの再現経路は修正後に成立しないことを確認し、Windows実画面確認へ進める状態と判断した。実LightCraft／GPU／Immich、RAW原本・sidecar・既存PoC成果物は操作していない。詳細な状態遷移・API code・残る未検証範囲は[Phase 1C設計書の監査修正追記](research/lightcraft/PHASE1C_DESIGN.md#c1限定監査-medium修正cache-cleanupと再openの競合2026-10-22)を参照。README／CHANGELOGは変更していない。
+# RAW診断JSONの保存ダイアログ（2026-10-24）
+
+RAW Preview診断が出力する`genzoroom-raw-preview-*.json`がDesktopの`valid_name()`許可prefixに含まれておらず、WebView2の要求段階で拒否されていた。既存の文字種・長さ・`.json`・診断ページ／Blob origin検証を保ち、このprefixだけを許可リストへ追加した。許可名は既存`DownloadEvent::Requested`からWindowsのnative保存先選択を通る。
+
+正常系でRAW名と既存origin gateを、拒否系でpath separator／実行形式・二重拡張子／Unicode／長さ超過を確認するunit testを追加。RAW測定、Frontend JSON生成、他のdownload prefix、保存IPCは変更していない。

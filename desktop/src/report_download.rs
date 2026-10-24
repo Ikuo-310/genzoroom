@@ -55,6 +55,7 @@ fn valid_name(name: &str) -> bool {
             "genzoroom-diagnostics-",
             "genzoroom-jpeg-diagnostics-",
             "genzoroom-webgpu-diagnostics-",
+            "genzoroom-raw-preview-",
             "genzoroom-backend-logs-",
             "genzoroom-frontend-logs-",
             "genzoroom-all-logs-",
@@ -224,10 +225,19 @@ mod tests {
         assert!(valid_name(
             "genzoroom-jpeg-diagnostics-20261019T000000Z.json"
         ));
+        let page = Url::parse("http://127.0.0.1:3191/developer").unwrap();
+        let blob = Url::parse("blob:http://127.0.0.1:3191/1234").unwrap();
+        let raw_name = "genzoroom-raw-preview-20261024T000000Z.json";
+        assert!(valid_name(raw_name));
+        assert!(permitted("diagnostics", &page, &blob, 3191));
         for name in [
             "../genzoroom-diagnostics-a.json",
             "genzoroom-diagnostics-x.exe",
             "file.json",
+            "genzoroom-raw-preview-../report.json",
+            "genzoroom-raw-preview-report.json.exe",
+            "genzoroom-raw-preview-レポート.json",
+            "genzoroom-raw-preview-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
         ] {
             assert!(!valid_name(name));
         }
