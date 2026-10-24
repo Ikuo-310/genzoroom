@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## A5実機受入完了とB1 Whole解像度（2026-10-24）
+
+ユーザーのWindows実測でA5を完了。3990×3000 DNG／DX12／1024×770／512 MiBでgpu_success、cache適用139.86 MiB、Draft9/9採用・破棄0、終了→Full343.6 ms、Full／History revision11。GPU・CPU Full ON/OFF各6/6一致。GPU ColdのNative0.8秒に対するFrontend1.9〜2.0秒の差と、RSS/VRAM・長時間・実driver障害は未確認として残す。
+
+B1はNative frame／bitmap／viewport／DPR／Zoomを分離し、表示需要を64px量子化・108%/75% hysteresis・180ms集約で選ぶ。gesture中はサイズ固定、終了Fullで再評価。長辺2048・2048²画素／PNG17 MiB／MCP line24 MiBを一体で適用し、Beforeも同じquality/サイズを要求して実寸・geometry一致を検査する。Panやサイズ変更でHistoryを作らず、P1/C4とJPEGを維持する。
+
+Native管理patchはPNG envelopeだけ拡張。clean再適用、MCP59＋e2e10（既存helper1 ignored）、release build、実GPU1536/2048出力、CPU2048、Full一致・tiny拒否継続、高entropy PNG12,586,335 bytesの転送probeに成功。B1 EXE：`I:\code\genzoroom\.tmp\lightcraft-b1\target\release\lightcraft-cli.exe`、SHA：`09d38369d4cbe0274fe363862d139097be063845f65a31a2bbd3931d4357a02e`。旧P2版は保持する。
+
+設計・安全予算・最終検証・Windows受入手順は[適応型設計§20](research/lightcraft/RAW_ADAPTIVE_PREVIEW_DESIGN.md#20-a5完了とb1whole-frame表示解像度2026-10-24)。ブラウザ動的確認、実RAWのB1速度・画質・RSS/VRAMは未実施。B1で停止しRegion／工程Cへ進まない。
+
+Frontend関連11ファイル433件、Backend関連9ファイル271件の成功結果を得た。最終変更後の影響範囲再実行は重複集計しない。既存HTTP取消テストはcompile中の広い実行・単独実行で失敗し、compile終了後の単独再実行で成功した。Frontendの初回sandbox一時cache ENOENTは権限付き実行で解消。型検査込みproduction buildと`git diff --check`成功。警告・未実施項目は設計記録に分けて記載した。
+
 ## RAW適応型プレビュー A5-P2：DX12 capacityと予算判定（2026-10-24）
 
 固定LC v0.10.0の管理patchを更新し、GPU保持をraw buffer capacity、CPU保持をVec capacityで計量する。全side・CPU/GPU entryのallocation identityで共有を重複除外し、描画後trimへ同じ計量を適用した。事前判定は実source／Plan、sampled/lin hit、最大plane、pool余剰25%、旧新共存、CPU fallback追加量から計算する。大shared sourceは別所有だがadmissionでは旧新容量を予約し、CPU P0と有限予算・working budgetを維持する。

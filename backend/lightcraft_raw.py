@@ -26,14 +26,17 @@ from lightcraft_runtime import _await_task_resilient, lightcraft_log
 
 
 ENGINE_COMMIT = "a2a41383c4fd62fa85a46ccd00998639221f2d3c"
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# A 2048² RGBA preview needs 16 MiB before PNG scanline/compression overhead.
+MAX_IMAGE_BYTES = 17 * 1024 * 1024
 MAX_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 MAX_METADATA_BYTES = 16 * 1024
 MAX_PATCH_BYTES = 64 * 1024
 MAX_SETTINGS_BYTES = 256 * 1024
 MAX_RAW_FILES = 2
 MAX_EDITS = 256
-MAX_PREVIEW_SIDE = 1024
+MAX_PREVIEW_SIDE = 2048
+# Legacy bootstrap and document Before identity must not change with the advertised ceiling.
+DEFAULT_PREVIEW_SIDE = 1024
 
 
 @dataclass(frozen=True)
@@ -981,7 +984,7 @@ class LightCraftRawSession:
         settings = json.loads(photo.settings_json)
         return {name: settings.get(name) for name in ("crop", "orientation")}
 
-    def before_key(self, handle, max_side=MAX_PREVIEW_SIDE):
+    def before_key(self, handle, max_side=DEFAULT_PREVIEW_SIDE):
         photo = self._photo(handle, active=True)
         if photo.before_fingerprint is None:
             return None
@@ -993,7 +996,7 @@ class LightCraftRawSession:
                  "geometry": self._before_geometry(photo), "maxSide": max_side}
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
 
-    def request_preview(self, handle, expected_revision, max_side=MAX_PREVIEW_SIDE, *, kind="after",
+    def request_preview(self, handle, expected_revision, max_side=DEFAULT_PREVIEW_SIDE, *, kind="after",
                         quality=None, serial=0, view_generation=0, geometry_id=None):
         photo = self._photo(handle, active=True)
         if quality not in (None, "draft", "full"):
@@ -1143,7 +1146,7 @@ class LightCraftRawSession:
                         pass
                     lightcraft_log("preview.measured", level="debug", generation=self._generation,
                         revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality, kind=ticket.kind,
-                        trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend,
+                        trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend, maxSide=ticket.max_side,
                         execution=metadata.get("execution") if metadata else None,
                         pngSha256=digest,
                         nativeMs=native_ms, validationMs=validation_ms,

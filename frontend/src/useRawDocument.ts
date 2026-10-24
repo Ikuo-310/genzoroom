@@ -5,10 +5,11 @@ import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelR
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
+import { rawWholeSide, type RawView } from './rawWholePreview';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
-  frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
+  requestSide?: number; frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
   saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
   history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[]; historyOffset?: number;
@@ -59,7 +60,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const restartWaitRef = useRef<() => Promise<void>>(async () => {});
   const renewalLockedRef = useRef<() => boolean>(() => false);
   const notifyRef = useRef<() => void>(() => {});
-  const viewRef = useRef<() => void>(() => {});
+  const viewRef = useRef<(view?: RawView) => void>(() => {});
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
@@ -73,8 +74,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
     let frameSerial = 0;
+    // Native geometry is available only after the first validated bitmap; never infer it from the PNG.
+    let side = 1024, latestView: RawView | undefined;
+    let viewTimer: ReturnType<typeof setTimeout> | undefined;
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
-    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null } | undefined;
+    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null; side: number } | undefined;
     let transmitted: { doc: RawDocument; serial: number } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
@@ -104,7 +108,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (transmitted) void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
     };
     suspendDisplayRef.current = invalidateDisplay;
-    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, valid = current) => {
+    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number, valid = current) => {
       if (!valid()) return;
       let candidate: string | undefined;
       const metrics = editor?.metrics, ackAt = metrics?.ackAt;
@@ -116,7 +120,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const requestSerial = ++frameSerial;
         transmitted = { doc, serial: requestSerial };
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
-          quality, mode: 'whole', maxSide: 1024, geometryId, viewGeneration });
+          quality, mode: 'whole', maxSide, geometryId, viewGeneration });
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal);
         if (!valid()) return;
@@ -130,7 +134,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
         setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
-          frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
+          requestSide: maxSide, frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
         if (metrics) {
           if (quality === 'draft') {
@@ -164,7 +168,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!valid()) return;
       displayRunning = true;
       // This slot owns failures and URL cleanup; mutation/save queues never join image work.
-      void renderPreview(intent.doc, intent.quality, intent.geometryId, valid).catch(cause => {
+      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid).catch(cause => {
         if (!valid()) return;
         if (cause instanceof RawSuperseded) {
           if (cause.reason === 'revision') resyncPreview(valid);
@@ -197,8 +201,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const displayPreview = (doc: RawDocument, valid = current) => {
       if (!current() || !valid()) return;
       if (editor && !editor.interacting && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
+      // A gesture keeps its selected size; the final Full re-evaluates the latest view.
+      if (!editor?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
       const quality = editor?.interacting ? 'draft' : 'full';
-      const key = `${doc.documentToken}:${doc.revision}:${quality}:${viewGeneration}`;
+      const key = `${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}`;
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
       // desired changed. Native revision and ownership checks still gate adoption.
@@ -210,10 +216,25 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
         && editor.confirmed.revision === doc.revision;
-      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId };
+      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side };
       pumpDisplay();
     };
-    viewRef.current = () => {
+    const applyView = () => {
+      viewTimer = undefined;
+      if (!current() || frozen.current || !editor || !latestView || editor.interacting || editor.unsettled) return;
+      const next = rawWholeSide(latestView, side);
+      if (next === undefined || next === side) return;
+      side = next;
+      viewGeneration++; revisionResyncs = 0;
+      invalidateDisplay(); displayPreview(editor.confirmed);
+    };
+    viewRef.current = (view) => {
+      if (view) {
+        latestView = view;
+        clearTimeout(viewTimer);
+        viewTimer = setTimeout(applyView, 180);
+        return;
+      }
       if (!current() || !editor) return;
       viewGeneration++;
       revisionResyncs = 0;
@@ -386,7 +407,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
       controller.abort();
-      clearTimeout(timer);
+      clearTimeout(timer); clearTimeout(viewTimer);
       revoke();
       enqueue(async () => {
         if (saver?.dirty || saver?.error || editor?.unsettled) {
@@ -415,8 +436,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const beforeKey = state?.assetId === assetId ? state.document?.beforeKey : null;
   const generation = state?.document?.generation, token = state?.document?.documentToken;
   useEffect(() => { beforeSerial.current = 0; }, [generation, token]);
-  const afterQuality = state?.quality ?? 'full', afterGeometry = state?.frame?.geometryId;
-  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}:${afterQuality}:${afterGeometry}`;
+  const afterQuality = state?.quality ?? 'full', afterGeometry = state?.frame?.geometryId, afterSide = state?.requestSide ?? 1024;
+  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}:${afterQuality}:${afterGeometry}:${afterSide}`;
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined, operation = false, failed = false;
@@ -444,7 +465,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (requestSerial >= 2 ** 31 - 2) { void restartRef.current().catch(() => {}); return; }
           transmitted = { doc: editor.confirmed, serial: requestSerial };
           const frame = await rawPreview(editor.confirmed, requestSerial, controller.signal, 'before', {
-            quality: afterQuality, mode: 'whole', maxSide: 1024, geometryId: null, viewGeneration: 0 });
+            quality: afterQuality, mode: 'whole', maxSide: afterSide, geometryId: null, viewGeneration: 0 });
           if (!currentIntent()) return;
           if (frame.kind !== 'before' || frame.key !== beforeKey) throw new RawApiError('raw_invalid_response');
           candidate = await decodeFrame(frame, controller.signal);
@@ -478,6 +499,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
   const beforeMatches = before?.owner === beforeOwner && before?.key === beforeKey;
   const beforeSizeMatches = beforeMatches && !visible?.pending && visible?.imageRevision === visible?.document?.revision
+    && before?.width === visible?.width && before?.height === visible?.height
     && before?.quality === visible?.quality && (visible?.frame
       ? before?.frame?.geometryId === visible.frame.geometryId && before.frame.nativeWidth === visible.frame.nativeWidth
         && before.frame.nativeHeight === visible.frame.nativeHeight
@@ -526,7 +548,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   return visible && { ...visible, beforeAvailable: !!beforeKey,
-    viewChanged: () => viewRef.current(),
+    viewChanged: (view?: RawView) => {
+      if (callbackEditor() && (!view || !visible.frame || view.geometryId === visible.frame.geometryId)) viewRef.current(view);
+    },
     retryPreview: () => { if (callbackEditor() && !frozen.current) viewRef.current(); },
     beforeUrl: beforeMatches && beforeSizeMatches ? before?.url : undefined,
     beforeStatus: beforeMatches ? before?.status === 'ready' && !beforeSizeMatches ? 'error' as const : before?.status : undefined,

@@ -232,7 +232,7 @@ def test_preview_budget_is_not_granted_to_other_messages(mode):
     asyncio.run(run())
 
 
-def test_real_subprocess_over_eight_mib_preview_is_drained_and_reaped():
+def test_real_subprocess_over_preview_limit_is_drained_and_reaped():
     from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
     async def run():
         process = await asyncio.create_subprocess_exec(sys.executable, "-c",
@@ -251,6 +251,23 @@ def test_real_subprocess_over_eight_mib_preview_is_drained_and_reaped():
             if process.returncode is None:
                 process.kill()
                 await process.wait()
+            await client.close()
+    asyncio.run(run())
+
+
+def test_whole_maximum_base64_fits_preview_line_envelope():
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    from lightcraft_raw import MAX_BASE64_CHARS
+    async def run():
+        reader = asyncio.StreamReader(limit=MAX_PREVIEW_LINE_BYTES)
+        result = {"isError": False, "content": [{"type": "image", "data": "A" * MAX_BASE64_CHARS, "mimeType": "image/png"}]}
+        writer = PipeWriter(lambda message: reply(reader, message, result))
+        client = LightCraftMCP(reader, writer, 9)
+        try:
+            value = await client.call_tool_result("render_preview", {}, timeout=10)
+            assert len(value["content"][0]["data"]) == MAX_BASE64_CHARS
+            assert not client.failure.done()
+        finally:
             await client.close()
     asyncio.run(run())
 

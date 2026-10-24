@@ -55,6 +55,51 @@ function enableBefore() {
 }
 
 describe('RAW native Before cache', () => {
+  it('adopts a larger same-revision Whole, pairs Before, and freezes size during a gesture', async () => {
+    vi.useFakeTimers(); enableBefore();
+    let width = 16, height = 12;
+    vi.stubGlobal('Image', class { src = ''; get naturalWidth() { return width; } get naturalHeight() { return height; }
+      decode() { return Promise.resolve(); } removeAttribute() {} });
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, _serial, _signal, kind = 'after', target) => {
+      width = target!.maxSide; height = width * 3 / 4;
+      return { blob: new Blob(['png']), width, height, epoch: 1, sequence: 1, kind, quality: target!.quality,
+        ...(kind === 'before' ? { key: doc.beforeKey! } : {}), frame: { geometryId: 'a'.repeat(64), nativeWidth: 3990,
+          nativeHeight: 3000, fullWidth: width, fullHeight: height, aspect: 4 / 3, window: null } };
+    });
+    await render('a', true); await flush();
+    const view = { width: 1600, height: 1200, nativeWidth: 3990, nativeHeight: 3000,
+      dpr: 1, scale: .4, geometryId: 'a'.repeat(64), fit: true };
+    act(() => current!.viewChanged(view));
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+    expect(current).toMatchObject({ width: 1600, requestSide: 1600, imageRevision: 1, quality: 'full', beforeStatus: 'ready' });
+    expect(current?.beforeUrl).toBeTruthy();
+    expect(api.rawPreview).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.anything(), 'before', expect.objectContaining({ maxSide: 1600 }));
+    const requests = vi.mocked(api.rawPreview).mock.calls.length, saves = vi.mocked(api.saveRawHistory).mock.calls.length;
+    act(() => current!.viewChanged({ ...view, width: 1601 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+    expect(api.rawPreview).toHaveBeenCalledTimes(requests); expect(api.saveRawHistory).toHaveBeenCalledTimes(saves);
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+    act(() => current!.viewChanged({ ...view, dpr: 2 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+    expect(current).toMatchObject({ requestSide: 1600, quality: 'draft' });
+    act(() => current!.flushControls()); await flush();
+    expect(current).toMatchObject({ requestSide: 2048, width: 2048, quality: 'full', dirty: false });
+    expect(api.setRawControls).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a superseded resolution result before decode', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
+    const view = { width: 1600, height: 1200, nativeWidth: 3990, nativeHeight: 3000,
+      dpr: 1, scale: .4, geometryId: 'a'.repeat(64), fit: true };
+    act(() => current!.viewChanged(view)); await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    act(() => current!.viewChanged({ ...view, dpr: 2 })); await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    const decoded = createURL.mock.calls.length;
+    await act(async () => gate.resolve({ blob: new Blob(['stale']), width: 16, height: 12, epoch: 1, sequence: 2 })); await flush();
+    expect(createURL).toHaveBeenCalledTimes(decoded + 1); // Only the latest target is decoded.
+    expect(current?.requestSide).toBe(2048);
+  });
   it.each([[10, 40], [10, 250], [300, 40]])('adopts monotonic ACK Drafts during continuous input (mutation %ims, render %ims)', async (mutationMs, renderMs) => {
     vi.useFakeTimers();
     const diagnostics = vi.spyOn(frontendLogger, 'add');

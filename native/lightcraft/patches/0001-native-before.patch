@@ -1272,7 +1272,7 @@ index 0000000000000000000000000000000000000000..705b17d63e5c871c1e923eabf53c542a
 +    }
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 3265b36f9b4c2653a57468113c4b9179d527b4db..34d6b061ccb73dc2c2749f4f1cfb9b6ff14f9b0d 100644
+index 3265b36f9b4c2653a57468113c4b9179d527b4db..08453056bacb2d350f44a7dee805f3f5e00b330c 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -118,6 +118,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
@@ -1306,7 +1306,7 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..34d6b061ccb73dc2c2749f4f1cfb9b6f
  /// content (+ a text block with the metadata).
  fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
 +    let adaptive = meta.get("previewContract").is_some();
-+    if adaptive && std::fs::metadata(file).map_or(true, |m| m.len() > 5 * 1024 * 1024) {
++    if adaptive && std::fs::metadata(file).map_or(true, |m| m.len() > 17 * 1024 * 1024) {
 +        let _ = std::fs::remove_file(file);
 +        return crate::preview::error("preview_budget_exceeded");
 +    }
@@ -1319,7 +1319,7 @@ index 3265b36f9b4c2653a57468113c4b9179d527b4db..34d6b061ccb73dc2c2749f4f1cfb9b6f
      }
 +    if adaptive {
 +        if let Some(o) = info.as_object_mut() { o.remove("path"); }
-+        if bytes.len() > 5 * 1024 * 1024 || info.to_string().len() > 16 * 1024 {
++        if bytes.len() > 17 * 1024 * 1024 || info.to_string().len() > 16 * 1024 {
 +            return crate::preview::error("preview_budget_exceeded");
 +        }
 +    }

@@ -730,7 +730,7 @@ export function AnshitsuPage() {
           key={assetId}
           src={rawDocument?.status === 'ready' ? rawDocument.url ?? '' : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
           documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
-          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.displayError ? 'error' : undefined}
+          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.displayError && !rawDocument.url ? 'error' : undefined}
           statusNote={rawDocument ? rawDocument.pending && !rawDocument.editError ? undefined
             : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}

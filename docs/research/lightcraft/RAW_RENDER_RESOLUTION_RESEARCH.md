@@ -364,3 +364,15 @@ Viewerは小さな全体画像を背景に保ち、tileを共通論理frameの�
 - 最小パッチ実装後には省略Full／Before後方互換、enum誤入力、実binary capability／quality echo、patch順序・digest・receiptの検証が必要。今回これらのパッチ適用・build・probe・テストは実施していない。
 
 本追加調査の実施範囲は既存資料の読込み、上記差分の静的追跡、文書の整合確認、`git diff --check`のみ。変更対象はこのMarkdown1件。LCソース・GenzoRoom製品コード・MCP patch・SQLite／Recipe／History・C4完了記録・README／CHANGELOGは変更せず、ビルド・実機試験・ブラウザ確認は行わない。文書のみCommit／Pushして停止し、実装へ進まない。
+
+## 16. B1実装：有限Whole-frame適応解像度（2026-10-24）
+
+§1〜15は調査時点の記録。現行A3/A5のnative品質・frame・StageCache契約とA5実機受入を前提に、B1はWholeのみ実装した。規則・状態所有権・安全予算・実EXE/SHA・受入手順の正本は[適応型設計§20](RAW_ADAPTIVE_PREVIEW_DESIGN.md#20-a5完了とb1whole-frame表示解像度2026-10-24)。
+
+Viewport CSSサイズ、実DPR、Native frame、Zoomから必要物理画素を求め、native長辺とWhole cap2048を上限に64px量子化する。108%以下／75%超の需要変化ではサイズを保持し、180 ms集約、gesture中は固定する。Panは再現像しない。PNG実寸は論理原寸と別で、同documentのbitmap交換でFit/Zoom/Panをresetしない。DPR1:1は物理倍率として維持し、2048超のnative細部を解像できる保証とはしない。
+
+1024pxだけを解除せず、最大2048²画素（RGBA16 MiB）、PNG17 MiB、Base6423,767,724 chars、MCP line24 MiB、HTTP／Frontend境界を一体で更新した。BeforeはAfterと同quality/要求サイズで取得し、bitmap寸法とnative geometryが一致する場合だけ比較する。native Before基準、C4保存／History、P1品質と送信済みjob回収は維持する。
+
+実binary合成probeで1536／2048要求とPNG実寸1536×1152／2048×1536の一致、GPU success、CPU2048、Full ON/OFF／Before一致、同revision Draft→Full、tiny budgetでも描画継続を検証した。高entropy CPU2048²はPNG12,586,335 bytesで旧5 MiB／8 MiB lineを超える転送に成功した。これはWindows WebView／実RAWの性能確認ではない。
+
+4096²はRGBA64 MiB、最悪PNGは17 MiBを超えるためB1では広告しない。native helper単体の4096能力をGenzoRoomの対応保証へ流用しない。Region・4096超を含む等倍詳細・全面転送方式の拡張は工程C以降。A5で残したGPU ColdのNative／Frontend差、RSS/VRAM、長時間、実driver障害は未解決事項として保持する。

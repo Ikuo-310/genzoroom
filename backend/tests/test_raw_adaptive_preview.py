@@ -16,6 +16,48 @@ import raw_recipe_store as store
 import windows_raw_api as http_api
 
 
+def test_whole_png_capacity_and_dimensions_are_bounded():
+    import io
+    import random
+    from PIL import Image
+    from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
+    from tests.test_lightcraft_raw import image_result
+    # Incompressible RGBA exercises the new envelope, rather than only tiny solid PNGs.
+    output = io.BytesIO()
+    Image.frombytes("RGBA", (2048, 2048), random.Random(0).randbytes(2048**2 * 4)).save(output, "PNG")
+    data = output.getvalue()
+    assert 5 * 1024**2 < len(data) <= adapter.MAX_IMAGE_BYTES
+    assert adapter.MAX_BASE64_CHARS + adapter.MAX_METADATA_BYTES + 4096 < MAX_PREVIEW_LINE_BYTES
+    result = image_result(data=data, w=2048, h=2048)
+    assert adapter._validate_png(result, 1, 2048)[:3] == (data, 2048, 2048)
+    for side in (1024, 2047):
+        with pytest.raises(LightCraftError):
+            adapter._validate_png(result, 1, side)
+    with pytest.raises(LightCraftError):
+        adapter._validate_png(image_result(w=2049, h=1), 1, 2048)
+
+
+@pytest.mark.parametrize("side,accepted", [(16, True), (1600, True), (2048, True), (2049, False), (0, False), (2**63, False)])
+def test_whole_http_size_reaches_native_without_mutations(local, tmp_path, monkeypatch, side, accepted):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                before = len(children[0].commands)
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json={**target(doc), "maxSide": side})
+                assert response.status_code == (200 if accepted else 400), response.text
+                if accepted:
+                    assert children[0].preview_arguments[-1]["max_side"] == side
+                assert not any(command.startswith("develop.") and command != "develop.get" for command, _ in children[0].commands[before:])
+                assert api.document["revision"] == doc["revision"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("execution", [
     None,
     {"outcome": "gpu_success", "backend": "gpu", "reason": "none"},

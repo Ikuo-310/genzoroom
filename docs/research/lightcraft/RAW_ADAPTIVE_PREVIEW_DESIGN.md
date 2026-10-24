@@ -772,3 +772,67 @@ GPU/mixed admissionは既存host/device capacity＋未計上source＋今回GPU�
 adaptive previewにoptional execution（gpu_success／cpu_not_tried／cpu_fallback、backend、固定reason）を追加した。gpu_successはreadback・error scope・出力検証後に確定し、hybridの全stage GPUを意味しない。Backend構造化ログとA4へ同じ結果を伝播し、旧metadata／旧A4記録も受け入れる。process-wide lastFallbackを個別成功判定へ流用しない。
 
 MCP 59＋e2e10、GPU/Engine/CPUの関連回帰、Backend116、Frontend診断30と型検査／build、clean再適用、release EXE／receipt／SHA照合に成功。実binary DX12合成probeは1024px／512 MiB適用・Full一致を確認した。実RAW性能・RSS/VRAM・driver device lossはユーザー実機確認が必要。P1/C4／解像度／工程B/Cは変更しない。
+
+## 20. A5完了とB1：Whole-frame表示解像度（2026-10-24）
+
+A5はユーザーのWindows受入報告により完了。P2 SHA、対象RAW、9/9 Draft採用、343.6 msでのFull／History revision11収束、gpu_success、cache適用139.86 MiB、GPU/CPU Full一致は[性能記録§12](RAW_PREVIEW_INTERACTION_PERFORMANCE.md#12-a5完了windows実機受入2026-10-24)に記録した。ColdのNative／Frontend差、RSS/VRAMピーク、長時間と実driver障害は未確認のまま分離する。
+
+### 20.1 B1の選択規則
+
+`rawWholePreview.ts`の純plannerを使用する。Native frame NとCSS viewport V、実測DPR d、CSS/native倍率sを入力とし、Fitではs=min(Vw/Nw,Vh/Nh)、ZoomではViewerの現在scaleを使う。必要長辺は`max(Nw,Nh) × min(1,s×d)`。native長辺とWhole安全上限2048を超えず、64px単位で切り上げる（capでは端数を許す）。これは固定Draft/Full二段階ではなく、品質と独立した表示需要の選択である。
+
+現サイズの108%以下かつ75%超の需要は現サイズを維持し、境界の小変化で往復しない。View変更は180 msで集約。gesture中は選択サイズを固定し、最後のACK／Full時に最新viewを再評価する。PanはWholeの画素密度を変えないため再要求しない。ResizeObserver、Fit/Zoom、DPR変更からviewを通知する。native geometry未取得時だけ既存1024pxでbootstrapし、geometryを得た後に適応する。旧binaryで実frameが得られない場合は推測せずbootstrapを維持する。
+
+例：3990×3000、900×600 CSSのFitでは、DPR1/1.25/1.5/2で初期選択832/1024/1216/1600。実PNGの短辺はnative Planのaspect丸めに従う。1600×1200 CSS・DPR1では1600、DPR2では上限2048。1:1はnative pixelに対する物理倍率を維持するが、native長辺が2048を超える細部をB1で等倍取得できるとは表示・性能保証しない。残りの詳細解像度とRegionは工程Cである。
+
+### 20.2 状態・比較・所有権
+
+| 状態 | 所有者／不変条件 |
+|---|---|
+| Native frame | LC実Plan→frame metadata。logical width/heightとgeometryId。PNG naturalWidthを原寸にしない |
+| Bitmap/URL | hookの採用済みPNG実寸・quality・requestSide。同documentKeyの交換でFit/Zoom/Panをresetしない |
+| Viewport/DPR/transform | ImageViewer。CSSサイズ、DPR、Fit/scale/panを保持し、RAWだけplannerへ通知。JPEG経路は同じ表示式のまま |
+| latestView/side | hookのdocument lifecycle。latestViewは最新表示意図、sideはgesture中固定。dispose時timerを回収し、古いowner/geometry通知を拒否 |
+| display intent | 既存一実行＋一latest待機。keyにrevision/quality/side/viewGeneration。サイズ変更も採用generationを更新し、旧結果をdecode前・後に拒否 |
+| Before | 独立fingerprintとnative基準を維持。owner keyにquality/geometry/side、同じWhole sizeで取得。実bitmap寸法・quality・native geometryの一致時だけ比較 |
+
+解像度intentはmutation／Recipe／Historyを書かず、C4の保存queueへ依存を加えない。送信済みFullは既存native ownerが回収し、新編集の優先・有限courtesyを維持する。新bitmapがreadyになるまで正常なAfterを残し、サイズ取得失敗でも保存成功を取り消さない。Before未取得／不一致／失敗はAfterを表示し、比較ローカルの状態とRetryで扱う。BeforeへAfter補正値をコピーしない。
+
+### 20.3 上限を一体で揃える
+
+| 項目 | B1上限／意味 |
+|---|---|
+| 通常HTTP/Frontend side／pixels | 16–2048、最大4,194,304 pixels。入力をnative送信前、出力をPNG decode前に検査 |
+| RGBA8／RGB32f一面 | 最大16 MiB／48 MiB。Before/After RGBA二面で32 MiB、旧画像・候補・decode用Image／表示textureはさらに共存 |
+| PNG | 17 MiB＝17,825,792 bytes。RGBA16 MiB＋scanline/zlib/chunk余裕。nativeのファイルstat→readとBase64化前、Backend受信・HTTP、Frontend読出しで有限検査 |
+| Base64／MCP line | 最大23,767,724 ASCII chars、line 24 MiB＝25,165,824 bytes。metadata16 KiBとJSONを加えても約1.3 MiBの余裕。通常command/notificationは従来1 MiBのまま |
+| HTTP lease | 最大3件、PNG bodyだけで最大51 MiB。detach／supersede／transfer終了／timeoutで既存ownerが回収 |
+| Frontend転送・表示 | 1 transferのchunks＋結合bytes＋Blobは保守的に3×17=51 MiB。After/Before Blobは最大34 MiB、decoded二面32 MiB。候補decode・旧表示・GPU texture等の追加コピーは別で、browser全体のhard capではない |
+| Backend一時コピー | line24 MiB、UTF-8 JSON text／Base64 string、decoded PNG17 MiB、Pillow16 MiB等が共存。StreamReaderのread-aheadもある。前述51 MiBとは別に考慮し、単一native request／validationで制限 |
+| StageCache／working | 有限StageCache（通常512 MiB、設定上限1 GiB）とnative memory budget1 GiBを維持。実capacity・追加予約・2 entry/side・GPU OOM/fatal fallbackはP2のまま。RSS/VRAM hard capにはしない |
+| timeout | native preview60秒、validation10秒、Frontend HTTP90秒／decode10秒、HTTP body送信90秒、既存workspace lease／cleanupを維持。timeoutで送信済みjobを無所有にしない |
+| A4／native helper | A4は比較条件1024px／5 MiBを維持。native helper単体は従来4096までだが、GenzoRoomの通常B1から4096を要求・広告しない |
+
+2048はこの転送・decode予算の安全上限であり、製品の二段階解像度定義ではない。4096²ならRGBA64 MiB、最悪PNGは17 MiBを超えるため、B1で4096の全面画像を保証しない。上限緩和や転送方式の変更は別段階。B1でも高負荷時のtimeout/OOMやPNG上限拒否は正常な有限失敗として扱い、既存After／保存契約を保持する。
+
+### 20.4 実装・検証結果
+
+実装対象はplanner、RAW view通知・hook intent／Before pair、Frontend/API PNG上限、Backend RAW validatorとMCP line上限、管理patchのPNG envelope、実binary probe。Native現像アルゴリズム・source選択・StageCache admission式は変更しない。
+
+build元`.tmp/lightcraft-b1`とclean固定upstream `.tmp/lightcraft-b1-apply`をmanifestで全diff照合。patch SHA-256は`582fd8d128db63f4f66f32baa8370f130d7d564eadbff9ccbdbece693aa8a807`。release EXEは`I:\code\genzoroom\.tmp\lightcraft-b1\target\release\lightcraft-cli.exe`、SHA-256は`09d38369d4cbe0274fe363862d139097be063845f65a31a2bbd3931d4357a02e`。A2/P0/P2は上書きせず、隣接receiptと実binaryを照合する。
+
+Native MCP unit59成功・既存helper1 ignored、e2e10成功、release build／probe成功。実DX12 probeは1024/1536/2048要求に対し実PNG 1024×768／1536×1152／2048×1536を検査し、Full cache ON/OFFとBefore一致、同revision Draft→Full、tiny budget拒否後の描画継続を確認。GPU successを確認し、GPU無効のCPUでも2048×1536を確認した。別の高entropy CPU画像は2048×2048・PNG12,586,335 bytesで、旧5 MiB／8 MiB lineを実際に超える転送と新上限内を検証した。合成画像であり実RAW速度測定ではない。
+
+Frontendはplanner/DPR、hook、API、Viewer/JPEGの4ファイル171成功、周辺P1/C4/Clipboard/History/診断7ファイル262成功（計433、重複なし）。最終owner/geometry/freezeガード後はhook53、要求サイズの診断追加後はAPI56と型検査込みbuild成功。変更のない周辺結果は再利用した。
+
+BackendはPNG/MCP/HTTP/RAW ownerの4ファイルで最終161成功、HTTP取消の既存1件がcompile負荷下で失敗した。同テストは単独でも失敗したが、Native compile終了後の単独再実行で成功した。A4／runtime／patch管理／C4 History／Recipeの関連5ファイル109成功と合わせ、関連271件の成功結果を得た（重複再実行は合算しない）。最終maxSide診断追加後はadaptive/A4の60件を再実行して成功。初回にreadback develop.getをmutationと誤判定した追加テスト3件も修正・再検証済み。環境・負荷依存の失敗を成功件数へ隠さない。
+
+最初のFrontend sandbox実行は一時cache ENOENTにより2 suiteをロードできず、権限付き再実行で成功した。既存のoptional craft-fonts未同梱、incremental hard-link不可によるcopy、Frontend500 kB超chunk警告は残る。`git diff --check`成功。全Frontend／Backend suite・Docker Smoke Test・ブラウザ動的確認は行っていない。Native現像／OOM・fatal回復のcodeはP2から不変で、P2の障害注入結果を再利用し、今回新たに実driver障害試験を行ったとはしない。
+
+### 20.5 Windows受入手順・未実施事項
+
+上記B1 EXEを設定し、対象RAWを開く。Fitで中央Viewerの幅・高さを変え、最大化・左右panel・DPR1/1.25/1.5/2を切り替える。debug `preview.received.requestedMaxSide`／`preview.measured.maxSide`と返却width/heightを照合する。64px量子化・hysteresis内の小変化では新要求が増えず、拡大時は1024超の実PNGが届くことを確認する。
+
+Zoom anchor／Pan、1:1 physical scale、同revisionのサイズ更新とDraft→Full、gesture中の固定サイズ、終了後の最新Full／History収束を確認する。Before/Afterは同寸法・同geometryで比較し、不一致時はAfterを維持する。StageCache予算拒否でも描画が継続すること、写真／generation切替・離脱後に旧画像が入らないことも確認する。
+
+Browser動的操作、実RAWのB1性能／画質、最大化・異DPR実画面、RSS/VRAMピーク、長時間・実driver障害は今回未実施。今回のテストはDOM／fake APIと実native合成probeであり、Windows WebView実動作の代替ではない。B1で停止しRegion／工程C／RAW Export／Scopeへ進まない。

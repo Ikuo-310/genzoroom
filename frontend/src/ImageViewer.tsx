@@ -10,12 +10,13 @@ import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 import type { HistogramChangeHandler } from './histogram';
+import type { RawView } from './rawWholePreview';
 
 type ImageViewerProps = {
   src: string;
   documentKey?: string;
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
-  onRawViewChange?: () => void;
+  onRawViewChange?: (view: RawView) => void;
   previewStatus?: 'loading' | 'error';
   statusNote?: string;
   previewPixels?: boolean;
@@ -76,6 +77,7 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
     window.addEventListener('resize', changed);
     return () => { media?.removeEventListener('change', changed); window.removeEventListener('resize', changed); };
   }, [dpr]);
+  const [viewportSize, setViewportSize] = useState({ x: 0, y: 0 });
   const [fitScale, setFitScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -93,7 +95,10 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
   const previousNativeSize = useRef<{ identity: string; x: number; y: number } | null>(null);
   const viewCallback = useRef(onRawViewChange);
   viewCallback.current = onRawViewChange;
-  useEffect(() => { viewCallback.current?.(); }, [scale, pan.x, pan.y, dpr, rawFrame?.geometryId]);
+  useEffect(() => {
+    if (rawFrame) viewCallback.current?.({ width: viewportSize.x, height: viewportSize.y, dpr, scale,
+      nativeWidth: rawFrame.nativeWidth, nativeHeight: rawFrame.nativeHeight, geometryId: rawFrame.geometryId, fit: fitMode });
+  }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode]);
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   useLayoutEffect(() => {
@@ -160,6 +165,8 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
     const viewport = viewportRef.current;
     if (!viewport || imageSize.x === 0) return;
     const updateFit = () => {
+      setViewportSize(current => current.x === viewport.clientWidth && current.y === viewport.clientHeight
+        ? current : { x: viewport.clientWidth, y: viewport.clientHeight });
       const next = calculateFitScale(
         { x: viewport.clientWidth, y: viewport.clientHeight },
         imageSize,
@@ -169,7 +176,6 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
         setScale(next);
         setPan({ x: 0, y: 0 });
       }
-      viewCallback.current?.();
     };
     updateFit();
     const observer = new ResizeObserver(updateFit);

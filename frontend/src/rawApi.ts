@@ -1,3 +1,4 @@
+import { RAW_WHOLE_MAX_SIDE, RAW_WHOLE_MAX_BYTES } from './rawWholePreview';
 import { frontendLogger } from './frontendLogging';
 
 export type RawDocument = {
@@ -13,7 +14,7 @@ export type RawFrame = { blob: Blob; width: number; height: number; epoch: numbe
 export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
-const RAW_PREVIEW_MAX_SIDE = 1024;
+const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
@@ -52,7 +53,7 @@ export type RawHistoryResult = RawSettings & {
 export type RawHistoryPage = RawDocument & Pick<RawHistoryResult, 'history' | 'historyPending' | 'nativeState' | 'nativeMatchesRecipe'> & {
   recipeRevision: number; recipeFingerprint: string | null; offset: number; limit: number; hasMore: boolean; steps: RawHistoryStep[] };
 const fingerprint = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = RAW_WHOLE_MAX_BYTES;
 const opaque = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const uuid = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id);
@@ -259,6 +260,8 @@ export async function cancelRawPreview(doc: RawDocument, kind: 'before' | 'after
   await request(`/documents/${doc.handle}/preview/cancel`, post({ ...identityBody(doc), kind, serial }));
 }
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget): Promise<RawFrame> {
+  if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE))
+    throw new RawApiError('raw_invalid_preview_request');
   const started = performance.now();
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,
     generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }),
@@ -309,10 +312,10 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     check();
     const width = numeric('width'), height = numeric('height'), epoch = numeric('epoch'), sequence = numeric('sequence');
     if (frame && (frame.fullWidth !== width || frame.fullHeight !== height)) throw new RawApiError('raw_invalid_response');
-    if (!width || !height || Math.max(width, height) > RAW_PREVIEW_MAX_SIDE || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
+    if (!width || !height || Math.max(width, height) > (target?.maxSide ?? RAW_PREVIEW_MAX_SIDE) || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
     const bytes = await readBounded(response, MAX_IMAGE_BYTES);
     try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'preview.received', context: {
-      generation: doc.generation, revision: doc.revision, renderSerial: serial, kind, quality: quality ?? 'full',
+      generation: doc.generation, revision: doc.revision, renderSerial: serial, kind, quality: quality ?? 'full', requestedMaxSide: target?.maxSide ?? 1024,
       width, height, payloadBytes: bytes.length, responseWaitMs: responseStarted - started,
       bodyReadMs: performance.now() - responseStarted } }); } catch { /* Optional diagnostics. */ }
     check();

@@ -5,7 +5,8 @@ import json
 
 
 MAX_LINE_BYTES = 1024 * 1024
-MAX_PREVIEW_LINE_BYTES = 8 * MAX_LINE_BYTES
+# Base64 for the 17 MiB PNG envelope plus bounded metadata/JSON stays below 24 MiB.
+MAX_PREVIEW_LINE_BYTES = 24 * MAX_LINE_BYTES
 PROTOCOL_VERSION = "2025-06-18"
 
 

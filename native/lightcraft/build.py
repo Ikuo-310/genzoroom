@@ -218,6 +218,7 @@ def probe(binary):
                 raise ValueError("malformed preview options were not rejected")
 
     probe_gpu(binary)
+    probe_whole_bytes(binary)
 
 
 def valid_execution(value):
@@ -229,14 +230,53 @@ def valid_execution(value):
             "cpu_requested", "shutdown", "gpu_disabled", "unsupported", "gpu_unavailable")
 
 
+def probe_whole_bytes(binary):
+    """Exercise PNG/base64/line capacity with real pixels that cannot compress to a tiny fixture."""
+    import random
+    with tempfile.TemporaryDirectory(prefix="genzoroom-whole-") as folder:
+        source = Path(folder) / "source.png"
+        def chunk(kind, data):
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        pixels = random.Random(0).randbytes(2048**2 * 3)
+        rows = b"".join(b"\0" + pixels[y * 2048 * 3:(y + 1) * 2048 * 3] for y in range(2048))
+        source.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2048, 2048, 8, 2, 0, 0, 0))
+                           + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+        def call(index, name, args):
+            return {"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {"name": name, "arguments": args}}
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+             "capabilities": {}, "clientInfo": {"name": "genzoroom-whole-probe", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            call(2, "command_run", {"id": "library.import", "params": {"paths": [str(source)], "mode": "add"}}),
+            call(3, "render_preview", {"id": 1, "max_side": 2048, "quality": "full", "stage_cache": "off"}),
+        ]
+        process = subprocess.run([str(binary), "mcp", "--headless", "--compact"],
+            input="".join(json.dumps(v) + "\n" for v in messages).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=120, check=True,
+            env={**os.environ, "TEMP": folder, "TMP": folder, "LIGHTCRAFT_GPU_BACKEND": "off"},
+            creationflags=0x08000000 if os.name == "nt" else 0)
+        if len(process.stdout) > 24 * 1024**2:
+            raise ValueError("Whole probe line capacity exceeded")
+        replies = {v["id"]: v for line in process.stdout.splitlines() if (v := json.loads(line)).get("id")}
+        result = replies[3]["result"]
+        if result.get("isError") is not False:
+            raise ValueError("Whole byte probe render failed")
+        png = base64.b64decode(next(c["data"] for c in result["content"] if c["type"] == "image"), validate=True)
+        meta = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
+        if not 5 * 1024**2 < len(png) <= 17 * 1024**2 or struct.unpack(">II", png[16:24]) != (2048, 2048) \
+                or (meta["width"], meta["height"]) != (2048, 2048) or meta["execution"]["backend"] != "cpu":
+            raise ValueError("Whole byte/dimension probe mismatch")
+        print(f"Whole CPU probe: 2048x2048, PNG {len(png)} bytes, line within 24 MiB")
+
+
 def probe_gpu(binary):
     """An isolated real-device check; no available adapter is an explicit skip, not success."""
     with tempfile.TemporaryDirectory(prefix="genzoroom-dx12-") as folder:
         source = Path(folder) / "source.png"
         def chunk(kind, data):
             return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-        source.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1280, 963, 8, 2, 0, 0, 0))
-                          + chunk(b"IDAT", zlib.compress((b"\0" + bytes([64, 96, 128]) * 1280) * 963)) + chunk(b"IEND", b""))
+        source.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 3072, 2304, 8, 2, 0, 0, 0))
+                          + chunk(b"IDAT", zlib.compress((b"\0" + bytes([64, 96, 128]) * 3072) * 2304)) + chunk(b"IEND", b""))
         def call(index, name, args):
             return {"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {"name": name, "arguments": args}}
         messages = [
@@ -249,6 +289,14 @@ def probe_gpu(binary):
                **({"before": True} if i == 6 else {}),
                **({"stage_cache_budget_bytes": budget} if mode == "on" else {})})
               for i, mode, budget in [(4, "off", 0), (5, "on", 512 << 20), (6, "on", 512 << 20), (7, "on", 1)]],
+            *[call(i, "render_preview", {"id": 1, "max_side": side, "quality": quality, "stage_cache": mode,
+               **({"before": True} if i == 12 else {}),
+               **({"stage_cache_budget_bytes": budget} if mode == "on" else {})})
+              for i, side, quality, mode, budget in [(8, 1536, "full", "off", 0), (9, 1536, "full", "on", 1 << 30),
+                (10, 2048, "full", "off", 0), (11, 2048, "full", "on", 1 << 30), (12, 2048, "full", "on", 1 << 30),
+                (13, 2048, "draft", "on", 1), (14, 2048, "full", "on", 1)]],
+            call(15, "command_run", {"id": "app.gpu", "params": {"enabled": False}}),
+            call(16, "render_preview", {"id": 1, "max_side": 2048, "quality": "full", "stage_cache": "off"}),
         ]
         environment = {**os.environ, "TEMP": folder, "TMP": folder,
                        "LIGHTCRAFT_GPU": "1", "LIGHTCRAFT_GPU_BACKEND": "dx12" if os.name == "nt" else "auto"}
@@ -261,7 +309,7 @@ def probe_gpu(binary):
         replies = {v["id"]: v for line in process.stdout.splitlines() if (v := json.loads(line)).get("id")}
         status = replies[3]["result"]["structuredContent"]
         images = []
-        for index in (4, 5, 6, 7):
+        for index in range(4, 15):
             result = replies[index]["result"]
             if result.get("isError") is not False:
                 raise ValueError("GPU probe render failed")
@@ -270,16 +318,23 @@ def probe_gpu(binary):
                 raise ValueError("GPU probe execution mismatch")
             if status["available"] and meta["execution"]["outcome"] != "gpu_success":
                 raise ValueError("available GPU did not complete the probe")
-            if max(meta["width"], meta["height"]) != 1024:
+            side = 1024 if index <= 7 else 1536 if index <= 9 else 2048
+            png = base64.b64decode(next(c["data"] for c in result["content"] if c["type"] == "image"), validate=True)
+            if (meta["width"], meta["height"]) != (side, side * 3 // 4) or struct.unpack(">II", png[16:24]) != (side, side * 3 // 4):
                 raise ValueError("GPU probe dimensions mismatch")
             cache = meta["stageCache"]
             if index in (5, 6) and (not cache["applied"] or not 0 < cache["retainedBytes"] <= 512 << 20):
                 raise ValueError("GPU probe capacity admission failed")
-            if index == 7 and (cache["applied"] or cache["reason"] != "budget" or cache["retainedBytes"]):
+            if index in (7, 13, 14) and (cache["applied"] or cache["reason"] != "budget" or cache["retainedBytes"]):
                 raise ValueError("GPU probe tiny budget failed")
             images.append(next(c["data"] for c in result["content"] if c["type"] == "image"))
-        if len(set(images)) != 1:
+        if any(len(set(images[a:b])) != 1 for a, b in [(0, 4), (4, 6), (6, 9)]) or images[6] != images[10]:
             raise ValueError("GPU cache changed Full pixels")
+        cpu = replies[16]["result"]
+        meta = json.loads(next(c["text"] for c in cpu["content"] if c["type"] == "text"))
+        png = base64.b64decode(next(c["data"] for c in cpu["content"] if c["type"] == "image"), validate=True)
+        if meta["execution"] != {"outcome": "cpu_not_tried", "backend": "cpu", "reason": "gpu_disabled"} or struct.unpack(">II", png[16:24]) != (2048, 1536):
+            raise ValueError("CPU Whole 2048 probe failed")
         print("DX12/GPU probe: real GPU success" if status["available"] else "SKIP GPU integration: no available adapter (CPU execution validated)")
 
 

@@ -313,3 +313,9 @@ SHA-256：`5565238de0d7e7ccd3c012e754c66680da75c793c68a5815da241592ba4173ec`。
 ユーザー実機では上記EXEを指定し、対象RAW・DX12・1024×770・512 MiBでexecutionとcache容量を収集する。長いドラッグ／停止再開／最終保存、Before/After、source切替・同source再利用、budget増減／off、Full画素一致、RSSとdedicated/shared GPU memoryの各peakを確認する。専用／共有GPUメモリは単純合算して安全判定しない。
 
 実driverのOOM／device loss、対象RAWのsource capacity／Plan、Windows暗室の操作感・性能・長時間挙動、RSS／VRAMは未計測。模擬faultや合成GPU probeの成功で代替しない。P2で停止し、工程B/C、解像度変更、scheduler追加調整へ進まない。
+
+## 13. A5実機受入の更新（2026-10-24）
+
+P2のWindows実RAW受入がユーザーから報告された。対象3990×3000 DNG／1024×770、DX12 gpu_success、StageCache 512 MiBでapplied=true／reason=none、retained=146,657,280 bytes（約139.86 MiB）、Draft Native約38〜44 ms。上記P2 SHAの実行結果で、GPU Full ON/OFF一致6/6組、CPU側24試行成功・Full一致6/6組を確認済みとの報告である。
+
+通常操作は入力23、mutation/ACK 9/9、Draft要求/採用9/9・破棄0、入力→ACK最大166.2 ms、ACK→Draft表示最大88.4 ms、終了→Full343.6 ms、最終Full／History保存revision11。詳細は[完了記録](RAW_PREVIEW_INTERACTION_PERFORMANCE.md#12-a5完了windows実機受入2026-10-24)。A5を完了しB1へ進む根拠とするが、GPU ColdのNative約0.8秒とFrontend総所要約1.9〜2.0秒の差、RSS／VRAMピーク、長時間、実driver障害は未確認のまま残す。今回Codexによる再測定ではない。

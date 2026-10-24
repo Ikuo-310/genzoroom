@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- RAW Whole-frame previews now adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
 - Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
 
 ### Fixed

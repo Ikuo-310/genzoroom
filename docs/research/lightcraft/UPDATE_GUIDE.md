@@ -36,6 +36,10 @@ A5-P2では実source／Planが得られるGPU／混在経路も実capacityと追
 
 P2検証済みEXEは`I:\code\genzoroom\.tmp\lightcraft-a5-p2\target\release\lightcraft-cli.exe`（隣接receipt付き）。旧A2/P0版は上書きしない。現行SHAと試験記録は[DX12調査§12](RAW_DX12_STAGE_CACHE_RESEARCH.md#12-a5-p2実装結果2026-10-24)を参照。開発用固定配置`.tmp/lightcraft/current`は、利用中EXE排他・backup・EXE/receipt一体切替の独立検証を要するため今回は導入しない。従来どおり明示的なEXE設定と`--binary`照合を使用する。
 
+B1では同じ管理patchのPNG envelopeを17 MiBへ拡張し、GenzoRoomの2048px／2048²画素・MCP line24 MiB契約に揃えた。既存probeに加え、独立DX12 processで1536／2048要求の実PNG寸法、Before/After・Full ON/OFF、Draft→Full、tiny budget拒否後の描画継続を検査する。GPU無効でも2048を確認し、別の高entropy CPU2048²画像で5 MiB超のPNGと24 MiB以内のlineを実検査する。単なるMCP成功やHTTP 200では受入しない。
+
+最新B1 EXEは`I:\code\genzoroom\.tmp\lightcraft-b1\target\release\lightcraft-cli.exe`、隣接receipt付き。SHA：`09d38369d4cbe0274fe363862d139097be063845f65a31a2bbd3931d4357a02e`。旧A2/P0/P2を上書きしない。`--binary`で実SHAとreceipt、schema、実寸と画像契約を再照合して使用する。安全上限と実機未確認事項は[適応型設計§20](RAW_ADAPTIVE_PREVIEW_DESIGN.md#20-a5完了とb1whole-frame表示解像度2026-10-24)を参照。
+
 ## 開発・Windows配布との接続
 
 現行GenzoRoomはLightCraftをinstallerに同梱せず、`GENZOROOM_LIGHTCRAFT_EXE`で外部の絶対pathを指定する構成。開発用にも上記scriptでbuild・検証したbinaryを指定する。汎用のTauri開発buildそのものにLightCraftを新たに同梱したり、自動download／本家更新を追加したりしない。

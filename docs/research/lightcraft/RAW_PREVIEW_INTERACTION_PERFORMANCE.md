@@ -306,3 +306,21 @@ Backendは通常StageCacheの512MiB／1GiB native転送、finite budget拒否、
 周辺Frontend回帰の `AnshitsuPersistence.test.tsx`「switches after a successful PUT for a numeric adjustment edit」は0.5を期待して1となり、単独でも基準HEADの製品コードでも同じ失敗を再現した。今回のRAW変更による退行とは判定せず未解決として残す。READMEやJPEG処理の修正へ範囲を広げない。
 
 Windows実機ではP0管理binaryと上記StageCache環境を使い、debugログのgesture別summaryで採用数・棄却理由・遅延を確認する。長いドラッグ／停止再開／終了直後保存／200到達／Before-After／写真切替・離脱・再生成、最終FullのNR・色・細部、cache OFF/ON・CPU/GPU別のRSS/VRAMとfallbackを確認する。ブラウザ操作やスクリーンショット、実RAW速度測定は今回実施していない。60fps・最大表示ageは保証しない。
+
+## 12. A5完了：Windows実機受入（2026-10-24）
+
+ユーザーからの実機受入報告に基づき、A5-P0/P1/P2を完了とする。今回Codexが再測定した値ではない。対象は3990×3000 DNG、1024×770、DX12、StageCache 512 MiB。P2 EXE SHA-256：`5565238de0d7e7ccd3c012e754c66680da75c793c68a5815da241592ba4173ec`。
+
+| 通常暗室の項目 | 受入結果 |
+|---|---|
+| 入力／mutation／ACK | 23／9／9 |
+| Draft要求／採用／破棄 | 9／9／0 |
+| 入力→ACK最大／ACK→Draft表示最大 | 166.2／88.4 ms |
+| 終了→Full表示 | 343.6 ms |
+| 最終Full／History保存 | revision 11／11 |
+| 実行／StageCache | gpu_success／applied=true、reason=none |
+| retained／Draft Native | 146,657,280 bytes（約139.86 MiB）／約38〜44 ms |
+| GPU診断Full ON/OFF一致 | 6/6組 |
+| CPU診断 | 24試行成功、Full ON/OFF一致6/6組 |
+
+未確認事項は完了条件と分けて残す。GPU Cold診断はNative約0.8秒に対しFrontend総所要約1.9〜2.0秒の差が未解明で、GPU演算時間や転送時間の単独原因へ帰属させない。RSS／VRAMピーク、長時間実行、実driver OOM／device lossは未測定。CPU固定settingsとGPU連続操作の時間から優劣は断定しない。

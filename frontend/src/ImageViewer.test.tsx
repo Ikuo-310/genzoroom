@@ -175,7 +175,9 @@ describe('Viewer edit settings context menu', () => {
     let resize = () => {};
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const viewChanged = vi.fn();
     const render = (src: string) => act(() => root.render(<ImageViewer src={src} documentKey="raw"
+      onRawViewChange={viewChanged}
       rawFrame={{ nativeWidth: 6000, nativeHeight: 4000, geometryId: 'a'.repeat(64) }} previewPixels
       alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
     render('blob:draft');
@@ -183,6 +185,7 @@ describe('Viewer edit settings context menu', () => {
     Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 900 });
     Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 });
     act(() => resize());
+    expect(viewChanged).toHaveBeenLastCalledWith(expect.objectContaining({ width: 900, height: 600, dpr: 2, nativeWidth: 6000, fit: true }));
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('30%');
     expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('900px');
     click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(b => b.textContent === '1:1')!);

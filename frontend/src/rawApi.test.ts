@@ -17,6 +17,13 @@ function response(patch: Record<string, string> = {}, bytes = png) {
 afterEach(() => vi.unstubAllGlobals());
 
 const adaptiveTarget = { quality: 'draft' as const, mode: 'whole' as const, maxSide: 1024, viewGeneration: 4, geometryId: null };
+it('accepts an actual larger bitmap and rejects responses larger than their requested target', async () => {
+  const frame = { ...geometry, fullWidth: 1600, fullHeight: 1200 };
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), 'X-Raw-Width': '1600', 'X-Raw-Height': '1200', 'X-Raw-Frame': JSON.stringify(frame) })));
+  expect((await rawPreview(doc, 3, new AbortController().signal, 'after', { ...adaptiveTarget, maxSide: 1600 })).width).toBe(1600);
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget)).rejects.toThrow();
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...adaptiveTarget, maxSide: 2049 })).rejects.toThrow();
+});
 const geometry = { geometryId: 'a'.repeat(64), nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3,
   fullWidth: 16, fullHeight: 12, window: null };
 const adaptiveHeaders = () => ({ 'X-Raw-Preview-Contract': '1', 'X-Raw-Quality': 'draft', 'X-Raw-Mode': 'whole',
@@ -218,7 +225,7 @@ describe('bounded RAW binary contract', () => {
   });
   it('rejects HTML, invalid PNG bytes and oversized binary responses', async () => {
     for (const res of [response({ 'Content-Type': 'text/html' }), response({}, new Uint8Array([1])),
-      response({}, new Uint8Array(5 * 1024 * 1024 + 1))]) {
+      response({}, new Uint8Array(17 * 1024 * 1024 + 1))]) {
       vi.stubGlobal('fetch', vi.fn(async () => res));
       await expect(rawPreview(doc, 3, new AbortController().signal)).rejects.toThrow();
     }
