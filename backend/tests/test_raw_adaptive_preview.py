@@ -60,9 +60,10 @@ def test_internal_stage_cache_requires_finite_budget(monkeypatch, budget):
         adapter.LightCraftRawSession(None)
 
 
-def test_internal_stage_cache_reaches_native_and_stays_out_of_history(local, tmp_path, monkeypatch):
+@pytest.mark.parametrize('budget', [536870912, 1024**3])
+def test_internal_stage_cache_reaches_native_and_stays_out_of_history(local, tmp_path, monkeypatch, budget):
     monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE", "on")
-    monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", str(1024**3))
+    monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", str(budget))
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         children[0].adaptive_supported = True
@@ -73,7 +74,8 @@ def test_internal_stage_cache_reaches_native_and_stays_out_of_history(local, tmp
                 settings = api.raw._photos[doc["assetId"]].settings_json
                 response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=target(doc, quality="full"))
                 assert response.status_code == 200
-                assert children[0].preview_arguments[-1]["stage_cache_budget_bytes"] == 1024**3
+                assert children[0].preview_arguments[-1]["stage_cache"] == "on"
+                assert children[0].preview_arguments[-1]["stage_cache_budget_bytes"] == budget
                 assert api.raw._photos[doc["assetId"]].settings_json == settings
                 assert api.document["recipeRevision"] == 0 and api.document["revision"] == doc["revision"]
         finally:

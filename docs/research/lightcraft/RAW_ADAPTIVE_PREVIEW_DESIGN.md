@@ -724,3 +724,39 @@ SHA-256：`53e59c9bdf18651bcd14edd9aa0c5801b16c8543d191f164b060077fbe0b6511`。
 隣接receipt：`I:\code\genzoroom\.tmp\lightcraft-a5-p0\target\release\lightcraft-cli.genzoroom.json`（beforeContract=1／previewContract=1、本家commit・patch digest・binary SHAを照合済み）。旧GPU PoCのEXEは操作せず、既存`.tmp/lightcraft-a2`のEXEも旧SHA `b0fbade4ab598614e03af4c29fecfe0a3f0f000642072d602495ae8b15d78aeb`を維持している。
 
 限定確認で、mode/budget切替のclearをsource取得前へ移し、見積り用Plan計算のpanic guardを補強した。native source／decoder情報が二重decodeやaccept漏れを起こさないこと、cold cache作成・次回reuse・失敗clearを回帰で確認した。CPUのfinite admission／保守的fallback／post-trimを維持し、この変更境界で未解決High／Mediumはない。新binaryでのWindows実RAW速度・画質・RSS/VRAM・長時間評価は未実施。ユーザーがEXE設定を上記pathへ切り替え、まず同じDNGのCPU／512 MiB／1024pxでA4を再測定する。P0だけで停止し、P1および工程B・Cへ進まない。
+
+<a id="raw-preview-a5-p1"></a>
+
+## 18. A5-P1：連続ドラッグの送信・Draft採用（2026-10-24）
+
+基準HEAD `62798c2`、LightCraft v0.10.0＋A5-P0。§13〜15のdesired入力で表示を失効させる規約は、本節の限定されたACK暫定表示で更新する。解像度・native patch・API／Recipe／History schemaは変更しない。
+
+### 18.1 P1a：latest-wins bounded throttle
+
+`RawControls`の150ms trailing debounceを、最初の未送信入力でarmし、後続入力で延長しない150ms timerへ変更した。pendingは一つのpatchへ上書き集約し、busy／queued中に独立したmutationを積まない。通常gestureは一ACKでowner queueを解放し、次patchはACK後150ms以上空ける。150msは既存値を基準として最大約6.7試行/秒に抑え、P1で周期最適化まで広げないための選択である。
+
+ACK後のAfter表示slotが動作中なら150ms刻みで送信を譲る。courtesyはACKから1000ms未満の間だけであり、timer丸めを含め約1050msで次mutationを許可する（event loop・owner queue・実native処理の待機時間は別）。これにより速いmutationが遅いrenderのnative revisionを直ちに変更することを避ける。一方、転送／decode停止は無期限の編集停止にしない。save／gesture endの既存flushはcourtesyを迂回し、既にbusyのactionにもdrainを伝えてsave barrierより前に最終patchを処理する。画像完了をsaveの依存へ加えない。
+
+200 soft thresholdでholdする既存規約と256 hard limitは維持。持続ドラッグでも送信が増えるので、最速条件では約30秒で200に近づき得る。最終flushの予約枠とSession再生成を残す。revision conflictの一回readback再同期だけは従来の有限retryを維持し、結果不明mutationは自動再送しない。
+
+### 18.2 P1b：ACKに限定した暫定表示
+
+| 状態 | 所有者・意味・採用条件 |
+| --- | --- |
+| desired／pending | RawControlsの未確認UI意図。一つのlatest patch。描画・保存の正本にはしない。 |
+| confirmed revision | native readbackによるACKだけで更新。preview callbackはpendingの有無にかかわらずACKを渡す。 |
+| mutating | RawControlsの送信〜ACK/readback区間。新mutation中は以前のDraftを採用しない。 |
+| native revision | rawPreviewの応答identity／revision検査とdecode後readRawDocumentで照合。confirmedが同じでもnativeが進んだ画像は採用しない。 |
+| displayRunning／displayPending | hookの一実行＋一latest待機slot。ACKは待機slotを置換し、desired更新だけでは実行中Draftをcancelしない。 |
+| document／generation／token／view | installed editor、asset、effect serial、generation、documentToken、viewGeneration、displayGenerationを照合。view切替、gesture終了、保存停止、離脱、再生成はcancel／失効境界を維持。 |
+| displayedRevision | document install時に初期化するhook内の表示下限。採用直前に比較して同document内のrevision逆行を防ぐ。 |
+
+暫定表示を許すのはinteracting中のACK済みrevisionだけ。最新desiredより遅れていても、上記のnative／ownership／view検査に合格すれば採用する。bitmap公開でdocument／settingsを上書きせず、UIのpending／desiredは別に保つ。新ACKが来れば古いrevisionは不適格。終了時はDraftを失効させ、最終flush→同owner queueのHistory receipt後に最新confirmedのFullを要求する。同revisionでもqualityが異なればFullを再発行する。Full失敗は既存displayErrorで表示し、保存成功を取り消さない。
+
+### 18.3 計測・検証・実機境界
+
+`interaction.summary`（debug）はgeneration／gestureIdごとの固定サイズ集計。入力・送信・ACK・Draft送信要求／採用数、revision／generation／session／view／departure／ended／frozen／superseded／failed別棄却数、入力→ACK最大ms、ACK→Draft採用最大ms、終了→Full採用msを記録する。入力時刻は送信patchへ集約された最後の入力の時刻であり、全pointerの分布ではない。Draft要求は実行slotからHTTPへ送った数、採用はdecodeとnative照合後にhook表示状態へ公開した数。待機slotの集約は送信要求数へ含めない。ended時のsummaryは途中値であり、fullDisplayedまたはnextGesture／disposedのsummaryを参照する。レコード列／画像／設定本文は保持しない。ログ失敗は編集に影響させない。
+
+通常編集のStageCacheは既存の `GENZOROOM_RAW_STAGE_CACHE=on` と `GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES=536870912` を引き続き使用できる。環境変数→native引数の512MiB回帰を追加。無指定はoff、有限予算・fallbackは既存どおり。P0実測のWarm短縮は固定settingsの結果であり、P1連続操作の速度保証へ転用しない。
+
+自動試験の比較・件数・制約は[性能記録§11](RAW_PREVIEW_INTERACTION_PERFORMANCE.md#a5-p1)を参照。Windows実RAW／CPU・GPU／WebViewの表示頻度・操作感・画質・RSS/VRAMは未測定。工程B・C、解像度変更、History UIの別件修正は対象外。

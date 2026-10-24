@@ -2,7 +2,7 @@
 
 調査日：2026-10-24。基準HEAD：`e0688f9c50366f1acb3722309fb818a9cf3a2587`、branch：`feature/lightcraft-integration`。開始時の作業ツリーはclean。調査・文書化だけを行い、製品コード、管理patch、binary、API、SQLite v8、JPEG Recipe v18、C4保存・History契約は変更しない。
 
-§1〜9はA5調査時点の旧binaryに対する記録。後続A5-P0のCPU admission実装と追加実測資料は§10が現行契約。P1のドラッグ追従改善は引き続き未実装。
+§1〜9はA5調査時点の旧binaryに対する記録。後続A5-P0のCPU admission実装と追加実測資料は§10、P1のドラッグ追従実装・模擬検証は§11が現行記録。
 
 ## 1. 結論と根拠の確度
 
@@ -268,3 +268,41 @@ Rはcacheの保持bufferとその置換時共存分の上界。decode、filter s
 回帰対象はCPU 1024px／512 MiB、tiny／必要量超過／overflow／不明source、source共有・切替、sampled/lin再利用・置換ピーク、2 entry、Before/After、mode/budget、Full一致、cold source保持、render失敗後clear、GPU/mixedの旧判定。実binary probeにもCPU 1024px要求／512 MiB、反復・Before/After、off/on Full一致・settings不変・mode clearを追加した。
 
 最終の実行結果、再適用・release build・receiptとbinary SHAは[適応型設計§17](RAW_ADAPTIVE_PREVIEW_DESIGN.md#cpu-stage-admission-p0)に記録する。新binaryでのWindows実RAW再測定はユーザーが実施する。P1、工程B・C、GenzoRoom Frontend／Backend動作、C4保存・History、Recipe／DB／API schemaは変更していない。
+
+<a id="a5-p1"></a>
+
+## 11. A5-P1：送信・採用機会の実装記録（2026-10-24）
+
+§1〜9のA5調査、§10のP0履歴を残し、基準HEAD `62798c2`の現行コードを照合してP1a＋P1bを実装した。詳細な状態不変条件は[適応型設計§18](RAW_ADAPTIVE_PREVIEW_DESIGN.md#raw-preview-a5-p1)を参照。
+
+- P1a：150msの非延長timer＋一latest pending patch。通常busy loopは一ACKで解放。ACK後の表示slotへ最大約1050msの有限courtesyを与え、mutationの連続予約でDraftを飢餓させない。初回timer・通常次回timerは150ms、gesture終了・保存flushは即時drain。200／256の保護は変更しない。
+- P1b：ACKごとにDraft候補を通知し、interacting中はdesired／pendingが残っていても許可。desired更新だけで実行中Draftを破棄しない。新mutation中、新ACK revision、別document／generation／Session／view、終了・離脱では採用不可。応答検査・decode後native revision照合・表示revision下限を維持。一実行＋一待機slotを越えない。
+- C4：confirmedはreadbackのみ。Recipe／Historyの正本、最終patch→ACK→同queue receipt、未知mutation／saveIdの再送規則は不変。saveはPNG・転送・decode・表示を待たない。終了後は最新confirmed Fullを優先し、画像失敗と保存結果を分離する。
+
+### 11.1 模擬連続入力の比較
+
+React DOM＋fake timer／fake APIで50ms間隔の60入力（3秒）を再現。以下は実CPU/GPU／HTTP／画像処理の計測ではなく、設定した遅延に対するschedulerとhook表示状態への採用結果。Fullまでのmutationには最終flushも含む。input→ACKは各送信patchの最後の入力から測る。
+
+| mutation／render遅延 | mutation／ACK | Draft要求／採用 | input→ACK最大 | ACK→Draft採用最大 | 終了→Full採用 |
+| --- | --- | --- | --- | --- | --- |
+| 10／40ms | 18／18 | 17／17 | 60ms | 40ms | 50ms |
+| 10／250ms | 10／10 | 9／8 | 60ms | 250ms | 260ms |
+| 300／40ms | 8／8 | 6／6 | 500ms | 40ms | 490ms |
+
+10／250msでは最後のDraft一件が終了境界で棄却され、Fullが優先された。採用revisionは各条件で単調増加、最終Full revisionは最後のconfirmedと一致し、History保存も成功した。追加テストの受入条件は固定した回数そのものではなく、操作中5回以上の採用、逆行防止、最終値Full／保存収束である。
+
+旧150ms trailing debounceでは同じ50ms入力中のtimerが延長されるため、3秒間のmutation／ACK／Draft採用は0（終了時flushは別）。RawControls単体では新方式が同期間20送信機会／20ACK preview callbackを確保する。実際のhookでは表示courtesy・ACK時間で上表へ集約され、mutation増だけを改善成功と判断しない。
+
+### 11.2 検証と制限
+
+FrontendはRAW controls／document／History／save／API／RAW Viewer／Clipboard／ImageViewerを回帰対象とした。追加ケースは連続入力、速い／遅いmutation・render、入力停止と再開、新desired中のDraft decode採用、view変更cancel、停止decodeの有限courtesy、busy中最終flush、Full失敗後の保存成功。既存ケースで未知結果・ACK失敗・200閾値・再生成・Undo/Redo/jump/Reset・写真切替・JPEG・退出・decode停止保存を確認する。
+
+最終関連Frontend 9ファイル398件成功（RAW controls／document／History save／Recipe save／API／RawEditHistory／AnshitsuRawPreview／AnshitsuClipboard／ImageViewer）。先行して周辺AnshitsuPersistenceも含めた10ファイルでは472成功・1失敗で、下記のHEAD再現済み失敗を含む。重複実行の件数は合算しない。TypeScript `tsc --noEmit`を含むproduction buildと`git diff --check`成功。buildの既存500kB超chunk警告は残る。
+
+courtesy判定を壁時計から単調時計へ統一した最終調整後、影響するcontrols／document／History save／Recipe saveの4ファイル108件とbuildを再実行して成功した。変更のない周辺回帰は前記結果を再利用する。
+
+Backendは通常StageCacheの512MiB／1GiB native転送、finite budget拒否、HTTP cancelと送信済みnative回収、revision検証・History・ownerの関連4ファイル149件成功。製品Backend／LightCraft patchは変更しない。sandbox内ではpytest一時領域作成失敗、その後のsandbox内実行は進行停止したため終了し、同じrepository Python 3.14で権限付き実行した。
+
+周辺Frontend回帰の `AnshitsuPersistence.test.tsx`「switches after a successful PUT for a numeric adjustment edit」は0.5を期待して1となり、単独でも基準HEADの製品コードでも同じ失敗を再現した。今回のRAW変更による退行とは判定せず未解決として残す。READMEやJPEG処理の修正へ範囲を広げない。
+
+Windows実機ではP0管理binaryと上記StageCache環境を使い、debugログのgesture別summaryで採用数・棄却理由・遅延を確認する。長いドラッグ／停止再開／終了直後保存／200到達／Before-After／写真切替・離脱・再生成、最終FullのNR・色・細部、cache OFF/ON・CPU/GPU別のRSS/VRAMとfallbackを確認する。ブラウザ操作やスクリーンショット、実RAW速度測定は今回実施していない。60fps・最大表示ageは保証しない。

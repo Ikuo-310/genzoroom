@@ -78,6 +78,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let transmitted: { doc: RawDocument; serial: number } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
+    let displayedRevision = -1;
     let publishedFrame: { revision: number; quality: 'draft' | 'full'; frame: RawGeometry } | undefined;
     let restarting = false, regenerationError: string | undefined;
     let restartOperation: Promise<void> | undefined;
@@ -106,6 +107,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, valid = current) => {
       if (!valid()) return;
       let candidate: string | undefined;
+      const metrics = editor?.metrics, ackAt = metrics?.ackAt;
+      const requestedView = viewGeneration;
+      let adopted = false, discard: 'superseded' | 'failed' | undefined;
+      if (quality === 'draft' && metrics) metrics.draftRequests++;
       try {
         if (frameSerial >= 2 ** 31 - 2) { void restart().catch(() => {}); return; }
         const requestSerial = ++frameSerial;
@@ -115,17 +120,40 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal);
         if (!valid()) return;
+        if (doc.revision < displayedRevision) return;
         // Recheck engine identity after decode, before publishing a native result.
         await readRawDocument(doc, controller.signal);
         if (!valid()) return;
         revoke();
+        displayedRevision = doc.revision;
         url = candidate;
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
         setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
-          frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined, document: doc }));
+          frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
+        adopted = true;
+        if (metrics) {
+          if (quality === 'draft') {
+            metrics.draftAdoptions++;
+            metrics.ackDisplayMaxMs = Math.max(metrics.ackDisplayMaxMs, performance.now() - (ackAt ?? performance.now()));
+          } else if (metrics.endedAt) { metrics.fullDisplayMs = performance.now() - metrics.endedAt; metrics.report('fullDisplayed'); }
+        }
         revisionResyncs = 0;
-      } finally { if (candidate) URL.revokeObjectURL(candidate); }
+      } catch (cause) {
+        discard = cause instanceof RawSuperseded ? 'superseded' : 'failed';
+        throw cause;
+      } finally {
+        if (!adopted && metrics && quality === 'draft') {
+          const reason = !current() || !editor ? 'departure'
+            : editor.confirmed.generation !== doc.generation ? 'generation'
+            : editor.confirmed.documentToken !== doc.documentToken ? 'session'
+            : requestedView !== viewGeneration ? 'view'
+            : frozen.current ? 'frozen' : !editor.interacting ? 'ended'
+            : editor.mutating || editor.confirmed.revision !== doc.revision ? 'revision' : discard ?? 'superseded';
+          metrics.discards[reason]++;
+        }
+        if (candidate) URL.revokeObjectURL(candidate);
+      }
     };
     const pumpDisplay = () => {
       if (displayRunning || !displayPending || !current() || frozen.current) return;
@@ -168,22 +196,29 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     resyncPreviewRef.current = () => resyncPreview();
     const displayPreview = (doc: RawDocument, valid = current) => {
       if (!current() || !valid()) return;
-      if (editor && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
+      if (editor && !editor.interacting && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
       const quality = editor?.interacting ? 'draft' : 'full';
       const key = `${doc.documentToken}:${doc.revision}:${quality}:${viewGeneration}`;
       if (key === displayTargetKey) return;
-      invalidateDisplay();
+      // New ACKs replace the pending slot, not a running ACK image merely because
+      // desired changed. Native revision and ownership checks still gate adoption.
+      if (quality === 'full') invalidateDisplay();
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
-      displayPending = { doc, valid, generation: displayGeneration, quality, geometryId };
+      const owner = editor, view = viewGeneration;
+      const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
+        && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
+        && editor.confirmed.revision === doc.revision;
+      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId };
       pumpDisplay();
     };
     viewRef.current = () => {
       if (!current() || !editor) return;
       viewGeneration++;
       revisionResyncs = 0;
-      if (editor.unsettled) { invalidateDisplay(); return; }
+      invalidateDisplay();
+      if (editor.unsettled) return;
       displayPreview(editor.confirmed);
     };
     const notify = () => {
@@ -204,10 +239,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     const install = (settings: RawSettings) => {
       frameSerial = 0;
+      displayedRevision = -1;
       viewGeneration = 0;
       publishedFrame = undefined;
       const installed = new RawControls(settings, { schedule: enqueue, changed: notify,
         hold: () => !!saver?.gesturing && installed.confirmed.mutationAttempts >= installed.confirmed.regenerationThreshold,
+        previewBusy: () => displayRunning || !!displayPending,
         preview: (confirmed, valid) => displayPreview(confirmed, () => current() && editor === installed && valid()),
         invalidate: invalidateDisplay,
       });

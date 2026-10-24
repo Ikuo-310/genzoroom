@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRawDocument } from './useRawDocument';
+import { frontendLogger } from './frontendLogging';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
@@ -54,6 +55,95 @@ function enableBefore() {
 }
 
 describe('RAW native Before cache', () => {
+  it.each([[10, 40], [10, 250], [300, 40]])('adopts monotonic ACK Drafts during continuous input (mutation %ims, render %ims)', async (mutationMs, renderMs) => {
+    vi.useFakeTimers();
+    const diagnostics = vi.spyOn(frontendLogger, 'add');
+    await render('a'); await flush();
+    const mutate = vi.mocked(api.setRawControls).getMockImplementation()!;
+    vi.mocked(api.setRawControls).mockImplementation(async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, mutationMs));
+      return mutate(...args);
+    });
+    vi.mocked(api.rawPreview).mockImplementation(async (_doc, _serial, _signal, _kind, target) => {
+      await new Promise(resolve => setTimeout(resolve, renderMs));
+      return { blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1, quality: target?.quality };
+    });
+    const adopted: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      act(() => current!.changeControls({ 'light.exposure': i / 100 }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+      if (current?.quality === 'draft' && adopted.at(-1) !== current.imageRevision) adopted.push(current.imageRevision!);
+    }
+    expect(adopted.length).toBeGreaterThanOrEqual(5);
+    expect(adopted.every((revision, i) => i === 0 || revision > adopted[i - 1])).toBe(true);
+    expect(current?.displayError).toBeUndefined();
+    act(() => current!.flushControls());
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); }); await flush();
+    expect(current?.quality).toBe('full'); expect(current?.imageRevision).toBe(current?.settings?.revision);
+    expect(current?.settings?.values['light.exposure']).toBe(.59); expect(current?.dirty).toBe(false);
+    const summary = diagnostics.mock.calls.find(([entry]) => entry.event === 'interaction.summary' && entry.context?.phase === 'fullDisplayed')?.[0].context;
+    expect(summary).toMatchObject({ inputs: 60, fullDisplayMs: expect.any(Number), draftAdoptions: expect.any(Number) });
+    expect(Number(summary?.draftAdoptions)).toBeGreaterThanOrEqual(5);
+    diagnostics.mockRestore();
+  });
+
+  it('cancels and rejects a running ACK Draft from the previous view', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
+    act(() => current!.changeControls({ 'light.exposure': 1 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+    const previous = current?.url;
+    act(() => current!.viewChanged()); await flush();
+    expect(api.cancelRawPreview).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }), 'after', 2);
+    await act(async () => gate.resolve({ blob: new Blob(['old view']), width: 16, height: 12, epoch: 1, sequence: 2 })); await flush();
+    expect(createURL).toHaveBeenCalledTimes(2); expect(current?.url).not.toBe(previous);
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.viewGeneration).toBe(1);
+    act(() => current!.flushControls()); await flush(); expect(current?.quality).toBe('full');
+  });
+
+  it('keeps a saved gesture successful when its final Full fails', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    act(() => current!.changeControls({ 'light.exposure': 1 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+    vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawApiError('raw_render_failed'));
+    act(() => current!.flushControls()); await flush();
+    expect(current?.dirty).toBe(false); expect(current?.saveError).toBeUndefined();
+    expect(current?.displayError).toBe('raw_render_failed'); expect(current?.quality).toBe('draft');
+  });
+
+  it('bounds stalled Draft courtesy, discards its old revision and still saves', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    const gate = deferred<void>(); decode = () => gate.promise;
+    act(() => current!.changeControls({ 'light.exposure': 1 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+    act(() => current!.changeControls({ 'light.exposure': 2 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); }); await flush();
+    expect(api.setRawControls).toHaveBeenCalledTimes(2);
+    expect(current?.imageRevision).toBe(1); expect(current?.displayError).toBeUndefined();
+    decode = async () => {}; await act(async () => gate.resolve()); await flush();
+    expect(current?.imageRevision).toBe(3);
+    act(() => current!.flushControls()); await flush();
+    expect(current?.dirty).toBe(false); expect(current?.quality).toBe('full');
+  });
+
+  it('adopts an ACK Draft across new desired input, then resumes after an input pause', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    const gate = deferred<void>(); decode = () => gate.promise;
+    act(() => current!.changeControls({ 'light.exposure': 1 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+    const revision = current!.settings!.revision;
+    act(() => current!.changeControls({ 'light.exposure': 2 }));
+    decode = async () => {}; await act(async () => gate.resolve()); await flush();
+    expect(current?.quality).toBe('draft'); expect(current?.imageRevision).toBe(revision);
+    expect(current?.desired?.['light.exposure']).toBe(2); expect(current?.settings?.values['light.exposure']).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); }); await flush();
+    expect(current?.imageRevision).toBe(revision + 1);
+    act(() => current!.changeControls({ 'light.exposure': 3 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); }); await flush();
+    expect(current?.imageRevision).toBe(revision + 2);
+    act(() => current!.flushControls()); await flush(); expect(current?.quality).toBe('full');
+  });
+
   it('resynchronizes a render revision once without rewriting its History checkpoint', async () => {
     await render('a'); await flush();
     const saved = current!.settings!.recipeFingerprint;

@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## RAW適応型プレビュー A5-P1：ドラッグ追従（2026-10-24）
+
+HEAD `62798c2`からP1a＋P1bを実装。150ms trailing debounceを非延長timerと一latest patchへ変更し、通常gestureは一ACKでowner queueを解放する。ACK後の表示slotには最大約1050msの有限courtesyを設ける。gesture終了／保存flushは待たせず、既にbusyの処理も最終patchまでdrainしてから同queueのHistory保存へ進む。
+
+DraftはdesiredではなくACK revisionを描画し、未送信入力だけでは失効させない。新mutation中、新ACK、別generation／Session／view、保存停止・終了・離脱では採用しない。decode後native照合と表示revision下限を維持し、bitmapからsettingsを更新しない。200／256、未知結果再送禁止、C4 receipt保証、JPEG経路は維持する。
+
+模擬50ms入力×3秒ではmutation/render=10/40ms、10/250ms、300/40msでDraft採用17／8／6回、終了→Fullは50／260／490ms。旧trailingでは同期間の送信・採用機会は0。実RAW性能の結果ではない。固定サイズdebug `interaction.summary`でgesture別入力／送信／ACK／Draft要求・採用・棄却理由と遅延を確認できる。
+
+通常StageCache ON／512MiBのnative引数回帰を追加し、Backend関連149件成功。Frontend関連回帰と型検査・buildの最終結果は[性能記録§11](research/lightcraft/RAW_PREVIEW_INTERACTION_PERFORMANCE.md#a5-p1)に記載する。周辺JPEG数値入力保存テスト1件はHEAD版でも同じ失敗を再現し、別件として残す。Windows実RAW／WebView、CPU/GPU・画質・RSS/VRAM・長時間操作はユーザー実機確認が必要。管理LC patch、解像度、工程B・C、History UIの別件は変更しない。
+
 ## RAW現像統合 Phase 1C-C3-D：同一RAWの安全なSession自動再生成（2026-10-22）
 
 設計修正Commit `33a130eda91c868c8facc39ad80418b929b60d11`から限定実装した。Backendは既存mutation試行カウンターをdocument／settingsへ公開し、soft閾値200・hard上限256を使用する。復元・readback失敗を含む実試行数を使い、revisionやSlider入力数から推測しない。native adapterのhard limit・Session再生成・cache所有権／cleanup、SQLite schema v7は変更していない。

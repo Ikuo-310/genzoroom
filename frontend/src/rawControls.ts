@@ -1,6 +1,8 @@
 import { RawApiError, readRawSettings, setRawControls, type RawSettings, type RawValues } from './rawApi';
+import { RawInteractionMetrics } from './rawInteractionMetrics';
 
-export const RAW_DEBOUNCE_MS = 150;
+export const RAW_THROTTLE_MS = 150;
+const RAW_DISPLAY_COURTESY_MS = 1000;
 
 /** One mutation owner, one latest unsent patch. Native work remains owned after UI disposal. */
 export class RawControls {
@@ -8,34 +10,60 @@ export class RawControls {
   pending: Partial<RawValues> = {};
   serial = 0;
   busy = false;
+  mutating = false;
   error?: string;
   private active = true;
   private queued = false;
+  private lastAck = -Infinity;
+  metrics?: RawInteractionMetrics;
+  private drain = false;
   private timer?: ReturnType<typeof setTimeout>;
   interacting = false;
   constructor(public confirmed: RawSettings, private options: {
     schedule: (action: () => Promise<void>) => void;
     changed: () => void;
     hold?: () => boolean;
+    previewBusy?: () => boolean;
     preview: (settings: RawSettings, current: () => boolean) => void;
     invalidate?: () => void;
   }) {}
 
-  beginPreview() { if (!this.interacting) { this.interacting = true; this.options.invalidate?.(); } }
-  endPreview() { this.interacting = false; this.options.invalidate?.(); }
+  beginPreview() {
+    if (this.interacting) return;
+    this.metrics?.report('nextGesture');
+    this.metrics = new RawInteractionMetrics(this.confirmed.generation, this.serial + 1);
+    this.interacting = true;
+    this.options.invalidate?.();
+  }
+  endPreview() {
+    if (this.interacting && this.metrics) { this.metrics.endedAt = performance.now(); this.metrics.report('ended'); }
+    this.interacting = false; this.options.invalidate?.();
+  }
 
   change(values: Partial<RawValues>) {
     if (!this.active || this.error) return;
     this.serial++;
-    this.options.invalidate?.();
+    this.metrics?.input();
+    if (!this.interacting) this.options.invalidate?.();
     Object.assign(this.desired, values);
     Object.assign(this.pending, values);
     this.options.changed();
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), RAW_DEBOUNCE_MS);
+    this.arm();
   }
-  flush() {
+  private arm() {
+    if (this.timer || this.busy || this.queued || !this.active || this.error || !Object.keys(this.pending).length || this.options.hold?.()) return;
+    // Keep the first unsent deadline; give one display slot a bounded opportunity.
+    // A stalled transfer/decode must not indefinitely block native edits.
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      if (this.interacting && this.options.previewBusy?.() && performance.now() - this.lastAck < RAW_DISPLAY_COURTESY_MS) { this.arm(); return; }
+      this.flush(false);
+    }, RAW_THROTTLE_MS);
+  }
+  flush(immediate = true) {
     clearTimeout(this.timer);
+    this.timer = undefined;
+    if (immediate && this.busy) this.drain = true;
     if (this.options.hold?.() || !this.active || this.error || this.busy || this.queued || !Object.keys(this.pending).length) return;
     this.queued = true;
     this.options.schedule(async () => {
@@ -50,8 +78,13 @@ export class RawControls {
           if (this.options.hold?.()) break;
           const patch = this.pending;
           this.pending = {};
+          const metrics = this.metrics, inputAt = metrics?.latestInput ?? performance.now();
           try {
+            this.mutating = true;
+            if (metrics) metrics.mutations++;
             this.confirmed = await setRawControls(this.confirmed, patch);
+            this.lastAck = performance.now();
+            metrics?.ack(inputAt);
           } catch (error) {
             // A lost HTTP response is not permission to repeat an unknown native mutation.
             this.pending = { ...patch, ...this.pending };
@@ -60,22 +93,23 @@ export class RawControls {
               continue;
             }
             throw error;
-          }
+          } finally { this.mutating = false; }
           if (!this.active) return;
           for (const id of Object.keys(patch) as (keyof RawValues)[]) {
             if (!(id in this.pending)) delete this.desired[id];
           }
           this.options.changed();
-          if (!Object.keys(this.pending).length) {
-            const serial = this.serial;
-            this.options.preview(this.confirmed, () => this.active && serial === this.serial);
-          }
+          const revision = this.confirmed.revision;
+          this.options.preview(this.confirmed, () => this.active && this.confirmed.revision === revision);
+          // Drag ACKs yield the owner queue; final flush still drains before its save fence.
+          if (this.interacting && !immediate && !this.drain) break;
         }
       } catch (error) {
         if (this.active) this.error = error instanceof RawApiError ? error.code : 'raw_connection_failed';
       } finally {
         this.busy = false;
-        if (this.active) this.options.changed();
+        this.drain = false;
+        if (this.active) { this.options.changed(); this.arm(); }
       }
     });
   }
@@ -96,7 +130,7 @@ export class RawControls {
       } catch (error) { this.error = error instanceof RawApiError ? error.code : 'raw_connection_failed'; }
       finally {
         this.busy = false;
-        if (this.active) { this.options.changed(); this.flush(); }
+        if (this.active) { this.options.changed(); if (this.interacting) this.arm(); else this.flush(); }
       }
     });
   }
@@ -116,6 +150,6 @@ export class RawControls {
     const serial = this.serial;
     if (this.active) this.options.preview(this.confirmed, () => this.active && serial === this.serial);
   }
-  dispose() { this.active = false; clearTimeout(this.timer); }
+  dispose() { this.metrics?.report('disposed'); this.active = false; clearTimeout(this.timer); }
   get unsettled() { return this.busy || Object.keys(this.desired).length > 0; }
 }

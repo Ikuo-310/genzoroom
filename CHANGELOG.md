@@ -12,6 +12,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- RAW slider drags now send coalesced updates during continuous input and show acknowledged Draft previews, then request the final Full preview when the gesture ends.
 - Windows PoC Developer Diagnostics now offers a save destination for JSON reports, supports consecutive exports, and reports save failures while treating cancellation normally.
 - Windows PoC now opens connection recovery Settings when its selected local database cannot be opened at startup, retaining the saved credentials and profile data.
 - Windows PoC now exits safely when its initial UI cannot become ready, correlates close failures to their request, confirms before closing during a page reload, and blocks a second Tauri host while an older WebView remains open.
