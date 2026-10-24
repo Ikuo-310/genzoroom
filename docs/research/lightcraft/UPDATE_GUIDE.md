@@ -30,6 +30,8 @@ $source = 'I:\code\raw-test\lightcraft-v0.10.0-gpu-poc'
 
 binaryの差替え検出には`--binary`を使う。現在のmanifest、receiptと実ファイルのSHA-256を一致確認した後、実binaryのschemaとrenderを再検査する。version文字列だけ、古いreceiptだけ、patchを適用したsourceだけではbinaryを承認しない。receiptは署名済みサプライチェーン証明ではなく、管理されたbuildとローカルファイルの照合記録である。
 
+A5-P0以降のprobeは、追加でGPUを無効化し、CPUの1024px要求／512 MiBでcacheが適用・保持されること、反復とBefore/After、off/on Full PNG一致、settings不変、off切替時の解放を実binaryで確認する。CPU admissionは実sourceと既存bufferの容量・追加確保分から計算し、GPU／混在／情報不足は従来の安全側見積りを維持する。probeは合成PNGの契約検証であり、実RAWの性能・RSS／VRAM受入を代替しない。
+
 ## 開発・Windows配布との接続
 
 現行GenzoRoomはLightCraftをinstallerに同梱せず、`GENZOROOM_LIGHTCRAFT_EXE`で外部の絶対pathを指定する構成。開発用にも上記scriptでbuild・検証したbinaryを指定する。汎用のTauri開発buildそのものにLightCraftを新たに同梱したり、自動download／本家更新を追加したりしない。

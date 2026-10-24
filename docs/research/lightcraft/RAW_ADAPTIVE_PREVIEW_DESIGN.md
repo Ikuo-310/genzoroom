@@ -686,3 +686,41 @@ Stop／RAWタブ非選択は停止flagとBackend Stopを送り、送信済み処
 5. 同じRAW・条件と実機環境を揃えて複数回比較し、高画素・細部・色・NRと長時間挙動を別途評価する。今回その測定は実施していない。
 
 cacheの最終採用構成・予算、品質ごとの画素数、大画像上限、whole/region閾値、最終timeout、CPU/GPU性能保証は引き続き実測判断。A4の診断機能で停止し、工程Bの解像度policy・工程CのDraft/Full regionには進まない。領域描画は最終必須要件として維持する。
+
+<a id="cpu-stage-admission-p0"></a>
+
+## 17. A5-P0：CPU StageCache予算見積り（2026-10-24）
+
+A5調査と追加実機JSONを受け、固定LC v0.10.0／本家commitを維持した管理patchのCPU admissionを修正した。基準GenzoRoom HEADは`a58917d7b38e2252a1bc37d7b31ecc28130a7b6e`。GenzoRoom製品コード、品質アルゴリズム、scheduler、Recipe／History／SQLite／API schemaは変更しない。§14.3の一律事前式はGPU／混在／情報不足のfallbackとして残し、CPU確定経路だけ本節が更新する。
+
+### 17.1 修正前後の式と根拠
+
+旧binary `b0fbade4ab598614e03af4c29fecfe0a3f0f000642072d602495ae8b15d78aeb`の追加JSONは3990×3000 DNG／1024×770／CPU／1024 MiBで、ON全12試行適用、保持84,367,360 bytes（GPU 0）、Full off/on 6組一致。Warm Native中央値はDraft OFF/ON=92.79/41.84ms、Full=93.81/40.49ms。これはユーザーの旧EXE実測で、新EXEの実測ではない。
+
+旧式は`edge²×512 + max(originalPixels,2560²)×36 + existing CPU/GPU`。1024pxで最低737 MiB、当該元寸法では約922.96 MiBになり、512 MiBを拒否する。
+
+CPU新式は、全side／各最大2 entryの既存CPU buffer実capacityをallocation identityで重複除外し、未計上のsource実capacity×12と、実Plan出力面積P×`(32 + sampled miss×12 + lin miss×12)`を加える。32は空間plane全種の置換余裕。既存entryはeviction前のまま課金し、置換中の旧・新buffer共存を覆う。sampled／linのhitはnativeと同じsource/geo/lin keyで判断する。source=2560×1925、出力1024×770の例では空pool約98.51 MiB、既存実測と同じbuffer構成でsampled/lin再利用なら約104.52 MiB。実capacityに応じたchecked判定であり、512 MiB固定許可ではない。
+
+### 17.2 所有権と保護
+
+Headlessはmode/budget変更を反映した後、GPU無効かつGPU host/device retentionがない場合だけ、guard内で一度sourceを取得する。同じDecodedSourceをjobへ渡し、cold loaded結果をSession.acceptへ戻すことでsource cache／decoder情報・As Shot学習の従来経路を維持する。見積り用Planもpanic guard内で計算する。
+
+計量補助はpixel計算を変えず、すべての容量演算をcheckedにする。GPU有効・混在bufferが残る場合、または必要情報不足の場合は旧見積りへfallback。render後の保守的CPU/GPU計量・総budget超過trimとsource/geometry/lifecycle/error clearを維持し、metadataの意味は変更しない。cache-associated bufferピークの保護であり、decode/filter scratch／PNG等のworking memoryやRSS／VRAM全体の上限ではない。
+
+詳細な計算、旧実測の解釈、C4の不変条件、実機で残す項目は[追従性能調査§10](RAW_PREVIEW_INTERACTION_PERFORMANCE.md#cpu-stage-admission-record)を参照。
+
+### 17.3 管理build・検証記録
+
+- 固定upstreamの別clean checkout `.tmp/lightcraft-a5-p0-final-apply`に最終patchを`--apply`で再適用し、全diffの完全一致を確認。build元`.tmp/lightcraft-a5-p0`も同じmanifest／全diff照合を通過した。
+- 最終patch SHA-256：`00a8f1d127c6a04f64fa680f849cdda36c028f8936ed5771afc0d8883655d328`。manifestの対象ファイル一覧は維持し、管理patch内のheadless／preview／pipeline計量補助とテストを更新した。
+- `build.py --source .tmp/lightcraft-a5-p0 --build`でMCP unit 58件・e2e 10件成功。既存subprocess helper 1件はignored。Focused pipeline 3件（共有source・capacity・置換ピーク等）、既存連続slider StageCache回帰1件、NR Draft→Full正確性1件も成功。GPU/mixed fixtureの追加単独実行ではGPU非対応による早期returnはなく、実device/host buffer保持を伴う保守的拒否を確認した（上記MCP件数と重複）。
+- GenzoRoom関連Backendはpatch管理／RAW owner／runtime／Windows API／A4の5ファイルで133件成功・1件失敗。失敗したHTTP waiter取消・source回収の既存テストは、並行release compile終了後の単独再実行で成功した。製品Pythonは変更しておらず、負荷下での初回時間依存失敗を成功件数へ隠さない。最終manifestの管理回帰4件も再実行して成功（前記件数と重複）。
+- CLI release build（`--locked --no-default-features -p lightcraft-cli`）と拡張MCP probe、receipt生成、さらに`--binary`によるreceipt／実SHA／probe再照合が成功。buildには既存のoptional craft-fonts未同梱警告があり、RAW画素処理の検証には使っていない。`git diff --check`と文書参照も確認した。
+
+新EXE：`I:\code\genzoroom\.tmp\lightcraft-a5-p0\target\release\lightcraft-cli.exe`。
+
+SHA-256：`53e59c9bdf18651bcd14edd9aa0c5801b16c8543d191f164b060077fbe0b6511`。
+
+隣接receipt：`I:\code\genzoroom\.tmp\lightcraft-a5-p0\target\release\lightcraft-cli.genzoroom.json`（beforeContract=1／previewContract=1、本家commit・patch digest・binary SHAを照合済み）。旧GPU PoCのEXEは操作せず、既存`.tmp/lightcraft-a2`のEXEも旧SHA `b0fbade4ab598614e03af4c29fecfe0a3f0f000642072d602495ae8b15d78aeb`を維持している。
+
+限定確認で、mode/budget切替のclearをsource取得前へ移し、見積り用Plan計算のpanic guardを補強した。native source／decoder情報が二重decodeやaccept漏れを起こさないこと、cold cache作成・次回reuse・失敗clearを回帰で確認した。CPUのfinite admission／保守的fallback／post-trimを維持し、この変更境界で未解決High／Mediumはない。新binaryでのWindows実RAW速度・画質・RSS/VRAM・長時間評価は未実施。ユーザーがEXE設定を上記pathへ切り替え、まず同じDNGのCPU／512 MiB／1024pxでA4を再測定する。P0だけで停止し、P1および工程B・Cへ進まない。

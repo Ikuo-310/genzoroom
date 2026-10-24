@@ -2,6 +2,8 @@
 
 調査日：2026-10-24。基準HEAD：`e0688f9c50366f1acb3722309fb818a9cf3a2587`、branch：`feature/lightcraft-integration`。開始時の作業ツリーはclean。調査・文書化だけを行い、製品コード、管理patch、binary、API、SQLite v8、JPEG Recipe v18、C4保存・History契約は変更しない。
 
+§1〜9はA5調査時点の旧binaryに対する記録。後続A5-P0のCPU admission実装と追加実測資料は§10が現行契約。P1のドラッグ追従改善は引き続き未実装。
+
 ## 1. 結論と根拠の確度
 
 | 現象 | 結論 | 確度・残る確認 |
@@ -227,3 +229,42 @@ P0は最小の独立実験として優先するが、**追従UX改善の本命�
 未確認：実機JSONのreason／binary SHA、元RAW寸法・effective設定、通常暗室のcache／GPU設定、pointer change間隔、各要求・採用・破棄count、mutation/readback／encode／HTTP／decode／表示前照会の時間、予算修正後の実retentionと速度、画質・RSS/VRAM、長時間・高画素／実GPUの挙動。
 
 今回実施した検証は、現行コード・既存テストの静的調査、固定upstream HEAD／管理patch digest照合、予算と中央値比の算術確認、文書参照と`git diff --check`。新規build、自動テスト再実行、browser操作、実RAW性能試験は行っていない。指定の本調査文書のみを追加し、修正実装および工程B・Cへ進まない。
+
+<a id="cpu-stage-admission-record"></a>
+
+## 10. A5-P0：CPU admission実装と追加実測資料（2026-10-24）
+
+### 10.1 旧binaryの追加実機結果
+
+提供JSON `genzoroom-raw-preview-20261024T020334Z.json`を照合した。旧binary SHA `b0fbade4ab598614e03af4c29fecfe0a3f0f000642072d602495ae8b15d78aeb`、CPU、3990×3000 DNG、1024×770、**1024 MiB budget**の24試行。ONの12件すべてapplied=true／reason=none／retained=84,367,360 bytes／gpuBytes=0、Full off/onの6組すべてSHA一致。Native中央値はDraft Cold OFF/ON=792.06/798.89ms、Full Cold=788.02/793.83ms、Draft Warm=92.79/41.84ms、Full Warm=93.81/40.49ms。
+
+旧binaryでも十分なbudgetならcacheは機能し、Warmで効果を得ている。§1〜9の「元JSON未受領」「ON効果未測定」はこの資料で更新する。512 MiBでは旧式が約922.96 MiBを要求して拒否する点は変わらない。これらはユーザーによる旧EXEの実測であり、新EXEの速度・画質・メモリ保証ではない。
+
+### 10.2 実装した計算とsource所有権
+
+Headless／StagePoolとpipelineの計量補助を管理patch内で変更した。GPU無効かつpoolにGPU device／host source保持がない場合、mode/budget変更を反映してからguard内でsourceを一度取得し、実際の`DecodedSource.image_for`のArc・寸法・Vec容量を得る。同じDecodedSourceをjobへ渡し、coldの`RenderResult.loaded`→`Session.accept`によるsource cache・decoder情報／As Shot学習を維持する。GenzoRoomの製品コード・API・settingsは変更しない。
+
+```text
+R = 全side／entryの既存CPU allocationの実capacity合計（同一Arcは一度）
+  + 未計上の当該source実capacity × 12 bytes
+  + 実Plan出力画素数P × (32 + sampled missなら12 + lin missなら12)
+CPU admit iff R <= requestedBudget
+```
+
+sampled／linはRGB32fで各12 bytes/pixel。32はlog/base/clarity/texture/darkのscalar 5面とRGB chromaticityの最大32 bytes/pixelで、hitや未使用でも置換余裕を予約する。sampledはsource Arc＋geo一致、linは加えてlin_key一致で再利用を判断する。元RAWの推定寸法ではなく、pinする実sourceの容量を計上する。同sourceを共有する2 entry／After/Beforeもallocation identityで重複除外する。
+
+既存entryをすべて課金してから追加量を予約するため、旧lin／planesと新lin／planesが共存するピークを含む。capacity=2のevictionを先取りして減算しない。1描画で作るentryは一つで、将来の2サイズ分を毎回新規確保する式にはしない。例えばsource=2560×1925、P=1024×770、Vec容量が画素数と同じなら空poolは約98.51 MiB。既存実測と同じbuffer構成でsampled/linを再利用できる場合は約104.52 MiB。512 MiB以内になるが、source／capacity／既存entryが異なれば再計算する。
+
+### 10.3 保護とfallback
+
+全容量の乗算・加算をchecked arithmeticで行う。非対応・必要情報不足・見積り不能は従来の安全側判定へ戻り、従来式もoverflowすれば拒否する。GPU有効、またはGPU device/host bufferが残る混在状態では、旧式`edge²×512 + max(originalPixels,2560²)×36 + existing CPU/GPU`を維持する。Plan計算にもpanic guardを設け、元のRenderJob guard境界を失わない。
+
+mode/budget変更はsource取得前に無効化。source／signature／geometry／library変更、失敗時clear、描画後のAfter/Before総量検査と非使用side→使用sideのtrimを維持する。post-renderのcpuBytes/gpuBytesは従来の保守的owner別計量、retainedBytesはtrim後であり、allocation共有を除いたCPU admission値と同一とは限らない。wire schemaは変更しない。
+
+Rはcacheの保持bufferとその置換時共存分の上界。decode、filter scratch、PNG、allocator、driver pool等を含むRSS／VRAM全体のhard capではない。source decodeは通常のsource owner／native working budgetが扱い、StageCache bufferはadmission後にだけ確保する。共通native予算と有限StageCache予算の双方を維持する。CPU ONでは見積り用Plan計算が一度増え、その費用もNative時間に含むため、性能は新binaryで再測定する。
+
+### 10.4 検証と残す範囲
+
+回帰対象はCPU 1024px／512 MiB、tiny／必要量超過／overflow／不明source、source共有・切替、sampled/lin再利用・置換ピーク、2 entry、Before/After、mode/budget、Full一致、cold source保持、render失敗後clear、GPU/mixedの旧判定。実binary probeにもCPU 1024px要求／512 MiB、反復・Before/After、off/on Full一致・settings不変・mode clearを追加した。
+
+最終の実行結果、再適用・release build・receiptとbinary SHAは[適応型設計§17](RAW_ADAPTIVE_PREVIEW_DESIGN.md#cpu-stage-admission-p0)に記録する。新binaryでのWindows実RAW再測定はユーザーが実施する。P1、工程B・C、GenzoRoom Frontend／Backend動作、C4保存・History、Recipe／DB／API schemaは変更していない。

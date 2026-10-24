@@ -96,6 +96,12 @@ def probe(binary):
             tool(17, "render_preview", {"id": 1, "max_side": 16, "quality": "full",
                 "stage_cache": "on", "stage_cache_budget_bytes": 1}),
             tool(18, "get_develop", {"id": 1}),
+            tool(100, "command_run", {"id": "app.gpu", "params": {"enabled": False}}),
+            *[tool(index, "render_preview", {"id": 1, "max_side": 1024, "quality": "full",
+                "stage_cache": "on", "stage_cache_budget_bytes": 512 * 1024**2,
+                **({"before": True} if index == 103 else {})}) for index in (101, 102, 103)],
+            tool(104, "render_preview", {"id": 1, "max_side": 1024, "quality": "full", "stage_cache": "off"}),
+            tool(105, "get_develop", {"id": 1}),
         ]
         invalid = []
         for field, values, code in (
@@ -177,6 +183,28 @@ def probe(binary):
             raise ValueError("quality/cache changed Full geometry or pixels")
         if replies[9]["result"]["structuredContent"] != replies[18]["result"]["structuredContent"]:
             raise ValueError("render changed develop settings")
+        if replies[100]["result"]["structuredContent"].get("enabled") is not False:
+            raise ValueError("CPU admission probe did not disable GPU rendering")
+        cpu_images = []
+        for index in (101, 102, 103, 104):
+            result = replies[index]["result"]
+            if result.get("isError") is not False:
+                raise ValueError("CPU admission render failed")
+            meta = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
+            png = base64.b64decode(next(c["data"] for c in result["content"] if c["type"] == "image"), validate=True)
+            cache = meta["stageCache"]
+            if meta["quality"] != "full" or meta["kind"] != ("before" if index == 103 else "after") \
+                    or struct.unpack(">II", png[16:24]) != (meta["width"], meta["height"]) \
+                    or max(meta["width"], meta["height"]) != 1024 or cache["gpuBytes"] != 0:
+                raise ValueError("CPU admission image contract mismatch")
+            if index != 104 and (cache["mode"] != "on" or not cache["applied"] or cache["reason"] != "none" \
+                    or cache["budgetBytes"] != 512 * 1024**2 or not 0 < cache["retainedBytes"] <= cache["budgetBytes"]):
+                raise ValueError("CPU 1024px/512MiB cache admission unavailable")
+            if index == 104 and (cache["mode"] != "off" or cache["applied"] or cache["retainedBytes"] != 0):
+                raise ValueError("CPU cache mode invalidation failed")
+            cpu_images.append(png)
+        if len(set(cpu_images)) != 1 or replies[18]["result"]["structuredContent"] != replies[105]["result"]["structuredContent"]:
+            raise ValueError("CPU cache changed Full pixels or settings")
         for index, code in invalid:
             result = replies[index]["result"]
             if result.get("isError") is not True or len(result.get("content", [])) != 1 \

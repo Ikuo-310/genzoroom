@@ -210,7 +210,7 @@ index 0c59afa6a84b0d5425fb74105bebd819ca553c4d..667aba09006d6024be1e4799a2aaa8bf
      fn describe(&self) -> String;
      /// Progress/cancellation for the next headless batch export. Other backends ignore it.
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a66f74768f 100644
+index 7c9af704d160b07ea652507e488fb66b5a57ef58..0ccdb5d662edf2ecc3a7b3ca84a8b23f1f75fac0 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
 @@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
@@ -230,7 +230,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
      }
  
      /// A headless session with the procedurally generated demo library.
-@@ -53,7 +54,62 @@ impl Headless {
+@@ -53,7 +54,84 @@ impl Headless {
      pub fn render(&mut self, p: &Value, default_size: u64) -> Result<Rgba8, String> {
          let id = self.photo_or_active(p)?;
          let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(default_size).clamp(16, 16384) as usize;
@@ -263,9 +263,31 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
 +                job.settings.crop, job.settings.orientation, job.settings.optics, job.settings.geometry,
 +                job.settings.profile, if before { baseline } else { 0 });
 +            let side = usize::from(before);
-+            let (cache, applied) = self.stages.prepare(side, &signature, options.budget, size, original);
++            self.stages.configure(options.budget);
++            // Decode once before CPU admission; preserve run()/accept() source ownership and metadata.
++            // GPU or mixed caches keep the old pre-decode bound, including after a GPU fallback.
++            let was_loaded = matches!(job.source, lightcraft_engine::media::SourceRef::Loaded(_));
++            let cpu_source = if options.budget.is_some() && !lightcraft_engine::gpu::enabled()
++                && !lightcraft_engine::gpu::shutting_down() && self.stages.cpu_only()
++            {
++                Some(lightcraft_engine::guard::catch("CPU stage admission", || {
++                    let decoded = job.source.load_source()?;
++                    let source = decoded.image_for(job.settings.denoise_amount());
++                    let info = decoded.info_or(job.info.clone());
++                    Ok::<_, String>((decoded, source, info))
++                }).map_err(|_| "preview_render_failed")?.map_err(|_| "preview_render_failed")?)
++            } else { None };
++            let input = cpu_source.as_ref().map(|(_, source, info)| crate::preview::CpuStageInput {
++                source, info, settings: &job.settings, request: &job.request,
++            });
++            let (cache, applied) = self.stages.prepare(side, &signature, options.budget, size, original, input);
++            let loaded = cpu_source.map(|(decoded, _, _)| {
++                job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(decoded.clone()));
++                decoded
++            });
 +            if let Some(cache) = cache { job = job.with_stages(cache); }
-+            let result = job.run();
++            let mut result = job.run();
++            if !was_loaded && result.rendered.is_ok() { result.loaded = loaded.or(result.loaded); }
 +            self.session.accept(&result);
 +            let rendered = result.rendered.map_err(|_| "preview_render_failed")?;
 +            let image = rendered.image;
@@ -294,7 +316,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -130,7 +186,19 @@ impl Backend for Headless {
+@@ -130,7 +208,19 @@ impl Backend for Headless {
                  if id == "app.export" {
                      return self.export(&params);
                  }
@@ -315,7 +337,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -140,14 +208,32 @@ impl Backend for Headless {
+@@ -140,14 +230,32 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -350,7 +372,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
                  }
              }
              "app.export" => self.export(&p),
-@@ -158,6 +244,8 @@ impl Backend for Headless {
+@@ -158,6 +266,8 @@ impl Backend for Headless {
          }
      }
  
@@ -359,10 +381,33 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
      fn has_ui(&self) -> bool {
          false
      }
-@@ -206,6 +294,52 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
+@@ -206,6 +316,75 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
  mod tests {
      use super::*;
  
++    #[test]
++    fn genzoroom_cpu_admission_preserves_loaded_source_and_clears_failed_render() {
++        lightcraft_engine::gpu::set_enabled(false);
++        let mut h = Headless::demo();
++        let id = h.session.active().unwrap();
++        let p = json!({"id":id.0,"size":1024,"quality":"full","stage_cache":"on","stage_cache_budget_bytes":512 << 20});
++        let options = || crate::preview::Options::parse(&p).unwrap();
++        let first = h.adaptive_render(&p, options()).unwrap();
++        assert_eq!(first["stageCache"]["applied"], true);
++        assert_eq!(first["stageCache"]["gpuBytes"], 0);
++        assert!(h.session.media.has_source(id, lightcraft_engine::SourceLevel::Preview));
++        let second = h.adaptive_render(&p, options()).unwrap();
++        assert_eq!(first["stageCache"]["retainedBytes"], second["stageCache"]["retainedBytes"]);
++        // An invalid destination fails after rendering and must discard both views.
++        let mut failed = p.clone();
++        failed["before"] = json!(true);
++        failed["path"] = json!("\0");
++        assert!(h.adaptive_render(&failed, options()).is_err());
++        assert_eq!(h.stages.finish(0, Some(512 << 20), false)["retainedBytes"], 0);
++        assert_eq!(h.adaptive_render(&p, options()).unwrap()["stageCache"]["applied"], true);
++        lightcraft_engine::gpu::set_enabled(true);
++    }
++
 +    #[test]
 +    fn genzoroom_reselection_and_memory_diagnostics_preserve_warm_stages() {
 +        use std::sync::Arc;
@@ -370,7 +415,7 @@ index 7c9af704d160b07ea652507e488fb66b5a57ef58..34b8e38fb0eaf42c6798dadb4b1cb0a6
 +        use lightcraft_raster::Rgb32f;
 +        let mut h = Headless::demo();
 +        let id = h.session.active().unwrap();
-+        let (cache, applied) = h.stages.prepare(0, "fixture", Some(lightcraft_engine::memory::budget()), 32, (32, 32));
++        let (cache, applied) = h.stages.prepare(0, "fixture", Some(lightcraft_engine::memory::budget()), 32, (32, 32), None);
 +        assert!(applied);
 +        let cache = cache.unwrap();
 +        let src = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.1; 3]));
@@ -426,17 +471,19 @@ index f632f145bb387212b8d7e463c23490f0028975a1..2065919eaa4d941854461c5ede6b2d37
  
 diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042cdd7b9b1
+index 0000000000000000000000000000000000000000..c941a6c361d82f160af2f44b262101e7a81dff16
 --- /dev/null
 +++ b/crates/mcp/src/preview.rs
-@@ -0,0 +1,344 @@
+@@ -0,0 +1,461 @@
 +//! GenzoRoom's opt-in preview envelope; legacy callers keep the original image contract.
 +use std::sync::Arc;
 +
 +use lightcraft_engine::{
 +    gpu, memory,
-+    pipeline::{StageCache, geometry::Frame},
++    pipeline::{StageCache, SourceInfo, RenderRequest, geometry::Frame},
++    develop::DevelopSettings,
 +};
++use lightcraft_raster::Rgb32f;
 +use serde_json::{Value, json};
 +use sha2::{Digest, Sha256};
 +
@@ -561,6 +608,13 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +    source: String,
 +}
 +
++pub(crate) struct CpuStageInput<'a> {
++    pub source: &'a Arc<Rgb32f>,
++    pub info: &'a SourceInfo,
++    pub settings: &'a DevelopSettings,
++    pub request: &'a RenderRequest,
++}
++
 +impl StagePool {
 +    pub fn source(&mut self, key: &str) {
 +        if self.source != key {
@@ -585,6 +639,17 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        })
 +    }
 +
++    pub fn cpu_only(&self) -> bool {
++        self.slots.iter().flatten().all(|c| gpu::stage_host_bytes(c) == 0 && gpu::stage_bytes(c) == 0)
++    }
++
++    pub fn configure(&mut self, budget: Option<usize>) {
++        if self.budget != budget || budget.is_none() {
++            self.clear();
++            self.budget = budget;
++        }
++    }
++
 +    pub fn prepare(
 +        &mut self,
 +        side: usize,
@@ -592,11 +657,9 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        budget: Option<usize>,
 +        edge: usize,
 +        original: (usize, usize),
++        cpu_input: Option<CpuStageInput<'_>>,
 +    ) -> (Option<Arc<StageCache>>, bool) {
-+        if self.budget != budget || budget.is_none() {
-+            self.clear();
-+            self.budget = budget;
-+        }
++        self.configure(budget);
 +        let Some(limit) = budget else { return (None, false) };
 +        if self.signatures[side] != signature {
 +            self.slots[side] = None;
@@ -605,11 +668,17 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        }
 +        // Two retained sizes per view; allow CPU+GPU planes and pinned host/device source copies.
 +        // This bounds admission, not the renderer's transient working memory or process RSS.
-+        let estimate = edge.checked_mul(edge).and_then(|n| n.checked_mul(512)).and_then(|n| {
++        let conservative = || edge.checked_mul(edge).and_then(|n| n.checked_mul(512)).and_then(|n| {
 +            original.0.checked_mul(original.1).map(|s| s.max(2560 * 2560)).and_then(|s| s.checked_mul(36)).and_then(|s| n.checked_add(s))
-+        });
-+        let (cpu, device) = self.sizes();
-+        if estimate.and_then(|n| n.checked_add(cpu)?.checked_add(device)).is_none_or(|n| n > limit) {
++        }).and_then(|n| { let (cpu, device) = self.sizes(); n.checked_add(cpu)?.checked_add(device) });
++        let estimate = cpu_input.filter(|_| self.cpu_only()).and_then(|input| {
++            let caches: Vec<_> = self.slots.iter().flatten().map(Arc::as_ref).collect();
++            // Planning used to run only inside RenderJob's panic guard; preserve that boundary.
++            lightcraft_engine::guard::catch("CPU stage budget", || StageCache::cpu_admission_bytes(
++                &caches, self.slots[side].as_deref(), input.source, input.info, input.settings, input.request))
++                .ok().flatten()
++        }).or_else(conservative);
++        if estimate.is_none_or(|n| n > limit) {
 +            self.slots[side] = None;
 +            return (None, false);
 +        }
@@ -712,7 +781,7 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        let mut pool = StagePool::default();
 +        pool.source("source-one");
 +        let limit = memory::budget();
-+        let (after, applied) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        let (after, applied) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32), None);
 +        assert!(applied);
 +        let after = after.unwrap();
 +        let src = Arc::new(Rgb32f::from_fn(32, 32, |x, y| [0.03 + (x + y) as f32 / 500.0; 3]));
@@ -720,9 +789,9 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        let mut s = DevelopSettings::default();
 +        let first = pipeline::render_cached(&src, &SourceInfo::default(), &s, &req, &after);
 +        assert_eq!(after.len(), 1);
-+        let (same, _) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        let (same, _) = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32), None);
 +        assert!(Arc::ptr_eq(&after, &same.unwrap()));
-+        let (before, _) = pool.prepare(1, "before-import", Some(limit), 32, (32, 32));
++        let (before, _) = pool.prepare(1, "before-import", Some(limit), 32, (32, 32), None);
 +        assert!(!Arc::ptr_eq(&after, &before.unwrap()));
 +        let mut draft = req;
 +        draft.quality = pipeline::Quality::Draft;
@@ -740,14 +809,107 @@ index 0000000000000000000000000000000000000000..b192da24a3cf7d42099aa38d79c00042
 +        assert_eq!(pool.finish(0, Some(1), true)["retainedBytes"], 0);
 +        assert!(pool.slots.iter().all(Option::is_none));
 +        // Lowering the configured limit clears both sides before any new cache admission.
-+        let (none, applied) = pool.prepare(0, "geometry-one", Some(1), 32, (32, 32));
++        let (none, applied) = pool.prepare(0, "geometry-one", Some(1), 32, (32, 32), None);
 +        assert!(none.is_none() && !applied);
 +        assert_eq!(pool.finish(0, Some(1), false)["retainedBytes"], 0);
-+        let _ = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32));
++        let _ = pool.prepare(0, "geometry-one", Some(limit), 32, (32, 32), None);
 +        pool.source("source-two");
 +        assert!(pool.slots.iter().all(Option::is_none));
-+        let _ = pool.prepare(0, "geometry-one", None, 32, (32, 32));
++        let _ = pool.prepare(0, "geometry-one", None, 32, (32, 32), None);
 +        assert_eq!(pool.finish(0, None, false)["retainedBytes"], 0);
++    }
++
++    fn cpu_prepare(pool: &mut StagePool, side: usize, src: &Arc<Rgb32f>, req: &RenderRequest, budget: usize) -> (Option<Arc<StageCache>>, bool) {
++        pool.prepare(side, "cpu-geometry", Some(budget), req.max_w.max(req.max_h), (3990, 3000),
++            Some(CpuStageInput { source: src, info: &SourceInfo::default(), settings: &DevelopSettings::default(), request: req }))
++    }
++
++    #[test]
++    fn genzoroom_cpu_1024_fits_512mib_and_full_pixels_remain_exact() {
++        let src = Arc::new(Rgb32f::from_fn(1280, 963, |x, y| [x as f32 / 1280.0, y as f32 / 963.0, 0.2]));
++        let req = RenderRequest::fit(1024, 1024);
++        let mut pool = StagePool::default();
++        let budget = 512 << 20;
++        let (cache, applied) = cpu_prepare(&mut pool, 0, &src, &req, budget);
++        assert!(applied);
++        let cache = cache.unwrap();
++        let s = DevelopSettings::default();
++        let full = pipeline::render_cached(&src, &SourceInfo::default(), &s, &req, &cache);
++        let draft = RenderRequest { quality: pipeline::Quality::Draft, ..req };
++        pipeline::render_cached(&src, &SourceInfo::default(), &s, &draft, &cache);
++        assert_eq!(pipeline::render_cached(&src, &SourceInfo::default(), &s, &req, &cache).image,
++            pipeline::render(&src, &SourceInfo::default(), &s, &req).image);
++        assert_eq!(full.image.width, 1024);
++        assert!(Arc::ptr_eq(&cache, &cpu_prepare(&mut pool, 0, &src, &req, budget).0.unwrap()));
++        let metadata = pool.finish(0, Some(budget), true);
++        assert!(metadata["retainedBytes"].as_u64().unwrap() > 0);
++        assert!(metadata["retainedBytes"].as_u64().unwrap() <= budget as u64);
++        assert_eq!(metadata["gpuBytes"], 0);
++    }
++
++    #[test]
++    fn genzoroom_cpu_required_bytes_tiny_budget_unknown_and_overflow_fail_closed() {
++        let src = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.2; 3]));
++        let req = RenderRequest::fit(1024, 1024);
++        let required = StageCache::cpu_admission_bytes(&[], None, &src, &SourceInfo::default(), &DevelopSettings::default(), &req).unwrap();
++        let mut pool = StagePool::default();
++        assert!(!cpu_prepare(&mut pool, 0, &src, &req, 1).1);
++        assert!(!cpu_prepare(&mut pool, 0, &src, &req, required - 1).1);
++        assert!(cpu_prepare(&mut pool, 0, &src, &req, required).1);
++        // GPU/mixed or unavailable CPU input retains the original conservative admission.
++        assert!(!pool.prepare(0, "cpu-geometry", Some(512 << 20), 1024, (3990, 3000), None).1);
++        assert!(!pool.prepare(0, "cpu-geometry", Some(usize::MAX), usize::MAX, (usize::MAX, 2), None).1);
++        let overflow = RenderRequest::fit(usize::MAX, usize::MAX);
++        assert!(StageCache::cpu_admission_bytes(&[], None, &src, &SourceInfo::default(), &DevelopSettings::default(), &overflow).is_none());
++        let mut invalid = (*src).clone();
++        invalid.width = usize::MAX;
++        assert!(!cpu_prepare(&mut pool, 0, &Arc::new(invalid), &req, 512 << 20).1);
++    }
++
++    #[test]
++    fn genzoroom_mixed_gpu_buffers_keep_conservative_admission() {
++        let src = Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.2; 3]));
++        let cache = Arc::new(StageCache::default());
++        if gpu::render(&src, &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(32, 32), Some(&cache)).is_none() {
++            eprintln!("GPU unavailable: mixed-device allocation fixture not exercised");
++            return;
++        }
++        let budget = 512 << 20;
++        let mut pool = StagePool { budget: Some(budget), ..Default::default() };
++        pool.slots[1] = Some(cache);
++        assert!(!pool.cpu_only());
++        assert!(!cpu_prepare(&mut pool, 0, &src, &RenderRequest::fit(1024, 1024), budget).1);
++        assert!(pool.slots[1].is_some());
++    }
++
++    #[test]
++    fn genzoroom_cpu_two_entries_both_sides_and_lifecycle_are_bounded() {
++        let src = Arc::new(Rgb32f::from_fn(96, 72, |_, _| [0.2; 3]));
++        let mut pool = StagePool::default();
++        pool.source("one");
++        let budget = 512 << 20;
++        for side in 0..2 {
++            for edge in [32, 64, 32] {
++                let req = RenderRequest::fit(edge, edge);
++                let cache = cpu_prepare(&mut pool, side, &src, &req, budget).0.unwrap();
++                pipeline::render_cached(&src, &SourceInfo::default(), &DevelopSettings::default(), &req, &cache);
++                assert!(cache.len() <= 2);
++            }
++            assert_eq!(pool.slots[side].as_ref().unwrap().len(), 2);
++        }
++        assert!(!Arc::ptr_eq(pool.slots[0].as_ref().unwrap(), pool.slots[1].as_ref().unwrap()));
++        assert!(pool.finish(0, Some(budget), true)["retainedBytes"].as_u64().unwrap() <= budget as u64);
++        let before = pool.slots[1].as_ref().unwrap().clone();
++        let req = RenderRequest::fit(64, 64);
++        assert!(!cpu_prepare(&mut pool, 0, &src, &req, 1).1);
++        assert!(before.is_empty()); // A budget change invalidates both views.
++        assert!(pool.slots[0].is_none() && pool.slots[1].is_none());
++        cpu_prepare(&mut pool, 0, &src, &req, budget);
++        pool.source("two");
++        assert!(pool.slots.iter().all(Option::is_none));
++        cpu_prepare(&mut pool, 0, &src, &req, budget);
++        pool.prepare(0, "cpu-geometry", None, 64, (3990, 3000), None);
++        assert!(pool.slots.iter().all(Option::is_none));
 +    }
 +}
 +
@@ -1070,7 +1232,7 @@ index 3f2766750c3c7f036ff9c4a066176ef51f53e522..4b520482bd65e63b3970d756dedd233c
      pub fn native_size(&self) -> (f64, f64) {
          let r = self.crop.rect_px(self.ow, self.oh);
 diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
-index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1ac5ace68b 100644
+index 455cec022178c3a179eda09be186bdc135c2de24..6a9899bfd932fded88ee04a8874da5f3fa33821e 100644
 --- a/crates/pipeline/src/lib.rs
 +++ b/crates/pipeline/src/lib.rs
 @@ -189,6 +189,8 @@ impl RenderRequest {
@@ -1082,7 +1244,7 @@ index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1a
      /// The result, 8-bit (for deep renders: `deep` reduced to 8 bits, display-encoded).
      pub image: Rgba8,
      pub histogram: Histogram,
-@@ -288,6 +290,15 @@ impl StageCache {
+@@ -288,6 +290,74 @@ impl StageCache {
      /// Bytes of the intermediate images held (each buffer counted once; the sources they were
      /// made from belong to their owner and are not counted).
      pub fn bytes(&self) -> usize {
@@ -1094,11 +1256,70 @@ index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1a
 +        self.count_bytes(true)
 +    }
 +
++    /// Bound cache-owned CPU buffers alive during the next render, including replaced entries.
++    /// Sources shared by views are one allocation; decode/filter scratch memory has other owners.
++    pub fn cpu_admission_bytes(
++        caches: &[&StageCache],
++        target: Option<&StageCache>,
++        src: &Arc<Rgb32f>,
++        info: &SourceInfo,
++        s: &DevelopSettings,
++        req: &RenderRequest,
++    ) -> Option<usize> {
++        if req.window.is_some() || req.depth != OutputDepth::U8
++            || src.width == 0 || src.height == 0
++            || src.width.checked_mul(src.height)? != src.data.len()
++        {
++            return None;
++        }
++        fn add<T>(image: &Arc<lightcraft_raster::Image<T>>, seen: &mut Vec<usize>, total: &mut usize) -> Option<()> {
++            let id = Arc::as_ptr(image) as usize;
++            if !seen.contains(&id) {
++                let bytes = image.data.capacity().checked_mul(std::mem::size_of::<T>())?;
++                *total = total.checked_add(bytes)?;
++                seen.push(id);
++            }
++            Some(())
++        }
++        let mut seen = Vec::new();
++        let mut total = 0usize;
++        for cache in caches {
++            for e in cache.lock().iter() {
++                add(&e.src, &mut seen, &mut total)?;
++                add(&e.sampled, &mut seen, &mut total)?;
++                if let Some((_, lin)) = &e.lin { add(lin, &mut seen, &mut total)?; }
++                let p = &e.planes;
++                for plane in p.log_l.iter().chain(p.base.iter().map(|x| &x.1))
++                    .chain(p.clarity.iter().map(|x| &x.1)).chain(p.texture.iter().map(|x| &x.1))
++                    .chain(p.dark.iter().map(|x| &x.1))
++                {
++                    add(plane, &mut seen, &mut total)?;
++                }
++                if let Some((_, chroma)) = &p.chroma { add(chroma, &mut seen, &mut total)?; }
++            }
++        }
++        add(src, &mut seen, &mut total)?;
++        let effective = s.effective();
++        let rendition = settings_for(&effective, req);
++        let plan = plan(src, info, &rendition, req);
++        let pixels = plan.w.checked_mul(plan.h)?;
++        if pixels == 0 { return None; }
++        let cached = target.and_then(|c| c.get(src, plan.geo));
++        // Reserve every spatial plane even on a hit: radius/quality changes can replace them.
++        // Existing entries stay charged until put() evicts them, so old/new overlap is covered.
++        let mut per_pixel = 32usize; // five scalar planes + RGB chromaticity
++        if cached.is_none() { per_pixel = per_pixel.checked_add(12)?; }
++        if cached.as_ref().and_then(|e| e.lin.as_ref()).is_none_or(|(key, _)| *key != plan.lin_key) {
++            per_pixel = per_pixel.checked_add(12)?;
++        }
++        total.checked_add(pixels.checked_mul(per_pixel)?)
++    }
++
 +    fn count_bytes(&self, include_sources: bool) -> usize {
          fn size<T>(i: &lightcraft_raster::Image<T>) -> usize {
              i.data.len() * std::mem::size_of::<T>()
          }
-@@ -300,6 +311,12 @@ impl StageCache {
+@@ -300,6 +370,12 @@ impl StageCache {
              }
          };
          for e in self.lock().iter() {
@@ -1111,7 +1332,7 @@ index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1a
              add(Arc::as_ptr(&e.sampled) as usize, size(&e.sampled));
              if let Some((_, l)) = &e.lin {
                  add(Arc::as_ptr(l) as usize, size(l));
-@@ -601,7 +618,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+@@ -601,7 +677,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
          let image = deep.to_rgba8();
          let histogram = Histogram::of_srgb8(&image);
          lap("finish (deep)", &mut t);
@@ -1120,7 +1341,7 @@ index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1a
      }
      let image = finish::finish(&prep, s, frame, info, req.space, req.display.as_ref(), req.proof);
      lap("finish", &mut t);
-@@ -627,7 +644,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+@@ -627,7 +703,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
          }
          lap("visualize hdr", &mut t);
      }
@@ -1130,10 +1351,52 @@ index 455cec022178c3a179eda09be186bdc135c2de24..d9e6e82bbd96c042c685507ca5a45e1a
  
  /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
 diff --git a/crates/pipeline/src/tests.rs b/crates/pipeline/src/tests.rs
-index 910705497e9d6112fecbd52112493626cfdd417d..8f6c52c32ee4c23b6431aed004437c9e304e59d7 100644
+index 910705497e9d6112fecbd52112493626cfdd417d..7498802141237e081869ddce652ee9a905e54e7e 100644
 --- a/crates/pipeline/src/tests.rs
 +++ b/crates/pipeline/src/tests.rs
-@@ -790,3 +790,60 @@ fn sliver_crops_render_quickly_with_wide_stages_on() {
+@@ -11,6 +11,41 @@ fn scene() -> Rgb32f {
+     lightcraft_scenes::demo_library()[0].render(240, 160)
+ }
+ 
++#[test]
++fn genzoroom_cpu_admission_deduplicates_sources_and_reserves_replacement_overlap() {
++    use crate::StageCache;
++    use std::sync::Arc;
++    let source = Arc::new(scene());
++    let other = Arc::new((*source).clone());
++    let s = DevelopSettings::default();
++    let info = SourceInfo::default();
++    let req = RenderRequest::fit(120, 120);
++    let cache = StageCache::default();
++    let fresh = StageCache::cpu_admission_bytes(&[], None, &source, &info, &s, &req).unwrap();
++    let pixels = 120 * 80;
++    assert_eq!(fresh, source.data.capacity() * 12 + pixels * 56);
++    crate::render_cached(&source, &info, &s, &req, &cache);
++    let warm = StageCache::cpu_admission_bytes(&[&cache], Some(&cache), &source, &info, &s, &req).unwrap();
++    assert_eq!(warm, cache.retained_bytes() + pixels * 32);
++    assert_eq!(warm, StageCache::cpu_admission_bytes(&[&cache, &cache], Some(&cache), &source, &info, &s, &req).unwrap());
++    let peer = StageCache::default();
++    crate::render_cached(&source, &info, &s, &req, &peer);
++    let both = StageCache::cpu_admission_bytes(&[&cache, &peer], Some(&cache), &source, &info, &s, &req).unwrap();
++    assert_eq!(both, cache.retained_bytes() + peer.retained_bytes() - source.data.capacity() * 12 + pixels * 32);
++    let changed = StageCache::cpu_admission_bytes(&[&cache], Some(&cache), &other, &info, &s, &req).unwrap();
++    assert_eq!(changed, cache.retained_bytes() + other.data.capacity() * 12 + pixels * 56);
++    let mut wb = s.clone();
++    wb.wb.mode = lightcraft_develop::WbMode::Custom;
++    wb.wb.tint += 10.0;
++    let replacing = StageCache::cpu_admission_bytes(&[&cache], Some(&cache), &source, &info, &wb, &req).unwrap();
++    assert_eq!(replacing, cache.retained_bytes() + pixels * 44); // sampled reused, old/new lin coexist
++    let mut spare = (*source).clone();
++    spare.data.reserve(100);
++    let spare = Arc::new(spare);
++    assert_eq!(StageCache::cpu_admission_bytes(&[], None, &spare, &info, &s, &req).unwrap(),
++        spare.data.capacity() * 12 + pixels * 56);
++}
++
+ #[test]
+ fn default_render_is_sane() {
+     let r = render(&scene(), &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(240, 240));
+@@ -790,3 +825,60 @@ fn sliver_crops_render_quickly_with_wide_stages_on() {
          assert!(r.image.width >= 1 && r.image.height >= 1, "{rect:?}");
      }
  }
