@@ -70,10 +70,90 @@ it('connects Region only explicitly and clears document-owned candidates on phot
   await act(async () => { expect(delivery.submit({ planGeneration: 100, items: [item] })).toBe(true); });
   await flush();
   expect(delivery.candidate?.result.operation).toBe('render');
-  expect(current!.url).toBe(wholeUrl); expect(createURL).toHaveBeenCalledTimes(1);
+  expect(current!.url).toBe(wholeUrl); expect(createURL).toHaveBeenCalledTimes(2);
   await render(null); await flush();
   expect(delivery.candidate).toBeUndefined(); expect(delivery.state.pending).toBeUndefined();
   expect(delivery.submit({ planGeneration: 101, items: [item] })).toBe(false);
+});
+
+it.each(['pagehide', 'departure', 'mutation', 'beforeEnd'])('reclaims a decoded Region display on %s', async boundary => {
+  const asset = regionRequest().identity.assetId;
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+    handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
+  vi.stubGlobal('Image', class { src = ''; get naturalWidth() { return this.src === 'blob:raw-1' ? 16 : 8; }
+    get naturalHeight() { return this.src === 'blob:raw-1' ? 12 : 8; }
+    decode() { return Promise.resolve(); } removeAttribute() {} });
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, fullWidth: 16, fullHeight: 12, aspect: 4/3, window: null } });
+  vi.mocked(api.rawRegion).mockImplementation(async (_doc, target) => ({ operation: 'render',
+    metadata: regionResponse(target as ReturnType<typeof regionRequest>), blob: new Blob(['region']) }));
+  await render(asset); await flush();
+  expect(window.genzoroomRegion).toBeUndefined();
+  await act(async () => { await current!.connectRegion(); });
+  const doc = current!.document!, delivery = current!.regionDelivery!;
+  const item = regionRequest({ identity: { assetId: asset, sourceId: 'b'.repeat(64), generation: doc.generation,
+    documentToken: doc.documentToken, kind: 'after', revision: doc.revision }, documentRevision: doc.revision,
+    fullWidth: 16, fullHeight: 12, window: { x: 0, y: 0, w: 8, h: 8 }, validRegion: { x: 0, y: 0, w: 8, h: 8 }, context: 0 });
+  await act(async () => { delivery.submit({ planGeneration: 100, items: [item] }); }); await flush();
+  expect(current!.regionDisplay?.after.url).toBe('blob:raw-2');
+  expect(current!.regionDisplay?.wholeAfter.url).toBe(current!.url);
+  if (boundary === 'pagehide') { await act(async () => window.dispatchEvent(new Event('pagehide'))); }
+  else if (boundary === 'departure') await render(null);
+  else if (boundary === 'mutation') await act(async () => current!.changeControls({ 'light.exposure': 1 }));
+  else { await render(asset, true); await render(asset, false); }
+  await flush();
+  expect(current?.regionDisplay).toBeUndefined();
+  expect(revokeURL.mock.calls.filter(([url]) => url === 'blob:raw-2')).toHaveLength(1);
+});
+
+it('installs the opt-in manual diagnostic trigger without automatic requests and removes it on departure', async () => {
+  localStorage.setItem('genzoroom-raw-region-debug', '1');
+  try {
+    vi.mocked(api.rawRegionOwner).mockResolvedValue({ sourceId: 'b'.repeat(64), supported: false });
+    await render('a'); await flush();
+    expect(window.genzoroomRegion).toBeDefined(); expect(api.rawRegionOwner).not.toHaveBeenCalled();
+    expect(api.rawRegion).not.toHaveBeenCalled();
+    await act(async () => { expect(await window.genzoroomRegion!.request({
+      visible: { x0: 0, y0: 0, x1: 100, y1: 100 }, context: 0, prefetch: 0 })).toBe(false); });
+    expect(api.rawRegion).not.toHaveBeenCalled();
+    await render(null); expect(window.genzoroomRegion).toBeUndefined();
+  } finally { localStorage.removeItem('genzoroom-raw-region-debug'); }
+});
+
+it('adopts both Region sides and safely rebinds the unchanged B1 Before base after an After revision', async () => {
+  const asset = regionRequest().identity.assetId; enableBefore();
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+    handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
+  createURL.mockImplementation((blob: Blob) => `blob:${blob.type.includes('region') ? 'region' : 'base'}-${createURL.mock.calls.length}`);
+  vi.stubGlobal('Image', class { src = ''; get naturalWidth() { return this.src.includes('region') ? 8 : 16; }
+    get naturalHeight() { return this.src.includes('region') ? 8 : 12; } decode() { return Promise.resolve(); } removeAttribute() {} });
+  vi.mocked(api.rawPreview).mockImplementation(async (doc, _serial, _signal, kind = 'after', target) => ({
+    blob: new Blob(['base'], { type: 'image/base' }), width: 16, height: 12, epoch: 1, sequence: 1, kind,
+    quality: target!.quality, key: kind === 'before' ? doc.beforeKey! : undefined,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, fullWidth: 16, fullHeight: 12, aspect: 4/3, window: null } }));
+  vi.mocked(api.rawRegion).mockImplementation(async (_doc, target) => ({ operation: 'render',
+    metadata: regionResponse(target as ReturnType<typeof regionRequest>), blob: new Blob(['region'], { type: 'image/region' }) }));
+  await render(asset, true); await flush();
+  await act(async () => { await current!.connectRegion(); });
+  const submit = async (generation: number) => {
+    const doc = current!.document!;
+    const after = regionRequest({ identity: { assetId: asset, sourceId: 'b'.repeat(64), generation: doc.generation,
+      documentToken: doc.documentToken, kind: 'after', revision: doc.revision }, documentRevision: doc.revision,
+      fullWidth: 16, fullHeight: 12, window: { x: 0, y: 0, w: 8, h: 8 }, validRegion: { x: 0, y: 0, w: 8, h: 8 }, context: 0 });
+    const before = { ...after, requestId: 'e'.repeat(32), identity: { assetId: asset, sourceId: 'b'.repeat(64),
+      generation: doc.generation, documentToken: doc.documentToken, kind: 'before' as const, beforeKey: doc.beforeKey! } };
+    await act(async () => { expect(current!.regionDelivery!.submit({ planGeneration: generation, items: [after, before] })).toBe(true); });
+    await flush();
+  };
+  await submit(100);
+  expect(current!.regionDisplay?.before?.metadata.kind).toBe('before');
+  const baseline = current!.regionDisplay!.wholeBefore!.url;
+  await render(asset, false); await act(async () => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
+  expect(current!.imageRevision).toBe(2);
+  await render(asset, true); await flush(); await submit(200);
+  expect(current!.regionDisplay?.wholeBefore?.url).toBe(baseline);
+  expect(current!.regionDisplay?.wholeBefore?.doc.revision).toBe(2);
+  expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(1);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 

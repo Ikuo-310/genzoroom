@@ -3,6 +3,7 @@ import { EMPTY_PREVIEW_PLAN, replacePreviewPlan, takePreviewItem, finishPreviewI
   type PreviewPlan, type PreviewPlanItem, type PreviewPlanState } from './rawRegionSchedule';
 import type { RegionGeometry } from './rawRegionPlanner';
 import { frontendLogger } from './frontendLogging';
+import { checkRegionResponse } from './rawRegionContract';
 
 export type RegionDeliveryOwner = { doc: RawDocument; sourceId: string; supported: boolean;
   geometry: RegionGeometry; blocked: boolean; wholeBusy: boolean };
@@ -23,8 +24,22 @@ export class RawRegionDelivery {
   private queuedAt = 0;
   private serial = 0;
   private latestView = -1;
+  private targets: readonly PreviewPlanItem[] = [];
+  private listeners = new Set<(candidate: RegionCandidate | undefined, error?: unknown) => void>();
   constructor(private readonly options: Options) {}
   get owner() { const owner = this.options.owner(); return owner ? structuredClone(owner) : undefined; }
+  subscribe(listener: (candidate: RegionCandidate | undefined, error?: unknown) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  isCurrent(candidate: RegionCandidate) {
+    const item = this.targets.find(i => i.requestId === candidate.item.requestId);
+    if (this.closed || candidate.planGeneration !== this.state.latestPlanGeneration || !item
+      || JSON.stringify(item) !== JSON.stringify(candidate.item) || !this.current(item)) return false;
+    if (item.mode === 'whole' && candidate.result.operation === 'whole') {
+      const f = candidate.result.frame;
+      return f.quality === item.quality && f.kind === item.identity.kind && f.frame?.geometryId === this.owner?.geometry.geometryId;
+    }
+    return item.mode === 'region' && !('desiredLongEdge' in item) && candidate.result.operation === 'render'
+      && checkRegionResponse(item, candidate.result.metadata).status === 'accepted';
+  }
   resetDocument() { this.invalidate(); this.latestView = -1; }
   private current(item: PreviewPlanItem, owner = this.options.owner()) {
     const i = item.identity, d = owner?.doc;
@@ -49,6 +64,7 @@ export class RawRegionDelivery {
     const next = replacePreviewPlan(this.state, plan);
     if (next === this.state) return false;
     this.state = next;
+    this.targets = next.pending!.items;
     this.latestView = plan.items[0].viewGeneration;
     this.candidate = this.preflight = undefined;
     this.queuedAt = performance.now();
@@ -56,6 +72,7 @@ export class RawRegionDelivery {
     this.pump(); return true;
   }
   invalidate() {
+    this.targets = [];
     const hadWork = !!(this.state.pending || this.state.running || this.candidate || this.preflight);
     this.state = invalidatePreviewPlan(this.state, this.state.latestPlanGeneration + 1);
     this.candidate = this.preflight = undefined;
@@ -63,6 +80,7 @@ export class RawRegionDelivery {
     // HTTP abort detaches the waiter. The Backend worker still joins readback and validation.
     if (running?.item.mode === 'region' && this.sentDocument) void cancelRawRegion(this.sentDocument, running.item.requestId).catch(() => {});
     this.controller?.abort();
+    this.listeners.forEach(listener => listener(undefined));
     if (hadWork) this.options.changed?.();
   }
   refresh() {
@@ -72,7 +90,7 @@ export class RawRegionDelivery {
       || this.preflight && !this.current(this.preflight.item)) this.invalidate();
     this.pump();
   }
-  dispose() { this.closed = true; this.invalidate(); }
+  dispose() { this.closed = true; this.invalidate(); this.listeners.clear(); }
   private pump() {
     const owner = this.options.owner();
     if (this.closed || !owner || owner.blocked || owner.wholeBusy || this.state.running || !this.state.pending) return;
@@ -98,13 +116,18 @@ export class RawRegionDelivery {
         // Preflight replaces its entire unsent tail; only an explicit new plan may use confirmed F.
         this.state = { ...this.state, pending: undefined };
         this.diagnostic(item, 'geometry_replan', planGeneration);
+        this.listeners.forEach(listener => listener(candidate));
         const next = this.options.replan?.(candidate);
         if (next) this.submit(next);
-      } else { this.candidate = candidate; this.diagnostic(item, 'accepted', planGeneration); }
-    }).catch(error => this.diagnostic(item, controller.signal.aborted ? 'cancelled'
+      } else { this.candidate = candidate; this.diagnostic(item, 'accepted', planGeneration);
+        this.listeners.forEach(listener => listener(candidate)); }
+    }).catch(error => {
+      this.diagnostic(item, controller.signal.aborted ? 'cancelled'
       : error instanceof RawSuperseded ? 'superseded'
       : error instanceof RawApiError && error.code === 'raw_region_unsupported' ? 'capability_missing'
-      : error instanceof RawApiError && error.code === 'raw_region_geometry_mismatch' ? 'whole_fallback' : 'failed', planGeneration))
+      : error instanceof RawApiError && error.code === 'raw_region_geometry_mismatch' ? 'whole_fallback' : 'failed', planGeneration);
+      if (this.state.latestPlanGeneration === planGeneration) this.listeners.forEach(listener => listener(undefined, error ?? new Error('raw_region_failed')));
+    })
       .finally(() => {
         this.state = finishPreviewItem(this.state, planGeneration, item.requestId);
         if (this.controller === controller) { this.controller = undefined; this.sentDocument = undefined; }

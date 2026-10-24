@@ -11,11 +11,13 @@ import type { EditImageSource } from './editImageSource';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 import type { HistogramChangeHandler } from './histogram';
 import type { RawView } from './rawWholePreview';
+import type { RawRegionDisplay } from './rawRegionOverlay';
 
 type ImageViewerProps = {
   src: string;
   documentKey?: string;
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
+  rawRegionDisplay?: RawRegionDisplay;
   onRawViewChange?: (view: RawView) => void;
   previewStatus?: 'loading' | 'error';
   statusNote?: string;
@@ -53,7 +55,7 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 
-export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -101,6 +103,10 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
   }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode]);
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
+  const regionDisplay = rawRegionDisplay?.after.metadata.geometryId === rawFrame?.geometryId
+    && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
+  const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;
+  const regionBase = showBeforeAdjustments ? regionDisplay?.wholeBefore : regionDisplay?.wholeAfter;
   useLayoutEffect(() => {
     onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
   }, [showBeforeAdjustments, onBeforeAdjustmentsDisplayChange]);
@@ -357,7 +363,19 @@ export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previ
         {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setLoadedImage({ identity: imageIdentity, status: 'ready', size: { x: width, y: height } }); }}
-          onError={() => { setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE }); onImageError?.(); }} /> : src && !previewStatus ? <img
+          onError={() => { setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE }); onImageError?.(); }} /> : src && !previewStatus && rawFrame && previewPixels ? <div
+            className="raw-native-frame" style={{ position: 'relative', width: imageSize.x * scale, height: imageSize.y * scale }}>
+            <img className="raw-whole-base" src={regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src)} alt={alt} draggable="false"
+              style={{ width: '100%', height: '100%' }} onLoad={event => setLoadedImage({ identity: imageIdentity, status: 'ready',
+                size: { x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight } })}
+              onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })} />
+            {regionLayer && <img className="raw-region-overlay" src={regionLayer.url} alt="" aria-hidden="true" draggable="false"
+              style={{ position: 'absolute', pointerEvents: 'none', boxShadow: 'none',
+                left: regionLayer.nativePlacement.x0 * scale, top: regionLayer.nativePlacement.y0 * scale,
+                width: (regionLayer.nativePlacement.x1 - regionLayer.nativePlacement.x0) * scale,
+                height: (regionLayer.nativePlacement.y1 - regionLayer.nativePlacement.y0) * scale,
+                clipPath: `inset(${(regionLayer.validNativeRect.y0 - regionLayer.nativePlacement.y0) * scale}px ${(regionLayer.nativePlacement.x1 - regionLayer.validNativeRect.x1) * scale}px ${(regionLayer.nativePlacement.y1 - regionLayer.validNativeRect.y1) * scale}px ${(regionLayer.validNativeRect.x0 - regionLayer.nativePlacement.x0) * scale}px)` }} />}
+          </div> : src && !previewStatus ? <img
           src={showBeforeAdjustments && beforeSrc ? beforeSrc : src}
           alt={alt}
           draggable="false"

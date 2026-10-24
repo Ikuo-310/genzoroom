@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## 工程C2-B：Region Viewer overlay統合（2026-10-25）
+
+基準 `d12b38869538993700ea785e009d661e592256a5` からRAW専用Whole/Region共通wrapperと表示ownerを追加した。C0のNative placement／valid域clipを使い、decode後のowner/plan/request再確認、有限URL参照、Draft/Full整合交換、Before/After pairの両側採用、比較終了・mutation・photo離脱等の回収を接続した。JPEG描画分岐、Native/Backend、P1/History/save queueは維持する。通常UIからRegionを自動要求せず、localStorageで事前に有効にした内部diagnostic triggerだけが明示planを発行する。
+
+初回関連17ファイル526件は525成功／1失敗。JPEG永続化試験の既存range index依存の失敗は、基準Commitを隔離展開した環境でも再現したため範囲外課題として残す。最終修正後の関連9ファイル292件、TypeScript／production build、Windows hostのCargo dev buildは成功した。既存chunk警告とincremental cacheのhard-link→copy警告は残る。限定再監査の未解決High/Mediumは0。
+
+C1 EXE実SHAとreceiptの各contract 1を確認し、Nativeを再buildしていない。実画面・実RAW/GPU・NAS/Firefoxは未確認。Dehaze最大3 LSB差を隠す処理は追加しない。[Region設計書§14](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#14-c2-b実装完了region-viewer-overlay統合2026-10-25)に起動・明示request・比較・解除手順とC2-C開始条件を記録した。自動Pan/Zoom要求、threshold、製品context/prefetch／予算／性能値、Export、Scopeは未実装。通常利用者向け挙動はB1のためREADME/CHANGELOGは変更しない。
+
 ## 工程C1：Region Native/Backend完了（2026-10-25）
 
 C0 `e0e442c`を基準に固定LC v0.10.0へ独立Region tool、実Plan preflight、厳密schema/PNG/work budget、共有StagePool、既存ownerへ合流するBackend adapterとoptional capabilityを追加した。C0共有fixtureをNativeでも利用し、旧B1実binaryのWhole継続を確認。C2のHTTP Region route、Viewer overlay、Pan要求は未接続。

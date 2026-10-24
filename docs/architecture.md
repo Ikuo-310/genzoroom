@@ -1487,3 +1487,18 @@ The [C2-A contract](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#13-c2-a完�
 | Region owner/candidates/preflight | Explicit `connectRegion()` and `regionDelivery.owner/state/submit/candidate/preflight`; public/content/revision/geometry and latest plan/view guards, invalidated on mutation, display invalidation, regeneration and departure. No Region object URLs yet. |
 
 Cancellation retains the transmitted document identity and detaches only its HTTP waiter; Native readback/validation remain owned until completion. Preflight drops its unsent tail and requires a new plan using confirmed dimensions. Stale candidates are never implicitly rebound; future reuse must use `canReuseRegion()`. Capability absence prevents plan admission while preserving Whole availability. No Viewer calls this boundary automatically, and no overlay, Pan dispatch, comparison Region UI or P1/History/save queue changes are included.
+
+### RAW Region Viewer overlays (C2-B)
+
+The [C2-B implementation and acceptance procedure](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#14-c2-b実装完了region-viewer-overlay統合2026-10-25) adds a RAW-only Native frame wrapper inside the existing Viewer position transform. Whole remains the base; Region is an absolute, pointer-transparent img mapped with C0 `regionNativeRect()` and clipped to `validNativeRect`. Both layers share the same scale and Pan. JPEG rendering and request generation remain outside this wrapper.
+
+| Display state | Owner and invariants |
+| --- | --- |
+| Current plan descriptors | `RawRegionDelivery`; at most six targets and synchronous result subscriptions. `isCurrent()` rechecks owner, revision, plan/view/request identity and the C0 response before and after decode. |
+| Pending/decoded Region | `RawRegionOverlay`; one running decode, four fixed unsent Whole/Region × After/Before slots with no URL, at most one decoded Region candidate per side. Stale stages cannot become current merely because a Whole base arrives later. |
+| Adopted display | One After Region and optional Before Region with retained matching Whole bases. Same owner/revision/geometry/Native dimensions/quality/F; comparison additionally requires a matching C0 pair and plan/view. Draft survives until all required Full components arrive. |
+| Blob URLs | `RawPreviewUrls` reference counts separate the UI's Whole reference from retained display bases. Candidate failure, replacement, mutation, owner/geometry change, comparison end and document lifecycle release ownership. Retired bases are not adopted. |
+
+The B1 Before baseline may keep its bitmap across After revisions; only its receipt revision is rebound after a newly confirmed After Whole proves the same owner/beforeKey/geometry/quality. Region content reuse is a separate pure `rebindRegion()` helper using `canReuseRegion()`, never implicit stale adoption. Before Whole descriptors share the existing Before serial counter.
+
+Only the explicit localStorage diagnostic opt-in registers `window.genzoroomRegion.request/status/clear`. It submits preflight and render through C2-A's finite owner with caller-supplied test margins and Native rect. Normal Viewer controls never request Region. No Pan scheduler, automatic threshold, product margins, feathering, Export or Scope is implemented. Windows build preparation and binary receipt verification are complete; visual acceptance remains manual.

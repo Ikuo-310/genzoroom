@@ -14,6 +14,8 @@ import type { EditImageSource } from './editImageSource';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 import { WEBGPU_STORAGE_KEY } from './webgpuSettings';
+import { regionRequest, regionResponse } from './test/rawRegion';
+import { regionLayerPlacement, type RawRegionDisplay } from './rawRegionOverlay';
 
 vi.mock('./jpegProfile', () => ({ readJpegProfile: vi.fn(async () => ({ status: 'embedded', description: 'Display P3' })) }));
 
@@ -171,6 +173,37 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it.each([1, 1.25, 1.5, 2])('shares Native scale, pan and comparison placement at DPR %s', dpr => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
+    const metadata = regionResponse(), geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };
+    const layer = { url: 'blob:region-after', metadata, planGeneration: 1, ...regionLayerPlacement(metadata, geometry) };
+    const whole = { url: 'blob:base-after', doc: { workspaceId: 'w', handle: 'h', ...metadata.identity, revision: 2 },
+      frame: { ...geometry, fullWidth: 4000, fullHeight: 3000, aspect: 4/3, window: null }, quality: 'full' as const };
+    const display: RawRegionDisplay = { after: layer, wholeAfter: whole,
+      before: { ...layer, url: 'blob:region-before' }, wholeBefore: { ...whole, url: 'blob:base-before' } };
+    const render = (before: boolean, value = display) => act(() => root.render(<ImageViewer src="blob:current-whole" documentKey="raw"
+      rawFrame={geometry} rawRegionDisplay={value} previewPixels beforeSrc="blob:before-whole" persistentBeforeAdjustments={before}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    render(false);
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(b => b.textContent === '1:1')!);
+    const overlay = host.querySelector<HTMLImageElement>('.raw-region-overlay')!;
+    expect(parseFloat(overlay.style.left)).toBeCloseTo(1000/dpr, 10); expect(parseFloat(overlay.style.top)).toBeCloseTo(800/dpr, 10);
+    expect(parseFloat(overlay.style.width)).toBeCloseTo(1000/dpr, 10); expect(overlay.style.pointerEvents).toBe('none');
+    expect(overlay.style.clipPath).toBe(`inset(${16/dpr}px ${16/dpr}px ${16/dpr}px ${16/dpr}px)`);
+    expect(host.querySelector<HTMLImageElement>('.raw-whole-base')!.getAttribute('src')).toBe('blob:base-after');
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
+    const placement = overlay.style.cssText;
+    render(true);
+    expect(host.querySelector<HTMLImageElement>('.raw-region-overlay')!.style.cssText).toBe(placement);
+    expect(host.querySelector<HTMLImageElement>('.raw-region-overlay')!.getAttribute('src')).toBe('blob:region-before');
+    expect(host.querySelector<HTMLImageElement>('.raw-whole-base')!.getAttribute('src')).toBe('blob:base-before');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(position);
+    render(true, { ...display, before: undefined });
+    expect(host.querySelector('.raw-region-overlay')).toBeNull();
+    expect(host.querySelector<HTMLImageElement>('.raw-whole-base')!.getAttribute('src')).toBe('blob:before-whole');
+    render(false, { ...display, after: { ...layer, metadata: { ...metadata, geometryId: 'f'.repeat(64) } } });
+    expect(host.querySelector('.raw-region-overlay')).toBeNull();
+  });
   it('uses native RAW dimensions for Fit and physical 1:1, preserving transform across bitmap changes', () => {
     let resize = () => {};
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
@@ -187,18 +220,18 @@ describe('Viewer edit settings context menu', () => {
     act(() => resize());
     expect(viewChanged).toHaveBeenLastCalledWith(expect.objectContaining({ width: 900, height: 600, dpr: 2, nativeWidth: 6000, fit: true }));
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('30%');
-    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('900px');
+    expect(host.querySelector<HTMLElement>('.raw-native-frame')!.style.width).toBe('900px');
     click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(b => b.textContent === '1:1')!);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
-    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('3000px');
+    expect(host.querySelector<HTMLElement>('.raw-native-frame')!.style.width).toBe('3000px');
     const transform = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
     render('blob:full');
-    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('3000px');
+    expect(host.querySelector<HTMLElement>('.raw-native-frame')!.style.width).toBe('3000px');
     expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(transform);
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1 });
     act(() => window.dispatchEvent(new Event('resize')));
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
-    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('6000px');
+    expect(host.querySelector<HTMLElement>('.raw-native-frame')!.style.width).toBe('6000px');
   });
   it('keeps native Preview load state aligned with its document across fast loads and JPEG switches', () => {
     const render = (props: { src: string; documentKey?: string; previewStatus?: 'loading' | 'error'; autoLoad: boolean }) =>

@@ -736,6 +736,7 @@ export function AnshitsuPage() {
             : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           rawFrame={rawDocument?.frame}
+          rawRegionDisplay={rawDocument?.regionDisplay}
           onRawViewChange={rawDocument?.viewChanged}
           beforeAvailable={!activeDetail.is_raw || !!rawDocument?.beforeAvailable}
           beforeSrc={activeDetail.is_raw ? rawDocument?.beforeUrl : undefined}

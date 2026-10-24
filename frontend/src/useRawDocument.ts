@@ -8,6 +8,8 @@ import { RawRecipeSave } from './rawRecipeSave';
 import { rawWholeSide, type RawView } from './rawWholePreview';
 import { rawRegionOwner, rawRegion } from './rawApi';
 import { RawRegionDelivery } from './rawRegionDelivery';
+import { RawPreviewUrls, RawRegionOverlay, type RawWholeSurface } from './rawRegionOverlay';
+import { requestManualRegion } from './rawRegionManual';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
@@ -24,10 +26,10 @@ function log(code: string, event = 'preview.failed') {
   catch { /* Diagnostics cannot change Preview ownership. */ }
 }
 
-async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
+async function decodeFrame(frame: RawFrame, signal: AbortSignal, urls: RawPreviewUrls) {
   const started = performance.now();
   const image = new Image();
-  const url = URL.createObjectURL(frame.blob);
+  const url = urls.create(frame.blob);
   let removeAbort = () => {};
   try {
     image.src = url;
@@ -43,11 +45,15 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
       sequence: frame.sequence, quality: frame.quality ?? 'full', kind: frame.kind ?? 'after',
       decodeMs: performance.now() - started, width: frame.width, height: frame.height } }); } catch { /* Optional diagnostics. */ }
     return url;
-  } catch (error) { URL.revokeObjectURL(url); throw error; }
+  } catch (error) { urls.release(url); throw error; }
   finally { removeAbort(); image.removeAttribute('src'); }
 }
 
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
+  const [urls] = useState(() => new RawPreviewUrls());
+  const wholeSurfaces = useRef<{ after?: RawWholeSurface; before?: RawWholeSurface }>({});
+  const comparing = useRef(beforeRequested); comparing.current = beforeRequested;
+  const overlayRef = useRef<RawRegionOverlay | null>(null);
   const [, regionChanged] = useState(0);
   const [state, setState] = useState<RawState | null>(null);
   const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number;
@@ -92,7 +98,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let regionOwner: Awaited<ReturnType<typeof rawRegionOwner>> | undefined;
     let regionConnection: Promise<boolean> | undefined;
     const region = new RawRegionDelivery({
-      changed: () => { if (current()) regionChanged(n => n + 1); },
+      changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); } },
       owner: () => editor && publishedFrame && regionOwner ? {
         doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
         blocked: !current() || frozen.current || editor.mutating || editor.unsettled || !!saver?.locked,
@@ -100,12 +106,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       } : undefined,
       send: async (owner, item, signal) => item.mode === 'region'
         ? rawRegion(owner.doc, item, owner.geometry, owner.supported, signal)
-        : { operation: 'whole', frame: await rawPreview(owner.doc, ++frameSerial, signal, item.identity.kind,
+        : { operation: 'whole', frame: await rawPreview(owner.doc,
+          item.identity.kind === 'before' ? ++beforeSerial.current : ++frameSerial, signal, item.identity.kind,
           { mode: 'whole', maxSide: item.maxSide, quality: item.quality, viewGeneration: item.viewGeneration,
             geometryId: owner.geometry.geometryId }) },
     });
     regionRef.current = region;
-    // C2-A exposes an explicit connection boundary; the Viewer never invokes it automatically.
+    const overlay = new RawRegionOverlay({ urls, current: candidate => region.isCurrent(candidate),
+      context: () => ({ owner: region.owner, ...wholeSurfaces.current, comparing: comparing.current }),
+      changed: () => { if (current()) regionChanged(n => n + 1); } });
+    overlayRef.current = overlay;
+    const unsubscribeRegion = region.subscribe((candidate, error) => {
+      if (candidate) overlay.offer(candidate); else if (!error) overlay.clear();
+    });
+    // Explicit connection keeps ordinary Viewer use on B1; only diagnostic plans request Region.
     connectRegionRef.current = () => {
       if (regionConnection) return regionConnection;
       if (!editor || !current()) return Promise.resolve(false);
@@ -116,6 +130,23 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       }).catch(() => false).finally(() => { regionConnection = undefined; });
       return regionConnection;
     };
+    let manualBusy = false;
+    const manual = { request: async (input: Parameters<typeof requestManualRegion>[3]) => {
+      if (manualBusy || !current()) return false;
+      manualBusy = true;
+      try {
+        if (!await connectRegionRef.current() || !current()) return false;
+        const whole = wholeSurfaces.current.after;
+        if (!whole) return false;
+        return await requestManualRegion(region, whole, wholeSurfaces.current.before, input);
+      } finally { manualBusy = false; }
+    }, clear: () => region.invalidate(), status: () => ({ owner: region.owner, state: region.state,
+      frame: wholeSurfaces.current.after?.frame, wholeQuality: wholeSurfaces.current.after?.quality,
+      beforeReady: !!wholeSurfaces.current.before,
+      overlay: overlay.display ? { after: overlay.display.after.metadata, before: overlay.display.before?.metadata } : null }) };
+    let debug = false;
+    try { debug = localStorage.getItem('genzoroom-raw-region-debug') === '1'; } catch { /* Optional diagnostic entry point. */ }
+    if (debug) window.genzoroomRegion = manual;
     let restarting = false, regenerationError: string | undefined;
     let restartOperation: Promise<void> | undefined;
     let stage: 'save' | 'release' | 'open' = 'save';
@@ -123,7 +154,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let oldGeneration: number | undefined;
     const controller = new AbortController();
     const current = () => active && identity.current === assetId && serial.current === currentSerial;
-    const revoke = () => { if (url) URL.revokeObjectURL(url); url = undefined; };
+    const revoke = () => {
+      if (wholeSurfaces.current.after?.url === url) wholeSurfaces.current.after = undefined;
+      if (url) urls.release(url); url = undefined;
+    };
     const fail = (error: unknown) => {
       if (!current()) return;
       region.invalidate(); regionOwner = undefined;
@@ -133,8 +167,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!unavailable) log(code);
       setState({ assetId, status: unavailable ? 'unavailable' : 'error', code });
     };
-    const invalidateDisplay = () => {
-      region.invalidate();
+    const invalidateDisplay = (preserveRegion = false) => {
+      if (!preserveRegion) region.invalidate();
       displayGeneration++;
       displayTargetKey = undefined;
       displayPending = undefined;
@@ -156,7 +190,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
           quality, mode: 'whole', maxSide, geometryId, viewGeneration });
         if (!valid()) return;
-        candidate = await decodeFrame(frame, controller.signal);
+        candidate = await decodeFrame(frame, controller.signal, urls);
         if (!valid()) return;
         if (doc.revision < displayedRevision) return;
         // Recheck engine identity after decode, before publishing a native result.
@@ -167,6 +201,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         url = candidate;
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
+        wholeSurfaces.current.after = frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality } : undefined;
+        const baseline = wholeSurfaces.current.before;
+        if (baseline && frame.frame && baseline.doc.assetId === doc.assetId && baseline.doc.handle === doc.handle
+          && baseline.doc.generation === doc.generation && baseline.doc.documentToken === doc.documentToken
+          && baseline.doc.beforeKey === doc.beforeKey && baseline.frame.geometryId === frame.frame.geometryId
+          && baseline.quality === (frame.quality ?? quality)) {
+          // B1's Before bitmap is content-keyed: rebind only its receipt revision after the same baseline/geometry is confirmed.
+          wholeSurfaces.current.before = { ...baseline, doc: { ...doc } };
+        }
+        overlay.refresh();
         setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
           requestSide: maxSide, frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
@@ -190,7 +234,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             : editor.mutating || editor.confirmed.revision !== doc.revision ? 'revision' : discard ?? 'superseded';
           metrics.discards[reason]++;
         }
-        if (candidate) URL.revokeObjectURL(candidate);
+        if (candidate) urls.release(candidate);
       }
     };
     const pumpDisplay = () => {
@@ -242,7 +286,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
       // desired changed. Native revision and ownership checks still gate adoption.
-      if (quality === 'full') invalidateDisplay();
+      if (quality === 'full') invalidateDisplay(publishedFrame?.revision === doc.revision);
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
@@ -253,6 +297,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side };
       pumpDisplay();
       region.refresh();
+      overlay.refresh();
     };
     const applyView = () => {
       viewTimer = undefined;
@@ -293,9 +338,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
       pumpDisplay();
       region.refresh();
+      overlay.refresh();
     };
     const install = (settings: RawSettings) => {
       region.resetDocument(); regionOwner = undefined;
+      wholeSurfaces.current = {};
       frameSerial = 0;
       displayedRevision = -1;
       viewGeneration = 0;
@@ -436,6 +483,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!active) return;
       active = false;
       region.dispose();
+      unsubscribeRegion(); overlay.dispose();
+      if (window.genzoroomRegion === manual) delete window.genzoroomRegion;
+      if (overlayRef.current === overlay) overlayRef.current = null;
+      wholeSurfaces.current = {};
       if (regionRef.current === region) regionRef.current = null;
       invalidateDisplay();
       saver?.pause();
@@ -492,7 +543,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     requestBeforeRef.current = (retry = false) => {
       const editor = editorRef.current;
       if (!beforeKey || !editor || !valid() || operation || url && !retry || failed && !retry || editor.unsettled || saverRef.current?.locked) return;
-      if (url) { URL.revokeObjectURL(url); url = undefined; }
+      if (url) {
+        if (wholeSurfaces.current.before?.url === url) wholeSurfaces.current.before = undefined;
+        urls.release(url); url = undefined;
+      }
       operation = true; failed = false;
       const attempt = intentGeneration;
       const currentIntent = () => valid() && attempt === intentGeneration;
@@ -507,9 +561,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             quality: afterQuality, mode: 'whole', maxSide: afterSide, geometryId: null, viewGeneration: 0 });
           if (!currentIntent()) return;
           if (frame.kind !== 'before' || frame.key !== beforeKey) throw new RawApiError('raw_invalid_response');
-          candidate = await decodeFrame(frame, controller.signal);
+          candidate = await decodeFrame(frame, controller.signal, urls);
           if (!currentIntent()) return;
           url = candidate; candidate = undefined;
+          wholeSurfaces.current.before = frame.frame ? { url, doc: { ...transmitted!.doc }, frame: frame.frame,
+            quality: frame.quality ?? afterQuality } : undefined;
+          overlayRef.current?.refresh();
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height,
             frame: frame.frame, quality: frame.quality ?? afterQuality });
         } catch (cause) {
@@ -522,17 +579,24 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'error' });
           try { frontendLogger.add({ level: 'warn', component: 'raw', event: 'before.failed', context: {
             errorCode: cause instanceof RawApiError ? cause.code : 'raw_connection_failed', generation: generation ?? null } }); } catch { /* Optional diagnostics. */ }
-        } finally { operation = false; transmitted = undefined; if (candidate) URL.revokeObjectURL(candidate); }
+        } finally { operation = false; transmitted = undefined; if (candidate) urls.release(candidate); }
       })();
     };
     return () => {
       if (transmitted) void cancelRawPreview(transmitted.doc, 'before', transmitted.serial).catch(() => {});
-      controller.abort(); if (url) URL.revokeObjectURL(url);
+      controller.abort(); if (url) urls.release(url);
+      if (wholeSurfaces.current.before?.url === url) wholeSurfaces.current.before = undefined;
     };
   }, [assetId, generation, token, beforeKey, beforeOwner, afterQuality]);
   useEffect(() => {
     if (beforeRequested && state?.status === 'ready' && !state.pending && !state.locked) requestBeforeRef.current();
   }, [beforeRequested, beforeKey, beforeOwner, state?.status, state?.pending, state?.locked, state?.imageRevision]);
+  const wasComparing = useRef(beforeRequested);
+  useEffect(() => {
+    if (wasComparing.current && !beforeRequested) overlayRef.current?.clear();
+    else overlayRef.current?.refresh();
+    wasComparing.current = beforeRequested;
+  }, [beforeRequested]);
 
   // Hide old ownership synchronously, before passive effects revoke its URLs.
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
@@ -588,6 +652,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   };
   return visible && { ...visible, beforeAvailable: !!beforeKey,
     regionDelivery: regionRef.current,
+    regionDisplay: overlayRef.current?.display,
     connectRegion: () => connectRegionRef.current(),
     viewChanged: (view?: RawView) => {
       if (callbackEditor() && (!view || !visible.frame || view.geometryId === visible.frame.geometryId)) viewRef.current(view);

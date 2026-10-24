@@ -328,3 +328,91 @@ Frontend関連12ファイル332件が成功。その後のowner取消・mutation
 Region overlay、Wholeとの合成、ImageViewer DOM変更、Pan/Zoomからの要求、自動Region切替、rho threshold、context/prefetchの製品確定、Before/After Region UI、Dehaze視覚調整、C3性能調整、RAW Export、Scopeは未実装。ブラウザ・Windows実画面・NAS/Firefox・実RAW/GPUでのC2配送／memory測定は未実施。
 
 **C2-B開始条件：** この配送owner/APIとC0/C1 schema/fixture/receiptを維持し、明示依頼を受けてから開始する。C2-Bでは最新viewによるpreflight再plan、候補pair/URL、overlay placementとcleanupを実装し、WindowsでDehaze境界を含む表示受入を行う。C2-Aはここで停止する。
+
+## 14. C2-B実装完了：Region Viewer overlay統合（2026-10-25）
+
+基準Commitは `d12b38869538993700ea785e009d661e592256a5`。C0契約／planner／fixture、C1 Native binary、C2-A HTTP/public owner/leaseを維持し、Frontend表示所有を接続した。ここでいう完了は実装・自動試験・開発buildの完了であり、Windows実画面受入はユーザー確認待ちである。
+
+### 14.1 DOMとNative placement
+
+RAWかつnative frameありの場合だけ、既存 `.viewer-image-position` の内側に `.raw-native-frame` を置く。Whole baseはframe全体を覆い、Regionは同じwrapper内のabsolute img。Panは親の共通translate、scaleはNative寸法とplacementへ同じCSS倍率を一度だけ適用する。JPEGのAdjustedImage／通常img分岐は維持し、ImageViewerはAPI・request生成・schedulerを所有しない。
+
+`regionLayerPlacement()` はC0 `regionNativeRect()` でresponseのF/window/validRegionをNativeへ写像する。bitmap全体をnativePlacementへ配置し、validNativeRectとの差をCSS inset clipへ渡す。bitmap naturalWidthやrequestedMaxSideから位置を推測しない。contextは表示せず、feather／blur／境界隠しは加えない。Before/Afterは既存の同位置img切替方式のまま、WholeとRegionを同じwrapperで切り替える。
+
+### 14.2 表示ownerとURL
+
+`RawRegionOverlay` はC2-A配送イベントをsubscribeする。Reactが複数応答を同じrenderへまとめても、After候補をBefore候補で失わない。送信plan内のdescriptorを最大6件で記憶する `RawRegionDelivery.isCurrent()` が、planGeneration、viewGeneration、requestId、owner、revision、quality/kind/geometry/F/W/validRegionを再検証する。URL生成前とdecode後、Whole到着後の採用時に再照合する。
+
+decodeは同時1件。未decodeの最新候補はWhole/Region×After/Beforeの4固定slotで、PNG URLを持たない。decoded候補は各側最大1件、採用Regionも各側最大1件。新しい同側decodeを始める際に同側の未採用候補を置換する。失敗／staleは候補URLだけを回収し、整合した旧表示を維持する。owner変更時はpending／staged／採用済み／decode controllerを全失効する。
+
+`RawPreviewUrls` の参照数でWholeのUI所有とoverlayの保持を分離する。新Wholeが来ても、旧整合pairが参照するbase URLは生存する。採用時に両baseを保持してから旧pairを解放する。再試行がUI参照をretireした後のURLは採用せず、現在生存するbaseを待つ。Region交換、decode失敗、asset/generation/token/revision/source/geometry変更、mutation、Before終了、再生成、Gallery/unmount/pagehideで回収する。Blob URLをログへ出さない。
+
+### 14.3 Draft/FullとBefore/After
+
+WholeとRegionは同owner/document revision/geometry/Native寸法/quality/Fを必須とする。Full Whole先着又はFull Region先着のどちらも、旧Draft pairを保持する。必要なFull WholeとFull Region（比較中は両側）が揃って初めて一括交換する。異revision・異qualityの重畳はしない。Region失敗／未使用時はWholeを維持する。
+
+比較中は `regionPairMatches()` に加え、同plan/viewと両側のWhole整合を要求する。W/validRegion/F/quality/bitmap寸法/geometryの不一致は採用しない。Afterだけ採用済みで比較を開始した場合は、それを外して両側Wholeへ戻す。片側Regionだけの比較を許可しない。比較終了時にはRegion表示所有を回収する。
+
+既存B1 Before bitmapはbeforeKeyが不変ならAfter revisionを跨いで再利用できる。新After Wholeのreadback・decode確認後、同asset/handle/generation/token/beforeKey/geometry/qualityの場合だけ、Before Wholeのreceipt revisionを現在docへ明示rebindする。これは既存Whole baselineの扱いであり、古いRegion responseの復活ではない。明示Whole descriptorのBefore serialも既存beforeSerialを共有する。
+
+Regionのreuse用 `rebindRegion()` はC0 `canReuseRegion()` を通し、最新可視Native rectがcached valid域に包含されるときだけ、新plan用request/responseを返す。bitmapの元W/validRegionを保持し、配送requestId/viewGeneration/documentRevisionだけを明示更新する。自動reuseやPan接続はしない。
+
+### 14.4 明示diagnostic trigger
+
+`localStorage['genzoroom-raw-region-debug']='1'` を事前に設定した場合のみ、active RAW ownerに `window.genzoroomRegion` を登録する。通常操作はRegion requestを発行しない。`request({visible,context,prefetch,compare})` は同時1actionで、C2-A finite planのpreflight→確認Fを使った新render planへ進む。Native workerを増やさない。`visible` は試験で指定するNative rectであり、実Pan/Zoomを監視しない。context/prefetchも引数必須で、製品defaultは設定しない。
+
+表示整合の確認用なので、preflight Fは現在Whole Fと同じであることを要求する。Whole／Beforeの必要なbaseがない場合は失敗又は待機し、Regionだけを先行表示しない。`status()` はWhole frame/quality、Before準備、planとoverlay metadataを確認できる。`clear()` は配送・overlayを失効させ、Wholeを残す。owner離脱時にはglobal triggerも削除する。
+
+診断eventは `region.overlay.*` にcandidateCreated、decodeStarted/Completed/Failed、adopted、replaced、stale、revoked、pairWaiting/Adopted/Rejected、geometryMismatchを記録する。revision、qualityと実表示Whole quality、geometry/F/W/validRegion、Native placement、plan/view/request IDsを持つ。通常cancelのdecode中断はstale/debug、decode異常・pair不一致・geometry不一致はwarn。logger失敗は表示動作へ伝播しない。
+
+### 14.5 自動試験と限定監査
+
+関連17ファイル526件の初回確認は525成功／1失敗。失敗は既存 `AnshitsuPersistence.test.tsx` の `switches after a successful PUT for a numeric adjustment edit` で、Exposureをrangeのindex 2で選ぶ試験の値が期待0.5に対し1だった。同じ試験を単独実行して再現し、作業ツリーを変更せず基準CommitのFrontendを隔離展開した環境でも同じ失敗を確認した。今回範囲外の既存試験課題として残し、JPEG実装や該当試験は変更していない。
+
+最終監査修正後は直接関連9ファイル292件が成功。対象はC0 fixtureの中央・四隅・edge・crop/portrait/landscape・DPR・非整数・丸め境界、Native placement、decode保持と失敗・交換、各種stale、100回URL交換、Full Whole/Region到着順の両方、Before pair不整合、明示Whole descriptor、hookの比較／revision rebind／pagehide／離脱／mutation、P1/History/save、JPEG/Whole Viewer。TypeScriptとproduction build成功。既存500 kB超chunk警告は継続。
+
+Windowsホスト `cargo build --manifest-path desktop/Cargo.toml --locked` 成功。hard-link非対応のincremental cacheをcopyへ切り替える警告のみ。指定C1 EXEの実SHA-256と隣接receipt（beforeContract/previewContract/regionContract各1）を確認し、Native再build・実RAW処理は行っていない。Backend/API/schemaを変更していないためBackend suiteは再実行していない。全Frontend suite／Docker Smoke Test／ブラウザ動的検証は未実施。
+
+限定監査はrevision混在、geometry placement、stale decode、URL leak、片側Before、Draft/Full混在、JPEG、ImageViewer責任、通常操作からの自動要求を対象とした。decode待機中にpair片側を失わない固定slot、Before serial共有、旧baseの参照保持、retry後のretired URL拒否、Before baselineのreceipt rebindを確認・修正して回帰試験を追加した。再監査の未解決High/Mediumは0。上記の既存JPEG試験失敗とC1 Dehaze最大3 LSB差は残るが、今回のコード回帰とは区別する。
+
+### 14.6 Windows実画面受入手順
+
+Frontend production buildとWindows開発hostは作成済み。既存プロセスはユーザー側で保存・終了してから、PowerShellで起動する。保存済みImmich設定とWindowsPoC profileを従来どおり使う。
+
+```powershell
+Set-Location I:\code\genzoroom
+$env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\release\lightcraft-cli.exe'
+# 実SHA: 2c7b7f01e366c56151dedffa0fc2b2af3496a035e3bba5a384a3fdcc1ac26812
+& '.\desktop\target\debug\genzoroom-desktop.exe'
+# 作り直す場合は frontend で npm run build、その後rootで cargo build --manifest-path desktop/Cargo.toml --locked。
+```
+
+GalleryでWebView2 DevTools Consoleを開き、次を設定してからRAWを暗室へ開く（すでに開いていた場合はいったんGalleryへ戻る）。
+
+```javascript
+localStorage.setItem('genzoroom-raw-region-debug', '1');
+// RAWのWhole Fullが表示・保存完了してから実行する。
+const g = window.genzoroomRegion.status().frame;
+await window.genzoroomRegion.request({
+  visible: { x0: g.nativeWidth / 4, y0: g.nativeHeight / 4,
+    x1: g.nativeWidth * 3 / 4, y1: g.nativeHeight * 3 / 4 },
+  context: 16, prefetch: 0 // C2-B試験値。製品値ではない。
+});
+window.genzoroomRegion.status(); // overlay metadataが確定するまで確認。
+```
+
+中央、四隅、画像edge、crop/portrait/landscape、DPR1/1.25/1.5/2、非整数zoomで、Region位置とvalid域境界・Whole保持を確認する。Pan/Zoomを動かしても新Regionを自動要求しない。新しい試験rectは明示requestで発行する。
+
+Before/Afterは既存の比較buttonを有効にし、Whole Beforeの準備完了後に同じrequestへ `compare:true` を加える。両側Regionが揃うまで両側Whole、揃った後は切替位置が完全一致することを確認する。比較終了・再要求・調整開始・photo/Filmstrip切替・Gallery復帰・終了でoverlayが残らないこと、decode失敗時にWholeが消えないことも確認する。Dehaze差はfeatherで隠していないため、その境界をWindowsで観察する。既存Developer LogsでFrontend levelをdebugにすると上記配送・overlay eventを確認できる。
+
+```javascript
+window.genzoroomRegion.clear();
+localStorage.removeItem('genzoroom-raw-region-debug');
+// Galleryへ戻るとtriggerを破棄し、次のRAWでは登録しない。
+```
+
+### 14.7 C2-Cへの受渡しと未実装
+
+`regionDelivery.submit/isCurrent/subscribe`、`regionDisplay`、表示ownerの有限URL/pair所有、`regionLayerPlacement`、`rebindRegion`、明示preflight helperを渡す。C2-C開始は別の明示依頼とWindows overlay受入を条件とする。実画面の1px整合、実RAW/GPU、Dehaze境界、長時間RSS/VRAMは未受入。
+
+Pan/Zoom自動Region要求、rho threshold、context/prefetch製品値、Pan集約間隔、Region product budget、latency/RSS/VRAM受入値、Dehaze差の製品許容、C3調整、RAW Export、Scopeは未実装・未決定のまま。C2-Bではこれ以上進めない。
