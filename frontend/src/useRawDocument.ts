@@ -6,6 +6,8 @@ import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
 import { rawWholeSide, type RawView } from './rawWholePreview';
+import { rawRegionOwner, rawRegion } from './rawApi';
+import { RawRegionDelivery } from './rawRegionDelivery';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
@@ -46,6 +48,7 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
 }
 
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
+  const [, regionChanged] = useState(0);
   const [state, setState] = useState<RawState | null>(null);
   const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number;
     quality?: 'draft' | 'full'; frame?: RawGeometry } | null>(null);
@@ -64,6 +67,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
+  const regionRef = useRef<RawRegionDelivery | null>(null);
+  const connectRegionRef = useRef<() => Promise<boolean>>(async () => false);
   identity.current = assetId;
   useEffect(() => {
     if (!assetId) { setState(null); return; }
@@ -84,6 +89,33 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let revisionResyncs = 0;
     let displayedRevision = -1;
     let publishedFrame: { revision: number; quality: 'draft' | 'full'; frame: RawGeometry } | undefined;
+    let regionOwner: Awaited<ReturnType<typeof rawRegionOwner>> | undefined;
+    let regionConnection: Promise<boolean> | undefined;
+    const region = new RawRegionDelivery({
+      changed: () => { if (current()) regionChanged(n => n + 1); },
+      owner: () => editor && publishedFrame && regionOwner ? {
+        doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
+        blocked: !current() || frozen.current || editor.mutating || editor.unsettled || !!saver?.locked,
+        wholeBusy: displayRunning || !!displayPending,
+      } : undefined,
+      send: async (owner, item, signal) => item.mode === 'region'
+        ? rawRegion(owner.doc, item, owner.geometry, owner.supported, signal)
+        : { operation: 'whole', frame: await rawPreview(owner.doc, ++frameSerial, signal, item.identity.kind,
+          { mode: 'whole', maxSide: item.maxSide, quality: item.quality, viewGeneration: item.viewGeneration,
+            geometryId: owner.geometry.geometryId }) },
+    });
+    regionRef.current = region;
+    // C2-A exposes an explicit connection boundary; the Viewer never invokes it automatically.
+    connectRegionRef.current = () => {
+      if (regionConnection) return regionConnection;
+      if (!editor || !current()) return Promise.resolve(false);
+      const doc = editor.confirmed;
+      regionConnection = rawRegionOwner(doc, controller.signal).then(value => {
+        if (!current() || editor?.confirmed.documentToken !== doc.documentToken || editor.confirmed.generation !== doc.generation) return false;
+        regionOwner = value; regionChanged(n => n + 1); return value.supported;
+      }).catch(() => false).finally(() => { regionConnection = undefined; });
+      return regionConnection;
+    };
     let restarting = false, regenerationError: string | undefined;
     let restartOperation: Promise<void> | undefined;
     let stage: 'save' | 'release' | 'open' = 'save';
@@ -94,6 +126,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const revoke = () => { if (url) URL.revokeObjectURL(url); url = undefined; };
     const fail = (error: unknown) => {
       if (!current()) return;
+      region.invalidate(); regionOwner = undefined;
       revoke();
       const code = error instanceof RawApiError ? error.code : 'raw_connection_failed';
       const unavailable = !available && (code === 'raw_unsupported' || code === 'raw_unavailable');
@@ -101,6 +134,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       setState({ assetId, status: unavailable ? 'unavailable' : 'error', code });
     };
     const invalidateDisplay = () => {
+      region.invalidate();
       displayGeneration++;
       displayTargetKey = undefined;
       displayPending = undefined;
@@ -178,7 +212,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         log(code);
         displayTargetKey = undefined;
         setState(previous => previous && ({ ...previous, displayError: code }));
-      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); });
+      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); });
     };
     const resyncPreview = (valid = current) => {
       if (!valid()) return;
@@ -218,6 +252,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         && editor.confirmed.revision === doc.revision;
       displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side };
       pumpDisplay();
+      region.refresh();
     };
     const applyView = () => {
       viewTimer = undefined;
@@ -257,8 +292,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && saver?.initialized && !saver.dirty && !saver.locked
         && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
       pumpDisplay();
+      region.refresh();
     };
     const install = (settings: RawSettings) => {
+      region.resetDocument(); regionOwner = undefined;
       frameSerial = 0;
       displayedRevision = -1;
       viewGeneration = 0;
@@ -398,6 +435,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const dispose = () => {
       if (!active) return;
       active = false;
+      region.dispose();
+      if (regionRef.current === region) regionRef.current = null;
       invalidateDisplay();
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
@@ -548,6 +587,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   return visible && { ...visible, beforeAvailable: !!beforeKey,
+    regionDelivery: regionRef.current,
+    connectRegion: () => connectRegionRef.current(),
     viewChanged: (view?: RawView) => {
       if (callbackEditor() && (!view || !visible.frame || view.geometryId === visible.frame.geometryId)) viewRef.current(view);
     },

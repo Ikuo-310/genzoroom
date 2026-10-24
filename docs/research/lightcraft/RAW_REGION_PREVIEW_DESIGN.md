@@ -278,3 +278,53 @@ Backend関連10ファイルの成功267件を基礎に、Region最終追加2件�
 限定監査はgeometry/source/window/work/overflow、PNG/MCP bounds、CPU/GPU、共有StagePool、Before baseline、cancel/cleanup、旧binaryとsettings不変を対象とした。cold RAW WB学習の抑止、実metadataのecho依存、論理Native frameの早期制限を修正して再検証した。**未解決High0 / Medium0 / Low1（上記Dehaze画素差）**。
 
 **C2開始条件：** C0/C1契約・共有fixture・実binary receiptを維持し、明示的なC2依頼を受けること。C2実装へ進める状態だが、Dehazeを含むoverlayの画質受入は未完了。C2ではpublic owner/lease、有限plan、ACK済みrevision、stale/readback、URL回収、同geometry pairを接続し、P1 courtesy/gesture終了Full/History/saveを保持する。C3はthreshold、context/prefetch、集約間隔、製品予算、latency、実RAW/RSS/VRAM実測を決める。C1ではViewer overlay、Pan送信、自動Region切替、Export、Scopeを実装せず停止する。
+
+## 13. C2-A完了：Region配送・所有・状態管理（2026-10-25）
+
+基準はC1完了 `e651a68179c91f348f9b321ea7c59a17b38ecb5b`。Native/schema/plannerの契約とbinary receiptは変更していない。
+
+### 13.1 HTTPとpublic owner
+
+`GET /api/raw/documents/{handle}/region` は既存workspace/generation/public tokenのheaderを照合し、source content hashとoptional capability（1又はnull）だけを公開する。通常Viewerからは呼ばず、`useRawDocument.connectRegion()` が明示接続する。
+
+`POST .../region` のJSONは `{workspaceId, operation:plan|render, target}`。targetはC0/C1 schemaそのもの。workspace、公開handle、asset/source、generation、公開documentToken、documentRevision、kind/revision又はBefore keyをownerで照合し、検証済み公開tokenを必ず `document_token=` へ渡す。Native lifetimeは内部RawHandleが所有する。Wholeが確認した公開geometryとNative geometryの対応をkind/quality別の最大4枠で保持し、現在revision/geometryの対応がある場合だけNative DTOへ変換する。新document／closeで破棄する。公開geometryをNative geometryとして送信しない。
+
+operation=planはJSON metadata、renderはimage/png bodyと `X-Raw-Region` のmetadataを返す。metadataにはidentity/revision/requestId/viewGeneration/quality/kind/geometry/F/W/validRegionが含まれる。C1のowner workerがNative readback、response identity、geometry/F/W/validRegion、実PNG寸法・CRC・decodeを再検証してからHTTPへ渡す。RegionはPNG 9 MiB／MCP line 13 MiBのまま、Wholeの17/24 MiBを変更しない。送信前のgeometry不一致は `raw_region_geometry_mismatch` でWhole維持・再preflightへ戻す。古い応答は204又はidentityを含むmetadataとして識別できる。
+
+### 13.2 lease・取消・lifecycle
+
+RegionとWholeは既存の3 image lease枠を共有する。未送信Region pendingの置換はticketを完了して枠を返し、bitmapを保持しない。PNG応答が完成した枠はASGI送信完了までresponse leaseとして同じ集合内で追跡する。送信は既存の90秒timeout内で、正常・失敗・取消のfinallyが枠を返す。document/workspace closeとshutdownは送信中responseの終了を待ってからsession/sourceを解放する。
+
+`POST .../region/cancel` はworkspace/generation/public token/requestIdを照合する。HTTP取消はwaiter detachであり、pendingは破棄、running Nativeはreadback/PNG検証/cleanupまで既存workerが回収する。取消は送信時のRawHandle/public documentを保持し、後継generationへ向け直さない。Native timeoutは既存manager回復境界へ入り、旧generationは再利用しない。
+
+Frontend ownerはasset切替（Filmstrip含む）、Gallery復帰／unmount／pagehide、session再生成、revision・geometry・owner変更、mutation、表示失効でpending、候補、preflight、HTTP controllerを回収する。送信中promiseはfinallyまで1件だけ保持する。Regionのobject URLは生成せず、候補Blobはownerから参照を外す。独自timer、Native worker、lease poolは追加していない。
+
+### 13.3 finite planとC2-Bへの受渡し
+
+`RawRegionDelivery` がC0 `rawRegionSchedule.ts` を実行する。`useRawDocument.regionDelivery` から `owner`（doc/sourceId/capability/geometryとavailability）、`state`、`submit(plan)`、`candidate`、`preflight` を取得できる。ownerはsnapshotとして公開する。planGenerationは同owner内で単調増加させる。document再生成ではviewの下限をresetし、planGenerationの下限はstateから継続する。
+
+running promise 1＋latest pending plan 1（最大6 descriptor）。未送信tailは新planで全置換し、running完了後に最新tailだけ進める。preflightが完了すると旧tailを破棄し、確認されたFを使った新planの明示submit、又はowner constructorのreplan callbackで再構築する。preflightとrenderは同じrunning slot。Whole descriptorも同じRaw APIへ送り、hookでは既存frameSerialを共有する。
+
+asset/source/generation/token/revision/geometryと最新plan/viewGeneration、request単位のC0 response検証を全て通った結果だけcandidateになる。quality/kind/F/W/validRegionもAPIで検証する。mutating/unsettled/frozen/save lock時には開始・採用を禁止し、既存Whole running/pendingを優先する。Whole側の新しい表示意図はRegionを失効させる。HTTP取消後もNativeの共有worker/lockは直列なのでNative runningは1。P1 courtesy最大1000ms、gesture終了Full、History receipt、save queueは変更せず、saveからRegion画像を待たない。
+
+古いRegionを直接採用・再利用しない。viewGenerationは配送identityのまま、content cache keyへ追加しない。C2-Bがreuseを実装する際は `canReuseRegion()` と最新planへの明示rebindが必要。Before/After候補pairの保持・採用とoverlay URL生成はC2-Bの責任。
+
+### 13.4 fallbackと診断
+
+regionContractなしでは明示接続がunsupportedを返し、有限planを開始しない。BackendもNative送信前にcapabilityを確認する。Whole availability、既存Whole route、通常ViewerのB1挙動を保持する。C1 binaryでも通常ViewerはRegionを要求しない。
+
+既存構造化loggerでplanGeneration/requestId/operation/viewGeneration/revision/quality/kind/geometry/F/W/validRegion、queue wait／response wait／body read／validation、accepted/stale/superseded/cancelled/failed/capability_missing/geometry_replan/whole_fallbackを追跡する。queue/配送はFrontend、Native/readback/検証はC1 Backend、HTTP採用はpublic ownerの診断境界。Pan入力ログ、Recipe本文、path、画像、資格情報を追加しない。logger例外は動作を変えない。
+
+### 13.5 自動検証・限定監査
+
+Backend関連8ファイル161件が成功。対象はC0/C1 Region契約・carrier上限、public owner spoof、公開tokenの明示attestation、plan/render、response mismatch、共有Native running=1、100回pending置換、waiter取消、lease、timeout、generation変更、応答送信中close/shutdown、Whole/Before/P1/History/Recipe。追加のHTTP配送試験は17件。Nativeを模した既存fixtureを使う自動試験であり、今回実binaryを起動した検証ではない。
+
+Frontend関連12ファイル332件が成功。その後のowner取消・mutation候補回収修正と送信時owner回帰追加後、関連6ファイル135件が成功。C0 planner/fixtures、API validation、preflightから新plan、100回置換、stale owner/revision/view、abort、capability fallback、hook明示接続・photo離脱、P1/History/saveを確認した。TypeScriptとproduction build成功。既存の500 kB超chunk警告は残る。サンドボックスのTEMP読込・疑似Native制限はrepo内TEMP指定とBackendの権限付き同一Python 3.14実行で解消した。全suite・Docker Smoke Testは実行していない。
+
+限定監査対象はowner spoof、lease leak、Native並列化、stale採用、取消、generation crossing、pending増加、旧binary fallback、P1/History/save。取消が後継documentを参照する競合とmutation開始時の候補回収を修正し、回帰試験を追加して再監査した。response lease登録もtask完了callbackからdocument lock内へ移し、closeがcallbackより先に再開する隙間を閉じた。最終修正後のBackend HTTP/Whole/P1関連3ファイル82件が成功。未解決High/Mediumなし。C1のDehaze最大3 LSB差は継続課題で、今回の表示受入結果ではない。
+
+### 13.6 C2-Aで実装しない表示機能と開始条件
+
+Region overlay、Wholeとの合成、ImageViewer DOM変更、Pan/Zoomからの要求、自動Region切替、rho threshold、context/prefetchの製品確定、Before/After Region UI、Dehaze視覚調整、C3性能調整、RAW Export、Scopeは未実装。ブラウザ・Windows実画面・NAS/Firefox・実RAW/GPUでのC2配送／memory測定は未実施。
+
+**C2-B開始条件：** この配送owner/APIとC0/C1 schema/fixture/receiptを維持し、明示依頼を受けてから開始する。C2-Bでは最新viewによるpreflight再plan、候補pair/URL、overlay placementとcleanupを実装し、WindowsでDehaze境界を含む表示受入を行う。C2-Aはここで停止する。

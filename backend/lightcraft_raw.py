@@ -445,6 +445,18 @@ class LightCraftRawSession:
                     setattr(self, name, None)
                     ticket._finish()
 
+    def cancel_region(self, handle, request_id):
+        self._photo(handle, active=True)
+        for name in ("_pending", "_running"):
+            ticket = getattr(self, name)
+            if ticket and ticket.handle == handle and ticket.region_target is not None \
+                    and ticket.region_target["requestId"] == request_id:
+                # Detach delivery, but retain native/readback/validation ownership until settled.
+                ticket.abandoned, ticket.reason = True, "cancelled"
+                if name != "_running":
+                    setattr(self, name, None)
+                    ticket._finish()
+
     def _observe(self):
         status = self.manager.status()
         if self._generation is not None and (status.generation != self._generation or status.state != "ready"):
@@ -1059,7 +1071,7 @@ class LightCraftRawSession:
         return identity
 
     def request_region(self, handle, target, *, operation='render', document_token=None):
-        """Unconnected C1 boundary: use the existing owner/worker, never a Region worker."""
+        """Use the existing owner/worker; the HTTP owner attests its public token explicitly."""
         from raw_region import validate_target
         validate_target(target, operation)
         photo = self._photo(handle, active=True)

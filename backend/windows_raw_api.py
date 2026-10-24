@@ -50,8 +50,12 @@ class RawPreviewApi:
         self._tasks = set()
         self._image_tasks = set()
         self._image_leases = set()
+        self._response_leases = set()
+        self._images_idle = asyncio.Event()
+        self._images_idle.set()
         self._lease_tickets = {}
         self._preview_latest = {}
+        self._region_geometry = {}
         self._history_tasks = set()
         self._closing = False
         self._lease_task = None
@@ -72,6 +76,8 @@ class RawPreviewApi:
             Route("/documents/{handle}", self.endpoint, methods=["GET", "DELETE"]),
             Route("/documents/{handle}/preview", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/preview/cancel", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/region", self.endpoint, methods=["GET", "POST"]),
+            Route("/documents/{handle}/region/cancel", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
@@ -127,14 +133,24 @@ class RawPreviewApi:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
             if request.url.path.endswith("/preview/cancel"):
                 return self._cancel_preview(request, body)
-            preview = request.url.path.endswith("/preview")
+            if request.url.path.endswith("/region/cancel"):
+                return self._cancel_region(request, body)
+            region = request.url.path.endswith("/region") and request.method == "POST"
+            preview = request.url.path.endswith("/preview") or region
+            if region:
+                self._region_owner(request, body)
+                target = body["target"]
+                mapping = self._region_geometry.get((target["identity"]["kind"], target["quality"]))
+                if mapping and mapping[:2] == (target["documentRevision"], target["geometryId"]):
+                    self._replace_pending_region()
             if preview and not self._closing and not self._history_draining and len(self._image_leases) >= 3:
                 self._replace_pending_image(request, body)
             if self._closing or self._history_draining or (len(self._image_leases) >= 3 if preview else len(self._tasks) >= 2):
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
-            handler = self._preview if request.url.path.endswith("/preview") else self._execute
+            handler = self._region if region else self._preview if preview else self._execute
             lease = object() if preview else None
+            raw_owner_handle = self._raw_handle if region else None
             task = asyncio.create_task(handler(request, body, lease) if preview else handler(request, body), name="windows-raw-before"
                                        if handler == self._preview and body.get("kind") == "before" else "windows-raw-request")
             if preview:
@@ -146,9 +162,7 @@ class RawPreviewApi:
                         self._release_image_lease(lease)
                     else:
                         response = done.result()
-                        if isinstance(response, _ImageResponse):
-                            response.release_lease = lambda: self._release_image_lease(lease)
-                        else:
+                        if not isinstance(response, _ImageResponse):
                             self._release_image_lease(lease)
                 task.add_done_callback(image_done)
             else:
@@ -163,6 +177,11 @@ class RawPreviewApi:
                 return await asyncio.shield(task)
             except asyncio.CancelledError:
                 if preview:
+                    if region:
+                        try:
+                            self.raw.cancel_region(raw_owner_handle, body["target"]["requestId"])
+                        except LightCraftError:
+                            pass  # Generation loss already invalidated the detached waiter.
                     # A detached HTTP waiter cannot own a response body that will never be sent.
                     task.add_done_callback(lambda _: self._release_image_lease(lease))
                 raise
@@ -171,9 +190,9 @@ class RawPreviewApi:
             if code == "lightcraft_invalid_preview":
                 code = "raw_invalid_preview"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large", "raw_preview_budget_exceeded"} else
-                      400 if code in {"raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
+                      400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
-                                      "raw_history_unavailable", "raw_history_save_failed", "raw_preview_unsupported"} else
+                                      "raw_history_unavailable", "raw_history_save_failed", "raw_preview_unsupported", "raw_region_unsupported"} else
                       409 if code in HISTORY_CONFLICTS or code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
@@ -197,7 +216,79 @@ class RawPreviewApi:
 
     def _release_image_lease(self, lease):
         self._image_leases.discard(lease)
+        self._response_leases.discard(lease)
         self._lease_tickets.pop(lease, None)
+        if not self._response_leases:
+            self._images_idle.set()
+
+    def _hold_image_response(self, response, lease):
+        if isinstance(response, _ImageResponse):
+            # Register under the document lock: close can resume before task-done callbacks run.
+            self._response_leases.add(lease)
+            self._images_idle.clear()
+            response.release_lease = lambda: self._release_image_lease(lease)
+        return response
+
+    def _region_owner(self, request, body):
+        from raw_region import validate_target
+        if set(body) != {"workspaceId", "operation", "target"}:
+            raise LightCraftError("raw_invalid_region_request")
+        target = validate_target(body["target"], body["operation"])
+        self._owner(body["workspaceId"])
+        doc = self._document(request.path_params["handle"])
+        if self._workspace_state != "active" or target["identity"] != self.raw.region_identity(
+                self._raw_handle, target["identity"]["kind"], document_token=doc["documentToken"]) \
+                or target["documentRevision"] != doc["revision"]:
+            raise LightCraftError("raw_revision_conflict")
+        return doc
+
+    def _replace_pending_region(self):
+        pending = self.raw._pending
+        if pending is not None and pending.region_operation is not None:
+            self.raw.cancel_region(self._raw_handle, pending.region_target["requestId"])
+            pending.reason = "replaced"
+            for lease, ticket in list(self._lease_tickets.items()):
+                if ticket is pending:
+                    self._release_image_lease(lease)
+
+    def _cancel_region(self, request, body):
+        if set(body) != {"workspaceId", "generation", "documentToken", "requestId"} \
+                or not isinstance(body["requestId"], str) or not re.fullmatch("[a-f0-9]{32}", body["requestId"]):
+            raise LightCraftError("raw_invalid_region_request")
+        self._owner(body["workspaceId"])
+        doc = self._document(request.path_params["handle"])
+        if type(body["generation"]) is not int or any(body[k] != doc[k] for k in ("generation", "documentToken")):
+            raise LightCraftError("raw_stale_handle")
+        self.raw.cancel_region(self._raw_handle, body["requestId"])
+        return Response(status_code=204)
+
+    async def _region(self, request, body, lease):
+        async with self._lock:
+            doc = self._region_owner(request, body)
+            if not await self.manager._raw_region_supported(doc["generation"]):
+                raise LightCraftError("raw_region_unsupported")
+            # Whole's public geometry is scoped to its owner; only this owner unwraps it.
+            target = body["target"]
+            mapping = self._region_geometry.get((target["identity"]["kind"], target["quality"]))
+            if not mapping or mapping[:2] != (doc["revision"], target["geometryId"]):
+                raise LightCraftError("raw_region_geometry_mismatch")
+            native_target = {**target, "geometryId": mapping[2]}
+            ticket = self.raw.request_region(self._raw_handle, native_target, operation=body["operation"],
+                                             document_token=doc["documentToken"])
+            self._lease_tickets[lease] = ticket
+        frame = await ticket
+        async with self._lock:
+            if frame is SUPERSEDED or self.document is not doc or target["documentRevision"] != doc["revision"]:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
+            self._document(doc["handle"])
+            metadata = {**frame.metadata["response"], "geometryId": target["geometryId"]}
+            headers = {"Cache-Control": "no-store", "X-Raw-Region": json.dumps(metadata, separators=(",", ":"))}
+            lightcraft_log("raw.region.delivered", level="debug", operation=body["operation"],
+                requestId=target["requestId"], viewGeneration=target["viewGeneration"], revision=doc["revision"],
+                quality=target["quality"], kind=metadata["kind"], disposition="accepted")
+            if body["operation"] == "plan":
+                return JSONResponse(metadata, headers={"Cache-Control": "no-store"})
+            return self._hold_image_response(_ImageResponse(frame.data, media_type="image/png", headers=headers), lease)
 
     def _replace_pending_image(self, request, body):
         # A replaced, unsent ticket owns no bitmap; its terminal 204 can leave the image pool.
@@ -278,6 +369,12 @@ class RawPreviewApi:
             if "workspace" in request.path_params:
                 workspace = request.path_params["workspace"]
             self._owner(workspace)
+            if path.endswith("/region") and method == "GET":
+                doc = self._document(request.path_params["handle"])
+                if request.headers.get("x-raw-generation") != str(doc["generation"]) or request.headers.get("x-raw-token") != doc["documentToken"]:
+                    raise LightCraftError("raw_stale_handle")
+                return JSONResponse({"sourceId": self.raw.region_identity(self._raw_handle)["sourceId"],
+                    "regionContract": 1 if await self.manager._raw_region_supported(doc["generation"]) else None})
             if method == "DELETE":
                 if "handle" in request.path_params:
                     self._document(request.path_params["handle"])
@@ -306,6 +403,7 @@ class RawPreviewApi:
                     raise
                 self._raw_handle = handle
                 self._preview_latest.clear()
+                self._region_geometry.clear()
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
@@ -391,7 +489,7 @@ class RawPreviewApi:
         async with self._lock:
             if frame is SUPERSEDED or self.document is not doc or adaptive and self._preview_latest.get(latest_key) != body["serial"]:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
-            return self._preview_response(frame, doc, body, kind, handle)
+            return self._hold_image_response(self._preview_response(frame, doc, body, kind, handle), lease)
 
     def _preview_response(self, frame, doc, body, kind, handle):
         if frame is SUPERSEDED:
@@ -413,11 +511,13 @@ class RawPreviewApi:
                             "X-Raw-View-Generation": str(body["viewGeneration"])})
             if frame.frame is not None:
                 native_frame = dict(frame.frame)
+                native_geometry = native_frame["geometryId"]
                 native_frame["geometryId"] = hashlib.sha256((f"{handle.source_key}:{handle.document_token}:"
                     f"{handle.generation}:{native_frame['geometryId']}").encode()).hexdigest()
                 if body["geometryId"] is not None and body["geometryId"] != native_frame["geometryId"]:
                     return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced"})
                 headers["X-Raw-Frame"] = json.dumps(native_frame, separators=(",", ":"), ensure_ascii=True)
+                self._region_geometry[(kind, frame.quality)] = (doc["revision"], native_frame["geometryId"], native_geometry)
         if frame.key:
             headers["X-Raw-Before-Key"] = frame.key
         lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
@@ -886,6 +986,7 @@ class RawPreviewApi:
             return
         await self._history_checkpoint()
         self.document = None
+        self._region_geometry.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
         self._history_initialized = self._history_enabled = False
@@ -893,6 +994,8 @@ class RawPreviewApi:
         try:
             # A cleanup retry must not restart the Engine or admit new source references.
             if not self._native_released:
+                # Response bodies retain their source/session owner until ASGI send completes.
+                await self._images_idle.wait()
                 await self.raw.reset_session(restore_active=False)
                 self._native_released = True
             await self.cache.close()
@@ -953,6 +1056,7 @@ class RawPreviewApi:
             await asyncio.gather(self._lease_task, return_exceptions=True)
         # Closing the RAW session releases in-flight native calls without cancelling HTTP owners.
         try:
+            await self._images_idle.wait()
             await self.raw.close()
             if self._tasks:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -966,6 +1070,7 @@ class RawPreviewApi:
             raise
         self.cache = None
         self.workspace = self.document = None
+        self._region_geometry.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
         self._history_initialized = self._history_enabled = False

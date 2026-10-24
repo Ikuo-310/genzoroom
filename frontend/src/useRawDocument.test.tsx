@@ -7,9 +7,11 @@ import { frontendLogger } from './frontendLogging';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
+import { regionRequest, regionResponse } from './test/rawRegion';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
@@ -30,6 +32,7 @@ beforeEach(() => {
   vi.stubGlobal('URL', { createObjectURL: createURL, revokeObjectURL: revokeURL });
   createURL.mockImplementation(() => `blob:raw-${createURL.mock.calls.length}`);
   vi.mocked(api.rawCapability).mockResolvedValue(true);
+  vi.mocked(api.rawRegionOwner).mockResolvedValue({ sourceId: 'b'.repeat(64), supported: true });
   vi.mocked(api.createRawWorkspace).mockResolvedValue('workspace');
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1 }));
@@ -44,6 +47,33 @@ beforeEach(() => {
     ? rawHistoryResult(request) : commitHistory(request));
   vi.mocked(api.releaseRawWorkspace).mockReset().mockResolvedValue();
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+});
+
+it('connects Region only explicitly and clears document-owned candidates on photo departure', async () => {
+  const asset = regionRequest().identity.assetId;
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+    handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.rawRegion).mockImplementation(async (_doc, target) => ({ operation: 'render',
+    metadata: regionResponse(target as ReturnType<typeof regionRequest>), blob: new Blob(['region']) }));
+  await render(asset); await flush();
+  expect(api.rawRegionOwner).not.toHaveBeenCalled(); expect(api.rawRegion).not.toHaveBeenCalled();
+  await act(async () => { expect(await current!.connectRegion()).toBe(true); });
+  const delivery = current!.regionDelivery!;
+  expect(delivery.owner?.sourceId).toBe('b'.repeat(64));
+  const doc = current!.document!;
+  const item = regionRequest({ identity: { assetId: asset, sourceId: 'b'.repeat(64), generation: doc.generation,
+    documentToken: doc.documentToken, kind: 'after', revision: doc.revision }, documentRevision: doc.revision });
+  const wholeUrl = current!.url;
+  await act(async () => { expect(delivery.submit({ planGeneration: 100, items: [item] })).toBe(true); });
+  await flush();
+  expect(delivery.candidate?.result.operation).toBe('render');
+  expect(current!.url).toBe(wholeUrl); expect(createURL).toHaveBeenCalledTimes(1);
+  await render(null); await flush();
+  expect(delivery.candidate).toBeUndefined(); expect(delivery.state.pending).toBeUndefined();
+  expect(delivery.submit({ planGeneration: 101, items: [item] })).toBe(false);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 

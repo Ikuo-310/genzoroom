@@ -1,5 +1,8 @@
 import { RAW_WHOLE_MAX_SIDE, RAW_WHOLE_MAX_BYTES } from './rawWholePreview';
 import { frontendLogger } from './frontendLogging';
+import { checkRegionResponse, confirmRegionFullFrame, validateRegionFrameRequest, validateRegionRequest,
+  type RegionRequest, type RegionResponse, type RegionFrameRequest, type RegionFrameResponse } from './rawRegionContract';
+import { C1_REGION_BUDGET, validRegionGeometry, type RegionGeometry } from './rawRegionPlanner';
 
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
@@ -104,6 +107,70 @@ export async function rawCapability(signal?: AbortSignal) {
   const value = await json('/capabilities', { signal });
   if (typeof value.available !== 'boolean' || value.version !== '0.10.0') throw new RawApiError('raw_invalid_response');
   return value.available as boolean;
+}
+
+export async function rawRegionOwner(doc: RawDocument, signal: AbortSignal) {
+  const value = await json(`/documents/${doc.handle}/region`, { signal, headers: {
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
+  if (!fingerprint(value.sourceId) || value.regionContract !== null && value.regionContract !== 1)
+    throw new RawApiError('raw_invalid_response');
+  return { sourceId: value.sourceId as string, supported: value.regionContract === 1 };
+}
+export type RawRegionResult = { operation: 'plan'; metadata: RegionFrameResponse }
+  | { operation: 'render'; metadata: RegionResponse; blob: Blob };
+export async function cancelRawRegion(doc: RawDocument, requestId: string) {
+  await request(`/documents/${doc.handle}/region/cancel`, post({ ...identityBody(doc), requestId }));
+}
+export async function rawRegion(doc: RawDocument, target: RegionRequest | RegionFrameRequest,
+  geometry: RegionGeometry, supported: boolean, signal: AbortSignal): Promise<RawRegionResult> {
+  if (!supported) throw new RawApiError('raw_region_unsupported');
+  const operation = 'desiredLongEdge' in target ? 'plan' : 'render';
+  if (!(operation === 'plan' ? validateRegionFrameRequest(target) : validateRegionRequest(target))
+    || !validRegionGeometry(geometry) || target.geometryId !== geometry.geometryId
+    || target.identity.assetId !== doc.assetId || target.identity.generation !== doc.generation
+    || target.identity.documentToken !== doc.documentToken || target.documentRevision !== doc.revision
+    || target.identity.kind === 'before' && target.identity.beforeKey !== doc.beforeKey)
+    throw new RawApiError('raw_invalid_region_request');
+  const started = performance.now();
+  const response = await request(`/documents/${doc.handle}/region`, { ...post({ workspaceId: doc.workspaceId, operation, target }), signal });
+  const received = performance.now();
+  try {
+    if (response.status === 204) throw new RawSuperseded('replaced');
+    if (response.status !== 200) throw new RawApiError('raw_invalid_response');
+    const plan = 'desiredLongEdge' in target;
+    if (response.headers.get('content-type')?.split(';')[0] !== (plan ? 'application/json' : 'image/png'))
+      throw new RawApiError('raw_invalid_response');
+    const bytes = await readBounded(response, plan ? 16384 : C1_REGION_BUDGET.maxPngBytes);
+    const read = performance.now();
+    signal.throwIfAborted();
+    const encoded = plan ? new TextDecoder().decode(bytes) : response.headers.get('x-raw-region');
+    if (!encoded || encoded.length > 16384) throw new RawApiError('raw_invalid_response');
+    let metadata: unknown;
+    try { metadata = JSON.parse(encoded); } catch { throw new RawApiError('raw_invalid_response'); }
+    const trace = () => {
+      try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.received', context: {
+        requestId: target.requestId, operation, viewGeneration: target.viewGeneration, revision: doc.revision,
+        quality: target.quality, kind: target.identity.kind, geometryId: target.geometryId,
+        responseWaitMs: received - started, bodyReadMs: read - received, validationMs: performance.now() - read } }); } catch { /* Optional diagnostics. */ }
+    };
+    if (plan) {
+      if (!confirmRegionFullFrame(target, metadata, geometry)) throw new RawApiError('raw_invalid_response');
+      trace();
+      return { operation: 'plan', metadata: metadata as RegionFrameResponse };
+    }
+    if (checkRegionResponse(target, metadata).status !== 'accepted') throw new RawApiError('raw_invalid_response');
+    const meta = metadata as RegionResponse;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 33 || ![137,80,78,71,13,10,26,10].every((b, i) => bytes[i] === b)
+      || view.getUint32(8) !== 13 || view.getUint32(12) !== 0x49484452
+      || view.getUint32(16) !== meta.width || view.getUint32(20) !== meta.height) throw new RawApiError('raw_invalid_response');
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.received', context: {
+      requestId: target.requestId, operation, viewGeneration: target.viewGeneration, revision: doc.revision,
+      quality: target.quality, kind: target.identity.kind, geometryId: target.geometryId,
+      fullWidth: meta.fullWidth, fullHeight: meta.fullHeight, window: meta.window, validRegion: meta.validRegion,
+      responseWaitMs: received - started, bodyReadMs: read - received, validationMs: performance.now() - read } }); } catch { /* Optional diagnostics. */ }
+    return { operation: 'render', metadata: meta, blob: new Blob([bytes], { type: 'image/png' }) };
+  } finally { await response.body?.cancel().catch(() => {}); }
 }
 export async function createRawWorkspace() {
   const value = await json('/workspaces', post({}));

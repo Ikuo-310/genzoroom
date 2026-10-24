@@ -61,7 +61,12 @@ def enable(child):
     child.region_arguments = []
     def respond(message):
         if message['method'] == 'tools/list':
-            return reply(child.stdout,message,{'tools':[tool(),{'name':'render_preview','inputSchema':{'properties':{'before':{'type':'boolean'}}}}]})
+            properties = {'before': {'type': 'boolean'}}
+            if child.adaptive_supported:
+                properties.update(quality={'type':'string','enum':['draft','full']},
+                    preview_contract={'type':'integer','enum':[1]}, stage_cache={'type':'string','enum':['off','on']},
+                    stage_cache_budget_bytes={'type':'integer'})
+            return reply(child.stdout,message,{'tools':[tool(),{'name':'render_preview','inputSchema':{'properties':properties}}]})
         if message['method'] != 'tools/call' or message['params']['name'] != 'render_region_preview':
             return old(message)
         args = message['params']['arguments']

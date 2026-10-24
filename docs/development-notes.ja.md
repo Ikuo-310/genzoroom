@@ -1657,6 +1657,12 @@ workerが遅れて終了しただけでは再openを許可しない。既存DELE
 新規回帰9ケースではgate／イベントで競合順序を固定した。監査経路の再open拒否、cleanup timeout／I/O失敗／cancel、遅延directory作成、worker起動失敗、別ownerの原本保護、shutdownと回収再試行、native解放失敗時の削除禁止を確認した。Backend関連6ファイル212件成功に加え、最後に追加したnative解放失敗回帰を含むRAW APIテスト22件成功。既存FrontendのAPI client／document hook 19件も成功。既知のWindows sandbox制約を避けてrepo Python 3.14／cwd backendで権限付き実行した。全suite・Frontend buildは変更範囲上不要と判断し未実施。`git diff --check`成功。
 
 差分と直接依存する所有・回収境界の限定再監査はHigh 0／Medium 0／Low 0。監査Mediumの再現経路は修正後に成立しないことを確認し、Windows実画面確認へ進める状態と判断した。実LightCraft／GPU／Immich、RAW原本・sidecar・既存PoC成果物は操作していない。詳細な状態遷移・API code・残る未検証範囲は[Phase 1C設計書の監査修正追記](research/lightcraft/PHASE1C_DESIGN.md#c1限定監査-medium修正cache-cleanupと再openの競合2026-10-22)を参照。README／CHANGELOGは変更していない。
+## Region C2-A配送接続（2026-10-25）
+
+C1基準 `e651a68179c91f348f9b321ea7c59a17b38ecb5b` からpublic owner、Region HTTP、共通3 lease、Frontend有限配送ownerを接続した。`useRawDocument.connectRegion()` と `regionDelivery` がC2-Bへの明示境界で、通常ViewerからRegionを要求しない。C0 schema/plannerとC1 Nativeを再定義せず、Native worker/lock/validation、manager timeout回復を共有する。WholeとRegionの予算は独立し、Recipe/History/save/P1 queueとViewer DOMを維持した。
+
+Backend関連161件、Frontend関連332件と監査修正後のFrontend関連135件／Backend関連82件、TypeScript／production buildが成功。既存chunk警告は残る。限定監査で送信時ownerを使う取消、mutation時候補回収、document lock内のresponse lease登録を修正し、回帰確認後の未解決High/Mediumはない。実画面／実RAW/GPU／NAS/Firefox検証とoverlayは未実施。詳細なHTTP・所有状態・検証範囲・C2-B開始条件は[Region設計書§13](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#13-c2-a完了region配送所有状態管理2026-10-25)を参照。README/CHANGELOGは変更しない。
+
 # RAW診断JSONの保存ダイアログ（2026-10-24）
 
 RAW Preview診断が出力する`genzoroom-raw-preview-*.json`がDesktopの`valid_name()`許可prefixに含まれておらず、WebView2の要求段階で拒否されていた。既存の文字種・長さ・`.json`・診断ページ／Blob origin検証を保ち、このprefixだけを許可リストへ追加した。許可名は既存`DownloadEvent::Requested`からWindowsのnative保存先選択を通る。
