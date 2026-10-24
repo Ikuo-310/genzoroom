@@ -32,6 +32,10 @@ binaryの差替え検出には`--binary`を使う。現在のmanifest、receipt�
 
 A5-P0以降のprobeは、追加でGPUを無効化し、CPUの1024px要求／512 MiBでcacheが適用・保持されること、反復とBefore/After、off/on Full PNG一致、settings不変、off切替時の解放を実binaryで確認する。CPU admissionは実sourceと既存bufferの容量・追加確保分から計算し、GPU／混在／情報不足は従来の安全側見積りを維持する。probeは合成PNGの契約検証であり、実RAWの性能・RSS／VRAM受入を代替しない。
 
+A5-P2では実source／Planが得られるGPU／混在経路も実capacityと追加確保量で判定し、情報不足のみ旧保守式へ戻す。GPUの実capacity、host共有、CPU fallback分、旧新共存、pool余剰、別所有shared sourceの予約を含む。adaptive metadataのoptional `execution`を検証し、CPU P0 probeではCPU未試行の固定reasonも確認する。さらに独立したDX12 processで合成1280×963→1024pxのOFF/ON、Before、tiny budget、Full一致を検査する。available GPUではrenderごとのgpu_successを必須とし、adapter不在は明示skipとCPU結果検証に分ける。
+
+P2検証済みEXEは`I:\code\genzoroom\.tmp\lightcraft-a5-p2\target\release\lightcraft-cli.exe`（隣接receipt付き）。旧A2/P0版は上書きしない。現行SHAと試験記録は[DX12調査§12](RAW_DX12_STAGE_CACHE_RESEARCH.md#12-a5-p2実装結果2026-10-24)を参照。開発用固定配置`.tmp/lightcraft/current`は、利用中EXE排他・backup・EXE/receipt一体切替の独立検証を要するため今回は導入しない。従来どおり明示的なEXE設定と`--binary`照合を使用する。
+
 ## 開発・Windows配布との接続
 
 現行GenzoRoomはLightCraftをinstallerに同梱せず、`GENZOROOM_LIGHTCRAFT_EXE`で外部の絶対pathを指定する構成。開発用にも上記scriptでbuild・検証したbinaryを指定する。汎用のTauri開発buildそのものにLightCraftを新たに同梱したり、自動download／本家更新を追加したりしない。
@@ -40,7 +44,7 @@ A5-P0以降のprobeは、追加でGPUを無効化し、CPUの1024px要求／512 
 
 runtimeはMCPの`render_preview.inputSchema.properties.before.type == boolean`を世代ごとに調べ、Before応答の`kind`、native import fingerprint、geometry、PNG実寸を検証する。schema非対応やBefore基準を確認できないbinaryでは`beforeKey=null`とし比較操作を無効にする。After／RAW編集は従来どおり利用できる。対応schemaだけを持ち、AfterをBeforeとして返すbinaryは画像検証で拒否し、Beforeだけを失敗にする。runtimeのSHA-256診断とbuild receiptで未変更本家binaryと管理buildを識別する。全配布先で既知hashの登録を強制する方式には変更しない。
 
-A2はnative契約までで、GenzoRoom runtime／HTTP／Frontendはまだadaptive引数を送らない。現行runtimeは旧metadata互換経路を利用する。A3で初めて新品質・geometryのcapability／strict metadata／schedulerを接続する。領域描画、最終解像度・容量・timeout・cache採用、実RAWのCPU/GPU性能・peak memoryは別の受入であり、synthetic probe成功と混同しない。
+A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Frontendの品質・geometry capability／strict metadata／schedulerを接続した。現在はA5-P2のoptional executionとcapacity計量にも対応し、旧metadata互換経路を維持する。領域描画、最終解像度・容量・timeout・cache採用、実RAWのCPU/GPU性能・peak memoryは別の受入であり、synthetic probe成功と混同しない。
 
 ## 将来のエンジン更新
 

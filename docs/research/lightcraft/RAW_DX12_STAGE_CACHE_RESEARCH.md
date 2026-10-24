@@ -241,3 +241,75 @@ mock／純計算はGPU不要で必ず実行し、GPU統合テストはadapterな
 **条件付き可。** source／出力の一律上界と毎回の過剰予約には改善余地がある。一方、現行計量のcapacity漏れ・shared sourceの境界・置換peakを解決せず係数を下げる実装は不可。まずcapacity計量とrender結果診断、次に実Plan＋追加確保のadmissionを最小変更で行うことを推奨する。実際に必要量が512 MiBを超える場合は拒否を維持する。
 
 本調査で行った検証は、ローカルHEAD/status・管理patch全diff/digest照合、提供JSON集計、関連ソース／テストの静的追跡、算術確認、文書diff確認と`git diff --check`。コード変更、build、binary起動、自動テスト再実行、ブラウザ操作、NAS検証は行っていない。README／CHANGELOG更新は不要。調査文書のCommit／Pushで終了し、P2実装には進まない。
+
+## 12. A5-P2実装結果（2026-10-24）
+
+本節は調査Commit `db63015e51f9a52cef0ecd25550bf5abe4fedde3`から実施したP2の記録。§1〜11の未実装・未検証記述は調査時点の履歴として残す。P1a/P1b、RAW controls、C4保存・History、解像度、工程B/Cは変更していない。
+
+### 12.1 Capacity計量と所有権
+
+**実装事実：** `GpuStages::allocations()`はGPU bufferを`raw().size()`で計量し、`Buf.len`はkernelの論理長にだけ使う。現行Bufは一つのTracked allocationを単独所有し、共有はArc<Buf>で行うため、そのidentityで重複除外する。別allocationは同サイズでも別課金。CPU ImageもArc identity＋Vec capacityで扱う。StagePool全sideを通じ、CPU entryとGPU entryがpinする同一host sourceを一度だけ数える。
+
+`stage_capacities()`を描画後trimでも使用する。wireのキーとtrim順は維持するが、cpuBytes/gpuBytesは**全sideで重複除外した実capacityの描画後・trim前値**、retainedBytesは**trim後合計**になった。従来のside別logical長合算から変わるため、余剰capacityで増える場合と、共有host sourceの重複除外で減る場合がある。RSS／OS VRAMではない。
+
+小sourceのdevice uploadは各side所有で、host共有から独立して課金する。96 MiB超のglobal shared sourceは別所有のまま保持量metadataに含めず、**admissionでは既存shared容量と新upload容量の両方を予約**する。pool／retired、sampling/filter scratch、readback staging、params、driver領域の所有者は変更しない。clear後のpool残留を解放済みVRAMとして報告しない。
+
+### 12.2 Allocation前admission
+
+source取得はguard内で一度行い、同じDecodedSourceをjobへ渡す。coldのloaded→Session.acceptを保ち、実effective settings／Planを用いる。CPU確定かつGPU保持なしではP0の計算を継続し、GPU有効またはmixedでは次の保守的上界を使用する。
+
+```text
+H = 全CPU/GPU entryがpinするhostの実capacity（全sideでidentity重複除外）
+  + 未計上の今回source Vec capacity
+D = 全sideが保持するGPU allocationのraw capacity（identity重複除外）
+C = CPU P0計算の「今回追加量」  # GPU未試行／失敗後のCPU cache用も予約
+G = P × (32 + sampled miss×12 + linear miss×12)
+U = small sourceの新uploadが必要なら実source logical bytes、不要なら0
+Required = H + D + C + G + floor(G/4) + U
+         + 既存global shared source raw容量
+         + large sourceなら新shared upload容量
+```
+
+Pは実Plan.w×h。32は全空間plane最大量で、hitや未使用でも置換余裕を予約する。GPU hit判定はrender本体と同じsource Arc／geo／lin_key。既存entryをすべて課金してから追加量を予約し、2 entry／sideのevictionや新旧置換を先取りして減算しない。poolの最大25%余剰をG/4で予約する（各bufferの余剰合計はこの値以下）。uploadはpoolを使わず別allocationを作る。CPU fallbackのCも加算するため、GPU/CPU両方が残る場合を過小評価しない。
+
+**条件付き算術：** 空pool、shared sourceなし、source=2560×1925／capacity=len、出力1024×770の場合、Requiredは217,620,480 bytes＝**207.5391 MiB**。旧式922.9573 MiBから減るが、これは実機RAWの確定値ではない。既存保持・source capacity・Plan・source level・mixed状態で再計算する。512 MiB固定許可にはしない。
+
+演算不能・不明・非対応は旧保守式へ戻り、旧式のchecked arithmeticも不能なら拒否する。予算超過はcacheなしで描画継続。post-render capacity trimは追加防御であり、事前予約の代わりではない。native source working budgetとdevice storage-buffer limitは維持した。
+
+### 12.3 Render単位の実行診断
+
+adaptive MCP preview metadataに任意拡張`execution={outcome,backend,reason}`を追加した。旧引数だけのlegacy metadataは変更しない。新Backendはexecutionのない旧adaptive metadataも受け入れる。旧保存済みA4 JSONも引き続きFrontendで検証可能。
+
+| outcome | backend | 固定reason |
+|---|---|---|
+| gpu_success | gpu | none |
+| cpu_not_tried | cpu | cpu_requested / shutdown / gpu_disabled / unsupported / gpu_unavailable |
+| cpu_fallback | cpu | gpu_failed |
+
+gpu_successはGPU rendererのreadback・未書込み／blank判定・error scope確認を通過した結果にだけ設定する。hybridのCPU stageを否定する意味ではない。gpu_failedはOOM／fatal／limit等を集約する安全な固定codeで、障害種別の細分類までは今回公開しない。device loss callback、fatal後のGPU停止、OOM時のCPU fallbackと失敗GPU stage破棄は維持する。追加fault injectionは実driverをリセットせずこれらの回復経路を検証する。
+
+`preview.measured`にはconfiguredBackendとexecutionを同じrender identityで記録する。CPU fallbackは`preview.gpuFallback`をwarnで記録し、上流の自由文・pathは転送しない。A4のmetricsにも同じexecutionを渡し、backend.executionをcpu/gpuへ確定する。旧binaryの場合だけ従来のcpu/unconfirmed判定を使う。process-wide lastFallbackが古くても、新renderの成功をfallbackと取り違えない。Frontendはoutcome/backend/reasonとfallbackReportedの整合を検証する。
+
+### 12.4 検証結果と成果物
+
+- clean固定upstream `.tmp/lightcraft-a5-p2-apply`への管理patch再適用成功。build元`.tmp/lightcraft-a5-p2`もmanifestと全diff完全一致。patch digest：`5965aa10a19124d857df94fb53acb2dd343fc3197deca98e7b16c93c2b678b31`。
+- Native MCP unit **59成功・1 ignored**、e2e **10成功**。ignoredは既存subprocess helper。source／signature／geometry、mode/budget、2 entry×2 side、512 MiB／tiny／等値±1／overflow、CPU P0・mixed等を含む。新純算術とcapacity/identity GPU unit **2成功**、Engine実行診断／模擬OOM・fatal回帰 **1成功**。
+- GPU既存統合：cached Full一致、大source共有、windowのsource保持、Validation/DropWork/Limit fallbackの計**4成功**。CPU P0計量等 **3成功**、連続slider cache一致とNR Draft→Full **各1成功**。adapter不在時は明示skipする。今回の実binary DX12 probeは**gpu_success**を確認し、未確認実行をGPU成功扱いしていない。
+- Backend関連4ファイル **116成功**（RAW owner／adaptive／A4／patch管理）。Frontend診断2ファイル **30成功**、TypeScriptチェック込みproduction build成功。scheduler・永続化本体は変更せず関連範囲で契約を検証できるため、全Frontend／Backend suiteは実行していない。
+- CLI release build、従来legacy/Before/adaptive/CPU P0 probe成功。追加の独立DX12 processで合成1280×963→1024px、OFF/ON／Before／tiny、Full画像一致と実行証拠を確認。**合成画像で512 MiB admission成功**。実RAWの適用・性能保証にはしない。
+- 初回MCPはsandboxのtemp/socket権限で失敗、Backend sandbox実行は進行停止、Frontend診断UIはsandbox一時cache ENOENT。権限付き関連再実行で成功。開発中のGPU診断上書きとfixture注入箇所の失敗も修正・再検証した。成功件数へ失敗／重複を合算しない。
+- 既存警告：optional craft-fonts未同梱、incremental cache hard-link不可によるcopy、Frontendの500 kB超chunk。RAW pixel処理の成功とUIフォント同梱を混同しない。`git diff --check`成功。
+
+新EXE：`I:\code\genzoroom\.tmp\lightcraft-a5-p2\target\release\lightcraft-cli.exe`。
+
+SHA-256：`5565238de0d7e7ccd3c012e754c66680da75c793c68a5815da241592ba4173ec`。
+
+隣接receipt：`lightcraft-cli.genzoroom.json`。固定upstream、patch digest、beforeContract=1／previewContract=1、実EXE SHAを照合し、最新probeを`--binary`で再実行した。P0 EXEのSHAは既存`53e59c9bdf18651bcd14edd9aa0c5801b16c8543d191f164b060077fbe0b6511`のまま。A2/P0は上書きしていない。
+
+固定参照先`.tmp/lightcraft/current/lightcraft-cli.exe`は検討したが今回は導入しない。稼働EXEの排他確認、旧版backup、EXEとreceiptの一体切替・失敗復旧を独立検証する後続作業とする。今回の明示参照先は上記P2 EXEとする。
+
+### 12.5 残す実機確認と終了範囲
+
+ユーザー実機では上記EXEを指定し、対象RAW・DX12・1024×770・512 MiBでexecutionとcache容量を収集する。長いドラッグ／停止再開／最終保存、Before/After、source切替・同source再利用、budget増減／off、Full画素一致、RSSとdedicated/shared GPU memoryの各peakを確認する。専用／共有GPUメモリは単純合算して安全判定しない。
+
+実driverのOOM／device loss、対象RAWのsource capacity／Plan、Windows暗室の操作感・性能・長時間挙動、RSS／VRAMは未計測。模擬faultや合成GPU probeの成功で代替しない。P2で停止し、工程B/C、解像度変更、scheduler追加調整へ進まない。

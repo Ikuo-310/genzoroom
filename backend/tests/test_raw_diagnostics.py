@@ -22,6 +22,42 @@ def config(**changes):
             "temperature": "both", "repeats": 2, "budgetBytes": 1024**3, **changes}
 
 
+@pytest.mark.parametrize("outcome,backend,reason", [
+    ("gpu_success", "gpu", "none"),
+    ("cpu_not_tried", "cpu", "gpu_unavailable"),
+    ("cpu_fallback", "cpu", "gpu_failed"),
+])
+def test_render_local_execution_reaches_a4_and_structured_logs(local, tmp_path, monkeypatch, outcome, backend, reason):
+    import lightcraft_raw
+    events = []
+    monkeypatch.setattr(lightcraft_raw, "lightcraft_log", lambda event, **context: events.append((event, context)))
+    execution = {"outcome": outcome, "backend": backend, "reason": reason}
+    async def run():
+        diag, editing, _, children, _ = await diagnostic_setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                started = (await http.post("/api/developer/raw-preview/start", json=config(
+                    backend="gpu", quality="full", stageCache="off", temperature="cold", repeats=1))).json()
+                body = {"runId": started["runId"], "index": 0}
+                assert (await http.post("/api/developer/raw-preview/prepare", json=body)).status_code == 200
+                children[-1].execution = execution
+                # A stale process-wide fallback must not override this render's successful result.
+                children[-1].gpu["lastFallback"] = "older failure"
+                response = await http.post("/api/developer/raw-preview/render", json=body)
+                assert response.status_code == 200, response.text
+                meta = json.loads(response.headers["x-raw-diagnostic"])
+                assert meta["metrics"]["execution"] == execution
+                assert meta["backend"]["execution"] == backend
+                assert meta["backend"]["fallbackReported"] == (outcome == "cpu_fallback")
+                assert any(e == "preview.measured" and c.get("execution") == execution for e, c in events)
+                assert any(e == "preview.gpuFallback" and c.get("level") == "warn" for e, c in events) == (outcome == "cpu_fallback")
+        finally:
+            await diag.close()
+            await editing.close()
+    asyncio.run(run())
+
+
 async def diagnostic_setup(tmp_path, local, monkeypatch):
     editing, manager, children, _ = await setup(tmp_path, local, monkeypatch)
     root = tmp_path / "diagnostic-sources"

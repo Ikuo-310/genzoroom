@@ -259,6 +259,16 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             allowed.add("kind")
         if quality is not None:
             allowed |= {"kind", "previewContract", "quality", "mode", "frame", "stageCache"}
+        if quality is not None and isinstance(metadata, dict) and "execution" in metadata:
+            allowed.add("execution")
+            execution = metadata["execution"]
+            if not isinstance(execution, dict) or set(execution) != {"outcome", "backend", "reason"} or not (
+                execution == {"outcome": "gpu_success", "backend": "gpu", "reason": "none"}
+                or execution == {"outcome": "cpu_fallback", "backend": "cpu", "reason": "gpu_failed"}
+                or execution.get("outcome") == "cpu_not_tried" and execution.get("backend") == "cpu"
+                and execution.get("reason") in ("cpu_requested", "shutdown", "gpu_disabled", "unsupported", "gpu_unavailable")
+            ):
+                raise ValueError()
         if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
             raise ValueError()
@@ -1134,16 +1144,22 @@ class LightCraftRawSession:
                     lightcraft_log("preview.measured", level="debug", generation=self._generation,
                         revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality, kind=ticket.kind,
                         trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend,
+                        execution=metadata.get("execution") if metadata else None,
                         pngSha256=digest,
                         nativeMs=native_ms, validationMs=validation_ms,
                         width=w, height=h, payloadBytes=len(data), stageCache=metadata["stageCache"] if metadata else None)
+                    if metadata and metadata.get("execution", {}).get("outcome") == "cpu_fallback":
+                        lightcraft_log("preview.gpuFallback", level="warn", generation=self._generation,
+                            revision=ticket.revision, sequence=ticket.sequence, configuredBackend=self.manager._gpu_backend,
+                            execution=metadata["execution"])
                     if self._ticket_current(ticket):
                         frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
                                              quality=ticket.quality, _frame_json=json.dumps(metadata["frame"]) if metadata else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
                                                  "validationMs": validation_ms,
-                                                 "pngSha256": digest, "stageCache": metadata["stageCache"]})
+                                                 "pngSha256": digest, "stageCache": metadata["stageCache"],
+                                                 **({"execution": metadata["execution"]} if "execution" in metadata else {})})
                                                  if self._diagnostics and metadata else None)
                         if ticket.kind == "before":
                             self._before_cache = frame

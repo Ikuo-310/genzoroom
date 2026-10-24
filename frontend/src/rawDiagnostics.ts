@@ -9,9 +9,9 @@ export type RawTrialMetadata = {
   trial: RawTrial; measuredAt: string;
   contract: { lightcraftVersion: '0.10.0'; engineCommit: string; previewContract: 1; binarySha256: string };
   source: { width: number; height: number; format: string; identity: string }; settingsFingerprint: string; frame: RawGeometry;
-  backend: { configured: 'cpu' | 'gpu'; execution: 'cpu' | 'unconfirmed'; gpuAvailable: boolean; fallbackReported: boolean };
+  backend: { configured: 'cpu' | 'gpu'; execution: 'cpu' | 'gpu' | 'unconfirmed'; gpuAvailable: boolean; fallbackReported: boolean };
   width: number; height: number; payloadBytes: number;
-  metrics: { nativeMs: number; validationMs: number; pngSha256: string | null;
+  metrics: { execution?: { outcome: 'gpu_success' | 'cpu_not_tried' | 'cpu_fallback'; backend: 'cpu' | 'gpu'; reason: string }; nativeMs: number; validationMs: number; pngSha256: string | null;
     stageCache: { mode: 'off' | 'on'; applied: boolean; reason: 'none' | 'budget'; cpuBytes: number; gpuBytes: number; retainedBytes: number; budgetBytes: number } };
   rssBytes: null; vramBytes: null;
 };
@@ -102,12 +102,20 @@ export function parseRawTrial(value: unknown, trial: RawTrial): RawTrialMetadata
     || !['nativeWidth', 'nativeHeight', 'fullWidth', 'fullHeight'].every(k => count(frame[k]) && (frame[k] as number) > 0 && (frame[k] as number) <= 2 ** 31 - 1)
     || typeof frame.aspect !== 'number' || !Number.isFinite(frame.aspect) || frame.aspect <= 0 || frame.window !== null
     || !exact(backend, 'configured,execution,gpuAvailable,fallbackReported') || !['cpu', 'gpu'].includes(backend.configured as string)
-    || !['cpu', 'unconfirmed'].includes(backend.execution as string) || backend.execution === 'cpu' && backend.configured !== 'cpu'
+    || !['cpu', 'gpu', 'unconfirmed'].includes(backend.execution as string)
     || typeof backend.gpuAvailable !== 'boolean' || typeof backend.fallbackReported !== 'boolean'
     || !count(value.width) || !value.width || !count(value.height) || !value.height || Math.max(value.width, value.height) > 1024
     || value.width !== frame.fullWidth || value.height !== frame.fullHeight || !count(value.payloadBytes) || value.payloadBytes > 5 * 1024 ** 2
-    || !exact(metrics, 'nativeMs,validationMs,pngSha256,stageCache') || !duration(metrics.nativeMs) || !duration(metrics.validationMs)
+    || !(exact(metrics, 'nativeMs,validationMs,pngSha256,stageCache') || exact(metrics, 'nativeMs,validationMs,pngSha256,stageCache,execution')) || !duration(metrics.nativeMs) || !duration(metrics.validationMs)
     || (trial.quality === 'full' ? !hash(metrics.pngSha256) : metrics.pngSha256 !== null)) return fail();
+  if ('execution' in metrics) {
+    const e = metrics.execution;
+    if (!exact(e, 'outcome,backend,reason') || !(e.outcome === 'gpu_success' && e.backend === 'gpu' && e.reason === 'none'
+      || e.outcome === 'cpu_fallback' && e.backend === 'cpu' && e.reason === 'gpu_failed'
+      || e.outcome === 'cpu_not_tried' && e.backend === 'cpu'
+        && ['cpu_requested', 'shutdown', 'gpu_disabled', 'unsupported', 'gpu_unavailable'].includes(e.reason as string))
+      || backend.execution !== e.backend || backend.fallbackReported !== (e.outcome === 'cpu_fallback')) return fail();
+  } else if (backend.execution === 'gpu' || backend.execution === 'cpu' && backend.configured !== 'cpu') return fail();
   const cache = metrics.stageCache;
   if (!exact(cache, 'mode,applied,reason,cpuBytes,gpuBytes,retainedBytes,budgetBytes') || cache.mode !== trial.stageCache
     || typeof cache.applied !== 'boolean' || !['none', 'budget'].includes(cache.reason as string)
@@ -211,7 +219,7 @@ export function createRawDiagnosticReport(config: RawDiagnosticConfig, rows: Raw
     conditions: { quality: config.quality, stageCache: config.stageCache, backend: config.backend, temperature: config.temperature,
       repeats: config.repeats, budgetBytes: config.budgetBytes, maxSide: 1024 }, trials,
     statistics: rawStatistics(trials), comparisons: rawComparisons(trials),
-    limitations: ['nativeIncludesMcpEncodeAndReadback', 'gpuExecutionUnconfirmed', 'coldMeansFreshNativeProcessNotOsDiskCache',
+    limitations: ['nativeIncludesMcpEncodeAndReadback', ...(trials.some(r => r.metadata?.backend.execution === 'unconfirmed') ? ['gpuExecutionUnconfirmed'] : []), 'coldMeansFreshNativeProcessNotOsDiskCache',
       'warmMeansOneUnmeasuredNativeWarmupNotCacheHitProof', 'rssAndVramNotCollected', 'stageRetentionIsNotProcessMemory',
       'importDefaultsOnlyNoSavedRecipe', 'totalIncludesGpuStatusQueriesAndFullHash', 'maxSide1024', 'windowsLocalOnly'] };
 }

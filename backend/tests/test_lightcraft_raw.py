@@ -73,6 +73,7 @@ class RawProcess(FakeProcess):
         self.before_supported = False
         self.before_wrong_kind = False
         self.adaptive_supported = False
+        self.execution = None
         self.preview_arguments = []
         self.preview_error_code = None
 
@@ -131,6 +132,8 @@ class RawProcess(FakeProcess):
                                 stageCache={"mode": args["stage_cache"], "applied": args["stage_cache"] == "on",
                                 "reason": "none", "cpuBytes": 0, "gpuBytes": 0, "retainedBytes": 0,
                                 "budgetBytes": args.get("stage_cache_budget_bytes", 0)})
+                            if self.execution is not None:
+                                metadata["execution"] = self.execution
                             result["content"][1]["text"] = json.dumps(metadata)
                         reply(self.stdout, message, result)
                 finally:

@@ -760,3 +760,15 @@ ACK後のAfter表示slotが動作中なら150ms刻みで送信を譲る。courte
 通常編集のStageCacheは既存の `GENZOROOM_RAW_STAGE_CACHE=on` と `GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES=536870912` を引き続き使用できる。環境変数→native引数の512MiB回帰を追加。無指定はoff、有限予算・fallbackは既存どおり。P0実測のWarm短縮は固定settingsの結果であり、P1連続操作の速度保証へ転用しない。
 
 自動試験の比較・件数・制約は[性能記録§11](RAW_PREVIEW_INTERACTION_PERFORMANCE.md#a5-p1)を参照。Windows実RAW／CPU・GPU／WebViewの表示頻度・操作感・画質・RSS/VRAMは未測定。工程B・C、解像度変更、History UIの別件修正は対象外。
+
+## 19. A5-P2：GPU capacityと事前予算判定（2026-10-24）
+
+調査Commit `db63015`を基準に実装した。履歴上のGPU／mixed一律見積りは、実sourceとPlanを取得できる場合に限り本節で更新する。式・所有権・診断契約・検証・binary SHAは[DX12調査§12](RAW_DX12_STAGE_CACHE_RESEARCH.md#12-a5-p2実装結果2026-10-24)を正本とする。
+
+GPUはBuf.lenを論理長、raw().size()を実capacityとして区別し、全sideのallocation identityで重複除外する。CPU sourceはVec capacityで計量し、CPU/GPU entryの同じhost Arcを一度だけ課金する。StagePoolのcpuBytes/gpuBytesはtrim前capacity、retainedBytesはtrim後で、RSS／OS VRAMではない。
+
+GPU/mixed admissionは既存host/device capacity＋未計上source＋今回GPU追加量（最大plane32P、sampled/lin miss各12P、pool余剰25%）＋CPU fallbackのP0追加量を予約する。小source uploadはsideごと、大sourceは別所有の既存shared＋新uploadをadmissionに含める。旧entryのevictionを先取りしない。不明／overflowは旧保守式または拒否、CPU確定経路はP0を維持する。post-trimだけでallocation前の拒否を緩和しない。
+
+adaptive previewにoptional execution（gpu_success／cpu_not_tried／cpu_fallback、backend、固定reason）を追加した。gpu_successはreadback・error scope・出力検証後に確定し、hybridの全stage GPUを意味しない。Backend構造化ログとA4へ同じ結果を伝播し、旧metadata／旧A4記録も受け入れる。process-wide lastFallbackを個別成功判定へ流用しない。
+
+MCP 59＋e2e10、GPU/Engine/CPUの関連回帰、Backend116、Frontend診断30と型検査／build、clean再適用、release EXE／receipt／SHA照合に成功。実binary DX12合成probeは1024px／512 MiB適用・Full一致を確認した。実RAW性能・RSS/VRAM・driver device lossはユーザー実機確認が必要。P1/C4／解像度／工程B/Cは変更しない。

@@ -5,6 +5,18 @@ import { createRawDiagnosticReport, fetchRawTrial, parseRawTrial, rawComparisons
 import { diagnosticConfig, trialMetadata, trialRows } from './test/rawDiagnostics';
 
 afterEach(() => vi.unstubAllGlobals());
+it.each(['gpu_success', 'cpu_not_tried', 'cpu_fallback'] as const)('uses render-local %s evidence with old metadata compatibility', outcome => {
+  const trial = rawTrialPlan(diagnosticConfig)[1], m = trialMetadata(trial);
+  expect(parseRawTrial(m, trial)).toEqual(m);
+  const backend = outcome === 'gpu_success' ? 'gpu' : 'cpu';
+  m.backend = { configured: 'gpu', execution: backend, gpuAvailable: true, fallbackReported: outcome === 'cpu_fallback' };
+  m.metrics.execution = { outcome, backend, reason: outcome === 'gpu_success' ? 'none' : outcome === 'cpu_fallback' ? 'gpu_failed' : 'gpu_unavailable' };
+  expect(parseRawTrial(m, trial)).toEqual(m);
+  m.backend.execution = 'unconfirmed';
+  expect(() => parseRawTrial(m, trial)).toThrow();
+  m.backend.execution = backend; m.metrics.execution.reason = 'private upstream text';
+  expect(() => parseRawTrial(m, trial)).toThrow();
+});
 it('defines bounded Cold groups and shared Warm groups without calling them cache hits', () => {
   const plan = rawTrialPlan({ ...diagnosticConfig, temperature: 'both', repeats: 5 });
   expect(plan).toHaveLength(40);

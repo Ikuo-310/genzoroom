@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## RAW適応型プレビュー A5-P2：DX12 capacityと予算判定（2026-10-24）
+
+固定LC v0.10.0の管理patchを更新し、GPU保持をraw buffer capacity、CPU保持をVec capacityで計量する。全side・CPU/GPU entryのallocation identityで共有を重複除外し、描画後trimへ同じ計量を適用した。事前判定は実source／Plan、sampled/lin hit、最大plane、pool余剰25%、旧新共存、CPU fallback追加量から計算する。大shared sourceは別所有だがadmissionでは旧新容量を予約し、CPU P0と有限予算・working budgetを維持する。
+
+render単位のgpu_success／cpu_not_tried／cpu_fallbackと固定reasonをMCP、構造化ログ、A4へ伝播した。GPU成功はreadback・error scope・出力検証後に確定する。hybridの全stage GPUを意味せず、旧metadata／旧A4 JSONも受け入れる。P1 scheduler、C4保存・History、JPEG、解像度は変更しない。
+
+Native MCP 59＋e2e10成功（既存helper 1 ignored）、GPU unit2／Engine障害診断1／GPU既存統合4／CPU関連5成功。Backend4ファイル116、Frontend診断2ファイル30と型検査・build成功。clean固定upstreamへのpatch再適用、CLI release build、実binary DX12 1024px／512 MiB合成probe、Full ON/OFF一致、tiny拒否、receipt/SHA照合成功。既存craft-fonts／hard-link copy／Frontend chunk警告は残る。
+
+新EXEは`I:\code\genzoroom\.tmp\lightcraft-a5-p2\target\release\lightcraft-cli.exe`。SHAは[DX12調査§12](research/lightcraft/RAW_DX12_STAGE_CACHE_RESEARCH.md#12-a5-p2実装結果2026-10-24)に記録。A2/P0 EXEは保持し、currentへの固定配置・安全な昇格機構は独立検証する後続作業とした。ユーザー実RAWでの適用・性能・RSS/VRAM・実driver OOM/device lossは未検証。P2で停止し工程B/Cへ進まない。
+
 ## RAW適応型プレビュー A5-P1：ドラッグ追従（2026-10-24）
 
 HEAD `62798c2`からP1a＋P1bを実装。150ms trailing debounceを非延長timerと一latest patchへ変更し、通常gestureは一ACKでowner queueを解放する。ACK後の表示slotには最大約1050msの有限courtesyを設ける。gesture終了／保存flushは待たせず、既にbusyの処理も最終patchまでdrainしてから同queueのHistory保存へ進む。

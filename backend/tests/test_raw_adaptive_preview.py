@@ -16,6 +16,34 @@ import raw_recipe_store as store
 import windows_raw_api as http_api
 
 
+@pytest.mark.parametrize("execution", [
+    None,
+    {"outcome": "gpu_success", "backend": "gpu", "reason": "none"},
+    {"outcome": "cpu_not_tried", "backend": "cpu", "reason": "gpu_unavailable"},
+    {"outcome": "cpu_fallback", "backend": "cpu", "reason": "gpu_failed"},
+])
+def test_render_execution_metadata_is_optional_and_validated(execution):
+    from tests.test_lightcraft_raw import image_result
+    result = image_result()
+    meta = json.loads(result["content"][1]["text"])
+    meta.update(kind="after", previewContract=1, quality="full", mode="whole",
+        frame={"geometryId": "a" * 64, "nativeWidth": 16, "nativeHeight": 12,
+               "aspect": 4 / 3, "fullWidth": 16, "fullHeight": 12, "window": None},
+        stageCache={"mode": "off", "applied": False, "reason": "none", "cpuBytes": 0,
+                    "gpuBytes": 0, "retainedBytes": 0, "budgetBytes": 0})
+    if execution is not None:
+        meta["execution"] = execution
+    result["content"][1]["text"] = json.dumps(meta)
+    assert adapter._validate_png(result, 1, 1024, quality="full")[3] == meta
+    for invalid in ({"outcome": "gpu_success", "backend": "cpu", "reason": "none"},
+                    {"outcome": "cpu_fallback", "backend": "cpu", "reason": "PRIVATE path"},
+                    None):
+        meta["execution"] = invalid
+        result["content"][1]["text"] = json.dumps(meta)
+        with pytest.raises(LightCraftError):
+            adapter._validate_png(result, 1, 1024, quality="full")
+
+
 def target(doc, serial=1, quality="draft"):
     return preview_body(doc, serial) | {"quality": quality, "mode": "whole", "maxSide": 1024,
                                        "viewGeneration": 1, "geometryId": None}

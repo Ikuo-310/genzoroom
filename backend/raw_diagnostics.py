@@ -257,6 +257,11 @@ class RawDiagnosticsApi:
                 "gpuAvailable": gpu_after.available, "fallbackReported": bool(gpu_before.last_fallback or gpu_after.last_fallback)},
             "width": frame.width, "height": frame.height, "payloadBytes": len(frame.data),
             "metrics": frame.metrics, "rssBytes": None, "vramBytes": None}
+        execution = frame.metrics.get("execution") if frame.metrics else None
+        if execution:
+            # A process-wide lastFallback can describe an earlier render; prefer this result's evidence.
+            metadata["backend"]["execution"] = execution["backend"]
+            metadata["backend"]["fallbackReported"] = execution["outcome"] == "cpu_fallback"
         encoded = json.dumps(metadata, separators=(",", ":"), allow_nan=False)
         if len(encoded) > 16 * 1024:
             raise LightCraftError("raw_diagnostic_failed")

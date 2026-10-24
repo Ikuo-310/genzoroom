@@ -22,7 +22,7 @@
       ],
       "file": "patches/0001-native-before.patch",
       "purpose": "Native import Before and opt-in adaptive quality, observed frame metadata and bounded StageCache comparison",
-      "sha256": "00a8f1d127c6a04f64fa680f849cdda36c028f8936ed5771afc0d8883655d328"
+      "sha256": "5965aa10a19124d857df94fb53acb2dd343fc3197deca98e7b16c93c2b678b31"
     }
   ],
   "commit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",

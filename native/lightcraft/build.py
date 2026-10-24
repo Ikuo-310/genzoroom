@@ -159,9 +159,12 @@ def probe(binary):
                 if set(metadata) != legacy:
                     raise ValueError("legacy metadata changed")
             else:
-                if set(metadata) != legacy | {"previewContract", "quality", "mode", "frame", "stageCache"} \
+                if set(metadata) != legacy | {"previewContract", "quality", "mode", "frame", "stageCache", "execution"} \
                         or metadata["previewContract"] != 1 or metadata["quality"] != quality or metadata["mode"] != "whole":
                     raise ValueError("adaptive metadata mismatch")
+                execution = metadata["execution"]
+                if not valid_execution(execution):
+                    raise ValueError("missing render-local execution")
                 frame, cache = metadata["frame"], metadata["stageCache"]
                 if set(frame) != {"geometryId", "nativeWidth", "nativeHeight", "aspect", "fullWidth", "fullHeight", "window"} \
                         or any(type(frame[k]) is not int or frame[k] != 16 for k in ("nativeWidth", "nativeHeight", "fullWidth", "fullHeight")) \
@@ -192,6 +195,8 @@ def probe(binary):
                 raise ValueError("CPU admission render failed")
             meta = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
             png = base64.b64decode(next(c["data"] for c in result["content"] if c["type"] == "image"), validate=True)
+            if meta["execution"] != {"outcome": "cpu_not_tried", "backend": "cpu", "reason": "gpu_disabled"}:
+                raise ValueError("CPU execution evidence mismatch")
             cache = meta["stageCache"]
             if meta["quality"] != "full" or meta["kind"] != ("before" if index == 103 else "after") \
                     or struct.unpack(">II", png[16:24]) != (meta["width"], meta["height"]) \
@@ -211,6 +216,71 @@ def probe(binary):
                     or result["content"][0].get("type") != "text" \
                     or json.loads(result["content"][0]["text"]) != {"code": code}:
                 raise ValueError("malformed preview options were not rejected")
+
+    probe_gpu(binary)
+
+
+def valid_execution(value):
+    if not isinstance(value, dict) or set(value) != {"outcome", "backend", "reason"}:
+        return False
+    return value == {"outcome": "gpu_success", "backend": "gpu", "reason": "none"} or \
+        value == {"outcome": "cpu_fallback", "backend": "cpu", "reason": "gpu_failed"} or \
+        value["outcome"] == "cpu_not_tried" and value["backend"] == "cpu" and value["reason"] in (
+            "cpu_requested", "shutdown", "gpu_disabled", "unsupported", "gpu_unavailable")
+
+
+def probe_gpu(binary):
+    """An isolated real-device check; no available adapter is an explicit skip, not success."""
+    with tempfile.TemporaryDirectory(prefix="genzoroom-dx12-") as folder:
+        source = Path(folder) / "source.png"
+        def chunk(kind, data):
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        source.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1280, 963, 8, 2, 0, 0, 0))
+                          + chunk(b"IDAT", zlib.compress((b"\0" + bytes([64, 96, 128]) * 1280) * 963)) + chunk(b"IEND", b""))
+        def call(index, name, args):
+            return {"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {"name": name, "arguments": args}}
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+             "capabilities": {}, "clientInfo": {"name": "genzoroom-gpu-probe", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            call(2, "command_run", {"id": "library.import", "params": {"paths": [str(source)], "mode": "add"}}),
+            call(3, "command_run", {"id": "app.gpu", "params": {}}),
+            *[call(i, "render_preview", {"id": 1, "max_side": 1024, "quality": "full", "stage_cache": mode,
+               **({"before": True} if i == 6 else {}),
+               **({"stage_cache_budget_bytes": budget} if mode == "on" else {})})
+              for i, mode, budget in [(4, "off", 0), (5, "on", 512 << 20), (6, "on", 512 << 20), (7, "on", 1)]],
+        ]
+        environment = {**os.environ, "TEMP": folder, "TMP": folder,
+                       "LIGHTCRAFT_GPU": "1", "LIGHTCRAFT_GPU_BACKEND": "dx12" if os.name == "nt" else "auto"}
+        process = subprocess.run([str(binary), "mcp", "--headless", "--compact"],
+            input="".join(json.dumps(v) + "\n" for v in messages).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=120, check=True, env=environment,
+            creationflags=0x08000000 if os.name == "nt" else 0)
+        if len(process.stdout) > 24 * 1024 * 1024:
+            raise ValueError("GPU probe response too large")
+        replies = {v["id"]: v for line in process.stdout.splitlines() if (v := json.loads(line)).get("id")}
+        status = replies[3]["result"]["structuredContent"]
+        images = []
+        for index in (4, 5, 6, 7):
+            result = replies[index]["result"]
+            if result.get("isError") is not False:
+                raise ValueError("GPU probe render failed")
+            meta = json.loads(next(c["text"] for c in result["content"] if c["type"] == "text"))
+            if not valid_execution(meta["execution"]):
+                raise ValueError("GPU probe execution mismatch")
+            if status["available"] and meta["execution"]["outcome"] != "gpu_success":
+                raise ValueError("available GPU did not complete the probe")
+            if max(meta["width"], meta["height"]) != 1024:
+                raise ValueError("GPU probe dimensions mismatch")
+            cache = meta["stageCache"]
+            if index in (5, 6) and (not cache["applied"] or not 0 < cache["retainedBytes"] <= 512 << 20):
+                raise ValueError("GPU probe capacity admission failed")
+            if index == 7 and (cache["applied"] or cache["reason"] != "budget" or cache["retainedBytes"]):
+                raise ValueError("GPU probe tiny budget failed")
+            images.append(next(c["data"] for c in result["content"] if c["type"] == "image"))
+        if len(set(images)) != 1:
+            raise ValueError("GPU cache changed Full pixels")
+        print("DX12/GPU probe: real GPU success" if status["available"] else "SKIP GPU integration: no available adapter (CPU execution validated)")
 
 
 def receipt(binary, spec):
