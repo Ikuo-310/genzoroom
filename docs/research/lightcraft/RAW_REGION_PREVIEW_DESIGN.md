@@ -359,7 +359,9 @@ Regionのreuse用 `rebindRegion()` はC0 `canReuseRegion()` を通し、最新�
 
 ### 14.4 明示diagnostic trigger
 
-`localStorage['genzoroom-raw-region-debug']='1'` を事前に設定した場合のみ、active RAW ownerに `window.genzoroomRegion` を登録する。通常操作はRegion requestを発行しない。`request({visible,context,prefetch,compare})` は同時1actionで、C2-A finite planのpreflight→確認Fを使った新render planへ進む。Native workerを増やさない。`visible` は試験で指定するNative rectであり、実Pan/Zoomを監視しない。context/prefetchも引数必須で、製品defaultは設定しない。
+Developer Diagnosticsの「RAW Region Preview」tabが選択された間、同一WebView群の診断BroadcastChannelから現在のRAW ownerへ明示操作を送る。RAW ownerはtab attach時だけRegion capabilityを確認し、ボタン操作以外ではRegion requestを発行しない。UIは位置名を送り、Native frameの半幅・半高から可視矩形を算出する。context=16 / prefetch=0はDeveloper Diagnostics専用の固定試験値で、製品値ではない。Pan/Zoomは監視しない。
+
+`window.genzoroomRegion` は旧来のopt-in内部manual triggerとして残すが、Windows受入では使用しない。通常暗室UIにRegion診断ボタンを追加せず、Developer Diagnostics tabを開いていない通常利用の動作を維持する。
 
 表示整合の確認用なので、preflight Fは現在Whole Fと同じであることを要求する。Whole／Beforeの必要なbaseがない場合は失敗又は待機し、Regionだけを先行表示しない。`status()` はWhole frame/quality、Before準備、planとoverlay metadataを確認できる。`clear()` は配送・overlayを失効させ、Wholeを残す。owner離脱時にはglobal triggerも削除する。
 
@@ -387,29 +389,17 @@ $env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\rel
 # 作り直す場合は frontend で npm run build、その後rootで cargo build --manifest-path desktop/Cargo.toml --locked。
 ```
 
-GalleryでWebView2 DevTools Consoleを開き、次を設定してからRAWを暗室へ開く（すでに開いていた場合はいったんGalleryへ戻る）。
+以下の操作はDeveloper Diagnostics UIだけで実施できる。任意JavaScriptやWebView2 Consoleの入力は不要。
 
-```javascript
-localStorage.setItem('genzoroom-raw-region-debug', '1');
-// RAWのWhole Fullが表示・保存完了してから実行する。
-const g = window.genzoroomRegion.status().frame;
-await window.genzoroomRegion.request({
-  visible: { x0: g.nativeWidth / 4, y0: g.nativeHeight / 4,
-    x1: g.nativeWidth * 3 / 4, y1: g.nativeHeight * 3 / 4 },
-  context: 16, prefetch: 0 // C2-B試験値。製品値ではない。
-});
-window.genzoroomRegion.status(); // overlay metadataが確定するまで確認。
-```
-
-中央、四隅、画像edge、crop/portrait/landscape、DPR1/1.25/1.5/2、非整数zoomで、Region位置とvalid域境界・Whole保持を確認する。Pan/Zoomを動かしても新Regionを自動要求しない。新しい試験rectは明示requestで発行する。
-
-Before/Afterは既存の比較buttonを有効にし、Whole Beforeの準備完了後に同じrequestへ `compare:true` を加える。両側Regionが揃うまで両側Whole、揃った後は切替位置が完全一致することを確認する。比較終了・再要求・調整開始・photo/Filmstrip切替・Gallery復帰・終了でoverlayが残らないこと、decode失敗時にWholeが消えないことも確認する。Dehaze差はfeatherで隠していないため、その境界をWindowsで観察する。既存Developer LogsでFrontend levelをdebugにすると上記配送・overlay eventを確認できる。
-
-```javascript
-window.genzoroomRegion.clear();
-localStorage.removeItem('genzoroom-raw-region-debug');
-// Galleryへ戻るとtriggerを破棄し、次のRAWでは登録しない。
-```
+1. Windows版GenzoRoomを起動する。
+2. Immich GalleryからRAWを暗室で開き、Whole Fullの準備が完了するまで待つ。
+3. 設定からDeveloper Diagnosticsを開き、「RAW Region Preview」tabを選ぶ。画面に「準備完了」、Quality「Full」、geometry「一致」が表示されることを確認する。RAW未接続、Region非対応LightCraft、Whole Full待ちの場合はUIの案内に従い、ボタン要求は送信されない。
+4. 「中央」を押す。Regionが画像のおよそ中央半分へ表示されること、Whole geometryとRegion geometryが一致し、Region表示サイズとQualityを確認する。context=16 / prefetch=0はこの診断UI内だけで使うC2-B試験値で、製品値ではない。
+5. 「左上」「右上」「左下」「右下」を順に押し、続けて「左端」「右端」「上端」「下端」を押す。各rectは現在のNative frameから自動計算され、ユーザーの座標入力は不要。中央・四隅・edge、crop/portrait/landscape、DPR1/1.25/1.5/2、非整数zoomでRegion位置とvalid域境界・Whole保持を確認する。Pan/Zoomだけでは新Regionは要求されない。
+6. Before画像を暗室の既存Before表示操作で準備する。Developer Diagnosticsの「Before/After Region比較」をONにして、Before準備状態がFullになるのを待ってから位置ボタンを押す。Before未準備中は要求を送らない。比較中は両側Regionが揃うまでWhole、揃った時だけRegion pairとなり、切替位置が一致することを確認する。
+7. 必要に応じて診断UIの「有効境界を細枠表示」をONにし、通常OFFの細い枠で1px整合を確認する。Dehaze有無で境界も見る。feather、blur、境界補間は適用しない。
+8. 「Region解除」を押し、Regionが消えてWholeだけになり、解除済みが「はい」になることを確認する。
+9. Developer Diagnosticsを閉じ、RAW photoを切り替え、Galleryへ復帰する。それぞれで旧Regionが残らず、診断接続が解除されることを確認する。decode失敗時にもWholeが消えないことを確認する。既存Developer LogsでFrontend levelをdebugにすると配送・overlay eventを確認できる。
 
 ### 14.7 C2-Cへの受渡しと未実装
 

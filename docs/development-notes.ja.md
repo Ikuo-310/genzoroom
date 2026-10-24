@@ -1,8 +1,14 @@
 # GenzoRoom 開発ノート
 
+## C2-B：Windows Region受入UI補助
+
+`/developer` に「RAW Region Preview」tabを追加し、RAW ownerとはtargeted BroadcastChannelで接続する。中央・四隅・edgeの位置button、Before/After pair、解除、通常OFFの有効域枠、品質／geometry／画像サイズ／要求状態表示を実装。位置rectは現在Native frameの半分サイズから算出し、context=16 / prefetch=0はこのDeveloper Diagnosticsだけの試験値として固定した。Developer tab detach、photo離脱、Gallery復帰で診断Region・細枠・channelを回収する。通常暗室に開発ボタンを設けず、Pan/Zoom、threshold、C2-C、JPEG経路は変更していない。
+
+関連7ファイル215件成功（UI位置・失敗表示・Before待機／pair操作、RAW lifecycle、C2-B overlay ownership／stale／pair試験）。TypeScript、Frontend production build、`git diff --check`成功。既存500 kB超chunk警告あり。Windows実画面受入はこれからユーザーが実施するため、Dehaze境界・1px alignment・実RAW/GPUは未確認。C2-Cには進まない。
+
 ## 工程C2-B：Region Viewer overlay統合（2026-10-25）
 
-基準 `d12b38869538993700ea785e009d661e592256a5` からRAW専用Whole/Region共通wrapperと表示ownerを追加した。C0のNative placement／valid域clipを使い、decode後のowner/plan/request再確認、有限URL参照、Draft/Full整合交換、Before/After pairの両側採用、比較終了・mutation・photo離脱等の回収を接続した。JPEG描画分岐、Native/Backend、P1/History/save queueは維持する。通常UIからRegionを自動要求せず、localStorageで事前に有効にした内部diagnostic triggerだけが明示planを発行する。
+基準 `d12b38869538993700ea785e009d661e592256a5` からRAW専用Whole/Region共通wrapperと表示ownerを追加した。C0のNative placement／valid域clipを使い、decode後のowner/plan/request再確認、有限URL参照、Draft/Full整合交換、Before/After pairの両側採用、比較終了・mutation・photo離脱等の回収を接続した。今回、Windows受入をDeveloper DiagnosticsのRAW Region Preview tabから操作できるようにし、RAW hookへ対象限定BroadcastChannel、中央・四隅・edgeの固定Native半frame試験位置、Before比較、解除、任意の細境界枠を追加した。context=16 / prefetch=0は診断専用試験値で製品値ではない。通常暗室から自動要求せず、JPEG描画、Native/Backend、P1/History/save queueは維持する。
 
 初回関連17ファイル526件は525成功／1失敗。JPEG永続化試験の既存range index依存の失敗は、基準Commitを隔離展開した環境でも再現したため範囲外課題として残す。最終修正後の関連9ファイル292件、TypeScript／production build、Windows hostのCargo dev buildは成功した。既存chunk警告とincremental cacheのhard-link→copy警告は残る。限定再監査の未解決High/Mediumは0。
 

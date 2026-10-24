@@ -12,7 +12,7 @@ const revoke = vi.fn();
 beforeEach(() => { serial = 0; revoke.mockReset(); vi.stubGlobal('URL', { createObjectURL: () => `blob:${++serial}`, revokeObjectURL: revoke }); });
 afterEach(() => vi.unstubAllGlobals());
 
-function harness(comparing = false) {
+function harness(comparing = false, failed = vi.fn()) {
   const r = regionRequest(), urls = new RawPreviewUrls();
   let owner: RegionDeliveryOwner | undefined = { doc: { workspaceId: '1'.repeat(32), handle: '2'.repeat(32), ...r.identity,
     revision: r.documentRevision, beforeKey: 'e'.repeat(64) }, sourceId: r.identity.sourceId, supported: true,
@@ -31,7 +31,7 @@ function harness(comparing = false) {
     && c.item.documentRevision === owner.doc.revision && (c.item.mode === 'whole' ? c.result.operation === 'whole'
       : !('desiredLongEdge' in c.item) && c.result.operation === 'render' && c.item.geometryId === owner.geometry.geometryId
         && checkRegionResponse(c.item, c.result.metadata).status === 'accepted');
-  const overlay = new RawRegionOverlay({ urls, context: () => ({ owner, after, before, comparing }), current, changed: vi.fn(), decode });
+  const overlay = new RawRegionOverlay({ urls, context: () => ({ owner, after, before, comparing }), current, changed: vi.fn(), failed, decode });
   const candidate = (kind: 'after' | 'before' = 'after', quality: 'draft' | 'full' = 'full', patch: Partial<RegionRequest> = {}): RegionCandidate => {
     const item = regionRequest({ quality, requestId: `${generation}${kind === 'after' ? 'a' : 'b'}`.padStart(32, '0'),
       ...(kind === 'before' ? { identity: { assetId: r.identity.assetId, sourceId: r.identity.sourceId,
@@ -41,7 +41,7 @@ function harness(comparing = false) {
   return { overlay, urls, decode, decodes, candidate, whole, getOwner: () => owner!, setOwner: (o?: RegionDeliveryOwner) => { owner = o; },
     setGeneration: (g: number) => { generation = g; }, setComparing: (v: boolean) => { comparing = v; },
     setWhole: (a: RawWholeSurface, b?: RawWholeSurface) => { urls.release(after.url); if (before) urls.release(before.url); after = a; before = b; },
-    bases: () => ({ after, before }) };
+    bases: () => ({ after, before }), failed };
 }
 
 it.each(fixtures.filter(f => 'contextWindow' in f.expected))('places C0 fixture $name in Native coordinates without DPR rounding', f => {
@@ -63,6 +63,14 @@ it('retains the old overlay through decode failure and atomically revokes it onl
   h.decodes[1].reject(); await tick(); expect(h.overlay.display!.after.url).toBe(old); expect(revoke).not.toHaveBeenCalledWith(old);
   h.setGeneration(3); h.overlay.offer(h.candidate()); h.decodes[2].resolve(); await tick();
   expect(h.overlay.display!.after.url).not.toBe(old); expect(revoke.mock.calls.filter(([url]) => url === old)).toHaveLength(1);
+});
+
+it('reports a bounded Region decode failure to the diagnostic owner while retaining the old display', async () => {
+  const h = harness(); h.overlay.offer(h.candidate()); h.decodes[0].resolve(); await tick();
+  const old = h.overlay.display!.after.url;
+  h.setGeneration(2); h.overlay.offer(h.candidate()); h.decodes[1].reject(); await tick();
+  expect(h.failed).toHaveBeenCalledExactlyOnceWith('raw_region_decode_failed');
+  expect(h.overlay.display!.after.url).toBe(old);
 });
 
 it.each(['asset', 'source', 'revision', 'generation', 'token', 'geometry', 'plan', 'view', 'request', 'mutation'])(

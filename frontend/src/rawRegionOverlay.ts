@@ -24,7 +24,8 @@ export type RawRegionDisplay = { after: RawRegionLayer; before?: RawRegionLayer;
   wholeAfter: RawWholeSurface; wholeBefore?: RawWholeSurface };
 type Context = { owner?: RegionDeliveryOwner; after?: RawWholeSurface; before?: RawWholeSurface; comparing: boolean };
 type Options = { context: () => Context; current: (candidate: RegionCandidate) => boolean; changed: () => void;
-  urls: RawPreviewUrls; decode?: (url: string, metadata: Pick<RegionResponse, 'width' | 'height'>, signal: AbortSignal) => Promise<void> };
+  urls: RawPreviewUrls; failed?: (code: string) => void;
+  decode?: (url: string, metadata: Pick<RegionResponse, 'width' | 'height'>, signal: AbortSignal) => Promise<void> };
 type DecodedLayer = RawRegionLayer & { candidate: RegionCandidate };
 
 export function regionLayerPlacement(metadata: RegionResponse, geometry: RegionGeometry) {
@@ -120,7 +121,9 @@ export class RawRegionOverlay {
     if (!owner || owner.blocked || d && (!sameDocument(d.wholeAfter.doc, owner.doc)
       || d.after.metadata.geometryId !== owner.geometry.geometryId || d.after.metadata.identity.sourceId !== owner.sourceId)
       || this.ownerTag && this.ownerTag !== ownerTag(owner)) {
-      if (owner && d && d.after.metadata.geometryId !== owner.geometry.geometryId) this.log('geometryMismatch', d.after);
+      if (owner && d && d.after.metadata.geometryId !== owner.geometry.geometryId) {
+        this.log('geometryMismatch', d.after); this.options.failed?.('raw_region_geometry_mismatch');
+      }
       this.clear(); return;
     }
     for (const key of ['after', 'before'] as const) {
@@ -135,7 +138,9 @@ export class RawRegionOverlay {
     if (!after || !this.options.current(after.candidate) || !matchesWhole(after, wholeAfter, owner)) return;
     if (c.comparing && (!before || !this.options.current(before.candidate) || !matchesWhole(before, wholeBefore, owner))) { this.log('pairWaiting', after); return; }
     if (c.comparing && (after.planGeneration !== before!.planGeneration || after.metadata.viewGeneration !== before!.metadata.viewGeneration
-      || !regionPairMatches(after.metadata, before!.metadata))) { this.log('pairRejected', after); return; }
+      || !regionPairMatches(after.metadata, before!.metadata))) {
+      this.log('pairRejected', after); this.options.failed?.('raw_region_pair_mismatch'); return;
+    }
     const next: RawRegionDisplay = { after, wholeAfter: wholeAfter!,
       ...(c.comparing ? { before, wholeBefore: wholeBefore! } : {}) };
     // A retry can retire its UI reference before a replacement base is available.
@@ -190,7 +195,11 @@ export class RawRegionOverlay {
       }
       const previous = this.staged[metadata.kind]; if (previous) this.drop(previous);
       this.staged[metadata.kind] = layer; this.refresh();
-    }).catch(() => { this.log(controller.signal.aborted ? 'stale' : 'decodeFailed', layer); this.drop(layer); })
+    }).catch(() => {
+      if (controller.signal.aborted) this.log('stale', layer);
+      else { this.log('decodeFailed', layer); this.options.failed?.('raw_region_decode_failed'); }
+      this.drop(layer);
+    })
       .finally(() => { if (this.running === controller) this.running = undefined; this.pump(); });
   }
 }

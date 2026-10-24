@@ -276,13 +276,13 @@ it('keeps the manually selected JPEG, filename and candidate list while switchin
   expect(fetch.mock.calls.filter(([url]) => !url.startsWith('/api/developer/logs/'))).toHaveLength(1);
 });
 
-it('selects Logs initially and follows five-tab keyboard order while retaining every panel', async () => {
+it('selects Logs initially and follows six-tab keyboard order while retaining every panel', async () => {
   const { DeveloperPage } = await import('./DeveloperPage');
   await act(async () => root.render(<DeveloperPage />));
   const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const panels = [...host.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
-  expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab', 'exportEngine-tab', 'rawPreview-tab']);
-  expect(panels.map(panel => panel.hidden)).toEqual([false, true, true, true, true]);
+  expect(tabs.map(tab => tab.id)).toEqual(['logs-tab', 'jpeg-tab', 'webgpu-tab', 'exportEngine-tab', 'rawPreview-tab', 'rawRegion-tab']);
+  expect(panels.map(panel => panel.hidden)).toEqual([false, true, true, true, true, true]);
   expect(host.querySelector('main')?.classList.contains('developer-page-export-engine')).toBe(false);
   const jpeg = host.querySelector('#jpeg-panel section'), webgpu = host.querySelector('#webgpu-panel section');
   const press = async (key: string, expected: number) => {
@@ -292,10 +292,10 @@ it('selects Logs initially and follows five-tab keyboard order while retaining e
     expect(tabs.map(tab => tab.tabIndex)).toEqual(tabs.map((_, index) => index === expected ? 0 : -1));
     expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(tabs.map((_, index) => String(index === expected)));
   };
-  await press('ArrowLeft', 4); await press('ArrowRight', 0); await press('ArrowRight', 1);
+  await press('ArrowLeft', 5); await press('ArrowRight', 0); await press('ArrowRight', 1);
   await press('ArrowRight', 2); await press('ArrowRight', 3);
   expect(host.querySelector('main')?.classList.contains('developer-page-export-engine')).toBe(true);
-  await press('Home', 0); await press('End', 4);
+  await press('Home', 0); await press('End', 5);
   expect(host.querySelector('#jpeg-panel section')).toBe(jpeg); expect(host.querySelector('#webgpu-panel section')).toBe(webgpu);
   expect(host.querySelector('#environment-title')?.closest('section')?.compareDocumentPosition(host.querySelector('[role="tablist"]')!)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

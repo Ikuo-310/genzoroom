@@ -18,6 +18,7 @@ type ImageViewerProps = {
   documentKey?: string;
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   rawRegionDisplay?: RawRegionDisplay;
+  rawRegionOutline?: boolean;
   onRawViewChange?: (view: RawView) => void;
   previewStatus?: 'loading' | 'error';
   statusNote?: string;
@@ -55,7 +56,7 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 
-export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -375,6 +376,11 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, onRa
                 width: (regionLayer.nativePlacement.x1 - regionLayer.nativePlacement.x0) * scale,
                 height: (regionLayer.nativePlacement.y1 - regionLayer.nativePlacement.y0) * scale,
                 clipPath: `inset(${(regionLayer.validNativeRect.y0 - regionLayer.nativePlacement.y0) * scale}px ${(regionLayer.nativePlacement.x1 - regionLayer.validNativeRect.x1) * scale}px ${(regionLayer.nativePlacement.y1 - regionLayer.validNativeRect.y1) * scale}px ${(regionLayer.validNativeRect.x0 - regionLayer.nativePlacement.x0) * scale}px)` }} />}
+            {rawRegionOutline && regionLayer && <div className="raw-region-valid-outline" aria-hidden="true" style={{ position: 'absolute', pointerEvents: 'none',
+              left: regionLayer.validNativeRect.x0 * scale, top: regionLayer.validNativeRect.y0 * scale,
+              width: (regionLayer.validNativeRect.x1 - regionLayer.validNativeRect.x0) * scale,
+              height: (regionLayer.validNativeRect.y1 - regionLayer.validNativeRect.y0) * scale,
+              boxSizing: 'border-box', border: '1px solid #ff3b30' }} />}
           </div> : src && !previewStatus ? <img
           src={showBeforeAdjustments && beforeSrc ? beforeSrc : src}
           alt={alt}

@@ -10,6 +10,8 @@ import { rawRegionOwner, rawRegion } from './rawApi';
 import { RawRegionDelivery } from './rawRegionDelivery';
 import { RawPreviewUrls, RawRegionOverlay, type RawWholeSurface } from './rawRegionOverlay';
 import { requestManualRegion } from './rawRegionManual';
+import { createRawRegionDiagnosticsChannel, diagnosticVisibleRect, type RawRegionDiagnosticMessage,
+  type RawRegionDiagnosticState, type RawRegionPosition } from './rawRegionDiagnostics';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
@@ -55,6 +57,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const comparing = useRef(beforeRequested); comparing.current = beforeRequested;
   const overlayRef = useRef<RawRegionOverlay | null>(null);
   const [, regionChanged] = useState(0);
+  const [regionOutline, setRegionOutline] = useState(false);
   const [state, setState] = useState<RawState | null>(null);
   const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number;
     quality?: 'draft' | 'full'; frame?: RawGeometry } | null>(null);
@@ -75,6 +78,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const suspendDisplayRef = useRef<() => void>(() => {});
   const regionRef = useRef<RawRegionDelivery | null>(null);
   const connectRegionRef = useRef<() => Promise<boolean>>(async () => false);
+  const publishDiagnosticRef = useRef<() => void>(() => {});
   identity.current = assetId;
   useEffect(() => {
     if (!assetId) { setState(null); return; }
@@ -97,8 +101,40 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let publishedFrame: { revision: number; quality: 'draft' | 'full'; frame: RawGeometry } | undefined;
     let regionOwner: Awaited<ReturnType<typeof rawRegionOwner>> | undefined;
     let regionConnection: Promise<boolean> | undefined;
+    let diagnosticClientId: string | undefined, diagnosticPosition: RawRegionPosition | null = null;
+    const diagnosticOwnerId = crypto.randomUUID();
+    // Diagnostic pair selection must not mutate the darkroom's own Before/After preference.
+    let diagnosticComparing: boolean | undefined;
+    let diagnosticRequesting = false, diagnosticCleared = true, diagnosticErrorCode: string | undefined;
+    let diagnosticPlanStart = 0;
+    const diagnosticChannel = createRawRegionDiagnosticsChannel();
+    const diagnosticSnapshot = (): RawRegionDiagnosticState => {
+      const whole = wholeSurfaces.current.after, displayed = overlay?.display;
+      const metadata = displayed?.after.metadata;
+      const beforeReady = !!wholeSurfaces.current.before && wholeSurfaces.current.before.quality === 'full'
+        && whole?.quality === 'full' && wholeSurfaces.current.before.frame.geometryId === whole.frame.geometryId
+        && wholeSurfaces.current.before.doc.beforeKey === whole.doc.beforeKey;
+      const geometryMatches = metadata && whole ? metadata.geometryId === whole.frame.geometryId : null;
+      const state: RawRegionDiagnosticState = { connected: current(), supported: regionOwner?.supported ?? null,
+        wholeQuality: whole?.quality ?? null, wholeGeometry: whole?.frame.geometryId ?? null,
+        regionGeometry: metadata?.geometryId ?? null, geometryMatches, regionSize: metadata ? { width: metadata.width, height: metadata.height } : null,
+        displayed: !!displayed && !!metadata && geometryMatches === true,
+        beforeReady, comparing: diagnosticComparing ?? comparing.current, position: diagnosticPosition,
+        requesting: diagnosticRequesting, cleared: diagnosticCleared, errorCode: diagnosticErrorCode,
+        frame: whole ? { nativeWidth: whole.frame.nativeWidth, nativeHeight: whole.frame.nativeHeight } : undefined,
+        details: metadata ? { f: { fullWidth: metadata.fullWidth, fullHeight: metadata.fullHeight }, w: metadata.window, validRegion: metadata.validRegion,
+          revision: metadata.documentRevision, viewGeneration: metadata.viewGeneration,
+          planGeneration: displayed!.after.planGeneration, requestId: metadata.requestId } : null };
+      return state;
+    };
+    const publishDiagnosticState = () => {
+      if (!diagnosticClientId || !diagnosticChannel) return;
+      try { diagnosticChannel.postMessage({ type: 'state', clientId: diagnosticClientId, ownerId: diagnosticOwnerId,
+        state: diagnosticSnapshot() } satisfies RawRegionDiagnosticMessage); } catch { /* Diagnostics are best effort. */ }
+    };
+    publishDiagnosticRef.current = publishDiagnosticState;
     const region = new RawRegionDelivery({
-      changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); } },
+      changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); publishDiagnosticState(); } },
       owner: () => editor && publishedFrame && regionOwner ? {
         doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
         blocked: !current() || frozen.current || editor.mutating || editor.unsettled || !!saver?.locked,
@@ -113,11 +149,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     });
     regionRef.current = region;
     const overlay = new RawRegionOverlay({ urls, current: candidate => region.isCurrent(candidate),
-      context: () => ({ owner: region.owner, ...wholeSurfaces.current, comparing: comparing.current }),
-      changed: () => { if (current()) regionChanged(n => n + 1); } });
+      context: () => ({ owner: region.owner, ...wholeSurfaces.current, comparing: diagnosticComparing ?? comparing.current }),
+      failed: code => { if (diagnosticClientId) { diagnosticRequesting = false; diagnosticErrorCode = code; publishDiagnosticState(); } },
+      changed: () => { if (current()) {
+        if (overlay.display && overlay.display.after.planGeneration > diagnosticPlanStart) diagnosticRequesting = false;
+        regionChanged(n => n + 1); publishDiagnosticState();
+      } } });
     overlayRef.current = overlay;
     const unsubscribeRegion = region.subscribe((candidate, error) => {
       if (candidate) overlay.offer(candidate); else if (!error) overlay.clear();
+      publishDiagnosticState();
     });
     // Explicit connection keeps ordinary Viewer use on B1; only diagnostic plans request Region.
     connectRegionRef.current = () => {
@@ -147,6 +188,56 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let debug = false;
     try { debug = localStorage.getItem('genzoroom-raw-region-debug') === '1'; } catch { /* Optional diagnostic entry point. */ }
     if (debug) window.genzoroomRegion = manual;
+    const sendDiagnosticResult = (clientId: string, actionId: string, ok: boolean, errorCode?: string) => {
+      try { diagnosticChannel?.postMessage({ type: 'result', clientId, ownerId: diagnosticOwnerId, actionId, ok, errorCode } satisfies RawRegionDiagnosticMessage); }
+      catch { /* Diagnostics are best effort. */ }
+    };
+    const onDiagnosticMessage = (event: MessageEvent) => {
+      const message = event.data as RawRegionDiagnosticMessage;
+      if (!message || typeof message !== 'object') return;
+      if (message.type === 'attach' && typeof message.clientId === 'string') {
+        diagnosticClientId = message.clientId;
+        void connectRegionRef.current().finally(publishDiagnosticState);
+        publishDiagnosticState();
+        return;
+      }
+      if (message.type === 'state.request' && message.clientId === diagnosticClientId) {
+        void connectRegionRef.current().finally(publishDiagnosticState); publishDiagnosticState(); return;
+      }
+      if (message.type === 'detach' && message.clientId === diagnosticClientId) {
+        diagnosticClientId = undefined; diagnosticRequesting = false; diagnosticErrorCode = undefined;
+        diagnosticPosition = null; diagnosticComparing = undefined; diagnosticCleared = true;
+        setRegionOutline(false); region.invalidate(); overlay.refresh(); publishDiagnosticState(); return;
+      }
+      if (message.type !== 'action' || message.clientId !== diagnosticClientId || message.ownerId !== diagnosticOwnerId) return;
+      if (message.action === 'outline') { setRegionOutline(message.enabled); sendDiagnosticResult(message.clientId, message.actionId, true); return; }
+      if (message.action === 'clear') {
+        diagnosticRequesting = false; diagnosticCleared = true; diagnosticPosition = null; diagnosticErrorCode = undefined;
+        region.invalidate(); publishDiagnosticState(); sendDiagnosticResult(message.clientId, message.actionId, true); return;
+      }
+      const whole = wholeSurfaces.current.after;
+      if (!whole || whole.quality !== 'full') { diagnosticErrorCode = 'raw_region_whole_waiting';
+        sendDiagnosticResult(message.clientId, message.actionId, false, diagnosticErrorCode); publishDiagnosticState(); return; }
+      if (message.compare && (!wholeSurfaces.current.before || wholeSurfaces.current.before.quality !== 'full')) {
+        diagnosticErrorCode = 'raw_region_pair_waiting';
+        sendDiagnosticResult(message.clientId, message.actionId, false, diagnosticErrorCode); publishDiagnosticState(); return;
+      }
+      diagnosticPosition = message.position; diagnosticRequesting = true; diagnosticCleared = false; diagnosticErrorCode = undefined;
+      diagnosticComparing = message.compare; overlay.refresh();
+      diagnosticPlanStart = region.state.latestPlanGeneration;
+      publishDiagnosticState();
+      const { nativeWidth, nativeHeight } = whole.frame;
+      void manual.request({ visible: diagnosticVisibleRect(message.position, nativeWidth, nativeHeight),
+        context: 16, prefetch: 0, compare: message.compare }).then(ok => {
+          if (!ok) throw new Error(regionOwner?.supported ? 'raw_region_whole_waiting' : 'raw_region_unavailable');
+          publishDiagnosticState();
+          sendDiagnosticResult(message.clientId, message.actionId, true);
+        }).catch(error => {
+          diagnosticRequesting = false; diagnosticErrorCode = error instanceof Error ? error.message : 'raw_connection_failed';
+          publishDiagnosticState(); sendDiagnosticResult(message.clientId, message.actionId, false, diagnosticErrorCode);
+        });
+    };
+    if (diagnosticChannel) diagnosticChannel.onmessage = onDiagnosticMessage;
     let restarting = false, regenerationError: string | undefined;
     let restartOperation: Promise<void> | undefined;
     let stage: 'save' | 'release' | 'open' = 'save';
@@ -211,6 +302,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           wholeSurfaces.current.before = { ...baseline, doc: { ...doc } };
         }
         overlay.refresh();
+        publishDiagnosticState();
         setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
           requestSide: maxSide, frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
@@ -256,7 +348,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         log(code);
         displayTargetKey = undefined;
         setState(previous => previous && ({ ...previous, displayError: code }));
-      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); });
+      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); publishDiagnosticState(); });
     };
     const resyncPreview = (valid = current) => {
       if (!valid()) return;
@@ -485,6 +577,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       region.dispose();
       unsubscribeRegion(); overlay.dispose();
       if (window.genzoroomRegion === manual) delete window.genzoroomRegion;
+      try { diagnosticChannel?.close(); } catch { /* Best-effort diagnostic channel cleanup. */ }
+      if (diagnosticChannel) diagnosticChannel.onmessage = null;
+      if (publishDiagnosticRef.current === publishDiagnosticState) publishDiagnosticRef.current = () => {};
+      setRegionOutline(false);
       if (overlayRef.current === overlay) overlayRef.current = null;
       wholeSurfaces.current = {};
       if (regionRef.current === region) regionRef.current = null;
@@ -567,6 +663,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           wholeSurfaces.current.before = frame.frame ? { url, doc: { ...transmitted!.doc }, frame: frame.frame,
             quality: frame.quality ?? afterQuality } : undefined;
           overlayRef.current?.refresh();
+          publishDiagnosticRef.current();
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height,
             frame: frame.frame, quality: frame.quality ?? afterQuality });
         } catch (cause) {
@@ -653,6 +750,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   return visible && { ...visible, beforeAvailable: !!beforeKey,
     regionDelivery: regionRef.current,
     regionDisplay: overlayRef.current?.display,
+    regionOutline,
     connectRegion: () => connectRegionRef.current(),
     viewChanged: (view?: RawView) => {
       if (callbackEditor() && (!view || !visible.frame || view.geometryId === visible.frame.geometryId)) viewRef.current(view);

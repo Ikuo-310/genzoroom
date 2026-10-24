@@ -63,6 +63,10 @@
 /* Compact controls keep diagnostic data visible without shrinking the click target excessively. */
 .developer-page button, .developer-page select { min-height: 36px; padding-block: 6px; }
 .developer-page .developer-tabs [role="tab"] { min-height: 40px; padding-block: 8px; }
+.raw-region-position-buttons { display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); gap: 8px; margin: 16px 0; }
+.raw-region-position-buttons button { min-height: 44px; }
+.raw-region-options label { display: inline-flex; align-items: center; gap: 8px; }
+.raw-region-details code, .raw-region-details dd { overflow-wrap: anywhere; }
 @media (max-width: 800px) {
   .developer-log-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .developer-log-common { grid-column: 1 / -1; margin-top: 0; flex-direction: row; flex-wrap: wrap; }

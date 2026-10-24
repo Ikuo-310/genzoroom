@@ -4,6 +4,7 @@ import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
 import { ExportEngineDiagnostics } from './ExportEngineDiagnostics';
 import { RawPreviewDiagnostics } from './RawPreviewDiagnostics';
+import { RawRegionDiagnostics } from './RawRegionDiagnosticsPanel';
 import { DeveloperLogs } from './DeveloperLogsPanel';
 import { frontendLogger } from './frontendLogging';
 import { disableBackendLoggingOnExit } from './developerLogs';
@@ -12,7 +13,7 @@ import { collectDiagnosticsEnvironment, createDiagnosticsReport, createJpegDiagn
   createWebGpuReport, exportDiagnosticsReport, exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
 import './developer.css';
 
-const diagnosticTabs = ['logs', 'jpeg', 'webgpu', 'exportEngine', 'rawPreview'] as const;
+const diagnosticTabs = ['logs', 'jpeg', 'webgpu', 'exportEngine', 'rawPreview', 'rawRegion'] as const;
 type DiagnosticTab = typeof diagnosticTabs[number];
 
 export function DeveloperPage() {
@@ -107,6 +108,9 @@ export function DeveloperPage() {
     </div>
     <div id="rawPreview-panel" role="tabpanel" aria-labelledby="rawPreview-tab" tabIndex={0} hidden={selectedTab !== 'rawPreview'}>
       <RawPreviewDiagnostics active={selectedTab === 'rawPreview'} />
+    </div>
+    <div id="rawRegion-panel" role="tabpanel" aria-labelledby="rawRegion-tab" tabIndex={0} hidden={selectedTab !== 'rawRegion'}>
+      <RawRegionDiagnostics active={selectedTab === 'rawRegion'} />
     </div>
   </main>;
 }

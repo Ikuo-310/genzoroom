@@ -76,7 +76,7 @@ it('connects Region only explicitly and clears document-owned candidates on phot
   expect(delivery.submit({ planGeneration: 101, items: [item] })).toBe(false);
 });
 
-it.each(['pagehide', 'departure', 'mutation', 'beforeEnd'])('reclaims a decoded Region display on %s', async boundary => {
+it.each(['pagehide', 'departure', 'photoSwitch', 'galleryReturn', 'mutation', 'beforeEnd'])('reclaims a decoded Region display on %s', async boundary => {
   const asset = regionRequest().identity.assetId;
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
     handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
@@ -98,7 +98,8 @@ it.each(['pagehide', 'departure', 'mutation', 'beforeEnd'])('reclaims a decoded 
   expect(current!.regionDisplay?.after.url).toBe('blob:raw-2');
   expect(current!.regionDisplay?.wholeAfter.url).toBe(current!.url);
   if (boundary === 'pagehide') { await act(async () => window.dispatchEvent(new Event('pagehide'))); }
-  else if (boundary === 'departure') await render(null);
+  else if (boundary === 'departure' || boundary === 'galleryReturn') await render(null);
+  else if (boundary === 'photoSwitch') await render('next-photo');
   else if (boundary === 'mutation') await act(async () => current!.changeControls({ 'light.exposure': 1 }));
   else { await render(asset, true); await render(asset, false); }
   await flush();
@@ -118,6 +119,27 @@ it('installs the opt-in manual diagnostic trigger without automatic requests and
     expect(api.rawRegion).not.toHaveBeenCalled();
     await render(null); expect(window.genzoroomRegion).toBeUndefined();
   } finally { localStorage.removeItem('genzoroom-raw-region-debug'); }
+});
+
+it('connects Region only while Developer Diagnostics is explicitly attached and closes its channel on photo departure', async () => {
+  const opened: Array<{ onmessage: ((event: MessageEvent) => void) | null; closed: boolean }> = [];
+  class DiagnosticChannel {
+    onmessage: ((event: MessageEvent) => void) | null = null; closed = false;
+    constructor() { opened.push(this); }
+    postMessage() {}
+    close() { this.closed = true; }
+  }
+  vi.stubGlobal('BroadcastChannel', DiagnosticChannel);
+  await render('photo-one'); await flush();
+  expect(api.rawRegionOwner).not.toHaveBeenCalled(); expect(api.rawRegion).not.toHaveBeenCalled();
+  const first = opened[0];
+  await act(async () => first.onmessage?.({ data: { type: 'attach', clientId: 'developer-ui' } } as MessageEvent)); await flush();
+  expect(api.rawRegionOwner).toHaveBeenCalledTimes(1); expect(api.rawRegion).not.toHaveBeenCalled();
+  await render('photo-two'); await flush();
+  expect(first.closed).toBe(true); expect(api.rawRegion).not.toHaveBeenCalled();
+  expect(opened).toHaveLength(2);
+  await render(null); await flush();
+  expect(opened[1].closed).toBe(true);
 });
 
 it('adopts both Region sides and safely rebinds the unchanged B1 Before base after an After revision', async () => {

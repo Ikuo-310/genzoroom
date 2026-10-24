@@ -737,6 +737,7 @@ export function AnshitsuPage() {
           previewPixels={!!rawDocument}
           rawFrame={rawDocument?.frame}
           rawRegionDisplay={rawDocument?.regionDisplay}
+          rawRegionOutline={rawDocument?.regionOutline}
           onRawViewChange={rawDocument?.viewChanged}
           beforeAvailable={!activeDetail.is_raw || !!rawDocument?.beforeAvailable}
           beforeSrc={activeDetail.is_raw ? rawDocument?.beforeUrl : undefined}
