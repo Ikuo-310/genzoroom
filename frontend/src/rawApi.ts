@@ -57,7 +57,7 @@ const opaque = (value: unknown): value is string => typeof value === 'string' &&
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const uuid = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id);
 
-async function readBounded(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer>> {
+export async function readBounded(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer>> {
   const reader = response.body?.getReader();
   if (!reader) throw new RawApiError('raw_invalid_response');
   const chunks: Uint8Array[] = [];

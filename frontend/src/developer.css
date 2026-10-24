@@ -1,5 +1,13 @@
 .developer-page { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
 .developer-page.developer-page-export-engine { max-width: none; }
+.raw-diagnostic-conditions { display: flex; flex-wrap: wrap; gap: 16px; }
+.raw-diagnostic-conditions label { display: flex; flex-direction: column; gap: 6px; }
+.raw-diagnostic-conditions input { min-height: 36px; padding: 6px; color: #ececee; background: #34363b; border: 1px solid #696b72; }
+.raw-diagnostic-conditions input:not([type="number"]) { width: 340px; max-width: 100%; }
+.raw-diagnostic-conditions input[type="number"] { width: 100px; }
+.raw-diagnostic-table { overflow-x: auto; }
+.raw-diagnostics th, .raw-diagnostics td { padding: 8px; text-align: left; vertical-align: top; }
+.raw-diagnostics code { overflow-wrap: anywhere; }
 .developer-page h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); }
 .developer-page button, .developer-page select { min-height: 36px; color: #ececee; background: #383a3f; border: 1px solid #696b72; border-radius: 6px; }
 .developer-page button:hover:not(:disabled) { background: #494b51; border-color: #85878e; }

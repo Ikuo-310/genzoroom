@@ -84,10 +84,15 @@ class PreviewFrame:
     key: str | None = None
     quality: str = "full"
     _frame_json: str | None = field(default=None, repr=False)
+    _metrics_json: str | None = field(default=None, repr=False)
 
     @property
     def frame(self):
         return json.loads(self._frame_json) if self._frame_json is not None else None
+
+    @property
+    def metrics(self):
+        return json.loads(self._metrics_json) if self._metrics_json is not None else None
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,7 @@ class _Photo:
     wb_kelvin: bool = False
     as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
     before_fingerprint: str | None = None
+    source_size: tuple[int, int] | None = None
 
 
 class PreviewTicket:
@@ -356,7 +362,7 @@ async def _finish_future(future):
 
 
 class LightCraftRawSession:
-    def __init__(self, manager, *, timeouts=None):
+    def __init__(self, manager, *, timeouts=None, stage_cache=None, stage_cache_budget_bytes=None, diagnostics=False):
         self.manager = manager
         self._timeouts = timeouts or RawTimeouts()
         self._lock = asyncio.Lock()
@@ -384,8 +390,9 @@ class LightCraftRawSession:
         self._resetting = False
         self._reset_task = self._close_task = None
         self._closed = False
-        self._stage_mode = os.environ.get("GENZOROOM_RAW_STAGE_CACHE", "off")
-        budget = os.environ.get("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", "")
+        self._diagnostics = diagnostics
+        self._stage_mode = os.environ.get("GENZOROOM_RAW_STAGE_CACHE", "off") if stage_cache is None else stage_cache
+        budget = os.environ.get("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", "") if stage_cache is None else str(stage_cache_budget_bytes or "")
         if self._stage_mode not in ("off", "on") or self._stage_mode == "on" and (len(budget) > 10 or not budget.isascii() or not budget.isdigit() or not 0 < int(budget) <= 1024**3):
             raise LightCraftError("raw_invalid_preview_request")
         self._stage_budget = int(budget) if self._stage_mode == "on" else None
@@ -613,6 +620,7 @@ class LightCraftRawSession:
                 raise LightCraftError("raw_source_changed")
             handle = RawHandle(key, uuid.uuid4().hex, self._generation)
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
+            photo.source_size = (info["width"], info["height"])
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
             # Import defaults are native Session state, never a copy of the persisted After recipe.
             try:
@@ -1109,6 +1117,7 @@ class LightCraftRawSession:
                     image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
                                               photo.before_fingerprint, geometry,
                                               *([ticket.quality] if ticket.adaptive else []))
+                    validation_ms = (monotonic() - validation_started) * 1000
                     del result
                     data, w, h = image[:3]
                     metadata = image[3] if ticket.adaptive else None
@@ -1118,7 +1127,7 @@ class LightCraftRawSession:
                     self._preview_trials += 1
                     digest = None
                     try:
-                        if backend_logger.get_level() == "debug" and ticket.quality == "full":
+                        if (self._diagnostics or backend_logger.get_level() == "debug") and ticket.quality == "full":
                             digest = hashlib.sha256(data).hexdigest()
                     except Exception:
                         pass
@@ -1126,12 +1135,16 @@ class LightCraftRawSession:
                         revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality, kind=ticket.kind,
                         trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend,
                         pngSha256=digest,
-                        nativeMs=native_ms, validationMs=(monotonic() - validation_started) * 1000,
+                        nativeMs=native_ms, validationMs=validation_ms,
                         width=w, height=h, payloadBytes=len(data), stageCache=metadata["stageCache"] if metadata else None)
                     if self._ticket_current(ticket):
                         frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
-                                             quality=ticket.quality, _frame_json=json.dumps(metadata["frame"]) if metadata else None)
+                                             quality=ticket.quality, _frame_json=json.dumps(metadata["frame"]) if metadata else None,
+                                             _metrics_json=json.dumps({"nativeMs": native_ms,
+                                                 "validationMs": validation_ms,
+                                                 "pngSha256": digest, "stageCache": metadata["stageCache"]})
+                                                 if self._diagnostics and metadata else None)
                         if ticket.kind == "before":
                             self._before_cache = frame
                         ticket._finish(frame)

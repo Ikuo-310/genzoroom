@@ -284,6 +284,11 @@ class LightCraftManager:
     def status(self):
         return LightCraftStatus(self._state, self._generation, self._version, self._sha256, self._error)
 
+    def diagnostic_manager(self, gpu_backend):
+        # Copy trusted startup configuration, never the editing process or its native state.
+        return LightCraftManager(environment=self._environment, platform=self._platform, spawn=self._spawn,
+                                timeouts=self._timeouts, gpu_backend=gpu_backend)
+
     async def start(self):
         async with self._lock:
             self._start_locked()

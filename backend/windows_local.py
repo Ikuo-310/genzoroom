@@ -25,6 +25,7 @@ from backend_logging import backend_logger
 from lightcraft_runtime import LightCraftManager
 from lightcraft_raw import LightCraftRawSession
 from windows_raw_api import RawPreviewApi
+from raw_diagnostics import RawDiagnosticsApi
 
 DEFAULT_PORT = 3191
 FRONTEND_DIST = (Path(__file__).resolve().parent / "frontend" / "dist" if getattr(sys, "frozen", False)
@@ -83,6 +84,7 @@ class LocalHost:
         self.backend = backend
         self.connection = connection
         self.raw_api = RawPreviewApi()
+        self.raw_diagnostics = RawDiagnosticsApi(self.raw_api)
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -99,7 +101,10 @@ class LocalHost:
                     yield
                 finally:
                     try:
-                        await self.raw_api.close()
+                        try:
+                            await self.raw_diagnostics.close()
+                        finally:
+                            await self.raw_api.close()
                     finally:
                         await manager.close()
 
@@ -113,6 +118,7 @@ class LocalHost:
         self.application = Starlette(routes=[*routes,
             Route("/api", endpoint=api_root, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
             Mount("/api/raw", app=self.raw_api.app),
+            Mount("/api/developer/raw-preview", app=self.raw_diagnostics.app),
             Mount("/api", app=backend),
             Mount("/", app=SpaFiles(directory=dist, html=True)),
         ], lifespan=lifespan)

@@ -59,6 +59,7 @@ class RawPreviewApi:
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
+        self.diagnostics_busy = lambda: False
         self._recipe_save = None
         self._history_save = None
         self._history_identity = None
@@ -254,6 +255,8 @@ class RawPreviewApi:
             if method != "DELETE":
                 self._ready()
             if method == "POST" and path.endswith("/workspaces"):
+                if self.diagnostics_busy():
+                    raise LightCraftError("raw_busy")
                 if body or self.workspace is not None:
                     raise LightCraftError("raw_workspace_conflict")
                 self.workspace = secrets.token_hex(16)

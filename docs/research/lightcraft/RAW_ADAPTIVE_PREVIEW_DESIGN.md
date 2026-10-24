@@ -618,3 +618,71 @@ CPU比較は既存managerの`gpu_backend="off"`、GPU比較は`dx12`を明示し
 この変更境界の限定監査で未解決High／Mediumはない。通常のdisplay cancelはnative transportへ伝播させず、control待機は既存taskの完了を待ってbusy loopを避ける。HTTP予約の解放callbackも受付時のnative ownerへ束縛する。未送信表示を捨てて離脱し、離脱取り消し時には最新ACKへのFullを再要求する。
 
 未決定は最終Draft／Full画素数、whole／region切替閾値、大画像上限、PNG／MCP／timeout／cacheの最終予算と採否、CPU/GPU性能保証。Windows実RAW・高画素・細部／色／NR・長時間／RSS/VRAM・Tauri表示は未検証。工程Bのwhole解像度policy、工程CのDraft/Full regionと異geometry比較mapping、RAW Export／Scope／配布／NASは実装していない。領域描画は最終必須要件として維持する。A3の接続と検証で停止する。
+
+<a id="raw-preview-a4"></a>
+
+## 16. A4：Developer Diagnostics測定タブ（2026-10-24）
+
+A3 commit `d9de0f3345ad99ffeef1fea3d326c2ee665dce6a`のclean treeから実装。既存Logs／JPEG／WebGPU／Export EngineにRAW Previewを追加した。暗室の操作・描画policy、LightCraft source／patch／binary、SQLite v8、JPEG Recipe v18、C4完了記録は変更しない。A4は測定器の実装であり、実RAWの速度・画質・メモリ評価の完了ではない。
+
+### 16.1 素材指定・所有権・API
+
+素材は診断タブへImmich RAW Asset UUIDを明示入力する。Gallery選択は参照せず、既存`RawSourceCache`の原版download／形式・容量検証／private一時file管理を再利用する。任意ローカルpathのAPI入力、アップロード、Recipe復元、History・Immich書込みは追加しない。測定settingsは同じRAWのnative import defaultsに固定する。
+
+Windows LocalHostだけが`POST /api/developer/raw-preview/{start,status,prepare,render,stop}`を公開する。既存認証、Host／Origin、no-storeを継承し、Dockerにはmountしない。`start`は`assetId, quality, stageCache, backend, temperature, repeats, budgetBytes`の完全一致allowlistを受ける。qualityはdraft/full/both、cacheはoff/on/both、backendはcpu/gpu、temperatureはcold/warm/both。応答の一時runIdと確定planを以後の要求へ渡す。prepare/renderはplanの現在index、status/stopはrunIdのみを受ける。HTTP画像応答は既存上限で検証したPNGと16 KiB以内の`X-Raw-Diagnostic` metadata。未知引数・不正値は400 `raw_invalid_request`、競合／旧ownerは409 `raw_busy`／`raw_stale_handle`、旧schemaは503 `raw_preview_unsupported`、実行／検証失敗は502の安全なcodeを返す。
+
+通常編集managerを再利用して変更するのではなく、trusted executable設定をコピーした診断専用manager／processと`LightCraftRawSession`を所有する。CPUはGPU backend off、GPUはdx12を指定する。通常RawPreviewApiのadmission lock内で、workspace／task／image leaseがないときだけ診断を予約する。診断ownerがある間は通常workspace作成を拒否し、既存編集中Sessionを奪わない。通常process、native generation、save owner、Recipe／History queueには触れない。
+
+| 一時状態 | 所有者・更新と不変条件 |
+| --- | --- |
+| 条件・plan・結果・UI phase | `RawPreviewDiagnostics`。明示Start時に条件を固定、結果は最大40件。次runで置換、永続化しない。 |
+| runId・next/prepared/group・baseline settings fingerprint・binary SHA | `RawDiagnosticsApi`。一つのrunだけが所有し、順番どおりprepare/render。別groupも同settings／binaryでなければ失敗。 |
+| native／HTTP操作と画像lease | Backend owner task一件・転送lease一件。HTTP waiterの離脱は送信済みnativeをcancelしない。次画像の準備は前lease解放後。 |
+| 診断process・source cache | 診断ownerがclose成功まで保持。回収失敗はcleanup_failedで所有を残し、新run／通常workspaceを拒否して再試行可能にする。 |
+| Frontend controller／Blob URL | コンポーネントが所有。decode後／失敗時にURLをrevoke、離脱後の結果を表示しない。 |
+
+### 16.2 品質・cache・Cold/Warm・上限
+
+`LightCraftRawSession`作成時の明示stage_cache／budget設定をnative render引数へ渡す。環境変数を書き換えず、通常編集は従来の環境変数設定を引き続き使う。品質は既存A2のdraft/fullを使用する。cache／品質／temperatureが変わるgroupごとにprocessを再作成する。
+
+- **Cold**：各計測前に新process／再import。OS page cache、disk cache、GPU driver cacheのcoldは保証しない。
+- **Warm**：同groupのprocessで同じ品質・cache・settings・寸法の描画を一度行い、その非計測warmup後に連続計測する。描画回数をcache hitと表示しない。各品質groupは独立し、Draft→Full再利用そのものを測る機能ではない。
+- prepareでdownload／start／import／warmupを完了してから、独立render HTTP要求を計測する。sourceは一run中一度downloadする。
+- repeatsは1〜5、最大40計測。cache ONのbudgetは正整数、最大native上限1 GiB（UIはMiB指定、初期値512 MiB）。OFFも入力条件を保持し、実際のmetadataはbudget 0で区別する。初期値は最終採用予算ではない。
+- 全体描画のmax side 1024／PNG 5 MiB／metadata 16 KiBを維持。結果保持はmetadataと時間だけで画像蓄積をしない。source容量、import／render／validationの既存安全上限も維持する。
+- runは600秒で新規受付停止、操作のないownerは120秒で回収、body送信90秒、Frontend要求180秒、decode10秒。run期限は送信済みMCPの強制preemptionではなく、既存native timeout／応答回収後まで延び得る。
+
+### 16.3 測定値・比較・JSON
+
+| 項目 | 実装上の意味・未取得の扱い |
+| --- | --- |
+| Native ms | A3 render workerの描画開始からMCP応答・settings readback完了。encode／readbackを含み、純粋な現像式時間ではない。 |
+| Validation ms | native所有lock解放後の既存PNG検証。Full SHA計算は別overheadとしてTotalへ含まれる。 |
+| responseWait ms | Frontend render開始からHTTP応答取得まで。native／validationとGPU状態照会・settings事前確認等を含む。JSONへ記録する。 |
+| Transfer／Decode／Total ms | body read／Image.decode／render要求開始からdecode終了。それぞれFrontend時計で測り、準備時間を除く。純粋な回線時間とは呼ばず、異なる時計の差分や単純加算でnative時間を推測しない。 |
+| PNG／cache | 実bitmap寸法・bytes、mode/applied/reason、CPU/GPU/retained/budget bytesを検証。保持容量はRSSやVRAM peakではない。 |
+| CPU／GPU | 設定値と実行確認を分離。CPU設定offかつ前後app.gpu.enabled=falseのときCPU確認。GPUにはjob単位の成功証跡がなく常に実行経路未確認。lastFallback本文は出力せず報告有無だけを表示する。 |
+| RSS／VRAM | 今回は収集せずnull／未取得。OS計測を実装したと誤認させず、実機評価で別途取得する。 |
+| 結果 | success／failed／cancelled／unsupported。未取得時間はnullであり0を補完しない。失敗はcodeのみ、upstream本文は表示しない。 |
+
+品質／cache／temperature等の同条件ごとにNative／Validation／Transfer／Decode／Totalの中央値・最小・最大・有効件数を表示する。Native中央値のFull÷Draft、OFF÷ONは、source identity・settings fingerprint・実frame・contract／binary・Backend・寸法・temperatureが一致し、成功・実行確認済み・fallback報告なし・ON実適用の組だけ計算する。Full OFF/ONのPNG SHA-256は同条件の同repeatを組み合わせ、一致／不一致／未検証を表示する。GPU未確認や条件違いを一致扱いしない。統計もgeometry等の異なる結果を同じgroupへ混ぜない。
+
+専用JSONは`schemaVersion: 1, reportType: raw-preview`。GenzoRoom build情報、測定日時、LC version/commit/preview contract/binary SHA、元RAW寸法・形式とhash identity、固定条件、個別値、統計・比較・制約をallowlistで投影する。Asset UUID、path、画像・pixel buffer、Blob URL、token、Recipe／History本文を含めない。応答metadataもstrict検証し、測定Backend／ON予算が固定条件と異なる場合は拒否する。既存Full／JPEG-only／WebGPU-only／Export Engine／Logsレポートのschemaと意味は変更しない。
+
+### 16.4 Stop・離脱・終了・検証
+
+Stop／RAWタブ非選択は停止flagとBackend Stopを送り、送信済み処理の応答を回収してからprocess／一時sourceをcloseする。pagehide／unmountは独立keepalive StopとUI waiterのabortを行う。HTTP切断はowner taskをshieldし、送信済みMCPを取り消さない。開始ACK紛失などでrunIdを取得できない場合もBackend idle watchdogが回収する。アプリ終了のlifespanは診断close→通常RAW close→通常manager closeの順で待機する。cleanup失敗後はownerを保持し、明示再試行を提供する。
+
+検証はrepository Python 3.14.5でBackend関連192件、Frontend診断関連10ファイル131件が成功。専用テストはnative品質・cache実引数、Cold再生成／Warm事前描画、通常ownerとの相互排他・保存無変更、Stop／shutdownの送信済み応答回収、timeout／cleanup失敗と再試行、重複開始・旧owner、認証／Host／Origin・Docker非公開、条件違いの拒否と誤比較防止、null統計、JSON機密情報除外、decode URL回収、非対応表示を確認する。既存RAW adapter／runtime／Windows API／LocalHost／sourceテストと既存診断レポートを回帰対象に含めた。
+
+限定監査はSession隔離、native／HTTP待機、回収失敗後の所有権、画像・metadata上限、比較条件とprivacyに限定し、回収失敗時のタブ切替による再試行UI消失と固定条件不一致応答を修正・回帰した。最後のbody-read計測境界調整後、Frontend専用27件を再実行して成功（前記131件へ加算しない）。TypeScript型検査を含む本番build、文書参照と`git diff --check`も成功。buildの既存500 kB超chunk警告は残る。この境界で未解決High／Mediumはない。実RAW性能、画質、RSS／VRAM、Windowsブラウザ／Tauri動作の実測は未検証であり、自動テストはその受入結果を意味しない。
+
+### 16.5 Windows実機での測定手順と後続
+
+1. 設定済みWindows LocalHostを起動し、暗室を閉じて通常RAW workspaceを解放する。Developer Diagnostics → RAW Previewを開く（開くだけでは実行しない）。
+2. 測定するImmich RAW Asset UUIDを入力する。品質・cacheを両方、CPU、Cold/Warm、回数、有限budgetを指定してStart。画像は表示・保存せずdecode後に解放される。
+3. Native等の個別値・中央値、cache applied/reasonと保持bytes、Full OFF/ON SHA一致を確認し、RAW専用JSONを保存する。小budgetでON非適用なら速度比・一致を未検証として扱う。
+4. 必要ならGPU設定で別runを実行する。GPU未確認を実GPU成功と解釈せず、OSのRSS／VRAM観測と実行経路の証跡は別途取得する。Stop／タブ切替／終了後の回収と通常編集復帰も手動確認する。
+5. 同じRAW・条件と実機環境を揃えて複数回比較し、高画素・細部・色・NRと長時間挙動を別途評価する。今回その測定は実施していない。
+
+cacheの最終採用構成・予算、品質ごとの画素数、大画像上限、whole/region閾値、最終timeout、CPU/GPU性能保証は引き続き実測判断。A4の診断機能で停止し、工程Bの解像度policy・工程CのDraft/Full regionには進まない。領域描画は最終必須要件として維持する。

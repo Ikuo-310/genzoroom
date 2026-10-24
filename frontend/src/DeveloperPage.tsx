@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
 import { ExportEngineDiagnostics } from './ExportEngineDiagnostics';
+import { RawPreviewDiagnostics } from './RawPreviewDiagnostics';
 import { DeveloperLogs } from './DeveloperLogsPanel';
 import { frontendLogger } from './frontendLogging';
 import { disableBackendLoggingOnExit } from './developerLogs';
@@ -11,7 +12,7 @@ import { collectDiagnosticsEnvironment, createDiagnosticsReport, createJpegDiagn
   createWebGpuReport, exportDiagnosticsReport, exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport, type WebGpuReport } from './developerDiagnostics';
 import './developer.css';
 
-const diagnosticTabs = ['logs', 'jpeg', 'webgpu', 'exportEngine'] as const;
+const diagnosticTabs = ['logs', 'jpeg', 'webgpu', 'exportEngine', 'rawPreview'] as const;
 type DiagnosticTab = typeof diagnosticTabs[number];
 
 export function DeveloperPage() {
@@ -103,6 +104,9 @@ export function DeveloperPage() {
     </div>
     <div id="exportEngine-panel" role="tabpanel" aria-labelledby="exportEngine-tab" tabIndex={0} hidden={selectedTab !== 'exportEngine'}>
       <ExportEngineDiagnostics />
+    </div>
+    <div id="rawPreview-panel" role="tabpanel" aria-labelledby="rawPreview-tab" tabIndex={0} hidden={selectedTab !== 'rawPreview'}>
+      <RawPreviewDiagnostics active={selectedTab === 'rawPreview'} />
     </div>
   </main>;
 }

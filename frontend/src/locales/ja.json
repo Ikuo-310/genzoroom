@@ -642,6 +642,25 @@
       "ko-KR": "韓国"
     }
   },
+  "rawDiagnostics": {
+    "title": "RAW Preview測定", "description": "Windows LocalHost専用です。接続先ImmichにあるRAW AssetのUUIDを指定してください。ローカルパスは入力できず、Galleryの選択状態も使用しません。",
+    "isolation": "独立した読取専用LightCraftプロセスとimport既定値で測定します。通常のRAW workspaceを先に閉じてください。診断の資源回収が終わるまでRAW編集は開始できません。Recipe・History・Immichは変更しません。",
+    "conditions": "固定する測定条件", "assetId": "Immich RAW Asset UUID", "quality": "品質", "stageCache": "StageCache / 実適用", "backend": "Backend / 実行経路", "temperature": "Cold / Warm",
+    "repeats": "条件ごとの測定回数（1〜5）", "budget": "StageCache予算（MiB、1〜1024）",
+    "coldWarm": "Cold：各試行でnativeプロセスを新規作成してimportします。OSのディスクcacheは消去しません。Warm：同じ品質・cache・サイズで事前に1回描画した後、同じプロセスで反復します。Warmはcache hitの証明ではありません。",
+    "limits": "出力は1024px・5MiBの安全枠を維持します。最大40試行、開始から10分の受付上限、2分のidle leaseがあります。準備処理は測定用render要求と分けます。最終的な解像度policyは実装しません。",
+    "start": "測定開始", "stop": "native応答を回収して停止", "retryCleanup": "資源回収を再試行", "export": "RAW専用JSONを出力", "exportFailed": "RAW診断JSONを出力できませんでした。",
+    "error": "RAW診断を完了できませんでした：", "notCollected": "未取得", "unverified": "未検証・一致する測定結果が不足", "fallback": "fallbackを検出",
+    "trials": "個別測定値", "native": "Native", "validation": "PNG検証", "transfer": "転送 / body read", "decode": "Decode", "total": "合計", "image": "PNG", "memory": "Stage保持 / メモリ", "result": "結果",
+    "statistics": "時間統計", "medianMinMax": "中央値 / 最小 / 最大", "draftFull": "Full / Draftのnative時間比", "cache": "OFF / ONのnative時間比",
+    "ratioNotes": "速度比はnative時間の中央値を用います。素材・settings・geometry・binary・Backend・サイズ・Cold/Warmが一致し、ONが実適用された組だけを比較します。経路未確認やfallbackは比較可能と扱いません。",
+    "fullMatch": "Full OFF / ONのPNG SHA-256一致", "timingNotes": "時間の単位はmsです。Nativeは描画・encode・MCP・settings readbackを含み、現像式だけの時間ではありません。転送はブラウザのbody read時間で、純粋なネットワーク遅延ではありません。合計はrender HTTP要求からdecode完了までで、GPU状態照会・settings事前確認・Full hashを含み、準備・import・事前描画を除きます。Stage保持bytesはRSS／VRAMではなく、これらは未取得です。",
+    "gpuNotes": "GPUの利用可能状態だけでは、この描画の実行経路を証明できません。現行native契約にjob単位のGPU／fallback証跡がないため、GPUが利用可能でも経路未確認とします。実RAWの速度・画質・メモリ評価はWindows実測で確認してください。",
+    "values": { "draft": "Draft", "full": "Full", "both": "両方比較", "off": "OFF", "on": "ON", "cpu": "CPU", "gpu": "GPU", "cold": "Cold", "warm": "Warm", "unconfirmed": "実行経路未確認" },
+    "phases": { "idle": "未実行", "preparing": "独立Sessionを準備中…", "running": "測定中…", "stopping": "native処理と資源を回収中…", "complete": "完了", "failed": "失敗", "cancelled": "中断", "cleanup_failed": "資源回収未完了・新規測定を禁止" },
+    "results": { "success": "成功", "failed": "失敗", "cancelled": "中断", "unsupported": "非対応" },
+    "matches": { "equal": "一致", "different": "不一致", "unverified": "未検証" }
+  },
   "developer": {
     "title": "Developer Diagnostics",
     "description": "GenzoRoomの開発・診断用ページです。各診断は実行ボタンで開始します。",
@@ -687,6 +706,7 @@
     "jpegTab": "実写JPEG",
     "webgpuTab": "WebGPU",
     "exportEngineTab": "Export Engine",
+    "rawPreviewTab": "RAW Preview",
     "environmentFields": {
       "secureContext": "Secure Context",
       "crossOriginIsolated": "クロスオリジン分離",
