@@ -48,6 +48,8 @@ it('invalidates a rendering Preview as soon as a newer desired value arrives', a
   preview.mockImplementationOnce(async (_settings, valid) => { current = valid; await gate.promise; });
   c.change({ 'light.exposure': 1 }); c.flush(); await flush(); expect(current()).toBe(true);
   c.change({ 'light.exposure': 2 }); expect(current()).toBe(false);
+  expect(c.busy).toBe(false);
+  c.flush();
   gate.resolve(); await flush(); await owner; expect(preview).toHaveBeenCalledTimes(2);
 });
 

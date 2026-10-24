@@ -171,6 +171,32 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('uses native RAW dimensions for Fit and physical 1:1, preserving transform across bitmap changes', () => {
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const render = (src: string) => act(() => root.render(<ImageViewer src={src} documentKey="raw"
+      rawFrame={{ nativeWidth: 6000, nativeHeight: 4000, geometryId: 'a'.repeat(64) }} previewPixels
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    render('blob:draft');
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 900 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 });
+    act(() => resize());
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('30%');
+    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('900px');
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(b => b.textContent === '1:1')!);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('3000px');
+    const transform = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
+    render('blob:full');
+    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('3000px');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(transform);
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1 });
+    act(() => window.dispatchEvent(new Event('resize')));
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(host.querySelector<HTMLImageElement>('.viewer-panel img')!.style.width).toBe('6000px');
+  });
   it('keeps native Preview load state aligned with its document across fast loads and JPEG switches', () => {
     const render = (props: { src: string; documentKey?: string; previewStatus?: 'loading' | 'error'; autoLoad: boolean }) =>
       act(() => root.render(<NativePreviewHarness {...props} />));

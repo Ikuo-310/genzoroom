@@ -57,6 +57,7 @@ class _Session:
     temp_root: Path | None = None
     temp_lock: threading.Lock = field(default_factory=threading.Lock)
     before_preview: bool | None = None
+    adaptive_preview: bool | None = None
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -553,13 +554,46 @@ class LightCraftManager:
             session.before_preview = isinstance(tools, list) and any(supports(tool) for tool in tools)
         return session.before_preview
 
-    async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False):
+    async def _raw_preview_supported(self, generation):
+        session = self._raw_session(generation)
+        if session.adaptive_preview is None:
+            result = await session.client.request("tools/list", timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            session.adaptive_preview = False
+            for tool in tools if isinstance(tools, list) else []:
+                if not isinstance(tool, dict) or tool.get("name") != "render_preview":
+                    continue
+                schema = tool.get("inputSchema")
+                props = schema.get("properties") if isinstance(schema, dict) else None
+                if not isinstance(props, dict) or not all(isinstance(props.get(k), dict) for k in
+                        ("quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes")):
+                    continue
+                session.adaptive_preview = (props["quality"].get("type") == "string"
+                    and props["quality"].get("enum") == ["draft", "full"]
+                    and props["preview_contract"].get("type") == "integer"
+                    and props["preview_contract"].get("enum") == [1]
+                    and props["stage_cache"].get("type") == "string"
+                    and props["stage_cache"].get("enum") == ["off", "on"]
+                    and props["stage_cache_budget_bytes"].get("type") == "integer")
+        return session.adaptive_preview
+
+    async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
+                           quality=None, stage_cache="off", stage_cache_budget_bytes=None):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
+        options = {}
+        if quality is not None:
+            if not await self._raw_preview_supported(generation):
+                raise LightCraftError("raw_preview_unsupported")
+            options = {"quality": quality, "preview_contract": 1, "stage_cache": stage_cache}
+            if stage_cache == "on":
+                options["stage_cache_budget_bytes"] = stage_cache_budget_bytes
         try:
             result = await session.client.call_tool_result("render_preview", {
-                "id": photo_id, "max_side": max_side, "format": "png", **({"before": True} if before else {})}, timeout=timeout)
+                "id": photo_id, "max_side": max_side, "format": "png", **options,
+                **({"before": True} if before else {})}, timeout=timeout)
             self._check_raw_session(session)
             return result
         finally:

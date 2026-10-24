@@ -72,6 +72,9 @@ class RawProcess(FakeProcess):
         self.wb_override = {}
         self.before_supported = False
         self.before_wrong_kind = False
+        self.adaptive_supported = False
+        self.preview_arguments = []
+        self.preview_error_code = None
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -81,12 +84,19 @@ class RawProcess(FakeProcess):
 
     def respond(self, message):
         if message["method"] == "tools/list":
+            if self.adaptive_supported:
+                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
+                    "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
+                    "preview_contract": {"type": "integer", "enum": [1]},
+                    "stage_cache": {"type": "string", "enum": ["off", "on"]},
+                    "stage_cache_budget_bytes": {"type": "integer"}}}}]})
             return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
                 "properties": {"before": {"type": "boolean"}} if self.before_supported else {}}}]})
         if message["method"] != "tools/call":
             return super().respond(message)
         args = message["params"]["arguments"]
         if message["params"]["name"] == "render_preview":
+            self.preview_arguments.append(copy.deepcopy(args))
             self.render_count += 1
             self.inflight += 1
             self.max_inflight = max(self.max_inflight, self.inflight)
@@ -96,7 +106,10 @@ class RawProcess(FakeProcess):
                 try:
                     if self.gate is not None:
                         await self.gate.wait()
-                    if self.raw_tool_error:
+                    if self.preview_error_code is not None:
+                        reply(self.stdout, message, {"isError": True, "content": [{"type": "text",
+                            "text": json.dumps({"code": self.preview_error_code})}]})
+                    elif self.raw_tool_error:
                         self.tool(message, error=True)
                     else:
                         result = image_result(args["id"])
@@ -109,6 +122,16 @@ class RawProcess(FakeProcess):
                             result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
+                        if "preview_contract" in args:
+                            metadata = json.loads(result["content"][1]["text"])
+                            metadata.update(kind="before" if args.get("before") else "after", previewContract=1,
+                                quality=args["quality"], mode="whole", frame={"geometryId": "a" * 64,
+                                "nativeWidth": 6000, "nativeHeight": 4500, "aspect": 4 / 3,
+                                "fullWidth": 16, "fullHeight": 12, "window": None},
+                                stageCache={"mode": args["stage_cache"], "applied": args["stage_cache"] == "on",
+                                "reason": "none", "cpuBytes": 0, "gpuBytes": 0, "retainedBytes": 0,
+                                "budgetBytes": args.get("stage_cache_budget_bytes", 0)})
+                            result["content"][1]["text"] = json.dumps(metadata)
                         reply(self.stdout, message, result)
                 finally:
                     self.inflight -= 1

@@ -32,6 +32,15 @@ LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
 
+class _ImageResponse(Response):
+    async def __call__(self, scope, receive, send):
+        try:
+            async with asyncio.timeout(90):
+                await super().__call__(scope, receive, send)
+        finally:
+            self.release_lease()
+
+
 class RawPreviewApi:
     def __init__(self):
         self.raw = self.manager = None
@@ -39,6 +48,10 @@ class RawPreviewApi:
         self.workspace = self.document = None
         self._lock = asyncio.Lock()
         self._tasks = set()
+        self._image_tasks = set()
+        self._image_leases = set()
+        self._lease_tickets = {}
+        self._preview_latest = {}
         self._history_tasks = set()
         self._closing = False
         self._lease_task = None
@@ -57,6 +70,7 @@ class RawPreviewApi:
             Route("/documents", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}", self.endpoint, methods=["GET", "DELETE"]),
             Route("/documents/{handle}/preview", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/preview/cancel", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
@@ -102,23 +116,55 @@ class RawPreviewApi:
     async def endpoint(self, request):
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
-            if self._closing or self._history_draining or len(self._tasks) >= 2:
+            if request.url.path.endswith("/preview/cancel"):
+                return self._cancel_preview(request, body)
+            preview = request.url.path.endswith("/preview")
+            if preview and not self._closing and not self._history_draining and len(self._image_leases) >= 3:
+                self._replace_pending_image(request, body)
+            if self._closing or self._history_draining or (len(self._image_leases) >= 3 if preview else len(self._tasks) >= 2):
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
             handler = self._preview if request.url.path.endswith("/preview") else self._execute
-            task = asyncio.create_task(handler(request, body), name="windows-raw-before"
+            lease = object() if preview else None
+            task = asyncio.create_task(handler(request, body, lease) if preview else handler(request, body), name="windows-raw-before"
                                        if handler == self._preview and body.get("kind") == "before" else "windows-raw-request")
-            self._tasks.add(task)
+            if preview:
+                self._image_leases.add(lease)
+                self._image_tasks.add(task)
+                def image_done(done):
+                    self._image_tasks.discard(done)
+                    if done.cancelled() or done.exception() is not None:
+                        self._release_image_lease(lease)
+                    else:
+                        response = done.result()
+                        if isinstance(response, _ImageResponse):
+                            response.release_lease = lambda: self._release_image_lease(lease)
+                        else:
+                            self._release_image_lease(lease)
+                task.add_done_callback(image_done)
+            else:
+                self._tasks.add(task)
+                control_owner = self.raw
+                control_owner.reserve_control()
+                task.add_done_callback(lambda _: control_owner.release_control())
             if request.method == "POST" and "/history/" in request.url.path:
                 self._history_tasks.add(task)
             task.add_done_callback(self._done)
-            return await asyncio.shield(task)
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if preview:
+                    # A detached HTTP waiter cannot own a response body that will never be sent.
+                    task.add_done_callback(lambda _: self._release_image_lease(lease))
+                raise
         except (LightCraftError, TimeoutError) as error:
             code = error.code if isinstance(error, LightCraftError) else "raw_request_timeout"
-            status = (413 if code in {"raw_request_too_large", "raw_source_too_large"} else
-                      400 if code in {"raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
+            if code == "lightcraft_invalid_preview":
+                code = "raw_invalid_preview"
+            status = (413 if code in {"raw_request_too_large", "raw_source_too_large", "raw_preview_budget_exceeded"} else
+                      400 if code in {"raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
-                                      "raw_history_unavailable", "raw_history_save_failed"} else
+                                      "raw_history_unavailable", "raw_history_save_failed", "raw_preview_unsupported"} else
                       409 if code in HISTORY_CONFLICTS or code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
@@ -128,6 +174,50 @@ class RawPreviewApi:
             lightcraft_log("raw.http.failed", level="error", errorCode="raw_operation_failed")
             return JSONResponse({"code": "raw_operation_failed"}, status_code=502,
                                 headers={"Cache-Control": "no-store"})
+
+    def _cancel_preview(self, request, body):
+        if set(body) != {"workspaceId", "generation", "documentToken", "kind", "serial"} or \
+                body.get("kind") not in ("after", "before") or type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1:
+            raise LightCraftError("raw_invalid_request")
+        self._owner(body["workspaceId"])
+        doc = self._document(request.path_params["handle"])
+        if type(body["generation"]) is not int or any(body[k] != doc[k] for k in ("generation", "documentToken")):
+            raise LightCraftError("raw_stale_handle")
+        self.raw.cancel_preview(self._raw_handle, body["kind"], body["serial"])
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    def _release_image_lease(self, lease):
+        self._image_leases.discard(lease)
+        self._lease_tickets.pop(lease, None)
+
+    def _replace_pending_image(self, request, body):
+        # A replaced, unsent ticket owns no bitmap; its terminal 204 can leave the image pool.
+        doc = self.document
+        kind = body.get("kind", "after")
+        if set(body) - {"kind"} != {"workspaceId", "generation", "documentToken", "revision", "serial", "quality", "mode", "maxSide", "viewGeneration", "geometryId"} or \
+                not doc or request.path_params.get("handle") != doc["handle"] or \
+                any(type(body.get(k)) is not int for k in ("generation", "revision")) or \
+                any(body.get(k) != doc[k] for k in ("workspaceId", "generation", "documentToken", "revision")) or \
+                type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
+                kind not in ("before", "after") or body.get("quality") not in ("draft", "full") or \
+                not self._valid_display_target(body):
+            return
+        pending = self.raw._before_pending if kind == "before" else self.raw._pending
+        if pending is None or pending.serial >= body["serial"]:
+            return
+        for lease, ticket in list(self._lease_tickets.items()):
+            if ticket is pending:
+                self.raw.cancel_preview(self._raw_handle, kind, pending.serial)
+                pending.reason = "replaced"
+                self._release_image_lease(lease)
+                return
+
+    @staticmethod
+    def _valid_display_target(body):
+        return (body.get("mode") == "whole" and type(body.get("maxSide")) is int and 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE
+            and type(body.get("viewGeneration")) is int and 0 <= body["viewGeneration"] <= 2**53 - 1
+            and "geometryId" in body and (body["geometryId"] is None or isinstance(body["geometryId"], str)
+                and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"]) is not None))
 
     def _done(self, task):
         self._tasks.discard(task)
@@ -204,6 +294,7 @@ class RawPreviewApi:
                     await self._release()
                     raise
                 self._raw_handle = handle
+                self._preview_latest.clear()
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
@@ -255,26 +346,40 @@ class RawPreviewApi:
                 return JSONResponse({**doc, "state": self.raw.status().state})
             raise LightCraftError("raw_invalid_request")
 
-    async def _preview(self, request, body):
+    async def _preview(self, request, body, lease=None):
         async with self._lock:
             self._owner(body.get("workspaceId"))
             doc = self._document(request.path_params["handle"])
             kind = body.get("kind", "after")
-            if set(body) - {"kind"} != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
+            adaptive = "quality" in body
+            extra = {"quality", "mode", "maxSide", "viewGeneration", "geometryId"} if adaptive else set()
+            if set(body) - {"kind"} - extra != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
                     or kind not in ("before", "after") \
                     or any(type(body.get(key)) is not int for key in ("generation", "revision")) \
                     or any(body.get(key) != doc[key] for key in ("generation", "documentToken", "revision")) \
                     or type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1:
                 raise LightCraftError("raw_revision_conflict")
+            if adaptive and (not extra <= set(body) or body["quality"] not in ("draft", "full") or not self._valid_display_target(body)):
+                raise LightCraftError("raw_invalid_preview_request")
             handle = self._raw_handle
-            ticket = self.raw.request_preview(handle, doc["revision"], **({"kind": kind} if kind == "before" else {}))
-            if kind == "after":
-                # Preserve the existing After/cleanup barrier; only optional Before releases admission.
-                frame = await ticket
-                return self._preview_response(frame, doc, body, kind, handle)
-        # Optional Before must not hold the HTTP mutation-admission lock.
+            options = {"kind": kind} if kind == "before" else {}
+            if adaptive:
+                supported = await self.manager._raw_preview_supported(doc["generation"])
+                options.update(max_side=body["maxSide"], serial=body["serial"], view_generation=body["viewGeneration"],
+                               geometry_id=body["geometryId"], quality=body["quality"] if supported else None)
+            latest_key = (doc["handle"], kind)
+            latest = self._preview_latest.get(latest_key, -1)
+            if adaptive and body["serial"] <= latest:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced"})
+            if adaptive:
+                self._preview_latest[latest_key] = body["serial"]
+            ticket = self.raw.request_preview(handle, doc["revision"], **options)
+            if lease is not None:
+                self._lease_tickets[lease] = ticket
         frame = await ticket
         async with self._lock:
+            if frame is SUPERSEDED or self.document is not doc or adaptive and self._preview_latest.get(latest_key) != body["serial"]:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
             return self._preview_response(frame, doc, body, kind, handle)
 
     def _preview_response(self, frame, doc, body, kind, handle):
@@ -283,7 +388,7 @@ class RawPreviewApi:
         if self._document(doc["handle"]) is not doc or frame.handle != self._raw_handle \
                 or frame.kind != kind or len(frame.data) > MAX_IMAGE_BYTES \
                 or (kind == "after" and frame.revision != doc["revision"]) \
-                or (kind == "before" and frame.key != self.raw.before_key(handle)):
+                or (kind == "before" and frame.frame is None and frame.key != self.raw.before_key(handle)):
             raise LightCraftError("raw_stale_handle")
         headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
                    "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
@@ -291,12 +396,23 @@ class RawPreviewApi:
                    "X-Raw-Width": str(frame.width), "X-Raw-Height": str(frame.height),
                    "Cache-Control": "no-store"}
         headers["X-Raw-Kind"] = frame.kind
+        if "quality" in body:
+            headers.update({"X-Raw-Quality": frame.quality, "X-Raw-Mode": "whole",
+                            "X-Raw-Preview-Contract": "1" if frame.frame is not None else "0",
+                            "X-Raw-View-Generation": str(body["viewGeneration"])})
+            if frame.frame is not None:
+                native_frame = dict(frame.frame)
+                native_frame["geometryId"] = hashlib.sha256((f"{handle.source_key}:{handle.document_token}:"
+                    f"{handle.generation}:{native_frame['geometryId']}").encode()).hexdigest()
+                if body["geometryId"] is not None and body["geometryId"] != native_frame["geometryId"]:
+                    return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced"})
+                headers["X-Raw-Frame"] = json.dumps(native_frame, separators=(",", ":"), ensure_ascii=True)
         if frame.key:
             headers["X-Raw-Before-Key"] = frame.key
         lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
                        generation=frame.handle.generation, revision=frame.revision, bytes=len(frame.data), kind=kind)
         self._touched = monotonic()
-        return Response(frame.data, media_type="image/png", headers=headers)
+        return _ImageResponse(frame.data, media_type="image/png", headers=headers)
 
     def _edit_budget(self):
         # The soft boundary leaves 56 attempts for final flush, resync and failed readbacks.
@@ -694,6 +810,13 @@ class RawPreviewApi:
             raise
 
     async def _history_checkpoint(self):
+        self.raw.reserve_control()
+        try:
+            await self._history_checkpoint_reserved()
+        finally:
+            self.raw.release_control()
+
+    async def _history_checkpoint_reserved(self):
         self._history_unsettled()
         if self.document is None or not self._history_initialized:
             return
@@ -792,6 +915,13 @@ class RawPreviewApi:
             raise asyncio.CancelledError()
 
     async def _close(self):
+        self.raw.reserve_control()
+        try:
+            await self._close_reserved()
+        finally:
+            self.raw.release_control()
+
+    async def _close_reserved(self):
         if self._history_initialized or self._history_save or self._history_tasks:
             self._history_draining = True
             try:
@@ -815,6 +945,8 @@ class RawPreviewApi:
             await self.raw.close()
             if self._tasks:
                 await asyncio.gather(*self._tasks, return_exceptions=True)
+            if self._image_tasks:
+                await asyncio.gather(*self._image_tasks, return_exceptions=True)
             if self.cache:
                 await self.cache.close()
         except BaseException:

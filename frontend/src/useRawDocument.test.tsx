@@ -9,7 +9,7 @@ import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHist
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
+  rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
 let root: Root;
@@ -54,6 +54,78 @@ function enableBefore() {
 }
 
 describe('RAW native Before cache', () => {
+  it('resynchronizes a render revision once without rewriting its History checkpoint', async () => {
+    await render('a'); await flush();
+    const saved = current!.settings!.recipeFingerprint;
+    vi.mocked(api.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), revision: doc.revision + 1,
+      settingsFingerprint: 'f'.repeat(64), recipeFingerprint: saved! }));
+    vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawSuperseded('revision'));
+    act(() => current!.viewChanged()); await flush();
+    expect(current?.settings?.settingsFingerprint).toBe('f'.repeat(64));
+    expect(current?.dirty).toBe(true);
+    await act(async () => { await expect(current!.prepareSave()).rejects.toThrow('raw_history_readback_mismatch'); });
+    expect(commitHistory).not.toHaveBeenCalled();
+    expect(current?.saveError).toBe('raw_history_readback_mismatch');
+  });
+  it('discards a delayed Full after an edit and drains the latest Draft before final Full', async () => {
+    const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
+    await render('a'); await flush();
+    expect(current?.locked).toBe(false);
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 170)); }); await flush();
+    expect(api.rawPreview).toHaveBeenCalledOnce();
+    expect(api.cancelRawPreview).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'a' }), 'after', 1);
+    await act(async () => gate.resolve({ blob: new Blob(['stale']), width: 16, height: 12, epoch: 1, sequence: 1 })); await flush();
+    expect(createURL).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('draft');
+    act(() => current!.flushControls()); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('full');
+    expect(api.setRawControls).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a native Before pair with a different geometry while keeping saving usable', async () => {
+    enableBefore();
+    const implementation = vi.mocked(api.rawPreview).getMockImplementation()!;
+    vi.mocked(api.rawPreview).mockImplementation(async (...args) => ({ ...await implementation(...args),
+      quality: args[4]?.quality ?? 'full', frame: { geometryId: (args[3] === 'before' ? 'b' : 'a').repeat(64),
+        nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3, fullWidth: 16, fullHeight: 12, window: null } }));
+    await render('a', true); await flush();
+    expect(current?.beforeUrl).toBeUndefined(); expect(current?.beforeStatus).toBe('error');
+    expect(current?.frame?.nativeWidth).toBe(6000); expect(current?.width).toBe(16);
+    await act(async () => current!.prepareSave());
+    expect(current?.saveError).toBeUndefined();
+  });
+  it('requests Draft on acknowledged interaction and Full on end without another mutation', async () => {
+    await render('a'); await flush();
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 170)); }); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('draft');
+    const revision = current!.settings!.revision;
+    act(() => current!.flushControls('light.exposure')); await flush();
+    const calls = vi.mocked(api.rawPreview).mock.calls;
+    expect(calls.at(-1)?.[4]?.quality).toBe('full');
+    expect(calls.at(-1)?.[0].revision).toBe(revision);
+    expect(calls.at(-1)?.[1]).toBeGreaterThan(calls.at(-2)![1]);
+    expect(api.setRawControls).toHaveBeenCalledOnce();
+  });
+
+  it('finishes saving while Draft decode is stalled and rejects its late publication', async () => {
+    await render('a'); await flush();
+    const gate = deferred<void>(); decode = () => gate.promise;
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 170)); }); await flush();
+    const previous = current!.url;
+    act(() => current!.flushControls()); await flush();
+    await act(async () => { await current!.prepareSave(); });
+    expect(current?.dirty).toBe(false); expect(current?.saveError).toBeUndefined();
+    decode = async () => {};
+    await act(async () => gate.resolve()); await flush();
+    expect(current?.url).toBe(previous);
+    act(() => current!.resumeEditing());
+    act(() => current!.viewChanged()); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('full');
+    expect(current?.url).not.toBe(previous);
+  });
   it('loads lazily, reuses across edits and toggles, and releases on document change', async () => {
     enableBefore();
     await render('a'); await flush();
@@ -121,7 +193,7 @@ describe('RAW document lifetime', () => {
     await render('a'); await flush();
     vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawApiError('raw_render_failed'));
     act(() => { current!.changeControls({ 'light.exposure': 2 }); current!.flushControls(); }); await flush();
-    expect(current?.editError).toBe('raw_render_failed'); expect(current?.saveError).toBeUndefined();
+    expect(current?.displayError).toBe('raw_render_failed'); expect(current?.editError).toBeUndefined(); expect(current?.saveError).toBeUndefined();
     expect(commitHistory).toHaveBeenCalledOnce(); expect(current?.dirty).toBe(false);
     await act(async () => { await current!.prepareSave(); });
     expect(current?.settings?.values['light.exposure']).toBe(2);
@@ -192,7 +264,7 @@ describe('RAW document lifetime', () => {
   it('reports native Preview failure without substituting a viewing Preview', async () => {
     vi.mocked(api.rawPreview).mockRejectedValue(new api.RawApiError('raw_unavailable'));
     await render('raw'); await flush();
-    expect(current?.status).toBe('error'); expect(current?.url).toBeUndefined();
+    expect(current?.status).toBe('ready'); expect(current?.displayError).toBeDefined(); expect(current?.url).toBeUndefined();
   });
   it('does not cancel a transmitted import and releases it before opening the next RAW', async () => {
     const pending = deferred<api.RawDocument>();
@@ -221,7 +293,7 @@ describe('RAW document lifetime', () => {
   it('rejects an engine identity change during decode', async () => {
     vi.mocked(api.readRawDocument).mockRejectedValue(new api.RawApiError('raw_stale_handle'));
     await render('a'); await flush();
-    expect(current?.status).toBe('error'); expect(current?.url).toBeUndefined();
+    expect(current?.status).toBe('ready'); expect(current?.displayError).toBeDefined(); expect(current?.url).toBeUndefined();
     expect(revokeURL).toHaveBeenCalledWith('blob:raw-1');
   });
   it('releases native ownership and the displayed URL on pagehide', async () => {
@@ -351,7 +423,7 @@ describe('RAW History document integration', () => {
     vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawApiError('raw_render_failed'));
     act(() => current!.undo()); await flush();
     expect(current?.history?.cursor).toBe(1); expect(current?.dirty).toBe(false);
-    expect(current?.editError).toBe('raw_render_failed'); expect(current?.saveError).toBeUndefined();
+    expect(current?.displayError).toBe('raw_render_failed'); expect(current?.editError).toBeUndefined(); expect(current?.saveError).toBeUndefined();
   });
 });
 
@@ -486,7 +558,7 @@ describe('bounded RAW session renewal', () => {
     vi.useFakeTimers(); renewal(); await threshold();
     const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
     act(() => current!.flushControls()); await drain();
-    expect(current?.regenerating).toBe(true); await render(null);
+    expect(current?.regenerating).toBe(false); await render(null);
     await act(async () => gate.resolve({ blob: new Blob(['stale']), width: 16, height: 12, epoch: 2, sequence: 1 })); await drain();
     expect(current).toBeNull(); expect(createURL).toHaveBeenCalledTimes(2);
     expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);

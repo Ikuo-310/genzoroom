@@ -554,3 +554,67 @@ unit/MCP/実binaryでoff/on、同side reuse、Before/After独立、source変更�
 GenzoRoom製品Backend/Frontend、SQLite、Recipe/History、既存C4完了記録、README/CHANGELOGは未変更。`backend/tests/test_lightcraft_patch.py`の変更はnative build管理回帰のみ。実binaryとreceiptはignored専用checkout `.tmp/lightcraft-a2/target/release/`に保持し、既存参照checkoutのbinary／環境設定を置き換えていない。
 
 A3ではquality/frame/stageCacheの世代capabilityとstrict検証、HTTP preview/cancel、control reservation、PNG検証・decodeと保存fenceの分離、表示intent・RAW論理尺度を接続する。Beforeの異geometry mappingは未解決事項のまま明示し、region APIは工程CでDraft/Full両方へ拡張する。実RAWの性能、stage cache効果、色・細部、Windows表示条件、長時間・メモリ受入はA工程の実機測定へ残す。A2で停止し、A3接続や領域描画の実装には進まない。
+
+## 15. A3接続実装（2026-10-24）
+
+A2 commit `ad1a3a98f65a77d69af3639fcfb0de923d8a8405`のclean treeから、既存Windows RAW経路へ接続した。LightCraft upstream commit／管理patch／binary、SQLite schema v8、JPEG Recipe v18、既存C4完了記録は変更しない。本節はA3の現行契約であり、前節までの工程別「未接続」はその時点の記録として保持する。
+
+### 15.1 MCP・HTTPと実geometry
+
+- runtimeはgenerationごとにquality enum、contract=1、cache enumとbudget型を確認する。Before booleanは独立判定。対応schemaを持つ場合だけ`quality/preview_contract=1/stage_cache`を送信し、実応答のcontract／quality／kind／whole／frame／cacheをPNG workerで厳格検証する。新schemaの不正応答をlegacyへ格下げしない。
+- 旧binaryには従来引数だけを送り、実際のFull wholeを返す。HTTPに`X-Raw-Preview-Contract:0|1`を追加し、legacyのFullとnative frame未取得を明示する。Frontendはcontract=0でnative寸法を捏造せず、従来PNG尺度へ限定する。Before非対応はAfterを停止しない。
+- HTTP adaptive bodyは§13.3のowner／revision／kind／serial／quality／mode／maxSide／viewGeneration／geometryId。省略qualityの旧bodyも維持する。geometryはrender付帯のみで取得し、queryは追加しない。`X-Raw-Frame`は検証済みnative frameで、geometryIdをsource/document/generationへ再束縛する。native PhotoId、path、settingsは返さない。
+- wholeのbootstrap、settings revision変更、新品質でまだ実frameを観測していない場合はgeometryId=null。同revision・同品質のview再要求には公開済みgeometryIdを指定する。Draft／Fullでeffective geometryが異なる可能性を推測で同一扱いしない。nativeWidth/HeightとPNGのwidth/height／fullWidth/Heightを分離する。
+- MCP固定error allowlistだけを抽出し、入力400、非対応503、geometry取得不能502、予算413、画像不正502へ§13.1どおり変換する。未知tool errorは従来の固定code、transport errorは従来規則を維持する。正常旧結果は204と`X-Raw-Superseded-Reason:revision|replaced|cancelled`。Frontendはrevisionだけを既存owner queueで一度再同期し、mutation／未知保存requestを再送しない。
+- Base64／metadata allowlist／CRC／IEND／単一frame／Pillow verify/load／pixel・byte制限は維持。Frontendもheader／frame／PNG実寸／decode実寸を検証し、header拒否・失敗時もresponse bodyを解放する。
+
+### 15.2 表示scheduler・状態の責任
+
+| 状態 | owner・更新条件・不変条件 |
+|---|---|
+| confirmed native revision、controls serial／pending／desired | 既存RawControls。serialは編集意図であり、画像品質変更だけでは進めない。busy/error/settleはmutationとreadbackのみ |
+| interacting | RawControlsの表示専用状態。RawRecipeSaveが受理したbegin／handoffで開始、end／History移動／操作／commit確定で終了。History ACKまで残るgestureとは別 |
+| renderSerial／displayGeneration／viewGeneration | hookのdocument owner。kind別serial、新編集・view置換で旧候補を無効化。Afterは未送信1件＋fetch/decode1件。31-bit serial上限前に既存再生成経路へ入り、wrapしない |
+| displayPending／transmitted／公開URL・frame | hook表示slot。画像Promiseをcatch/finallyし候補URLを解放。旧結果は公開しない。Fullは保存coordinatorのlock解放後、最終ACKのsettingsへ束縛する |
+| native pending After／Before／running／validation | 既存adapter worker。After優先、各pending最新1件、runningとvalidationは同時に増やさない。別のnative dispatcherは追加しない |
+| HTTP画像lease／latest serial | API。最新serialは現documentのkind別2件だけ、document openで破棄。画像leaseは最大3件。制御2枠とは分離 |
+| Before基準／比較URL | import/process/crop/orientationの既存基準keyと、品質・実geometryを分ける。Before URLを同pairで再利用できるが、現在After画像のrevision・品質・geometryが揃わなければ比較として表示しない |
+
+操作中のACKはDraft、操作終了と保存ACK後はFull。pending空／no-opでも終了intentがFullへ戻す。数値入力、Enter／blur／Escape、keyboard／wheelの500ms確定、focus／unmountは共通Sliderの既存境界を使い、新timerを追加しない。Reset／カテゴリ操作／Undo／Redo／jumpは既存History ACK後にFullを通知する。ハンドオフの未ACK intentを前controlのrevisionで描画しない。
+
+viewport／zoom／pan／DPR／geometry変更はviewGenerationとserialを進める。編集中ならDraft、それ以外Full。Bの解像度policyは実装せず、両品質とも現行1024安全枠を使う。RAW Viewerはnative論理frameでFit／Zoom／Panを計算し、1:1はscale=1/DPR、表示間のDPR変更でも物理倍率を保持する。bitmap交換だけではtransformを初期化しない。JPEGの尺度・Preview/Original経路は維持する。
+
+Beforeは要求時のみ低優先で取得し、品質と実geometryを検証する。異geometryはAfterを保持して比較errorとし、stretchで同一座標と扱わない。native Beforeがreadback revisionを進める場合も同じ一度限りの再同期経路へ渡す。失敗はAfter編集・保存から分離する。adaptive BeforeのBackend完成画像cacheは実geometryを再確認せず使わず、Frontendの有効な比較URLとnative StageCacheを再利用する。旧legacy Before cacheは維持する。
+
+### 15.3 native・保存・画像の待機境界
+
+1. Frontend既存ownership queueはopen／restore／mutation／History／save／releaseを所有する。初期History保存と画像公開を分け、RawControlsとRawRecipeSaveは画像Promiseをawaitしない。prepareSaveはnative readback／saveId／CAS／receipt/current照合までを待ち、fetch／decodeは待たない。表示errorは独立し、専用Retryも保存再送を行わない。
+2. HTTP制御受付でadapter control reservationを同期取得し、完了callbackで解放する。Historyのreadback→SQLite transaction→receipt/current照合まで保持。内部checkpoint／closeも予約する。既存_submit待機中／予約中はworkerが新renderを送らず、native lock取得後にも再確認する。
+3. native lock内で同期RenderJob、PNG encode／Base64／MCP応答回収、完全settings readbackを完了する。Beforeにも適用。helperがaccept後にtool errorを返す場合もreadbackする。正常renderのreadbackが変化すればrevisionを更新し、画像は204 revisionとする。transport lock・送信後timeout/cancelのSession喪失規則は変更しない。
+4. lockを解放してからPNG検証へ渡す。同workerが検証threadを保持し、timeout後もjoinする。検証中にmutation／保存を進められる。render workerからHTTP lockを取得しない。HTTPは短い登録と最終検証だけlockし、ticket待機・body送信では保持しない。
+5. 画像leaseは受付／pending／running／validation／HTTP bodyまで最大3件。全枠使用中でも同ownerの未送信旧ticketを204へ終端させ、最新へ置換できる。送信済みjobは回収する。body完了／切断／送信失敗でleaseを解放し、送信にも既存Frontend要求と同じ90秒の初期deadlineを使う。保存の制御受付枠を消費しない。
+6. `/preview/cancel`はowner／kind／serialを検証する短いevent-loop処理。HTTP制御lockを待たず、pendingだけ破棄し、runningは採用資格のみ失効。hookはbegin/change、view置換、再生成／離脱でbest-effort通知する。HTTP waiter abortをnative cancelとは扱わない。release／closeはnative・検証・一時fileを既存ownerで回収してからsourceを解放する。
+
+送信済みFull中は同期MCPとreadbackが後続操作を待たせる。完全preemptionは実装していない。Pillow不正などで後からSessionを失っても、完了済みSQLite receiptを取り消さず、未完了保存は既存owner/current検査で成功と偽らない。
+
+**readbackの防御境界：** 再同期はsavedFingerprint／retryRequest／History checkpointを上書きしない。既に初期化済みでgestureのないnative settings差分が見つかった場合、保存は`raw_history_readback_mismatch`を返す。表示が勝手なHistory stepを作ったり、dirtyなno-op保存を無限反復したりしない。これは未知のnative変更を自動採用・破棄する新仕様ではなく、既存不一致を明示するfail-closed境界。固定nativeのAs Shot学習は`Op::SetAsShotWb`でcatalog属性だけを更新し、`develop.get`が返すdevelop自体を書き換えないことも確認した。故障注入ではAfter／Before双方のrevision変更・再同期と、保存checkpointを維持した拒否を検証する。
+
+### 15.4 StageCacheの内部測定設定
+
+通常はoff。Backend起動環境の`GENZOROOM_RAW_STAGE_CACHE=on`と`GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES=<正の整数>`でA2のon経路を選ぶ。onは有限budget必須、現行native memory budgetの1GiB以内。不正値は明示拒否する。これは最終採用・最終予算ではなく内部測定の初期上限で、UI／Recipe／Historyへ設定を追加しない。HTTPからcache/budgetを入力できない。旧binaryのcontract=0はStageCache比較対象にしない。
+
+debug診断はnative＋MCP＋readback時間、PNG validation時間、Frontend応答待ち／body read／decode時間、generation／revision／sequence／品質／kind／寸法／容量、cacheのmode/applied/reasonと保持byteを記録する。Full PNGのSHA-256はdebug時だけ算出し、同系列off/onの最終Full一致確認に使える。画像／settings本文／path／tokenは記録しない。ログ失敗は処理を失敗させない。
+
+CPU比較は既存managerの`gpu_backend="off"`、GPU比較は`dx12`を明示して別generationで行う。ログのconfiguredBackendは設定値であり実GPU成功の証拠ではない。測定callerは既存`get_gpu_info()`も明示取得しfallbackを区別する。coldは新generation／再import、warmは同source・settings系列・サイズの連続描画とtrialIndexで区別し、trialIndexをnative cache hitと呼ばない。Before／AfterとDraft／Fullを別集計する。保持byteはRSS／VRAM peakではなく、後者はWindows実測で別途取得する。
+
+### 15.5 検証・限定監査・残す範囲
+
+関連Backend 488件、Frontend 9ファイル262件が成功。最後のadmission待機・離脱／再開の変更後、その影響範囲のBackend 121件／Frontend 94件を再実行して成功した（前記件数へ加算しない）。Pythonはrepositoryの3.14、FrontendはTypeScript検査を含む本番build成功。`git diff --check`と文書参照を確認した。全suite、ブラウザ手動動作、RAW実機性能試験の成功を意味しない。Frontendの既存panel-arrowテストでReact act警告2件、buildで500kB超chunk警告が出るが、失敗はない。
+
+- A2の実binaryのmanifest／receipt／SHA-256を`build.py --binary`で再照合。A3 runtimeとstrict PNG validatorに合成PNGを通し、After/Before × Draft/Full × cache off/onの8組、Full off/onのbyte一致を確認した。native source／patch／binaryは変更していない。
+- 回帰は旧／新schema、品質・geometry不正、同revision品質切替、pending置換、制御lock非依存cancel、PNG検証停止中のHistory保存、SQLite停止中のrender予約、転送中の3画像leaseと保存独立性、旧owner／timeout／close回収、C4保存・History・200操作／200/256再生成、Slider操作境界、DPR／Fit／1:1、Before不一致、JPEG経路を対象とする。
+- 限定監査ではハンドオフの未ACK描画、重複Full、初期化／closeの待機境界、legacy Beforeのserial、metadata拒否時body解放、native不一致時のno-op保存反復、bitmap交換でfit effectが再発火する問題を確認し、実装・回帰で対処した。保存済みcheckpointと不明結果の再送規則は変更していない。
+
+この変更境界の限定監査で未解決High／Mediumはない。通常のdisplay cancelはnative transportへ伝播させず、control待機は既存taskの完了を待ってbusy loopを避ける。HTTP予約の解放callbackも受付時のnative ownerへ束縛する。未送信表示を捨てて離脱し、離脱取り消し時には最新ACKへのFullを再要求する。
+
+未決定は最終Draft／Full画素数、whole／region切替閾値、大画像上限、PNG／MCP／timeout／cacheの最終予算と採否、CPU/GPU性能保証。Windows実RAW・高画素・細部／色／NR・長時間／RSS/VRAM・Tauri表示は未検証。工程Bのwhole解像度policy、工程CのDraft/Full regionと異geometry比較mapping、RAW Export／Scope／配布／NASは実装していない。領域描画は最終必須要件として維持する。A3の接続と検証で停止する。

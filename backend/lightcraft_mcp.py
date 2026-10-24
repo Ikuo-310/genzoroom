@@ -27,8 +27,8 @@ class MCPRpcError(LightCraftError):
 
 
 class MCPToolError(LightCraftError):
-    def __init__(self):
-        super().__init__("lightcraft_tool_error")
+    def __init__(self, code="lightcraft_tool_error"):
+        super().__init__(code)
 
 
 def _decode(line):
@@ -275,6 +275,18 @@ class LightCraftMCP:
             self.abort("lightcraft_invalid_tool_response")
             raise MCPTransportError("lightcraft_invalid_tool_response")
         if result["isError"]:
+            if name == "render_preview" and len(result["content"]) == 1 and "structuredContent" not in result:
+                item = result["content"][0]
+                try:
+                    value = _decode(item["text"].encode()) if item.get("type") == "text" and len(item.get("text", "")) <= 256 else None
+                    codes = {"preview_invalid_quality": "raw_invalid_preview_request", "preview_invalid_contract": "raw_invalid_preview_request",
+                        "preview_invalid_stage_cache": "raw_invalid_preview_request", "preview_unsupported": "raw_preview_unsupported",
+                        "preview_geometry_unavailable": "raw_preview_geometry_unavailable", "preview_geometry_mismatch": "raw_preview_geometry_unavailable",
+                        "preview_budget_exceeded": "raw_preview_budget_exceeded", "preview_render_failed": "raw_invalid_preview"}
+                    if isinstance(value, dict) and set(value) == {"code"} and value["code"] in codes:
+                        raise MCPToolError(codes[value["code"]])
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    pass
             raise MCPToolError()
         return result
 

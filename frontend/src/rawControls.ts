@@ -12,16 +12,22 @@ export class RawControls {
   private active = true;
   private queued = false;
   private timer?: ReturnType<typeof setTimeout>;
+  interacting = false;
   constructor(public confirmed: RawSettings, private options: {
     schedule: (action: () => Promise<void>) => void;
     changed: () => void;
     hold?: () => boolean;
-    preview: (settings: RawSettings, current: () => boolean) => Promise<void>;
+    preview: (settings: RawSettings, current: () => boolean) => void;
+    invalidate?: () => void;
   }) {}
+
+  beginPreview() { if (!this.interacting) { this.interacting = true; this.options.invalidate?.(); } }
+  endPreview() { this.interacting = false; this.options.invalidate?.(); }
 
   change(values: Partial<RawValues>) {
     if (!this.active || this.error) return;
     this.serial++;
+    this.options.invalidate?.();
     Object.assign(this.desired, values);
     Object.assign(this.pending, values);
     this.options.changed();
@@ -62,7 +68,7 @@ export class RawControls {
           this.options.changed();
           if (!Object.keys(this.pending).length) {
             const serial = this.serial;
-            await this.options.preview(this.confirmed, () => this.active && serial === this.serial);
+            this.options.preview(this.confirmed, () => this.active && serial === this.serial);
           }
         }
       } catch (error) {
@@ -85,7 +91,7 @@ export class RawControls {
         this.error = undefined;
         if (this.active && !Object.keys(this.pending).length) {
           const serial = this.serial;
-          await this.options.preview(this.confirmed, () => this.active && serial === this.serial);
+          this.options.preview(this.confirmed, () => this.active && serial === this.serial);
         }
       } catch (error) { this.error = error instanceof RawApiError ? error.code : 'raw_connection_failed'; }
       finally {
@@ -106,15 +112,9 @@ export class RawControls {
       if (!this.unsettled && !this.queued) return this.confirmed;
     }
   }
-  async refreshPreview() {
-    const serial = ++this.serial;
-    try {
-      await this.options.preview(this.confirmed, () => this.active && serial === this.serial);
-      if (this.active) this.error = undefined;
-    } catch (cause) {
-      if (this.active) this.error = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
-    }
-    if (this.active) this.options.changed();
+  refreshPreview() {
+    const serial = this.serial;
+    if (this.active) this.options.preview(this.confirmed, () => this.active && serial === this.serial);
   }
   dispose() { this.active = false; clearTimeout(this.timer); }
   get unsettled() { return this.busy || Object.keys(this.desired).length > 0; }

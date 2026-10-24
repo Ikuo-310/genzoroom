@@ -1,9 +1,18 @@
+import { frontendLogger } from './frontendLogging';
+
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
   recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string;
   beforeKey?: string | null;
 };
-export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string };
+export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
+  fullWidth: number; fullHeight: number; window: null };
+export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole'; maxSide: number; viewGeneration: number; geometryId: string | null };
+export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
+  quality?: 'draft' | 'full'; frame?: RawGeometry };
+export class RawSuperseded extends Error {
+  constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
+}
 const RAW_PREVIEW_MAX_SIDE = 1024;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
@@ -246,32 +255,71 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
       kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
       changes: step.changes?.map(change => ({ ...change })) ?? null })) };
 }
-export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after'): Promise<RawFrame> {
+export async function cancelRawPreview(doc: RawDocument, kind: 'before' | 'after', serial: number) {
+  await request(`/documents/${doc.handle}/preview/cancel`, post({ ...identityBody(doc), kind, serial }));
+}
+export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget): Promise<RawFrame> {
+  const started = performance.now();
   const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,
-    generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial, ...(kind === 'before' ? { kind } : {}) }),
+    generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
-  const numeric = (name: string) => {
-    const text = response.headers.get(`x-raw-${name}`);
-    if (!text || !/^\d{1,16}$/.test(text) || !integer(Number(text))) throw new RawApiError('raw_invalid_response');
-    return Number(text);
-  };
-  const check = () => {
-    signal.throwIfAborted();
-    if (response.status !== 200 || response.headers.get('content-type') !== 'image/png'
-      || numeric('generation') !== doc.generation || numeric('revision') !== doc.revision
-      || numeric('serial') !== serial || response.headers.get('x-raw-token') !== doc.documentToken
-      || (response.headers.get('x-raw-kind') ?? 'after') !== kind
-      || kind === 'before' && (!fingerprint(doc.beforeKey) || response.headers.get('x-raw-before-key') !== doc.beforeKey))
-      throw new RawApiError('raw_stale_handle');
-  };
-  check();
-  const width = numeric('width'), height = numeric('height'), epoch = numeric('epoch'), sequence = numeric('sequence');
-  if (!width || !height || Math.max(width, height) > RAW_PREVIEW_MAX_SIDE || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
-  const bytes = await readBounded(response, MAX_IMAGE_BYTES);
-  check();
-  if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
-  return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
-    kind, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
+  try {
+    const responseStarted = performance.now();
+    if (response.status === 204) {
+      const reason = response.headers.get('x-raw-superseded-reason');
+      if (reason !== 'revision' && reason !== 'replaced' && reason !== 'cancelled') throw new RawApiError('raw_invalid_response');
+      throw new RawSuperseded(reason);
+    }
+    let frame: RawGeometry | undefined, quality: 'draft' | 'full' | undefined;
+    if (target) {
+      const contract = response.headers.get('x-raw-preview-contract');
+      const actual = response.headers.get('x-raw-quality');
+      if (response.headers.get('x-raw-mode') !== 'whole' || response.headers.get('x-raw-view-generation') !== String(target.viewGeneration)
+        || contract !== '0' && contract !== '1' || actual !== 'full' && actual !== 'draft'
+        || (contract === '1' ? actual !== target.quality : actual !== 'full')) throw new RawApiError('raw_invalid_response');
+      quality = actual;
+      if (contract === '1') {
+        const encoded = response.headers.get('x-raw-frame');
+        try {
+          if (!encoded || encoded.length > 16 * 1024) throw new Error();
+          const value = JSON.parse(encoded);
+          if (!value || Object.keys(value).sort().join(',') !== 'aspect,fullHeight,fullWidth,geometryId,nativeHeight,nativeWidth,window'
+            || !fingerprint(value.geometryId) || target.geometryId !== null && target.geometryId !== value.geometryId
+            || !['nativeWidth', 'nativeHeight', 'fullWidth', 'fullHeight'].every(k => integer(value[k]) && value[k] > 0 && value[k] <= 2 ** 31 - 1)
+            || typeof value.aspect !== 'number' || !Number.isFinite(value.aspect) || value.aspect <= 0 || value.window !== null) throw new Error();
+          frame = value;
+        } catch { throw new RawApiError('raw_invalid_response'); }
+      } else if (response.headers.has('x-raw-frame')) throw new RawApiError('raw_invalid_response');
+    }
+    const numeric = (name: string) => {
+      const text = response.headers.get(`x-raw-${name}`);
+      if (!text || !/^\d{1,16}$/.test(text) || !integer(Number(text))) throw new RawApiError('raw_invalid_response');
+      return Number(text);
+    };
+    const check = () => {
+      signal.throwIfAborted();
+      if (response.status !== 200 || response.headers.get('content-type') !== 'image/png'
+        || numeric('generation') !== doc.generation || numeric('revision') !== doc.revision
+        || numeric('serial') !== serial || response.headers.get('x-raw-token') !== doc.documentToken
+        || (response.headers.get('x-raw-kind') ?? 'after') !== kind
+        || kind === 'before' && (!fingerprint(doc.beforeKey) || !target && response.headers.get('x-raw-before-key') !== doc.beforeKey
+          || !!target && !fingerprint(response.headers.get('x-raw-before-key'))))
+        throw new RawApiError('raw_stale_handle');
+    };
+    check();
+    const width = numeric('width'), height = numeric('height'), epoch = numeric('epoch'), sequence = numeric('sequence');
+    if (frame && (frame.fullWidth !== width || frame.fullHeight !== height)) throw new RawApiError('raw_invalid_response');
+    if (!width || !height || Math.max(width, height) > RAW_PREVIEW_MAX_SIDE || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
+    const bytes = await readBounded(response, MAX_IMAGE_BYTES);
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'preview.received', context: {
+      generation: doc.generation, revision: doc.revision, renderSerial: serial, kind, quality: quality ?? 'full',
+      width, height, payloadBytes: bytes.length, responseWaitMs: responseStarted - started,
+      bodyReadMs: performance.now() - responseStarted } }); } catch { /* Optional diagnostics. */ }
+    check();
+    if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
+    return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
+      kind, quality, frame, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
+  } finally { await response.body?.cancel().catch(() => {}); }
 }
 
 /** A repeated DELETE can lose its ack; only an observed empty owner permits moving on. */

@@ -51,6 +51,7 @@ export class RawRecipeSave {
     if (action === 'undo' && !this.canUndo || action === 'redo' && !this.canRedo) return Promise.resolve();
     if (action === 'jump' && targetStepId !== null && !this.steps.some(step => step.stepId === targetStepId)) return Promise.resolve();
     this.moving = true;
+    this.options.controls?.endPreview();
     this.moveIntent = { action, targetStepId };
     // Reserve the entire commit->move sequence on the existing queue before cleanup can enter.
     const operation = this.save().finally(() => {
@@ -64,6 +65,7 @@ export class RawRecipeSave {
     if (!this.active || this.locked && !finishingGesture || this.historyLoading || this.historyError || !this.history) return Promise.resolve();
     this.moving = true;
     this.moveIntent = { action: 'operate', operation: structuredClone(intent) };
+    this.options.controls?.endPreview();
     // Share the History fence with navigation and renewal; an accepted Reset drains its gesture first.
     const operation = this.save().finally(() => {
       this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
@@ -140,6 +142,7 @@ export class RawRecipeSave {
       return;
     }
     this.gesture = { control, fingerprint: this.confirmed.settingsFingerprint };
+    this.options.controls?.beginPreview();
     this.options.changed();
   }
   change(control: RawControlId, value: number) {
@@ -152,7 +155,13 @@ export class RawRecipeSave {
   }
   end(control?: RawControlId) {
     if (this.handoff && (control === undefined || control === this.handoff.control)) { this.handoff.ended = true; return; }
-    if (this.gesture && (control === undefined || control === this.gesture.control)) void this.save().catch(() => {});
+    if (this.gesture && (control === undefined || control === this.gesture.control)) {
+      this.options.controls?.endPreview();
+      void this.save().then(() => this.options.controls?.refreshPreview()).catch(() => {});
+    } else if (!this.gesture && !this.locked) {
+      this.options.controls?.endPreview();
+      this.options.controls?.refreshPreview();
+    }
   }
   observe(settings: RawSettings, settled: boolean) {
     this.confirmed = settings;
@@ -209,10 +218,13 @@ export class RawRecipeSave {
           this.handoff = undefined;
           // Pausing admission for navigation must still drain intent already accepted.
           this.gesture = { control: next.control, fingerprint: this.confirmed.settingsFingerprint };
+          this.options.controls?.beginPreview();
           if (next.value !== undefined) this.options.controls?.change({ [next.control]: next.value });
           if (next.ended || this.paused || this.moving) this.end(next.control);
         }
         if (this.active) { this.options.changed(); this.observe(this.confirmed, true); }
+        if (this.active && !this.error && !this.gesture && !this.handoff && this.initialized)
+          this.options.controls?.refreshPreview();
       }
     });
     this.options.changed();
@@ -224,6 +236,11 @@ export class RawRecipeSave {
     // unconfirmed desired/native work prevents saving that confirmed edit.
     if (controls.unsettled) throw new RawApiError(controls.error ?? 'raw_save_unconfirmed');
     this.confirmed = controls.confirmed;
+    // Render readback may advance native state, but it cannot invent a user History step
+    // or rebase a saved checkpoint. Fail closed instead of reporting a no-op save forever.
+    if (!this.retryRequest && this.initialized && !this.gesture
+      && this.confirmed.settingsFingerprint !== this.savedFingerprint)
+      throw new RawApiError('raw_history_readback_mismatch');
     if (this.gesture && this.gesture.fingerprint !== this.savedFingerprint) throw new RawApiError('raw_save_unconfirmed');
     if (!this.retryRequest && (this.gesture || !this.initialized)) {
       this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
@@ -252,6 +269,7 @@ export class RawRecipeSave {
       this.lastSaveId = result.ack.saveId;
       this.initialized = true;
       this.retryRequest = undefined;
+      if (this.gesture) controls.endPreview();
       this.gesture = undefined;
       this.confirmed = controls.confirmed = result;
       this.history = result.history;
@@ -260,7 +278,7 @@ export class RawRecipeSave {
       else if (result.history.cursor > 0 && (result.history.cursor <= this.historyOffset
         || result.history.cursor > this.historyOffset + this.steps.length))
         await this.loadHistoryPage(Math.floor((result.history.cursor - 1) / 20) * 20);
-      if (moving) await controls.refreshPreview();
+      if (moving) controls.refreshPreview();
       try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'history.saved', context: {
         assetId: result.assetId, generation: result.generation, saveId: result.ack.saveId,
         action: request.action, revision: result.revision, recipeRevision: result.recipeRevision, historyCursor: result.history.cursor,

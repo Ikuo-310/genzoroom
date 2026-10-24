@@ -728,12 +728,14 @@ export function AnshitsuPage() {
       viewer={detailState === 'ready' && activeDetail ? (
         <ImageViewer gpuRenderer={gpu.renderer} onGpuError={gpu.fail} onBackendChange={gpu.reportBackend}
           key={assetId}
-          src={rawDocument?.status === 'ready' ? rawDocument.url! : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
+          src={rawDocument?.status === 'ready' ? rawDocument.url ?? '' : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
           documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
-          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' ? 'error' : undefined}
+          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.displayError ? 'error' : undefined}
           statusNote={rawDocument ? rawDocument.pending && !rawDocument.editError ? undefined
-            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.status}`) : undefined}
+            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
+          rawFrame={rawDocument?.frame}
+          onRawViewChange={rawDocument?.viewChanged}
           beforeAvailable={!activeDetail.is_raw || !!rawDocument?.beforeAvailable}
           beforeSrc={activeDetail.is_raw ? rawDocument?.beforeUrl : undefined}
           beforeStatus={activeDetail.is_raw ? rawDocument?.beforeStatus : undefined}

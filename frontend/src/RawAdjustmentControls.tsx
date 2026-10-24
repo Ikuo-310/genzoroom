@@ -65,6 +65,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       ? 'workspace.rawPreview.saveConflict' : 'workspace.rawPreview.saveFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.regenerating || raw.saving}
         onClick={() => { void raw.retrySave(); }}>{t('workspace.rawPreview.retrySave')}</button></div>}
+    {raw.displayError && <div role="alert"><p>{t('workspace.rawPreview.error')}</p>
+      <button className="tool-button" type="button" disabled={disabled || raw.locked}
+        onClick={raw.retryPreview}>{t('workspace.rawPreview.retry')}</button></div>}
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.locked}
         onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}

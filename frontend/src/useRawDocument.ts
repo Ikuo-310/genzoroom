@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, readRawDocument, readRawSettings,
+import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
   releaseRawWorkspace, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
-  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame } from './rawApi';
+  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
 
 type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
+  frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
   saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
   history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[]; historyOffset?: number;
@@ -21,6 +22,7 @@ function log(code: string, event = 'preview.failed') {
 }
 
 async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
+  const started = performance.now();
   const image = new Image();
   const url = URL.createObjectURL(frame.blob);
   let removeAbort = () => {};
@@ -34,6 +36,9 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
       if (bounded.aborted) abort();
     })]);
     if (image.naturalWidth !== frame.width || image.naturalHeight !== frame.height) throw new RawApiError('raw_invalid_response');
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'preview.decoded', context: {
+      sequence: frame.sequence, quality: frame.quality ?? 'full', kind: frame.kind ?? 'after',
+      decodeMs: performance.now() - started, width: frame.width, height: frame.height } }); } catch { /* Optional diagnostics. */ }
     return url;
   } catch (error) { URL.revokeObjectURL(url); throw error; }
   finally { removeAbort(); image.removeAttribute('src'); }
@@ -41,7 +46,8 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal) {
 
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
   const [state, setState] = useState<RawState | null>(null);
-  const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number } | null>(null);
+  const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number;
+    quality?: 'draft' | 'full'; frame?: RawGeometry } | null>(null);
   const requestBeforeRef = useRef<(retry?: boolean) => void>(() => {});
   const beforeSerial = useRef(0);
   const serial = useRef(0);
@@ -53,6 +59,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const restartWaitRef = useRef<() => Promise<void>>(async () => {});
   const renewalLockedRef = useRef<() => boolean>(() => false);
   const notifyRef = useRef<() => void>(() => {});
+  const viewRef = useRef<() => void>(() => {});
+  const invalidateBeforeRef = useRef<() => void>(() => {});
+  const resyncPreviewRef = useRef<() => void>(() => {});
+  const suspendDisplayRef = useRef<() => void>(() => {});
   identity.current = assetId;
   useEffect(() => {
     if (!assetId) { setState(null); return; }
@@ -63,6 +73,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
     let frameSerial = 0;
+    let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
+    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null } | undefined;
+    let transmitted: { doc: RawDocument; serial: number } | undefined;
+    let displayTargetKey: string | undefined;
+    let revisionResyncs = 0;
+    let publishedFrame: { revision: number; quality: 'draft' | 'full'; frame: RawGeometry } | undefined;
     let restarting = false, regenerationError: string | undefined;
     let restartOperation: Promise<void> | undefined;
     let stage: 'save' | 'release' | 'open' = 'save';
@@ -79,11 +95,23 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!unavailable) log(code);
       setState({ assetId, status: unavailable ? 'unavailable' : 'error', code });
     };
-    const displayPreview = async (doc: RawDocument, valid = current) => {
+    const invalidateDisplay = () => {
+      displayGeneration++;
+      displayTargetKey = undefined;
+      displayPending = undefined;
+      if (current()) invalidateBeforeRef.current();
+      if (transmitted) void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
+    };
+    suspendDisplayRef.current = invalidateDisplay;
+    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, valid = current) => {
       if (!valid()) return;
       let candidate: string | undefined;
       try {
-        const frame = await rawPreview(doc, ++frameSerial, controller.signal);
+        if (frameSerial >= 2 ** 31 - 2) { void restart().catch(() => {}); return; }
+        const requestSerial = ++frameSerial;
+        transmitted = { doc, serial: requestSerial };
+        const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
+          quality, mode: 'whole', maxSide: 1024, geometryId, viewGeneration });
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal);
         if (!valid()) return;
@@ -93,8 +121,70 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         revoke();
         url = candidate;
         candidate = undefined;
-        setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height, document: doc }));
+        if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
+        setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
+          frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined, document: doc }));
+        revisionResyncs = 0;
       } finally { if (candidate) URL.revokeObjectURL(candidate); }
+    };
+    const pumpDisplay = () => {
+      if (displayRunning || !displayPending || !current() || frozen.current) return;
+      if (displayPending.quality === 'full' && saver?.locked) return;
+      const intent = displayPending;
+      displayPending = undefined;
+      const valid = () => current() && intent.valid() && intent.generation === displayGeneration;
+      if (!valid()) return;
+      displayRunning = true;
+      // This slot owns failures and URL cleanup; mutation/save queues never join image work.
+      void renderPreview(intent.doc, intent.quality, intent.geometryId, valid).catch(cause => {
+        if (!valid()) return;
+        if (cause instanceof RawSuperseded) {
+          if (cause.reason === 'revision') resyncPreview(valid);
+          return;
+        }
+        const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+        log(code);
+        displayTargetKey = undefined;
+        setState(previous => previous && ({ ...previous, displayError: code }));
+      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); });
+    };
+    const resyncPreview = (valid = current) => {
+      if (!valid()) return;
+      if (revisionResyncs++ > 0) {
+        setState(previous => previous && ({ ...previous, displayError: 'raw_preview_geometry_unavailable' }));
+        return;
+      }
+      enqueue(async () => {
+        if (!valid() || !editor || editor.unsettled) return;
+        try {
+          editor.confirmed = await readRawSettings(editor.confirmed);
+          notify();
+          displayPreview(editor.confirmed);
+        } catch {
+          if (valid()) setState(previous => previous && ({ ...previous, displayError: 'raw_preview_geometry_unavailable' }));
+        }
+      });
+    };
+    resyncPreviewRef.current = () => resyncPreview();
+    const displayPreview = (doc: RawDocument, valid = current) => {
+      if (!current() || !valid()) return;
+      if (editor && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
+      const quality = editor?.interacting ? 'draft' : 'full';
+      const key = `${doc.documentToken}:${doc.revision}:${quality}:${viewGeneration}`;
+      if (key === displayTargetKey) return;
+      invalidateDisplay();
+      displayTargetKey = key;
+      const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
+        ? publishedFrame.frame.geometryId : null;
+      displayPending = { doc, valid, generation: displayGeneration, quality, geometryId };
+      pumpDisplay();
+    };
+    viewRef.current = () => {
+      if (!current() || !editor) return;
+      viewGeneration++;
+      revisionResyncs = 0;
+      if (editor.unsettled) { invalidateDisplay(); return; }
+      displayPreview(editor.confirmed);
     };
     const notify = () => {
       if (!current() || !editor) return;
@@ -110,11 +200,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         locked: frozen.current || saver?.locked, regenerating: restarting, regenerationError }));
       if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && saver?.initialized && !saver.dirty && !saver.locked
         && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
+      pumpDisplay();
     };
     const install = (settings: RawSettings) => {
+      frameSerial = 0;
+      viewGeneration = 0;
+      publishedFrame = undefined;
       const installed = new RawControls(settings, { schedule: enqueue, changed: notify,
         hold: () => !!saver?.gesturing && installed.confirmed.mutationAttempts >= installed.confirmed.regenerationThreshold,
         preview: (confirmed, valid) => displayPreview(confirmed, () => current() && editor === installed && valid()),
+        invalidate: invalidateDisplay,
       });
       editor = installed;
       saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed });
@@ -124,7 +219,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       setState(previous => ({ ...previous, assetId, status: 'ready', document: settings, settings,
         desired: {}, pending: false, editError: undefined, dirty: true, saving: false, saveError: undefined, locked: true }));
       // Install runs on the owner queue; schedule initialization rather than awaiting it here.
-      void saver.save().catch(() => {});
+      void saver.save().then(() => { if (current()) displayPreview(installed.confirmed); }).catch(() => {});
     };
     // Compose release/open on the existing owner queue, never a second lifecycle dispatcher.
     const owned = (action: () => Promise<void>) => new Promise<void>((resolve, reject) => {
@@ -148,6 +243,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!current() || !editor || !saver) return Promise.reject(new RawApiError('raw_document_closed'));
       sessionEvent('session.regenerationStarted');
       restarting = true;
+      invalidateDisplay();
       regenerationError = undefined;
       frozen.current = true;
       saver.pause();
@@ -184,7 +280,6 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (settings.generation === oldGeneration || settings.settingsFingerprint !== expectedFingerprint
             || settings.recipeFingerprint !== expectedFingerprint || settings.recipeRevision !== expectedRecipeRevision)
             throw new RawApiError('raw_recipe_restore_mismatch');
-          await displayPreview(settings);
           if (!current()) throw new RawApiError('raw_document_closed');
           install(settings);
           stage = 'save';
@@ -227,8 +322,6 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (!current()) return;
         const settings = await readRawSettings(doc);
         if (!current()) return;
-        await displayPreview(settings);
-        if (!current()) return;
         install(settings);
         const heartbeat = async () => {
           const attempt = editor!.serial, owner = editor;
@@ -247,6 +340,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const dispose = () => {
       if (!active) return;
       active = false;
+      invalidateDisplay();
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
@@ -283,10 +377,18 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   // A comparison toggle and ordinary After revisions do not own the native Before cache lifetime.
   const beforeKey = state?.assetId === assetId ? state.document?.beforeKey : null;
   const generation = state?.document?.generation, token = state?.document?.documentToken;
-  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}`;
+  useEffect(() => { beforeSerial.current = 0; }, [generation, token]);
+  const afterQuality = state?.quality ?? 'full', afterGeometry = state?.frame?.geometryId;
+  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}:${afterQuality}:${afterGeometry}`;
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined, operation = false, failed = false;
+    let transmitted: { doc: RawDocument; serial: number } | undefined;
+    let intentGeneration = 0;
+    invalidateBeforeRef.current = () => {
+      intentGeneration++;
+      if (transmitted) void cancelRawPreview(transmitted.doc, 'before', transmitted.serial).catch(() => {});
+    };
     const valid = () => !controller.signal.aborted && identity.current === assetId && !frozen.current
       && editorRef.current?.confirmed.beforeKey === beforeKey
       && editorRef.current?.confirmed.generation === generation && editorRef.current?.confirmed.documentToken === token;
@@ -295,36 +397,54 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!beforeKey || !editor || !valid() || operation || url && !retry || failed && !retry || editor.unsettled || saverRef.current?.locked) return;
       if (url) { URL.revokeObjectURL(url); url = undefined; }
       operation = true; failed = false;
+      const attempt = intentGeneration;
+      const currentIntent = () => valid() && attempt === intentGeneration;
       setBefore({ owner: beforeOwner, key: beforeKey, status: 'loading' });
       void (async () => {
         let candidate: string | undefined;
         try {
-          const frame = await rawPreview(editor.confirmed, ++beforeSerial.current, controller.signal, 'before');
-          if (!valid()) return;
+          const requestSerial = ++beforeSerial.current;
+          if (requestSerial >= 2 ** 31 - 2) { void restartRef.current().catch(() => {}); return; }
+          transmitted = { doc: editor.confirmed, serial: requestSerial };
+          const frame = await rawPreview(editor.confirmed, requestSerial, controller.signal, 'before', {
+            quality: afterQuality, mode: 'whole', maxSide: 1024, geometryId: null, viewGeneration: 0 });
+          if (!currentIntent()) return;
           if (frame.kind !== 'before' || frame.key !== beforeKey) throw new RawApiError('raw_invalid_response');
           candidate = await decodeFrame(frame, controller.signal);
-          if (!valid()) return;
+          if (!currentIntent()) return;
           url = candidate; candidate = undefined;
-          setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height });
+          setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height,
+            frame: frame.frame, quality: frame.quality ?? afterQuality });
         } catch (cause) {
-          if (!valid()) return;
+          if (!currentIntent()) return;
+          if (cause instanceof RawSuperseded) {
+            if (cause.reason === 'revision') resyncPreviewRef.current();
+            return;
+          }
           failed = true;
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'error' });
           try { frontendLogger.add({ level: 'warn', component: 'raw', event: 'before.failed', context: {
             errorCode: cause instanceof RawApiError ? cause.code : 'raw_connection_failed', generation: generation ?? null } }); } catch { /* Optional diagnostics. */ }
-        } finally { operation = false; if (candidate) URL.revokeObjectURL(candidate); }
+        } finally { operation = false; transmitted = undefined; if (candidate) URL.revokeObjectURL(candidate); }
       })();
     };
-    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
-  }, [assetId, generation, token, beforeKey, beforeOwner]);
+    return () => {
+      if (transmitted) void cancelRawPreview(transmitted.doc, 'before', transmitted.serial).catch(() => {});
+      controller.abort(); if (url) URL.revokeObjectURL(url);
+    };
+  }, [assetId, generation, token, beforeKey, beforeOwner, afterQuality]);
   useEffect(() => {
     if (beforeRequested && state?.status === 'ready' && !state.pending && !state.locked) requestBeforeRef.current();
-  }, [beforeRequested, beforeKey, state?.status, state?.pending, state?.locked]);
+  }, [beforeRequested, beforeKey, beforeOwner, state?.status, state?.pending, state?.locked, state?.imageRevision]);
 
   // Hide old ownership synchronously, before passive effects revoke its URLs.
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
   const beforeMatches = before?.owner === beforeOwner && before?.key === beforeKey;
-  const beforeSizeMatches = beforeMatches && before?.width === visible?.width && before?.height === visible?.height;
+  const beforeSizeMatches = beforeMatches && !visible?.pending && visible?.imageRevision === visible?.document?.revision
+    && before?.quality === visible?.quality && (visible?.frame
+      ? before?.frame?.geometryId === visible.frame.geometryId && before.frame.nativeWidth === visible.frame.nativeWidth
+        && before.frame.nativeHeight === visible.frame.nativeHeight
+      : !before?.frame && before?.width === visible?.width && before?.height === visible?.height);
   // A departing slider's commit callback must never flush the successor document's owner.
   const activeEditor = () => identity.current === assetId && editorRef.current?.confirmed.assetId === assetId ? editorRef.current : null;
   const callbackEditor = () => {
@@ -337,6 +457,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     if (renewalLockedRef.current()) return;
     frozen.current = false;
     saverRef.current?.resume();
+    activeEditor()?.refreshPreview();
     notifyRef.current();
   };
   const prepareSave = async (retry = false) => {
@@ -344,6 +465,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const editor = activeEditor(), saver = saverRef.current;
     if (!editor || !saver) return; // No editable document has been exposed yet.
     frozen.current = true;
+    suspendDisplayRef.current();
     saver.pause();
     notifyRef.current();
     await saver.waitHistory(retry);
@@ -367,6 +489,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   return visible && { ...visible, beforeAvailable: !!beforeKey,
+    viewChanged: () => viewRef.current(),
+    retryPreview: () => { if (callbackEditor() && !frozen.current) viewRef.current(); },
     beforeUrl: beforeMatches && beforeSizeMatches ? before?.url : undefined,
     beforeStatus: beforeMatches ? before?.status === 'ready' && !beforeSizeMatches ? 'error' as const : before?.status : undefined,
     retryBefore: () => requestBeforeRef.current(true),

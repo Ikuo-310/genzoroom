@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
@@ -14,6 +14,8 @@ import type { HistogramChangeHandler } from './histogram';
 type ImageViewerProps = {
   src: string;
   documentKey?: string;
+  rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
+  onRawViewChange?: () => void;
   previewStatus?: 'loading' | 'error';
   statusNote?: string;
   previewPixels?: boolean;
@@ -50,7 +52,7 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 
-export function ImageViewer({ src, documentKey, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -63,13 +65,35 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
   // Identity-tagged load state prevents a late passive effect from undoing an already-fired load event.
   const [loadedImage, setLoadedImage] = useState<{ identity: string; status: 'ready' | 'error'; size: Point } | null>(null);
   const imageState = loadedImage?.identity === imageIdentity ? loadedImage.status : 'loading';
-  const imageSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
+  const bitmapSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
+  const logicalWidth = rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = rawFrame?.nativeHeight ?? bitmapSize.y;
+  const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  useEffect(() => {
+    const media = window.matchMedia?.(`(resolution: ${dpr}dppx)`);
+    const changed = () => setDpr(window.devicePixelRatio || 1);
+    media?.addEventListener('change', changed);
+    window.addEventListener('resize', changed);
+    return () => { media?.removeEventListener('change', changed); window.removeEventListener('resize', changed); };
+  }, [dpr]);
   const [fitScale, setFitScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
+  const previousDpr = useRef(dpr);
+  useEffect(() => {
+    const ratio = previousDpr.current / dpr;
+    previousDpr.current = dpr;
+    if (!rawFrame || ratio === 1) return;
+    // Keep physical RAW magnification stable when the window moves between displays.
+    if (!fitMode) setScale(current => current * ratio);
+    if (previousTransform.current) previousTransform.current.scale *= ratio;
+  }, [dpr, !!rawFrame, fitMode]);
   const previousNativeSize = useRef<{ identity: string; x: number; y: number } | null>(null);
+  const viewCallback = useRef(onRawViewChange);
+  viewCallback.current = onRawViewChange;
+  useEffect(() => { viewCallback.current?.(); }, [scale, pan.x, pan.y, dpr, rawFrame?.geometryId]);
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   useLayoutEffect(() => {
@@ -145,6 +169,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
         setScale(next);
         setPan({ x: 0, y: 0 });
       }
+      viewCallback.current?.();
     };
     updateFit();
     const observer = new ResizeObserver(updateFit);
@@ -177,7 +202,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
   function setActualSize() {
     previousTransform.current = null;
     setFitMode(false);
-    setScale(1);
+    setScale(rawFrame ? 1 / dpr : 1);
     setPan({ x: 0, y: 0 });
   }
 
@@ -203,7 +228,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
   }, [keyboardBlocked, fitMode, scale, pan, fitScale]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
-    const next = clampZoom(nextValue);
+    const next = rawFrame ? clampZoom(nextValue * dpr) / dpr : clampZoom(nextValue);
     setFitMode(false);
     setPan((current) => zoomAroundPoint(current, point, scale, next));
     setScale(next);
@@ -245,7 +270,7 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
           title={fitShortcut ? t('workspace.fitShortcutHint', { shortcut: fitShortcut }) : t('workspace.fit')}>{t('workspace.fit')}</button>
         <button type="button" className="tool-button" onClick={setActualSize}>{t('workspace.actualSize')}</button>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale / 1.25)} aria-label={t('workspace.zoomOut')}>−</button>
-        <output aria-live="polite">{Math.round(scale * 100)}%</output>
+        <output aria-live="polite">{Math.round(scale * (rawFrame ? dpr : 1) * 100)}%</output>
         <button type="button" className="tool-button icon-button" onClick={() => zoom(scale * 1.25)} aria-label={t('workspace.zoomIn')}>+</button>
       </div>
       <div className="viewer-toolbar-right">
@@ -330,7 +355,8 @@ export function ImageViewer({ src, documentKey, previewStatus, statusNote, previ
           src={showBeforeAdjustments && beforeSrc ? beforeSrc : src}
           alt={alt}
           draggable="false"
-          style={{ width: imageSize.x ? `${imageSize.x * scale}px` : undefined }}
+          style={{ width: imageSize.x ? `${imageSize.x * scale}px` : undefined,
+            height: rawFrame ? `${imageSize.y * scale}px` : undefined }}
           onLoad={(event) => {
             setLoadedImage({ identity: imageIdentity, status: 'ready', size: {
               x: event.currentTarget.naturalWidth, y: event.currentTarget.naturalHeight,

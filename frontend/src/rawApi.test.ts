@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
+import { RawSuperseded } from './rawApi';
 import { rawHistoryResult, rawHistoryPage } from './test/rawHistory';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
@@ -14,6 +15,38 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+const adaptiveTarget = { quality: 'draft' as const, mode: 'whole' as const, maxSide: 1024, viewGeneration: 4, geometryId: null };
+const geometry = { geometryId: 'a'.repeat(64), nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3,
+  fullWidth: 16, fullHeight: 12, window: null };
+const adaptiveHeaders = () => ({ 'X-Raw-Preview-Contract': '1', 'X-Raw-Quality': 'draft', 'X-Raw-Mode': 'whole',
+  'X-Raw-View-Generation': '4', 'X-Raw-Frame': JSON.stringify(geometry) });
+it('keeps logical geometry separate from bitmap dimensions and sends display identity', async () => {
+  const fetch = vi.fn(async () => response(adaptiveHeaders())); vi.stubGlobal('fetch', fetch);
+  const frame = await rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget);
+  expect(frame.frame?.nativeWidth).toBe(6000); expect(frame.width).toBe(16); expect(frame.quality).toBe('draft');
+  const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
+  expect(JSON.parse(init.body as string)).toMatchObject(adaptiveTarget);
+});
+it.each<Record<string, string>>([
+  { 'X-Raw-Quality': 'full' }, { 'X-Raw-View-Generation': '3' }, { 'X-Raw-Mode': 'region' },
+  { 'X-Raw-Frame': JSON.stringify({ ...geometry, fullWidth: 17 }) },
+  { 'X-Raw-Frame': JSON.stringify({ ...geometry, window: {} }) },
+  { 'X-Raw-Frame': JSON.stringify({ ...geometry, nativeHeight: 0 }) },
+])('rejects malformed adaptive response: %j', async patch => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), ...patch })));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget)).rejects.toThrow();
+});
+it('accepts explicit legacy Full fallback without fabricating native geometry', async () => {
+  const headers = adaptiveHeaders(); delete (headers as Partial<typeof headers>)['X-Raw-Frame'];
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...headers, 'X-Raw-Preview-Contract': '0', 'X-Raw-Quality': 'full' })));
+  const frame = await rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget);
+  expect(frame.quality).toBe('full'); expect(frame.frame).toBeUndefined();
+});
+it.each(['revision', 'replaced', 'cancelled'])('treats normal %s as superseded, separate from image errors', async reason => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204, headers: { 'X-Raw-Superseded-Reason': reason } })));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget)).rejects.toBeInstanceOf(RawSuperseded);
+});
 it.each<Record<string, string>>([
   { 'X-Raw-Kind': 'after', 'X-Raw-Before-Key': 'b'.repeat(64) },
   { 'X-Raw-Kind': 'before', 'X-Raw-Before-Key': 'c'.repeat(64) },

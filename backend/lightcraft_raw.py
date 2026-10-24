@@ -13,13 +13,15 @@ import re
 import stat
 import struct
 import threading
+from time import monotonic
 import uuid
 import warnings
 import zlib
 
 from PIL import Image
+from backend_logging import backend_logger
 
-from lightcraft_mcp import LightCraftError, MCPTransportError, _decode
+from lightcraft_mcp import LightCraftError, MCPToolError, MCPTransportError, _decode
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 
 
@@ -80,6 +82,12 @@ class PreviewFrame:
     mime_type: str = "image/png"
     kind: str = "after"
     key: str | None = None
+    quality: str = "full"
+    _frame_json: str | None = field(default=None, repr=False)
+
+    @property
+    def frame(self):
+        return json.loads(self._frame_json) if self._frame_json is not None else None
 
 
 @dataclass(frozen=True)
@@ -123,6 +131,12 @@ class PreviewTicket:
         self.sequence, self.max_side = sequence, max_side
         self.kind, self.key = kind, key
         self.abandoned = False
+        self.serial = 0
+        self.quality = "full"
+        self.view_generation = 0
+        self.geometry_id = None
+        self.adaptive = False
+        self.reason = "replaced"
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
 
@@ -216,7 +230,7 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
-def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None):
+def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None):
     try:
         content = result["content"]
         if len(content) != 2 or any(not isinstance(c, dict) for c in content):
@@ -237,6 +251,8 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             allowed |= {"kind", "beforeFingerprint", "effectiveBeforeFingerprint", "geometry"}
         elif isinstance(metadata, dict) and "kind" in metadata:
             allowed.add("kind")
+        if quality is not None:
+            allowed |= {"kind", "previewContract", "quality", "mode", "frame", "stageCache"}
         if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
             raise ValueError()
@@ -248,6 +264,22 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                 or _object_json(metadata["geometry"], MAX_METADATA_BYTES) != _object_json(geometry, MAX_METADATA_BYTES)):
             raise ValueError()
         w, h = metadata["width"], metadata["height"]
+        if quality is not None:
+            frame, cache = metadata["frame"], metadata["stageCache"]
+            if type(metadata["previewContract"]) is not int or metadata["previewContract"] != 1 or \
+                    metadata["quality"] != quality or metadata["mode"] != "whole" or \
+                    not isinstance(frame, dict) or set(frame) != {"geometryId", "nativeWidth", "nativeHeight", "aspect", "fullWidth", "fullHeight", "window"} or \
+                    not isinstance(frame["geometryId"], str) or not re.fullmatch(r"[a-f0-9]{64}", frame["geometryId"]) or \
+                    any(type(frame[k]) is not int or not 0 < frame[k] <= 2**31 - 1 for k in ("nativeWidth", "nativeHeight", "fullWidth", "fullHeight")) or \
+                    type(frame["aspect"]) not in (int, float) or not math.isfinite(frame["aspect"]) or frame["aspect"] <= 0 or \
+                    (frame["fullWidth"], frame["fullHeight"]) != (w, h) or frame["window"] is not None or \
+                    not isinstance(cache, dict) or set(cache) != {"mode", "applied", "reason", "cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes"} or \
+                    cache["mode"] not in ("off", "on") or type(cache["applied"]) is not bool or cache["reason"] not in ("none", "budget") or \
+                    any(type(cache[k]) is not int or not 0 <= cache[k] <= 2**53 - 1 for k in ("cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes")) or \
+                    cache["retainedBytes"] > cache["budgetBytes"] or \
+                    cache["mode"] == "off" and (cache["applied"] or cache["retainedBytes"] or cache["reason"] != "none") or \
+                    cache["mode"] == "on" and (cache["budgetBytes"] == 0 or cache["applied"] != (cache["reason"] == "none")):
+                raise ValueError()
         if type(w) is not int or type(h) is not int or min(w, h) <= 0 or \
                 max(w, h) > max_side or w * h > MAX_PREVIEW_SIDE * MAX_PREVIEW_SIDE:
             raise ValueError()
@@ -280,7 +312,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                 opened.verify()
             with Image.open(io.BytesIO(raw)) as opened:
                 opened.load()
-        return raw, w, h
+        return (raw, w, h, metadata) if quality is not None else (raw, w, h)
     except Exception:
         # Never retain a Pillow/upstream exception (or its image/path-bearing traceback).
         raise LightCraftError("lightcraft_invalid_preview") from None
@@ -328,6 +360,9 @@ class LightCraftRawSession:
         self.manager = manager
         self._timeouts = timeouts or RawTimeouts()
         self._lock = asyncio.Lock()
+        self._control_reservations = 0
+        self._control_idle = asyncio.Event()
+        self._control_idle.set()
         self._lifecycle = asyncio.Lock()
         self._stop = asyncio.Event()
         self._photos = {}
@@ -349,6 +384,32 @@ class LightCraftRawSession:
         self._resetting = False
         self._reset_task = self._close_task = None
         self._closed = False
+        self._stage_mode = os.environ.get("GENZOROOM_RAW_STAGE_CACHE", "off")
+        budget = os.environ.get("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", "")
+        if self._stage_mode not in ("off", "on") or self._stage_mode == "on" and (len(budget) > 10 or not budget.isascii() or not budget.isdigit() or not 0 < int(budget) <= 1024**3):
+            raise LightCraftError("raw_invalid_preview_request")
+        self._stage_budget = int(budget) if self._stage_mode == "on" else None
+        self._preview_trials = 0
+
+    def reserve_control(self):
+        # HTTP retains this fence through readback and durable receipt verification.
+        self._control_reservations += 1
+        self._control_idle.clear()
+
+    def release_control(self):
+        self._control_reservations -= 1
+        if not self._control_reservations:
+            self._control_idle.set()
+
+    def cancel_preview(self, handle, kind, serial):
+        self._photo(handle, active=True)
+        for name in ("_pending", "_before_pending", "_running"):
+            ticket = getattr(self, name)
+            if ticket and ticket.handle == handle and ticket.kind == kind and ticket.serial == serial:
+                ticket.abandoned, ticket.reason = True, "cancelled"
+                if name != "_running":
+                    setattr(self, name, None)
+                    ticket._finish()
 
     def _observe(self):
         status = self.manager.status()
@@ -914,8 +975,11 @@ class LightCraftRawSession:
                  "geometry": self._before_geometry(photo), "maxSide": max_side}
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
 
-    def request_preview(self, handle, expected_revision, max_side=MAX_PREVIEW_SIDE, *, kind="after"):
+    def request_preview(self, handle, expected_revision, max_side=MAX_PREVIEW_SIDE, *, kind="after",
+                        quality=None, serial=0, view_generation=0, geometry_id=None):
         photo = self._photo(handle, active=True)
+        if quality not in (None, "draft", "full"):
+            raise LightCraftError("raw_invalid_request")
         if kind not in ("before", "after") or type(max_side) is not int or not 16 <= max_side <= MAX_PREVIEW_SIDE:
             raise LightCraftError("raw_invalid_preview_size")
         if type(expected_revision) is not int or photo.applied_revision != expected_revision or \
@@ -923,14 +987,16 @@ class LightCraftRawSession:
             raise LightCraftError("raw_revision_conflict")
         if kind == "before":
             key = self.before_key(handle, max_side)
+            if quality is not None and key is not None:
+                key = hashlib.sha256(f"{key}:{quality}".encode()).hexdigest()
             if key is None:
                 raise LightCraftError("raw_before_unsupported")
             for pending in (self._before_pending, self._running):
-                if pending and pending.kind == "before" and pending.key == key and self._ticket_current(pending):
+                if quality is None and serial == 0 and pending and pending.kind == "before" and pending.key == key and self._ticket_current(pending):
                     return pending
             self._before_sequence += 1
             ticket = PreviewTicket(handle, self._epoch, expected_revision, self._before_sequence, max_side, kind, key)
-            if self._before_cache is not None and self._before_cache.key == key:
+            if quality is None and serial == 0 and self._before_cache is not None and self._before_cache.key == key:
                 ticket._finish(replace(self._before_cache, revision=expected_revision, sequence=ticket.sequence))
                 return ticket
             if self._before_pending:
@@ -941,6 +1007,8 @@ class LightCraftRawSession:
             self._discard_pending()
             ticket = PreviewTicket(handle, self._epoch, expected_revision, self._sequence, max_side)
             self._pending = ticket
+        ticket.quality, ticket.adaptive = quality or "full", quality is not None
+        ticket.serial, ticket.view_generation, ticket.geometry_id = serial, view_generation, geometry_id
         if self._worker is None or self._worker.done():
             self._worker = asyncio.create_task(self._previews(), name="lightcraft-preview-worker")
         return ticket
@@ -949,14 +1017,18 @@ class LightCraftRawSession:
         try:
             photo = self._photo(ticket.handle, active=True)
             if ticket.kind == "before":
-                return ticket.epoch == self._epoch and ticket.key == self.before_key(ticket.handle, ticket.max_side)
+                key = self.before_key(ticket.handle, ticket.max_side)
+                if ticket.adaptive and key is not None:
+                    key = hashlib.sha256(f"{key}:{ticket.quality}".encode()).hexdigest()
+                return not ticket.abandoned and ticket.epoch == self._epoch and ticket.key == key
             return not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence and \
                 ticket.revision == photo.applied_revision == photo.requested_revision
         except LightCraftError:
             return False
 
-    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None):
-        _, future = _thread_job(_validate_png, result, photo_id, max_side, kind, before_fingerprint, geometry)
+    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None):
+        args = (quality,) if quality is not None else ()
+        _, future = _thread_job(_validate_png, result, photo_id, max_side, kind, before_fingerprint, geometry, *args)
         self._validation = future
         cancelled = False
         try:
@@ -979,6 +1051,11 @@ class LightCraftRawSession:
     async def _previews(self):
         try:
             while (self._pending is not None or self._before_pending is not None) and not self._stop.is_set() and not self._resetting:
+                await self._control_idle.wait()
+                controls = tuple(task for task in self._operations if not task.done())
+                if controls:
+                    await asyncio.wait(controls, return_when=asyncio.FIRST_COMPLETED)
+                    continue
                 # After has its own latest-wins slot and priority; Before never supersedes it.
                 if self._pending is not None:
                     ticket, self._pending = self._pending, None
@@ -992,6 +1069,14 @@ class LightCraftRawSession:
                     async with asyncio.timeout(self._timeouts.admission):
                         await self._lock.acquire()
                     try:
+                        if self._control_reservations or any(not task.done() for task in self._operations):
+                            if ticket.kind == "before" and self._before_pending is None:
+                                self._before_pending = ticket
+                            elif ticket.kind == "after" and self._pending is None:
+                                self._pending = ticket
+                            else:
+                                ticket._finish()
+                            continue
                         if not self._ticket_current(ticket):
                             ticket._finish()
                             continue
@@ -1003,30 +1088,59 @@ class LightCraftRawSession:
                             continue
                         photo = self._photo(ticket.handle, active=True)
                         args = {"before": True} if ticket.kind == "before" else {}
-                        result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
-                                                                 timeout=self._timeouts.preview, **args)
-                        data, w, h = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
-                                                     photo.before_fingerprint, self._before_geometry(photo))
-                        del result
-                        deadline = asyncio.get_running_loop().time() + self._timeouts.command
-                        if ticket.kind == "after":
-                            settings = await self._read_settings(photo, deadline)
-                            if settings != photo.settings_json:
-                                self._commit(photo, settings)
-                        if self._ticket_current(ticket):
-                            frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
-                                                 ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key)
-                            if ticket.kind == "before":
-                                self._before_cache = frame
-                            ticket._finish(frame)
-                            lightcraft_log("preview.completed", level="debug", generation=self._generation,
-                                           revision=ticket.revision, sequence=ticket.sequence, payloadBytes=len(data),
-                                           width=w, height=h, kind=ticket.kind)
-                        else:
-                            ticket._finish()
-                        del data
+                        if ticket.adaptive:
+                            args.update(quality=ticket.quality, stage_cache=self._stage_mode,
+                                        stage_cache_budget_bytes=self._stage_budget)
+                        native_started = monotonic()
+                        try:
+                            result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
+                                                                     timeout=self._timeouts.preview, **args)
+                        except MCPToolError:
+                            # A helper can reject metadata after accept() has learned native defaults.
+                            await self._preview_readback(photo, ticket)
+                            raise
+                        await self._preview_readback(photo, ticket)
+                        geometry = self._before_geometry(photo)
                     finally:
                         self._lock.release()
+                    # The worker still owns the result/validation, while native controls can proceed.
+                    native_ms = (monotonic() - native_started) * 1000
+                    validation_started = monotonic()
+                    image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
+                                              photo.before_fingerprint, geometry,
+                                              *([ticket.quality] if ticket.adaptive else []))
+                    del result
+                    data, w, h = image[:3]
+                    metadata = image[3] if ticket.adaptive else None
+                    if metadata and (metadata["stageCache"]["mode"] != self._stage_mode or
+                            self._stage_mode == "on" and metadata["stageCache"]["budgetBytes"] != self._stage_budget):
+                        raise LightCraftError("lightcraft_invalid_preview")
+                    self._preview_trials += 1
+                    digest = None
+                    try:
+                        if backend_logger.get_level() == "debug" and ticket.quality == "full":
+                            digest = hashlib.sha256(data).hexdigest()
+                    except Exception:
+                        pass
+                    lightcraft_log("preview.measured", level="debug", generation=self._generation,
+                        revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality, kind=ticket.kind,
+                        trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend,
+                        pngSha256=digest,
+                        nativeMs=native_ms, validationMs=(monotonic() - validation_started) * 1000,
+                        width=w, height=h, payloadBytes=len(data), stageCache=metadata["stageCache"] if metadata else None)
+                    if self._ticket_current(ticket):
+                        frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
+                                             ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
+                                             quality=ticket.quality, _frame_json=json.dumps(metadata["frame"]) if metadata else None)
+                        if ticket.kind == "before":
+                            self._before_cache = frame
+                        ticket._finish(frame)
+                        lightcraft_log("preview.completed", level="debug", generation=self._generation,
+                            revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality,
+                            kind=ticket.kind, width=w, height=h, payloadBytes=len(data))
+                    else:
+                        ticket._finish()
+                    del data, image
                 except asyncio.CancelledError:
                     if not self._stop.is_set() and not self._resetting:
                         self._lost = True
@@ -1054,6 +1168,17 @@ class LightCraftRawSession:
         finally:
             if self._stop.is_set() or self._resetting:
                 self._discard_pending("raw_closed" if self._stop.is_set() else "raw_session_lost")
+
+    async def _preview_readback(self, photo, ticket):
+        deadline = asyncio.get_running_loop().time() + self._timeouts.command
+        try:
+            settings = await self._read_settings(photo, deadline)
+        except LightCraftError:
+            photo.sync = "desynchronized"
+            raise
+        if settings != photo.settings_json:
+            self._commit(photo, settings)
+            ticket.abandoned, ticket.reason = True, "revision"
 
     async def _join_operations(self):
         tasks = [t for t in self._operations if not t.done()]
