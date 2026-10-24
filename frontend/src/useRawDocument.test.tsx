@@ -175,13 +175,19 @@ it('publishes a distinct owner lookup failure instead of leaving capability inde
     close() {}
   }
   vi.stubGlobal('BroadcastChannel', DiagnosticChannel);
-  vi.mocked(api.rawRegionOwner).mockRejectedValue(new Error('network unavailable'));
+  vi.mocked(api.rawRegionOwner).mockRejectedValue(new api.RawApiError('raw_stale_handle', 409));
   await render('photo-one'); await flush();
   const channel = channels[0];
   await act(async () => channel.onmessage?.({ data: { type: 'attach', clientId: 'developer-ui' } } as MessageEvent)); await flush();
   const states = channel.messages.filter((message): message is { type: string; state?: { supported: boolean | null; errorCode?: string } } =>
     typeof message === 'object' && message !== null && 'type' in message && (message as { type: string }).type === 'state');
-  expect(states.at(-1)?.state).toMatchObject({ supported: null, errorCode: 'raw_region_owner_failed' });
+  expect(states.at(-1)?.state).toMatchObject({ supported: null, errorCode: 'raw_region_owner_failed', ownerErrorCode: 'raw_stale_handle', ownerHttpStatus: 409 });
+  vi.mocked(api.rawRegionOwner).mockResolvedValue({ sourceId: 'b'.repeat(64), supported: true });
+  await act(async () => channel.onmessage?.({ data: { type: 'state.request', clientId: 'developer-ui' } } as MessageEvent)); await flush();
+  const recovered = channel.messages.at(-1) as { state: { supported: boolean; errorCode?: string; ownerErrorCode?: string } };
+  expect(recovered.state.supported).toBe(true);
+  expect(recovered.state.errorCode).toBeUndefined();
+  expect(recovered.state.ownerErrorCode).toBeUndefined();
   expect(api.rawRegion).not.toHaveBeenCalled();
 });
 

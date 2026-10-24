@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { rawRegion, rawRegionOwner, type RawDocument } from './rawApi';
 import { regionRequest, regionResponse } from './test/rawRegion';
+import { frontendLogger } from './frontendLogging';
 
 const r = regionRequest();
 const doc: RawDocument = { workspaceId: '1'.repeat(32), handle: '2'.repeat(32), ...r.identity, revision: r.documentRevision };
@@ -14,7 +15,7 @@ function png(width = r.window.w, height = r.window.h) {
 function response(meta: unknown = regionResponse(), bytes = png()) {
   return new Response(bytes, { headers: { 'Content-Type': 'image/png', 'X-Raw-Region': JSON.stringify(meta) } });
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it('sends the fixed C0 descriptor and returns metadata separately from the bounded PNG blob', async () => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => response()); vi.stubGlobal('fetch', fetch);
   const result = await rawRegion(doc, r, geometry, true, signal());
@@ -48,4 +49,30 @@ it('rejects unsupported and malformed requests before fetch; reads legacy owner 
   await expect(rawRegion(doc, { ...r, context: -1 }, geometry, true, signal())).rejects.toThrow('raw_invalid_region_request');
   expect(fetch).not.toHaveBeenCalled();
   expect(await rawRegionOwner(doc, signal())).toEqual({ sourceId: r.identity.sourceId, supported: false });
+});
+
+it.each([32, 64])('enforces C0 sourceId width for a successful owner GET (%i native/contract hex characters)', async characters => {
+  const logs = vi.spyOn(frontendLogger, 'add');
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ sourceId: 'a'.repeat(characters), regionContract: 1 }),
+    { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetch);
+  if (characters === 32) {
+    await expect(rawRegionOwner(doc, signal())).rejects.toMatchObject({ code: 'raw_invalid_response', status: 200 });
+    expect(logs).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'region.owner.failed', context: expect.objectContaining({ errorCode: 'raw_invalid_response', status: 200, generation: doc.generation }) }));
+  } else {
+    expect(await rawRegionOwner(doc, signal())).toEqual({ sourceId: 'a'.repeat(64), supported: true });
+    expect(logs).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'region.owner.completed', context: expect.objectContaining({ supported: true, status: 200 }) }));
+  }
+  expect(fetch.mock.calls[0][1]).toMatchObject({ headers: { 'X-Raw-Workspace': doc.workspaceId,
+    'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
+  expect(JSON.stringify(logs.mock.calls)).not.toContain(doc.documentToken);
+  expect(JSON.stringify(logs.mock.calls)).not.toContain(doc.workspaceId);
+  expect(JSON.stringify(logs.mock.calls)).not.toContain('a'.repeat(characters));
+});
+
+it('logs the real owner rejection code and HTTP status without recording credentials', async () => {
+  const logs = vi.spyOn(frontendLogger, 'add');
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'raw_stale_handle' }), { status: 409 })));
+  await expect(rawRegionOwner(doc, signal())).rejects.toMatchObject({ code: 'raw_stale_handle', status: 409 });
+  expect(logs).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'region.owner.failed', context: expect.objectContaining({ errorCode: 'raw_stale_handle', status: 409 }) }));
 });

@@ -29,7 +29,7 @@ export function RawRegionDiagnostics({ active }: { active: boolean }) {
     bus.onmessage = event => {
       const message = event.data as RawRegionDiagnosticMessage;
       if (!message || message.clientId !== clientId.current) return;
-      if (message.type === 'state') { ownerId.current = message.ownerId; setState(message.state); if (message.state.errorCode) setError(message.state.errorCode); }
+      if (message.type === 'state') { ownerId.current = message.ownerId; setState(message.state); setError(message.state.errorCode); }
       if (message.type === 'result') {
         setPending(false);
         setError(message.ok ? undefined : message.errorCode ?? 'raw_region_unavailable');
@@ -96,7 +96,8 @@ export function RawRegionDiagnostics({ active }: { active: boolean }) {
     {state.supported === false && <p>{t('rawRegionDiagnostics.errors.capability')}</p>}
     {state.connected && state.supported && state.wholeQuality !== 'full' && <p>{t('rawRegionDiagnostics.errors.wholeWaiting')}</p>}
     {compare && state.connected && state.supported && !state.beforeReady && <p>{t('rawRegionDiagnostics.errors.beforeWaiting')}</p>}
-    {errorKey && <p role="alert">{t(`rawRegionDiagnostics.errors.${errorKey}`)}{reportedError && errorKey === 'requestFailed' && ` (${reportedError})`}</p>}
+    {errorKey && <p role="alert">{t(`rawRegionDiagnostics.errors.${errorKey}`)}{reportedError && errorKey === 'requestFailed' && ` (${reportedError})`}
+      {ownerFailed && state.ownerErrorCode && ` (${state.ownerErrorCode}${state.ownerHttpStatus ? ` / HTTP ${state.ownerHttpStatus}` : ''})`}</p>}
     <details><summary>{t('rawRegionDiagnostics.details')}</summary>
       <dl className="developer-diagnostics raw-region-details">
         <div><dt>F</dt><dd>{state.details ? `${state.details.f.fullWidth} × ${state.details.f.fullHeight}` : '—'}</dd></div>

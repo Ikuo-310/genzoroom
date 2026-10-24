@@ -8,6 +8,7 @@ export type RawRegionDiagnosticState = {
   regionSize: { width: number; height: number } | null; displayed: boolean; beforeReady: boolean;
   comparing: boolean; position: RawRegionPosition | null; requesting: boolean; cleared: boolean;
   errorCode?: string; frame?: { nativeWidth: number; nativeHeight: number };
+  ownerErrorCode?: string; ownerHttpStatus?: number;
   details?: { f: { fullWidth: number; fullHeight: number }; w: RegionWindow; validRegion: RegionWindow; revision: number; viewGeneration: number;
     planGeneration: number; requestId: string } | null;
 };

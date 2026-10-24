@@ -129,6 +129,9 @@ class RawPreviewApi:
             raise LightCraftError("raw_invalid_request") from None
 
     async def endpoint(self, request):
+        region_owner_get = request.method == 'GET' and request.url.path.endswith('/region')
+        if region_owner_get:
+            lightcraft_log('region.owner.started', level='debug')
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
             if request.url.path.endswith("/preview/cancel"):
@@ -197,8 +200,12 @@ class RawPreviewApi:
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
                                       "raw_recipe_revision_conflict", "raw_recipe_save_id_reused"} else 502)
+            if region_owner_get:
+                lightcraft_log('region.owner.failed', level='warn', errorCode=code, status=status)
             return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
         except Exception:
+            if region_owner_get:
+                lightcraft_log('region.owner.failed', level='error', errorCode='raw_operation_failed', status=502)
             lightcraft_log("raw.http.failed", level="error", errorCode="raw_operation_failed")
             return JSONResponse({"code": "raw_operation_failed"}, status_code=502,
                                 headers={"Cache-Control": "no-store"})
@@ -373,8 +380,12 @@ class RawPreviewApi:
                 doc = self._document(request.path_params["handle"])
                 if request.headers.get("x-raw-generation") != str(doc["generation"]) or request.headers.get("x-raw-token") != doc["documentToken"]:
                     raise LightCraftError("raw_stale_handle")
-                return JSONResponse({"sourceId": self.raw.region_identity(self._raw_handle)["sourceId"],
-                    "regionContract": 1 if await self.manager._raw_region_supported(doc["generation"]) else None})
+                lightcraft_log('region.owner.validated', level='debug', generation=doc['generation'])
+                source_id = self.raw.region_identity(self._raw_handle)['sourceId']
+                supported = await self.manager._raw_region_supported(doc['generation'])
+                lightcraft_log('region.owner.completed', level='debug', generation=doc['generation'],
+                               supported=supported, sourceIdCharacters=len(source_id), status=200)
+                return JSONResponse({'sourceId': source_id, 'regionContract': 1 if supported else None})
             if method == "DELETE":
                 if "handle" in request.path_params:
                     self._document(request.path_params["handle"])

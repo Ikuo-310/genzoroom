@@ -66,11 +66,15 @@ it('keeps null capability in Checking and enables positions only after a support
 });
 
 it('reports a failed Region owner lookup distinctly from unsupported capability', async () => {
-  state({ ...baseState, supported: null, errorCode: 'raw_region_owner_failed' }); await render();
+  state({ ...baseState, supported: null, errorCode: 'raw_region_owner_failed', ownerErrorCode: 'raw_invalid_response', ownerHttpStatus: 200 }); await render();
   expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.status.ownerFailed'));
   expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.capability.ownerFailed'));
   expect(host.querySelector('[role=alert]')?.textContent).toContain(i18n.t('rawRegionDiagnostics.errors.ownerFailed'));
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('raw_invalid_response / HTTP 200');
   expect([...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('rawRegionDiagnostics.positions.center'))!.disabled).toBe(true);
+  state(baseState); await render();
+  expect(host.querySelector('[role=alert]')).toBeNull();
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('rawRegionDiagnostics.positions.center'))!.disabled).toBe(false);
 });
 
 it('shows adopted overlay quality, geometry agreement, bitmap size and clear state in plain language', async () => {

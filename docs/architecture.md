@@ -1477,7 +1477,7 @@ C1 implements the managed `render_region_preview` tool and an unconnected Backen
 
 ### RAW Region delivery ownership (C2-A)
 
-The [C2-A contract](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#13-c2-a完了region配送所有状態管理2026-10-25) connects the existing Native worker to explicit document-scoped delivery. `GET /documents/{handle}/region` exposes source hash and capability after public-owner checks. `POST` accepts `{workspaceId, operation, target}` using the unchanged C0 DTO; workspace/handle/generation/public token/source/revision/kind must match before the owner passes `document_token=` to the adapter. Preflight returns JSON; rendering returns PNG plus `X-Raw-Region` metadata. Region keeps its independent 9/13 MiB PNG/MCP budgets.
+The [C2-A contract](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#13-c2-a完了region配送所有状態管理2026-10-25) connects the existing Native worker to explicit document-scoped delivery. `GET /documents/{handle}/region` exposes source identity and capability after public-owner checks. `region_identity()` derives C0's opaque 64-hex sourceId as SHA-256 over the domain `genzoroom-region-source-v1`, one NUL byte and the lowercase ASCII Native content hash. Native Hash128 itself is only 32 hex digits; it is not exposed as a C0 sourceId. `POST` accepts `{workspaceId, operation, target}` using the unchanged C0 DTO; workspace/handle/generation/public token/source/revision/kind must match before the owner passes `document_token=` to the adapter. Preflight returns JSON; rendering returns PNG plus `X-Raw-Region` metadata. Region keeps its independent 9/13 MiB PNG/MCP budgets.
 
 | Shared state | Owner, updates and invariants |
 | --- | --- |

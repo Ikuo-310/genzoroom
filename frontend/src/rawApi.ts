@@ -110,11 +110,34 @@ export async function rawCapability(signal?: AbortSignal) {
 }
 
 export async function rawRegionOwner(doc: RawDocument, signal: AbortSignal) {
-  const value = await json(`/documents/${doc.handle}/region`, { signal, headers: {
-    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
-  if (!fingerprint(value.sourceId) || value.regionContract !== null && value.regionContract !== 1)
-    throw new RawApiError('raw_invalid_response');
-  return { sourceId: value.sourceId as string, supported: value.regionContract === 1 };
+  const started = performance.now();
+  let status: number | undefined;
+  const trace = (event: string, errorCode?: string, supported?: boolean) => {
+    try { frontendLogger.add({ level: errorCode ? 'warn' : 'debug', component: 'raw', event, context: {
+      generation: doc.generation, revision: doc.revision, status: status ?? null,
+      elapsedMs: performance.now() - started, ...(errorCode ? { errorCode } : {}),
+      ...(supported === undefined ? {} : { supported }) } }); } catch { /* Optional diagnostics. */ }
+  };
+  trace('region.owner.started');
+  try {
+    const response = await request(`/documents/${doc.handle}/region`, { signal, headers: {
+      'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
+    status = response.status;
+    if (response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response', status);
+    let value: unknown;
+    try { value = JSON.parse(new TextDecoder().decode(await readBounded(response, 4096))); }
+    catch { throw new RawApiError('raw_invalid_response', status); }
+    if (!value || typeof value !== 'object' || !('sourceId' in value) || !('regionContract' in value)
+      || !fingerprint(value.sourceId) || value.regionContract !== null && value.regionContract !== 1)
+      throw new RawApiError('raw_invalid_response', status);
+    const supported = value.regionContract === 1;
+    trace('region.owner.completed', undefined, supported);
+    return { sourceId: value.sourceId, supported };
+  } catch (error) {
+    if (error instanceof RawApiError) status = error.status ?? status;
+    trace('region.owner.failed', error instanceof RawApiError ? error.code : signal.aborted ? 'raw_region_cancelled' : 'raw_connection_failed');
+    throw error;
+  }
 }
 export type RawRegionResult = { operation: 'plan'; metadata: RegionFrameResponse }
   | { operation: 'render'; metadata: RegionResponse; blob: Blob };

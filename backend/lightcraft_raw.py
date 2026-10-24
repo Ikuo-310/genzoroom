@@ -1062,7 +1062,9 @@ class LightCraftRawSession:
 
     def region_identity(self, handle, kind='after', *, document_token=None):
         photo = self._photo(handle, active=True)
-        identity = {'assetId':handle.source_key, 'sourceId':photo.content_hash, 'generation':handle.generation,
+        # Native Hash128 is 32 hex digits; C0 owns an opaque 64-hex source identity.
+        source_id = hashlib.sha256(b'genzoroom-region-source-v1\0' + photo.content_hash.lower().encode('ascii')).hexdigest()
+        identity = {'assetId':handle.source_key, 'sourceId':source_id, 'generation':handle.generation,
                     'documentToken':handle.document_token if document_token is None else document_token, 'kind':kind}
         if kind == 'before':
             identity['beforeKey'] = self.before_key(handle)

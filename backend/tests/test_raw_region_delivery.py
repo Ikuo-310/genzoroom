@@ -1,5 +1,7 @@
 import asyncio
 import json
+import hashlib
+import re
 from dataclasses import replace
 
 import pytest
@@ -61,6 +63,48 @@ def test_public_region_plan_render_and_common_worker(local, tmp_path, monkeypatc
                 assert child.max_inflight == 1 and not api._image_leases
         finally:
             if child.gate: child.gate.set()
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('supported', [True, False])
+def test_native_hash128_owner_preserves_c0_identity_and_public_owner_checks(local, tmp_path, monkeypatch, supported):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        events = []
+        monkeypatch.setattr(module, 'lightcraft_log', lambda event, **context: events.append((event, context)))
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                doc, geometry = await connect(api, http, children[0])
+                # Actual C1 photo.inspect returns Hash128, unlike the fake Native's SHA-256.
+                native_hash = '1234567890abcdef' * 2
+                api.raw._photo(api._raw_handle).content_hash = native_hash
+                api.manager._session.region_preview = supported
+                url = f'/api/raw/documents/{doc["handle"]}/region'
+                headers = {'X-Raw-Workspace': doc['workspaceId'], 'X-Raw-Generation': str(doc['generation']),
+                           'X-Raw-Token': doc['documentToken']}
+                response = await http.get(url, headers=headers)
+                assert response.status_code == 200
+                source = response.json()['sourceId']
+                assert re.fullmatch('[a-f0-9]{64}', source)
+                assert source == hashlib.sha256(b'genzoroom-region-source-v1\0' + native_hash.encode('ascii')).hexdigest()
+                assert response.json()['regionContract'] == (1 if supported else None)
+                assert any(event == 'region.owner.completed' and context.get('sourceIdCharacters') == 64
+                           and context.get('supported') is supported for event, context in events)
+                for key, value in [('X-Raw-Workspace', 'f'*32), ('X-Raw-Generation', str(doc['generation']+1)),
+                                   ('X-Raw-Token', 'f'*32)]:
+                    assert (await http.get(url, headers=headers | {key: value})).status_code == 409
+                if supported:
+                    result = await http.post(url, json=body(api, geometry, 'plan'))
+                    assert result.status_code == 200, result.text
+                    assert result.json()['identity']['sourceId'] == source
+                whole = await http.post(url.removesuffix('/region') + '/preview', json=whole_target(doc, serial=2))
+                assert whole.status_code == 200
+                assert any(event == 'region.owner.failed' and context.get('errorCode') == 'raw_stale_handle'
+                           and context.get('status') == 409 for event, context in events)
+                assert doc['documentToken'] not in json.dumps(events)
+        finally:
             await api.close()
     asyncio.run(run())
 

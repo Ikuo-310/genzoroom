@@ -106,6 +106,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     // Diagnostic pair selection must not mutate the darkroom's own Before/After preference.
     let diagnosticComparing: boolean | undefined;
     let diagnosticRequesting = false, diagnosticCleared = true, diagnosticErrorCode: string | undefined;
+    let diagnosticOwnerErrorCode: string | undefined, diagnosticOwnerHttpStatus: number | undefined;
     let diagnosticPlanStart = 0;
     const diagnosticChannel = createRawRegionDiagnosticsChannel();
     const diagnosticSnapshot = (): RawRegionDiagnosticState => {
@@ -121,6 +122,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         displayed: !!displayed && !!metadata && geometryMatches === true,
         beforeReady, comparing: diagnosticComparing ?? comparing.current, position: diagnosticPosition,
         requesting: diagnosticRequesting, cleared: diagnosticCleared, errorCode: diagnosticErrorCode,
+        ownerErrorCode: diagnosticOwnerErrorCode, ownerHttpStatus: diagnosticOwnerHttpStatus,
         frame: whole ? { nativeWidth: whole.frame.nativeWidth, nativeHeight: whole.frame.nativeHeight } : undefined,
         details: metadata ? { f: { fullWidth: metadata.fullWidth, fullHeight: metadata.fullHeight }, w: metadata.window, validRegion: metadata.validRegion,
           revision: metadata.documentRevision, viewGeneration: metadata.viewGeneration,
@@ -168,10 +170,18 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       regionConnection = rawRegionOwner(doc, controller.signal).then(value => {
         if (!current() || editor?.confirmed.documentToken !== doc.documentToken || editor.confirmed.generation !== doc.generation) return false;
         regionOwner = value;
-        if (diagnosticClientId) diagnosticErrorCode = undefined;
+        if (diagnosticClientId) {
+          if (diagnosticErrorCode === 'raw_region_owner_failed') diagnosticErrorCode = undefined;
+          diagnosticOwnerErrorCode = undefined; diagnosticOwnerHttpStatus = undefined;
+        }
         regionChanged(n => n + 1); publishDiagnosticState(); return value.supported;
-      }).catch(() => {
-        if (diagnosticClientId) { diagnosticErrorCode = 'raw_region_owner_failed'; publishDiagnosticState(); }
+      }).catch(error => {
+        if (diagnosticClientId) {
+          diagnosticErrorCode = 'raw_region_owner_failed';
+          diagnosticOwnerErrorCode = error instanceof RawApiError ? error.code : 'raw_connection_failed';
+          diagnosticOwnerHttpStatus = error instanceof RawApiError ? error.status : undefined;
+          publishDiagnosticState();
+        }
         return false;
       }).finally(() => { regionConnection = undefined; });
       return regionConnection;

@@ -262,7 +262,7 @@ C1初期検証budgetはNative/virtual各軸65536、要求/内部work各軸2048�
 
 `LightCraftRawSession.request_region` は未接続の内部境界。既存worker/native lock/validation threadへ合流し、running 1、未送信latest pending相当で置換する。Region Beforeも同じpending枠を使う。既存legacy Whole Beforeの独立pending挙動は変更しない。100 view置換、cancel後readback/validation回収、timeoutでprocess終了、旧generation拒否、reset/photo change/shutdown joinを試験した。Region専用worker/Session、HTTP Region routeは追加しない。
 
-sourceIdは既存source content hash、generation/revision/beforeKeyは既存ownerから構築・照合する。内部RawHandle tokenとHTTP公開document tokenは異なるため、将来のHTTP ownerが検証したtokenだけを明示的にadapterへ渡せる境界を設けた。省略時は内部tokenで照合する。**C2は公開documentのowner/leaseを先に検証し、source identityを必要なDTOへ安全に公開してから接続する責任を持つ**。現行routeの `mode:region` は拒否のまま。structured diagnosticsはoperation/quality/kind/revision/generation/geometry/F/W/valid/requestId、native/validation時間、PNG bytes、source容量、execution/cache/rejectを扱い、path・画像・Recipe本文を記録しない。
+sourceIdは既存source content hashから構築する不透明64桁ID（§14.8の修正を参照）、generation/revision/beforeKeyは既存ownerから構築・照合する。内部RawHandle tokenとHTTP公開document tokenは異なるため、将来のHTTP ownerが検証したtokenだけを明示的にadapterへ渡せる境界を設けた。省略時は内部tokenで照合する。**C2は公開documentのowner/leaseを先に検証し、source identityを必要なDTOへ安全に公開してから接続する責任を持つ**。現行routeの `mode:region` は拒否のまま。structured diagnosticsはoperation/quality/kind/revision/generation/geometry/F/W/valid/requestId、native/validation時間、PNG bytes、source容量、execution/cache/rejectを扱い、path・画像・Recipe本文を記録しない。
 
 ### 12.5 配布物・検証・限定監査
 
@@ -393,7 +393,7 @@ $env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\rel
 
 1. Windows版GenzoRoomを起動する。
 2. Immich GalleryからRAWを暗室で開き、Whole Fullの準備が完了するまで待つ。
-3. 設定からDeveloper Diagnosticsを開き、「RAW Region Preview」tabを選ぶ。画面に「準備完了」、Quality「Full」、geometry「一致」が表示されることを確認する。RAW未接続、Region非対応LightCraft、Whole Full待ちの場合はUIの案内に従い、ボタン要求は送信されない。
+3. 設定からDeveloper Diagnosticsを開き、「RAW Region Preview」tabを選ぶ。capability確認後に「Region対応」「準備完了」、Quality「Full」となり、位置buttonが有効になることを確認する。最初のRegion要求前はgeometry「未確認」で正常。RAW未接続、Region非対応LightCraft、Whole Full待ちの場合はUIの案内に従い、ボタン要求は送信されない。
 4. 「中央」を押す。Regionが画像のおよそ中央半分へ表示されること、Whole geometryとRegion geometryが一致し、Region表示サイズとQualityを確認する。context=16 / prefetch=0はこの診断UI内だけで使うC2-B試験値で、製品値ではない。
 5. 「左上」「右上」「左下」「右下」を順に押し、続けて「左端」「右端」「上端」「下端」を押す。各rectは現在のNative frameから自動計算され、ユーザーの座標入力は不要。中央・四隅・edge、crop/portrait/landscape、DPR1/1.25/1.5/2、非整数zoomでRegion位置とvalid域境界・Whole保持を確認する。Pan/Zoomだけでは新Regionは要求されない。
 6. Before画像を暗室の既存Before表示操作で準備する。Developer Diagnosticsの「Before/After Region比較」をONにして、Before準備状態がFullになるのを待ってから位置ボタンを押す。Before未準備中は要求を送らない。比較中は両側Regionが揃うまでWhole、揃った時だけRegion pairとなり、切替位置が一致することを確認する。
@@ -406,3 +406,15 @@ $env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\rel
 `regionDelivery.submit/isCurrent/subscribe`、`regionDisplay`、表示ownerの有限URL/pair所有、`regionLayerPlacement`、`rebindRegion`、明示preflight helperを渡す。C2-C開始は別の明示依頼とWindows overlay受入を条件とする。実画面の1px整合、実RAW/GPU、Dehaze境界、長時間RSS/VRAMは未受入。
 
 Pan/Zoom自動Region要求、rho threshold、context/prefetch製品値、Pan集約間隔、Region product budget、latency/RSS/VRAM受入値、Dehaze差の製品許容、C3調整、RAW Export、Scopeは未実装・未決定のまま。C2-Bではこれ以上進めない。
+
+### 14.8 Windows owner取得失敗の原因と修正
+
+基準 `48e10fe7931fe29081da1f31828b6c5885728ece` のWindowsログはgeneration 2 / revision 4のWhole Full 1024、1472×1107、DX12 gpu_successとFrontend decode成功を示すが、owner GETの観測がなく失敗境界までは判定できなかった。実C1 EXE（SHA-256 `2c7b7f01e366c56151dedffa0fc2b2af3496a035e3bba5a384a3fdcc1ac26812`、receiptのbefore/preview/regionContract各1）をprobeし、実tools/listのRegion toolが1件あり、Backendの厳密`supports_region()`がtrueとなることを確認した。schemaは原因ではない。
+
+実photo.inspectのcontent_hashはNative Hash128の32桁hexだった。Backendの`region_identity()`がこれを未変換でsourceIdへ返していたため、GETがHTTP 200でもFrontendのC0 64桁検証で`raw_invalid_response`になる。fake Nativeは64桁SHA-256を返していたので従来試験では露出しなかった。32桁を使うHTTP回帰試験を修正前に失敗させ、原因を再現した。
+
+sourceIdを`SHA256(ASCII("genzoroom-region-source-v1") + NUL + ASCII(lowercase_native_content_hash))`で導出する。domain区切りはNUL byte 1個である。これはNativeの内容識別子からの不透明ID導出であり、RAWファイル自体のSHA-256やNative hashの衝突強度向上を意味しない。GETとRegion request所有検査は同じ`region_identity()`を使う。C0 schema、Frontend検証、public owner/token検証は緩めず、永続形式も変更しない。
+
+Frontendには`region.owner.started/completed/failed`（generation/revision、HTTP status、安全なerrorCode、時間、supported）を追加した。BackendにはGET開始・owner検証・capability結果・失敗コードを追加し、sourceIdの桁数だけを補助metadataに記録する。token、資格情報、path、画像、raw response本文は記録しない。診断UIは実errorCode/HTTP statusを併記し、再接続成功stateで以前のエラーを解除する。
+
+関連Backend 100件、Frontend 11ファイル310件成功。Hash128 owner、stale generation/public token、Region preflight、Whole-only fallback、C0/C1契約、C2-A配送、C2-B診断・URL/pair/staleを含む。実probeはCPUの小さな合成PNGとtools/listを対象とし、実RAW/GPUの画面受入とは区別する。C2-Cには進めない。
