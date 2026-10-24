@@ -663,14 +663,15 @@
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
     "note": "実機表示確認専用。ボタン操作でのみ要求し、context 16 / prefetch 0を試験値として使用します（製品値ではありません）。通常暗室UIやPan/Zoomからは要求しません。",
-    "statusLabel": "Region", "position": "位置", "quality": "Quality", "beforeCompare": "Before比較",
+    "statusLabel": "Region", "capabilityLabel": "Region capability", "position": "位置", "quality": "Quality", "beforeCompare": "Before比較",
     "geometry": "Whole / Region geometry", "regionSize": "Region表示サイズ", "clearedLabel": "Region解除済み",
     "notChecked": "未確認", "match": "一致", "mismatch": "不一致", "none": "—", "yes": "はい", "no": "いいえ",
     "on": "ON", "off": "OFF", "compare": "Before/After Region比較", "clear": "Region解除", "outline": "有効境界を細枠表示",
     "details": "詳細", "positions": { "center": "中央", "topLeft": "左上", "topRight": "右上", "bottomLeft": "左下", "bottomRight": "右下", "left": "左端", "right": "右端", "top": "上端", "bottom": "下端" },
     "qualities": { "draft": "Draft", "full": "Full" },
-    "status": { "notConnected": "未接続", "unsupported": "非対応", "wholeWaiting": "準備待ち", "ready": "準備完了", "requesting": "要求中", "displaying": "表示中", "error": "エラー" },
-    "errors": { "notConnected": "RAW暗室が開かれていません。RAWを暗室で開いてから再試行してください。", "capability": "Region対応LightCraftが使用されていません。", "wholeWaiting": "Whole Fullの準備待ちです。", "beforeWaiting": "Before画像の準備待ちです。比較要求は送信していません。", "geometryMismatch": "geometryが一致しないため表示できません。", "cancelled": "Region要求は取り消されました。", "requestFailed": "Region要求に失敗しました。", "channelUnavailable": "診断channelを利用できません。" }
+    "status": { "notConnected": "未接続", "checking": "Region capability確認中", "unsupported": "非対応", "wholeWaiting": "準備待ち", "ready": "準備完了", "requesting": "要求中", "displaying": "表示中", "ownerFailed": "Region owner取得失敗", "error": "エラー" },
+    "capability": { "notConnected": "RAW未接続", "checking": "確認中", "supported": "Region対応", "unsupported": "Region非対応", "ownerFailed": "Region owner取得失敗" },
+    "errors": { "notConnected": "RAW暗室が開かれていません。RAWを暗室で開いてから再試行してください。", "capability": "Region対応LightCraftが使用されていません。", "ownerFailed": "RAW暗室のRegion ownerからcapabilityを取得できませんでした。RAWを開き直すか、診断tabを選び直して再確認してください。", "wholeWaiting": "Whole Fullの準備待ちです。", "beforeWaiting": "Before画像の準備待ちです。比較要求は送信していません。", "geometryMismatch": "geometryが一致しないため表示できません。", "cancelled": "Region要求は取り消されました。", "requestFailed": "Region要求に失敗しました。", "channelUnavailable": "診断channelを利用できません。" }
   },
   "developer": {
     "title": "Developer Diagnostics",

@@ -52,6 +52,27 @@ it('shows disconnected, unsupported and Whole waiting states without sending a R
   expect(posted.filter(message => message.type === 'action' && message.action === 'request')).toHaveLength(0);
 });
 
+it('keeps null capability in Checking and enables positions only after a supported owner response', async () => {
+  state({ ...baseState, supported: null }); await render();
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.status.checking'));
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.capability.checking'));
+  expect(host.textContent).not.toContain(i18n.t('rawRegionDiagnostics.status.ready'));
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('rawRegionDiagnostics.positions.center'))!.disabled).toBe(true);
+
+  state({ ...baseState, supported: true }); await render();
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.capability.supported'));
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.status.ready'));
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('rawRegionDiagnostics.positions.center'))!.disabled).toBe(false);
+});
+
+it('reports a failed Region owner lookup distinctly from unsupported capability', async () => {
+  state({ ...baseState, supported: null, errorCode: 'raw_region_owner_failed' }); await render();
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.status.ownerFailed'));
+  expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.capability.ownerFailed'));
+  expect(host.querySelector('[role=alert]')?.textContent).toContain(i18n.t('rawRegionDiagnostics.errors.ownerFailed'));
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === i18n.t('rawRegionDiagnostics.positions.center'))!.disabled).toBe(true);
+});
+
 it('shows adopted overlay quality, geometry agreement, bitmap size and clear state in plain language', async () => {
   const displayed: RawRegionDiagnosticState = { ...baseState, wholeQuality: 'draft', regionGeometry: 'geometry',
     geometryMatches: true, regionSize: { width: 1024, height: 768 }, displayed: true, cleared: false,

@@ -40,6 +40,7 @@ export function rawRegionDiagnosticError(code: string) {
     raw_region_geometry_mismatch: 'geometryMismatch', raw_region_cancelled: 'cancelled', raw_region_timeout: 'requestFailed',
     raw_region_rejected: 'requestFailed', raw_connection_failed: 'requestFailed', raw_region_decode_dimensions: 'requestFailed',
     raw_region_decode_failed: 'requestFailed', raw_region_pair_mismatch: 'geometryMismatch',
+    raw_region_owner_failed: 'ownerFailed',
   };
   return known[code] ?? 'requestFailed';
 }

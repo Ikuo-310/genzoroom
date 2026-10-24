@@ -673,14 +673,15 @@
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
     "note": "For real-device visual acceptance only. Requests run only from these buttons and use context 16 / prefetch 0 as diagnostic values, not product values. The normal darkroom and Pan/Zoom never request Region.",
-    "statusLabel": "Region", "position": "Position", "quality": "Quality", "beforeCompare": "Before comparison",
+    "statusLabel": "Region", "capabilityLabel": "Region capability", "position": "Position", "quality": "Quality", "beforeCompare": "Before comparison",
     "geometry": "Whole / Region geometry", "regionSize": "Region display size", "clearedLabel": "Region cleared",
     "notChecked": "Not checked", "match": "Match", "mismatch": "Mismatch", "none": "—", "yes": "Yes", "no": "No",
     "on": "ON", "off": "OFF", "compare": "Before/After Region comparison", "clear": "Clear Region", "outline": "Show thin valid-boundary outline",
     "details": "Details", "positions": { "center": "Center", "topLeft": "Top left", "topRight": "Top right", "bottomLeft": "Bottom left", "bottomRight": "Bottom right", "left": "Left edge", "right": "Right edge", "top": "Top edge", "bottom": "Bottom edge" },
     "qualities": { "draft": "Draft", "full": "Full" },
-    "status": { "notConnected": "Not connected", "unsupported": "Unsupported", "wholeWaiting": "Waiting for Whole", "ready": "Ready", "requesting": "Requesting", "displaying": "Displaying", "error": "Error" },
-    "errors": { "notConnected": "RAW darkroom is not open. Open a RAW photo in the darkroom and retry.", "capability": "A Region-capable LightCraft is not active.", "wholeWaiting": "Waiting for Whole Full.", "beforeWaiting": "Waiting for the Before image. No comparison request was sent.", "geometryMismatch": "Cannot display because geometry does not match.", "cancelled": "The Region request was cancelled.", "requestFailed": "The Region request failed.", "channelUnavailable": "The diagnostics channel is unavailable." }
+    "status": { "notConnected": "Not connected", "checking": "Checking Region capability", "unsupported": "Unsupported", "wholeWaiting": "Waiting for Whole", "ready": "Ready", "requesting": "Requesting", "displaying": "Displaying", "ownerFailed": "Region owner failed", "error": "Error" },
+    "capability": { "notConnected": "RAW not connected", "checking": "Checking", "supported": "Region supported", "unsupported": "Region unsupported", "ownerFailed": "Region owner failed" },
+    "errors": { "notConnected": "RAW darkroom is not open. Open a RAW photo in the darkroom and retry.", "capability": "A Region-capable LightCraft is not active.", "ownerFailed": "Could not get Region capability from the RAW owner. Reopen the RAW photo or reselect this diagnostics tab to retry.", "wholeWaiting": "Waiting for Whole Full.", "beforeWaiting": "Waiting for the Before image. No comparison request was sent.", "geometryMismatch": "Cannot display because geometry does not match.", "cancelled": "The Region request was cancelled.", "requestFailed": "The Region request failed.", "channelUnavailable": "The diagnostics channel is unavailable." }
   },
   "developer": {
     "title": "Developer Diagnostics",

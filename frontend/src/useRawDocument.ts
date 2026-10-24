@@ -167,8 +167,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const doc = editor.confirmed;
       regionConnection = rawRegionOwner(doc, controller.signal).then(value => {
         if (!current() || editor?.confirmed.documentToken !== doc.documentToken || editor.confirmed.generation !== doc.generation) return false;
-        regionOwner = value; regionChanged(n => n + 1); return value.supported;
-      }).catch(() => false).finally(() => { regionConnection = undefined; });
+        regionOwner = value;
+        if (diagnosticClientId) diagnosticErrorCode = undefined;
+        regionChanged(n => n + 1); publishDiagnosticState(); return value.supported;
+      }).catch(() => {
+        if (diagnosticClientId) { diagnosticErrorCode = 'raw_region_owner_failed'; publishDiagnosticState(); }
+        return false;
+      }).finally(() => { regionConnection = undefined; });
       return regionConnection;
     };
     let manualBusy = false;
@@ -197,6 +202,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!message || typeof message !== 'object') return;
       if (message.type === 'attach' && typeof message.clientId === 'string') {
         diagnosticClientId = message.clientId;
+        diagnosticErrorCode = undefined;
         void connectRegionRef.current().finally(publishDiagnosticState);
         publishDiagnosticState();
         return;
@@ -557,6 +563,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const settings = await readRawSettings(doc);
         if (!current()) return;
         install(settings);
+        if (diagnosticClientId) void connectRegionRef.current().finally(publishDiagnosticState);
         const heartbeat = async () => {
           const attempt = editor!.serial, owner = editor;
           try { if (!restarting && !regenerationError && !editor!.unsettled && !editor!.error) await readRawDocument(editor!.confirmed, controller.signal); }

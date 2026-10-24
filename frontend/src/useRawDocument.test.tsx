@@ -142,6 +142,49 @@ it('connects Region only while Developer Diagnostics is explicitly attached and 
   expect(opened[1].closed).toBe(true);
 });
 
+it('publishes capability checking immediately, then republishes the asynchronous supported result', async () => {
+  const gate = deferred<boolean>();
+  const channels: Array<{ onmessage: ((event: MessageEvent) => void) | null; messages: unknown[] }> = [];
+  class DiagnosticChannel {
+    onmessage: ((event: MessageEvent) => void) | null = null; messages: unknown[] = [];
+    constructor() { channels.push(this); }
+    postMessage(message: unknown) { this.messages.push(message); }
+    close() {}
+  }
+  vi.stubGlobal('BroadcastChannel', DiagnosticChannel);
+  vi.mocked(api.rawCapability).mockReturnValue(gate.promise);
+  await render('photo-one'); await flush();
+  const channel = channels[0];
+  await act(async () => channel.onmessage?.({ data: { type: 'attach', clientId: 'developer-ui' } } as MessageEvent));
+  const checking = channel.messages.filter((message): message is { type: string; state?: { supported: boolean | null } } =>
+    typeof message === 'object' && message !== null && 'type' in message && (message as { type: string }).type === 'state').at(-1);
+  expect(checking?.state?.supported).toBeNull();
+  await act(async () => gate.resolve(true)); await flush();
+  const states = channel.messages.filter((message): message is { type: string; state?: { supported: boolean | null } } =>
+    typeof message === 'object' && message !== null && 'type' in message && (message as { type: string }).type === 'state');
+  expect(states.at(-1)?.state?.supported).toBe(true);
+  expect(api.rawRegion).not.toHaveBeenCalled();
+});
+
+it('publishes a distinct owner lookup failure instead of leaving capability indefinitely unknown', async () => {
+  const channels: Array<{ onmessage: ((event: MessageEvent) => void) | null; messages: unknown[] }> = [];
+  class DiagnosticChannel {
+    onmessage: ((event: MessageEvent) => void) | null = null; messages: unknown[] = [];
+    constructor() { channels.push(this); }
+    postMessage(message: unknown) { this.messages.push(message); }
+    close() {}
+  }
+  vi.stubGlobal('BroadcastChannel', DiagnosticChannel);
+  vi.mocked(api.rawRegionOwner).mockRejectedValue(new Error('network unavailable'));
+  await render('photo-one'); await flush();
+  const channel = channels[0];
+  await act(async () => channel.onmessage?.({ data: { type: 'attach', clientId: 'developer-ui' } } as MessageEvent)); await flush();
+  const states = channel.messages.filter((message): message is { type: string; state?: { supported: boolean | null; errorCode?: string } } =>
+    typeof message === 'object' && message !== null && 'type' in message && (message as { type: string }).type === 'state');
+  expect(states.at(-1)?.state).toMatchObject({ supported: null, errorCode: 'raw_region_owner_failed' });
+  expect(api.rawRegion).not.toHaveBeenCalled();
+});
+
 it('adopts both Region sides and safely rebinds the unchanged B1 Before base after an After revision', async () => {
   const asset = regionRequest().identity.assetId; enableBefore();
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,

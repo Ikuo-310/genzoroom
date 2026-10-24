@@ -59,18 +59,24 @@ export function RawRegionDiagnostics({ active }: { active: boolean }) {
     if (kind === 'outline') setOutline(value => !value);
     send(message);
   };
-  const status = !state.connected ? 'notConnected' : state.supported === false ? 'unsupported' : (error || state.errorCode) ? 'error'
-    : state.requesting || pending ? 'requesting' : state.displayed ? 'displaying'
-      : state.wholeQuality !== 'full' ? 'wholeWaiting' : 'ready';
+  const ownerFailed = error === 'raw_region_owner_failed' || state.errorCode === 'raw_region_owner_failed';
+  const status = !state.connected ? 'notConnected' : ownerFailed ? 'ownerFailed' : state.supported === null ? 'checking'
+    : state.supported === false ? 'unsupported' : (error || state.errorCode) ? 'error'
+      : state.requesting || pending ? 'requesting' : state.displayed ? 'displaying'
+        : state.wholeQuality !== 'full' ? 'wholeWaiting' : 'ready';
   const reportedError = error ?? state.errorCode;
   const errorKey = reportedError ? reportedError === 'channelUnavailable' ? reportedError : rawRegionDiagnosticError(reportedError) : undefined;
+  const capability = !state.connected ? 'notConnected' : ownerFailed ? 'ownerFailed'
+    : state.supported === null ? 'checking' : state.supported ? 'supported' : 'unsupported';
   const canRequest = state.connected && state.supported === true && state.wholeQuality === 'full' && !pending
+    && !ownerFailed
     && (!compare || state.beforeReady);
   return <section className="developer-section raw-region-diagnostics" aria-labelledby="raw-region-diagnostics-title">
     <h2 id="raw-region-diagnostics-title">{t('rawRegionDiagnostics.title')}</h2>
     <p>{t('rawRegionDiagnostics.note')}</p>
     <dl className="developer-diagnostics">
       <div><dt>{t('rawRegionDiagnostics.statusLabel')}</dt><dd role="status">{t(`rawRegionDiagnostics.status.${status}`)}</dd></div>
+      <div><dt>{t('rawRegionDiagnostics.capabilityLabel')}</dt><dd>{t(`rawRegionDiagnostics.capability.${capability}`)}</dd></div>
       <div><dt>{t('rawRegionDiagnostics.position')}</dt><dd>{state.position ? t(`rawRegionDiagnostics.positions.${state.position}`) : t('rawRegionDiagnostics.none')}</dd></div>
       <div><dt>{t('rawRegionDiagnostics.quality')}</dt><dd>{state.wholeQuality ? t(`rawRegionDiagnostics.qualities.${state.wholeQuality}`) : t('rawRegionDiagnostics.none')}</dd></div>
       <div><dt>{t('rawRegionDiagnostics.beforeCompare')}</dt><dd>{compare ? t('rawRegionDiagnostics.on') : t('rawRegionDiagnostics.off')}</dd></div>
