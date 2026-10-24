@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## B1 Windows受入完了・限定UI cleanup・工程C設計（2026-10-24）
+
+ユーザーのWindows実機受入によりB1（実装Commit `79e198ede4750f52fbed9116d6351597f62755c3`）を完了扱いとする。Pixel 7 Pro DNGのFit1472×1107、Draft4/4採用・discard0、同最終revision Full収束、DX12 gpu_success、cache512 MiB適用約205.3 MiBを確認。Native Draft69.7–73.8ms／Full74.9ms、終了→Full519.7ms。等倍では2048×1540、DX12 Full186.9ms、PNG約5.98 MiB。2048のcache budget拒否でも描画継続。最大化／panel／Zoom/Pan／Before/After／写真切替に目立つ違和感なし。詳細と証拠区分は[受入記録](research/lightcraft/RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)。RSS/VRAM peak、長時間、実driver OOM/device loss、全DPR網羅は未確認として残す。
+
+正常RAW ready時の旧「最大1024px」常設説明を削除（日英ready文字列も削除）。loading、Preview失敗、編集失敗、Before状態とJPEG挙動は維持。RAW画面／Viewerの限定回帰2ファイル104件成功、型検査込みproduction buildと`git diff --check`成功。初回sandboxは一時cache ENOENTでsuiteをロードできず、通常環境で再実行した。追加loadingテストの期待値を既存の「Loading photo」に合わせて修正し最終104件成功。既存500 kB超chunk警告あり。Backend／Native製品コードは変更せず、そのテスト・binary buildは実施しない。ブラウザ動的確認は行っていない。
+
+[工程C Region専用設計](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md)を新設。固定upstreamのwindow／source／margin／GPU/CPU／Beforeを再確認し、Whole base＋RAW専用overlay、明示4組intent、bounded plan、同geometry比較と別Region予算を推奨。C0契約固定→C1 Native/Backend→C2 Frontend統合→C3 Windows受入。閾値・Pan集約・margin・予算は検証候補。異geometry Beforeのmapping拡張は初期C対象外。Regionコード、管理patch追加、工程C用binary buildへ進まず停止する。
+
 ## A5実機受入完了とB1 Whole解像度（2026-10-24）
 
 ユーザーのWindows実測でA5を完了。3990×3000 DNG／DX12／1024×770／512 MiBでgpu_success、cache適用139.86 MiB、Draft9/9採用・破棄0、終了→Full343.6 ms、Full／History revision11。GPU・CPU Full ON/OFF各6/6一致。GPU ColdのNative0.8秒に対するFrontend1.9〜2.0秒の差と、RSS/VRAM・長時間・実driver障害は未確認として残す。
@@ -8,7 +16,7 @@ B1はNative frame／bitmap／viewport／DPR／Zoomを分離し、表示需要を
 
 Native管理patchはPNG envelopeだけ拡張。clean再適用、MCP59＋e2e10（既存helper1 ignored）、release build、実GPU1536/2048出力、CPU2048、Full一致・tiny拒否継続、高entropy PNG12,586,335 bytesの転送probeに成功。B1 EXE：`I:\code\genzoroom\.tmp\lightcraft-b1\target\release\lightcraft-cli.exe`、SHA：`09d38369d4cbe0274fe363862d139097be063845f65a31a2bbd3931d4357a02e`。旧P2版は保持する。
 
-設計・安全予算・最終検証・Windows受入手順は[適応型設計§20](research/lightcraft/RAW_ADAPTIVE_PREVIEW_DESIGN.md#20-a5完了とb1whole-frame表示解像度2026-10-24)。ブラウザ動的確認、実RAWのB1速度・画質・RSS/VRAMは未実施。B1で停止しRegion／工程Cへ進まない。
+設計・安全予算・最終検証・Windows受入手順は[適応型設計§20](research/lightcraft/RAW_ADAPTIVE_PREVIEW_DESIGN.md#20-a5完了とb1whole-frame表示解像度2026-10-24)。この節はB1実装時点の記録。後続のWindows受入と工程C設計状況は冒頭の記録を参照。
 
 Frontend関連11ファイル433件、Backend関連9ファイル271件の成功結果を得た。最終変更後の影響範囲再実行は重複集計しない。既存HTTP取消テストはcompile中の広い実行・単独実行で失敗し、compile終了後の単独再実行で成功した。Frontendの初回sandbox一時cache ENOENTは権限付き実行で解消。型検査込みproduction buildと`git diff --check`成功。警告・未実施項目は設計記録に分けて記載した。
 

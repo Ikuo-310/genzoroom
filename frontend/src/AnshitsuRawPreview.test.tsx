@@ -93,7 +93,7 @@ it('keeps mixed Filmstrip order and separates native RAW Preview from the JPEG r
   await mount();
   expect([...host.querySelectorAll('.filmstrip-item')].map(item => item.getAttribute('aria-label'))).toEqual(['a.DNG', 'b.jpg', 'c.DNG']);
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
-  expect(host.textContent).toContain('LightCraft RAW Preview · up to 1024 px');
+  expect(host.querySelector('.raw-preview-note')).toBeNull();
   expect(adjusted).not.toHaveBeenCalled();
   await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
   expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
@@ -419,6 +419,20 @@ it('does not show an Immich image as the result of failed native rendering', asy
   expect(host.querySelector('.viewer-panel img')).toBeNull();
   expect(host.textContent).toContain('LightCraft RAW Preview failed');
   expect(adjusted).not.toHaveBeenCalled();
+});
+
+it('keeps the RAW loading status until the preview is ready', async () => {
+  vi.mocked(rawApi.rawPreview).mockImplementation(() => new Promise(() => {}));
+  await mount();
+  expect(host.querySelector('.viewer-image-status')?.textContent).toContain('Loading photo');
+});
+
+it('keeps the RAW edit failure status over the last ready preview', async () => {
+  await mount();
+  vi.mocked(rawApi.setRawControls).mockRejectedValue(new rawApi.RawApiError('raw_connection_failed'));
+  await editRaw();
+  expect(host.querySelector('.raw-preview-note')?.textContent).toContain('RAW settings or Preview could not be confirmed');
+  expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
 });
 
 it('blocks RAW to JPEG on a lost save response and retries the exact saveId before navigation', async () => {

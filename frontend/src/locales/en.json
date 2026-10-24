@@ -287,7 +287,6 @@
       "regenerationFailed": "RAW session renewal failed. The current save state has been retained. Retry to continue.",
       "retryRegeneration": "Retry session renewal",
       "loading": "Developing RAW Preview with LightCraft…",
-      "ready": "LightCraft RAW Preview · up to 1024 px",
       "unavailable": "RAW development unavailable · showing Immich viewing preview",
       "error": "LightCraft RAW Preview failed. Leave this photo and reopen it to retry.",
       "readOnly": "RAW Preview only. Adjustments are not available in this phase.",

@@ -829,10 +829,32 @@ BackendはPNG/MCP/HTTP/RAW ownerの4ファイルで最終161成功、HTTP取消�
 
 最初のFrontend sandbox実行は一時cache ENOENTにより2 suiteをロードできず、権限付き再実行で成功した。既存のoptional craft-fonts未同梱、incremental hard-link不可によるcopy、Frontend500 kB超chunk警告は残る。`git diff --check`成功。全Frontend／Backend suite・Docker Smoke Test・ブラウザ動的確認は行っていない。Native現像／OOM・fatal回復のcodeはP2から不変で、P2の障害注入結果を再利用し、今回新たに実driver障害試験を行ったとはしない。
 
-### 20.5 Windows受入手順・未実施事項
+### 20.5 Windows受入手順（実装時点の計画）
 
 上記B1 EXEを設定し、対象RAWを開く。Fitで中央Viewerの幅・高さを変え、最大化・左右panel・DPR1/1.25/1.5/2を切り替える。debug `preview.received.requestedMaxSide`／`preview.measured.maxSide`と返却width/heightを照合する。64px量子化・hysteresis内の小変化では新要求が増えず、拡大時は1024超の実PNGが届くことを確認する。
 
 Zoom anchor／Pan、1:1 physical scale、同revisionのサイズ更新とDraft→Full、gesture中の固定サイズ、終了後の最新Full／History収束を確認する。Before/Afterは同寸法・同geometryで比較し、不一致時はAfterを維持する。StageCache予算拒否でも描画が継続すること、写真／generation切替・離脱後に旧画像が入らないことも確認する。
 
-Browser動的操作、実RAWのB1性能／画質、最大化・異DPR実画面、RSS/VRAMピーク、長時間・実driver障害は今回未実施。今回のテストはDOM／fake APIと実native合成probeであり、Windows WebView実動作の代替ではない。B1で停止しRegion／工程C／RAW Export／Scopeへ進まない。
+上記はB1実装時点の計画。実装時の検証はDOM／fake APIと実native合成probeであり、Windows WebView実動作の代替ではない。その後のユーザー実機受入は次節を正本とする。
+
+<a id="b1-windows-acceptance"></a>
+
+### 20.6 B1完了：Windows実機受入（2026-10-24）
+
+ユーザー報告によりB1を受入完了とする。対象実装Commitは`79e198ede4750f52fbed9116d6351597f62755c3`、binaryは§20.4のB1版。以下はユーザーのWindows実機確認であり、今回エージェントが再測定した値ではない。
+
+| 確認対象 | ユーザー実機結果 |
+|---|---|
+| 対象／通常Fit | 3990×3000クラスPixel 7 Pro DNG。requestedMaxSide=1472、実PNG1472×1107。表示依存の適応解像度が動作 |
+| 露光slider gesture | 1472pxを維持。Draft要求4／採用4、discard0。終了後は同一最終revisionのFullへ収束 |
+| 1472実行 | Draft／FullともDX12 gpu_success。StageCache512 MiB適用、retainedBytes約205.3 MiB。Draft Native約69.7–73.8ms、最終Full Native約74.9ms、gesture終了→Full表示約519.7ms |
+| 等倍への切替 | requestedMaxSide=2048、実PNG2048×1540。Full DX12 gpu_success、Native約186.9ms、PNG約5.98 MiB |
+| 2048のcache | StageCache512 MiBはreason=budgetで不適用。描画は正常継続。cache admission拒否とPreview失敗を区別 |
+| 表示操作 | 最大化、panel開閉、Zoom/Pan、Before/After、写真切替等で目立った表示上の違和感は確認されなかった |
+| 残る精細度制約 | Pixel生成JPEGとの実画面比較で、100%時もRAW Whole2048上限による解像度制約を確認。B1失敗ではなく工程C Regionが必要な根拠 |
+
+**受入完了と別に残す未確認項目：** RSS／VRAM peak、長時間試験、実driver OOM/device loss、複数DPR環境すべての網羅試験。retainedBytesはStageCache保持量であり、RSS／VRAM測定の代用ではない。今回の操作確認を全RAW・全環境・全画質条件の保証へ拡張しない。
+
+B1限定UI cleanupとして、正常ready時の旧「最大1024px」常設status noteを削除し、不要な日英ready文字列を削除した。loading／Preview失敗／編集失敗／Before状態は維持し、JPEG Viewerは変更しない。工程Cの製品実装と混ぜない。
+
+工程Cの実装前調査・座標／状態／比較／メモリ契約、段階別受入条件は[Region専用設計](RAW_REGION_PREVIEW_DESIGN.md)へ分離した。本書のB1実装契約は維持する。Region製品コード・管理patch追加・工程C binary build、RAW Export／Scope実装は未実施。

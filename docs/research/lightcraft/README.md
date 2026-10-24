@@ -7,6 +7,8 @@ GenzoRoomのLightCraft統合を判断するための研究記録。統合実装�
 
 | 文書 | 内容 |
 |---|---|
+| [RAW_ADAPTIVE_PREVIEW_DESIGN.md](RAW_ADAPTIVE_PREVIEW_DESIGN.md) | A〜B1の適応型Preview契約、B1 Windows受入完了と未確認項目 |
+| [RAW_REGION_PREVIEW_DESIGN.md](RAW_REGION_PREVIEW_DESIGN.md) | 未実装の工程C：固定source確認、座標・scheduler・表示合成・比較・メモリ契約、段階別受入計画 |
 | [BASELINE.md](BASELINE.md) | 基準バージョン・commit、crate構成、Rust・Docker条件、ライセンス |
 | [POC_RESULTS.md](POC_RESULTS.md) | Windows/Linuxの既存実測、画像比較、Docker資材、QNAP未検証事項 |
 | [ENGINE_API.md](ENGINE_API.md) | CLI/MCP、Session、ソース・段階キャッシュ、Preview、DevelopSettings、Process Version、XMP入出力仕様 |
