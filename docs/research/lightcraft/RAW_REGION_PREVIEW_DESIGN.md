@@ -1,6 +1,6 @@
 # RAW Region Preview：工程C 実装前設計
 
-2026-10-24（Asia/Tokyo）。基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。本書は**未実装の推奨契約**であり、製品Regionコード・管理patch追加・工程C binary buildは行っていない。閾値や性能目標の候補を受入済み仕様と読まないこと。
+2026-10-24（Asia/Tokyo）。初回調査基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。§1〜10は初回設計、**C0契約固定の完了記録・厳密な規則は§11を正本**とする。Region描画・管理patch追加・工程C binary buildは未実装。閾値や性能目標の候補を受入済み仕様と読まないこと。
 
 ## 1. 調査根拠と確認済み事実
 
@@ -117,7 +117,7 @@ Region失敗時は整合したWholeで閲覧・編集・保存を続け、比較
 | C2 Frontend統合 | RAW overlay、4組intent、bounded plan、Before pair | fake API＋DOMで連続Pan中running1/pending1、古いrevision/view/geometry/decode採用拒否、被覆内再利用、写真切替/離脱URL回収、空白なし、異geometry比較拒否、同位置同精細度。P1 ACK採用/courtesy/終了Full、History/save/Undo/Redo、JPEG変化なしの関連回帰。TS/build成功 |
 | C3 Windows受入・調整 | 閾値/先読み/間隔/上限の実測確定 | 下記実機計画、peak/回収、境界画質、CPU/DX12とcold/warm、Draft採用とFull Region収束を満たす値を選択。具体的latency許容値は測定基準を共有して合意。自動試験のみで受入完了にしない |
 
-各段階は受入条件を満たしてから次へ進む。今回の停止位置はC0実装の前。Region patch／binary作成は次回以降の明示依頼で行う。
+各段階は受入条件を満たしてから次へ進む。初回設計時はC0実装の前で停止した。後続C0完了記録は§11。Region patch／binary作成は次回以降の明示依頼で行う。
 
 Windows計画：B1と同じPixel 7 Pro 3990×3000クラスDNGを基準に、原寸Whole reference（試験専用、通常HTTPとは分離）との中心/四隅/境界比較、露光・NR・Dehaze、Fit→100%→100%超、斜め/高速/反転Pan、最大化/panel、DPR1/1.25/1.5/2とモニタ移動、Before/After連打を確認する。Whole baseが消えず、Regionが画像上に固定され、継ぎ目・位置ずれ・片側だけの高精細化がないこと。gesture Draft採用率・discard理由、最終ACK/History revisionとFull Region revision、終了→Whole Fullと→Region Fullを別測定する。CPU/DX12、cold/warm、budget拒否、写真切替/再生成/離脱、長時間Pan/編集、RSS/VRAM peakと解放後安定値を測る。実driver OOM/device lossは障害注入と分け、実施可否と未実施範囲を明記する。
 
@@ -130,3 +130,89 @@ Windows計画：B1と同じPixel 7 Pro 3990×3000クラスDNGを基準に、原�
 - 初期Cの異geometry Before比較は安全に拒否。native mapping拡張、複数tileによる全面精細化、別転送形式は後続判断。比較を常に可能にする要件なら実装前にこの範囲を再合意する。
 - memory／timeout初期値は予算設計案。実device/host capacityとFrontend peakを測るまで速度・RSS/VRAM保証をしない。
 - RAW Exportは出力品質・色空間・保存/Stack/COVER/Album契約を持つ別工程。Region PNGをExport入力や永続cacheにしない。Scopeは可視Regionの局所分布を全画像histogramに流用せず、Whole/別集計契約を維持する。Recipe/History/DB format、JPEG Viewer、Export Queue、NAS配備は今回変更しない。
+
+## 11. C0完了：Region契約固定（2026-10-24）
+
+基準Commit `0b3e6127f217e1bdbb22e53ae28b093b84e8d635`。追加したコードは純planner・schema/capability/identity検証・有限plan状態遷移だけで、通常のRAW経路からimportしていない。HTTP処理、native tool呼出し、PNG生成、overlay、worker、LightCraft patch／binaryは変更しない。
+
+### 11.1 正本とC1/C2共通fixture
+
+| ファイル（repository相対） | 責任 |
+|---|---|
+| `frontend/src/rawRegionContract.json` | contractVersion=1、capability名、C1初期budget、座標演算順序、固定出力profile |
+| `frontend/src/rawRegion.schema.json` | JSON Schema Draft2020-12。`$defs.request/response/frameRequest/frameResponse`がそれぞれ独立したDTO schema。未知fieldは拒否。Nativeへ埋め込む時もこのschemaを基準にする |
+| `frontend/src/rawRegionPlanner.ts` | `visibleNativeRegion`、`planRawRegion`、`rawWholeDensity`。副作用なし。Fのaspect丸め・向き補正は行わない |
+| `frontend/src/rawRegionContract.ts` | DTO型、構造＋意味検証、Native preflight確認、応答採否、capability検査、cache/reuse/pair判定 |
+| `frontend/src/rawRegionSchedule.ts` | Promiseを保持しないdescriptorだけの有限state machine。Native workerへ未接続 |
+| `frontend/src/test-fixtures/raw-region-v1.json` | C1でも再利用する固定入力／期待値。現時点ではFrontend実行のみ。Native portはこれと同じfixtureを読んで照合すること |
+
+JSON Schemaは構造・型・field上限を規定し、積の面積上限、window包含、context inset、revision整合、要求応答の照合はTS validatorと本節の意味規則を併せて規定する。schemaだけで安全検証が完了した扱いにしない。C1は別の座標選択器を作らず、受け取ったF/W/有効域を検証して使う。Nativeの実演算検証に同fixtureを使用し、schema/budgetを再定義する場合は正本と同時更新する。
+
+### 11.2 座標とplanner出力
+
+入力は`geometry={nativeWidth,nativeHeight,geometryId}`、`view={width,height,dpr,scale,panX,panY}`、`full={geometryId,fullWidth,fullHeight}`、`context`、`prefetch`、`budget`。viewportとPanはCSS pixel、scaleはCSS/Native、context/prefetch/gridはFull pixel。Native寸法は正のsafe integer、geometryIdは64桁小文字hex。0/負値/非finite/unsafe integerを拒否する（Panは負値と0を許す）。geometryは最終Frameであり、sensor情報・orientation等をplannerへ渡さない。
+
+全rectはpixel-edgeの**半開区間**。`RegionRect`は`x0/y0/x1/y1`、`RegionWindow`は`x/y/w/h`。Native可視rectは§3の共通画像左上から逆写像して画像境界と交差させる。演算はbinary64、Native→Fullは**先に乗算、その後除算**（`xN * Fw / Nw`）。逆写像も同順序。epsilon補正で境界を移動しない。
+
+順序を固定する：
+
+1. Native可視rectをFullへ写す（この段階はfloat）。
+2. `prefetch`だけ拡張した要求域と、`prefetch+context`を拡張した描画域をそれぞれ作る。
+3. 左上floor、右下ceil。
+4. gridで外向きsnap（左上floor、右下ceil）。
+5. Full画像境界へclamp。
+6. budget超過なら下記の中央windowへ縮小。
+7. 画像境界に接していない辺だけcontextをinsetし、有効表示領域を得る。
+
+出力`mode=region`は`nativeVisibleRect`、`requestedWindow`（先読み込み・contextなし）、`contextWindow`（送信W）、`validRegion`（Full上の有効表示域）、`nativePlacement`（W全体のNative配置）、`validNativeRect`、`limited`を持つ。有効域のpixelだけを表示する。`mode=whole`は理由と、計算できた場合のNative可視rectを返す。plannerは切替閾値やcapabilityを判定せず、呼出し側が必要性を判断するための純計算である。
+
+budget超過ではw/hを各軸上限で切り、面積超過なら短辺を維持して長辺（同値なら幅）を`floor(maxPixels/短辺/grid)*grid`へ縮める。原点は可視域中心から`floor((center−length/2)/grid)*grid`を求め、元のcontext windowに収まる範囲へclampする。画像境界でgrid非整列の端が残ることを許す。全面被覆は保証せず`limited=true`。contextは削減しない。有効域が空、又は可視域と交差しない場合はWholeへ縮退する。
+
+固定reasonは`invalid_input`、`arithmetic_overflow`、`geometry_mismatch`、`frame_limit`、`not_visible`、`context_exhausted`、`budget_exhausted`。safe integerを越える座標演算、underflowで無限大となる逆写像も拒否。任意budgetはC1初期値より厳しい値だけ許す。閾値や大きな予算を暗黙に採用しない。
+
+FixtureはFit／100%／100%超、中央／四隅／境界またぎ、landscape／portrait、crop後／orientation0/90/180/270後／flip後／straighten後のeffective geometry、DPR1/1.25/1.5/2、非整数scale、1px境界を扱う。異geometryには別geometryIdを与える。これらはNativeによるRAW幾何変換の画素正確性を検証したものではなく、**変換済みframeの座標契約**の試験。Native実Planとの照合はC1へ残す。
+
+### 11.3 Fの交渉・request/response・capability
+
+FrontendはLCのfit/roundingを再実装しない。C1用MCP能力は新tool **`render_region_preview`** の必須integer `region_contract` enum `[1]`で独立検出する。既存`preview_contract=1`や既存`render_preview` schemaを変更せず、全体protocol versionも増やさない。tool引数は`id`（既存native photo ID文字列）、`region_contract:1`、`operation:plan|render`、`target`。targetは共有schemaのframeRequest又はrequest。operationとtarget型の対応をNative側でも拒否検証する。
+
+`operation=plan`はPNGを生成せず、frameRequestの`desiredLongEdge`（正の有限float、最大65536）とidentity/quality/geometryIdから実Native Planを調べる。frameResponseは同じ配送fieldに、実nativeWidth/nativeHeight/fullWidth/fullHeight/kindを返す。`confirmRegionFullFrame`はecho／owner／実Native寸法／geometryId／非upscale／上限を照合し、一致したFだけplannerへ渡す。問い合わせ失敗・geometry不一致はWhole維持。このNative処理自体はC1で実装する。
+
+`operation=render`のrequestは`contractVersion:1,mode:region,quality,geometryId,F,window,validRegion,context,prefetch,identity,documentRevision,viewGeneration,requestId`。windowはplannerのcontextWindow、validRegionはFull座標の有効域をそのまま送る。responseは**実際に使用した**同fieldに`width,height,kind`を加える。実bitmap寸法はW.w/W.hと一致必須。C1はresponse metadataだけでなく実PNG header／decode寸法／quality／kindとNative readbackも照合する。echoだけで実行成功や現在revisionを認定しない。
+
+`checkRegionResponse`は配送・owner・quality違いをstale、壊れた形やW/有効域の不一致をinvalidとする。実geometryId変更はWhole。Fだけ変更なら、初回だけ実Fを返して**再plan**を要求し、その画像は表示しない。再不一致はWholeへ縮退する。返却Fはplannerの上限/非upscale検査を再度通す。preflightしていてもrender時にsource/自動upright等が変化し得る境界を省略しない。
+
+capabilityの純判定はmarkerとoperation、共有target schemaを検査し、不完全・不明version・重複toolは未対応とする。C1はNative generationごとに再検出し、将来のHTTP capabilitiesへoptional `regionContract:1`を公開する。未対応時はfieldを省略し、C2はRegion要求・専用UIを出さずB1 Wholeを維持する。RAW暗室全体のavailableをfalseにしない。C0の現行Backendはこのfieldをまだ返さず、既存binaryへRegionを送らない回帰を追加した。
+
+### 11.4 密度・identity・比較
+
+`rawWholeDensity`はNative geometry、scale、DPR、**採用済みWhole実bitmap寸法**、可視Native rectを検査し、`rhoX/rhoY/rho=max`、`sufficient`（数学的にrho≤1）、`physicalScale`、`nativeCappedRho`を返す。100%超ではrhoは増えるがnativeCappedRhoは原寸以上のdetailを要求しない。threshold／開始停止hysteresisは含めない。Fit/Zoomの別値を推測せずViewerの実scaleを使う。
+
+content identityは`assetId,sourceId,generation,documentToken,kind`＋Afterの`revision`又はBeforeの`beforeKey`。sourceIdはBackendが割り当てる不透明な64桁hexで、path/URL/資格情報を含めず、同じsource内容の寿命を識別する（C1で生成・所有）。requestの`documentRevision`はBeforeにも持たせて配送・Native ACK検査に使い、Before pixel cacheはbeforeKeyで再利用できる。requestIdは32桁hex、counter類は非負safe integer。
+
+`regionCacheKey`はcontent identity＋contractVersion/mode/quality/geometryId/F/W/有効域/固定`srgb-u8`を順序付き配列としてserializeする。viewGeneration/requestId/documentRevision（Beforeの場合）はcontent keyから除外。`canReuseRegion`は両DTO検証と同content owner/quality/geometry/Fを必須とし、最新可視Native rectがcached有効域に完全包含される時だけtrue。古い応答の直接採用を許可する関数ではなく、C2が最新planへ明示的に再bindするための判定である。
+
+`regionPairMatches`はAfter/Beforeそれぞれの検証後、asset/source/generation/token/documentRevision、**geometryId一致**、同F/W/有効域/quality/実bitmap寸法を必須とする。Before keyは期待要求との応答照合を済ませてからpairへ渡す。異geometry mappingは禁止。比較不可ならAfter、又は整合したWhole比較を維持し、片側だけ精細化しない。BeforeへAfter補正値を転写しない。
+
+### 11.5 初期budgetと有限状態遷移
+
+**C1検証用初期budget**を定数化した。各軸2048、面積2,097,152、PNG9 MiB、MCP line13 MiB、metadata16 KiB、仮想/Native各軸65536、grid256。製品確定値やRSS/VRAM hard capではない。context／prefetchの量は入力であり既定の4.5%等をコードへ採用していない。既存Whole PNG17 MiB／line24 MiBと別modeのvalidationで扱う。内部work拡張と実capacityの検査、実PNG/MCP読出し制限はC1実装であり、今は純validationのみ。
+
+有限planは最大**6 descriptor**：After/BeforeそれぞれWhole render、Region preflight、Region renderの各slotを最大1件。quality・document revision・viewGenerationとownerはplan内で揃え、Before keyとRegion geometryIdの混在も拒否する。preflightも同じrunning slotを使い、別workerを作らない。descriptorは未確定Fのplaceholderを許さないため、preflight結果が必要ならまずqueryだけを送信し、その結果と最新viewから**新planを組み直す**。最大6はqueue descriptor数であり、6枚の画像や6 Native同時実行を許す値ではない。
+
+`replacePreviewPlan`は単調増加planGenerationで全未送信itemを置換、`takePreviewItem`はrunningが空の時だけpending先頭を移す。`finishPreviewItem`はplanGeneration/requestId一致時だけrunningを解放。invalidateはpendingだけを捨て、送信済みrunningは完了まで所有する。古いplan到着は無視。呼出し元入力はsnapshotして保持し、無限Promise列やappend queueを持たない。
+
+C2ではこのdescriptor遷移に既存owner/readback/ACK採用/gesture/geometry/save guardを接続する。`take`は実行可能性を判断するdispatcherではない。mutating/未ACK/保存barrierの既存guardを通過してから送信する。P1 courtesyの1000ms上限、ACK済みDraft採用、終了Full、History receipt、画像を待たないsaveを変更しない。HTTP cancelは未送信破棄とwaiter detachでありNative preemptionではない。C0はworkerへの接続も送信も行わない。
+
+### 11.6 残る確認とC1開始条件
+
+- **C1必須確認：** 固定v0.10.0実Planによるpreflight/F安定性、source level/自動uprightの差、contextとwork windowの最大範囲、CPU/DX12のWhole対Region画素比較、StagePool/source所有、PNG高entropy転送、schema/kind/qualityと実binary receipt。C0のJSON fixtureをNative側でも同一期待値で通す。既存patchの全適用・重複/部分適用拒否は更新guideどおり必要。
+- **C2まで未実装：** RawViewへPan/可視域を追加、capabilityのHTTP公開・UI利用、有限planと既存ownerの統合、Region送信・decode・overlay、pair切替、URL回収。現行ViewerはB1 Wholeのまま。
+- **C3で決定：** rho開始/解除threshold、Pan集約間隔、context/先読み量、予算の製品採用値、latency受入値とRSS/VRAM peak。C0初期定数は実測結果を先取りしない。
+- **C1開始条件：** C0契約・fixture・限定監査に未解決High/Mediumがなく、ユーザーからC1開始の明示依頼があること。C1はNative/Backendのみから始め、通常Viewerを有効化しない。今回C1には進まない。
+
+### 11.7 検証・限定監査結果
+
+Frontend関連8ファイルは最終成功300件（C0最終77＋変更のないB1関連223、再実行の重複を加算しない）。Backendは新規のRegion未送信/Whole維持回帰と既存adaptiveの2ファイル43件。TypeScript込みproduction build成功、`git diff --check`実施。既存500 kB超chunk警告あり。初回sandboxのFrontend一時cache ENOENTとBackend一時dir作成失敗は通常環境で再実行して解消した。C0の試験は純関数／DOM／fake native境界であり、Native Region実装やWindows実機の成功を示さない。全suite、ブラウザ動的操作、LightCraft patch変更／Region binary buildは実施しない。
+
+限定監査は座標単位・順序・上限・未知mode、schema/DTO意味検証、独立capabilityとB1 fallback、Before/After identity、Pan reuseと配送staleの分離、running回収とpending上限、既存P1/History/save/JPEGへの接続有無を確認。unknown modeとplan内のBefore key／Region geometry混在を拒否するguardを追加し、影響範囲を再検証した。**未解決High0／Medium0／Low0**。既知のC1/C2未実装とC3候補は監査済み実動作ではなく後続工程の受入条件として残す。C1開始は明示依頼待ちで、C0で停止する。

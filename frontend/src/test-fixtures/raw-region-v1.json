@@ -1,0 +1,947 @@
+[
+  {
+    "name": "100-percent-center",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "top-left",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 1600,
+        "panY": 1200
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 0,
+        "y0": 0,
+        "x1": 800,
+        "y1": 600
+      },
+      "contextWindow": {
+        "x": 0,
+        "y": 0,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "top-right",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": -1600,
+        "panY": 1200
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 3200,
+        "y0": 0,
+        "x1": 4000,
+        "y1": 600
+      },
+      "contextWindow": {
+        "x": 3200,
+        "y": 0,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "bottom-left",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 1600,
+        "panY": -1200
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 0,
+        "y0": 2400,
+        "x1": 800,
+        "y1": 3000
+      },
+      "contextWindow": {
+        "x": 0,
+        "y": 2400,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "bottom-right",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": -1600,
+        "panY": -1200
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 3200,
+        "y0": 2400,
+        "x1": 4000,
+        "y1": 3000
+      },
+      "contextWindow": {
+        "x": 3200,
+        "y": 2400,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "pan-crosses-image-edge",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 1900,
+        "panY": 1400
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 0,
+        "y0": 0,
+        "x1": 500,
+        "y1": 400
+      },
+      "contextWindow": {
+        "x": 0,
+        "y": 0,
+        "w": 500,
+        "h": 400
+      }
+    }
+  },
+  {
+    "name": "above-100-percent",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 2,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1800,
+        "y0": 1350,
+        "x1": 2200,
+        "y1": 1650
+      },
+      "contextWindow": {
+        "x": 1800,
+        "y": 1350,
+        "w": 400,
+        "h": 300
+      }
+    }
+  },
+  {
+    "name": "fit",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 0.2,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 1000,
+        "fullHeight": 750
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 0,
+        "y0": 0,
+        "x1": 4000,
+        "y1": 3000
+      },
+      "contextWindow": {
+        "x": 0,
+        "y": 0,
+        "w": 1000,
+        "h": 750
+      }
+    }
+  },
+  {
+    "name": "fractional-scale",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1.25,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1680,
+        "y0": 1260,
+        "x1": 2320,
+        "y1": 1740
+      },
+      "contextWindow": {
+        "x": 1680,
+        "y": 1260,
+        "w": 640,
+        "h": 480
+      }
+    }
+  },
+  {
+    "name": "orientation-0-landscape",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "orientation-180-landscape",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "2222222222222222222222222222222222222222222222222222222222222222",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "flip-already-in-native-frame",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 1600,
+        "panY": 1200
+      },
+      "full": {
+        "geometryId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 0,
+        "y0": 0,
+        "x1": 800,
+        "y1": 600
+      },
+      "contextWindow": {
+        "x": 0,
+        "y": 0,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "orientation-90-portrait",
+    "input": {
+      "geometry": {
+        "nativeWidth": 3000,
+        "nativeHeight": 4000,
+        "geometryId": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "1111111111111111111111111111111111111111111111111111111111111111",
+        "fullWidth": 3000,
+        "fullHeight": 4000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1100,
+        "y0": 1700,
+        "x1": 1900,
+        "y1": 2300
+      },
+      "contextWindow": {
+        "x": 1100,
+        "y": 1700,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "orientation-270-portrait",
+    "input": {
+      "geometry": {
+        "nativeWidth": 3000,
+        "nativeHeight": 4000,
+        "geometryId": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "3333333333333333333333333333333333333333333333333333333333333333",
+        "fullWidth": 3000,
+        "fullHeight": 4000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1100,
+        "y0": 1700,
+        "x1": 1900,
+        "y1": 2300
+      },
+      "contextWindow": {
+        "x": 1100,
+        "y": 1700,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "crop-effective-frame",
+    "input": {
+      "geometry": {
+        "nativeWidth": 2000,
+        "nativeHeight": 1200,
+        "geometryId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "fullWidth": 2000,
+        "fullHeight": 1200
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 600,
+        "y0": 300,
+        "x1": 1400,
+        "y1": 900
+      },
+      "contextWindow": {
+        "x": 600,
+        "y": 300,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "straighten-effective-frame",
+    "input": {
+      "geometry": {
+        "nativeWidth": 3900,
+        "nativeHeight": 2800,
+        "geometryId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fullWidth": 3900,
+        "fullHeight": 2800
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1550,
+        "y0": 1100,
+        "x1": 2350,
+        "y1": 1700
+      },
+      "contextWindow": {
+        "x": 1550,
+        "y": 1100,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "fixed-css-scale-dpr-1",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "fixed-css-scale-dpr-1.25",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1.25,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "fixed-css-scale-dpr-1.5",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1.5,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "fixed-css-scale-dpr-2",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 2,
+        "scale": 1,
+        "panX": 0,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600,
+        "y0": 1200,
+        "x1": 2400,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 800,
+        "h": 600
+      }
+    }
+  },
+  {
+    "name": "pixel-edge-half-open",
+    "input": {
+      "geometry": {
+        "nativeWidth": 4000,
+        "nativeHeight": 3000,
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "view": {
+        "width": 800,
+        "height": 600,
+        "dpr": 1,
+        "scale": 1,
+        "panX": -0.5,
+        "panY": 0
+      },
+      "full": {
+        "geometryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fullWidth": 4000,
+        "fullHeight": 3000
+      },
+      "context": 0,
+      "prefetch": 0,
+      "budget": {
+        "maxFullSide": 65536,
+        "maxSide": 2048,
+        "maxPixels": 2097152,
+        "grid": 1
+      }
+    },
+    "expected": {
+      "nativeVisibleRect": {
+        "x0": 1600.5,
+        "y0": 1200,
+        "x1": 2400.5,
+        "y1": 1800
+      },
+      "contextWindow": {
+        "x": 1600,
+        "y": 1200,
+        "w": 801,
+        "h": 600
+      }
+    }
+  }
+]

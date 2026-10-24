@@ -1,0 +1,18 @@
+{
+  "contractVersion": 1,
+  "capability": { "tool": "render_region_preview", "marker": "region_contract", "version": 1 },
+  "c1InitialBudget": {
+    "maxFullSide": 65536,
+    "maxSide": 2048,
+    "maxPixels": 2097152,
+    "maxPngBytes": 9437184,
+    "maxMcpLineBytes": 13631488,
+    "maxMetadataBytes": 16384,
+    "grid": 256,
+    "maxPlanItems": 6
+  },
+  "requestFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId"],
+  "responseFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId", "width", "height", "kind"],
+  "coordinateOrder": ["visible", "prefetch/context", "floor/ceil", "grid-snap", "clamp", "budget-center", "context-inset"],
+  "outputProfile": "srgb-u8"
+}

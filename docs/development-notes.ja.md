@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## 工程C0：Region契約固定完了（2026-10-24）
+
+基準`0b3e6127f217e1bdbb22e53ae28b093b84e8d635`。正本[Region設計§11](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#11-c0完了region契約固定2026-10-24)へC0完了契約を追記。純planner、request/response・preflightのJSON Schemaと型、独立Region capabilityの純判定、実Whole密度不足率、content key／再利用／同geometry比較、running1＋latest pending1の有限descriptor状態遷移を追加した。通常Viewer/API/workerからは未接続。FはNative preflightで確定し、FrontendでLCのaspect丸めを推測しない。markerは`region_contract=1`、既存`preview_contract`やprotocol versionは変更しない。
+
+context/prefetchはFull pixel、半開区間でvisible→margin/context→floor/ceil→grid snap→clamp。1px fixtureで除算先行による浮動小数誤差を検出し、座標×変換先寸法÷変換元寸法の順序へ固定した。表示域・配置・cap中央縮退・空context・非finite/overflowを検証。RAW向き/crop等は変換済みNative frameのfixtureでありNative変換画質の実証ではない。最大2048／2,097,152 pixels／PNG9 MiB／line13 MiBはC1初期budgetのまま、製品確定値にしない。
+
+Frontend関連8ファイルの最終成功結果は合計300件（C0最終77＋変更のないB1関連223、重複再実行は加算しない）。Backendは新規未送信/Whole維持回帰＋既存adaptiveの2ファイル43件成功。初回Frontendはsandbox一時cache ENOENT、Backendはpytest一時dir作成失敗（10成功/33 setup error）であり、通常環境の指定Python3.14で切り分け・再実行して解消した。型検査込みproduction buildと`git diff --check`を実施。既存500 kB超chunk警告は残る。Browser動的確認、Windows Region実機、全suite、LightCraft patch変更・binary buildは未実施。
+
+限定監査は座標/丸め・schemaと意味検証・capability fallback・identity/stale・bounded状態遷移・既存経路への影響を確認。未知modeとplan内のBefore key／Region geometry混在を拒否するguardを補強した。最終未解決High0／Medium0／Low0。C1へ進める契約状態だが、開始は次の明示依頼待ち。C1ではNative実Plan/source level/upright差、context/work拡張、CPU/DX12画素、転送/StagePool所有とreceiptを確認する。C2のoverlay/送信/owner接続、C3のthreshold/Pan間隔/先読み量/実機予算採用は未実装・未決定。C0で停止する。
+
 ## B1 Windows受入完了・限定UI cleanup・工程C設計（2026-10-24）
 
 ユーザーのWindows実機受入によりB1（実装Commit `79e198ede4750f52fbed9116d6351597f62755c3`）を完了扱いとする。Pixel 7 Pro DNGのFit1472×1107、Draft4/4採用・discard0、同最終revision Full収束、DX12 gpu_success、cache512 MiB適用約205.3 MiBを確認。Native Draft69.7–73.8ms／Full74.9ms、終了→Full519.7ms。等倍では2048×1540、DX12 Full186.9ms、PNG約5.98 MiB。2048のcache budget拒否でも描画継続。最大化／panel／Zoom/Pan／Before/After／写真切替に目立つ違和感なし。詳細と証拠区分は[受入記録](research/lightcraft/RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)。RSS/VRAM peak、長時間、実driver OOM/device loss、全DPR網羅は未確認として残す。
