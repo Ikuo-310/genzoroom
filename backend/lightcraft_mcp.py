@@ -29,7 +29,8 @@ class MCPRpcError(LightCraftError):
 
 
 class MCPToolError(LightCraftError):
-    def __init__(self, code="lightcraft_tool_error"):
+    def __init__(self, code="lightcraft_tool_error", diagnostic_reason=None):
+        self.diagnostic_reason = diagnostic_reason
         super().__init__(code)
 
 
@@ -285,6 +286,13 @@ class LightCraftMCP:
                     if code in {'region_invalid_request','region_unsupported','region_geometry_mismatch','region_budget_exceeded',
                                 'region_work_budget_exceeded','region_render_failed'}:
                         raise MCPToolError('raw_' + code)
+                    if code in {'region_geometry_source_missing', 'region_geometry_native_frame_missing',
+                                'region_geometry_metadata_mismatch', 'region_geometry_id_mismatch',
+                                'region_native_full_width_mismatch', 'region_native_full_height_mismatch',
+                                'region_full_width_mismatch', 'region_full_height_mismatch',
+                                'region_render_contract_mismatch', 'region_render_width_mismatch',
+                                'region_render_height_mismatch'}:
+                        raise MCPToolError('raw_region_geometry_mismatch', code.removeprefix('region_'))
                 except (KeyError, TypeError, ValueError, AttributeError):
                     pass
             if name == "render_preview" and len(result["content"]) == 1 and "structuredContent" not in result:

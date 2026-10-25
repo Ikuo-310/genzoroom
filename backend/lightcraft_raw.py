@@ -1289,6 +1289,34 @@ class LightCraftRawSession:
                 except LightCraftError as error:
                     if ticket.region_operation is not None:
                         fatal = isinstance(error,MCPTransportError) and error.code != 'lightcraft_busy_timeout'
+                        target = ticket.region_target
+                        native_reply = not isinstance(error, MCPTransportError)
+                        stage = 'native_tool' if isinstance(error, MCPToolError) else 'native_validation'
+                        if error.code == 'raw_region_geometry_mismatch':
+                            reason = (error.diagnostic_reason or 'native_tool_rejected') if isinstance(error, MCPToolError) \
+                                else 'response_validation_failed'
+                            context = dict(stage=stage, reason=reason, operation=ticket.region_operation,
+                                revision=ticket.revision, quality=target['quality'], kind=target['identity']['kind'],
+                                viewGeneration=target['viewGeneration'], requestId=target['requestId'],
+                                nativeResponseReceived=native_reply, publicGeometryMappingMatch=True, errorCode=error.code)
+                            mismatch_fields = {
+                                'geometry_id_mismatch': ['geometryId'],
+                                'native_full_width_mismatch': ['fullWidth'],
+                                'native_full_height_mismatch': ['fullHeight'],
+                                'full_width_mismatch': ['fullWidth'], 'full_height_mismatch': ['fullHeight'],
+                                'render_contract_mismatch': ['quality', 'window'],
+                                'render_width_mismatch': ['width'], 'render_height_mismatch': ['height'],
+                            }.get(reason)
+                            if mismatch_fields:
+                                context['mismatchFields'] = mismatch_fields
+                            if reason == 'geometry_id_mismatch':
+                                context.update(geometryMatches=False, mismatchSide='native_plan_response')
+                            elif reason in ('native_full_width_mismatch', 'native_full_height_mismatch',
+                                    'full_width_mismatch', 'full_height_mismatch', 'render_width_mismatch', 'render_height_mismatch'):
+                                context['mismatchSide'] = 'native_plan_or_render_response'
+                            if 'desiredLongEdge' in target:
+                                context['desiredLongEdge'] = target['desiredLongEdge']
+                            lightcraft_log('region.geometryMismatch', level='warn', **context)
                         lightcraft_log('region.failed' if fatal else 'region.rejected', level='error' if fatal else 'warn', generation=self._generation,
                             operation=ticket.region_operation, revision=ticket.revision, errorCode=error.code)
                     if (isinstance(error, MCPTransportError) and error.code != "lightcraft_busy_timeout") or \

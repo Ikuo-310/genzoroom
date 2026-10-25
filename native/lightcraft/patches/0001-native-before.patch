@@ -1299,10 +1299,10 @@ index 0000000000000000000000000000000000000000..705b17d63e5c871c1e923eabf53c542a
 +}
 diff --git a/crates/mcp/src/region.rs b/crates/mcp/src/region.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef44ec66a2c
+index 0000000000000000000000000000000000000000..b8a8bb18a67f17f8549381dd4cf6b8ebb4869ce5
 --- /dev/null
 +++ b/crates/mcp/src/region.rs
-@@ -0,0 +1,337 @@
+@@ -0,0 +1,361 @@
 +//! Independent, fail-closed Region contract. The caller owns view planning, LC owns effective geometry.
 +use crate::{Backend, Headless, ToolResult};
 +use lightcraft_engine::{
@@ -1425,6 +1425,17 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +        "region_invalid_request"
 +        | "region_unsupported"
 +        | "region_geometry_mismatch"
++        | "region_geometry_source_missing"
++        | "region_geometry_native_frame_missing"
++        | "region_geometry_metadata_mismatch"
++        | "region_geometry_id_mismatch"
++        | "region_native_full_width_mismatch"
++        | "region_native_full_height_mismatch"
++        | "region_full_width_mismatch"
++        | "region_full_height_mismatch"
++        | "region_render_contract_mismatch"
++        | "region_render_width_mismatch"
++        | "region_render_height_mismatch"
 +        | "region_budget_exceeded"
 +        | "region_work_budget_exceeded"
 +        | "region_render_failed" => code,
@@ -1521,7 +1532,7 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +    if t["quality"] == "draft" {
 +        job = job.draft();
 +    }
-+    let source_key = format!("{:?}", job.source_key.ok_or("region_geometry_mismatch")?);
++    let source_key = format!("{:?}", job.source_key.ok_or("region_geometry_source_missing")?);
 +    // Window output bounds do not bound a full RAW decode. Reject impossible source reservations first.
 +    if job.level == lightcraft_engine::media::SourceLevel::Full
 +        && !matches!(job.source, SourceRef::Loaded(_))
@@ -1533,7 +1544,7 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +    let source = decoded.image_for(job.settings.denoise_amount());
 +    let info = decoded.info_or(job.info.clone());
 +    let mut whole = pipeline::plan(&source, &info, &job.settings, &job.request);
-+    let native = whole.frame.native_size_at(original.0, original.1).ok_or("region_geometry_mismatch")?;
++    let native = whole.frame.native_size_at(original.0, original.1).ok_or("region_geometry_native_frame_missing")?;
 +    let (nw, nh) = (native.0.round().max(1.0) as usize, native.1.round().max(1.0) as usize);
 +    if nw > 65536 || nh > 65536 {
 +        return Err("region_budget_exceeded");
@@ -1544,9 +1555,16 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +        job.request.max_h = job.request.max_h.min(nh);
 +        whole = pipeline::plan(&source, &info, &job.settings, &job.request);
 +    }
-+    let meta = crate::preview::frame_metadata(&whole.frame, original, &source_key, whole.w, whole.h).map_err(|_| "region_geometry_mismatch")?;
-+    if meta["geometryId"] != t["geometryId"] || whole.w > nw || whole.h > nh {
-+        return Err("region_geometry_mismatch");
++    let meta = crate::preview::frame_metadata(&whole.frame, original, &source_key, whole.w, whole.h)
++        .map_err(|_| "region_geometry_metadata_mismatch")?;
++    if meta["geometryId"] != t["geometryId"] {
++        return Err("region_geometry_id_mismatch");
++    }
++    if whole.w > nw {
++        return Err("region_native_full_width_mismatch");
++    }
++    if whole.h > nh {
++        return Err("region_native_full_height_mismatch");
 +    }
 +    let (fw, fh) = (whole.w, whole.h);
 +    drop(whole);
@@ -1574,7 +1592,10 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +        return Ok(json!({"response":response,"diagnostics":diagnostics}));
 +    }
 +    if (fw, fh) != (n(t, "fullWidth"), n(t, "fullHeight")) {
-+        return Err("region_geometry_mismatch");
++        if fw != n(t, "fullWidth") {
++            return Err("region_full_width_mismatch");
++        }
++        return Err("region_full_height_mismatch");
 +    }
 +    let w = win(&t["window"]);
 +    let mut region = if before { h.session.region_job_before(id, fw, fh, w, true) } else { h.session.region_job(id, fw, fh, w, true) }
@@ -1584,9 +1605,9 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +    }
 +    // Return the job's actual contract, never silently relabel a different quality/window.
 +    if response["quality"] != if region.request.quality == pipeline::Quality::Draft { "draft" } else { "full" } || region.request.window != Some(w) {
-+        return Err("region_geometry_mismatch");
++        return Err("region_render_contract_mismatch");
 +    }
-+    response["window"] = wjson(region.request.window.ok_or("region_geometry_mismatch")?);
++    response["window"] = wjson(region.request.window.ok_or("region_render_contract_mismatch")?);
 +    region.source = SourceRef::Loaded(Box::new(decoded.clone()));
 +    region.info = info.clone();
 +    let actual = pipeline::plan(&source, &info, &region.settings, &region.request);
@@ -1623,10 +1644,13 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +        region = region.with_stages(cache);
 +    }
 +    let rendered = region.run().rendered.map_err(|_| "region_render_failed")?;
-+    if (rendered.image.width, rendered.image.height) != (w.w, w.h) {
-+        return Err("region_geometry_mismatch");
++    if rendered.image.width != w.w {
++        return Err("region_render_width_mismatch");
 +    }
-+    h.stages.geometry(side, meta["geometryId"].as_str().ok_or("region_geometry_mismatch")?);
++    if rendered.image.height != w.h {
++        return Err("region_render_height_mismatch");
++    }
++    h.stages.geometry(side, meta["geometryId"].as_str().ok_or("region_geometry_metadata_mismatch")?);
 +    diagnostics["stageCache"] = h.stages.finish(side, options.budget, applied);
 +    diagnostics["execution"] = serde_json::to_value(rendered.execution.ok_or("region_render_failed")?).map_err(|_| "region_render_failed")?;
 +    diagnostics["workWindow"] = wjson(work);
@@ -1642,7 +1666,7 @@ index 0000000000000000000000000000000000000000..a5ff75eb92a1e88365435b0a8a69eef4
 +mod tests;
 diff --git a/crates/mcp/src/region/tests.rs b/crates/mcp/src/region/tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..866e8ec1f379a10531076b3655139249e938d487
+index 0000000000000000000000000000000000000000..b3c8bb2883f3dae211fb14691bf8835371157152
 --- /dev/null
 +++ b/crates/mcp/src/region/tests.rs
 @@ -0,0 +1,418 @@
@@ -1973,7 +1997,7 @@ index 0000000000000000000000000000000000000000..866e8ec1f379a10531076b3655139249
 +    let mut h = host_size(settings, 4000, 3000);
 +    let q = target(&mut h, false);
 +    let old = h.session.develop_of(PhotoId(1)).unwrap().hash64();
-+    for (edge, level) in [(512, "Thumb"), (1536, "Preview"), (2600, "Full")] {
++    for (edge, level) in [(512, "Thumb"), (1536, "Preview"), (2600, "Full"), (4064, "Full")] {
 +        let mut query = q.clone();
 +        query["desiredLongEdge"] = json!(edge);
 +        let r = call(&mut h, &tool_args("plan", query));
@@ -1992,7 +2016,7 @@ index 0000000000000000000000000000000000000000..866e8ec1f379a10531076b3655139249
 +    changed["desiredLongEdge"] = json!(1536);
 +    let r = call(&mut h, &tool_args("plan", changed));
 +    assert!(r.is_error);
-+    assert!(r.content[0]["text"].as_str().unwrap().contains("region_geometry_mismatch"));
++    assert!(r.content[0]["text"].as_str().unwrap().contains("region_geometry_id_mismatch"));
 +    drop(h);
 +    let mut s = DevelopSettings::default();
 +    s.spots = serde_json::from_value(json!([{"points":[{"x":0.1,"y":0.5}],"size":0.01,"source_offset":{"x":0.85,"y":0.0}}])).unwrap();

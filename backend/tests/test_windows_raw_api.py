@@ -17,6 +17,15 @@ from tests.test_windows_local import local, client, authenticate
 from lightcraft_mcp import LightCraftError
 
 
+def test_public_region_mapping_reports_missing_revision_and_geometry_reasons():
+    target = {"documentRevision": 7, "geometryId": "a" * 64}
+    mapping = (7, "a" * 64, "b" * 64)
+    assert module._public_region_mapping_reason(None, 7, target) == "public_mapping_missing"
+    assert module._public_region_mapping_reason((6, "a" * 64, "b" * 64), 7, target) == "public_revision_mismatch"
+    assert module._public_region_mapping_reason(mapping, 7, target | {"geometryId": "c" * 64}) == "public_geometry_mismatch"
+    assert module._public_region_mapping_reason(mapping, 7, target) is None
+
+
 async def setup(tmp_path, local, monkeypatch):
     # ASGITransport does not enter the common lifespan that initializes the selected profile DB.
     edit_store.DB_PATH.parent.mkdir(parents=True, exist_ok=True)

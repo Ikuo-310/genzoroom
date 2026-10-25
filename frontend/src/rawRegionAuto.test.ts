@@ -60,6 +60,12 @@ it('uses Whole at Fit, starts a genuinely denser Native frame, keeps hysteresis,
   expect(h.overlay.display).toBeUndefined(); expect(h.auto.report.active).toBe(false); expect(h.urls.owns(base)).toBe(true);
 });
 
+it('keeps the C2-C 1:1 preflight request at the Native long edge without changing the planner contract', async () => {
+  const h = harness(); h.update({ nativeWidth: 4064, nativeHeight: 3056, scale: 1 }); await tick();
+  expect(h.send.mock.calls[0][1]).toMatchObject({ desiredLongEdge: 4064, quality: 'full' });
+  expect(h.send.mock.calls[0][1].geometryId).toBe(h.getWhole().frame.geometryId);
+});
+
 it('rebinds Pan and Zoom inside cached validRegion without render, decode or new object URLs; F changes replan', async () => {
   const h = harness(); h.update(); await tick();
   expect(h.overlay.display!.after.metadata.fullWidth).toBe(4000);

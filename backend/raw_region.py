@@ -138,7 +138,25 @@ def validate_result(result, target, operation, photo_id, before_fingerprint=None
         r = meta['response']
         if not matches(r, SCHEMA['$defs']['frameResponse' if operation == 'plan' else 'response']):
             raise ValueError()
-        if any(r[k] != v for k, v in target.items()) or r['kind'] != target['identity']['kind']:
+        mismatches = [key for key, expected in target.items() if r.get(key) != expected]
+        if r.get('kind') != target['identity']['kind']:
+            mismatches.append('kind')
+        if mismatches:
+            # Echo diagnostics name fields only; opaque document/source tokens are never logged.
+            from lightcraft_runtime import lightcraft_log
+            context = {
+                'stage': 'native_response_echo', 'reason': 'echo_mismatch', 'operation': operation,
+                'revision': target['documentRevision'], 'quality': target['quality'],
+                'kind': target['identity']['kind'], 'viewGeneration': target['viewGeneration'],
+                'mismatchFields': mismatches, 'nativeResponseReceived': True,
+                'mismatchSide': 'native_response',
+                'geometryMatches': 'geometryId' not in mismatches,
+                'identityMatches': 'identity' not in mismatches,
+            }
+            if 'desiredLongEdge' in target:
+                context['requestDesiredLongEdge'] = target['desiredLongEdge']
+                context['responseDesiredLongEdge'] = r.get('desiredLongEdge')
+            lightcraft_log('region.geometryMismatch', level='warn', **context)
             raise LightCraftError('raw_region_geometry_mismatch')
         _diagnostics(meta['diagnostics'], operation, before_fingerprint)
         if operation == 'plan':

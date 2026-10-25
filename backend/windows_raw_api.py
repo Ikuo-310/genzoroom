@@ -32,6 +32,16 @@ LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
 
+def _public_region_mapping_reason(mapping, revision, target):
+    if not mapping:
+        return "public_mapping_missing"
+    if mapping[0] != revision or target["documentRevision"] != revision:
+        return "public_revision_mismatch"
+    if mapping[1] != target["geometryId"]:
+        return "public_geometry_mismatch"
+    return None
+
+
 class _ImageResponse(Response):
     async def __call__(self, scope, receive, send):
         try:
@@ -277,8 +287,28 @@ class RawPreviewApi:
             # Whole's public geometry is scoped to its owner; only this owner unwraps it.
             target = body["target"]
             mapping = self._region_geometry.get((target["identity"]["kind"], target["quality"]))
-            if not mapping or mapping[:2] != (doc["revision"], target["geometryId"]):
+            reason = _public_region_mapping_reason(mapping, doc["revision"], target)
+            if reason:
+                context = {"stage": "public_mapping", "reason": reason, "operation": body["operation"],
+                    "revision": doc["revision"], "quality": target["quality"], "kind": target["identity"]["kind"],
+                    "viewGeneration": target["viewGeneration"], "publicGeometryMappingMatch": False,
+                    "nativeResponseReceived": False, "mismatchSide": "public_mapping"}
+                if reason == "public_revision_mismatch":
+                    context["mismatchFields"] = ["documentRevision"]
+                elif reason == "public_geometry_mismatch":
+                    context["mismatchFields"] = ["geometryId"]
+                    context["geometryMatches"] = False
+                elif reason == "public_mapping_missing":
+                    context["mismatchFields"] = ["geometryMapping"]
+                if "desiredLongEdge" in target:
+                    context["desiredLongEdge"] = target["desiredLongEdge"]
+                lightcraft_log("region.geometryMismatch", level="warn", **context)
                 raise LightCraftError("raw_region_geometry_mismatch")
+            lightcraft_log("region.started", level="debug", operation=body["operation"],
+                revision=doc["revision"], quality=target["quality"], kind=target["identity"]["kind"],
+                viewGeneration=target["viewGeneration"], requestId=target["requestId"],
+                desiredLongEdge=target.get("desiredLongEdge"), publicGeometryMappingMatch=True,
+                nativeResponseReceived=False)
             native_target = {**target, "geometryId": mapping[2]}
             ticket = self.raw.request_region(self._raw_handle, native_target, operation=body["operation"],
                                              document_token=doc["documentToken"])
@@ -289,6 +319,11 @@ class RawPreviewApi:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
             self._document(doc["handle"])
             metadata = {**frame.metadata["response"], "geometryId": target["geometryId"]}
+            lightcraft_log("region.nativeResponse", level="debug", operation=body["operation"],
+                revision=doc["revision"], quality=target["quality"], kind=target["identity"]["kind"],
+                viewGeneration=target["viewGeneration"], requestId=target["requestId"],
+                desiredLongEdge=target.get("desiredLongEdge"), publicGeometryMappingMatch=True,
+                nativeResponseReceived=True)
             headers = {"Cache-Control": "no-store", "X-Raw-Region": json.dumps(metadata, separators=(",", ":"))}
             lightcraft_log("raw.region.delivered", level="debug", operation=body["operation"],
                 requestId=target["requestId"], viewGeneration=target["viewGeneration"], revision=doc["revision"],

@@ -114,6 +114,42 @@ def test_rpc_and_tool_errors_are_distinct_and_do_not_break_transport():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(("native_code", "reason"), [
+    ("region_geometry_source_missing", "geometry_source_missing"),
+    ("region_geometry_native_frame_missing", "geometry_native_frame_missing"),
+    ("region_geometry_metadata_mismatch", "geometry_metadata_mismatch"),
+    ("region_geometry_id_mismatch", "geometry_id_mismatch"),
+    ("region_native_full_width_mismatch", "native_full_width_mismatch"),
+    ("region_native_full_height_mismatch", "native_full_height_mismatch"),
+    ("region_full_width_mismatch", "full_width_mismatch"),
+    ("region_full_height_mismatch", "full_height_mismatch"),
+    ("region_render_contract_mismatch", "render_contract_mismatch"),
+    ("region_render_width_mismatch", "render_width_mismatch"),
+    ("region_render_height_mismatch", "render_height_mismatch"),
+])
+def test_native_region_diagnostic_reasons_preserve_external_error_code(native_code, reason):
+    async def run():
+        reader = asyncio.StreamReader()
+        text = json.dumps({"code": native_code})
+        def respond(message):
+            if message.get("method") == "initialize":
+                reply(reader, message, {"protocolVersion": PROTOCOL_VERSION,
+                    "serverInfo": {"name": "lightcraft", "version": "0.10.0"}})
+            elif message.get("method") == "tools/call":
+                reply(reader, message, {"isError": True, "content": [{"type": "text", "text": text}]})
+        writer = PipeWriter(respond)
+        client = LightCraftMCP(reader, writer, 1)
+        try:
+            await client.initialize("diagnostic-test")
+            with pytest.raises(MCPToolError) as caught:
+                await client.call_tool_result("render_region_preview", {"operation": "plan"})
+            assert caught.value.code == "raw_region_geometry_mismatch"
+            assert caught.value.diagnostic_reason == reason
+        finally:
+            await client.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("data,code", [
     (b'not json\n', "lightcraft_invalid_json"),
     (b'\xff\n', "lightcraft_invalid_utf8"),

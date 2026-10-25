@@ -222,6 +222,70 @@ def test_region_response_png_metadata_and_identity_are_validated(tmp_path):
     asyncio.run(run())
 
 
+def test_plan_echo_mismatch_logs_field_names_without_opaque_identity_or_private_values(monkeypatch):
+    from types import SimpleNamespace
+    import lightcraft_runtime
+    events = []
+    monkeypatch.setattr(lightcraft_runtime, 'lightcraft_log',
+        lambda event, **context: events.append((event, context)))
+    fake = SimpleNamespace(region_identity=lambda _handle, kind: {
+        'assetId': '12345678-1234-4234-9234-123456789abc', 'sourceId': 'a' * 64,
+        'generation': 1, 'documentToken': 'b' * 32, 'kind': kind, 'revision': 2},
+        _photo=lambda _handle: SimpleNamespace(applied_revision=2))
+    t = target(fake, object(), operation='plan')
+    good = result(t, 'plan')
+    assert region.validate_result(good, t, 'plan', 1)[1]['response']['desiredLongEdge'] == 16
+    assert events == []
+
+    meta = json.loads(good['content'][0]['text'])
+    meta['response']['desiredLongEdge'] = 4096
+    good['content'][0]['text'] = json.dumps(meta)
+    with pytest.raises(LightCraftError, match='^raw_region_geometry_mismatch$'):
+        region.validate_result(good, t, 'plan', 1)
+    event, context = events[-1]
+    assert event == 'region.geometryMismatch'
+    assert context['stage'] == 'native_response_echo' and context['reason'] == 'echo_mismatch'
+    assert context['mismatchFields'] == ['desiredLongEdge']
+    assert context['requestDesiredLongEdge'] == 16 and context['responseDesiredLongEdge'] == 4096
+    assert context['geometryMatches'] and context['identityMatches'] and context['nativeResponseReceived']
+    serialized = json.dumps(context)
+    for secret in (t['identity']['sourceId'], t['identity']['documentToken'], t['identity']['assetId'], 'unused-fixture'):
+        assert secret not in serialized
+
+    events.clear()
+    identity_bad = result(t, 'plan')
+    identity_meta = json.loads(identity_bad['content'][0]['text'])
+    identity_meta['response']['identity']['sourceId'] = 'c' * 64
+    identity_bad['content'][0]['text'] = json.dumps(identity_meta)
+    with pytest.raises(LightCraftError, match='^raw_region_geometry_mismatch$'):
+        region.validate_result(identity_bad, t, 'plan', 1)
+    identity_context = events[-1][1]
+    assert identity_context['mismatchFields'] == ['identity'] and not identity_context['identityMatches']
+    serialized = json.dumps(identity_context)
+    for secret in (t['identity']['sourceId'], t['identity']['documentToken'], t['identity']['assetId'], 'c' * 64):
+        assert secret not in serialized
+
+
+def test_malformed_plan_response_keeps_existing_error_code_without_echo_diagnostic(monkeypatch):
+    from types import SimpleNamespace
+    import lightcraft_runtime
+    events = []
+    monkeypatch.setattr(lightcraft_runtime, 'lightcraft_log',
+        lambda event, **context: events.append((event, context)))
+    fake = SimpleNamespace(region_identity=lambda _handle, kind: {
+        'assetId': '12345678-1234-4234-9234-123456789abc', 'sourceId': 'a' * 64,
+        'generation': 1, 'documentToken': 'b' * 32, 'kind': kind, 'revision': 2},
+        _photo=lambda _handle: SimpleNamespace(applied_revision=2))
+    t = target(fake, object(), operation='plan')
+    malformed = result(t, 'plan')
+    meta = json.loads(malformed['content'][0]['text'])
+    del meta['response']['fullWidth']
+    malformed['content'][0]['text'] = json.dumps(meta)
+    with pytest.raises(LightCraftError, match='^raw_invalid_region_response$'):
+        region.validate_result(malformed, t, 'plan', 1)
+    assert events == []
+
+
 def test_method_aware_region_line_limit_does_not_use_whole_envelope():
     async def run():
         reader=asyncio.StreamReader(limit=24*1024**2)
