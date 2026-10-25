@@ -1,4 +1,5 @@
 import type { RegionRect, RegionWindow } from './rawRegionPlanner';
+import type { RegionAutoReport } from './rawRegionAuto';
 
 export const RAW_REGION_DIAGNOSTICS_CHANNEL = 'genzoroom-raw-region-diagnostics';
 export type RawRegionPosition = 'center' | 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight' | 'left' | 'right' | 'top' | 'bottom';
@@ -9,6 +10,7 @@ export type RawRegionDiagnosticState = {
   comparing: boolean; position: RawRegionPosition | null; requesting: boolean; cleared: boolean;
   errorCode?: string; frame?: { nativeWidth: number; nativeHeight: number };
   ownerErrorCode?: string; ownerHttpStatus?: number;
+  auto?: RegionAutoReport;
   details?: { f: { fullWidth: number; fullHeight: number }; w: RegionWindow; validRegion: RegionWindow; revision: number; viewGeneration: number;
     planGeneration: number; requestId: string } | null;
 };
@@ -17,6 +19,7 @@ export type RawRegionDiagnosticMessage =
   | { type: 'action'; clientId: string; ownerId?: string; actionId: string; action: 'request'; position: RawRegionPosition; compare: boolean }
   | { type: 'action'; clientId: string; ownerId?: string; actionId: string; action: 'clear' }
   | { type: 'action'; clientId: string; ownerId?: string; actionId: string; action: 'outline'; enabled: boolean }
+  | { type: 'action'; clientId: string; ownerId?: string; actionId: string; action: 'auto'; enabled: boolean }
   | { type: 'state'; clientId: string; ownerId: string; state: RawRegionDiagnosticState }
   | { type: 'result'; clientId: string; ownerId: string; actionId: string; ok: boolean; errorCode?: string };
 

@@ -46,7 +46,7 @@ it('shows disconnected, unsupported and Whole waiting states without sending a R
   expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.status.notConnected'));
   state({ ...baseState, connected: true, supported: false }); await render();
   expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.errors.capability'));
-  expect(host.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('.raw-region-position-buttons button')!.disabled).toBe(true);
   state({ ...baseState, connected: true, supported: true, wholeQuality: 'draft' }); await render();
   expect(host.textContent).toContain(i18n.t('rawRegionDiagnostics.errors.wholeWaiting'));
   expect(posted.filter(message => message.type === 'action' && message.action === 'request')).toHaveLength(0);
@@ -128,4 +128,17 @@ it('detaches when the Developer Diagnostics section is closed or unmounted', asy
   await render(true);
   act(() => root.unmount()); root = createRoot(host);
   expect(posted.at(-1)).toMatchObject({ type: 'detach' });
+});
+
+it('offers provisional density evidence and same-view automatic/Whole-only controls without manual coordinates', async () => {
+  state({ ...baseState, auto: { enabled: true, active: true, decision: 'region_reuse', reason: 'cached_valid_region',
+    viewGeneration: 8, wholeBitmap: { width: 2048, height: 1536 }, wholeF: { width: 2048, height: 1536 },
+    regionBitmap: { width: 512, height: 512 }, regionF: { width: 4000, height: 3000 }, dpr: 1.25, scale: .8,
+    wholeDensity: .512, requiredDensity: 1, regionDensity: 1, rho: .512, quality: 'full', lastPlan: 'reuse' } }); await render();
+  expect(host.textContent).toContain('2048 × 1536'); expect(host.textContent).toContain('4000 × 3000');
+  expect(host.textContent).toContain('0.512'); expect(host.textContent).toContain('C2-C provisional');
+  await click(i18n.t('rawRegionDiagnostics.wholeOnly'));
+  expect(posted.at(-1)).toMatchObject({ action: 'auto', enabled: false, ownerId: 'owner' });
+  await click(i18n.t('rawRegionDiagnostics.autoEnable'));
+  expect(posted.at(-1)).toMatchObject({ action: 'auto', enabled: true, ownerId: 'owner' });
 });

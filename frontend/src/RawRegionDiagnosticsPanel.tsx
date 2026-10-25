@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { createRawRegionDiagnosticsChannel, type RawRegionDiagnosticMessage, type RawRegionDiagnosticState,
   type RawRegionPosition } from './rawRegionDiagnostics';
 import { rawRegionDiagnosticError } from './rawRegionDiagnostics';
+import { REGION_AUTO_PROVISIONAL } from './rawRegionAuto';
 
 const initial: RawRegionDiagnosticState = { connected: false, supported: null, wholeQuality: null, wholeGeometry: null,
   regionGeometry: null, geometryMatches: null, regionSize: null, displayed: false, beforeReady: false,
@@ -71,9 +72,32 @@ export function RawRegionDiagnostics({ active }: { active: boolean }) {
   const canRequest = state.connected && state.supported === true && state.wholeQuality === 'full' && !pending
     && !ownerFailed
     && (!compare || state.beforeReady);
+  const automatic = state.auto;
+  const size = (value?: { width: number; height: number }) => value ? `${value.width} × ${value.height}` : '—';
+  const number = (value?: number) => value === undefined ? '—' : Number(value.toFixed(4)).toString();
+  const autoMode = (enabled: boolean) => send({ type: 'action', clientId: clientId.current, ownerId: ownerId.current,
+    actionId: crypto.randomUUID(), action: 'auto', enabled });
   return <section className="developer-section raw-region-diagnostics" aria-labelledby="raw-region-diagnostics-title">
     <h2 id="raw-region-diagnostics-title">{t('rawRegionDiagnostics.title')}</h2>
     <p>{t('rawRegionDiagnostics.note')}</p>
+    <h3>{t('rawRegionDiagnostics.automatic')}</h3>
+    <p>{t('rawRegionDiagnostics.provisional', { ...REGION_AUTO_PROVISIONAL, context: undefined, contextPixels: REGION_AUTO_PROVISIONAL.context })}</p>
+    <div className="developer-actions">
+      <button type="button" disabled={!state.connected} aria-pressed={automatic?.enabled ?? false} onClick={() => autoMode(true)}>{t('rawRegionDiagnostics.autoEnable')}</button>
+      <button type="button" disabled={!state.connected} aria-pressed={automatic ? !automatic.enabled : false} onClick={() => autoMode(false)}>{t('rawRegionDiagnostics.wholeOnly')}</button>
+    </div>
+    <dl className="developer-diagnostics raw-region-auto-metrics">
+      <div><dt>{t('rawRegionDiagnostics.autoState')}</dt><dd>{automatic ? `${automatic.active ? 'ON' : 'OFF'} / ${automatic.decision} / ${automatic.reason}` : '—'}</dd></div>
+      <div><dt>Whole bitmap / F</dt><dd>{size(automatic?.wholeBitmap)} / {size(automatic?.wholeF)}</dd></div>
+      <div><dt>Region bitmap / F</dt><dd>{size(automatic?.regionBitmap)} / {size(automatic?.regionF)}</dd></div>
+      <div><dt>Viewer DPR / scale</dt><dd>{number(automatic?.dpr)} / {number(automatic?.scale)}</dd></div>
+      <div><dt>{t('rawRegionDiagnostics.visible')}</dt><dd>{automatic?.visible ? `(${number(automatic.visible.x0)}, ${number(automatic.visible.y0)}) → (${number(automatic.visible.x1)}, ${number(automatic.visible.y1)})` : '—'}</dd></div>
+      <div><dt>Whole / required / Region density</dt><dd>{number(automatic?.wholeDensity)} / {number(automatic?.requiredDensity)} / {number(automatic?.regionDensity)}</dd></div>
+      <div><dt>rho (Whole / required)</dt><dd>{number(automatic?.rho)}</dd></div>
+      <div><dt>Quality / viewGeneration</dt><dd>{automatic?.quality ?? '—'} / {automatic?.viewGeneration ?? '—'}</dd></div>
+      <div><dt>reuse / replan · budget limited</dt><dd>{automatic?.lastPlan ?? '—'} / {automatic?.limited ? 'YES' : 'NO'}</dd></div>
+    </dl>
+    <h3>{t('rawRegionDiagnostics.manual')}</h3>
     <dl className="developer-diagnostics">
       <div><dt>{t('rawRegionDiagnostics.statusLabel')}</dt><dd role="status">{t(`rawRegionDiagnostics.status.${status}`)}</dd></div>
       <div><dt>{t('rawRegionDiagnostics.capabilityLabel')}</dt><dd>{t(`rawRegionDiagnostics.capability.${capability}`)}</dd></div>

@@ -10,6 +10,7 @@ import { rawRegionOwner, rawRegion } from './rawApi';
 import { RawRegionDelivery } from './rawRegionDelivery';
 import { RawPreviewUrls, RawRegionOverlay, type RawWholeSurface } from './rawRegionOverlay';
 import { requestManualRegion } from './rawRegionManual';
+import { RawRegionAuto, REGION_AUTO_PROVISIONAL } from './rawRegionAuto';
 import { createRawRegionDiagnosticsChannel, diagnosticVisibleRect, type RawRegionDiagnosticMessage,
   type RawRegionDiagnosticState, type RawRegionPosition } from './rawRegionDiagnostics';
 
@@ -79,6 +80,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const regionRef = useRef<RawRegionDelivery | null>(null);
   const connectRegionRef = useRef<() => Promise<boolean>>(async () => false);
   const publishDiagnosticRef = useRef<() => void>(() => {});
+  const evaluateAutoRef = useRef<() => void>(() => {});
   identity.current = assetId;
   useEffect(() => {
     if (!assetId) { setState(null); return; }
@@ -101,6 +103,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let publishedFrame: { revision: number; quality: 'draft' | 'full'; frame: RawGeometry } | undefined;
     let regionOwner: Awaited<ReturnType<typeof rawRegionOwner>> | undefined;
     let regionConnection: Promise<boolean> | undefined;
+    let auto: RawRegionAuto | undefined;
+    let autoQueued = false;
+    const evaluateAuto = () => {
+      if (autoQueued || !current()) return;
+      autoQueued = true;
+      queueMicrotask(() => { autoQueued = false; if (current()) auto?.evaluate(); });
+    };
     let diagnosticClientId: string | undefined, diagnosticPosition: RawRegionPosition | null = null;
     const diagnosticOwnerId = crypto.randomUUID();
     // Diagnostic pair selection must not mutate the darkroom's own Before/After preference.
@@ -121,8 +130,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         regionGeometry: metadata?.geometryId ?? null, geometryMatches, regionSize: metadata ? { width: metadata.width, height: metadata.height } : null,
         displayed: !!displayed && !!metadata && geometryMatches === true,
         beforeReady, comparing: diagnosticComparing ?? comparing.current, position: diagnosticPosition,
-        requesting: diagnosticRequesting, cleared: diagnosticCleared, errorCode: diagnosticErrorCode,
+        requesting: diagnosticRequesting || !!auto?.report.active && (!!(region.state.running || region.state.pending)
+          || !displayed && ['in_flight', 'native_preflight', 'render'].includes(auto.report.reason)),
+        cleared: diagnosticCleared && !displayed, errorCode: diagnosticErrorCode,
         ownerErrorCode: diagnosticOwnerErrorCode, ownerHttpStatus: diagnosticOwnerHttpStatus,
+        auto: auto?.report,
         frame: whole ? { nativeWidth: whole.frame.nativeWidth, nativeHeight: whole.frame.nativeHeight } : undefined,
         details: metadata ? { f: { fullWidth: metadata.fullWidth, fullHeight: metadata.fullHeight }, w: metadata.window, validRegion: metadata.validRegion,
           revision: metadata.documentRevision, viewGeneration: metadata.viewGeneration,
@@ -136,10 +148,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     publishDiagnosticRef.current = publishDiagnosticState;
     const region = new RawRegionDelivery({
-      changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); publishDiagnosticState(); } },
+      changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); evaluateAuto(); publishDiagnosticState(); } },
       owner: () => editor && publishedFrame && regionOwner ? {
         doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
-        blocked: !current() || frozen.current || editor.mutating || editor.unsettled || !!saver?.locked,
+        blocked: !current() || frozen.current || editor.mutating || editor.unsettled && !editor.interacting || !!saver?.locked,
         wholeBusy: displayRunning || !!displayPending,
       } : undefined,
       send: async (owner, item, signal) => item.mode === 'region'
@@ -150,24 +162,25 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             geometryId: owner.geometry.geometryId }) },
     });
     regionRef.current = region;
-    const overlay = new RawRegionOverlay({ urls, current: candidate => region.isCurrent(candidate),
-      context: () => ({ owner: region.owner, ...wholeSurfaces.current, comparing: diagnosticComparing ?? comparing.current }),
+    const overlay = new RawRegionOverlay({ urls, current: candidate => region.isCurrent(candidate) && (auto?.accept(candidate) ?? true),
+      context: () => ({ owner: region.owner, ...wholeSurfaces.current, comparing: diagnosticComparing ?? comparing.current,
+        regionFull: auto?.enabled ? auto.full : undefined }),
       failed: code => { if (diagnosticClientId) { diagnosticRequesting = false; diagnosticErrorCode = code; publishDiagnosticState(); } },
       changed: () => { if (current()) {
         if (overlay.display && overlay.display.after.planGeneration > diagnosticPlanStart) diagnosticRequesting = false;
-        regionChanged(n => n + 1); publishDiagnosticState();
+        regionChanged(n => n + 1); evaluateAuto(); publishDiagnosticState();
       } } });
     overlayRef.current = overlay;
     const unsubscribeRegion = region.subscribe((candidate, error) => {
       if (candidate) overlay.offer(candidate); else if (!error) overlay.clear();
       publishDiagnosticState();
     });
-    // Explicit connection keeps ordinary Viewer use on B1; only diagnostic plans request Region.
+    // Capability is negotiated only for insufficient density or an explicit diagnostic connection.
     connectRegionRef.current = () => {
       if (regionConnection) return regionConnection;
       if (!editor || !current()) return Promise.resolve(false);
       const doc = editor.confirmed;
-      regionConnection = rawRegionOwner(doc, controller.signal).then(value => {
+      const connection = rawRegionOwner(doc, controller.signal).then(value => {
         if (!current() || editor?.confirmed.documentToken !== doc.documentToken || editor.confirmed.generation !== doc.generation) return false;
         regionOwner = value;
         if (diagnosticClientId) {
@@ -176,6 +189,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         }
         regionChanged(n => n + 1); publishDiagnosticState(); return value.supported;
       }).catch(error => {
+        if (!current() || editor?.confirmed.documentToken !== doc.documentToken || editor.confirmed.generation !== doc.generation) return false;
         if (diagnosticClientId) {
           diagnosticErrorCode = 'raw_region_owner_failed';
           diagnosticOwnerErrorCode = error instanceof RawApiError ? error.code : 'raw_connection_failed';
@@ -183,9 +197,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           publishDiagnosticState();
         }
         return false;
-      }).finally(() => { regionConnection = undefined; });
+      }).finally(() => { if (regionConnection === connection) regionConnection = undefined; });
+      regionConnection = connection;
       return regionConnection;
     };
+    auto = new RawRegionAuto({ delivery: region, overlay,
+      snapshot: () => ({ ...wholeSurfaces.current, comparing: diagnosticComparing ?? comparing.current,
+        interacting: !!editor?.interacting || !!latestView?.interacting }),
+      connect: () => connectRegionRef.current(), changed: publishDiagnosticState });
+    evaluateAutoRef.current = evaluateAuto;
     let manualBusy = false;
     const manual = { request: async (input: Parameters<typeof requestManualRegion>[3]) => {
       if (manualBusy || !current()) return false;
@@ -223,11 +243,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (message.type === 'detach' && message.clientId === diagnosticClientId) {
         diagnosticClientId = undefined; diagnosticRequesting = false; diagnosticErrorCode = undefined;
         diagnosticPosition = null; diagnosticComparing = undefined; diagnosticCleared = true;
-        setRegionOutline(false); region.invalidate(); overlay.refresh(); publishDiagnosticState(); return;
+        setRegionOutline(false); region.invalidate(); auto?.reset(); auto?.setEnabled(true); evaluateAuto(); publishDiagnosticState(); return;
       }
       if (message.type !== 'action' || message.clientId !== diagnosticClientId || message.ownerId !== diagnosticOwnerId) return;
+      if (message.action === 'auto') {
+        diagnosticComparing = undefined; auto?.setEnabled(message.enabled);
+        publishDiagnosticState(); sendDiagnosticResult(message.clientId, message.actionId, true); return;
+      }
       if (message.action === 'outline') { setRegionOutline(message.enabled); sendDiagnosticResult(message.clientId, message.actionId, true); return; }
       if (message.action === 'clear') {
+        auto?.setEnabled(false);
         diagnosticRequesting = false; diagnosticCleared = true; diagnosticPosition = null; diagnosticErrorCode = undefined;
         region.invalidate(); publishDiagnosticState(); sendDiagnosticResult(message.clientId, message.actionId, true); return;
       }
@@ -239,6 +264,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         sendDiagnosticResult(message.clientId, message.actionId, false, diagnosticErrorCode); publishDiagnosticState(); return;
       }
       diagnosticPosition = message.position; diagnosticRequesting = true; diagnosticCleared = false; diagnosticErrorCode = undefined;
+      auto?.setEnabled(false);
       diagnosticComparing = message.compare; overlay.refresh();
       diagnosticPlanStart = region.state.latestPlanGeneration;
       publishDiagnosticState();
@@ -275,7 +301,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       setState({ assetId, status: unavailable ? 'unavailable' : 'error', code });
     };
     const invalidateDisplay = (preserveRegion = false) => {
-      if (!preserveRegion) region.invalidate();
+      if (!preserveRegion) { region.invalidate(); auto?.reset(); }
       displayGeneration++;
       displayTargetKey = undefined;
       displayPending = undefined;
@@ -364,7 +390,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         log(code);
         displayTargetKey = undefined;
         setState(previous => previous && ({ ...previous, displayError: code }));
-      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); publishDiagnosticState(); });
+      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); evaluateAuto(); publishDiagnosticState(); });
     };
     const resyncPreview = (valid = current) => {
       if (!valid()) return;
@@ -388,8 +414,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!current() || !valid()) return;
       if (editor && !editor.interacting && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
-      if (!editor?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
-      const quality = editor?.interacting ? 'draft' : 'full';
+      if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
+      const quality = editor?.interacting || latestView?.interacting ? 'draft' : 'full';
       const key = `${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}`;
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
@@ -410,17 +436,19 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const applyView = () => {
       viewTimer = undefined;
       if (!current() || frozen.current || !editor || !latestView || editor.interacting || editor.unsettled) return;
-      const next = rawWholeSide(latestView, side);
-      if (next === undefined || next === side) return;
-      side = next;
-      viewGeneration++; revisionResyncs = 0;
-      invalidateDisplay(); displayPreview(editor.confirmed);
+      const next = latestView.interacting ? side : rawWholeSide(latestView, side);
+      if (next !== undefined && next !== side) {
+        side = next; viewGeneration++; revisionResyncs = 0;
+        invalidateDisplay();
+      }
+      displayPreview(editor.confirmed); evaluateAuto();
     };
     viewRef.current = (view) => {
       if (view) {
         latestView = view;
-        clearTimeout(viewTimer);
-        viewTimer = setTimeout(applyView, 180);
+        auto?.viewChanged(view);
+        // One non-extending B1/C2-C aggregation slot samples the latest view during a continuous Pan.
+        if (!viewTimer) viewTimer = setTimeout(applyView, REGION_AUTO_PROVISIONAL.aggregationMs);
         return;
       }
       if (!current() || !editor) return;
@@ -447,9 +475,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       pumpDisplay();
       region.refresh();
       overlay.refresh();
+      evaluateAuto();
     };
     const install = (settings: RawSettings) => {
-      region.resetDocument(); regionOwner = undefined;
+      region.resetDocument(); auto?.reset(); regionOwner = undefined; regionConnection = undefined;
       wholeSurfaces.current = {};
       frameSerial = 0;
       displayedRevision = -1;
@@ -457,7 +486,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       publishedFrame = undefined;
       const installed = new RawControls(settings, { schedule: enqueue, changed: notify,
         hold: () => !!saver?.gesturing && installed.confirmed.mutationAttempts >= installed.confirmed.regenerationThreshold,
-        previewBusy: () => displayRunning || !!displayPending,
+        previewBusy: () => displayRunning || !!displayPending || !!region.state.running || !!region.state.pending,
         preview: (confirmed, valid) => displayPreview(confirmed, () => current() && editor === installed && valid()),
         invalidate: invalidateDisplay,
       });
@@ -591,6 +620,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const dispose = () => {
       if (!active) return;
       active = false;
+      auto?.dispose(); evaluateAutoRef.current = () => {};
       region.dispose();
       unsubscribeRegion(); overlay.dispose();
       if (window.genzoroomRegion === manual) delete window.genzoroomRegion;
@@ -681,6 +711,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             quality: frame.quality ?? afterQuality } : undefined;
           overlayRef.current?.refresh();
           publishDiagnosticRef.current();
+          evaluateAutoRef.current();
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height,
             frame: frame.frame, quality: frame.quality ?? afterQuality });
         } catch (cause) {
@@ -710,6 +741,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     if (wasComparing.current && !beforeRequested) overlayRef.current?.clear();
     else overlayRef.current?.refresh();
     wasComparing.current = beforeRequested;
+    evaluateAutoRef.current();
   }, [beforeRequested]);
 
   // Hide old ownership synchronously, before passive effects revoke its URLs.

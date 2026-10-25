@@ -33,6 +33,7 @@ beforeEach(() => {
   createURL.mockImplementation(() => `blob:raw-${createURL.mock.calls.length}`);
   vi.mocked(api.rawCapability).mockResolvedValue(true);
   vi.mocked(api.rawRegionOwner).mockResolvedValue({ sourceId: 'b'.repeat(64), supported: true });
+  vi.mocked(api.rawRegion).mockReset().mockRejectedValue(new api.RawApiError('raw_region_unsupported'));
   vi.mocked(api.createRawWorkspace).mockResolvedValue('workspace');
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1 }));
@@ -234,6 +235,97 @@ function enableBefore() {
     blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1, kind,
     ...(kind === 'before' ? { key: doc.beforeKey! } : {}) }));
 }
+
+function enableAutomaticNative() {
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+    handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'e'.repeat(64) }));
+  createURL.mockImplementation((blob: Blob) => `blob:${blob.type}:${createURL.mock.calls.length}`);
+  vi.stubGlobal('Image', class { src = ''; get naturalWidth() { return Number(/size-(\d+)x(\d+)/.exec(this.src)?.[1]); }
+    get naturalHeight() { return Number(/size-(\d+)x(\d+)/.exec(this.src)?.[2]); } decode() { return Promise.resolve(); } removeAttribute() {} });
+  const blob = (w: number, h: number) => new Blob(['bitmap'], { type: `application/x-size-${w}x${h}` });
+  vi.mocked(api.rawPreview).mockImplementation(async (doc, _serial, _signal, kind = 'after', target) => {
+    const width = target?.maxSide ?? 1024, height = width * 3/4;
+    return { blob: blob(width, height), width, height, epoch: 1, sequence: 1, kind, quality: target?.quality ?? 'full',
+      key: kind === 'before' ? doc.beforeKey! : undefined,
+      frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, fullWidth: width, fullHeight: height, aspect: 4/3, window: null } };
+  });
+  vi.mocked(api.rawRegion).mockImplementation(async (_doc, target) => {
+    if ('desiredLongEdge' in target) return { operation: 'plan', metadata: { ...target, kind: target.identity.kind,
+      nativeWidth: 4000, nativeHeight: 3000, fullWidth: target.desiredLongEdge, fullHeight: target.desiredLongEdge * 3/4 } };
+    return { operation: 'render', metadata: regionResponse(target), blob: blob(target.window.w, target.window.h) };
+  });
+}
+
+it.each([false, true])('connects real Viewer density to automatic Draft/Full Region and pair=%s without waiting in save', async compare => {
+  vi.useFakeTimers(); enableAutomaticNative();
+  const asset = regionRequest().identity.assetId;
+  await render(asset, compare); await flush();
+  const fit = { width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64),
+    dpr: 1, scale: .25, fit: true, panX: 0, panY: 0, interacting: false };
+  act(() => current!.viewChanged(fit)); await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(api.rawRegion).not.toHaveBeenCalled();
+  act(() => current!.viewChanged({ ...fit, scale: 1, fit: false }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(current!.regionDisplay?.after.metadata.fullWidth).toBe(4000);
+  expect(current!.regionDisplay?.wholeAfter.frame.fullWidth).toBe(2048);
+  expect(!!current!.regionDisplay?.before).toBe(compare);
+  act(() => current!.viewChanged({ ...fit, scale: 1, fit: false, panX: 500, interacting: true }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(current!.regionDisplay?.after.metadata.quality).toBe('draft');
+  act(() => current!.viewChanged({ ...fit, scale: 1, fit: false, panX: 500 }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(current!.regionDisplay?.after.metadata.quality).toBe('full');
+  if (compare) expect(current!.regionDisplay?.before?.metadata.viewGeneration).toBe(current!.regionDisplay?.after.metadata.viewGeneration);
+  await render(null); await flush();
+  expect(current).toBeNull();
+  expect(new Set(revokeURL.mock.calls.map(([value]) => value)).size).toBe(createURL.mock.calls.length);
+});
+
+it.each(['unsupported', 'ownerFailed'])('retains automatic B1 Whole fallback for %s', async mode => {
+  vi.useFakeTimers(); enableAutomaticNative();
+  if (mode === 'unsupported') vi.mocked(api.rawRegionOwner).mockResolvedValue({ sourceId: 'b'.repeat(64), supported: false });
+  else vi.mocked(api.rawRegionOwner).mockRejectedValue(new api.RawApiError('raw_request_failed', 502));
+  await render(regionRequest().identity.assetId); await flush();
+  act(() => current!.viewChanged({ width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64), dpr: 1, scale: 1, fit: false }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(current?.status).toBe('ready'); expect(current?.url).toBeTruthy(); expect(current?.width).toBe(2048);
+  expect(current?.regionDisplay).toBeUndefined(); expect(api.rawRegion).not.toHaveBeenCalled();
+});
+
+it.each(['photoSwitch', 'pagehide', 'unmount', 'saveDeparture'])('invalidates automatic Region at %s while Whole remains independently owned', async boundary => {
+  vi.useFakeTimers(); enableAutomaticNative();
+  await render(regionRequest().identity.assetId); await flush();
+  act(() => current!.viewChanged({ width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64), dpr: 1, scale: 1, fit: false }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(current!.regionDisplay).toBeDefined();
+  const regionURL = current!.regionDisplay!.after.url;
+  if (boundary === 'photoSwitch') await render('next-photo');
+  else if (boundary === 'pagehide') await act(async () => window.dispatchEvent(new Event('pagehide')));
+  else if (boundary === 'unmount') { act(() => root.unmount()); root = createRoot(document.createElement('div')); }
+  else await act(async () => current!.prepareSave());
+  await flush();
+  expect(revokeURL.mock.calls.filter(([value]) => value === regionURL)).toHaveLength(1);
+  if (boundary === 'saveDeparture') { expect(current!.url).toBeTruthy(); expect(current!.regionDisplay).toBeUndefined(); }
+});
+
+it('does not join a transmitted automatic image when saving a departure', async () => {
+  vi.useFakeTimers(); enableAutomaticNative();
+  const render = vi.mocked(api.rawRegion).getMockImplementation()!, pending = deferred<api.RawRegionResult>();
+  let target: Parameters<typeof api.rawRegion>[1] | undefined;
+  vi.mocked(api.rawRegion).mockImplementation(async (...args) => {
+    if ('desiredLongEdge' in args[1]) return render(...args);
+    target = args[1]; return pending.promise;
+  });
+  await act(async () => { root.render(<Harness id={regionRequest().identity.assetId} />); }); await flush();
+  act(() => current!.viewChanged({ width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64), dpr: 1, scale: 1, fit: false }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await flush();
+  expect(target).toBeDefined(); expect(current!.regionDisplay).toBeUndefined();
+  await act(async () => current!.prepareSave());
+  expect(current!.url).toBeTruthy(); expect(current!.locked).toBe(true);
+  await act(async () => pending.resolve({ operation: 'render', metadata: regionResponse(target as ReturnType<typeof regionRequest>), blob: new Blob(['late']) })); await flush();
+  expect(current!.regionDisplay).toBeUndefined();
+});
 
 describe('RAW native Before cache', () => {
   it('adopts a larger same-revision Whole, pairs Before, and freezes size during a gesture', async () => {

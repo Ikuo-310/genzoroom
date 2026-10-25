@@ -233,6 +233,32 @@ describe('Viewer edit settings context menu', () => {
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
     expect(host.querySelector<HTMLElement>('.raw-native-frame')!.style.width).toBe('6000px');
   });
+  it('publishes actual Native Pan and wheel gesture state through the existing RawView callback', async () => {
+    vi.useFakeTimers(); let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    const changed = vi.fn();
+    act(() => root.render(<ImageViewer src="blob:raw" documentKey="raw" previewPixels rawFrame={{ nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64) }}
+      onRawViewChange={changed} alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 750 });
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    act(() => resize());
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    const pointer = (type: string, x: number) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 20 });
+      Object.defineProperty(event, 'pointerId', { value: 7 }); act(() => viewport.dispatchEvent(event));
+    };
+    pointer('pointerdown', 10); pointer('pointermove', 60);
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ panX: 50, panY: 0, interacting: true }));
+    pointer('pointerup', 60);
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ panX: 50, interacting: false }));
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 })));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ interacting: true }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(180); });
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ interacting: false }));
+    vi.useRealTimers();
+  });
   it('keeps native Preview load state aligned with its document across fast loads and JPEG switches', () => {
     const render = (props: { src: string; documentKey?: string; previewStatus?: 'loading' | 'error'; autoLoad: boolean }) =>
       act(() => root.render(<NativePreviewHarness {...props} />));

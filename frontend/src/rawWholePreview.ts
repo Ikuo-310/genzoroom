@@ -2,7 +2,8 @@
 export const RAW_WHOLE_MAX_SIDE = 2048;
 export const RAW_WHOLE_MAX_BYTES = 17 * 1024 ** 2;
 export type RawView = { width: number; height: number; dpr: number; scale: number;
-  nativeWidth: number; nativeHeight: number; geometryId: string; fit: boolean };
+  nativeWidth: number; nativeHeight: number; geometryId: string; fit: boolean;
+  panX?: number; panY?: number; interacting?: boolean };
 
 export function rawWholeSide(view: RawView, previous?: number): number | undefined {
   if (![view.width, view.height, view.dpr, view.scale, view.nativeWidth, view.nativeHeight]

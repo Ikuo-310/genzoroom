@@ -662,7 +662,10 @@
   },
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
-    "note": "実機表示確認専用。ボタン操作でのみ要求し、context 16 / prefetch 0を試験値として使用します（製品値ではありません）。通常暗室UIやPan/Zoomからは要求しません。",
+    "note": "C2-C provisional：ViewerのPan/ZoomとWhole密度に応じて自動要求します。下の手動位置buttonはC2-B用（context 16 / prefetch 0）で、自動要求を一時停止します。",
+    "automatic": "自動Region / 画質比較", "manual": "C2-B手動位置試験", "autoEnable": "自動Region ON", "wholeOnly": "Region一時OFF（Whole-only）",
+    "autoState": "自動Region / 判断 / 理由", "visible": "可視Native範囲",
+    "provisional": "C2-C provisional（製品値ではありません）：開始rho < {{startRho}}、解除rho ≥ {{stopRho}}、集約{{aggregationMs}}ms、context {{contextPixels}} / prefetch {{prefetch}}、F要求刻み{{fullSideStep}}px。densityはNative 1px当たりの画像／表示pixel数です。",
     "statusLabel": "Region", "capabilityLabel": "Region capability", "position": "位置", "quality": "Quality", "beforeCompare": "Before比較",
     "geometry": "Whole / Region geometry", "regionSize": "Region表示サイズ", "clearedLabel": "Region解除済み",
     "notChecked": "未確認", "match": "一致", "mismatch": "不一致", "none": "—", "yes": "はい", "no": "いいえ",

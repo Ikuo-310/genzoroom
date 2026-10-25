@@ -418,3 +418,82 @@ sourceIdを`SHA256(ASCII("genzoroom-region-source-v1") + NUL + ASCII(lowercase_n
 Frontendには`region.owner.started/completed/failed`（generation/revision、HTTP status、安全なerrorCode、時間、supported）を追加した。BackendにはGET開始・owner検証・capability結果・失敗コードを追加し、sourceIdの桁数だけを補助metadataに記録する。token、資格情報、path、画像、raw response本文は記録しない。診断UIは実errorCode/HTTP statusを併記し、再接続成功stateで以前のエラーを解除する。
 
 関連Backend 100件、Frontend 11ファイル310件成功。Hash128 owner、stale generation/public token、Region preflight、Whole-only fallback、C0/C1契約、C2-A配送、C2-B診断・URL/pair/staleを含む。実probeはCPUの小さな合成PNGとtools/listを対象とし、実RAW/GPUの画面受入とは区別する。C2-Cには進めない。
+
+## 15. C2-B Windows受入PASSとC2-C自動Region（2026-10-25）
+
+ユーザーのWindows実機報告により、基準 `1e3fa0307e6b128faa6f91aef9763b889d516c0c` のC2-BをPASSとする。owner取得・capability対応、中央／四隅／各edge、Whole/Region geometry一致、位置ずれなし、Zoom後の手動再要求、Before/After比較を確認済み。これはユーザー実機報告であり、agentがブラウザ操作した結果ではない。以下のC2-Cは別途Windows受入待ちで、先行する節の「自動要求しない」「C2-C未実装」をこの節で更新する。
+
+### 15.1 densityと暫定policy
+
+`RawRegionAuto` は既存 `RawRegionDelivery` / `RawRegionOverlay` にview intentを渡す。独立Native worker、画像cache、保存ownerは追加しない。B1 Wholeの実採用frameのfullWidth/fullHeightをbitmap寸法とし、Native寸法・CSS scale・DPRからC0 `rawWholeDensity()` を呼ぶ。C0の既存rhoはrequired/bitmapなので、UIで指定された `rho = bitmap density / required density` へ逆数変換する。Whole densityはNative 1px当たりの最小軸bitmap pixel数、required densityはscale×DPRである。
+
+以下はすべて **C2-C provisional** で、性能測定に基づく製品値ではない。Developer Diagnosticsにも表示する。
+
+| 値 | C2-C provisional |
+| --- | --- |
+| Region開始 | rho < 0.85 |
+| Region解除 | rho ≥ 0.95。中間は現在のON/OFFを維持 |
+| Pan/Zoom集約 | B1と共用の非延長180ms timer、最新viewだけを保持 |
+| wheel/button Zoom gesture終了 | 180msの静止。短いgestureは中間Draftを省略してFullへ集約できる |
+| Region context / prefetch | 16 / 64 Full pixel |
+| Region Fの要求 | Native長辺×min(1,scale×DPR)を256px単位で切上げ、Native長辺を上限とする |
+
+Fの要求値はdensityからのintentであり、LCのaspect丸めをFrontendが再実装するものではない。Native preflightが返した実Fだけをplanner／表示へ渡す。予算は既存C1のside/pixel/PNG/MCP上限を維持する。capによる部分overlayは`limited`で診断表示し、残りはWholeで埋める。NativeがWholeより高い密度を供給できない場合は`no_density_gain`でRegionを表示しない。100%を超えてもNativeを超える情報量は主張しない。
+
+### 15.2 RawViewと有限配送
+
+`ImageViewer` は既存 `RawView` にpanX/panY/interactingを追加し、CSS viewport、DPR、scale、Native frame、geometryIdと同時に通知する。Native可視rectはC0 `visibleNativeRegion()` でclampする。PNG natural sizeやrequestedMaxSideから座標を逆算しない。Panのpointer capture開始／終了、wheel/button Zoomの静止でview gestureを通知する。JPEG描画分岐・ショートカットは維持する。
+
+hookはB1と共用する180ms slotで途中viewを捨てる。待機中のviewは1個、Region配送のrunning descriptorは1個、pending finite planは最新1個。preflight結果から明示的に新render planを作る。新viewで送信済みNativeを強制preemptしない。最新planに置き換え、古い結果はviewGeneration/plan/request/owner/revision再検証で破棄する。Nativeは従来の共有workerで直列実行し、Wholeを優先する。通常のview変更ではHTTP Promiseを増殖させない。
+
+Panでcacheのvalid域を出る、qualityや必要Fが変わる場合は集約待ちの間から旧overlayを外す。Wholeは保持する。同じowner/content/F/qualityのまま可視rectがcache valid域に完全包含される場合だけC0 `canReuseRegion()` と `rebindRegion()` を使い、latest viewへ明示rebindする。`adoptReuse()` は配送descriptorだけを更新し、`RawRegionOverlay.rebind()` は既存URL・decoded bitmap・保持Whole参照を再利用する。Native要求もdecodeもURL作成も発生しない。手動診断から自動へ戻す際には配送のviewGeneration下限を引き継ぐ。
+
+### 15.3 Whole／Draft／Full／比較
+
+高密度RegionはWholeと異なるFを必要とする。自動modeに限り、overlay contextが確認済みRegion preflight Fを明示する。WholeとRegionは同じdocument owner/revision/Native geometry/qualityで、Regionはその確認済みFと一致することを要求する。手動C2-B modeの同F検査は維持する。Before/After Region同士には引き続き同じF/W/validRegion/quality/bitmap寸法/view/planを要求する。
+
+Pan/Zoom gestureと既存RawControlsのedit gestureは、同じhookのWhole表示intentのqualityへ合流する。操作中はACK revisionのWhole DraftをbaseにRegion Draft、終了後は最新view/revisionのWhole FullとRegion Fullへ収束する。mutation中の採用は禁止する。Before Wholeも同quality/revisionが必要で、未準備又は片側Regionのみの間はWholeを表示する。既存P1の非延長1000ms courtesyにRegion running/pendingも含めるが、gestureやHistory/save queueは追加しない。保存成功はRegion render/decode完了を待たない。
+
+| 状態 | 所有・更新・不変条件 |
+| --- | --- |
+| 最新RawView / gesture | ImageViewer → hookの1 slot。pan、scale、DPR、Native geometryを同じviewで扱う |
+| 自動Region intent / hysteresis / confirmed F | RawRegionAuto。owner/quality/Whole F/必要F/比較が変われば再preflight。FはNativeの結果だけ |
+| descriptor / preflight / running / pending | 既存RawRegionDelivery。C0検証・最新view guardを維持、rebindにNative workなし |
+| bitmap / URL / Whole base | 既存RawRegionOverlay / RawPreviewUrls。共有参照、pair一括採用、stale decode破棄を維持 |
+
+photo/Filmstrip切替、Gallery、generation/token/revision変更、regeneration、mutation、save departure、Before終了、unmount/pagehide/shutdownでは既存の失効・解放経路を通す。自動plannerのF/intent/接続試行状態もresetする。density不足時に初めてRegion ownerを明示接続し、非対応・照会失敗ではWhole B1を継続する。失敗時にviewごとの無制限retryは行わない。
+
+### 15.4 diagnosticsと画質比較
+
+`/developer` のRAW Region Previewに自動Region ON／Region一時OFF（Whole-only）を追加した。Zoom/Pan位置は変更せずoverlayだけを切り替える。手動位置button又はRegion解除は自動modeを一時停止する。診断tabを閉じると通常の自動modeへ戻る。自動Before pairは暗室の既存Before/After操作に追従し、診断UI内のBefore checkboxは従来の手動位置試験用である。
+
+診断表示はWhole bitmap/F、Region bitmap/F、DPR/scale、Native visible rect、Whole/required/Region density、rho、active/inactive理由、reuse/replan、Draft/Full、viewGeneration、budget limitedを示す。`region.auto.evaluate` は集約された判断を記録し、Pan event全件は記録しない。既存`region.started/delivery/received/overlay.*`とBackendのNative timingを併用し、queue wait・render/transport・decodeMs・adoptWaitMs・stale/superseded/cancelledを追跡する。token、画像、path、Recipe/History本文はログへ出さない。
+
+### 15.5 自動試験と限定監査
+
+関連Frontend 18ファイル451件成功後、save departureが送信中Regionを待たずに完了する追加試験を含むhook 74件と、失敗時retry loop抑止／generation別接続epochを含むauto 11件も成功（重複を除く合計454件）。最終の接続epoch修正は直接関連4ファイル107件で再確認した。C0/C1/C2-A Backend契約・配送35件成功。density/hysteresis、Native座標、独立高F、reuseでNative/decode/URL作成なし、F変更、100 Panのrunning1/latest pending1、Draft/Full、Before pair、stale view、capability fallback、owner失敗、manual→auto generation、Whole-only比較、lifecycle、P1、RAW/JPEG Viewer、History/save/Undo/Redoを対象とした。実ブラウザ操作・実RAWの画質／速度／メモリ受入とは区別する。
+
+監査は無制限request、stale、quality/pair混在、Whole消失、capability fallback、境界振動、URL参照、保存待機、C3先行、JPEG影響に限定する。C3の製品値を確定せず、Windows C2-C受入を次の手順で行う。
+
+限定監査ではmanual→autoのviewGeneration下限引継ぎ、no-density-gain抑止、失敗理由保持／retry loop抑止、decode待ち中の診断状態、旧generationのcapability照会が新接続を上書きしないepoch／promise所有を確認・修正した。未解決High/Mediumは0。TypeScript／production build／`git diff --check`成功。Windows hostのCargo dev build（locked/offline）成功。既存の500 kB超chunk警告とincremental cacheのhard-link→copy警告は継続。実画面、実RAW/GPU、長時間RSS/VRAM、NAS/Firefox、全suite、Docker release Smoke Testは実施していない。
+
+### 15.6 Windows起動・受入
+
+Frontend production buildとWindows開発hostを用意した後、既存アプリを保存・終了し、PowerShellで次を実行する。C1 binaryは変更しない。
+
+```powershell
+Set-Location I:\code\genzoroom
+$env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\release\lightcraft-cli.exe'
+& '.\desktop\target\debug\genzoroom-desktop.exe'
+```
+
+1. 約4000px級RAWの細かい文字、建物の細線、植栽、テクスチャを暗室で開く。FitでWhole密度が十分ならWhole-onlyとなる。高DPR／大viewportでFitでも不足する場合は診断rhoに従ってRegionが必要になり得る。
+2. Developer Diagnostics → RAW Region Previewを開き「自動Region ON」を選ぶ。暗室で100%以上へZoomし、Wholeを消さずRegionへ進み、Region F/densityがWholeより高いことを数値で確認する。Region bitmapサイズだけで高解像度化を判断しない。
+3. Panを続け、必要時だけ更新され、白抜け・旧位置Region残留・位置ずれがないことを確認する。valid域内ではreuse、外ではreplanになる。pointerを離す／Zoomが静止した後、Fullへ収束する。
+4. 同じZoom/Pan位置のまま「Region一時OFF（Whole-only）」と「自動Region ON」を交互に押し、細部を比較する。密度が上がっても画像内容によって画質差が目立たない場合がある。Dehaze境界はfeatherで隠していない。
+5. 暗室の既存Before/Afterを切り替え、同じ位置・F・qualityの両側Regionが揃うまでWhole、揃ってからpairになることを確認する。
+6. Zoom outでrhoが解除側へ達するとoverlayだけ外れWholeへ戻ること、photo切替／Gallery復帰で旧Regionが残らないことを確認する。診断のWhole-only一時停止はtabを閉じると解除される。
+
+### 15.7 C3へ残すもの
+
+最終rho threshold/hysteresis、context/prefetch、aggregation/quiet interval/F刻み、Region memory budget、latency・RSS/VRAM、Dehaze 3 LSBの最終品質判定、長時間stress、RAW Export、Scopeは未確定・未実装。C2-CのWindows受入と次の明示依頼を条件にC3へ進む。

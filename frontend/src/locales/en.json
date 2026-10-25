@@ -672,7 +672,10 @@
   },
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
-    "note": "For real-device visual acceptance only. Requests run only from these buttons and use context 16 / prefetch 0 as diagnostic values, not product values. The normal darkroom and Pan/Zoom never request Region.",
+    "note": "C2-C provisional: automatic requests follow Viewer Pan/Zoom and Whole density. Manual position buttons below are for C2-B (context 16 / prefetch 0) and pause automatic requests.",
+    "automatic": "Automatic Region / quality comparison", "manual": "C2-B manual positions", "autoEnable": "Automatic Region ON", "wholeOnly": "Region temporarily OFF (Whole-only)",
+    "autoState": "Automatic Region / decision / reason", "visible": "Visible Native rectangle",
+    "provisional": "C2-C provisional, not product values: start rho < {{startRho}}, stop rho ≥ {{stopRho}}, aggregate {{aggregationMs}}ms, context {{contextPixels}} / prefetch {{prefetch}}, F request step {{fullSideStep}}px. Density is image/display pixels per Native pixel.",
     "statusLabel": "Region", "capabilityLabel": "Region capability", "position": "Position", "quality": "Quality", "beforeCompare": "Before comparison",
     "geometry": "Whole / Region geometry", "regionSize": "Region display size", "clearedLabel": "Region cleared",
     "notChecked": "Not checked", "match": "Match", "mismatch": "Mismatch", "none": "—", "yes": "Yes", "no": "No",

@@ -28,6 +28,7 @@ export class RawRegionDelivery {
   private listeners = new Set<(candidate: RegionCandidate | undefined, error?: unknown) => void>();
   constructor(private readonly options: Options) {}
   get owner() { const owner = this.options.owner(); return owner ? structuredClone(owner) : undefined; }
+  get nextViewGeneration() { return this.latestView + 1; }
   subscribe(listener: (candidate: RegionCandidate | undefined, error?: unknown) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   isCurrent(candidate: RegionCandidate) {
     const item = this.targets.find(i => i.requestId === candidate.item.requestId);
@@ -70,6 +71,15 @@ export class RawRegionDelivery {
     this.queuedAt = performance.now();
     this.options.changed?.();
     this.pump(); return true;
+  }
+  adoptReuse(plan: PreviewPlan) {
+    if (this.closed || !plan.items.every(item => this.current(item)) || plan.items[0].viewGeneration < this.latestView) return false;
+    const next = replacePreviewPlan(this.state, plan);
+    if (next === this.state) return false;
+    // Rebinding changes delivery identity, but never queues bitmap work or preempts a transmitted call.
+    this.state = { ...next, pending: undefined }; this.targets = plan.items;
+    this.latestView = plan.items[0].viewGeneration; this.candidate = this.preflight = undefined;
+    return true;
   }
   invalidate() {
     this.targets = [];

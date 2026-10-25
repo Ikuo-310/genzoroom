@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## 工程C2-C：Pan/Zoom自動Region（2026-10-25）
+
+ユーザー報告により `1e3fa0307e6b128faa6f91aef9763b889d516c0c` のC2-B Windows実機受入はPASS。owner/capability、中央／四隅／edge、geometry一致・位置ずれなし、Zoom後の手動再要求、Before/Afterを確認済み。
+
+C2-Cは既存RawViewに実Pan／gestureを追加し、B1と共用する最新view集約からC0 density／planner、既存finite delivery／overlayへ接続した。Wholeを維持し、Native確認済みの独立Region Fで局所密度を高める。reuseはcanReuseRegionを通したmetadata rebindだけで、Native/decode/URL作成なし。Pan/ZoomとeditのDraft/Fullは既存hookへ統合し、History/saveは画像待ちにしない。
+
+開始rho<0.85、解除rho≥0.95、集約／Zoom静止180ms、context16／prefetch64、F要求刻み256pxは全てC2-C provisional。Developer Diagnosticsで実bitmap/F・density/rho・可視rect・reuse/replanを確認でき、同じZoom/Pan位置でWhole-onlyと自動Regionを比較できる。製品値・性能・メモリ・Dehaze最終判定はC3へ残す。詳しい不変条件とWindows手順は[Region設計§15](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#15-c2-b-windows受入passとc2-c自動region2026-10-25)。README/CHANGELOGはWindows C2-C受入前なので変更しない。
+
+関連Frontendは重複除外454件、Backend契約／配送35件成功。最終修正の関連107件も成功。TypeScript、production build、Windows Cargo dev build、差分検査成功。既存chunk警告・incremental cache hard-link→copy警告は継続。限定監査High0／Medium0。agentによる実画面操作は行わず、C2-CのWindows受入と画質比較はユーザー確認待ち。
+
 ## C2-B：Windows Region受入UI補助
 
 `/developer` に「RAW Region Preview」tabを追加し、RAW ownerとはtargeted BroadcastChannelで接続する。中央・四隅・edgeの位置button、Before/After pair、解除、通常OFFの有効域枠、品質／geometry／画像サイズ／要求状態表示を実装。位置rectは現在Native frameの半分サイズから算出し、context=16 / prefetch=0はこのDeveloper Diagnosticsだけの試験値として固定した。Developer tab detach、photo離脱、Gallery復帰で診断Region・細枠・channelを回収する。通常暗室に開発ボタンを設けず、Pan/Zoom、threshold、C2-C、JPEG経路は変更していない。

@@ -86,6 +86,12 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
+  const [viewInteracting, setViewInteracting] = useState(false);
+  const viewGestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    setViewInteracting(false);
+    return () => { clearTimeout(viewGestureTimer.current); };
+  }, [imageIdentity]);
   const previousDpr = useRef(dpr);
   useEffect(() => {
     const ratio = previousDpr.current / dpr;
@@ -100,8 +106,9 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   viewCallback.current = onRawViewChange;
   useEffect(() => {
     if (rawFrame) viewCallback.current?.({ width: viewportSize.x, height: viewportSize.y, dpr, scale,
-      nativeWidth: rawFrame.nativeWidth, nativeHeight: rawFrame.nativeHeight, geometryId: rawFrame.geometryId, fit: fitMode });
-  }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode]);
+      nativeWidth: rawFrame.nativeWidth, nativeHeight: rawFrame.nativeHeight, geometryId: rawFrame.geometryId, fit: fitMode,
+      panX: pan.x, panY: pan.y, interacting: viewInteracting });
+  }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode, pan.x, pan.y, viewInteracting]);
   const [backslashHeld, setBackslashHeld] = useState(false);
   const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   const regionDisplay = rawRegionDisplay?.after.metadata.geometryId === rawFrame?.geometryId
@@ -206,6 +213,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
 
   // Explicit view controls discard the return point instead of reviving an older zoom.
   function fit() {
+    clearTimeout(viewGestureTimer.current); setViewInteracting(false);
     previousTransform.current = null;
     setFitMode(true);
     setScale(fitScale);
@@ -213,6 +221,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function setActualSize() {
+    clearTimeout(viewGestureTimer.current); setViewInteracting(false);
     previousTransform.current = null;
     setFitMode(false);
     setScale(rawFrame ? 1 / dpr : 1);
@@ -241,6 +250,11 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }, [keyboardBlocked, fitMode, scale, pan, fitScale]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
+    if (rawFrame) {
+      setViewInteracting(true); clearTimeout(viewGestureTimer.current);
+      // C2-C provisional quiet interval; this changes display quality, never the edit/save gesture owner.
+      viewGestureTimer.current = setTimeout(() => { if (!dragRef.current) setViewInteracting(false); }, 180);
+    }
     const next = rawFrame ? clampZoom(nextValue * dpr) / dpr : clampZoom(nextValue);
     setFitMode(false);
     setPan((current) => zoomAroundPoint(current, point, scale, next));
@@ -259,6 +273,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     if (scale <= fitScale || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
+    if (rawFrame) setViewInteracting(true);
   }
 
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
@@ -268,7 +283,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function stopPan(event: ReactPointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+    if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; if (rawFrame) setViewInteracting(false); }
   }
 
   return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
