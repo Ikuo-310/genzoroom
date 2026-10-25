@@ -1,12 +1,20 @@
 # GenzoRoom 開発ノート
 
+## 工程C2：Windows実機受入完了（2026-10-25）
+
+基準Commit `01a6c86832749e7b18857a1d165ca58b663277e1` の文書状態を更新。ユーザーのWindows実機受入報告により、**C2-B PASS、C2-C PASS、C2全体はWindows実機受入PASSとして完了**。C2-Bのowner/capability、中央・四隅・各edge、geometry/overlay配置、Zoom後再要求、Before/After、Whole base/fallback、およびC2-CのFit Whole-only（1472×1107、rho約1.01）、1:1 Full RAW Region（Whole 2048×1540、Region 1280×1536 / F 4064×3056、Whole density 0.5039、Region density 1）、Pan/Zoom/Zoom out、Before/After、明瞭な実効解像度向上を確認した。白抜け・位置ずれ・古いoverlay残留なし。実画面結果はユーザー報告であり、agentによる手動確認ではない。
+
+C2-C途中のgeometry mismatchは診断履歴を保持し、Commit `01a6c86832749e7b18857a1d165ca58b663277e1`でcanonical Native aspectへ修正済み。descriptor contractは2、公開Before/Preview/Region contractは1。CPU/DX12実RAW Whole→plan→production planner→Region render、geometry fixture/regression、StageCache/Before、厳密契約検証の結果は[Region設計§16–17](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#17-c2-windows実機受入完了2026-10-25)と[canonical regression記録](research/lightcraft/REGION_GEOMETRY_CANONICAL_REGRESSION.json)に記録。geometryIdは永続化されずmigration不要。
+
+**C3は未着手**。rho threshold/hysteresis、context/prefetch、aggregation/quiet interval、F刻み、memory budget、latency、RSS/VRAM、stress、Dehaze差、部分coverage/tile、RAW Export、Scope、NR/sharpening等の現像品質改善はC3対象として未確定のまま維持する。実画面で見たカラーノイズやPixel JPEGとの差はC2 Region機構の不具合と扱わず、現像品質課題として残す。以下のC2途中記録にある「受入待ち」は各記録時点の履歴で、最終状態は本節を正本とする。ソース、test、managed patch、binary、設定値はこの文書更新では変更していない。
+
 ## C2-C geometry root fix：canonical Native aspect（2026-10-25）
 
 基準`5f7a50d`の同一実RAW調査結果を受け、managed Native descriptor内部contractを2へ上げた。sampling bitmapの整数丸めが入るsourceAspectを、`Frame::native_size_at(original)`のorientation/crop適用後・未丸めNative寸法比であるnativeAspectへ分離した。source/original/crop/orientation/flip/実warpは保持し、旧IDとのaliasを作らない。Whole/Before/Region/StageCacheは同じ生成関数を使い、公開Preview/Region contractは1を維持する。geometryIdはsession/response/cacheとログの情報だけで、Recipe/History/SQLite/XMP/Export/Immich/saved sessionへの永続化はなくmigration不要。Backend fail-closedと`625a3fa`の診断を維持した。
 
 比例／丸めPreviewの正式Native regression、真のgeometry変更とtone-only変更、Before、source cache所有、10種類のNative rect写像を確認した。Frontend356、Backend190、Native unit70＋E2E10成功、既存helper1 ignored。private実RAW harnessはCPU/DX12各2成功。同じRAW・Recipe120で新binaryのWhole1024/1472/2048→plan4064→実C0planner→Region renderもCPU/DX12成功し、actual F4064×3056、canonical ID/Native/W/valid/PNG一致、DX12 gpu_successを確認。cache ON/OFFでも同一Full PNG。TypeScript/build/差分検査成功、限定監査High0/Medium0。
 
-新binaryは`.tmp/lightcraft-c2c-geometry-fix/target/release/lightcraft-cli.exe`、SHA-256 `7f4f76fd5c8989bf8439206c3bba778a753cf5e5b56359fb495cc14c4e914111`。managed patch digest `6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc`。receiptと実C1 CPU/DX12 probeを照合済み。旧C1/診断用EXEは保持。既存chunk/font警告と調査NodeのExperimentalWarningあり。**C2-CはWindows実機受入待ち**でC3へ進まない。[設計・Windows手順](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#16-c2-c-canonical-native-geometry-root-fix2026-10-25)と[旧調査を残した記録](research/lightcraft/REGION_GEOMETRY_DESCRIPTOR_INVESTIGATION.md)を参照。README/CHANGELOGは変更しない。
+新binaryは`.tmp/lightcraft-c2c-geometry-fix/target/release/lightcraft-cli.exe`、SHA-256 `7f4f76fd5c8989bf8439206c3bba778a753cf5e5b56359fb495cc14c4e914111`。managed patch digest `6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc`。receiptと実C1 CPU/DX12 probeを照合済み。旧C1/診断用EXEは保持。既存chunk/font警告と調査NodeのExperimentalWarningあり。この記録時点ではC2-CのWindows受入待ちだった。Windows実機での最終PASSは本ノート冒頭と[設計§17](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#17-c2-windows実機受入完了2026-10-25)に追記した。C3は未着手。README/CHANGELOGは変更しない。
 
 ## 工程C2-C：Pan/Zoom自動Region（2026-10-25）
 
@@ -14,9 +22,9 @@
 
 C2-Cは既存RawViewに実Pan／gestureを追加し、B1と共用する最新view集約からC0 density／planner、既存finite delivery／overlayへ接続した。Wholeを維持し、Native確認済みの独立Region Fで局所密度を高める。reuseはcanReuseRegionを通したmetadata rebindだけで、Native/decode/URL作成なし。Pan/ZoomとeditのDraft/Fullは既存hookへ統合し、History/saveは画像待ちにしない。
 
-開始rho<0.85、解除rho≥0.95、集約／Zoom静止180ms、context16／prefetch64、F要求刻み256pxは全てC2-C provisional。Developer Diagnosticsで実bitmap/F・density/rho・可視rect・reuse/replanを確認でき、同じZoom/Pan位置でWhole-onlyと自動Regionを比較できる。製品値・性能・メモリ・Dehaze最終判定はC3へ残す。詳しい不変条件とWindows手順は[Region設計§15](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#15-c2-b-windows受入passとc2-c自動region2026-10-25)。README/CHANGELOGはWindows C2-C受入前なので変更しない。
+開始rho<0.85、解除rho≥0.95、集約／Zoom静止180ms、context16／prefetch64、F要求刻み256pxは全てC2-C provisional。Developer Diagnosticsで実bitmap/F・density/rho・可視rect・reuse/replanを確認でき、同じZoom/Pan位置でWhole-onlyと自動Regionを比較できる。製品値・性能・メモリ・Dehaze最終判定はC3へ残す。詳しい不変条件とWindows手順は[Region設計§15](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#15-c2-b-windows受入passとc2-c自動region2026-10-25)。この実装記録時点ではWindows C2-C受入前だったためREADME/CHANGELOGは変更しなかった。
 
-関連Frontendは重複除外454件、Backend契約／配送35件成功。最終修正の関連107件も成功。TypeScript、production build、Windows Cargo dev build、差分検査成功。既存chunk警告・incremental cache hard-link→copy警告は継続。限定監査High0／Medium0。agentによる実画面操作は行わず、C2-CのWindows受入と画質比較はユーザー確認待ち。
+関連Frontendは重複除外454件、Backend契約／配送35件成功。最終修正の関連107件も成功。TypeScript、production build、Windows Cargo dev build、差分検査成功。既存chunk警告・incremental cache hard-link→copy警告は継続。限定監査High0／Medium0。実装完了時点ではagentによる実画面操作を行わず、C2-CのWindows受入と画質比較はユーザー確認待ちだった。最終受入結果は本ノート冒頭に記録。
 
 ## C2-B：Windows Region受入UI補助
 
