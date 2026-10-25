@@ -191,6 +191,7 @@ export async function rawRegion(doc: RawDocument, target: RegionRequest | Region
       requestId: target.requestId, operation, viewGeneration: target.viewGeneration, revision: doc.revision,
       quality: target.quality, kind: target.identity.kind, geometryId: target.geometryId,
       fullWidth: meta.fullWidth, fullHeight: meta.fullHeight, window: meta.window, validRegion: meta.validRegion,
+      payloadBytes: bytes.length,
       responseWaitMs: received - started, bodyReadMs: read - received, validationMs: performance.now() - read } }); } catch { /* Optional diagnostics. */ }
     return { operation: 'render', metadata: meta, blob: new Blob([bytes], { type: 'image/png' }) };
   } finally { await response.body?.cancel().catch(() => {}); }

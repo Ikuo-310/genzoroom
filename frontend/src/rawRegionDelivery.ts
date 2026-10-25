@@ -64,8 +64,10 @@ export class RawRegionDelivery {
     if (plan.items[0].viewGeneration < this.latestView) return false;
     const next = replacePreviewPlan(this.state, plan);
     if (next === this.state) return false;
+    for (const item of this.state.pending?.items ?? []) this.diagnostic(item, 'pending_replaced', this.state.pending!.planGeneration);
     this.state = next;
     this.targets = next.pending!.items;
+    for (const item of this.targets) this.diagnostic(item, 'queued', plan.planGeneration);
     this.latestView = plan.items[0].viewGeneration;
     this.candidate = this.preflight = undefined;
     this.queuedAt = performance.now();

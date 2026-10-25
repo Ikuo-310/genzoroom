@@ -94,6 +94,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     // Native geometry is available only after the first validated bitmap; never infer it from the PNG.
     let side = 1024, latestView: RawView | undefined;
     let viewTimer: ReturnType<typeof setTimeout> | undefined;
+    let viewAggregationAt = 0;
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
     let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null; side: number } | undefined;
     let transmitted: { doc: RawDocument; serial: number } | undefined;
@@ -435,6 +436,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     const applyView = () => {
       viewTimer = undefined;
+      try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.aggregation', context: {
+        aggregationWaitMs: performance.now() - viewAggregationAt,
+      } }); } catch { /* Observe the existing timer; never add or extend a scheduling slot. */ }
       if (!current() || frozen.current || !editor || !latestView || editor.interacting || editor.unsettled) return;
       const next = latestView.interacting ? side : rawWholeSide(latestView, side);
       if (next !== undefined && next !== side) {
@@ -448,7 +452,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         latestView = view;
         auto?.viewChanged(view);
         // One non-extending B1/C2-C aggregation slot samples the latest view during a continuous Pan.
-        if (!viewTimer) viewTimer = setTimeout(applyView, REGION_AUTO_PROVISIONAL.aggregationMs);
+        if (!viewTimer) {
+          viewAggregationAt = performance.now();
+          viewTimer = setTimeout(applyView, REGION_AUTO_PROVISIONAL.aggregationMs);
+        }
         return;
       }
       if (!current() || !editor) return;

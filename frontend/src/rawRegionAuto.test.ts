@@ -5,11 +5,13 @@ import { RawRegionOverlay, RawPreviewUrls, type RawWholeSurface } from './rawReg
 import { regionRequest, regionResponse } from './test/rawRegion';
 import type { RawView } from './rawWholePreview';
 import type { RegionRequest } from './rawRegionContract';
+import { frontendLogger } from './frontendLogging';
+import { rawWholeSide } from './rawWholePreview';
 
 const tick = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
 let url = 0;
 beforeEach(() => { url = 0; vi.stubGlobal('URL', { createObjectURL: vi.fn(() => `blob:${++url}`), revokeObjectURL: vi.fn() }); });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); frontendLogger.setLevel('off'); frontendLogger.clear(); });
 function harness(nativeWidth = 4000, nativeHeight = 3000) {
   const r = regionRequest(), urls = new RawPreviewUrls();
   let owner: RegionDeliveryOwner | undefined = { doc: { workspaceId: '1'.repeat(32), handle: '2'.repeat(32),
@@ -73,6 +75,18 @@ it('keeps the C2-C 1:1 preflight request at the Native long edge without changin
   expect(h.auto.report.regionDensity).toBeGreaterThan(h.auto.report.wholeDensity!);
 });
 
+it.each([1, 1.25, 2])('replays Fit at DPR %s with adaptive Whole and the unchanged auto owner', async dpr => {
+  const h = harness(4064, 3056), scale = 1096 / 3056;
+  const view = h.view({ width: 1952, height: 1096, scale, fit: true, dpr });
+  const side = rawWholeSide(view)!;
+  h.setWholeBitmap(side, Math.round(side * 3056 / 4064));
+  frontendLogger.setLevel('debug');
+  h.update(view); await tick();
+  expect(!!h.overlay.display).toBe(dpr === 2);
+  if (dpr === 2) expect(h.send.mock.calls[0][1]).toMatchObject({ desiredLongEdge: 3072 });
+  expect(frontendLogger.getEntries().find(e => e.event === 'region.view')?.context?.zoomPercent).toBeCloseTo(scale * dpr * 100);
+});
+
 it('rebinds Pan and Zoom inside cached validRegion without render, decode or new object URLs; F changes replan', async () => {
   const h = harness(); h.update(); await tick();
   expect(h.overlay.display!.after.metadata.fullWidth).toBe(4000);
@@ -96,6 +110,41 @@ it('keeps one transmitted call and one latest pending plan across 100 outside Pa
   h.gate(undefined); release(); await tick();
   expect(h.maxInFlight()).toBe(1); expect(h.send).toHaveBeenCalledTimes(3);
   expect(h.overlay.display!.after.metadata.viewGeneration).toBe(h.auto.report.viewGeneration);
+});
+
+it('C3 diagnostics preserve request counts and report synthetic Pan reuse separately from Native work', async () => {
+  const measurements = [];
+  for (const viewport of [{ width: 1000, height: 750 }, { width: 1952, height: 1096 }]) {
+    for (const [name, pans] of Object.entries({ slow: [5, 10, 15, 20], continuous: Array.from({ length: 100 }, (_, i) => i * 5),
+      jump: [700], backtrack: [10, 30, 0] })) {
+      const observed = [];
+      for (const level of ['off', 'debug'] as const) {
+        frontendLogger.clear(); frontendLogger.setLevel(level);
+        const h = harness(4064, 3056); h.setWholeBitmap(2048, 1540); h.update(viewport); await tick();
+        const initial = h.send.mock.calls.length;
+        for (const panX of pans) { h.update({ ...viewport, panX }); await tick(); }
+        const calls = h.send.mock.calls.map(call => call[1]);
+        const entries = frontendLogger.getEntries();
+        const count = (event: string) => entries.filter(e => e.event === event).length;
+        const row = { name, viewport, viewUpdates: pans.length + 1, calls: calls.length, panCalls: calls.length-initial,
+          planCalls: calls.filter(i => 'desiredLongEdge' in i).length,
+          renderCalls: calls.filter(i => !('desiredLongEdge' in i)).length,
+          reuse: count('region.overlay.rebound'), policyEvaluations: count('region.policy'),
+          limited: h.auto.report.limited, finalQuality: h.overlay.display?.after.metadata.quality };
+        expect(h.maxInFlight()).toBe(1); expect(row.finalQuality).toBe('full');
+        if (level === 'debug') {
+          expect(entries.find(e => e.event === 'region.view')?.context).toMatchObject({ width: viewport.width, scale: 1 });
+          expect(entries.find(e => e.event === 'region.planning')?.context).toMatchObject({ context: 16, prefetch: 64 });
+          measurements.push(row);
+        }
+        observed.push({ calls: row.calls, planCalls: row.planCalls, renderCalls: row.renderCalls });
+        h.auto.dispose(); h.overlay.dispose(); h.delivery.dispose();
+      }
+      expect(observed[1]).toEqual(observed[0]);
+    }
+  }
+  // Capture with Vitest --disableConsoleIntercept; no filesystem or Node types enter the frontend.
+  console.info('C3_SYNTHETIC ' + JSON.stringify({ measurementKind: 'synthetic-immediate-mock-no-aggregation', rows: measurements }));
 });
 
 it('uses acknowledged Draft and converges to Full; mutation/generation invalidation cannot adopt stale output', async () => {

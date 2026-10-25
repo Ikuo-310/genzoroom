@@ -33,6 +33,7 @@ export class RawRegionAuto {
   private evaluating = false;
   private query?: RegionFrameRequest;
   private lastReport = '';
+  private viewAt = 0;
   private unsubscribe: () => void;
   constructor(private options: { delivery: RawRegionDelivery; overlay: RawRegionOverlay; snapshot: () => Snapshot;
     connect: () => Promise<boolean>; changed: () => void }) {
@@ -68,6 +69,12 @@ export class RawRegionAuto {
   viewChanged(view: RawView) {
     if (JSON.stringify(view) === JSON.stringify(this.view)) return;
     this.view = { ...view }; this.generation++;
+    this.viewAt = performance.now();
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.view', context: {
+      viewGeneration: this.generation, width: view.width, height: view.height, dpr: view.dpr,
+      scale: view.scale, zoomPercent: view.scale * view.dpr * 100, panX: view.panX ?? 0, panY: view.panY ?? 0,
+      nativeWidth: view.nativeWidth, nativeHeight: view.nativeHeight, fit: view.fit, interacting: !!view.interacting,
+    } }); } catch { /* Optional diagnostics must never change view scheduling. */ }
     const s = this.options.snapshot(), d = this.options.overlay.display;
     const visible = visibleNativeRegion(view, this.regionView(view));
     // An outside view must not keep an obsolete overlay while aggregation/render/decode catches up.
@@ -103,6 +110,9 @@ export class RawRegionAuto {
   }
   evaluate() {
     if (this.closed || this.evaluating) return;
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.policy', context: {
+      viewGeneration: this.generation, viewAgeMs: this.viewAt ? performance.now() - this.viewAt : null,
+    } }); } catch { /* Counts evaluations even when the deduplicated report is unchanged. */ }
     this.evaluating = true;
     try { this.evaluateCurrent(); } finally { this.evaluating = false; }
   }
@@ -173,6 +183,13 @@ export class RawRegionAuto {
     const plan = planRawRegion({ geometry: owner.geometry, full: this.full, view: this.regionView(v),
       context: REGION_AUTO_PROVISIONAL.context, prefetch: REGION_AUTO_PROVISIONAL.prefetch });
     if (plan.mode !== 'region') { this.record('region_hold', plan.reason); return; }
+    // Keep planning separate from the policy report to stay inside the logger's context bounds.
+    try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'region.planning', context: {
+      viewGeneration: this.generation, desiredLongEdge, requestedF: Math.max(v.nativeWidth, v.nativeHeight) * Math.min(1, v.scale * v.dpr),
+      actualF: { width: this.full.fullWidth, height: this.full.fullHeight }, requestedWindow: { ...plan.requestedWindow },
+      window: { ...plan.contextWindow }, validRegion: { ...plan.validRegion }, limited: plan.limited,
+      context: REGION_AUTO_PROVISIONAL.context, prefetch: REGION_AUTO_PROVISIONAL.prefetch,
+    } }); } catch { /* Optional diagnostics. */ }
     const after: RegionRequest = { ...base, ...this.full, requestId: id(), window: plan.contextWindow, validRegion: plan.validRegion,
       context: REGION_AUTO_PROVISIONAL.context, prefetch: REGION_AUTO_PROVISIONAL.prefetch };
     const before: RegionRequest | undefined = s.comparing && owner.doc.beforeKey ? { ...after, requestId: id(), identity: {
