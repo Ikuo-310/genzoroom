@@ -1,0 +1,928 @@
+{
+  "backend": "dx12",
+  "fixtures": {
+    "proportional": {
+      "region4064": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298429319371727,
+          "warp": null
+        },
+        "frameAspect": 1.3298429319371727,
+        "fullHeight": 3056,
+        "fullWidth": 4064,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298429319371727,
+        "sourceBitmap": [
+          4064,
+          3056
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Full",
+        "sourceRefKind": "Loaded"
+      },
+      "thumb": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298429319371727,
+          "warp": null
+        },
+        "frameAspect": 1.3298429319371727,
+        "fullHeight": 193,
+        "fullWidth": 256,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298429319371727,
+        "sourceBitmap": [
+          508,
+          382
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Thumb",
+        "sourceRefKind": "Loaded"
+      },
+      "thumbToFull": {
+        "differenceFields": [],
+        "fieldStatus": {
+          "crop": "identical",
+          "flip": "identical",
+          "orientation": "identical",
+          "original": "identical",
+          "source": "identical",
+          "sourceAspect": "identical",
+          "warp": "identical"
+        },
+        "nativeDimensionsMatch": true,
+        "sourceMatches": true
+      },
+      "whole2048": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298429319371727,
+          "warp": null
+        },
+        "execution": {
+          "backend": "gpu",
+          "outcome": "gpu_success",
+          "reason": "none"
+        },
+        "frameAspect": 1.3298429319371727,
+        "fullHeight": 1540,
+        "fullWidth": 2048,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298429319371727,
+        "sourceBitmap": [
+          2032,
+          1528
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Preview",
+        "sourceRefKind": "Loaded"
+      },
+      "wholeToRegion": {
+        "differenceFields": [],
+        "fieldStatus": {
+          "crop": "identical",
+          "flip": "identical",
+          "orientation": "identical",
+          "original": "identical",
+          "source": "identical",
+          "sourceAspect": "identical",
+          "warp": "identical"
+        },
+        "nativeDimensionsMatch": true,
+        "sourceMatches": true
+      }
+    },
+    "roundedPreview": {
+      "region4064": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298429319371727,
+          "warp": null
+        },
+        "frameAspect": 1.3298429319371727,
+        "fullHeight": 3056,
+        "fullWidth": 4064,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298429319371727,
+        "sourceBitmap": [
+          4064,
+          3056
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Full",
+        "sourceRefKind": "Loaded"
+      },
+      "thumb": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298429319371727,
+          "warp": null
+        },
+        "frameAspect": 1.3298429319371727,
+        "fullHeight": 193,
+        "fullWidth": 256,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298429319371727,
+        "sourceBitmap": [
+          508,
+          382
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Thumb",
+        "sourceRefKind": "Loaded"
+      },
+      "thumbToFull": {
+        "differenceFields": [],
+        "fieldStatus": {
+          "crop": "identical",
+          "flip": "identical",
+          "orientation": "identical",
+          "original": "identical",
+          "source": "identical",
+          "sourceAspect": "identical",
+          "warp": "identical"
+        },
+        "nativeDimensionsMatch": true,
+        "sourceMatches": true
+      },
+      "whole2048": {
+        "decodedLensPresent": false,
+        "descriptor": {
+          "contract": 1,
+          "crop": {
+            "angle": 0.0,
+            "rect": {
+              "x0": 0.0,
+              "x1": 1.0,
+              "y0": 0.0,
+              "y1": 1.0
+            }
+          },
+          "flip": [
+            false,
+            false
+          ],
+          "orientation": "Normal",
+          "original": [
+            4064,
+            3056
+          ],
+          "sourceAspect": 1.3298701298701299,
+          "warp": null
+        },
+        "execution": {
+          "backend": "gpu",
+          "outcome": "gpu_success",
+          "reason": "none"
+        },
+        "frameAspect": 1.3298701298701299,
+        "fullHeight": 1540,
+        "fullWidth": 2048,
+        "nativeHeight": 3056,
+        "nativeWidth": 4064,
+        "quality": "Full",
+        "sourceAspect": 1.3298701298701299,
+        "sourceBitmap": [
+          2560,
+          1925
+        ],
+        "sourceInfoRaw": false,
+        "sourceKind": "Hash128(content_key(photo))",
+        "sourceLevel": "Preview",
+        "sourceRefKind": "Loaded"
+      },
+      "wholeToRegion": {
+        "differenceFields": [
+          "sourceAspect"
+        ],
+        "fieldStatus": {
+          "crop": "identical",
+          "flip": "identical",
+          "orientation": "identical",
+          "original": "identical",
+          "source": "identical",
+          "sourceAspect": "different",
+          "warp": "identical"
+        },
+        "nativeDimensionsMatch": true,
+        "sourceMatches": true
+      }
+    }
+  },
+  "geometrySettings": {
+    "crop": {
+      "aspect": null,
+      "flip_h": false,
+      "flip_v": false,
+      "geometry": {
+        "angle": 0.0,
+        "rect": {
+          "x0": 0.0,
+          "x1": 1.0,
+          "y0": 0.0,
+          "y1": 1.0
+        }
+      }
+    },
+    "geometry": {
+      "aspect": 0.0,
+      "constrain_crop": false,
+      "guides": [],
+      "horizontal": 0.0,
+      "offset_x": 0.0,
+      "offset_y": 0.0,
+      "rotate": 0.0,
+      "scale": 100.0,
+      "upright": "off",
+      "upright_transform": null,
+      "vertical": 0.0
+    },
+    "optics": {
+      "ca_blue": 0.0,
+      "ca_red": 0.0,
+      "distortion": 0.0,
+      "lens_profile": true,
+      "profile_distortion": 100.0,
+      "remove_ca": false
+    },
+    "orientation": "Normal"
+  },
+  "realRaw": {
+    "nativeRejection": "region_geometry_id_mismatch",
+    "region4064": {
+      "decodedLensPresent": true,
+      "descriptor": {
+        "contract": 1,
+        "crop": {
+          "angle": 0.0,
+          "rect": {
+            "x0": 0.0,
+            "x1": 1.0,
+            "y0": 0.0,
+            "y1": 1.0
+          }
+        },
+        "flip": [
+          false,
+          false
+        ],
+        "orientation": "Normal",
+        "original": [
+          4064,
+          3056
+        ],
+        "sourceAspect": 1.3298429319371727,
+        "warp": {
+          "ca": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "k1": -0.0,
+          "lens": {
+            "stages": [
+              null,
+              null,
+              null
+            ],
+            "vignette": null,
+            "warp": {
+              "center": {
+                "x": 0.5104860445222535,
+                "y": 0.5245558182996605
+              },
+              "planes": [
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "radius": 0.6477138657863136
+            }
+          },
+          "lensDist": 1.0,
+          "perspective": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "frameAspect": 1.3298429319371727,
+      "fullHeight": 3056,
+      "fullWidth": 4064,
+      "nativeHeight": 3056,
+      "nativeWidth": 4064,
+      "quality": "Full",
+      "sourceAspect": 1.3298429319371727,
+      "sourceBitmap": [
+        4064,
+        3056
+      ],
+      "sourceInfoRaw": true,
+      "sourceKind": "Hash128(content_key(photo))",
+      "sourceLevel": "Full",
+      "sourceRefKind": "File"
+    },
+    "thumb": {
+      "decodedLensPresent": true,
+      "descriptor": {
+        "contract": 1,
+        "crop": {
+          "angle": 0.0,
+          "rect": {
+            "x0": 0.0,
+            "x1": 1.0,
+            "y0": 0.0,
+            "y1": 1.0
+          }
+        },
+        "flip": [
+          false,
+          false
+        ],
+        "orientation": "Normal",
+        "original": [
+          4064,
+          3056
+        ],
+        "sourceAspect": 1.3298429319371727,
+        "warp": {
+          "ca": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "k1": -0.0,
+          "lens": {
+            "stages": [
+              null,
+              null,
+              null
+            ],
+            "vignette": null,
+            "warp": {
+              "center": {
+                "x": 0.5104860445222535,
+                "y": 0.5245558182996605
+              },
+              "planes": [
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "radius": 0.6477138657863136
+            }
+          },
+          "lensDist": 1.0,
+          "perspective": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "frameAspect": 1.3298429319371727,
+      "fullHeight": 193,
+      "fullWidth": 256,
+      "nativeHeight": 3056,
+      "nativeWidth": 4064,
+      "quality": "Full",
+      "sourceAspect": 1.3298429319371727,
+      "sourceBitmap": [
+        508,
+        382
+      ],
+      "sourceInfoRaw": true,
+      "sourceKind": "Hash128(content_key(photo))",
+      "sourceLevel": "Thumb",
+      "sourceRefKind": "File"
+    },
+    "thumbToFull": {
+      "differenceFields": [],
+      "fieldStatus": {
+        "crop": "identical",
+        "flip": "identical",
+        "orientation": "identical",
+        "original": "identical",
+        "source": "identical",
+        "sourceAspect": "identical",
+        "warp": "identical"
+      },
+      "nativeDimensionsMatch": true,
+      "sourceMatches": true
+    },
+    "whole1024": {
+      "decodedLensPresent": true,
+      "descriptor": {
+        "contract": 1,
+        "crop": {
+          "angle": 0.0,
+          "rect": {
+            "x0": 0.0,
+            "x1": 1.0,
+            "y0": 0.0,
+            "y1": 1.0
+          }
+        },
+        "flip": [
+          false,
+          false
+        ],
+        "orientation": "Normal",
+        "original": [
+          4064,
+          3056
+        ],
+        "sourceAspect": 1.3298701298701299,
+        "warp": {
+          "ca": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "k1": -0.0,
+          "lens": {
+            "stages": [
+              null,
+              null,
+              null
+            ],
+            "vignette": null,
+            "warp": {
+              "center": {
+                "x": 0.5104860445222535,
+                "y": 0.5245558182996605
+              },
+              "planes": [
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "radius": 0.6477138657863136
+            }
+          },
+          "lensDist": 1.0,
+          "perspective": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "execution": {
+        "backend": "gpu",
+        "outcome": "gpu_success",
+        "reason": "none"
+      },
+      "frameAspect": 1.3298701298701299,
+      "fullHeight": 770,
+      "fullWidth": 1024,
+      "nativeHeight": 3056,
+      "nativeWidth": 4064,
+      "quality": "Full",
+      "sourceAspect": 1.3298701298701299,
+      "sourceBitmap": [
+        2560,
+        1925
+      ],
+      "sourceInfoRaw": true,
+      "sourceKind": "Hash128(content_key(photo))",
+      "sourceLevel": "Preview",
+      "sourceRefKind": "File"
+    },
+    "whole1472": {
+      "decodedLensPresent": true,
+      "descriptor": {
+        "contract": 1,
+        "crop": {
+          "angle": 0.0,
+          "rect": {
+            "x0": 0.0,
+            "x1": 1.0,
+            "y0": 0.0,
+            "y1": 1.0
+          }
+        },
+        "flip": [
+          false,
+          false
+        ],
+        "orientation": "Normal",
+        "original": [
+          4064,
+          3056
+        ],
+        "sourceAspect": 1.3298701298701299,
+        "warp": {
+          "ca": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "k1": -0.0,
+          "lens": {
+            "stages": [
+              null,
+              null,
+              null
+            ],
+            "vignette": null,
+            "warp": {
+              "center": {
+                "x": 0.5104860445222535,
+                "y": 0.5245558182996605
+              },
+              "planes": [
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "radius": 0.6477138657863136
+            }
+          },
+          "lensDist": 1.0,
+          "perspective": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "execution": {
+        "backend": "gpu",
+        "outcome": "gpu_success",
+        "reason": "none"
+      },
+      "frameAspect": 1.3298701298701299,
+      "fullHeight": 1107,
+      "fullWidth": 1472,
+      "nativeHeight": 3056,
+      "nativeWidth": 4064,
+      "quality": "Full",
+      "sourceAspect": 1.3298701298701299,
+      "sourceBitmap": [
+        2560,
+        1925
+      ],
+      "sourceInfoRaw": true,
+      "sourceKind": "Hash128(content_key(photo))",
+      "sourceLevel": "Preview",
+      "sourceRefKind": "Loaded"
+    },
+    "whole2048": {
+      "decodedLensPresent": true,
+      "descriptor": {
+        "contract": 1,
+        "crop": {
+          "angle": 0.0,
+          "rect": {
+            "x0": 0.0,
+            "x1": 1.0,
+            "y0": 0.0,
+            "y1": 1.0
+          }
+        },
+        "flip": [
+          false,
+          false
+        ],
+        "orientation": "Normal",
+        "original": [
+          4064,
+          3056
+        ],
+        "sourceAspect": 1.3298701298701299,
+        "warp": {
+          "ca": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "k1": -0.0,
+          "lens": {
+            "stages": [
+              null,
+              null,
+              null
+            ],
+            "vignette": null,
+            "warp": {
+              "center": {
+                "x": 0.5104860445222535,
+                "y": 0.5245558182996605
+              },
+              "planes": [
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.9872548580169678,
+                  0.01752694509923458,
+                  -0.00564634520560503,
+                  0.0006694584735669196,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "radius": 0.6477138657863136
+            }
+          },
+          "lensDist": 1.0,
+          "perspective": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "execution": {
+        "backend": "gpu",
+        "outcome": "gpu_success",
+        "reason": "none"
+      },
+      "frameAspect": 1.3298701298701299,
+      "fullHeight": 1540,
+      "fullWidth": 2048,
+      "nativeHeight": 3056,
+      "nativeWidth": 4064,
+      "quality": "Full",
+      "sourceAspect": 1.3298701298701299,
+      "sourceBitmap": [
+        2560,
+        1925
+      ],
+      "sourceInfoRaw": true,
+      "sourceKind": "Hash128(content_key(photo))",
+      "sourceLevel": "Preview",
+      "sourceRefKind": "Loaded"
+    },
+    "wholeToRegion": {
+      "differenceFields": [
+        "sourceAspect"
+      ],
+      "fieldStatus": {
+        "crop": "identical",
+        "flip": "identical",
+        "orientation": "identical",
+        "original": "identical",
+        "source": "identical",
+        "sourceAspect": "different",
+        "warp": "identical"
+      },
+      "nativeDimensionsMatch": true,
+      "sourceMatches": true
+    }
+  },
+  "realRawReproduced": true,
+  "recipeRevision": 120,
+  "schemaVersion": 1,
+  "settingsExactlyRestored": true,
+  "settingsUnchanged": true,
+  "cpuDx12DescriptorsIdentical": true,
+  "basisCommit": "625a3fa8202eafbd6e4a0d1d65ff144c22d9d5a3",
+  "upstreamCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",
+  "managedPatchSha256": "8eb1aefa8bac815d2bc081cc79205023e33154eef78f5b5456daa59e5bee1813",
+  "sourceAspectAnalysis": {
+    "idealPreviewHeight": 1925.0393700787401,
+    "actualPreviewHeight": 1925,
+    "relativeDifferencePercent": 0.0020451988955949574
+  }
+}
