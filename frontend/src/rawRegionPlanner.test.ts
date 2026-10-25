@@ -4,6 +4,47 @@ import { C1_REGION_BUDGET, planRawRegion, rawWholeDensity, regionNativeRect, vis
   type RegionPlannerInput, type RegionView } from './rawRegionPlanner';
 
 const base: RegionPlannerInput = fixtures[0].input;
+const canonicalRects = [
+  ['center', 1776, 1336, 2288, 1720], ['topLeft', 0, 0, 512, 384],
+  ['topRight', 3552, 0, 4064, 384], ['bottomLeft', 0, 2672, 512, 3056],
+  ['bottomRight', 3552, 2672, 4064, 3056], ['left', 0, 1336, 512, 1720],
+  ['right', 3552, 1336, 4064, 1720], ['top', 1776, 0, 2288, 384],
+  ['bottom', 1776, 2672, 2288, 3056], ['interior', 123.25, 456.5, 789.75, 987.125],
+] as const;
+it.each(canonicalRects)('canonical Native boundaries survive rounded Preview sampling: %s', (_name, x0, y0, x1, y1) => {
+  const geometry = { nativeWidth: 4064, nativeHeight: 3056, geometryId: 'a'.repeat(64) };
+  const full = { geometryId: geometry.geometryId, fullWidth: 4064, fullHeight: 3056 };
+  const width = x1 - x0, height = y1 - y0;
+  const plan = planRawRegion({ geometry, full, context: 16, prefetch: 64,
+    view: { width, height, dpr: 1, scale: 1, panX: 4064 / 2 - (x0 + x1) / 2, panY: 3056 / 2 - (y0 + y1) / 2 } });
+  if (plan.mode !== 'region') throw new Error(plan.reason);
+  expect(plan.nativeVisibleRect).toEqual({ x0, y0, x1, y1 });
+  expect(plan.limited).toBe(false);
+  // Six affine multiply/divide/add operations at <=4064px: 32 ULPs bounds roundoff, not sampling error.
+  const ulp = 2 ** (Math.floor(Math.log2(4064)) - 52);
+  const tolerance = 32 * ulp;
+  for (const sampling of [{ width: 2032, height: 1528 }, { width: 2560, height: 1925 }, { width: 4064, height: 3056 }]) {
+    const wholeWidth = 2048, wholeHeight = Math.round(wholeWidth * sampling.height / sampling.width);
+    if (sampling.width === 2560) expect(sampling.width / sampling.height).not.toBe(4064 / 3056);
+    for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]]) {
+      // Whole is stretched over canonical Native dimensions by ImageViewer; its actual PNG is 2048x1540.
+      const wholeX = x * wholeWidth / geometry.nativeWidth, wholeY = y * wholeHeight / geometry.nativeHeight;
+      const wholeNative = regionNativeRect({ x: wholeX, y: wholeY, w: 1, h: 1 }, geometry,
+        { ...full, fullWidth: wholeWidth, fullHeight: wholeHeight });
+      const regionX = x * full.fullWidth / geometry.nativeWidth - plan.contextWindow.x;
+      const regionY = y * full.fullHeight / geometry.nativeHeight - plan.contextWindow.y;
+      const regionNative = regionNativeRect({ x: regionX + plan.contextWindow.x, y: regionY + plan.contextWindow.y, w: 1, h: 1 }, geometry, full);
+      expect(Math.abs(wholeNative.x0 - x)).toBeLessThanOrEqual(tolerance);
+      expect(Math.abs(wholeNative.y0 - y)).toBeLessThanOrEqual(tolerance);
+      expect(Math.abs(regionNative.x0 - wholeNative.x0)).toBeLessThanOrEqual(tolerance);
+      expect(Math.abs(regionNative.y0 - wholeNative.y0)).toBeLessThanOrEqual(tolerance);
+      const cssX = plan.nativePlacement.x0 + regionX * (plan.nativePlacement.x1 - plan.nativePlacement.x0) / plan.contextWindow.w;
+      const cssY = plan.nativePlacement.y0 + regionY * (plan.nativePlacement.y1 - plan.nativePlacement.y0) / plan.contextWindow.h;
+      expect(Math.abs(cssX - x)).toBeLessThanOrEqual(tolerance);
+      expect(Math.abs(cssY - y)).toBeLessThanOrEqual(tolerance);
+    }
+  }
+});
 it.each(fixtures)('shared coordinate fixture: $name', ({ input, expected }) => {
   const plan = planRawRegion(input);
   expect(plan.mode).toBe('region');

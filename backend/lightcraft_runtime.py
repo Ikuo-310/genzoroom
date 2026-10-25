@@ -591,6 +591,12 @@ class LightCraftManager:
             tools = await session.client.request('tools/list', timeout=self._timeouts.request)
             self._check_raw_session(session)
             session.region_preview = supports_region(tools)
+            items = tools.get('tools') if isinstance(tools, dict) else None
+            region_tools = [tool for tool in items if isinstance(tool, dict) and tool.get('name') == 'render_region_preview'] if isinstance(items, list) else []
+            metadata = region_tools[0].get('_meta', {}) if len(region_tools) == 1 else {}
+            descriptor = metadata.get('genzoroom.geometryDescriptorContract') if isinstance(metadata, dict) else None
+            lightcraft_log('region.capability', level='debug', generation=generation, supported=session.region_preview,
+                geometryDescriptorContract=descriptor if type(descriptor) is int and descriptor in (1, 2) else None)
         return session.region_preview
 
     async def _raw_region(self, generation, photo_id, operation, target, *, timeout, stage_cache='off', stage_cache_budget_bytes=None):

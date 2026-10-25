@@ -118,3 +118,16 @@ private入力JSONのkeysは`sourcePaths`（既存cache候補のpath配列）、`
 CPU／実DX12でそれぞれ2 tests passed。field差分の決定性、hash入力bytesの再現、source値/path非出力、実RAWのmismatch拒否維持、完全比例fixtureと丸めfixtureを確認した。
 Python構文確認、追加Rustファイルのrustfmt check、`git diff --check`を実施した。
 機能修正・C3 tuningは未実施。監査でHigh/Mediumの問題は見つからなかった。
+
+## 2026-10-25追記：canonical Native geometry root fix
+
+上記は`5f7a50d`時点の調査履歴として保持する。明示依頼により、その後descriptor内部contractを**2**へ変更した。
+hash入力は`sourceAspect`から`nativeAspect`へ分離し、正本を`Frame::native_size_at(original)`の未丸めNative幅÷高さとした。この関数は原本のoriented寸法にresolved cropを適用する。sampling bitmap比率は`samplingAspect`として調査reportに残り、実outputの`frame.aspect()`と公開frame metadataは維持する。今回RAWのnativeAspectは両sourceとも4064/3056、samplingAspectの旧差は残るがgeometryIdは一致する。
+
+source content、original、orientation、crop、flip、座標移動を伴うwarp/perspective/distortion/CA/lensは維持し、gain-only vignettingの除外も維持する。contract1 IDとのsilent equivalenceは作らない。公開Preview/Region contractは1。Whole/Before/RegionとStageCacheは単一の生成関数を使う。永続化調査ではRecipe/History/SQLite/XMP/Export/Immich/saved sessionにID保存・復元はなく、response/session/cacheおよびログの観測値に限定され、migrationは不要だった。
+
+比例／丸めPreviewを正式Native regressionへ入れ、canonical Native aspectの一致とsamplingAspect差、crop/rotation/orientation/flip/perspective/distortion/CA/lens変更時のID変化、tone-only/quality/source level/output sizeでの安定性、Beforeの実geometry分離、StageCacheのsource ownershipを確認した。新test-only probeはcontract2を再構成して本生成関数のhash bytesへ一致させ、正しいRAW PhotoIdでplan成功とspoof拒否を確認する。
+
+実RAW・Recipe120は再びcacheとread-only DBから照合した。新binary上でCPU/DX12双方のWhole1024/1472/2048、plan4064、実production C0 plannerから生成したRegion window、Region renderが成功した。実sourceはWhole Preview2560×1925、Region Full4064×3056のまま。Native/Fは4064×3056、render window1280×1536、validRegion1248×1504、厳密Backend validatorでecho/geometry/F/window/PNG実寸を確認した。DX12は実gpu_success。既存budgetによるlimited coverageを変えていない。cache opt-in比較でもFull PNGが一致し、Whole cache適用・Region budget非適用の既存fallbackを確認した。
+
+修正後の安全化実測は[canonical regressionデータ](REGION_GEOMETRY_CANONICAL_REGRESSION.json)、設計・binary receipt・Windows手順は[Region設計§16](RAW_REGION_PREVIEW_DESIGN.md#16-c2-c-canonical-native-geometry-root-fix2026-10-25)参照。旧descriptor1の[元データ](REGION_GEOMETRY_DESCRIPTOR_DATA.json)は変更していない。C2-C完了判定はユーザーのWindows受入後とし、C3には進まない。

@@ -21,7 +21,7 @@ from tests.test_raw_adaptive_preview import target as whole_target
 
 
 def tool():
-    return {'name':'render_region_preview','inputSchema':{'type':'object','required':['id','region_contract','operation','target'],
+    return {'name':'render_region_preview','_meta':{'genzoroom.geometryDescriptorContract':2},'inputSchema':{'type':'object','required':['id','region_contract','operation','target'],
         'properties':{'id':{'type':'string'},'region_contract':{'type':'integer','enum':[1]},
         'operation':{'type':'string','enum':['plan','render']},'target':{'oneOf':[region.SCHEMA['$defs']['frameRequest'],region.SCHEMA['$defs']['request']]}}}}
 
@@ -97,6 +97,23 @@ def test_c0_schema_and_native_copies_are_the_same_contract():
     bad = copy.deepcopy(tool());bad['inputSchema']['properties']['region_contract']['enum'] = [True]
     assert not region.supports_region({'tools':[bad]})
     assert not region.matches(1, {'type':'integer','unknownConstraint':True})
+
+
+def test_region_capability_logs_descriptor_version_without_changing_public_contract(tmp_path, monkeypatch):
+    import lightcraft_runtime
+    events=[]
+    monkeypatch.setattr(lightcraft_runtime,'lightcraft_log',lambda event,**context: events.append((event,context)))
+    async def run():
+        raw,manager,children,files=await create(tmp_path); enable(children[0])
+        try:
+            handle,_=await raw.open_raw(str(uuid4()),files[0])
+            assert await manager._raw_region_supported(handle.generation)
+            record=next(context for event,context in events if event=='region.capability')
+            assert record['geometryDescriptorContract']==2 and record['supported'] is True
+            assert tool()['inputSchema']['properties']['region_contract']=={'type':'integer','enum':[1]}
+        finally:
+            await raw.close(); await manager.close()
+    asyncio.run(run())
 
 
 def test_frozen_backend_includes_the_same_runtime_schema(tmp_path):

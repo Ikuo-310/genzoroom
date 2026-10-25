@@ -479,11 +479,11 @@ photo/Filmstrip切替、Gallery、generation/token/revision変更、regeneration
 
 ### 15.6 Windows起動・受入
 
-Frontend production buildとWindows開発hostを用意した後、既存アプリを保存・終了し、PowerShellで次を実行する。C1 binaryは変更しない。
+Frontend production buildとWindows開発hostを用意した後、既存アプリを保存・終了し、PowerShellで次を実行する。canonical geometry修正版を別targetで使う（§16）。既存C1／診断用binaryは保持する。
 
 ```powershell
 Set-Location I:\code\genzoroom
-$env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\release\lightcraft-cli.exe'
+$env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c2c-geometry-fix\target\release\lightcraft-cli.exe'
 & '.\desktop\target\debug\genzoroom-desktop.exe'
 ```
 
@@ -497,3 +497,23 @@ $env:GENZOROOM_LIGHTCRAFT_EXE = 'I:\code\genzoroom\.tmp\lightcraft-c1\target\rel
 ### 15.7 C3へ残すもの
 
 最終rho threshold/hysteresis、context/prefetch、aggregation/quiet interval/F刻み、Region memory budget、latency・RSS/VRAM、Dehaze 3 LSBの最終品質判定、長時間stress、RAW Export、Scopeは未確定・未実装。C2-CのWindows受入と次の明示依頼を条件にC3へ進む。
+
+## 16. C2-C canonical Native geometry root fix（2026-10-25）
+
+実RAW・Recipe revision 120の調査で、Whole Preview source 2560×1925とRegion Full source 4064×3056のdescriptor差は`sourceAspect`だけだった。[調査履歴と修正結果](REGION_GEOMETRY_DESCRIPTOR_INVESTIGATION.md)に旧結果を残す。
+
+geometry descriptorの内部contractを**2**にし、sampling bitmap比率をcanonical identityから分離した。`nativeAspect`の正本は`Frame::native_size_at(original)`の**orientation/crop適用後・整数丸め前**のNative幅÷高さ。同じsource content、original、resolved crop/orientation/flip/coordinate-moving warpならsampling source level・output F・qualityで変わらない。sampling aspectは`frame.src_w/frame.src_h`、実output aspectは`frame.aspect()`として調査diagnosticsに残る。公開frameの`aspect`や画像生成・座標変換は変更しない。
+
+descriptorはsource identity、original、orientation、crop、flip、perspective/distortion/CA/lens/lensDistを保持し、gain-only vignettingを除く既存方針を維持する。resolved warpやcropが実際に変化すれば異なるIDになる。contract 1との互換aliasはない。Whole/Before/Region/StageCacheは同じ`frame_metadata()`を使う。公開Preview、Region request/response、Before contractは全て**1のまま**。
+
+geometryIdはresponse/sessionのframe、表示owner、public/native mapping、StageCache、Region reuse/currentness、およびログexportで使う。Recipe/History、SQLite、XMP、Export/Immich metadata、saved sessionへidentityを保存する経路は見つからず、migrationは不要。mappingはdocument/generationで破棄され、各Native processは単一生成関数からcontract 2だけを生成する。`region.capability`ログは実tools/listの`geometryDescriptorContract:2`を記録する。
+
+StageCacheのgeometry invalidationは実座標変更を扱う。sampling source安全性は別のsource/signature、CPU/GPUのsource Arc ownership、実Plan/size keysで守る。canonical ID一致だけで異なるsource pixelsを再利用しない。source切替cache pixel試験と実RAW cache ON/OFF比較で同一Full PNGを確認した。実RAWの512 MiB試験ではWholeはcache適用、Regionは既存budget判定で非適用となり描画を継続した。製品budgetは変更していない。
+
+正式Native regressionに比例／丸めPreview fixture、全source level、Whole 1024/1472/2048、Draft/Full、Before/After、true geometry変更、tone-only変更、旧version不一致を追加した。C0のcenter・四隅・4 edge・任意rectのNative→Whole／F/window→Native roundtripも確認した。誤差上限はNative長辺4064における32 ULP（約1.46e-11 Native px）。6段程度のaffine演算の浮動小数丸めを評価するもので、samplingずれを許容する大きなepsilonではない。
+
+公開の対象試験はFrontend **356**、Backend **190**、Native unit **70**＋E2E **10**成功、既存helper **1 ignored**。private実RAW harnessはCPU/DX12各2 tests成功。新binaryで同一RAW・同一RecipeのWhole 1024→1472→2048→Region plan 4064→**production C0 planner**→Region renderをCPU/DX12双方で成功し、echo・geometry・実F・W/validRegion・PNG実寸を既存Backend validatorで確認した。実F4064×3056、window1280×1536、validRegion1248×1504。C1有限budgetにより部分coverage（limited=true）となりWhole baseを維持する既存設計のまま。DX12はWhole/Regionともgpu_success。[安全化regression証跡](REGION_GEOMETRY_CANONICAL_REGRESSION.json)参照。
+
+新EXE：`I:\code\genzoroom\.tmp\lightcraft-c2c-geometry-fix\target\release\lightcraft-cli.exe`。upstream `a2a41383c4fd62fa85a46ccd00998639221f2d3c`、managed patch SHA-256 `6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc`、binary SHA-256 `7f4f76fd5c8989bf8439206c3bba778a753cf5e5b56359fb495cc14c4e914111`。隣接receiptはBefore/Preview/Region各1とgeometryDescriptorContract 2を持ち、発行前に実binaryの全C1 CPU/DX12 probeを完了した。旧2 EXE/receiptは上書きしていない。
+
+TypeScript/production build、差分検査、private出力監査を成功し、限定監査の未解決High/Mediumは0。既存chunk/font警告とNodeのtest-only type strippingのExperimentalWarningあり。Windowsのoverlay位置・細部・Before比較は未確認であり、**C2-CはWindows受入待ち**。§15.6の新binaryでGallery→RAW→Fit→1:1→自動Region→Whole-only比較→Pan/Zoom→Before/Afterを確認する。C3には進まない。

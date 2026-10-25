@@ -10,13 +10,13 @@ const tick = async () => { for (let i = 0; i < 60; i++) await Promise.resolve();
 let url = 0;
 beforeEach(() => { url = 0; vi.stubGlobal('URL', { createObjectURL: vi.fn(() => `blob:${++url}`), revokeObjectURL: vi.fn() }); });
 afterEach(() => vi.unstubAllGlobals());
-function harness() {
+function harness(nativeWidth = 4000, nativeHeight = 3000) {
   const r = regionRequest(), urls = new RawPreviewUrls();
   let owner: RegionDeliveryOwner | undefined = { doc: { workspaceId: '1'.repeat(32), handle: '2'.repeat(32),
-    ...r.identity, revision: r.documentRevision, beforeKey: 'e'.repeat(64) }, geometry: { nativeWidth: 4000, nativeHeight: 3000, geometryId: r.geometryId },
+    ...r.identity, revision: r.documentRevision, beforeKey: 'e'.repeat(64) }, geometry: { nativeWidth, nativeHeight, geometryId: r.geometryId },
     sourceId: r.identity.sourceId, supported: true, blocked: false, wholeBusy: false };
   const whole = (): RawWholeSurface => ({ doc: { ...owner!.doc }, url: urls.create(new Blob(['whole'])), quality: 'full',
-    frame: { ...owner!.geometry, aspect: 4/3, fullWidth: 2048, fullHeight: 1536, window: null } });
+    frame: { ...owner!.geometry, aspect: nativeWidth/nativeHeight, fullWidth: 2048, fullHeight: Math.round(2048*nativeHeight/nativeWidth), window: null } });
   let after = whole(), before: RawWholeSurface | undefined, comparing = false, interacting = false;
   let auto: RawRegionAuto, overlay: RawRegionOverlay;
   let gate: (() => Promise<void>) | undefined;
@@ -27,7 +27,7 @@ function harness() {
       if (gate) await gate();
       expect(signal.aborted).toBe(false);
       if ('desiredLongEdge' in item) return { operation: 'plan' as const, metadata: { ...item, kind: item.identity.kind,
-        nativeWidth: 4000, nativeHeight: 3000, fullWidth: item.desiredLongEdge, fullHeight: item.desiredLongEdge * 3/4 } };
+        nativeWidth, nativeHeight, fullWidth: item.desiredLongEdge, fullHeight: Math.round(item.desiredLongEdge*nativeHeight/nativeWidth) } };
       return { operation: 'render' as const, metadata: regionResponse(item as RegionRequest), blob: new Blob(['region']) };
     } finally { inFlight--; }
   });
@@ -40,10 +40,11 @@ function harness() {
   const connect = vi.fn(async () => false);
   auto = new RawRegionAuto({ delivery, overlay, snapshot: () => ({ after, before, comparing, interacting }), connect, changed: vi.fn() });
   const view = (patch: Partial<RawView> = {}): RawView => ({ width: 1000, height: 750, dpr: 1, scale: 1,
-    nativeWidth: 4000, nativeHeight: 3000, geometryId: r.geometryId, fit: false, panX: 0, panY: 0, ...patch });
+    nativeWidth, nativeHeight, geometryId: r.geometryId, fit: false, panX: 0, panY: 0, ...patch });
   const update = (patch: Partial<RawView> = {}) => { auto.viewChanged(view(patch)); auto.evaluate(); };
   return { auto, overlay, delivery, send, decode, connect, urls, view, update, getOwner: () => owner!,
     setOwner: (value?: RegionDeliveryOwner) => { owner = value; }, getWhole: () => after,
+    setWholeBitmap: (width: number, height: number) => { after = { ...after, frame: { ...after.frame, fullWidth: width, fullHeight: height } }; },
     setWhole: (quality: 'draft' | 'full') => { after = { ...after, quality, doc: { ...owner!.doc } }; if (before) before = { ...before, quality, doc: { ...owner!.doc } }; },
     compare: () => { comparing = true; before = whole(); }, gesture: (value: boolean) => { interacting = value; },
     gate: (value?: () => Promise<void>) => { gate = value; }, maxInFlight: () => maxInFlight };
@@ -61,9 +62,15 @@ it('uses Whole at Fit, starts a genuinely denser Native frame, keeps hysteresis,
 });
 
 it('keeps the C2-C 1:1 preflight request at the Native long edge without changing the planner contract', async () => {
-  const h = harness(); h.update({ nativeWidth: 4064, nativeHeight: 3056, scale: 1 }); await tick();
+  const h = harness(4064, 3056);
+  h.setWholeBitmap(1472, 1107); h.update({ width: 1952, height: 1096, scale: .3586387434554974, fit: true }); await tick();
+  expect(h.send).not.toHaveBeenCalled(); expect(h.auto.report.reason).toBe('whole_sufficient');
+  h.setWholeBitmap(2048, 1540); h.update({ width: 1952, height: 1096, scale: 1 }); await tick();
   expect(h.send.mock.calls[0][1]).toMatchObject({ desiredLongEdge: 4064, quality: 'full' });
   expect(h.send.mock.calls[0][1].geometryId).toBe(h.getWhole().frame.geometryId);
+  expect(h.auto.report.rho).toBeCloseTo(.5039267015706806);
+  expect(h.overlay.display?.after.metadata).toMatchObject({ fullWidth: 4064, fullHeight: 3056 });
+  expect(h.auto.report.regionDensity).toBeGreaterThan(h.auto.report.wholeDensity!);
 });
 
 it('rebinds Pan and Zoom inside cached validRegion without render, decode or new object URLs; F changes replan', async () => {

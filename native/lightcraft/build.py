@@ -140,6 +140,9 @@ def probe(binary):
         if server.get("name") != "lightcraft" or server.get("version") != manifest()["version"]:
             raise ValueError("binary version mismatch")
         preview = next(t for t in replies[2]["result"]["tools"] if t["name"] == "render_preview")
+        region = next(t for t in replies[2]["result"]["tools"] if t["name"] == "render_region_preview")
+        if region.get('_meta', {}).get('genzoroom.geometryDescriptorContract') != manifest()['geometryDescriptorContract']:
+            raise ValueError('binary geometry descriptor contract mismatch')
         properties = preview["inputSchema"]["properties"]
         if properties.get("before", {}).get("type") != "boolean" \
                 or properties.get("quality", {}).get("enum") != ["draft", "full"] \
@@ -356,7 +359,8 @@ def probe_gpu(binary):
 
 def receipt(binary, spec):
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
-            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1}
+            "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
+            "geometryDescriptorContract": spec['geometryDescriptorContract']}
 
 
 def main():

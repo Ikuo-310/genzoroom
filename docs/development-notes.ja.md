@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## C2-C geometry root fix：canonical Native aspect（2026-10-25）
+
+基準`5f7a50d`の同一実RAW調査結果を受け、managed Native descriptor内部contractを2へ上げた。sampling bitmapの整数丸めが入るsourceAspectを、`Frame::native_size_at(original)`のorientation/crop適用後・未丸めNative寸法比であるnativeAspectへ分離した。source/original/crop/orientation/flip/実warpは保持し、旧IDとのaliasを作らない。Whole/Before/Region/StageCacheは同じ生成関数を使い、公開Preview/Region contractは1を維持する。geometryIdはsession/response/cacheとログの情報だけで、Recipe/History/SQLite/XMP/Export/Immich/saved sessionへの永続化はなくmigration不要。Backend fail-closedと`625a3fa`の診断を維持した。
+
+比例／丸めPreviewの正式Native regression、真のgeometry変更とtone-only変更、Before、source cache所有、10種類のNative rect写像を確認した。Frontend356、Backend190、Native unit70＋E2E10成功、既存helper1 ignored。private実RAW harnessはCPU/DX12各2成功。同じRAW・Recipe120で新binaryのWhole1024/1472/2048→plan4064→実C0planner→Region renderもCPU/DX12成功し、actual F4064×3056、canonical ID/Native/W/valid/PNG一致、DX12 gpu_successを確認。cache ON/OFFでも同一Full PNG。TypeScript/build/差分検査成功、限定監査High0/Medium0。
+
+新binaryは`.tmp/lightcraft-c2c-geometry-fix/target/release/lightcraft-cli.exe`、SHA-256 `7f4f76fd5c8989bf8439206c3bba778a753cf5e5b56359fb495cc14c4e914111`。managed patch digest `6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc`。receiptと実C1 CPU/DX12 probeを照合済み。旧C1/診断用EXEは保持。既存chunk/font警告と調査NodeのExperimentalWarningあり。**C2-CはWindows実機受入待ち**でC3へ進まない。[設計・Windows手順](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#16-c2-c-canonical-native-geometry-root-fix2026-10-25)と[旧調査を残した記録](research/lightcraft/REGION_GEOMETRY_DESCRIPTOR_INVESTIGATION.md)を参照。README/CHANGELOGは変更しない。
+
 ## 工程C2-C：Pan/Zoom自動Region（2026-10-25）
 
 ユーザー報告により `1e3fa0307e6b128faa6f91aef9763b889d516c0c` のC2-B Windows実機受入はPASS。owner/capability、中央／四隅／edge、geometry一致・位置ずれなし、Zoom後の手動再要求、Before/Afterを確認済み。

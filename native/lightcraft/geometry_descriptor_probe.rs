@@ -24,8 +24,9 @@ fn capture(
         json!({"perspective":w.persp,"k1":w.k1,"ca":w.ca,
             "lens":if w.lens_dist == 0.0 {None} else {lens},"lensDist":w.lens_dist})
     });
-    let descriptor = json!({"contract":1,"source":source,"original":[original.0,original.1],
-        "sourceAspect":frame.src_w as f64 / frame.src_h as f64,
+    let native = frame.native_size_at(original.0, original.1).unwrap();
+    let descriptor = json!({"contract":2,"source":source,"original":[original.0,original.1],
+        "nativeAspect":native.0/native.1,
         "orientation":frame.orient,"crop":frame.crop,"flip":[frame.flip_h,frame.flip_v],"warp":warp});
     let metadata = crate::preview::frame_metadata(frame, original, source, width, height)
         .unwrap_or_else(|_| panic!("diagnostic frame metadata rejected"));
@@ -43,7 +44,8 @@ fn capture(
         descriptor,
         summary: json!({"sourceLevel":level,"sourceKind":"Hash128(content_key(photo))",
         "sourceBitmap":[frame.src_w,frame.src_h],"nativeWidth":metadata["nativeWidth"],"nativeHeight":metadata["nativeHeight"],
-        "fullWidth":width,"fullHeight":height,"sourceAspect":safe["sourceAspect"],"frameAspect":frame.aspect(),
+        "fullWidth":width,"fullHeight":height,"nativeAspect":safe["nativeAspect"],
+        "samplingAspect":frame.src_w as f64/frame.src_h as f64,"frameAspect":frame.aspect(),
         "quality":"Full","descriptor":safe}),
     }
 }
@@ -103,7 +105,7 @@ fn comparison(a: &Sample, b: &Sample) -> Value {
     let status: serde_json::Map<String, Value> = [
         "source",
         "original",
-        "sourceAspect",
+        "nativeAspect",
         "orientation",
         "crop",
         "flip",
@@ -298,6 +300,16 @@ fn investigate_geometry_descriptors() {
     let second = whole_sample(&mut h, id, 1472);
     let whole = whole_sample(&mut h, id, 2048);
     let region = plan_sample(&mut h, id, 4064);
+    assert_eq!(whole.summary["sourceLevel"], json!("Preview"));
+    assert_eq!(region.summary["sourceLevel"], json!("Full"));
+    assert_eq!(
+        whole.summary["nativeAspect"],
+        region.summary["nativeAspect"]
+    );
+    assert_ne!(
+        whole.summary["samplingAspect"],
+        region.summary["samplingAspect"]
+    );
     assert_eq!(whole.summary["sourceInfoRaw"], json!(true));
     assert_eq!(region.summary["sourceInfoRaw"], json!(true));
     if backend == "dx12" {
@@ -309,7 +321,22 @@ fn investigate_geometry_descriptors() {
         Sha256::digest(serde_json::to_vec(&whole.descriptor).unwrap())
     ));
     query["desiredLongEdge"] = json!(4064);
-    let rejection = crate::region::execute(&mut h, &tool_args("plan", query));
+    // The shared synthetic helper defaults to photo 1; the matched private RAW may have another ID.
+    let mut plan_args = tool_args("plan", query.clone());
+    plan_args["id"] = json!(id.0.to_string());
+    let planned = crate::region::execute(&mut h, &plan_args)
+        .unwrap_or_else(|_| panic!("canonical preflight failed"));
+    assert_eq!(planned["response"]["geometryId"], query["geometryId"]);
+    assert_eq!(
+        (
+            planned["response"]["fullWidth"].as_u64(),
+            planned["response"]["fullHeight"].as_u64()
+        ),
+        (Some(4064), Some(3056))
+    );
+    query["geometryId"] = json!("0".repeat(64));
+    plan_args["target"] = query;
+    let rejection = crate::region::execute(&mut h, &plan_args);
     assert!(
         matches!(rejection, Err("region_geometry_id_mismatch")),
         "existing Native mismatch rejection must remain active"
@@ -328,15 +355,17 @@ fn investigate_geometry_descriptors() {
     let proportional = fixture((2032, 1528));
     let rounded = fixture((2560, 1925));
     assert_eq!(proportional["wholeToRegion"]["differenceFields"], json!([]));
-    assert_eq!(
-        rounded["wholeToRegion"]["differenceFields"],
-        json!(["sourceAspect"])
+    assert_eq!(rounded["wholeToRegion"]["differenceFields"], json!([]));
+    assert_ne!(
+        rounded["whole2048"]["samplingAspect"],
+        rounded["region4064"]["samplingAspect"]
     );
-    let report = json!({"schemaVersion":1,"backend":backend,"realRawReproduced":true,"recipeRevision":input["recipeRevision"],
+    let report = json!({"schemaVersion":2,"geometryDescriptorContract":2,"backend":backend,"realRawReproduced":true,"recipeRevision":input["recipeRevision"],
         "settingsExactlyRestored":true,"settingsUnchanged":initial == h.session.develop_of(id).unwrap().hash64(),
         "geometrySettings":{"crop":restored["crop"],"orientation":restored["orientation"],"geometry":restored["geometry"],"optics":optics},
         "realRaw":{"thumb":thumb.summary,"whole1024":first.summary,"whole1472":second.summary,"whole2048":whole.summary,"region4064":region.summary,
-            "wholeToRegion":comparison(&whole,&region),"thumbToFull":comparison(&thumb,&region),"nativeRejection":"region_geometry_id_mismatch"},
+            "wholeToRegion":comparison(&whole,&region),"thumbToFull":comparison(&thumb,&region),"nativePlanSucceeded":true,
+            "actualF":[4064,3056],"nativeMismatchGuardRetained":true},
         "fixtures":{"proportional":proportional,"roundedPreview":rounded}});
     let serialized = serde_json::to_string_pretty(&report).unwrap();
     for source in input["sourcePaths"].as_array().unwrap() {

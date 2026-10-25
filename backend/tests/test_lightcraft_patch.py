@@ -16,10 +16,12 @@ def test_manifest_patch_digest_and_targets():
     value = build.manifest()
     assert value["version"] == "0.10.0"
     assert value["commit"] == "a2a41383c4fd62fa85a46ccd00998639221f2d3c"
+    assert value['geometryDescriptorContract'] == 2
     assert len(value["patches"]) == 1
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
     assert '"before"' in patch and 'render_job(id, size, size, true, true)' in patch
     assert all(f"a/{target}" in patch for target in value["patches"][0]["targets"])
+    assert 'GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2' in patch and '"nativeAspect":native_aspect' in patch
 
 
 def test_patch_apply_verify_duplicate_and_unknown_changes_fail_closed(tmp_path, monkeypatch):
