@@ -11,6 +11,7 @@ export function BasicAdjustmentControls({ assetId, recipe, dispatch, onOpenConte
     const control = BASIC_CONTROLS[key];
     const value = recipe.adjustments[key];
     return <AdjustmentSlider key={`${assetId}-${key}`} adjustmentId={key}
+      commitPolicy="operation-boundary"
       enabled={recipe.adjustmentEnabled[key]} onToggle={() => dispatch({ type: 'toggleAdjustment', id: key })} onOpenContextMenu={onOpenContextMenu} label={t(control.label)} value={value}
       min={control.min} max={control.max} step={control.step}
       valueText={`${control.format(value)}${control.unit ? ` ${control.unit}` : ''}`}

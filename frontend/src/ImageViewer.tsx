@@ -19,6 +19,7 @@ type ImageViewerProps = {
   showingOriginal?: boolean;
   onOriginalToggle?: () => void;
   onImageError?: () => void;
+  onInteractionStart?: () => void;
   recipe?: EditRecipe;
   onHistogramChange?: HistogramChangeHandler;
   gpuRenderer?: WorkspaceGpuRenderer | null;
@@ -43,7 +44,7 @@ type ImageViewerProps = {
 
 const NAVIGATOR_LONG_EDGE = 180;
 
-export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -130,13 +131,13 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         // JIS Backslash also matches Original; keep this branch first to avoid showing Before.
         if (originalStatus === 'ready' && editSource && onOriginalToggle) {
           event.preventDefault();
-          if (!event.repeat) onOriginalToggle();
+          if (!event.repeat) { onInteractionStart?.(); onOriginalToggle(); }
         } else if (matchesShortcut(event, 'viewerBefore')) {
           event.preventDefault();
         }
       } else if (matchesShortcut(event, 'viewerBefore')) {
         event.preventDefault();
-        if (!event.repeat) setBackslashHeld(true);
+        if (!event.repeat) { onInteractionStart?.(); setBackslashHeld(true); }
       }
     };
     const keyup = (event: KeyboardEvent) => {
@@ -154,7 +155,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
       window.removeEventListener('blur', release);
       document.removeEventListener('visibilitychange', visibilityChange);
     };
-  }, [editSource, keyboardBlocked, onOriginalToggle, originalStatus]);
+  }, [editSource, keyboardBlocked, onInteractionStart, onOriginalToggle, originalStatus]);
 
   useEffect(() => {
     setImageState('loading');
@@ -241,6 +242,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
         || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFitRestore')
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       event.preventDefault();
+      onInteractionStart?.();
       if (!fitMode) {
         previousTransform.current = { scale, pan };
         setFitMode(true);
@@ -254,7 +256,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [keyboardBlocked, fitMode, scale, pan, fitScale]);
+  }, [keyboardBlocked, fitMode, scale, pan, fitScale, onInteractionStart]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
     const next = clampZoom(nextValue);
@@ -267,6 +269,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
   function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
     if (imageSize.x === 0) return;
     event.preventDefault();
+    onInteractionStart?.();
     const bounds = event.currentTarget.getBoundingClientRect();
     const point = { x: event.clientX - bounds.left - bounds.width / 2, y: event.clientY - bounds.top - bounds.height / 2 };
     zoom(scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12), point);
@@ -275,6 +278,7 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0) return;
+    onInteractionStart?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
   }
@@ -363,7 +367,8 @@ export function ImageViewer({ src, editSource, originalStatus, showingOriginal =
     if (point) setPanFromNavigatorCenter(point);
   }
 
-  return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
+  return <section className="viewer-panel" aria-label={t('workspace.viewer')}
+    onPointerDownCapture={() => onInteractionStart?.()} onClickCapture={() => onInteractionStart?.()}>
     <div className="viewer-toolbar">
       <button type="button" className="tool-button icon-button panel-toggle" onClick={onToggleLeft}
         aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}

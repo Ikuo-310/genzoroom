@@ -12,6 +12,7 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch, onOp
   const { t } = useTranslation();
   return <>
     <AdjustmentSlider key={`${assetId}-temperature`} adjustmentId="temperature"
+      commitPolicy="operation-boundary"
       enabled={recipe.adjustmentEnabled.temperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'temperature' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.temperature} valueText={formatTemperature(recipe.adjustments.temperature)}
       valueLabel={t('workspace.temperatureValue')} precision={0} defaultValue={0}
@@ -22,6 +23,7 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch, onOp
       onCommit={() => dispatch({ type: 'commit', kind: 'temperature' })}
       onReset={() => dispatch({ type: 'temperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-tint`} adjustmentId="tint"
+      commitPolicy="operation-boundary"
       enabled={recipe.adjustmentEnabled.tint} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'tint' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.tint} valueText={formatTint(recipe.adjustments.tint)}
       valueLabel={t('workspace.tintValue')} precision={0} defaultValue={0}

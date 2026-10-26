@@ -8,6 +8,7 @@ export function ColorAdjustmentControls({ assetId, recipe, dispatch, onOpenConte
   const { t } = useTranslation();
   return <>
     <AdjustmentSlider key={`${assetId}-vibrance`} adjustmentId="vibrance"
+      commitPolicy="operation-boundary"
       enabled={recipe.adjustmentEnabled.vibrance} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'vibrance' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.vibrance')} {...VIBRANCE}
       value={recipe.adjustments.vibrance} valueText={formatVibrance(recipe.adjustments.vibrance)}
       valueLabel={t('workspace.vibranceValue')} precision={0} defaultValue={0}
@@ -17,6 +18,7 @@ export function ColorAdjustmentControls({ assetId, recipe, dispatch, onOpenConte
       onCommit={() => dispatch({ type: 'commit', kind: 'vibrance' })}
       onReset={() => dispatch({ type: 'vibranceReset' })} />
     <AdjustmentSlider key={`${assetId}-saturation`} adjustmentId="saturation"
+      commitPolicy="operation-boundary"
       enabled={recipe.adjustmentEnabled.saturation} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'saturation' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.saturation')} {...SATURATION}
       value={recipe.adjustments.saturation} valueText={formatSaturation(recipe.adjustments.saturation)}
       valueLabel={t('workspace.saturationValue')} precision={0} defaultValue={0}

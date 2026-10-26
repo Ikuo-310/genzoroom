@@ -15,6 +15,7 @@ export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => v
 
 type Props = {
   adjustmentId: AdjustmentId;
+  commitPolicy?: 'inactivity' | 'operation-boundary';
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
   enabled: boolean; onToggle: () => void; operationName?: string;
@@ -114,7 +115,7 @@ export function AdjustmentSlider(props: Props) {
     }
   }
 
-  function commitAfterInactivity() {
+  function commitInteraction() {
     clearTimeout(timer.current);
     interaction.current = 'idle';
     latest.current.onCommit();
@@ -122,7 +123,8 @@ export function AdjustmentSlider(props: Props) {
   function scheduleCommit(kind: 'keyboard' | 'wheel' = 'keyboard') {
     clearTimeout(timer.current);
     interaction.current = kind;
-    timer.current = setTimeout(commitAfterInactivity, ADJUSTMENT_COMMIT_DELAY_MS);
+    if (latest.current.commitPolicy === 'operation-boundary') return;
+    timer.current = setTimeout(commitInteraction, ADJUSTMENT_COMMIT_DELAY_MS);
   }
   function finishPointer() {
     if (interaction.current !== 'pointer') return;
@@ -132,7 +134,7 @@ export function AdjustmentSlider(props: Props) {
   useEffect(() => {
     const element = range.current;
     if (element) registerAdjustment(element, () => {
-      if (interaction.current === 'keyboard' || interaction.current === 'wheel' || interaction.current === 'pointer') commitAfterInactivity();
+      if (interaction.current === 'keyboard' || interaction.current === 'wheel' || interaction.current === 'pointer') commitInteraction();
     });
     const keydown = (event: KeyboardEvent) => {
       const currentElement = range.current;

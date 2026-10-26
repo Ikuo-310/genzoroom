@@ -62,6 +62,7 @@ vi.mock('./AdjustedImage', () => ({
 
 let host: HTMLDivElement;
 let root: Root;
+const viewerInteractionStart = vi.fn();
 
 function Harness({ src = '/first' }: { src?: string }) {
   const [persistentBeforeAdjustments, setPersistentBeforeAdjustments] = useState(false);
@@ -70,6 +71,7 @@ function Harness({ src = '/first' }: { src?: string }) {
     persistentBeforeAdjustments={persistentBeforeAdjustments}
     onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
     onBeforeAdjustmentsDisplayChange={(value) => { mockImage.beforeDisplay = value; }}
+    onInteractionStart={viewerInteractionStart}
     onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
@@ -142,6 +144,7 @@ beforeEach(async () => {
   mockImage.beforeDisplay = false;
   updateSetting('zoomNavigatorPosition', 'bottom-right');
   Object.values(contextActions).forEach((action) => action.mockClear());
+  viewerInteractionStart.mockClear();
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -819,6 +822,12 @@ describe('Before / After viewer state', () => {
 });
 
 describe('Viewer Fit restore shortcut', () => {
+  it('signals the operation boundary when the Viewer starts a zoom interaction', () => {
+    act(() => root.render(<Harness />));
+    zoomViewer();
+    expect(viewerInteractionStart).toHaveBeenCalledTimes(1);
+  });
+
   it('restores the exact zoom and pan, then clears the saved view on source change without remounting', () => {
     const render = (src: string) => act(() => root.render(<ImageViewer src={src} alt="photo" leftOpen rightOpen
       editSource={{ kind: 'immich-preview', url: src }} recipe={defaultRecipe()} onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />));

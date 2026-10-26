@@ -139,7 +139,7 @@ describe('non-destructive edit sessions', () => {
     expect(state.pending).toBeNull();
   });
   it('jumps across compound Paste entries and a new edit after a jump drops Redo', () => {
-    let state = adjustExposure(newSession(), 0.5);
+    let state = editSession(newSession(), { type: 'exposure', value: 0.5 });
     state = editSession(state, { type: 'paste', values: { exposure: 1, tint: 30 }, sourceAssetId: 'source', sourceFilename: 'source.jpg' });
     state = adjustContrast(state, 15);
     expect(state.history.map((entry) => entry.kind)).toEqual(['exposure', 'paste', 'contrast']);
