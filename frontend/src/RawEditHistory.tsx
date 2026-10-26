@@ -35,10 +35,8 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
 export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled: boolean;
   onReset: (trigger: HTMLElement) => void }) {
   const { t } = useTranslation();
-  const steps = raw.historySteps ?? [], offset = raw.historyOffset ?? 0;
-  const rows = steps.map((step, index) => {
-    return { id: step.stepId, position: offset + index + 1, description: describe(step, t) };
-  });
+  const steps = raw.historySteps ?? [];
+  const rows = steps.map((step, index) => ({ id: step.stepId, position: index + 1, description: describe(step, t) }));
   return <>
     {raw.resetError && <p role="alert">{t(raw.resetError === 'raw_edit_reset_database_failed' ? 'workspace.rawPreview.editResetDatabaseFailed'
       : raw.resetError === 'raw_edit_reset_session_failed' ? 'workspace.rawPreview.editResetSessionFailed'
@@ -51,13 +49,8 @@ export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<Re
     {raw.historyError && <div role="alert"><p>{t(raw.historyError === 'raw_history_target_missing'
       ? 'workspace.rawPreview.historyTargetMissing' : 'workspace.rawPreview.historyFailed')}</p>
       <button type="button" className="tool-button" disabled={raw.historyLoading || raw.locked || disabled}
-        onClick={() => raw.loadMoreHistory(true)}>{t('workspace.rawPreview.retryHistory')}</button></div>}
+        onClick={() => raw.retryHistory()}>{t('workspace.rawPreview.retryHistory')}</button></div>}
     <HistoryList rows={rows} cursor={raw.history?.cursor ?? 0} disabled={disabled || !!raw.locked || !!raw.historyLoading || !!raw.historyError || !raw.history}
-      onJump={position => raw.jumpHistory(position === 0 ? null : steps[position - offset - 1].stepId)} />
-    {offset > 0 && <button type="button" className="tool-button" disabled={disabled || !!raw.locked || !!raw.dirty || !!raw.historyLoading || !!raw.historyError}
-      onClick={() => raw.loadMoreHistory()}>{t('workspace.rawPreview.moreHistory')}</button>}
-    {offset + steps.length < (raw.history?.length ?? 0) && <button type="button" className="tool-button"
-      disabled={disabled || !!raw.locked || !!raw.dirty || !!raw.historyLoading || !!raw.historyError}
-      onClick={() => raw.loadMoreHistory(false, true)}>{t('workspace.rawPreview.newerHistory')}</button>}
+      onJump={position => raw.jumpHistory(position === 0 ? null : steps[position - 1].stepId)} />
   </>;
 }

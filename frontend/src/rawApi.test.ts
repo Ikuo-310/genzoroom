@@ -4,7 +4,7 @@ import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawReci
   RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
-import { rawHistoryResult, rawHistoryPage } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
   assetId: 'asset', generation: 1, revision: 2 };
@@ -145,31 +145,35 @@ describe('RAW History transport', () => {
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
       expectedRecipeRevision: 4, saveId: request.saveId, ...(action === 'jump' ? { targetStepId: null } : {}) });
   });
-  it('reads 20 display-diff rows within the History-only 16 KiB boundary without exposing snapshots', async () => {
-    const result = rawHistoryResult(historyRequest('commit'), { history: { initialized: true, cursor: 200, length: 200,
-      selectedStepId: historyRequest('commit').saveId } });
-    const page = rawHistoryPage(result, 180);
-    const fetch = vi.fn(async () => new Response(JSON.stringify({ ...page, internal: 'excluded', settings: { private: true } }),
+  it.each([0, 1, 20, 21, 38, 200])('reads all %i ordered display-diff rows without exposing snapshots', async count => {
+    const result = rawHistoryResult(historyRequest('commit'), { history: { initialized: true, cursor: count, length: count,
+      selectedStepId: count ? `00000000-0000-4000-8000-${String(count).padStart(12, '0')}` : null } });
+    const data = rawHistoryData(result);
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ...data, internal: 'excluded', settings: { private: true } }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);
-    const value = await readRawHistory(result, 180); expect(value.steps).toHaveLength(20);
-    expect(value.steps[0].changes).toEqual([{ control: 'light.exposure', before: 180, after: 181 }]);
+    const value = await readRawHistory(result); expect(value.steps).toHaveLength(count);
+    expect(value.steps.map(step => step.stepId)).toEqual(Array.from({ length: count }, (_, i) =>
+      `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`));
+    if (count) expect(value.steps[0].changes).toEqual([{ control: 'light.exposure', before: 0, after: 1 }]);
     expect(value).not.toHaveProperty('settings');
     expect(value).not.toHaveProperty('internal');
     const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-    expect(path).toBe(`/api/raw/documents/${doc.handle}/history?offset=180&limit=20`);
+    expect(path).toBe(`/api/raw/documents/${doc.handle}/history`);
     expect(init.headers).toEqual({ 'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': '1', 'X-Raw-Token': doc.documentToken });
   });
   it.each(['generation', 'rows', 'cursor', 'metadata', 'changes', 'oversize'])('rejects invalid History %s', async invalid => {
-    const result = rawHistoryResult(historyRequest('commit')), page = rawHistoryPage(result, 0);
-    if (invalid === 'generation') page.generation++;
-    if (invalid === 'rows') page.steps.push(page.steps[0]);
-    if (invalid === 'cursor') page.history = { ...page.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
-    if (invalid === 'metadata') page.steps[0].metadata.control = 'native.unknown' as never;
-    if (invalid === 'changes') page.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
-    const content = invalid === 'oversize' ? JSON.stringify(page) + ' '.repeat(16384) : JSON.stringify(page);
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    if (invalid === 'generation') data.generation++;
+    if (invalid === 'rows') data.steps.push(data.steps[0]);
+    if (invalid === 'cursor') data.history = { ...data.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
+    if (invalid === 'metadata') data.steps[0].metadata.control = 'native.unknown' as never;
+    if (invalid === 'changes') data.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
+    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(262144) : JSON.stringify(data);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
-    await expect(readRawHistory(result, 0)).rejects.toThrow('raw_invalid_response');
+    await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
   });
 });
 describe('bounded RAW binary contract', () => {

@@ -54,8 +54,8 @@ export type RawHistoryResult = RawSettings & {
   ack: { saveId: string; revision: number; settingsFingerprint: string; updatedAt: string;
     historyCursor: number; historyLength: number; stepId: string | null };
 };
-export type RawHistoryPage = RawDocument & Pick<RawHistoryResult, 'history' | 'historyPending' | 'nativeState' | 'nativeMatchesRecipe'> & {
-  recipeRevision: number; recipeFingerprint: string | null; offset: number; limit: number; hasMore: boolean; steps: RawHistoryStep[] };
+export type RawHistoryData = RawDocument & Pick<RawHistoryResult, 'history' | 'historyPending' | 'nativeState' | 'nativeMatchesRecipe'> & {
+  recipeRevision: number; recipeFingerprint: string | null; steps: RawHistoryStep[] };
 const fingerprint = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const MAX_IMAGE_BYTES = RAW_WHOLE_MAX_BYTES;
 const opaque = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
@@ -307,10 +307,9 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
     throw new RawSaveError(error.code, accepted || !error.status || error.status >= 500 || error.status === 408 ? 'unknown' : 'rejected', error.status);
   }
 }
-export async function readRawHistory(doc: RawDocument, offset: number): Promise<RawHistoryPage> {
-  if (!integer(offset) || offset > 200) throw new RawApiError('raw_invalid_request');
-  const value = await json(`/documents/${doc.handle}/history?offset=${offset}&limit=20`, { headers: {
-    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 16384);
+export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> {
+  const value = await json(`/documents/${doc.handle}/history`, { headers: {
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 256 * 1024);
   document(value, doc.workspaceId, doc.assetId);
   const h = value.history;
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
@@ -319,9 +318,8 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
     || !h || typeof h.initialized !== 'boolean' || !integer(h.cursor) || !integer(h.length) || h.length > 200 || h.cursor > h.length
     || (h.cursor === 0 ? h.selectedStepId !== null : !uuid(h.selectedStepId))
     || typeof value.historyPending !== 'boolean' || typeof value.nativeMatchesRecipe !== 'boolean'
-    || !['synced', 'desynchronized'].includes(value.nativeState) || value.offset !== offset || value.limit !== 20
-    || value.hasMore !== (offset + 20 < h.length) || !Array.isArray(value.steps)
-    || value.steps.length !== Math.min(20, Math.max(0, h.length - offset))) throw new RawApiError('raw_invalid_response');
+    || !['synced', 'desynchronized'].includes(value.nativeState) || !Array.isArray(value.steps)
+    || value.steps.length !== h.length) throw new RawApiError('raw_invalid_response');
   const ids = new Set<string>();
   for (const step of value.steps) {
     const m = step?.metadata;
@@ -341,7 +339,7 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
         }))) throw new RawApiError('raw_invalid_response');
     ids.add(step.stepId);
   }
-  if (h.cursor > offset && h.cursor <= offset + value.steps.length && value.steps[h.cursor - offset - 1].stepId !== h.selectedStepId)
+  if (h.cursor > 0 && value.steps[h.cursor - 1].stepId !== h.selectedStepId)
     throw new RawApiError('raw_invalid_response');
   // Keep only the display contract, even if a server accidentally adds internal fields.
   return { workspaceId: value.workspaceId, handle: value.handle, assetId: value.assetId, generation: value.generation,
@@ -349,7 +347,7 @@ export async function readRawHistory(doc: RawDocument, offset: number): Promise<
     recipeRevision: value.recipeRevision, recipeFingerprint: value.recipeFingerprint,
     history: { initialized: h.initialized, cursor: h.cursor, length: h.length, selectedStepId: h.selectedStepId },
     historyPending: value.historyPending, nativeState: value.nativeState, nativeMatchesRecipe: value.nativeMatchesRecipe,
-    offset, limit: 20, hasMore: value.hasMore, steps: value.steps.map((step: RawHistoryStep) => ({ stepId: step.stepId,
+    steps: value.steps.map((step: RawHistoryStep) => ({ stepId: step.stepId,
       kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
       changes: step.changes?.map(change => ({ ...change })) ?? null })) };
 }

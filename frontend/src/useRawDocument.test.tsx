@@ -6,7 +6,7 @@ import { useRawDocument } from './useRawDocument';
 import { frontendLogger } from './frontendLogging';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { regionRequest, regionResponse } from './test/rawRegion';
 import { ImageViewer } from './ImageViewer';
 import './i18n';
@@ -26,7 +26,7 @@ async function render(id: string | null, before = false) { await act(async () =>
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 beforeEach(() => {
-  vi.mocked(api.readRawHistory).mockReset().mockImplementation(async (doc, offset) => rawHistoryPage(doc, offset));
+  vi.mocked(api.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   root = createRoot(document.createElement('div'));
   vi.clearAllMocks(); decode = async () => {};
@@ -849,7 +849,7 @@ describe('RAW History document integration', () => {
     const model = fakeRawHistory(2, 2, attempts);
     vi.mocked(api.readRawSettings).mockImplementation(async doc => model.settings(doc));
     vi.mocked(api.saveRawHistory).mockImplementation(async request => model.save(request));
-    vi.mocked(api.readRawHistory).mockImplementation(async (doc, offset) => model.page(doc, offset));
+    vi.mocked(api.readRawHistory).mockImplementation(async doc => model.history(doc));
     return model;
   }
   it('publishes SQLite cursor, controls and a fresh Preview after moving', async () => {

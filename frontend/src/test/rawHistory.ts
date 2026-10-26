@@ -1,4 +1,4 @@
-import type { RawDocument, RawHistoryPage, RawHistoryRequest, RawHistoryResult } from '../rawApi';
+import type { RawDocument, RawHistoryData, RawHistoryRequest, RawHistoryResult } from '../rawApi';
 import { RawSaveError } from '../rawApi';
 import { rawSettings } from './rawSettings';
 
@@ -13,16 +13,16 @@ export function rawHistoryResult(request: RawHistoryRequest, patch: Partial<RawH
       historyCursor: history.cursor, historyLength: history.length, stepId: history.selectedStepId }, ...patch };
 }
 
-export function rawHistoryPage(doc: RawDocument, offset: number): RawHistoryPage {
+export function rawHistoryData(doc: RawDocument): RawHistoryData {
   const value = doc as RawHistoryResult;
   const history = value.history ?? { initialized: false, cursor: 0, length: 0, selectedStepId: null };
   return { ...doc, recipeRevision: doc.recipeRevision ?? 0, recipeFingerprint: doc.recipeFingerprint ?? null,
-    history, historyPending: false, nativeState: 'synced', nativeMatchesRecipe: true, offset, limit: 20,
-    hasMore: offset + 20 < history.length, steps: Array.from({ length: Math.min(20, Math.max(0, history.length - offset)) }, (_, i) => ({
-      stepId: offset + i + 1 === history.cursor && history.selectedStepId ? history.selectedStepId
-        : `00000000-0000-4000-8000-${String(offset + i + 1).padStart(12, '0')}`,
+    history, historyPending: false, nativeState: 'synced', nativeMatchesRecipe: true,
+    steps: Array.from({ length: history.length }, (_, i) => ({
+      stepId: i + 1 === history.cursor && history.selectedStepId ? history.selectedStepId
+        : `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z',
-      changes: [{ control: 'light.exposure', before: offset + i, after: offset + i + 1 }] })) };
+      changes: [{ control: 'light.exposure', before: i, after: i + 1 }] })) };
 }
 
 /** Test transport model: metadata/snapshots belong to this fake Backend, never the hook. */
@@ -56,10 +56,10 @@ export function fakeRawHistory(count = 2, initialCursor = count, attempts = 0) {
       const result = rawHistoryResult({ ...request, doc: next }, { history: metadata() });
       revision = result.recipeRevision; receipts.set(request.saveId, result); return result;
     },
-    page: (doc: RawDocument, offset: number): RawHistoryPage => ({ ...rawHistoryPage(doc, offset), recipeRevision: revision,
-      history: metadata(), hasMore: offset + 20 < entries.length, steps: entries.slice(offset, offset + 20).map((entry, index) => ({ stepId: entry.id,
+    history: (doc: RawDocument): RawHistoryData => ({ ...rawHistoryData(doc), recipeRevision: revision,
+      history: metadata(), steps: entries.map((entry, index) => ({ stepId: entry.id,
         kind: 'control', metadata: { control: 'light.exposure' }, createdAt: '2026-10-23T00:00:00Z',
-        changes: [{ control: 'light.exposure', before: offset + index ? entries[offset + index - 1].exposure : 0,
+        changes: [{ control: 'light.exposure', before: index ? entries[index - 1].exposure : 0,
           after: entry.exposure }] })) }),
   };
 }

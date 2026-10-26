@@ -22,7 +22,6 @@ export class RawRecipeSave {
   initialized = false;
   history?: RawHistoryResult['history'];
   steps: RawHistoryStep[] = [];
-  historyOffset = 0;
   historyLoading = false;
   historyError?: string;
   moving = false;
@@ -73,31 +72,24 @@ export class RawRecipeSave {
     this.historyOperation = operation;
     return operation;
   }
-  loadMoreHistory(retry = false, newer = false) {
+  retryHistory() {
     if (!this.active || !this.initialized || this.historyLoading || this.moving || this.operation || this.error || this.dirty) return;
     this.historyLoading = true;
     this.options.changed();
-    this.options.schedule(async () => { await this.loadHistoryPage(retry ? undefined : newer
-      ? Math.min(this.history?.length ?? 0, this.historyOffset + this.steps.length) : Math.max(0, this.historyOffset - 20)); });
+    this.options.schedule(async () => { await this.loadHistory(); });
   }
-  private async loadHistoryPage(offset?: number) {
+  private async loadHistory() {
     this.historyLoading = true;
     try {
-      const selected = this.history?.cursor || this.history?.length || 1;
-      const start = offset ?? Math.floor((selected - 1) / 20) * 20;
-      const page = await readRawHistory(this.confirmed, start);
+      const data = await readRawHistory(this.confirmed);
       if (!this.active) return;
-      if (page.recipeRevision !== this.revision || page.recipeFingerprint !== this.savedFingerprint || page.historyPending
-        || page.nativeState !== 'synced' || !page.nativeMatchesRecipe || !this.history
-        || page.history.cursor !== this.history.cursor || page.history.length !== this.history.length
-        || page.history.selectedStepId !== this.history.selectedStepId) throw new RawApiError('raw_history_revision_conflict');
-      const prepend = offset !== undefined && start + page.steps.length === this.historyOffset;
-      const append = offset !== undefined && start === this.historyOffset + this.steps.length;
-      const steps = prepend ? [...page.steps, ...this.steps] : append ? [...this.steps, ...page.steps] : page.steps;
-      if (new Set(steps.map(step => step.stepId)).size !== steps.length || steps.length > 200)
+      if (data.recipeRevision !== this.revision || data.recipeFingerprint !== this.savedFingerprint || data.historyPending
+        || data.nativeState !== 'synced' || !data.nativeMatchesRecipe || !this.history
+        || data.history.cursor !== this.history.cursor || data.history.length !== this.history.length
+        || data.history.selectedStepId !== this.history.selectedStepId) throw new RawApiError('raw_history_revision_conflict');
+      if (new Set(data.steps.map(step => step.stepId)).size !== data.steps.length || data.steps.length > 200)
         throw new RawApiError('raw_invalid_response');
-      this.steps = steps;
-      if (!append) this.historyOffset = start;
+      this.steps = data.steps;
       this.historyError = undefined;
     } catch (cause) {
       if (this.active) {
@@ -110,7 +102,7 @@ export class RawRecipeSave {
   }
   private async sendMoveIntent() {
     if (!this.moveIntent) return;
-    if (this.historyError) await this.loadHistoryPage();
+    if (this.historyError) await this.loadHistory();
     if (this.historyError) throw new RawApiError(this.historyError);
     const { action, targetStepId, operation } = this.moveIntent;
     // Cache refresh can hide a still-valid UUID. Let SQLite validate membership; never
@@ -273,11 +265,8 @@ export class RawRecipeSave {
       this.gesture = undefined;
       this.confirmed = controls.confirmed = result;
       this.history = result.history;
-      // Metadata pages are a bounded display cache. Any new commit can prune/replace UUIDs.
-      if (!moving || request.action === 'operate' || this.historyError) await this.loadHistoryPage();
-      else if (result.history.cursor > 0 && (result.history.cursor <= this.historyOffset
-        || result.history.cursor > this.historyOffset + this.steps.length))
-        await this.loadHistoryPage(Math.floor((result.history.cursor - 1) / 20) * 20);
+      // Commits can prune or replace step IDs, while cursor moves preserve the complete list.
+      if (!moving || request.action === 'operate' || this.historyError) await this.loadHistory();
       if (moving) controls.refreshPreview();
       try { frontendLogger.add({ level: 'debug', component: 'raw', event: 'history.saved', context: {
         assetId: result.assetId, generation: result.generation, saveId: result.ack.saveId,

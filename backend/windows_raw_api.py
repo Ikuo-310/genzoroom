@@ -23,8 +23,7 @@ from raw_controls import CONTROLS, controls_state, validate_controls, validate_h
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
-MAX_HISTORY_RESPONSE_BYTES = 16 * 1024
-HISTORY_PAGE_SIZE = 20
+MAX_HISTORY_RESPONSE_BYTES = 256 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
@@ -808,11 +807,7 @@ class RawPreviewApi:
                     or request.headers.get("x-raw-token") != doc["documentToken"]):
                 raise LightCraftError("raw_stale_handle")
             try:
-                if set(request.query_params) - {"offset", "limit"}:
-                    raise ValueError()
-                offset = int(request.query_params.get("offset", "0"))
-                limit = int(request.query_params.get("limit", str(HISTORY_PAGE_SIZE)))
-                if not 0 <= offset <= HISTORY_LIMIT or not 1 <= limit <= HISTORY_PAGE_SIZE:
+                if request.query_params:
                     raise ValueError()
             except ValueError:
                 raise LightCraftError("raw_invalid_request") from None
@@ -820,13 +815,12 @@ class RawPreviewApi:
             history = state["history"]
             steps = history["steps"] if history else []
             baseline = history["baselineSettings"] if history else None
-            page_steps = []
-            for index, step in enumerate(steps[offset:offset + limit], offset):
+            public_steps = []
+            for index, step in enumerate(steps):
                 before = baseline if index == 0 else steps[index - 1]["settings"]
-                page_steps.append({key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
+                public_steps.append({key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
                                   | {"changes": self._history_changes(step, before, step["settings"])})
-            return self._history_json({**doc, **self._history_public(doc, state), "offset": offset,
-                "limit": limit, "hasMore": offset + limit < len(steps), "steps": page_steps}, MAX_HISTORY_RESPONSE_BYTES)
+            return self._history_json({**doc, **self._history_public(doc, state), "steps": public_steps}, MAX_HISTORY_RESPONSE_BYTES)
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)
         fingerprint = hashlib.sha256(json.dumps([doc["handle"], action, body], sort_keys=True,

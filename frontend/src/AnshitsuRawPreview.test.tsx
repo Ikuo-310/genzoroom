@@ -10,7 +10,7 @@ import i18n from './i18n';
 import type { AssetDetail } from './assets';
 import * as rawApi from './rawApi';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
@@ -44,7 +44,7 @@ async function mount() {
   await flush();
 }
 beforeEach(async () => {
-  vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async (doc, offset) => rawHistoryPage(doc, offset));
+  vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.clearAllMocks(); await i18n.changeLanguage('en');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -683,7 +683,7 @@ function historyBackend(count = 2) {
   const model = fakeRawHistory(count);
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => model.settings(doc));
   vi.mocked(rawApi.saveRawHistory).mockImplementation(async request => model.save(request));
-  vi.mocked(rawApi.readRawHistory).mockImplementation(async (doc, offset) => model.page(doc, offset));
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async doc => model.history(doc));
   return model;
 }
 function historyKey(key = 'z', init: KeyboardEventInit = {}, target: EventTarget = window) {
@@ -750,12 +750,13 @@ it('commits an open RAW gesture before shortcut Undo without recording the move 
   expect(historyButton(2).getAttribute('aria-current')).toBe('step'); expect(history().querySelectorAll('li')).toHaveLength(4);
 });
 
-it('pages through 200 saved operations in batches of 20', async () => {
-  historyBackend(200); await mount(); expect(history().querySelectorAll('li')).toHaveLength(21);
+it('displays all 200 saved operations on first load with no paging controls', async () => {
+  historyBackend(200); await mount(); expect(history().querySelectorAll('li')).toHaveLength(201);
   expect(rawApi.readRawHistory).toHaveBeenCalledOnce();
-  for (let i = 0; i < 9; i++) await clickText('Load 20 earlier operations');
-  expect(history().querySelectorAll('li')).toHaveLength(201); expect(rawApi.readRawHistory).toHaveBeenCalledTimes(10);
+  expect(historyButton(1).textContent).toContain('Exposure');
   expect(historyButton(200).getAttribute('aria-current')).toBe('step');
+  expect(host.textContent).not.toContain('20 earlier operations');
+  expect(host.textContent).not.toContain('20 later operations');
 });
 
 it('retains the old cursor on save failure, locks history/editing, and retries exactly the same move', async () => {
@@ -796,10 +797,10 @@ it('reloads the persisted cursor and Redo range after switching through JPEG', a
 
 it('labels RAW temperature in Kelvin without inventing unavailable before/after values', async () => {
   const model = historyBackend();
-  vi.mocked(rawApi.readRawHistory).mockImplementation(async (doc, offset) => {
-    const page = model.page(doc, offset);
-    page.steps[0].metadata.control = 'wb.temp'; page.steps[0].changes = [{ control: 'wb.temp', before: 4500, after: 5000 }];
-    page.steps[1].metadata.control = 'wb.tint'; page.steps[1].changes = [{ control: 'wb.tint', before: 0, after: -10 }]; return page;
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async doc => {
+    const data = model.history(doc);
+    data.steps[0].metadata.control = 'wb.temp'; data.steps[0].changes = [{ control: 'wb.temp', before: 4500, after: 5000 }];
+    data.steps[1].metadata.control = 'wb.tint'; data.steps[1].changes = [{ control: 'wb.tint', before: 0, after: -10 }]; return data;
   });
   await mount();
   expect(history().textContent).toContain(`${i18n.t('workspace.temperature')} 4500 K → 5000 K`);

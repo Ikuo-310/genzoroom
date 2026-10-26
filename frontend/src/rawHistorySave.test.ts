@@ -3,7 +3,7 @@ import * as api from './rawApi';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
 import { rawSettings } from './test/rawSettings';
-import { rawHistoryResult, rawHistoryPage } from './test/rawHistory';
+import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
@@ -22,7 +22,7 @@ function owner(settings = initial()) {
 async function drain() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
 function gate<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(yes => { resolve = yes; }), get resolve() { return resolve; } }; }
 beforeEach(() => {
-  vi.mocked(api.readRawHistory).mockReset().mockImplementation(async (doc, offset) => rawHistoryPage(doc, offset));
+  vi.mocked(api.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.useFakeTimers(); vi.clearAllMocks(); queue = Promise.resolve();
   vi.mocked(api.saveRawHistory).mockImplementation(async request => rawHistoryResult(request));
   vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => {
@@ -236,9 +236,9 @@ function historyBackend(length = 3, cursor = length, sameSettings = false) {
       selectedStepId: position ? entries[position - 1].id : null } });
     receipts.set(request.saveId, result); return result;
   });
-  vi.mocked(api.readRawHistory).mockImplementation(async (doc, offset) => ({ ...rawHistoryPage(doc, offset),
-    steps: entries.slice(offset, offset + 20).map((e, index) => ({ stepId: e.id, kind: 'control', metadata: { control: 'light.exposure' },
-      createdAt: '2026-10-23T00:00:00Z', changes: [{ control: 'light.exposure', before: index ? entries[offset + index - 1].value : 0, after: e.value }] })) }));
+  vi.mocked(api.readRawHistory).mockImplementation(async doc => ({ ...rawHistoryData(doc),
+    steps: entries.map((e, index) => ({ stepId: e.id, kind: 'control', metadata: { control: 'light.exposure' },
+      createdAt: '2026-10-23T00:00:00Z', changes: [{ control: 'light.exposure', before: index ? entries[index - 1].value : 0, after: e.value }] })) }));
   return { settings, entries, position: () => position };
 }
 
@@ -278,12 +278,11 @@ it('does not retarget a removed redo UUID and keeps the preceding gesture saved'
   expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'commit', 'jump']);
   expect(saver.error).toBeUndefined(); expect(saver.historyError).toBe('raw_history_target_missing');
   expect(saver.history?.length).toBe(2); expect(saver.dirty).toBe(false);
-  saver.loadMoreHistory(true); await drain(); expect(saver.historyError).toBeUndefined();
+  saver.retryHistory(); await drain(); expect(saver.historyError).toBeUndefined();
 });
 
 it('uses the stable requested UUID even when a valid older target leaves the refreshed display page', async () => {
   const backend = historyBackend(200), { saver } = owner(backend.settings); await saver.save();
-  for (let i = 0; i < 5; i++) { saver.loadMoreHistory(); await drain(); }
   const target = backend.entries[100].id;
   saver.change('light.exposure', 201); await saver.move('jump', target);
   expect(vi.mocked(api.saveRawHistory).mock.calls.at(-1)?.[0]).toMatchObject({ action: 'jump', targetStepId: target });
@@ -291,17 +290,14 @@ it('uses the stable requested UUID even when a valid older target leaves the ref
   expect(saver.confirmed.values['light.exposure']).toBe(101); expect(saver.historyError).toBeUndefined();
 });
 
-it('bounds History fetches to pages of 20, handles 200 entries and finds selection after baseline/redo', async () => {
+it('loads all 200 History entries at once and keeps the full list through baseline/redo', async () => {
   const backend = historyBackend(200), { saver } = owner(backend.settings); await saver.save();
-  expect(saver.steps).toHaveLength(20); expect(saver.historyOffset).toBe(180);
+  expect(saver.steps).toHaveLength(200);
   expect(api.readRawHistory).toHaveBeenCalledOnce();
-  for (let i = 0; i < 9; i++) { saver.loadMoreHistory(); await drain(); }
-  expect(saver.steps).toHaveLength(200); expect(saver.historyOffset).toBe(0);
-  expect(vi.mocked(api.readRawHistory).mock.calls.map(([, offset]) => offset)).toEqual([180, 160, 140, 120, 100, 80, 60, 40, 20, 0]);
   const fresh = owner(backend.settings); await fresh.saver.save();
   await fresh.saver.move('jump', null); await fresh.saver.move('redo');
-  expect(fresh.saver.historyOffset).toBe(0); expect(fresh.saver.steps[0].stepId).toBe(backend.entries[0].id);
-  fresh.saver.loadMoreHistory(false, true); await drain(); expect(fresh.saver.steps).toHaveLength(40);
+  expect(fresh.saver.steps).toHaveLength(200); expect(fresh.saver.steps[0].stepId).toBe(backend.entries[0].id);
+  expect(fresh.saver.steps.at(-1)?.stepId).toBe(backend.entries.at(-1)?.id);
 });
 
 it('retries the same uncertain cursor move and blocks duplicate moves/new gestures until ack', async () => {
@@ -340,21 +336,20 @@ it('retains the requested Undo behind an uncertain gesture commit and completes 
   expect(saver.history?.cursor).toBe(3); expect(saver.history?.length).toBe(4); expect(saver.dirty).toBe(false);
 });
 
-it('loads the selected page on reopen and retains aligned pages for 21 entries', async () => {
+it('loads all entries on reopen for both 200 and 21 step histories', async () => {
   const backend = historyBackend(200, 41), { saver } = owner(backend.settings); await saver.save();
-  expect(saver.historyOffset).toBe(40); expect(saver.steps[0].stepId).toBe(backend.entries[40].id);
+  expect(saver.steps).toHaveLength(200); expect(saver.steps[0].stepId).toBe(backend.entries[0].id);
   const other = historyBackend(21), fresh = owner(other.settings); await fresh.saver.save();
-  expect(fresh.saver.historyOffset).toBe(20); expect(fresh.saver.steps).toHaveLength(1);
-  fresh.saver.loadMoreHistory(); await drain(); expect(fresh.saver.steps).toHaveLength(21);
+  expect(fresh.saver.steps).toHaveLength(21);
 });
 
-it('retries metadata loading without another save or move and refuses unverified pages', async () => {
+it('retries metadata loading without another save or move and refuses an unverified response', async () => {
   const backend = historyBackend(), { saver } = owner(backend.settings);
   vi.mocked(api.readRawHistory).mockRejectedValueOnce(new api.RawApiError('raw_history_unavailable'));
   await saver.save(); expect(saver.historyError).toBe('raw_history_unavailable'); expect(saver.dirty).toBe(false);
   await saver.move('undo'); expect(api.saveRawHistory).toHaveBeenCalledOnce();
-  saver.loadMoreHistory(true); await drain(); expect(saver.historyError).toBeUndefined();
-  vi.mocked(api.readRawHistory).mockImplementationOnce(async (doc, offset) => ({ ...rawHistoryPage(doc, offset), recipeRevision: 99 }));
-  saver.loadMoreHistory(true); await drain(); expect(saver.historyError).toBe('raw_history_revision_conflict');
+  saver.retryHistory(); await drain(); expect(saver.historyError).toBeUndefined();
+  vi.mocked(api.readRawHistory).mockImplementationOnce(async doc => ({ ...rawHistoryData(doc), recipeRevision: 99 }));
+  saver.retryHistory(); await drain(); expect(saver.historyError).toBe('raw_history_revision_conflict');
   expect(saver.steps).toHaveLength(3); expect(saver.revision).toBe(11);
 });

@@ -6,7 +6,7 @@ import { RawEditHistory } from './RawEditHistory';
 import type { RawHistoryStep } from './rawApi';
 
 function rawHistory(steps: RawHistoryStep[], cursor: number) {
-  return { historySteps: steps, historyOffset: 0, history: { initialized: true, cursor, length: steps.length,
+  return { historySteps: steps, history: { initialized: true, cursor, length: steps.length,
     selectedStepId: cursor ? steps[cursor - 1].stepId : null }, jumpHistory: vi.fn() };
 }
 

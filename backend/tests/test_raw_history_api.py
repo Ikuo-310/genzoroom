@@ -5,7 +5,7 @@ import json
 import sqlite3
 import threading
 from contextlib import closing
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from PIL import Image
@@ -181,7 +181,7 @@ def test_uninitialized_commit_and_legacy_dirty_optin_are_safe(local, tmp_path, m
     asyncio.run(run())
 
 
-def test_auth_pagination_and_no_arbitrary_settings(local, tmp_path, monkeypatch):
+def test_auth_reads_complete_history_without_arbitrary_settings(local, tmp_path, monkeypatch):
     async def run():
         api, _, _, _ = await setup(tmp_path, local, monkeypatch)
         try:
@@ -193,31 +193,48 @@ def test_auth_pagination_and_no_arbitrary_settings(local, tmp_path, monkeypatch)
                 for illegal in ({"Origin": "http://evil.example"}, {"Host": "evil.example"}):
                     assert (await http.post(url(doc, "initialize"), json=body(doc), headers=illegal)).status_code == 403
                 assert (await http.get(url(doc), headers=headers(doc) | {"X-Raw-Token": "bad"})).status_code == 409
-                for query in ("limit=21", "offset=-1", "offset=201", "limit=x", "random=1"):
+                for query in ("limit=20", "offset=0", "random=1"):
                     assert (await http.get(url(doc) + "?" + query, headers=headers(doc))).status_code == 400
                 oversized = await http.post(url(doc, "initialize"), content=json.dumps({"x": "x" * 4096}),
                                             headers={"Content-Type": "application/json"})
                 assert oversized.status_code == 413
                 doc = await operation(http, doc, "initialize")
-                for index in range(22):
-                    doc = await change(http, doc, (index + 1) / 10)
-                    doc = await operation(http, doc, "commit", commit_body(doc))
                 response = await http.get(url(doc), headers=headers(doc))
-                assert len(response.content) <= 16384 and len(response.json()["steps"]) == 20
-                assert response.json()["hasMore"]
-                first = response.json()["steps"][0]
-                assert first["changes"] == [{"control": "light.exposure", "before": 0, "after": .1}]
-                last = (await http.get(url(doc) + "?offset=20", headers=headers(doc))).json()
-                assert len(last["steps"]) == 2 and not last["hasMore"]
-                assert last["steps"][0]["changes"] == [{"control": "light.exposure", "before": 2., "after": 2.1}]
-                assert not {"settings", "sourceContentHash", "baselineSettings"} & set(last)
-                assert all(set(step) == {"stepId", "kind", "metadata", "createdAt", "changes"} for step in last["steps"])
+                assert response.status_code == 200 and response.json()["steps"] == []
+                base_state = store.get_raw_history(api._history_identity)
+                requested_count = 0
+                async def full_history(_doc):
+                    state = copy.deepcopy(base_state)
+                    baseline = state["history"]["baselineSettings"]
+                    before = copy.deepcopy(baseline)
+                    steps = []
+                    for index in range(requested_count):
+                        after = copy.deepcopy(before)
+                        after["light"]["exposure"] = (index + 1) / 10
+                        steps.append({"stepId": str(UUID(int=index + 1)), "kind": "control", "metadata": {"control": "light.exposure"},
+                            "createdAt": "2026-10-23T00:00:00Z", "settings": after})
+                        before = after
+                    state["history"] = {"baselineSettings": baseline, "cursor": requested_count, "steps": steps}
+                    return state
+                monkeypatch.setattr(api, "_history_load", full_history)
+                for count in (1, 20, 21, 38, 200):
+                    requested_count = count
+                    response = await http.get(url(doc), headers=headers(doc))
+                    result = response.json()
+                    assert response.status_code == 200 and len(response.content) <= 256 * 1024
+                    assert len(result["steps"]) == count
+                    assert [step["stepId"] for step in result["steps"]] == [str(UUID(int=index + 1)) for index in range(count)]
+                    assert result["steps"][0]["changes"] == [{"control": "light.exposure", "before": 0, "after": .1}]
+                    assert result["steps"][-1]["changes"] == [{"control": "light.exposure", "before": (count - 1) / 10,
+                                                                "after": count / 10}]
+                    assert not {"settings", "sourceContentHash", "baselineSettings", "offset", "limit", "hasMore"} & set(result)
+                    assert all(set(step) == {"stepId", "kind", "metadata", "createdAt", "changes"} for step in result["steps"])
         finally:
             await api.close()
     asyncio.run(run())
 
 
-def test_history_page_diffs_follow_rolled_baseline_and_new_branch(local, tmp_path, monkeypatch):
+def test_history_diffs_follow_rolled_baseline_and_new_branch(local, tmp_path, monkeypatch):
     import raw_recipe_store
 
     async def run():

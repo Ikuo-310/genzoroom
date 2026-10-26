@@ -282,8 +282,6 @@
       "historyFailed": "RAW history could not be verified. Retry to refresh the list.",
       "historyTargetMissing": "The selected operation was removed by the preceding edit. Your edit is saved. Refresh history and select again.",
       "retryHistory": "Retry RAW history",
-      "moreHistory": "Load 20 earlier operations",
-      "newerHistory": "Load 20 later operations",
       "regenerating": "Saving and renewing the RAW editing session…",
       "regenerationFailed": "RAW session renewal failed. The current save state has been retained. Retry to continue.",
       "retryRegeneration": "Retry session renewal",
