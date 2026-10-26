@@ -1,6 +1,6 @@
 # RAW Region Preview：工程C 実装前設計
 
-2026-10-24（Asia/Tokyo）。初回調査基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。§1〜10は初回設計、**C0契約固定の完了記録・厳密な規則は§11を正本**とする。**この冒頭の状態説明は初回調査時点の記録**であり、C1 Native/Backendは§12、C2実装と最終Windows受入は§13〜§17を正本とする。閾値や性能目標の候補を受入済み仕様と読まないこと。
+2026-10-24（Asia/Tokyo）。初回調査基準GenzoRoom `79e198ede4750f52fbed9116d6351597f62755c3`、`feature/lightcraft-integration`。B1は[Windows受入記録](RAW_ADAPTIVE_PREVIEW_DESIGN.md#b1-windows-acceptance)により完了。§1〜10は初回設計、**C0契約固定の完了記録・厳密な規則は§11を正本**とする。**この冒頭および各工程末尾の未実装・未着手状態は当時の記録**であり、C1 Native/Backendは§12、C2実装と最終Windows受入は§13〜§17、現在の機能完了と性能課題の扱いは§18を正本とする。閾値や性能目標の候補を受入済み仕様と読まないこと。
 
 ## 1. 調査根拠と確認済み事実
 
@@ -530,4 +530,20 @@ C2-C途中のgeometry原因は履歴として保持する。初期の1:1 Region 
 
 根本修正後、同一RAW/Recipe revision 120でCPUとDX12双方のWhole 1024/1472/2048、Region plan 4064、production C0 planner、Region renderに成功した。Preview sourceとFull sourceでcanonical geometryId/Native寸法が一致し、Whole/Regionは実F・window・validRegion・bitmap寸法の契約を満たし、DX12は`gpu_success`だった。比例/丸めPreview fixture、geometry変更/tone-only回帰、Before、StageCache source所有、Native座標roundtripも確認済み。回帰証跡とbinary receiptは§16および[canonical regression記録](REGION_GEOMETRY_CANONICAL_REGRESSION.json)に保持する。
 
-C2が満たしたのはWhole密度が十分なFitではWhole-only、高Zoomで不足する部分だけFull RAW RegionをWhole base上へ表示し、Pan/Zoom、Draft→Full、Before/After pair、stale/failure時のWhole fallbackを行う設計目的である。次は未確定のC3対象であり、C2完了とは分けて扱う：rho threshold/hysteresis最終値、context/prefetch最終値、aggregation/quiet interval、F刻み、Region memory budget、latency、RSS/VRAM、長時間stress、Dehaze品質差、部分coverage/tile戦略、RAW Export、Scope、NR/sharpening等の現像品質改善。実画面で観測したRAWのカラーノイズやPixel JPEGとの差も、C2 Region機構の不具合ではなく現像品質側の後続課題とする。**C3は未着手である。**
+C2が満たしたのはWhole密度が十分なFitではWhole-only、高Zoomで不足する部分だけFull RAW RegionをWhole base上へ表示し、Pan/Zoom、Draft→Full、Before/After pair、stale/failure時のWhole fallbackを行う設計目的である。§17末尾のC3未着手記載は当時の工程状態であり、現在の完了状態と性能調査結果は次節に記録する。
+
+## 18. RAW Preview機能完了と性能課題の扱い（2026-10-26）
+
+RAW PreviewはLightCraft v0.14.0統合の機能として完了した。対象はWhole Draft/Full、Native geometryとDPR、Region、Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、LightCraft v0.14.0追随、RAW Viewer Smoke、Developer Diagnostics RAW Viewer Benchmarkである。C2のWindows実機受入は§17、v0.14.0の更新確認は[追随調査](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md)、Smoke/Benchmarkの手順は[UPDATE_GUIDE](UPDATE_GUIDE.md)を参照。ここでいう完了はこのPreview統合の受入範囲を指し、RAW Export、Scope、将来の画質向上を含めない。
+
+C3-A/B/Cは性能・実現性の調査として完了し、Region policy、Region budget、StageCache budget、scheduler、transport、Preview品質は変更していない。既知の課題はblocking issueではなく、将来のperformance optimization候補である。
+
+| 観測 | 結果 | 扱い |
+|---|---:|---|
+| initial RAW open | 約2秒 | 将来の最適化候補 |
+| cold first Region Plan（Native） | 約660ms | 約99.96%が`job.source.load_source()`によるFull sourceの初回取得・生成。将来の最適化候補 |
+| 同一document内の再Plan | 約0.25ms | 生成済みsourceの再利用を確認。cold costは毎Planではない |
+
+C3-Cはsettings/geometry条件を限定すればmetadata-only Planが成立しうると判定した一方、cold Full source costが初回Region renderへ移り、初回Region表示までのlatency改善を保証しないため実装保留とした。metadata-only fast path、Full source prewarm、source生成内部最適化はいずれも将来検討である。再検討時はPlanと初回Region表示を合わせたend-to-end latencyを評価し、適用条件をfail-closedにする。詳細は[C3-B計測](REGION_C3B_PLAN_TIMING.md)および[C3-C成立性調査](REGION_C3C_METADATA_ONLY_FEASIBILITY.md)を参照。
+
+C3-Aで挙げたpolicy tuning、memory stress/capacity、partial/tile、Dehaze差などPreviewの成立条件を変えない項目は必要時の将来調査とする。RAW Export、Scope、NR/sharpening等の現像品質作業も本機能のblocking issueではない。

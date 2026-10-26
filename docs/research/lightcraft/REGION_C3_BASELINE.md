@@ -1,6 +1,6 @@
 # C3-A Region baseline — 2026-10-25
 
-C3-Aの計測結果。**製品値の確定や調整は行っていない。C3-Bへの進行にはユーザーレビューが必要。**
+C3-A時点の計測記録（2026-10-25）。**当時は製品値の確定や調整を行わず、C3-Bへの進行にユーザーレビューを求めていた。**その後のC3-B/C3-C調査とRAW Preview機能完了は[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)を参照。C3-A由来の未実施提案は現在もblocking issueではなく、必要時の将来最適化候補である。
 数値・view trace・各requestの結果は [REGION_C3_BASELINE.json](REGION_C3_BASELINE.json) に収録する。
 
 ## 条件と変更範囲
@@ -242,8 +242,8 @@ Before fingerprint除外、未sample peakのnull化、DPR表示、generation更�
 変更内のHigh / Medium残件なし。上記の測定限界・既存テスト失敗は残す。
 実時計測におけるdebugログ自身のobserver costは較正していない。OFF/DEBUG同件数の確認は決定的mock workloadであり、実時間の完全な無干渉性を証明するものではない。
 
-## C3-B以降へ渡す判断材料
+## 当時C3-B以降へ渡した判断材料
 
 閾値直近の細かなZoom traceと画質受入、aggregationの応答性、partial時のreuse条件とrequest圧力、prefetchの移動距離分布、256px刻みの細かいZoom比較が必要。
-メモリの反復stress / capacityはC3-C、large viewportのpartial受入とtile要否は必要ならC3-Dへ渡す。
+この段落のC3-C/D割当はC3-A時点の提案であり、後続調査の実施範囲を表さない。後続C3-B/Cの実施結果と残す将来候補は§18に集約する。メモリの反復stress / capacity、large viewportのpartial受入とtile要否は必要性が生じた場合の将来調査である。
 Dehaze最大3 LSB差の既存Native regressionは保持。Dehaze UI受入、NR / sharpening追加は今回の対象にしていない。

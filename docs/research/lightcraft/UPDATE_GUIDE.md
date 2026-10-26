@@ -2,6 +2,8 @@
 
 この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`**（U3自動検証PASS、短いWindows実機受入待ち）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
+RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。
+
 ## 標準更新方針
 
 GenzoRoomは開発中のため、LightCraft更新の標準受入は変更に直接関係するfocused regressionに限定する。過去の研究文書やPhase記録は設計背景・当時の受入証跡・問題発生時の調査資料であり、記載された全試験を更新ごとに繰り返す手順ではない。
