@@ -6,6 +6,7 @@ import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
 import { useShortcutDisplay } from './useShortcutDisplay';
+import { useAppSettings } from './appSettings';
 import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
@@ -56,9 +57,11 @@ type ImageViewerProps = {
 };
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
+const NAVIGATOR_LONG_EDGE = 180;
 
 export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
+  const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
   const fitShortcut = shortcut.label('viewerFitRestore');
@@ -90,6 +93,31 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [fitMode, setFitMode] = useState(true);
+  const zoomed = scale > fitScale;
+  const navigatorPosition = settings.zoomNavigatorPosition;
+  const navigatorScale = imageSize.x > 0 && imageSize.y > 0
+    ? Math.min(NAVIGATOR_LONG_EDGE / Math.max(imageSize.x, imageSize.y), (viewportSize.x - 24) / imageSize.x, (viewportSize.y - 24) / imageSize.y) : 0;
+  const showNavigator = zoomed && navigatorPosition !== 'off' && imageState === 'ready'
+    && viewportSize.x > 24 && viewportSize.y > 24 && navigatorScale > 0;
+  const navigatorWidth = imageSize.x * navigatorScale;
+  const navigatorHeight = imageSize.y * navigatorScale;
+  const navigatorFrame = useMemo(() => {
+    if (!imageSize.x || !imageSize.y || !scale) return { left: 0, top: 0, width: 0, height: 0 };
+    const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value));
+    const left = clamp(imageSize.x / 2 - (viewportSize.x / 2 + pan.x) / scale, imageSize.x);
+    const right = Math.max(left, clamp(imageSize.x / 2 + (viewportSize.x / 2 - pan.x) / scale, imageSize.x));
+    const top = clamp(imageSize.y / 2 - (viewportSize.y / 2 + pan.y) / scale, imageSize.y);
+    const bottom = Math.max(top, clamp(imageSize.y / 2 + (viewportSize.y / 2 - pan.y) / scale, imageSize.y));
+    return { left: left / imageSize.x * 100, top: top / imageSize.y * 100,
+      width: (right - left) / imageSize.x * 100, height: (bottom - top) / imageSize.y * 100 };
+  }, [imageSize.x, imageSize.y, scale, pan.x, pan.y, viewportSize.x, viewportSize.y]);
+  const navigatorCanvasRef = useRef<HTMLCanvasElement>(null);
+  const navigatorVisibleRef = useRef(showNavigator);
+  navigatorVisibleRef.current = showNavigator;
+  const [navigatorCanvasRevision, setNavigatorCanvasRevision] = useState(0);
+  const notifyNavigatorCanvasRendered = useCallback(() => {
+    if (navigatorVisibleRef.current) setNavigatorCanvasRevision(revision => revision + 1);
+  }, []);
   const previousTransform = useRef<{ scale: number; pan: Point } | null>(null);
   const [viewInteracting, setViewInteracting] = useState(false);
   const viewGestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -124,9 +152,22 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
   const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;
   const regionBase = showBeforeAdjustments ? regionDisplay?.wholeBefore : regionDisplay?.wholeAfter;
+  const navigatorImageSrc = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
   useLayoutEffect(() => {
     onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
   }, [showBeforeAdjustments, onBeforeAdjustmentsDisplayChange]);
+  useLayoutEffect(() => {
+    if (!showNavigator || !editSource || !recipe) return;
+    // Both source canvases remain visible in After mode, so mirror the topmost active comparison side.
+    const sourceCanvas = viewportRef.current?.querySelector<HTMLCanvasElement>(
+      `.viewer-comparison-image canvas:${showBeforeAdjustments ? 'first-child' : 'last-child'}`);
+    const targetCanvas = navigatorCanvasRef.current;
+    if (!sourceCanvas || !targetCanvas || !sourceCanvas.width || !sourceCanvas.height) return;
+    targetCanvas.width = Math.max(1, Math.round(navigatorWidth));
+    targetCanvas.height = Math.max(1, Math.round(navigatorHeight));
+    const context = targetCanvas.getContext('2d');
+    if (context) context.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
+  }, [showNavigator, editSource, recipe, showBeforeAdjustments, navigatorWidth, navigatorHeight, navigatorCanvasRevision]);
   const closeContextMenu = useCallback((restoreFocus: boolean) => {
     setContextMenuPosition(null);
     if (restoreFocus) viewportRef.current?.focus({ preventScroll: true });
@@ -402,7 +443,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       ref={viewportRef}
       tabIndex={0}
       aria-label={alt}
-      className={`viewer-viewport${scale > fitScale ? ' pannable' : ''}`}
+      className={`viewer-viewport${zoomed ? ' pannable' : ''}`}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
         if (keyboardBlocked || document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
@@ -440,7 +481,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>
-        {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
+        {editSource && recipe ? <AdjustedImage gpuRenderer={gpuRenderer} onGpuError={onGpuError} onBackendChange={onBackendChange} onCanvasRendered={notifyNavigatorCanvasRendered} source={editSource} recipe={recipe} alt={alt} showBeforeAdjustments={showBeforeAdjustments}
           width={imageSize.x * scale} onHistogramChange={onHistogramChange}
           onLoad={(width, height) => { setLoadedImage({ identity: imageIdentity, status: 'ready', size: { x: width, y: height } }); }}
           onError={() => { setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE }); onImageError?.(); }} /> : src && !previewStatus && rawFrame && previewPixels ? <div
@@ -474,6 +515,14 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
           onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })}
         /> : null}
       </div>
+      {showNavigator && <div className="viewer-navigator" data-testid="zoom-navigator" data-position={navigatorPosition}
+        role="img" aria-label={t('workspace.zoomNavigator')} style={{ width: navigatorWidth, height: navigatorHeight }}>
+        {editSource && recipe ? <canvas ref={navigatorCanvasRef} aria-hidden="true"
+          width={Math.max(1, Math.round(navigatorWidth))} height={Math.max(1, Math.round(navigatorHeight))} />
+          : <img src={navigatorImageSrc} alt="" draggable="false" />}
+        <div className="viewer-navigator-frame" aria-hidden="true" style={{ left: `${navigatorFrame.left}%`, top: `${navigatorFrame.top}%`,
+          width: `${navigatorFrame.width}%`, height: `${navigatorFrame.height}%` }} />
+      </div>}
       {statusNote && !(previewPixels && showBeforeAdjustments && !editSource && !beforeSrc) && <p className="raw-preview-note" role="status">{statusNote}</p>}
       {previewPixels && showBeforeAdjustments && !editSource && !beforeSrc && <p className="raw-preview-note" role="status">
         {t(beforeStatus === 'error' ? 'workspace.rawPreview.beforeFailed' : 'workspace.rawPreview.beforeLoading')}

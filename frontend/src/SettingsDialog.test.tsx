@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applicationBuildLabel, SettingsButton, SettingsProvider } from './SettingsDialog';
 import { BUILD_INFO } from './buildInfo';
 import { changeAppLanguage } from './i18n';
-import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, readSettings, updateSetting, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 
 vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { create: vi.fn() } }));
@@ -21,6 +21,8 @@ beforeEach(async () => {
   updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto');
   updateSetting('showKeyboardShortcuts', true);
   updateSetting('anshitsuInitialSelection', 'nonRaw');
+  updateSetting('zoomNavigatorPosition', 'bottom-right');
+  localStorage.removeItem(ZOOM_NAVIGATOR_POSITION_KEY);
   localStorage.removeItem(ANSHITSU_INITIAL_SELECTION_KEY);
   vi.stubGlobal('isSecureContext', false);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
@@ -36,6 +38,22 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('persists the Navigator position choices and falls back to bottom-right for invalid storage', async () => {
+    expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
+    await click(host.querySelector('button')!);
+    const label = [...dialog().querySelectorAll('label')].find(item => item.textContent?.includes('Zoom Navigator Position'))!;
+    const select = label.querySelector('select')!;
+    expect(select.value).toBe('bottom-right');
+    expect([...select.options].map(option => option.value)).toEqual([...ZOOM_NAVIGATOR_POSITIONS]);
+    await act(async () => { select.value = 'top-left'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(localStorage.getItem(ZOOM_NAVIGATOR_POSITION_KEY)).toBe('top-left');
+    await act(async () => changeAppLanguage('ja'));
+    expect(label.textContent).toContain('拡大表示ナビゲーターの位置');
+    expect([...select.options].map(option => option.textContent)).toEqual(['表示しない', '左上', '右上', '左下', '右下']);
+    localStorage.setItem(ZOOM_NAVIGATOR_POSITION_KEY, 'center');
+    expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
+  });
+
   it('unlocks and saves RAW and Both only after the Windows RAW capability is available', async () => {
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'

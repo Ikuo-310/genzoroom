@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n, { changeAppLanguage, currentLanguagePreference, SUPPORTED_LANGUAGES, type LanguagePreference } from './i18n';
-import { ANSHITSU_INITIAL_SELECTIONS, effectiveAnshitsuSelection, DATE_LOCALES, DATE_LOCALE_CHOICES, updateSetting, useAppSettings, type AnshitsuInitialSelection, type DateLocale, type InitialImage, type WeekStart } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTIONS, effectiveAnshitsuSelection, DATE_LOCALES, DATE_LOCALE_CHOICES, ZOOM_NAVIGATOR_POSITIONS, updateSetting, useAppSettings, type AnshitsuInitialSelection, type DateLocale, type InitialImage, type WeekStart, type ZoomNavigatorPosition } from './appSettings';
 import { useRawCapability } from './useRawCapability';
 import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
@@ -259,6 +259,12 @@ export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClos
       </select></label>
       <label>{t('settings.weekStart')}<select value={settings.weekStart} onChange={event => updateSetting('weekStart', event.target.value as WeekStart)}>
         <option value="auto">{t('settings.autoWeek')}</option><option value="sunday">{t('settings.sunday')}</option><option value="monday">{t('settings.monday')}</option>
+      </select></label>
+      <label>{t('settings.zoomNavigatorPosition')}<select value={settings.zoomNavigatorPosition} onChange={event => {
+        const value = event.target.value as ZoomNavigatorPosition;
+        if (ZOOM_NAVIGATOR_POSITIONS.includes(value)) updateSetting('zoomNavigatorPosition', value);
+      }}>
+        {ZOOM_NAVIGATOR_POSITIONS.map(value => <option key={value} value={value}>{t(`settings.zoomNavigatorPositions.${value}`)}</option>)}
       </select></label>
       <BinaryRadioChoice label={t('settings.showKeyboardShortcuts')} value={settings.showKeyboardShortcuts}
         onChange={value => updateSetting('showKeyboardShortcuts', value)} onLabel={t('settings.on')} offLabel={t('settings.off')} />

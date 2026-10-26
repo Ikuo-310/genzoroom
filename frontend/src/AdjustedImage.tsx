@@ -10,13 +10,14 @@ import { collectHistogram, type Histogram, type HistogramChangeHandler } from '.
 type Props = {
   source: EditImageSource; recipe: EditRecipe; alt: string; width?: number; showBeforeAdjustments?: boolean;
   onLoad: (width: number, height: number) => void; onError: () => void;
+  onCanvasRendered?: () => void;
   onHistogramChange?: HistogramChangeHandler;
   gpuRenderer?: WorkspaceGpuRenderer | null;
   onGpuError?: (renderer: WorkspaceGpuRenderer, error: unknown) => void;
   onBackendChange?: (backend: ProcessingBackend) => void;
 };
 
-export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustments = false, onLoad, onError, onHistogramChange, gpuRenderer = null, onGpuError, onBackendChange }: Props) {
+export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustments = false, onLoad, onError, onCanvasRendered, onHistogramChange, gpuRenderer = null, onGpuError, onBackendChange }: Props) {
   const beforeCanvas = useRef<HTMLCanvasElement>(null);
   const afterCanvas = useRef<HTMLCanvasElement>(null);
   const sourceKey = `${source.kind}:${source.url}`;
@@ -31,8 +32,8 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
   const currentRoute = useRef({ sourceKey, renderer, recipe });
   currentRoute.current = { sourceKey, renderer, recipe };
   const workerClient = useRef<AdjustmentWorkerClient | AdjustmentGpuClient | null>(null);
-  const callbacks = useRef({ onLoad, onError, onHistogramChange, onGpuError, onBackendChange });
-  callbacks.current = { onLoad, onError, onHistogramChange, onGpuError, onBackendChange };
+  const callbacks = useRef({ onLoad, onError, onCanvasRendered, onHistogramChange, onGpuError, onBackendChange });
+  callbacks.current = { onLoad, onError, onCanvasRendered, onHistogramChange, onGpuError, onBackendChange };
   useEffect(() => {
     const controller = new AbortController();
     setDecoded(null);
@@ -52,6 +53,7 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
       const context = beforeCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
       if (!context) throw new Error('Canvas unavailable');
       context.putImageData(pixels, 0, 0);
+      callbacks.current.onCanvasRendered?.();
     } catch { callbacks.current.onError(); }
   }, [pixels]);
   useEffect(() => {
@@ -67,6 +69,7 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
         const context = afterCanvas.current?.getContext('2d', { colorSpace: 'srgb' });
         if (!context) throw new Error('Canvas unavailable');
         context.putImageData(new ImageData(data, width, height), 0, 0);
+        callbacks.current.onCanvasRendered?.();
         // Canvas and histogram accept exactly the same source, Recipe, and processing route.
         callbacks.current.onHistogramChange?.({ sourceKey, before: beforeHistogram, after: histogram });
         callbacks.current.onBackendChange?.(backend);
@@ -133,6 +136,7 @@ export function AdjustedImage({ source, recipe, alt, width, showBeforeAdjustment
         const adjusted = renderAdjustments(pixels.data, recipe);
         const histogram = collectHistogram(adjusted);
         context.putImageData(new ImageData(adjusted, pixels.width, pixels.height), 0, 0);
+        callbacks.current.onCanvasRendered?.();
         callbacks.current.onHistogramChange?.({ sourceKey, before: beforeHistogram, after: histogram });
         callbacks.current.onBackendChange?.('cpu');
       } catch { callbacks.current.onError(); }

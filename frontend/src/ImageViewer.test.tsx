@@ -1,5 +1,5 @@
 import { SettingsProvider } from './SettingsDialog';
-import { updateSetting } from './appSettings';
+import { readSettings, updateSetting, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS } from './appSettings';
 // @vitest-environment jsdom
 import { act, useLayoutEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,6 +26,7 @@ vi.mock('./editStateApi', async (importOriginal) => ({
 
 const mockImage = vi.hoisted(() => ({
   onLoad: undefined as undefined | ((width: number, height: number) => void),
+  onCanvasRendered: undefined as undefined | (() => void),
   recipe: undefined as unknown,
   source: undefined as EditImageSource | undefined,
   onHistogramChange: undefined as HistogramChangeHandler | undefined,
@@ -43,17 +44,24 @@ vi.mock('./api', async (importOriginal) => {
   })) };
 });
 vi.mock('./AdjustedImage', () => ({
-  AdjustedImage: ({ source, showBeforeAdjustments, onLoad, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange }: { source: EditImageSource; showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler;
+  AdjustedImage: ({ source, showBeforeAdjustments, onLoad, onCanvasRendered, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange }: { source: EditImageSource; showBeforeAdjustments: boolean; onLoad: (width: number, height: number) => void; onCanvasRendered?: () => void; recipe: unknown; onHistogramChange?: HistogramChangeHandler;
     gpuRenderer?: WorkspaceGpuRenderer | null; onGpuError?: (renderer: WorkspaceGpuRenderer, error: unknown) => void; onBackendChange?: (backend: ProcessingBackend) => void }) => {
     mockImage.source = source;
     mockImage.onLoad = onLoad;
+    mockImage.onCanvasRendered = onCanvasRendered;
     mockImage.recipe = recipe;
     mockImage.onHistogramChange = onHistogramChange;
     mockImage.gpuRenderer = gpuRenderer;
     mockImage.onGpuError = onGpuError;
     mockImage.onBackendChange = onBackendChange;
     mockImage.renders++;
-    return <div data-testid="adjusted-image" data-before={String(showBeforeAdjustments)} />;
+    return <div className={source.url === 'navigator-canvas' ? 'viewer-comparison-image' : undefined}
+      data-testid="adjusted-image" data-before={String(showBeforeAdjustments)}>
+      {source.url === 'navigator-canvas' && <>
+        <canvas width={800} height={600} />
+        <canvas width={800} height={600} className={showBeforeAdjustments ? 'comparison-hidden' : undefined} />
+      </>}
+    </div>;
   },
 }));
 
@@ -1320,5 +1328,174 @@ describe('Viewer image double-click Fit and Actual Size toggle', () => {
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
     click(buttons.find(button => button.textContent === '1:1')!);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+  });
+});
+
+describe('ImageViewer Zoom Navigator', () => {
+  let resize = () => {};
+  beforeEach(() => {
+    updateSetting('zoomNavigatorPosition', 'bottom-right');
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+  });
+
+  function renderJpeg() {
+    act(() => root.render(<ImageViewer src="/navigator.jpg" alt="photo" leftOpen rightOpen
+      onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 } as DOMRect);
+    const image = host.querySelector<HTMLImageElement>('.viewer-image-position > img')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 600 });
+    act(() => image.dispatchEvent(new Event('load')));
+    act(() => resize());
+    return viewport;
+  }
+
+  function button(label: string) {
+    return [...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(item => item.textContent === label)!;
+  }
+
+  function pointer(viewport: HTMLElement, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number) {
+    const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 31 });
+    act(() => viewport.dispatchEvent(event));
+  }
+
+  it('hides in Fit, shows for enlargement, and hides again after Fit restore', () => {
+    renderJpeg();
+    expect(host.querySelector('[data-testid="zoom-navigator"]')).toBeNull();
+    click(button('1:1'));
+    const navigator = host.querySelector<HTMLElement>('[data-testid="zoom-navigator"]')!;
+    expect(navigator).not.toBeNull();
+    expect(navigator.style.width).toBe('180px');
+    expect(navigator.style.height).toBe('135px');
+    expect(navigator.querySelector('img')?.getAttribute('src')).toBe('/navigator.jpg');
+    click(button('Fit'));
+    expect(host.querySelector('[data-testid="zoom-navigator"]')).toBeNull();
+  });
+
+  it('keeps the visible frame full-height when an image edge is smaller than the viewport', () => {
+    act(() => root.render(<ImageViewer src="/wide.jpg" alt="photo" leftOpen rightOpen
+      onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    const image = host.querySelector<HTMLImageElement>('.viewer-image-position > img')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 200 });
+    act(() => image.dispatchEvent(new Event('load')));
+    act(() => resize());
+    click(button('1:1'));
+    const frame = host.querySelector<HTMLElement>('.viewer-navigator-frame')!;
+    expect(parseFloat(frame.style.height)).toBeCloseTo(100, 4);
+    expect(parseFloat(frame.style.top)).toBeCloseTo(0, 4);
+  });
+
+  it('mirrors the currently visible adjusted JPEG canvas for After and Before', () => {
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ drawImage } as unknown as CanvasRenderingContext2D));
+    const render = (before: boolean) => act(() => root.render(<ImageViewer src="/navigator-edited.jpg" alt="photo" leftOpen rightOpen
+      editSource={{ kind: 'immich-preview', url: 'navigator-canvas' }} recipe={defaultRecipe()}
+      persistentBeforeAdjustments={before} onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    render(false);
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    act(() => mockImage.onLoad?.(800, 600));
+    act(() => resize());
+    click(button('1:1'));
+    const sourceCanvases = () => [...host.querySelectorAll<HTMLCanvasElement>('.viewer-comparison-image canvas')];
+    const afterCanvas = sourceCanvases()[1];
+    expect(drawImage.mock.calls.at(-1)?.[0]).toBe(afterCanvas);
+    render(true);
+    expect(drawImage.mock.calls.at(-1)?.[0]).toBe(sourceCanvases()[0]);
+  });
+
+  it('uses the shared zoom threshold and follows wheel zoom and pan in the visible frame', () => {
+    const viewport = renderJpeg();
+    click(button('1:1'));
+    const frame = () => host.querySelector<HTMLElement>('.viewer-navigator-frame')!;
+    expect(parseFloat(frame().style.width)).toBeCloseTo(50, 4);
+    const initialLeft = parseFloat(frame().style.left);
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true,
+      deltaY: -100, clientX: 200, clientY: 150 })));
+    expect(parseFloat(frame().style.width)).toBeLessThan(50);
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    pointer(viewport, 'pointerdown', 200, 150);
+    pointer(viewport, 'pointermove', 250, 170);
+    pointer(viewport, 'pointerup', 250, 170);
+    expect(parseFloat(frame().style.left)).not.toBe(initialLeft);
+    fitRestoreKey();
+    expect(host.querySelector('.viewer-navigator')).toBeNull();
+    fitRestoreKey();
+    expect(host.querySelector('.viewer-navigator')).not.toBeNull();
+  });
+
+  it('clamps the viewport frame to the image boundary after a large pan', () => {
+    const viewport = renderJpeg();
+    click(button('1:1'));
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    pointer(viewport, 'pointerdown', 200, 150);
+    pointer(viewport, 'pointermove', 2000, 2000);
+    pointer(viewport, 'pointerup', 2000, 2000);
+    const frame = host.querySelector<HTMLElement>('.viewer-navigator-frame')!;
+    const left = parseFloat(frame.style.left), top = parseFloat(frame.style.top);
+    const width = parseFloat(frame.style.width), height = parseFloat(frame.style.height);
+    expect(left).toBeGreaterThanOrEqual(0); expect(top).toBeGreaterThanOrEqual(0);
+    expect(left + width).toBeLessThanOrEqual(100); expect(top + height).toBeLessThanOrEqual(100);
+  });
+
+  it('shows RAW whole-frame sources for After and Before and excludes Region imagery', () => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const metadata = regionResponse();
+    const geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };
+    const layer = { url: 'blob:region-after', metadata, planGeneration: 1, ...regionLayerPlacement(metadata, geometry) };
+    const whole = { url: 'blob:whole-after', doc: { workspaceId: 'w', handle: 'h', ...metadata.identity, revision: 2 },
+      frame: { ...geometry, fullWidth: 4000, fullHeight: 3000, aspect: 4 / 3, window: null }, quality: 'full' as const };
+    const display: RawRegionDisplay = { after: layer, wholeAfter: whole,
+      before: { ...layer, url: 'blob:region-before' }, wholeBefore: { ...whole, url: 'blob:whole-before' } };
+    const render = (before: boolean) => act(() => root.render(<ImageViewer src="blob:raw-source" documentKey="raw-nav"
+      rawFrame={geometry} rawRegionDisplay={display} beforeSrc="blob:before-fallback" previewPixels
+      persistentBeforeAdjustments={before} alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    render(false);
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 800 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 } as DOMRect);
+    act(() => resize());
+    const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 4000 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 3000 });
+    act(() => image.dispatchEvent(new Event('load')));
+    click(button('1:1'));
+    const navigatorImage = () => host.querySelector<HTMLImageElement>('.viewer-navigator img')!;
+    expect(navigatorImage().getAttribute('src')).toBe('blob:whole-after');
+    expect(navigatorImage().getAttribute('src')).not.toContain('blob:region');
+    expect(host.querySelector<HTMLElement>('.viewer-navigator')?.dataset.position).toBe('bottom-right');
+    render(true);
+    expect(navigatorImage().getAttribute('src')).toBe('blob:whole-before');
+  });
+
+  it('applies all configured positions and turns the Navigator off while zoomed', () => {
+    renderJpeg();
+    click(button('1:1'));
+    expect(host.querySelector<HTMLElement>('.viewer-navigator')?.dataset.position).toBe('bottom-right');
+    for (const position of ZOOM_NAVIGATOR_POSITIONS.slice(1)) {
+      act(() => updateSetting('zoomNavigatorPosition', position));
+      expect(host.querySelector<HTMLElement>('.viewer-navigator')?.dataset.position).toBe(position);
+    }
+    act(() => updateSetting('zoomNavigatorPosition', 'off'));
+    expect(host.querySelector('.viewer-navigator')).toBeNull();
+    click(button('Fit'));
+    expect(host.querySelector('.viewer-navigator')).toBeNull();
+  });
+
+  it('defaults and falls back to bottom-right for an invalid saved position', () => {
+    localStorage.removeItem(ZOOM_NAVIGATOR_POSITION_KEY);
+    expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
+    localStorage.setItem(ZOOM_NAVIGATOR_POSITION_KEY, 'center');
+    expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
   });
 });
