@@ -6,6 +6,8 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+- JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
+
 ## [0.2.5] - 2026-10-26
 
 ### Added

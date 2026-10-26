@@ -2,6 +2,12 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## JPEG Historyを操作境界で確定（2026-10-26）
+
+JPEG暗室のkeyboard／wheel調整は、同じAdjustmentを続けて操作する間、入力間隔やAutosaveでHistoryを分割しない。別Adjustmentの操作開始、Viewer操作、Undo／Redo、History Jump、Adjustment Reset、Category Reset／Toggle、Individual Adjustment Toggle、All Reset、Paste、Asset／Filmstrip切替、暗室離脱や保存・終了処理でgestureを確定する。pointer dragはpointer終了、数値入力はEnter／blurで確定する従来の境界を維持する。
+
+Autosaveはpending gestureを含む保存用snapshotを作るが、live sessionのgestureは継続する。History圧縮は既存機能として維持し、gesture確定の代わりには使わない。保存形式や既存Historyの書き換えは伴わない。
+
 ## STACKゴミ箱予約の元COVER条件見直し・実機確認完了（2026-10-21）
 
 従来は取得時点の元COVERを永久保護していたため、別AssetへCOVERを変更した後も元COVERをTrash予約できなかった。予約条件を現在COVER基準に整理し、元COVERでも現在非COVERの元Stack memberなら予約可能とした。RAW、現在COVER、元Stack memberではない追加素材の保護は維持する。retained trashSourceを使うMANUAL retryでも同じ条件を適用する。
