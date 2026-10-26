@@ -1,26 +1,32 @@
 # Provisional Architecture
 
-**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows has an internal RAW import/settings/Preview adapter, verified in a Windows development Backend PoC against LightCraft v0.10.0. Windows RAW Preview and LightCraft sliders are implemented. C3-A adds SQLite RAW recipe storage, C3-B restores compatible saved recipes before publishing a RAW document, and C3-C connects confirmed readback Autosave and save guards for photo switching, Gallery return and normal Windows close. C3-D renews the same RAW session at a soft threshold of 200 mutation attempts while retaining the 256-attempt hard safety limit. C4-B1/B2 connect SQLite RAW History to the Windows document API. C4-B3-1 persists adjustment gestures, and C4-B3-2 adds RAW History metadata, Undo/Redo, baseline/step selection and shared shortcut arbitration. C4-C adds RAW category bypass and validated As Shot Reset operations on the same durable History owner. C4-D adds native RAW Before/After comparison and a reproducible MCP patch/build contract. Final RAW Export/Immich integration remains later work. The later C4 records below supersede earlier phase-specific unimplemented statements.**
+**Current implementation — authenticated Immich photo browsing, Home-aware Stack organization, shared Immersive Preview, Anshitsu, Recipe v18 JPEG adjustments, History, persistent edit state, Recipe-rendered JPEG thumbnails, and Export Queue are implemented. Thumbnail generation uses a process-local scheduler and bounded disk cache. Production Export uploads JPEGs, assigns the GenzoRoom tag, registers the generated output in the source Stack and makes it the Cover, with serial runtime and Stop/Retry/restart recovery. NAS/Immich Export verification and Home-time silent tag-repair verification have been completed. Windows RAW import, editing, persisted Recipe/History, Before/After and Preview use the current LightCraft contract summarized below. References to the original v0.10.0 PoC and earlier implementation phases are historical. Final RAW Export/Immich integration remains later work.**
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
-## Current managed LightCraft identity (U3)
+**Reading order:** “Current LightCraft runtime contract” below is the normative description of present behavior. Phase 1A–C4 sections retain implementation history and acceptance evidence; their old version pins, capability limits and “not implemented” statements describe their phase snapshot only. Where a historical section differs, the current contract wins. For every future LightCraft version update, start with [`UPDATE_GUIDE.md`](research/lightcraft/UPDATE_GUIDE.md); do not reconstruct the update procedure from phase history. [`LIGHTCRAFT_0_14_UPGRADE_REVIEW.md`](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md) is the investigation and implementation record for the first v0.10→v0.14 update.
 
-U3 advances the managed engine to v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`, with automated acceptance complete and short Windows visual acceptance pending. This supersedes the engine version pins in historical phase records below. `native/lightcraft/manifest.json` owns the version, commit, patch digest/targets and geometry descriptor 2; Before/Preview/Region remain contract 1. `sync_identity.py` generates the Frontend strict identity from it. The Backend reads this manifest at startup, including the frozen Windows package's copy. Docker has no native artifact and claims no installed engine version.
+## Current LightCraft runtime contract
 
-On Windows source development, an explicit `GENZOROOM_LIGHTCRAFT_EXE` always overrides discovery. When unset, the manager searches only the current manifest's `.tmp/lightcraft-<major.minor>/target/release/lightcraft-cli.exe` candidate and only from a non-frozen checkout with `.git`; a candidate becomes usable for RAW/Settings only after its adjacent receipt, actual SHA-256, manifest tuple, and contracts pass the same strict inspection as an override. Missing or invalid candidates leave RAW unavailable. Frozen distribution builds never search development `.tmp`; a future bundled artifact remains independently attestable.
+The current managed engine is **LightCraft v0.14.0**, upstream commit `03c88c166c054c009db2a47187d59991f6232b85`. Its contracts are Before 1, Preview 1, Region 1 and geometry descriptor 2. The current GenzoRoom patch is [`native/lightcraft/patches/0002-v0.14-native-contracts.patch`](../native/lightcraft/patches/0002-v0.14-native-contracts.patch). [`native/lightcraft/manifest.json`](../native/lightcraft/manifest.json) is the single source of truth for version, upstream commit, patch digest/targets, and contract versions. `sync_identity.py` generates the Frontend strict identity from the manifest; the Backend reads the manifest at startup, including the frozen Windows package's copy.
+
+On Windows development, `GENZOROOM_LIGHTCRAFT_EXE` is optional and is the highest-priority override only when explicitly set. Otherwise, a Windows non-frozen development checkout with `.git` resolves the manifest's v0.14.0 candidate to `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`. File existence alone never admits an artifact. The process must pass the adjacent receipt, actual binary SHA-256, manifest tuple, Before/Preview/Region contracts, geometry descriptor, and handshake-version checks. Only a fully verified ready artifact enables RAW capability and its Settings version display. Missing or invalid candidates leave RAW unavailable. Frozen distribution builds do not search development `.tmp`; no automatic download or old-LightCraft switching occurs. Docker has no native artifact and claims no installed engine version.
 
 The manager's per-generation `_artifact` owns only receipt-verified version/commit/managed-patch/descriptor metadata. Existing bounded daemon inspection owns both EXE hashing and receipt reading, so stalled I/O cannot hold the event loop or default-executor shutdown. Restart clears it before any new work; it is exposed only while ready. Settings requires the complete manifest patch tuple, integer contract versions, actual EXE SHA and handshake version to match the receipt. Raw stderr and receipt/source paths are not added to diagnostics.
 
 RAW editing and Recipe identity issuance also require this attestation, independently of JPEG readiness. A version-matching but unverified process is rejected before import with `raw_unverified_artifact`; a reported version alone cannot authorize saving the pinned source commit.
 
-Persisted Recipe lookup and restore bind to Asset ID, source content hash, `lightcraft` engine name and a supported settings schema (currently 1). Engine version and commit differences do not block best-effort restore; the current engine receives the stored settings unchanged and its actual deserialize/apply/readback result decides success. A successful restore remains editable, and the next save writes the current engine tuple as a separate row without rewriting the older Recipe. Unsupported engine names or schemas remain incompatible. History rows and same-run snapshots keep their existing strict identity/ownership checks. No migration is performed and complete pixel equivalence across future engine versions is not guaranteed. Recipe/History schemas and save receipts are unchanged.
+Persisted Recipe restore requires a matching Asset ID and source content hash, engine name `lightcraft`, and a supported settings schema (currently schema 1). Engine version and commit differences alone do not reject a Recipe. Its settings go unchanged to the current LightCraft for best-effort deserialize/apply/readback. Successful restore is normally editable; the next save writes a new row with the current LightCraft tuple and leaves the old row unchanged. Unsupported engine names/schemas and source identity mismatches remain rejected; actual settings incompatibility is reported at the native restore/readback failure boundary. History rows and same-run snapshots keep their strict ownership checks. GenzoRoom is in active development: old LightCraft versions are not required to remain fully forward-compatible, and pixel-identical output across versions is not guaranteed. There is no Recipe migration, automatic old-engine fallback, or multi-engine runtime. If settings cannot be restored, the RAW edit reset below restarts that Asset from current-engine defaults. Reassess compatibility policy when the product enters a release-stability phase.
 
-The Windows RAW API exposes `POST /api/raw/assets/{assetId}/edits/reset` to recover a photo whose persisted settings cannot be restored. An open document must present its current workspace, handle, generation, token, and revision; the API then uses the existing workspace release/reset lifecycle without checkpointing History. Only after the session is closed does one `BEGIN IMMEDIATE` transaction delete that Asset's RAW Recipe, RAW History, steps, and their associated current save receipts. It never touches JPEG state, export data, Immich metadata, the source file, Stacks, or Albums. A session cleanup failure leaves persisted rows intact; a database failure rolls back the delete. The Frontend reopens the same Asset in a fresh workspace so the current engine supplies its default settings and normal Preview/controls path. This reset is available from the RAW History pane and after a restore failure.
+The Windows RAW API exposes `POST /api/raw/assets/{assetId}/edits/reset` to recover a photo whose persisted settings cannot be restored. The Frontend offers “RAW編集をリセット” both in the regular RAW History pane and after restore failure. The operation validates the open document's workspace, handle, generation, token and revision, then closes the existing session without checkpointing History. After successful session cleanup, one `BEGIN IMMEDIATE` transaction deletes that Asset's persisted RAW Recipe, RAW History, History steps and associated current save receipts. It does not delete the original RAW, Immich Asset or metadata, JPEG edits, Export information, Stack or Album membership. Session cleanup failure leaves persisted edit rows intact; a DB failure rolls back the transaction. The Frontend then opens the same RAW in a fresh workspace so the current engine provides default settings and the ordinary Preview/slider path.
 
 The native patch keeps canonical Native geometry identity separate from sampling/window cache keys. Post-Plan Desktop display fitting clears its geometry sidecar rather than attesting a resized bitmap with the old Plan; headless Whole/Region do not request display fitting. Engine GPU admission and execution diagnostics share the v0.14 device-profile proof predicate. C3 policy and budgets are unchanged. See [U3 results](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26) for evidence and manual acceptance.
 
+The current LightCraft update procedure's authoritative steps and checks live in [`UPDATE_GUIDE.md`](research/lightcraft/UPDATE_GUIDE.md). The U3 review linked above is a dated v0.10→v0.14 investigation/implementation record, not the procedure for later updates.
+
 ## LightCraft RAW integration foundation (Phase 1A)
+
+> **Historical record — superseded by Current LightCraft runtime contract.** This section records the Phase 1A state; its v0.10 pin, mandatory environment configuration, lack of discovery and listed unimplemented features are not the current runtime contract.
 
 The Windows Python Backend owns an optional, single LightCraft v0.10.0 headless MCP child. Phase 1A supplies process and communication infrastructure; the internal Phase 1B adapter below adds RAW import/settings/Preview operations. Export, Recipe/History integration and RAW UI remain unimplemented. The [research index](research/lightcraft/README.md) retains source findings and prior PoC measurements; [Phase 1A design](research/lightcraft/PHASE1A_DESIGN.md) remains the original design and completion record.
 
@@ -34,7 +40,7 @@ The child starts without a shell or visible console as `mcp --headless --compact
 
 | State / shared value | Owner, update conditions and invariant |
 |---|---|
-| Manager state | `LightCraftManager`: `stopped → starting → initializing → ready`; failures become `failed`; close uses `stopping → stopped`. An unavailable GPU alone preserves `ready`. Missing configuration/non-Windows stays `disabled`. |
+| Manager state | `LightCraftManager`: `stopped → starting → initializing → ready`; failures become `failed`; close uses `stopping → stopped`. An unavailable GPU alone preserves `ready`. In the historical Phase 1A state, missing configuration/non-Windows stayed `disabled`; current Windows development discovery is defined above. |
 | Generation / current session | Manager lifecycle lock serializes start/close/restart. Each new process attempt increments generation. Old sessions hold only their own client/tasks and cannot update current manager state. A failed session needs explicit `restart()`. |
 | Pending request / ID | MCP client: one transmitted request at a time, matched by generation/sequence string ID; pending callers fail on disconnect/close/restart. Queued requests never transfer to a new client. |
 | Process and task ownership | One session owner retains spawn, exit watcher, stderr drain and MCP reader through cleanup. Cleanup runs in a separate task and survives owner/caller cancellation. If the exit watcher was cancelled, cleanup creates a fresh `process.wait()` watcher before deciding whether to kill. Close does not abandon an in-flight spawn or release ownership before reaping. |
@@ -45,7 +51,9 @@ Failure cleanup first rejects pending work, closes stdin, waits up to 3 seconds 
 
 The focused Backend suite covers fake-process protocol and lifecycle boundaries, including cancellation, timeout, oversized stdout and inspection I/O; the Phase 1A post-audit run passed 117 tests. Its initial Windows connection check verified MCP initialization, ping, manager readiness, RX 580 adapter reporting, restart and child cleanup. Phase 1B RAW operations have their own implementation and PoC record below. Tauri-host screen startup and normal close, the existing JPEG darkroom UI, frozen/PyInstaller DLL lookup, Job Object recovery of a grandchild, and LightCraft packaging/licensing remain unverified. Phase 1A does not imply a Docker execution test.
 
-### Adaptive RAW preview (A2/A3; current contract)
+### Adaptive RAW preview (A2/A3 implementation record)
+
+> **Historical implementation record — superseded by Current LightCraft runtime contract for managed version and artifact identity.** The native contracts and checks below describe the A2/A3 phase implementation and acceptance evidence.
 
 The managed v0.10.0 patch exposes opt-in `quality=draft|full`, `preview_contract=1`, and bounded `stage_cache=off|on` evaluation. A3 connects these to the existing Windows Backend and Frontend. Omitted MCP extension arguments retain Full and the exact legacy metadata shape. The runtime checks schema per generation and independently checks Before support; actual quality, kind, geometry, cache metadata and PNG are validated on every adaptive result. Legacy binaries receive only legacy arguments and return explicit Full whole fallback without native geometry. SQLite v8, JPEG Recipe v18 and C4 History formats remain unchanged. This subsection supersedes earlier phase-specific Preview waiting and scaling descriptions below. Region Native/Backend implementation is recorded in the C1 subsection below; Viewer integration remains later work.
 
@@ -69,6 +77,8 @@ Developer measurement uses `GENZOROOM_RAW_STAGE_CACHE=off` (default), or `on` wi
 
 ## Internal RAW adapter (Phase 1B)
 
+> **Historical record — superseded by Current LightCraft runtime contract.** The v0.10 development PoC and phase-specific verification limits below are not current compatibility or artifact-selection requirements.
+
 `lightcraft_raw.LightCraftRawSession` is owned as `backend.state.lightcraft_raw` by the same Windows LocalHost lifespan, using its existing manager. Construction starts no worker, import, GPU query or memory-budget command. Backend readiness and JPEG availability remain independent. Shutdown rejects new RAW work, invalidates tickets, closes the manager to release transmitted MCP requests, then joins RAW operations and image validation; the final manager close is idempotent before the common lifespan exits. No common Backend, Docker, Tauri, Frontend or JPEG pipeline uses this service.
 
 The internal interface is `open_raw`, `select`, `get_settings`, `set_controls`, `merge_settings`, `restore_settings`, `request_preview`, `reset_session` and `close`, plus synchronous `status()`. `request_preview()` returns an awaitable ticket yielding `PreviewFrame` or `Superseded`. Source keys/document tokens are distinct from LightCraft PhotoId. Import uses a single local absolute file with mode add, verifies photo.inspect kind/preview_only/dimensions/content hash, and leaves original files and sidecars untouched. No library, XMP auto-write, metadata write or Export command is enabled. The first RAW import sets app.memoryBudget to 1024 MiB and verifies its report; this is a cache/work allocation policy, not a process RSS limit.
@@ -90,6 +100,8 @@ The [Phase 1B design](research/lightcraft/PHASE1B_DESIGN.md) retains the pre-imp
 The Phase 1B follow-up audit found that restore readback was not committed to the in-memory snapshot, TEMP filesystem work could exceed lifecycle bounds, and stderr draining stopped after a failed reap; these paths were corrected. Failed RAW admission now leaves the current healthy selection usable while advancing the selection epoch, so previous Preview tickets remain stale. The Windows development PoC verified LightCraft RAW import, confirmed settings, PNG Preview, selection changes, consecutive reset/restore and cleanup. The audit fixes and PoC are recorded in `docs/development-notes.ja.md` and the [Phase 1B record](research/lightcraft/PHASE1B_DESIGN.md).
 
 ## RAW darkroom Preview (Phase 1C-C1)
+
+> **Historical record — superseded by Current LightCraft runtime contract.** The v0.10 pin, temporary-slider status and “not implemented” list below describe the C1 phase snapshot only.
 
 C1 connects the existing Gallery/Stack target selection and mixed Filmstrip to LightCraft v0.10.0 on Windows. The [Phase 1C design and implementation record](research/lightcraft/PHASE1C_DESIGN.md) includes the C3 SQLite design revision. The user completed C1 Windows/Tauri RAW Preview confirmation. C2 adds temporary RAW sliders below; C3-A adds storage and C3-B connects saved-recipe restoration to document open. C3-C now saves RAW edits from the darkroom; History, Undo/Redo and final RAW Export remain unimplemented.
 
@@ -134,6 +146,8 @@ This is an internal storage contract only: no RAW HTTP routes, LightCraft restor
 
 ### C3-B: restore a persisted RAW recipe before Preview
 
+> **Historical implementation record — superseded by Current LightCraft runtime contract and RAW edit reset behavior.** The restore flow below records the C3-B implementation checkpoint; current version compatibility and recovery policy are defined above.
+
 The existing Windows `POST /api/raw/documents` imports the current original, then obtains its Asset UUID, `photo.inspect` content hash, handshake engine version, fixed adapter commit and readback settings schema through `LightCraftRawSession.recipe_identity()`. `raw_recipe_store.lookup_raw_recipe()` uses the C3-A normalization, 256 KiB JSON validation and receipt verification in one read transaction. An exact tuple match takes precedence. Without one, it selects the newest validated row for the same Asset/content hash, engine name and supported schema, even if version or commit differ; other rows remain untouched. A same-Asset/same-content row with no supported candidate means engine/schema incompatibility; a same-Asset/different-content row means source mismatch; absence for this Asset means no recipe.
 
 SQLite work runs in the existing threadpool outside the event loop. Persistence imports remain lazy because Windows selects its storage profile after importing the LocalHost/RAW modules. The open operation owns the workspace/cache until lookup and native restoration finish. Workspace/cache ownership, closing state, selection epoch, active document handle and generation are checked after asynchronous work and before publication. HTTP waiter cancellation does not cancel a transmitted restore; shutdown drains the owned operation before deleting native source cache. C1 cleanup-failure/reopen guards remain in force.
@@ -144,7 +158,7 @@ Document responses add `recipeStatus` (`none` or `restored`) and `recipeRevision
 
 Source mismatch, a different engine name or unsupported settings schema rejects open with HTTP 409 and `raw_recipe_source_mismatch` / `raw_recipe_engine_incompatible`. DB/validation failure returns 503 `raw_recipe_unavailable`; native application failure, readback mismatch and outcome-unknown return 502 `raw_recipe_restore_failed`, `raw_recipe_restore_mismatch`, or `raw_recipe_restore_unknown`. None of these publishes a default document or starts Preview. Stored rows and receipts are retained, with C1 release/cleanup used for the failed import. Structured diagnostics record successful restoration and terminal failure using safe IDs/revision/fixed codes, without settings or paths.
 
-C3-B leaves schema v7, JPEG persistence/Queue, C2 editing semantics and the Frontend unchanged. New slider changes are still temporary: saving/Autosave, switch/exit save guards, Gallery edit-state management, resident capacity and generation scheduling remain C3-C/D work. RAW History/Undo/Redo/Reset and Export remain later work.
+C3-B left schema v7, JPEG persistence/Queue and C2 editing semantics unchanged. At that checkpoint, new slider changes were temporary and RAW History/Undo/Redo/Reset and Export remained later work; those phase-time limitations are superseded by the later sections above/below.
 
 ### C3-C: RAW Autosave and guarded departure
 
@@ -214,9 +228,12 @@ Those remain C4-B2/B3; existing C3 operations create no History rows by themselv
 
 ### C4-B2: Windows RAW History operations
 
+> **Historical phase record — superseded by Current LightCraft runtime contract.** The version pin below records the B2 checkpoint only.
+
 The Windows-only RAW router now connects the B1 writers to the existing serialized document
 owner and verified `restore_persisted_settings()` adapter. Docker mounts no new endpoints.
-LightCraft remains pinned to v0.10.0; native undo/redo/history commands are not used.
+At the B2 checkpoint LightCraft remained pinned to v0.10.0; native undo/redo/history commands
+were not used. The current managed version is defined by the manifest above.
 
 | Endpoint under `/api/raw/documents/{handle}` | Contract |
 |---|---|
@@ -325,10 +342,10 @@ reject departing slider callbacks and late successor responses. An unexpected ho
 also queues the old gesture's final save before cleanup; an unconfirmed save refuses release.
 Browser/OS forced termination still cannot guarantee completion of the final network operation.
 
-History list, Undo/Redo/jump UI and cursor display remain B3-2. Category toggles, Reset,
-Before/After and JPEG category changes remain later phases; their disabled RAW placeholders
-are unchanged. No new save queue, native snapshot store, Backend/schema or LightCraft change
-is introduced here.
+At this checkpoint, History list, Undo/Redo/jump UI and cursor display remained B3-2 work.
+Category toggles, As Shot Reset and Before/After remained later phases; RAW edit reset is now
+documented in the current contract above. No new save queue, native snapshot store,
+Backend/schema or LightCraft change was introduced in this phase.
 
 ### C4-B3-2: RAW History view and cursor operations
 
@@ -406,10 +423,12 @@ acceptance remains to be performed.
 
 ### C4-B3-3: integrated automated acceptance and audit
 
+> **Historical phase record — superseded by Current LightCraft runtime contract.** The old version pin and pending statements below describe the B3-3 audit checkpoint.
+
 C4-B3 is complete within the implementation and automated-audit boundary. The current record
 and test counts are in `docs/research/lightcraft/PHASE1C_DESIGN.md`. Earlier B3-3 pending statements
 describe the preceding phase; current Windows/WebView, GPU/RAW and Immich acceptance remains
-manual and unverified. LightCraft stays pinned to v0.10.0; schema v8, Recipe v18, normal save-time
+manual and unverified. At the B3-3 checkpoint LightCraft stayed pinned to v0.10.0; schema v8, Recipe v18, normal save-time
 disabled behavior and the single persistence owner/queue are unchanged.
 
 A new Windows ASGI lifecycle test follows one real temporary SQLite History through multiple
@@ -1434,7 +1453,9 @@ The deployment runtime check is to open the Web UI, confirm `Backend: Connected`
 
 ## Native RAW Before/After (Phase 1C-C4-D)
 
-LightCraft stays pinned to v0.10.0 / `a2a41383c4fd62fa85a46ccd00998639221f2d3c`. GenzoRoom's MCP extension is a separately managed Git patch, manifest and fail-closed build/probe script under `native/lightcraft/`. The [update guide](research/lightcraft/UPDATE_GUIDE.md) covers clean-source replay, patch/digest verification, native tests, CLI build, binary SHA-256 receipts, packaging validation and eventual retirement of the patch when upstream supplies compatible behavior. `desktop/packaging/build.ps1` validates an explicitly selected or environment-configured engine before continuing. The current installer still does not bundle LightCraft; an absent engine configuration remains supported.
+> **Historical phase record — superseded by Current LightCraft runtime contract.** The v0.10 pin and phase-time packaging statements below describe C4-D acceptance, not the current managed artifact.
+
+At the C4-D checkpoint LightCraft was pinned to v0.10.0 / `a2a41383c4fd62fa85a46ccd00998639221f2d3c`. GenzoRoom's MCP extension is a separately managed Git patch, manifest and fail-closed build/probe script under `native/lightcraft/`. The [update guide](research/lightcraft/UPDATE_GUIDE.md) covers clean-source replay, patch/digest verification, native tests, CLI build, binary SHA-256 receipts, packaging validation and eventual retirement of the patch when upstream supplies compatible behavior. `desktop/packaging/build.ps1` validates an explicitly selected or environment-configured engine before continuing. The current installer still does not bundle LightCraft; an absent engine configuration remains supported.
 
 `render_preview` accepts an optional boolean `before`, defaulting to false. Native Before uses the existing `Session::render_job(..., true, true)`; After retains `render_now()`. Each import explicitly selects `beforeAfter.setBefore {source:"import"}`. Persisted After recipes, History navigation, bypass and Reset do not select the Before baseline. Native `before_settings()` supplies current crop/orientation without copying After optics or other edits. MCP metadata labels the actual image kind; Before also carries native import/effective settings fingerprints and geometry. No new develop algorithm or renderer is introduced.
 
@@ -1484,8 +1505,12 @@ Normal ready RAW Preview has no permanent explanatory status note; loading and f
 
 The [Region design](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md) originally proposed RAW-only Whole-base plus Region overlay, Native-visible-rect to virtual-frame/window mapping, independent quality/resolution/mode, a shared one-running/latest-pending plan, geometry-validated Before/After pairs and separate Region transport/retention budgets. The statements that RawView lacked pan/visible geometry and the API/Viewer were Whole-only are historical design-stage status, superseded by the C2 implementation and acceptance recorded below. Thresholds, context/prefetch and capacity candidates still require C3 measurements before final product adoption.
 
+> **Historical phase records:** C0 and C1 below capture the successive planner-only and Native/Backend-adapter checkpoints. Their statements that Region was unconnected or still awaited integration are superseded by the later C2 sections and acceptance record.
+
 C0 now fixes the [pure Region contract](research/lightcraft/RAW_REGION_PREVIEW_DESIGN.md#11-c0完了region契約固定2026-10-24) at baseline `0b3e612`: `rawRegionPlanner.ts`, `rawRegionContract.ts` / JSON Schema and `rawRegionSchedule.ts` are deliberately unconnected to the Viewer, API and worker. Shared coordinate fixtures fix half-open edges and visible → margin/context → floor/ceil → grid → clamp ordering. A native preflight DTO supplies actual Full dimensions; the Frontend does not duplicate LC fit/aspect rounding. Proposed MCP `render_region_preview` uses independent `region_contract=1` and `operation=plan|render`; missing support retains B1 Whole availability. No tool is called by C0. Responses must validate actual quality/kind/geometry/F/W/bitmap and identity, with one replan on changed F and Whole fallback on repeated mismatch. Pixel cache keys exclude view delivery generation; comparison requires matching geometry/F/W/interior/quality/dimensions. The pure state machine holds one running descriptor and one replaceable pending plan (at most six descriptors including Before/After preflights), preserving ownership of transmitted work. C1 validation budgets are side 2048, 2,097,152 pixels, PNG 9 MiB and MCP line 13 MiB, separate from Whole; these are not final product limits or RSS/VRAM caps. Native validation, transport, overlay and worker integration remain C1/C2 work; density thresholds and timing remain C3 measurements. Recipe/History/save/P1/JPEG behavior is unchanged.
 
+
+> **Historical C1 implementation record — superseded by Current LightCraft runtime contract and the integrated Region descriptions below.** The fixed v0.10 artifact and future-integration status here record the C1 checkpoint only.
 
 C1 implements the managed `render_region_preview` tool and an unconnected Backend adapter on fixed LightCraft v0.10.0. Actual whole-frame Plan metadata supplies geometry/F before windowing; render checks actual F/W/quality/kind and bounds the expanded work window before execution. The shared C0 schema/fixtures are verified against Native artifacts at build time; the Backend schema is included in frozen application data. Whole and Region share the existing StagePool/P2 budget and RawSession worker/native lock/validation ownership, with latest pending replacement and join/readback after cancellation. No Region worker, Session, HTTP render route or Viewer integration is added. Optional `regionContract:1` is exposed independently; the actual old B1 binary retains Whole behavior. A future C2 HTTP owner must attest the public document token and lease before calling the adapter; internal RawHandle lifetime ownership remains unchanged. Delivery identity is separate from pixel reuse identity.
 
