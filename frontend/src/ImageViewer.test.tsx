@@ -1525,7 +1525,7 @@ describe('ImageViewer Zoom Navigator', () => {
     expect(viewerPan().y).toBeCloseTo(-120, 5);
   });
 
-  it('clamps a dragged frame at Navigator boundaries and completes on pointercancel', () => {
+  it('clamps a dragged frame at Navigator boundaries and allows the next click after pointercancel', () => {
     const viewport = renderJpeg();
     click(button('1:1'));
     setNavigatorImageBounds();
@@ -1540,6 +1540,9 @@ describe('ImageViewer Zoom Navigator', () => {
     expect(parseFloat(frame.style.left) + parseFloat(frame.style.width)).toBeLessThanOrEqual(100);
     expect(parseFloat(frame.style.top) + parseFloat(frame.style.height)).toBeLessThanOrEqual(100);
     expect(viewport.classList.contains('pannable')).toBe(true);
+    clickAt(navigator, 118, 63);
+    expect(viewerPan().x).toBeCloseTo(200, 5);
+    expect(viewerPan().y).toBeCloseTo(150, 5);
   });
 
   it('shows RAW whole-frame sources for After and Before and excludes Region imagery', () => {
@@ -1613,6 +1616,36 @@ describe('ImageViewer Zoom Navigator', () => {
     expect(finalView.interacting).toBe(false);
     expect(parseFloat(frame.style.left)).toBeCloseTo(50, 5);
     expect(parseFloat(frame.style.top)).toBeCloseTo(50, 5);
+  });
+
+  it('returns RAW interaction to false on pointercancel and accepts the next background click', () => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const changed = vi.fn();
+    act(() => root.render(<ImageViewer src="blob:raw-cancel" documentKey="raw-cancel" previewPixels
+      rawFrame={{ nativeWidth: 2000, nativeHeight: 1500, geometryId: 'b'.repeat(64) }} onRawViewChange={changed}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    act(() => resize());
+    const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 2000 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 1500 });
+    act(() => image.dispatchEvent(new Event('load')));
+    click(button('1:1'));
+    setNavigatorImageBounds();
+    const navigator = host.querySelector<HTMLElement>('.viewer-navigator')!;
+    const frame = host.querySelector<HTMLElement>('.viewer-navigator-frame')!;
+    Object.defineProperty(navigator, 'setPointerCapture', { value: vi.fn() });
+    pointer(frame, 'pointerdown', 163, 97.25);
+    pointer(navigator, 'pointermove', 199, 124.25);
+    pointer(navigator, 'pointercancel', 199, 124.25);
+    const cancelledView = changed.mock.calls.at(-1)![0];
+    expect(cancelledView.interacting).toBe(false);
+    expect(cancelledView.panX).toBeCloseTo(-200, 5);
+    expect(cancelledView.panY).toBeCloseTo(-150, 5);
+    clickAt(navigator, 118, 63);
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ panX: 300, panY: 225, interacting: true }));
   });
 
   it('applies all configured positions and turns the Navigator off while zoomed', () => {

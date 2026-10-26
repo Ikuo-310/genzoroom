@@ -443,8 +443,8 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     const drag = navigatorDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     navigatorDragRef.current = null;
-    // Captured frame presses may retarget their click to the Navigator itself, even without movement.
-    suppressNavigatorClickRef.current = true;
+    // Only pointerup produces a trailing click; pointercancel ends without one.
+    if (event.type === 'pointerup') suppressNavigatorClickRef.current = true;
     clearTimeout(viewGestureTimer.current);
     if (rawFrame) setViewInteracting(false);
   }
