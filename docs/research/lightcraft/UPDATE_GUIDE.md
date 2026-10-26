@@ -2,6 +2,40 @@
 
 この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`**（U3自動検証PASS、短いWindows実機受入待ち）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
+## 標準更新方針
+
+GenzoRoomは開発中のため、LightCraft更新の標準受入は変更に直接関係するfocused regressionに限定する。過去の研究文書やPhase記録は設計背景・当時の受入証跡・問題発生時の調査資料であり、記載された全試験を更新ごとに繰り返す手順ではない。
+
+通常の更新では、次の項目を確認する。
+
+- upstream tag／commitの固定と、更新に関係する差分の確認
+- managed patchの追随、manifest／patch digest／targetsの更新
+- Native focused testとbuild、および生成・採用する実binaryのprobe
+- receipt、manifest tuple、実binary SHA-256の整合
+- Before／Preview／Region contractとgeometry descriptorの整合
+- CPU／DX12それぞれの基本描画
+- persisted RAW Recipeのbest-effort restoreとRAW編集Reset
+- RAW Viewer smoke testと短いWindows実機目視
+
+必要なテストやprobeは、変更したNative contract、GenzoRoom adapter/API、Frontend接続点に絞る。これらの確認を満たすために不要なら、全Backend／Frontend test suite、全機能のbuildや追加監査へ広げない。
+
+通常更新で自動的に再実行しない項目：
+
+- 大規模performance benchmark、旧版対新版の詳細side-by-side、数%／数十ms差の性能評価
+- RSS／VRAMの長時間測定、Pan大量trace、scheduler timing matrix
+- rho／hysteresis、Region budget、StageCache budgetの比較
+- 無関係なJPEG／Export／Home機能の全面回帰
+- Computer Useによる長時間自動操作
+- 旧LightCraftとのpixel-perfect／pixel-identical再現確認
+
+これらは標準受入条件ではない。A2／P0／P2／B1／C1／C2／C3-Aなどに残る詳細benchmark、memory／GPU計測、高entropy PNG試験、大量Pan／Zoom trace、policy比較は各機能を導入した時点の証跡であり、毎回の更新では再実行しない。実装したNative contractそのものを変更した場合だけ、そのcontractに直接必要なprobeを選んで実施する。
+
+追加調査は、明確な異常の兆候を確認した場合に、その影響範囲へ限定する。例は明らかな性能回帰、geometry／Preview位置ずれ、GPU fallback異常、OOM、RSS／VRAMの継続増加、hang、RAW画質の明確な破綻、contract mismatch、Recipe restore失敗、Viewer smoke failure。原因が未確定という理由だけで大規模benchmarkへ進まず、観測された問題を切り分けるためのfocused調査から始める。
+
+前方互換性については、過去LightCraft versionとの完全互換、旧versionによる再現環境、multi-engine runtime、Recipe migration framework、過去Historyの完全再現、旧版とのpixel-identical出力を必須要件にしない。persisted RecipeはAsset ID、source content hash、engine name、対応settings schemaが合えば、保存settingsを現LightCraftへそのままbest-effort restoreする。engine version／commit差だけでは拒否しない。settingsを実際に読めない場合はRAW編集Resetで現行engineの初期状態から再開できればよい。将来、release安定期に入った段階で必要なら互換方針を再設計する。
+
+新versionに有用な修正・改善があり、上記focused regressionに問題がなければ採用できる。旧versionより高速であることや、小さな性能差が改善していることは採用条件ではない。更新手順の正本はこのガイドであり、Phase文書や研究記録の全試験を毎回の要件として扱わない。
+
 ## 管理対象
 
 | パッチ | 目的・変更対象 |
@@ -20,11 +54,15 @@
 - 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。Windows開発checkoutではenv未指定時に現在manifestからこのmanaged candidateを探索する。候補は起動時に隣接receipt・実SHA・manifest tuple・contractをstrict検証し、一つでも一致しない場合RAW unavailableとなる。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証・別build・debug binary用の優先overrideで、override先も同じstrict検証を通す。
 - `.tmp`探索は非frozenのWindows開発checkoutに限定する。配布版の通常runtimeへ持ち込まず、将来のbundled artifactも同じreceipt/manifest検証境界へ接続する。自動downloadや旧LightCraftの自動切替は行わない。
 
+> **過去の導入記録／受入証跡:** 以下のA2／P0／P2／B1 probe詳細は、その契約・機能を追加した当時の検証記録であり、LightCraft更新時の標準受入として毎回実行するものではない。契約実装を変更する更新では、変更範囲に直接必要なprobeだけ選択する。
+
 A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_contract`／`stage_cache`と有限budgetの検証、headless job実行・typed metadata、CPU/GPUの実Planを返す`Rendered.frame` sidecar、原本gridへのnative寸法投影、stage保持bufferの計量を含む。`preview.rs`は新規のMCP helperであり、独立した現像／永続cache基盤ではない。変更対象一覧とSHA-256の正本はmanifest。新規依存はworkspaceですでに固定された`sha2`をMCPでも使うためのCargo.toml／lock追記のみで、upstream versionは変えない。
 
 従来引数だけならFull・既存metadata形状を維持する。明示quality、preview_contract=1、stage_cacheのopt-inでは実quality／frame／stageCacheを返す。CPU/GPUアルゴリズム、`run/accept`とsource cache、Before import基準は維持する。stand-inの`Rendered.frame=None`は実geometryの証拠にしない。Beforeはnative `before_settings()`がcrop／orientationだけを現在値に揃え、Afterの手動歪曲補正等を転写しない。hash64はnativeの既存settings hashであり、画像checksumや暗号学的出自証明として扱わない。
 
 ## 再現可能な準備・ビルド
+
+> **既存build toolの記録:** 以下のコマンド説明はpatch適用・artifact検証方法を示すもので、列挙されたPhase-era probe全体を通常更新で再実行する指示ではない。標準更新では上記の受入方針に従って変更に関係するfocused test／build／binary probeを選ぶ。build toolが内部で行う検査はそのtoolの実装動作として扱い、旧Phaseの詳細probeを別途重ねて実行しない。
 
 1. 本家から上記commitの**未変更**checkoutを用意する。既存の利用者変更をreset／上書きしない。作業前にHEAD・statusを確認する。
 2. GenzoRoomのリポジトリPythonから準備scriptを実行する（PowerShell例、`$source`は専用checkoutの絶対path）。
@@ -64,19 +102,27 @@ A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Fronten
 
 ## 将来のエンジン更新
 
-1. 新version／commitと上流の変更・ライセンス・設定schema互換性を調査する。先に現行固定値を置き換えて配布しない。
-2. 専用の新clean checkoutに対してpatchの`git apply --check`を実行する。衝突する場合は`tools.rs`→`ui.render`→headless→native render jobの接続とmetadata契約を確認し、差分を調整する。本家の現像式は独自に移植しない。
-3. 新commit基準のGit patch、manifestの対象commit／version／digest／変更対象を同じ変更で更新する。未対応の余分なdiffを承認しない。
-4. 上記scriptでnativeテスト・CLI build・実binary Before／After probeを実施する。旧After省略契約、import基準、crop／orientation、Before失敗時のAfter継続を検証する。
-5. GenzoRoomのadapter／runtime／Windows RAW API／復元／History・Reset、Frontend RAW API／hook／Viewer／JPEG比較・ショートカットの関連回帰、typecheck／production build／Python構文検査を行う。engine tupleと保存済みRecipeの互換性・非互換時の保持方針を再確認する。
-6. 実RAW／GPU／WebViewの比較、zoom／pan、再入場／再生成、エラー回復を確認し、実機未実施範囲を明記する。検証後にadapter固定tuple、manifest、研究／architecture文書を一括更新する。新receiptを発行し、配布対象の実binaryを再検査する。
+更新は次のfocusedな流れで行う。変更に直接関係しないsuite、benchmarkや旧版比較は標準手順に追加しない。
+
+1. 新upstream version／tag／commitを固定し、関連差分とmanaged patchへの影響を確認する。
+2. 専用のclean checkoutでmanaged patchを追随する。`git apply --check`を含め、部分適用・重複・余分なdiffがないことを確認する。本家の現像式を独自に移植しない。
+3. manifestのversion／commit、patch digest／targetsを更新し、manifestをidentityの正本として保つ。
+4. 変更に関係するNative focused test、build、実binary probeを行い、receipt／manifest tuple／actual binary SHAを照合する。Before／Preview／Region contractsとgeometry descriptorを確認し、CPU／DX12の基本描画を確認する。
+5. GenzoRoom側の関連focused regressionを行う。最低限、persisted RAW Recipeのbest-effort restore、RAW編集Reset、RAW Viewer smokeを確認する。変更が影響しない領域の全suiteは実行しない。
+6. 短いWindows実機目視でPreview、Before／After、操作可能性を確認する。失敗や明確な異常があれば、観測された範囲だけ追加調査する。
+7. focused regressionに問題がなく、有用な修正・改善がある新versionを採用する。旧versionより高速であることや画素完全一致は条件にしない。
+8. 更新後のmanifest／receiptと変更した関連文書を揃える。旧Recipeの事前変換、旧engine切替やmigration frameworkは導入しない。
+
+性能benchmark、RSS／VRAM長時間測定、Pan trace、scheduler timing matrix、budget policy比較などはこの標準フローに含めない。明確な回帰等の兆候がある場合だけ、原因を絞る追加調査として実施する。
 
 ## 上流に同等機能が入った場合
 
-独自patchを削除する前に、上流binaryのboolean Before schema、import基準、kind・fingerprint・geometry、PNG／After互換性を同じnative／GenzoRoom回帰とbinary probeで確認する。契約名が異なる場合は最小のadapter変換で同じ保証を満たし、画像種別を推測しない。互換性確認後、manifestの`patches`を空にしてpatchを削除し、nativeの機能テストが上流側にあるかGenzoRoom管理のprobeで代替されることを記録する。clean upstream buildでも`--build`／`--binary`検証とreceiptを維持する。patch不在を理由に能力検査を省かない。
+独自patchを削除する場合は、変更するcontractに直接関係する範囲で上流binaryのboolean Before schema、import基準、kind・fingerprint・geometry、PNG／After互換性をfocused regressionとbinary probeで確認する。契約名が異なる場合は最小のadapter変換で同じ保証を満たし、画像種別を推測しない。互換性確認後、manifestの`patches`を空にしてpatchを削除し、nativeの機能テストが上流側にあるかGenzoRoom管理のprobeで代替されることを記録する。clean upstream buildでもreceiptとactual binary SHAを照合する。patch不在を理由に能力検査を省かない。
 
 
 ## C1 Region検証の追加（2026-10-25）
+
+> **過去の契約導入probe記録:** 以下のCPU／DX12、多数の入力境界、高entropy PNG、capacity／budget probeはC1のRegion機能導入時の受入証跡であり、将来version更新の標準要件ではない。Region contractまたは関連adapterを変更する場合に限り、変更した契約境界に必要なprobeを選択する。
 
 固定upstreamは変更しない。同じ管理patchに `region.rs` とtests、C0のschema/contract/fixture artifactを含める。prepareはNative artifactがFrontend正本と一致すること、およびBackend schemaの一致を確認し、不一致ならbuildを中止する。既存Before/Whole tool schemaを拡張せず、独立 `render_region_preview` の `region_contract:1` を検出する。
 
