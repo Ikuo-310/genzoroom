@@ -229,6 +229,35 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     setPan({ x: 0, y: 0 });
   }
 
+  function toggleFitActualSize(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const imageBounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < imageBounds.left || event.clientX > imageBounds.right
+      || event.clientY < imageBounds.top || event.clientY > imageBounds.bottom) return;
+
+    clearTimeout(viewGestureTimer.current);
+    setViewInteracting(false);
+    previousTransform.current = null;
+    if (!fitMode) {
+      setFitMode(true);
+      setScale(fitScale);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+
+    const nextScale = rawFrame ? 1 / dpr : 1;
+    const bounds = viewport.getBoundingClientRect();
+    const point = { x: event.clientX - bounds.left - bounds.width / 2, y: event.clientY - bounds.top - bounds.height / 2 };
+    const nextPan = zoomAroundPoint(pan, point, scale, nextScale);
+    const maxPanX = Math.max(0, (imageSize.x * nextScale - viewport.clientWidth) / 2);
+    const maxPanY = Math.max(0, (imageSize.y * nextScale - viewport.clientHeight) / 2);
+    setFitMode(false);
+    setScale(nextScale);
+    setPan({ x: Math.max(-maxPanX, Math.min(maxPanX, nextPan.x)), y: Math.max(-maxPanY, Math.min(maxPanY, nextPan.y)) });
+  }
+
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (keyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
@@ -382,6 +411,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       onPointerCancel={stopPan}
     >
       <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+        onDoubleClick={toggleFitActualSize}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>

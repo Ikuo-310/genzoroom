@@ -1152,3 +1152,110 @@ describe('workspace Viewer focus mode', () => {
     }
   });
 });
+
+describe('Viewer image double-click Fit and Actual Size toggle', () => {
+  let resize = () => {};
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+  });
+
+  function prepareViewport() {
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 50, width: 400, height: 300, right: 500, bottom: 350 } as DOMRect);
+    act(() => resize());
+    return viewport;
+  }
+
+  function imagePosition() {
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 50, width: 400, height: 300, right: 500, bottom: 350 } as DOMRect);
+    return position;
+  }
+
+  function doubleClick(target: Element, x: number, y: number, button = 0) {
+    act(() => target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, button, clientX: x, clientY: y })));
+  }
+
+  it('toggles JPEG Fit to 100% around the clicked point, clamps at the image edge, then restores Fit', () => {
+    act(() => root.render(<Harness />));
+    prepareViewport();
+    act(() => mockImage.onLoad?.(800, 600));
+    const position = imagePosition();
+    doubleClick(position, 400, 200);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(position.style.transform).toContain('-100px');
+
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === 'Fit')!);
+    doubleClick(position, 100, 50);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(position.style.transform).toContain('+ 200px');
+    expect(position.style.transform).toContain('+ 150px');
+    doubleClick(position, 400, 200);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    expect(position.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
+  });
+
+  it('toggles RAW Fit to physical Actual Size through RawView state and returns to Fit from magnification', () => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const changed = vi.fn();
+    act(() => root.render(<ImageViewer src="blob:raw" documentKey="raw" previewPixels
+      rawFrame={{ nativeWidth: 2000, nativeHeight: 1500, geometryId: 'a'.repeat(64) }} onRawViewChange={changed}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    prepareViewport();
+    const rawImage = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(rawImage, 'naturalWidth', { configurable: true, value: 2000 });
+    Object.defineProperty(rawImage, 'naturalHeight', { configurable: true, value: 1500 });
+    act(() => rawImage.dispatchEvent(new Event('load')));
+    const position = imagePosition();
+    doubleClick(position, 300, 200);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 0.5, dpr: 2, fit: false }));
+    doubleClick(position, 300, 200);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('40%');
+    expect(position.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ fit: true, panX: 0, panY: 0 }));
+  });
+
+  it('ignores unloaded images, non-left clicks, active drags, and points outside the image bounds', () => {
+    act(() => root.render(<Harness />));
+    prepareViewport();
+    const position = imagePosition();
+    act(() => mockImage.onLoad?.(800, 600));
+    doubleClick(position, 300, 200, 2);
+    doubleClick(position, 99, 50);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 200, clientY: 150 });
+    Object.defineProperty(pointerDown, 'pointerId', { value: 7 });
+    act(() => viewport.dispatchEvent(pointerDown));
+    doubleClick(position, 300, 200);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+  });
+
+  it('leaves RAW view state unchanged before the image is ready', () => {
+    const changed = vi.fn();
+    act(() => root.render(<ImageViewer src="blob:raw" documentKey="raw" previewPixels
+      rawFrame={{ nativeWidth: 2000, nativeHeight: 1500, geometryId: 'a'.repeat(64) }} onRawViewChange={changed}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    prepareViewport();
+    doubleClick(imagePosition(), 300, 200);
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ fit: true, scale: 0.2, panX: 0, panY: 0 }));
+  });
+
+  it('keeps wheel zoom, pan, Fit, and Actual Size controls available alongside the toggle', () => {
+    act(() => root.render(<Harness />));
+    const viewport = prepareViewport();
+    act(() => mockImage.onLoad?.(800, 600));
+    act(() => viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, clientX: 300, clientY: 200 })));
+    expect(host.querySelector('.zoom-controls output')!.textContent).not.toBe('50%');
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')];
+    click(buttons.find(button => button.textContent === 'Fit')!);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    click(buttons.find(button => button.textContent === '1:1')!);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+  });
+});
