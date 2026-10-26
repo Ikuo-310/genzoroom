@@ -27,16 +27,17 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       <button type="button" className={`adjustment-category-icon grading-range-toggle${enabled ? '' : ' is-off'}`}
         aria-pressed={enabled} aria-label={toggleLabel} title={toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        onClick={() => dispatch({ type: range.toggle })}>⏻</button>
+        onClick={() => dispatch({ type: range.toggle })}>竢ｻ</button>
       <button type="button" className="adjustment-category-reset grading-range-reset" aria-label={resetLabel} title={resetLabel}
         disabled={range.ids.every(id => recipe.adjustments[id] === 0)}
         onFocus={focusAdjustmentCategory} onKeyDown={event => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        onClick={() => dispatch({ type: range.reset })}>↺</button>
+        onClick={() => dispatch({ type: range.reset })}>竊ｺ</button>
     </div>;
   }
   return <>
     {header('shadows')}
     <AdjustmentSlider key={`${assetId}-shadows-temperature`} adjustmentId="shadowsTemperature"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.shadowsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.shadowsTemperature} valueText={formatShadowsTemperature(recipe.adjustments.shadowsTemperature)}
       valueLabel={t('workspace.shadowsTemperatureValue')} precision={0} defaultValue={0}
@@ -47,6 +48,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onCommit={() => dispatch({ type: 'commit', kind: 'shadowsTemperature' })}
       onReset={() => dispatch({ type: 'shadowsTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-shadows-tint`} adjustmentId="shadowsTint"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.shadowsTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.shadowsTint} valueText={formatShadowsTint(recipe.adjustments.shadowsTint)}
       valueLabel={t('workspace.shadowsTintValue')} precision={0} defaultValue={0}
@@ -58,6 +60,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'shadowsTintReset' })} />
     {header('midtones')}
     <AdjustmentSlider key={`${assetId}-midtones-temperature`} adjustmentId="midtonesTemperature"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.midtonesTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.midtonesTemperature} valueText={formatMidtonesTemperature(recipe.adjustments.midtonesTemperature)}
       valueLabel={t('workspace.midtonesTemperatureValue')} precision={0} defaultValue={0}
@@ -68,6 +71,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onCommit={() => dispatch({ type: 'commit', kind: 'midtonesTemperature' })}
       onReset={() => dispatch({ type: 'midtonesTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-midtones-tint`} adjustmentId="midtonesTint"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.midtonesTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.midtonesTint} valueText={formatMidtonesTint(recipe.adjustments.midtonesTint)}
       valueLabel={t('workspace.midtonesTintValue')} precision={0} defaultValue={0}
@@ -79,6 +83,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'midtonesTintReset' })} />
     {header('highlights')}
     <AdjustmentSlider key={`${assetId}-highlights-temperature`} adjustmentId="highlightsTemperature"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.highlightsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.highlightsTemperature} valueText={formatHighlightsTemperature(recipe.adjustments.highlightsTemperature)}
       valueLabel={t('workspace.highlightsTemperatureValue')} precision={0} defaultValue={0}
@@ -89,6 +94,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onCommit={() => dispatch({ type: 'commit', kind: 'highlightsTemperature' })}
       onReset={() => dispatch({ type: 'highlightsTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-highlights-tint`} adjustmentId="highlightsTint"
+      commitPolicy="operation-boundary"
       enabled onOpenContextMenu={onOpenContextMenu} hideToggle operationName={t('workspace.highlightsTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.highlightsTint} valueText={formatHighlightsTint(recipe.adjustments.highlightsTint)}
       valueLabel={t('workspace.highlightsTintValue')} precision={0} defaultValue={0}

@@ -27,7 +27,10 @@ vi.mock('./api', async (importOriginal) => ({
   })),
 }));
 vi.mock('./ImageViewer', () => ({
-  ImageViewer: ({ recipe }: { recipe: EditRecipe }) => <pre data-recipe>{JSON.stringify(recipe)}</pre>,
+  ImageViewer: ({ recipe, onInteractionStart }: { recipe: EditRecipe; onInteractionStart?: () => void }) => <>
+    <pre data-recipe>{JSON.stringify(recipe)}</pre>
+    <button data-viewer-operation onClick={onInteractionStart}>Viewer operation</button>
+  </>,
 }));
 
 let host: HTMLDivElement;
@@ -130,7 +133,7 @@ describe('production White Balance controls', () => {
     key('ArrowLeft', title, { shiftKey: true });
     expect(document.activeElement).toBe(title);
     expect(recipe()).toEqual(before);
-    expect(history()).toEqual(beforeHistory);
+    expect(history()).toHaveLength(beforeHistory.length + 1);
   });
 
   it.each(['.adjustment-category-title', '[data-category-switch]', '.adjustment-category-reset'])
@@ -147,7 +150,7 @@ describe('production White Balance controls', () => {
       navigate('ArrowDown');
       expect(document.activeElement).toBe(slider(1));
       expect(recipe()).toEqual(before);
-      expect(history()).toEqual(beforeHistory);
+      expect(history()).toHaveLength(beforeHistory.length + 1);
     });
 
   it.each(['Enter', ' '])('activates category Reset once with native %s', (value) => {
@@ -199,7 +202,7 @@ describe('production White Balance controls', () => {
       act(() => source.focus());
       navigate('ArrowDown');
       expect(document.activeElement).toBe(category(1).querySelectorAll('.adjustment-range')[1]);
-      expect(history()).toEqual(beforeHistory);
+      expect(history()).toHaveLength(beforeHistory.length + 1);
       expect(host.querySelector('.scope-section')!.scrollTop).toBe(0);
       expect(host.querySelector('.develop-panel > .workspace-section-header')!.scrollTop).toBe(0);
     });
@@ -414,7 +417,7 @@ describe('production White Balance controls', () => {
     expect(items[to].value).toBe('11');
     expect(items[from].value).toBe('0');
     advance();
-    expect(history()).toHaveLength(1);
+    expect(history()).toHaveLength(0);
   });
 
   it.each([0, 2, 8])('releases keyboard focus for mouse hover and restores it on Shift navigation from %s', (index) => {
@@ -433,7 +436,7 @@ describe('production White Balance controls', () => {
     advance(499);
     expect(history()).toHaveLength(0);
     advance(1);
-    expect(history()).toHaveLength(1);
+    expect(history()).toHaveLength(0);
     key('ArrowRight', document.activeElement!);
     wheel(-1, false, items[index]);
     wheel(-1, true, items[index]);
@@ -446,7 +449,7 @@ describe('production White Balance controls', () => {
     key('ArrowRight', previous);
     expect(previous.value).toBe('2');
     advance();
-    expect(history()).toHaveLength(3);
+    expect(history()).toHaveLength(2);
     key('z', previous, { ctrlKey: true });
     expect(previous.value).toBe('1');
     key('z', previous, { ctrlKey: true, shiftKey: true });
@@ -487,7 +490,7 @@ describe('production White Balance controls', () => {
     advance(499);
     expect(history()).toHaveLength(1);
     advance(1);
-    expect(history()).toEqual(['Tint 0 → +1', 'Temperature 0 → +10']);
+    expect(history()).toEqual(['Temperature 0 → +10']);
     pointer('pointerout', items[0]);
     pointer('pointerover', items[3]);
     key('ArrowUp', items[1]);
@@ -517,7 +520,7 @@ describe('production White Balance controls', () => {
     expect(Number(destination.value)).toBe(Number(destination.step));
     for (const item of items.filter(item => item !== destination)) expect(item.value).toBe('0');
     advance();
-    expect(history()).toHaveLength(1);
+    expect(history()).toHaveLength(0);
   });
 
   it.each(['collapse', 'disable'])('skips a %s category in both directions', (mode) => {
@@ -595,12 +598,12 @@ describe('production White Balance controls', () => {
     wheel(1, true, tintSlider());
     expect(recipe().adjustments.tint).toBe(10);
     advance();
-    expect(history()).toEqual(['Tint 0 → +10']);
+    expect(history()).toHaveLength(0);
     act(() => number(1).focus());
     change(number(1), '-25.6');
     key('Enter', number(1));
     expect(recipe().adjustments.tint).toBe(-26);
-    expect(history()[0]).toBe('Tint +10 → -26');
+    expect(history()[0]).toBe('Tint 0 → -26');
     click(category().querySelectorAll<HTMLElement>('.adjustment-reset')[1]);
     expect(recipe().adjustments.tint).toBe(0);
     expect(history()[0]).toBe('Reset Tint -26 → 0');
@@ -628,7 +631,7 @@ describe('production White Balance controls', () => {
     pointer('pointerup', window);
     expect(history()).toEqual(['Temperature 0 → -50']);
   });
-  it('uses arrow steps and coalesces for 500ms inactivity with Undo/Redo', () => {
+  it('keeps arrow steps together across inactivity and supports Undo/Redo', () => {
     act(() => slider().focus());
     key('ArrowRight');
     key('ArrowUp');
@@ -639,9 +642,10 @@ describe('production White Balance controls', () => {
     key('ArrowDown');
     key('ArrowLeft');
     advance();
-    expect(history()).toEqual(['Temperature 0 → -1']);
+    expect(history()).toHaveLength(0);
     click(button('Undo'));
     expect(recipe().adjustments.temperature).toBe(0);
+    expect(history()).toEqual(['Temperature 0 → -1']);
     click(button('Redo'));
     expect(recipe().adjustments.temperature).toBe(-1);
   });
@@ -658,7 +662,78 @@ describe('production White Balance controls', () => {
     advance(499);
     expect(history()).toHaveLength(0);
     advance(1);
+    expect(history()).toHaveLength(0);
+    click(button('Undo'));
     expect(history()).toEqual(['Temperature 0 → -1']);
+  });
+  it('keeps same-control keyboard and wheel edits pending across inactivity and commits on handoff', () => {
+    act(() => slider().focus());
+    key('ArrowUp');
+    advance(1200);
+    key('ArrowUp');
+    advance(1200);
+    expect(recipe().adjustments.temperature).toBe(20);
+    expect(history()).toHaveLength(0);
+
+    wheel(-1);
+    advance(1200);
+    wheel(-1);
+    expect(history()).toHaveLength(0);
+    wheel(-1, false, tintSlider());
+    expect(history()).toEqual(['Temperature 0 → +40']);
+    expect(recipe().adjustments.tint).toBe(10);
+  });
+  it('keeps autosave from splitting a same-control gesture', async () => {
+    act(() => slider().focus());
+    key('ArrowUp');
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(history()).toHaveLength(0);
+
+    key('ArrowUp');
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const saved = savedEdits.get('a')?.state as { history: { before: EditRecipe; after: EditRecipe }[] };
+    expect(saved.history).toHaveLength(1);
+    expect(saved.history[0].before.adjustments.temperature).toBe(0);
+    expect(saved.history[0].after.adjustments.temperature).toBe(20);
+    expect(history()).toHaveLength(0);
+    wheel(-1, false, tintSlider());
+    expect(history()).toEqual(['Temperature 0 → +20']);
+  });
+  it('does not merge separated A → B → A adjustments', () => {
+    wheel(-1, false, slider());
+    wheel(-1, false, tintSlider());
+    wheel(-1, false, slider());
+    expect(history()).toHaveLength(2);
+    wheel(-1, false, slider(1));
+    expect(history()).toEqual([
+      'Temperature +10 → +20',
+      'Tint 0 → +10',
+      'Temperature 0 → +10',
+    ]);
+  });
+  it('closes a keyboard gesture before Undo and Viewer operations', () => {
+    act(() => slider().focus());
+    key('ArrowUp');
+    advance(1200);
+    click(button('Undo'));
+    expect(recipe().adjustments.temperature).toBe(0);
+    expect(history()).toEqual(['Temperature 0 → +10']);
+
+    key('ArrowUp');
+    click(host.querySelector<HTMLButtonElement>('[data-viewer-operation]')!);
+    expect(history()).toHaveLength(1);
+    key('ArrowUp');
+    click(host.querySelector<HTMLButtonElement>('[data-viewer-operation]')!);
+    expect(history()[0]).toBe('Temperature +10 → +20');
+    expect(history()).toHaveLength(2);
   });
   it('normalizes direct input and supports Enter, blur, Escape, and individual Reset', () => {
     act(() => number().focus());
@@ -679,16 +754,16 @@ describe('production White Balance controls', () => {
     expect(history()[0]).toBe('Reset Temperature +100 → 0');
     expect(category().querySelector<HTMLButtonElement>('.adjustment-reset')!.disabled).toBe(true);
   });
-  it('commits pending input across adjustments and ignores stale debounce callbacks', () => {
+  it('commits pending input across adjustments and keeps autosave timing out of History', () => {
     wheel(-1);
     wheel(-1, false, slider(1));
     expect(history()).toEqual(['Temperature 0 → +10']);
     advance();
-    expect(history()).toEqual(['Exposure 0.00 → +0.10', 'Temperature 0 → +10']);
+    expect(history()).toEqual(['Temperature 0 → +10']);
     wheel(1);
     click(category(1).querySelector<HTMLElement>('.adjustment-category-reset')!);
     advance();
-    expect(history().slice(0, 2)).toEqual(['Reset Basic adjustments', 'Temperature +10 → 0']);
+    expect(history().slice(0, 3)).toEqual(['Reset Basic adjustments', 'Temperature +10 → 0', 'Exposure 0.00 → +0.10']);
   });
   it('keeps the integrated Color category toggle synchronized and commits pending before disabling', () => {
     const collapse = category().querySelector<HTMLButtonElement>('.adjustment-category-title')!;

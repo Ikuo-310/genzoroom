@@ -85,7 +85,7 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
 
 function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean, preserveIfTemporarilyDisabled = false) {
   const scope = destination.closest('.workspace-side-panel') ?? destination.ownerDocument;
-  for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
+  commitAdjustmentsInScope(scope);
   keyboardNavigation = true;
   activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
   if (preserveIfTemporarilyDisabled) {
@@ -95,6 +95,12 @@ function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean, preser
   }
   destination.focus({ preventScroll: true });
   if (reveal) revealAdjustment(destination);
+}
+
+export function commitAdjustmentsInScope(scope: ParentNode | null) {
+  if (!scope) return;
+  // Gesture ownership lives in each slider, so UI boundaries must close it as well as the EditSession.
+  for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
 }
 
 export function restoreAdjustmentFocus(panel: HTMLElement, lastId: AdjustmentId | null): boolean {

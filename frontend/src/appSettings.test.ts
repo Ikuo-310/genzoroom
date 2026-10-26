@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
 import i18n, { changeAppLanguage, currentLanguagePreference, detectLanguage, formatPhotoDate, LANGUAGE_STORAGE_KEY, readLanguagePreference } from './i18n';
 import { formatAlbumMonth } from './albums';
 import { SHOW_KEYBOARD_SHORTCUTS_KEY } from './appSettings';
 
-afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailColumns', 6); updateSetting('recentPhotoCount', 100); updateSetting('anshitsuInitialSelection', 'nonRaw'); });
+afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailColumns', 6); updateSetting('recentPhotoCount', 100); updateSetting('anshitsuInitialSelection', 'nonRaw'); updateSetting('zoomNavigatorPosition', 'bottom-right'); });
 const memory = (initial: Record<string, string> = {}) => ({
   getItem: (key: string) => initial[key] ?? null,
   setItem: (key: string, value: string) => { initial[key] = value; },
@@ -21,6 +21,22 @@ describe('browser preferences', () => {
       expect(storage.getItem(SHOW_KEYBOARD_SHORTCUTS_KEY)).toBe(String(value));
       expect(readSettings(storage as Storage).showKeyboardShortcuts).toBe(value);
     }
+  });
+  it('defaults the Zoom Navigator to bottom-right and validates persisted positions', () => {
+    expect(readSettings(memory() as Storage).zoomNavigatorPosition).toBe('bottom-right');
+    for (const position of ZOOM_NAVIGATOR_POSITIONS) {
+      expect(readSettings(memory({ [ZOOM_NAVIGATOR_POSITION_KEY]: position }) as Storage).zoomNavigatorPosition).toBe(position);
+    }
+    for (const invalid of ['', 'center', 'BottomRight']) {
+      expect(readSettings(memory({ [ZOOM_NAVIGATOR_POSITION_KEY]: invalid }) as Storage).zoomNavigatorPosition).toBe('bottom-right');
+    }
+    const storage = memory();
+    vi.stubGlobal('window', { localStorage: storage });
+    updateSetting('zoomNavigatorPosition', 'off');
+    expect(storage.getItem(ZOOM_NAVIGATOR_POSITION_KEY)).toBe('off');
+    expect(readSettings(storage as Storage).zoomNavigatorPosition).toBe('off');
+    updateSetting('zoomNavigatorPosition', 'invalid' as never);
+    expect(readSettings(storage as Storage).zoomNavigatorPosition).toBe('off');
   });
   it('preserves legacy browser Auto, restores language sync and falls back for invalid date preferences', () => {
     for (const value of ['auto', 'invalid', '']) {
@@ -70,23 +86,23 @@ describe('browser preferences', () => {
     expect(detectLanguage(storage, ['ja-JP'])).toBe('en');
   });
   it('defaults and reloads independent preferences, ignoring invalid saved values', () => {
-    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
+    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
     const storage = memory({ [DATE_LOCALE_KEY]: 'en-GB', [WEEK_START_KEY]: 'sunday', [INITIAL_IMAGE_KEY]: 'original', [HOME_THUMBNAIL_COLUMNS_KEY]: '3', [RECENT_PHOTO_COUNT_KEY]: '250' });
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailColumns: 3, recentPhotoCount: 250, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailColumns: 3, recentPhotoCount: 250, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
     for (const columns of [3, 4, 5, 6, 7, 8, 9, 10]) {
       expect(readSettings(memory({ [HOME_THUMBNAIL_COLUMNS_KEY]: String(columns) }) as Storage).homeThumbnailColumns).toBe(columns);
     }
     for (const invalidCount of ['49', '51', '501', '225', '100.0', 'invalid']) {
       expect(readSettings(memory({ [RECENT_PHOTO_COUNT_KEY]: invalidCount }) as Storage).recentPhotoCount).toBe(100);
     }
-    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_COLUMNS_KEY]: '11', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
+    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_COLUMNS_KEY]: '11', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
     vi.stubGlobal('window', { localStorage: storage });
     updateSetting('initialImage', 'preview'); updateSetting('weekStart', 'monday'); updateSetting('dateLocale', 'ja-JP');
     updateSetting('homeThumbnailColumns', 4);
     updateSetting('recentPhotoCount', 450);
     expect(storage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('4');
     expect(storage.getItem(RECENT_PHOTO_COUNT_KEY)).toBe('450');
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailColumns: 4, recentPhotoCount: 450, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailColumns: 4, recentPhotoCount: 450, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'raw' }) as Storage).anshitsuInitialSelection).toBe('raw');
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'both' }) as Storage).anshitsuInitialSelection).toBe('both');
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'invalid' }) as Storage).anshitsuInitialSelection).toBe('nonRaw');
@@ -123,7 +139,7 @@ describe('browser preferences', () => {
   it('accepts changes for the current session when storage is blocked', async () => {
     const storage = { getItem: () => { throw new Error('Denied'); }, setItem: () => { throw new Error('Denied'); } };
     vi.stubGlobal('window', { localStorage: storage });
-    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw' });
+    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailColumns: 6, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
     updateSetting('dateLocale', 'en-GB'); expect(resolveDateLocale()).toBe('en-GB');
     updateSetting('weekStart', 'sunday'); expect(resolveWeekStart()).toBe(0);
     await changeAppLanguage('ja', storage); expect(i18n.resolvedLanguage).toBe('ja'); expect(currentLanguagePreference()).toBe('ja');

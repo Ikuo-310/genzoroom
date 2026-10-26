@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { calculateFitScale, clampZoom, zoomAroundPoint, type Point } from './viewerMath';
+import { calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
 import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
@@ -34,6 +34,7 @@ type ImageViewerProps = {
   showingOriginal?: boolean;
   onOriginalToggle?: () => void;
   onImageError?: () => void;
+  onInteractionStart?: () => void;
   recipe?: EditRecipe;
   onHistogramChange?: HistogramChangeHandler;
   gpuRenderer?: WorkspaceGpuRenderer | null;
@@ -59,13 +60,7 @@ type ImageViewerProps = {
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 
-function clampViewerPan(pan: Point, scale: number, imageSize: Point, viewportSize: Point): Point {
-  const maxX = Math.max(0, (imageSize.x * scale - viewportSize.x) / 2);
-  const maxY = Math.max(0, (imageSize.y * scale - viewportSize.y) / 2);
-  return { x: Math.max(-maxX, Math.min(maxX, pan.x)), y: Math.max(-maxY, Math.min(maxY, pan.y)) };
-}
-
-export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -200,7 +195,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
         // JIS Backslash also matches Original; keep this branch first to avoid showing Before.
         if (originalStatus === 'ready' && editSource && onOriginalToggle) {
           event.preventDefault();
-          if (!event.repeat) onOriginalToggle();
+          if (!event.repeat) { onInteractionStart?.(); onOriginalToggle(); }
         } else if (matchesShortcut(event, 'viewerBefore')) {
           event.preventDefault();
         }
@@ -237,23 +232,24 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     const viewport = viewportRef.current;
     if (!viewport || imageSize.x === 0) return;
     const updateFit = () => {
-      setViewportSize(current => current.x === viewport.clientWidth && current.y === viewport.clientHeight
-        ? current : { x: viewport.clientWidth, y: viewport.clientHeight });
+      const nextViewport = { x: viewport.clientWidth, y: viewport.clientHeight };
+      setViewportSize(current => current.x === nextViewport.x && current.y === nextViewport.y
+        ? current : nextViewport);
       const next = calculateFitScale(
-        { x: viewport.clientWidth, y: viewport.clientHeight },
+        nextViewport,
         imageSize,
       );
       setFitScale(next);
       if (fitMode) {
         setScale(next);
         setPan({ x: 0, y: 0 });
-      }
+      } else setPan(current => clampViewerPan(current, scale, imageSize, nextViewport));
     };
     updateFit();
     const observer = new ResizeObserver(updateFit);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [fitMode, imageSize]);
+  }, [fitMode, imageSize, scale]);
 
   useLayoutEffect(() => {
     const previous = previousNativeSize.current;
@@ -300,6 +296,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     if (event.clientX < imageBounds.left || event.clientX > imageBounds.right
       || event.clientY < imageBounds.top || event.clientY > imageBounds.bottom) return;
 
+    onInteractionStart?.();
     clearTimeout(viewGestureTimer.current);
     setViewInteracting(false);
     previousTransform.current = null;
@@ -313,7 +310,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     const nextScale = rawFrame ? 1 / dpr : 1;
     const bounds = viewport.getBoundingClientRect();
     const point = { x: event.clientX - bounds.left - bounds.width / 2, y: event.clientY - bounds.top - bounds.height / 2 };
-    const nextPan = zoomAroundPoint(pan, point, scale, nextScale);
+    const nextPan = panForCenteredZoom(pan, point, scale, nextScale);
     setFitMode(false);
     setScale(nextScale);
     setPan(clampViewerPan(nextPan, nextScale, imageSize, { x: viewport.clientWidth, y: viewport.clientHeight }));
@@ -325,6 +322,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
         || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFitRestore')
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       event.preventDefault();
+      onInteractionStart?.();
       if (!fitMode) {
         previousTransform.current = { scale, pan };
         setFitMode(true);
@@ -338,7 +336,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [keyboardBlocked, fitMode, scale, pan, fitScale]);
+  }, [keyboardBlocked, fitMode, scale, pan, fitScale, onInteractionStart]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
     if (rawFrame) {
@@ -348,13 +346,15 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     }
     const next = rawFrame ? clampZoom(nextValue * dpr) / dpr : clampZoom(nextValue);
     setFitMode(false);
-    setPan((current) => zoomAroundPoint(current, point, scale, next));
+    setPan((current) => clampViewerPan(zoomAroundPoint(current, point, scale, next), next, imageSize,
+      viewportSize.x && viewportSize.y ? viewportSize : { x: viewportRef.current?.clientWidth ?? 0, y: viewportRef.current?.clientHeight ?? 0 }));
     setScale(next);
   }
 
   function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
     if (imageSize.x === 0) return;
     event.preventDefault();
+    onInteractionStart?.();
     const bounds = event.currentTarget.getBoundingClientRect();
     const point = { x: event.clientX - bounds.left - bounds.width / 2, y: event.clientY - bounds.top - bounds.height / 2 };
     zoom(scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12), point);
@@ -363,6 +363,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0) return;
+    onInteractionStart?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
     if (rawFrame) setViewInteracting(true);
@@ -470,7 +471,8 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     setPan({ x: rawDiagnosticView.nativePanX / dpr, y: rawDiagnosticView.nativePanY / dpr });
   }, [rawDiagnosticView?.actual, rawDiagnosticView?.nativePanX, rawDiagnosticView?.nativePanY, !!rawFrame, fitScale, dpr]);
 
-  return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
+  return <section className="viewer-panel" aria-label={t('workspace.viewer')}
+    onPointerDownCapture={() => onInteractionStart?.()} onClickCapture={() => onInteractionStart?.()}>
     <div className="viewer-toolbar">
       <button type="button" className="tool-button icon-button panel-toggle" onClick={onToggleLeft}
         aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}

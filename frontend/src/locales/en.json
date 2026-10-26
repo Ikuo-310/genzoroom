@@ -633,6 +633,14 @@
     "autoWeek": "Auto (regional settings)",
     "dateLocale": "Date and time locale",
     "weekStart": "First day of the week",
+    "zoomNavigatorPosition": "Zoom Navigator Position",
+    "zoomNavigatorPositions": {
+      "off": "Off",
+      "top-left": "Top Left",
+      "top-right": "Top Right",
+      "bottom-left": "Bottom Left",
+      "bottom-right": "Bottom Right"
+    },
     "sunday": "Sunday",
     "monday": "Monday",
     "zoomNavigatorPosition": "Zoom Navigator Position",

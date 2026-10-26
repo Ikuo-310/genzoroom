@@ -76,8 +76,8 @@ export function readSettings(storage = browserStorage()): Settings {
 let settings = readSettings();
 const listeners = new Set<() => void>();
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-  if (key === 'anshitsuInitialSelection' && !ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) return;
   if (key === 'zoomNavigatorPosition' && !ZOOM_NAVIGATOR_POSITIONS.includes(value as ZoomNavigatorPosition)) return;
+  if (key === 'anshitsuInitialSelection' && !ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) return;
   settings = { ...settings, [key]: value };
   const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY, zoomNavigatorPosition: ZOOM_NAVIGATOR_POSITION_KEY }[key];
   try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }

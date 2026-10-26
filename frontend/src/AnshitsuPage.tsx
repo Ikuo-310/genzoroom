@@ -2,7 +2,7 @@ import { useAppSettings } from './appSettings';
 import { useWorkspaceGpu } from './useWorkspaceGpu';
 import { SettingsButton, useSettingsDialog } from './SettingsDialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
-import { activeAdjustmentId, commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus, restoreAdjustmentFocus } from './adjustmentFocus';
+import { activeAdjustmentId, commitAdjustmentEdits, commitAdjustmentsInScope, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus, restoreAdjustmentFocus } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchAssetDetail, isRecentAsset } from './api';
@@ -175,6 +175,7 @@ export function AnshitsuPage() {
         const before = localStateFor(id);
         if (before.dirty || before.saving) {
           if (!before.canSave) throw new Error('Save unavailable');
+          if (id === assetId) commitAdjustmentsInScope(selectedOperationPanelRef.current);
           const saved = await save(id);
           if (!saved.ok || !saved.clean) throw new Error('Save not confirmed');
         }
@@ -249,6 +250,7 @@ export function AnshitsuPage() {
   }
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
+  const commitJpegAdjustmentGesture = useCallback(() => commitAdjustmentsInScope(selectedOperationPanelRef.current), []);
   const lastFocusedAdjustment = useRef<AdjustmentId | null>(null);
   const closeHistoryMenu = useCallback(() => setHistoryMenu(null), []);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
@@ -425,6 +427,7 @@ export function AnshitsuPage() {
       return;
     }
     if (!editable) { navigateToAsset(nextId); return; }
+    commitAdjustmentsInScope(selectedOperationPanelRef.current);
     switchingRef.current = true;
     pauseAutosave(assetId);
     setSwitching(true);
@@ -452,6 +455,7 @@ export function AnshitsuPage() {
 
   async function exitToHome(retryRaw = false) {
     if (exitRef.current && !retryRaw || switchingRef.current || exclusionBusy.current || failedSwitch) return;
+    commitAdjustmentsInScope(selectedOperationPanelRef.current);
     clearExclusionUndo();
     exitRef.current = true;
     setExitSaving(true);
@@ -525,6 +529,7 @@ export function AnshitsuPage() {
       || visibleAssets.length <= 1 || index < 0 || localStateFor(id).saving
       || queueOperations.current.has(id) || (id === assetId && canEdit && !editable)) return;
     clearExclusionUndo();
+    if (id === assetId && editable) commitAdjustmentsInScope(selectedOperationPanelRef.current);
     exclusionBusy.current = true;
     setExcluding(true);
     setExcludeFailure(false);
@@ -749,6 +754,7 @@ export function AnshitsuPage() {
           originalStatus={jpegOriginal.status}
           showingOriginal={jpegOriginal.showingOriginal}
           onOriginalToggle={jpegOriginal.toggle}
+          onInteractionStart={commitJpegAdjustmentGesture}
           onImageError={jpegOriginal.failDecode}
           recipe={editable ? session.recipe : undefined}
           onHistogramChange={receiveHistograms}

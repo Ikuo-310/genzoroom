@@ -290,7 +290,7 @@ describe('edit controls DOM interaction', () => {
     expect(host.querySelectorAll('.adjustment-control')).toHaveLength(6);
     expect(session().recipe).toEqual(before);
   });
-  it('groups hover keyboard input until inactivity and supports every undo/redo binding', () => {
+  it('keeps hover keyboard input pending across inactivity and supports every undo/redo binding', () => {
     pointer('pointerover');
     expect(document.activeElement).not.toBe(range());
     key('ArrowRight');
@@ -304,8 +304,9 @@ describe('edit controls DOM interaction', () => {
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS - 1));
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(1));
-    expect(session().history).toHaveLength(1);
+    expect(session().history).toHaveLength(0);
     key('z', window, { ctrlKey: true });
+    expect(session().history).toHaveLength(1);
     expect(session().recipe.adjustments.exposure).toBe(0);
     key('z', window, { ctrlKey: true, shiftKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0.01);
@@ -313,7 +314,7 @@ describe('edit controls DOM interaction', () => {
     key('y', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0.01);
   });
-  it('groups wheel input into one edit and supports Undo and Redo after 500ms inactivity', () => {
+  it('keeps wheel input pending across inactivity and supports Undo and Redo', () => {
     expect(wheel(-0.1).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(300));
     expect(wheel(-120).defaultPrevented).toBe(true);
@@ -324,10 +325,11 @@ describe('edit controls DOM interaction', () => {
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS - 1));
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(1));
+    expect(session().history).toHaveLength(0);
+    key('z', window, { ctrlKey: true });
     expect(session().history).toHaveLength(1);
     expect(session().history[0].before.adjustments.exposure).toBe(0);
     expect(session().history[0].after.adjustments.exposure).toBe(0.3);
-    key('z', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0);
     key('y', window, { ctrlKey: true });
     expect(session().recipe.adjustments.exposure).toBe(0.3);
@@ -354,7 +356,7 @@ describe('edit controls DOM interaction', () => {
     expect(wheel(1).defaultPrevented).toBe(false);
     expect(session().recipe.adjustments.exposure).toBe(-5);
   });
-  it('commits an active direct edit before starting a wheel transaction on its range', () => {
+  it('commits an active direct edit before a wheel transaction and keeps the wheel gesture open', () => {
     act(() => number().focus());
     changeNumber('0.37');
     expect(wheel(-1, range()).defaultPrevented).toBe(true);
@@ -362,9 +364,9 @@ describe('edit controls DOM interaction', () => {
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure']);
     expect(session().pending?.kind).toBe('exposure');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history).toHaveLength(2);
-    expect(session().history[1].before.adjustments.exposure).toBe(0.37);
-    expect(session().history[1].after.adjustments.exposure).toBe(0.47);
+    expect(session().history).toHaveLength(1);
+    expect(session().pending?.before.adjustments.exposure).toBe(0.37);
+    expect(session().recipe.adjustments.exposure).toBe(0.47);
   });
   it('steps all adjustment types and commits the previous parameter when wheel input switches controls', () => {
     expect(wheel(-1, range()).defaultPrevented).toBe(true);
@@ -377,7 +379,8 @@ describe('edit controls DOM interaction', () => {
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
     expect(session().pending?.kind).toBe('blacks');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
+    expect(session().pending?.kind).toBe('blacks');
   });
   it('uses one step for Shift+wheel across all adjustment types', () => {
     expect(wheel(-100, range(), { shiftKey: true }).defaultPrevented).toBe(true);
@@ -512,7 +515,7 @@ describe('edit controls DOM interaction', () => {
     expect(input.value).toBe('35');
     expect(session().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['contrast', 'contrast']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['contrast']);
     act(() => reset.click());
     expect(session().recipe.adjustments.contrast).toBe(0);
     expect(input.value).toBe('0');
@@ -539,7 +542,7 @@ describe('edit controls DOM interaction', () => {
     expect(input.value).toBe('-15');
     expect(session().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['highlights', 'highlights']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['highlights']);
     act(() => reset.click());
     expect(session().recipe.adjustments.highlights).toBe(0);
     expect(input.value).toBe('0');
@@ -566,7 +569,7 @@ describe('edit controls DOM interaction', () => {
     expect(input.value).toBe('20');
     expect(session().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['whites', 'whites']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['whites']);
     act(() => reset.click());
     expect(session().recipe.adjustments.whites).toBe(0);
     expect(input.value).toBe('0');
@@ -593,7 +596,7 @@ describe('edit controls DOM interaction', () => {
     expect(input.value).toBe('20');
     expect(session().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['shadows', 'shadows']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['shadows']);
     act(() => reset.click());
     expect(session().recipe.adjustments.shadows).toBe(0);
     expect(input.value).toBe('0');
@@ -620,7 +623,7 @@ describe('edit controls DOM interaction', () => {
     expect(input.value).toBe('-20');
     expect(session().history).toHaveLength(1);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['blacks', 'blacks']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['blacks']);
     act(() => reset.click());
     expect(session().recipe.adjustments.blacks).toBe(0);
     expect(input.value).toBe('0');
@@ -684,10 +687,10 @@ describe('edit controls DOM interaction', () => {
     expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
     expect(session().pending?.kind).toBe('blacks');
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+    expect(session().history.map((entry) => entry.kind)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows']);
     expect(session().recipe.adjustments).toEqual({ temperature: 0, tint: 0, exposure: 0.01, contrast: 1, highlights: -1, whites: 1, shadows: 1, blacks: -1, shadowsTemperature: 0, shadowsTint: 0, midtonesTemperature: 0, midtonesTint: 0, highlightsTemperature: 0, highlightsTint: 0, vibrance: 0, saturation: 0 });
   });
-  it('does not commit keyboard input on keyup, pointer leave, or focus departure', () => {
+  it('does not commit keyboard input on keyup, pointer leave, focus departure, or inactivity', () => {
     pointer('pointerover');
     key('ArrowRight');
     key('ArrowRight', window, {}, 'keyup');
@@ -697,7 +700,7 @@ describe('edit controls DOM interaction', () => {
     expect(session().recipe.adjustments.exposure).toBe(0.01);
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history).toHaveLength(1);
+    expect(session().history).toHaveLength(0);
   });
   it('keeps a pointer gesture open across initial focus and a long pause', () => {
     pointer('pointerdown');
@@ -736,14 +739,14 @@ describe('edit controls DOM interaction', () => {
     }
     expect(session().recipe.adjustments.exposure).toBe(0.1);
   });
-  it('supports focused sliders and commits only after keyboard inactivity', () => {
+  it('keeps focused slider edits pending after keyboard inactivity', () => {
     act(() => range().focus());
     key('ArrowUp', range());
     expect(session().recipe.adjustments.exposure).toBe(0.1);
     act(() => host.querySelector('button')!.focus());
     expect(session().history).toHaveLength(0);
     act(() => vi.advanceTimersByTime(ADJUSTMENT_COMMIT_DELAY_MS));
-    expect(session().history).toHaveLength(1);
+    expect(session().history).toHaveLength(0);
   });
   it('does not intercept keys for hidden controls, other focused ranges, or IME', () => {
     pointer('pointerover');
