@@ -325,7 +325,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const delta = { x: event.clientX - drag.origin.x, y: event.clientY - drag.origin.y };
-    if (delta.x !== 0 || delta.y !== 0) panMovedRef.current = true;
+    if (Math.hypot(delta.x, delta.y) >= 4) panMovedRef.current = true;
     setPan({ x: drag.pan.x + delta.x, y: drag.pan.y + delta.y });
   }
 
