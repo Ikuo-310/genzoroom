@@ -63,10 +63,14 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const beforeShortcut = shortcut.label('viewerBefore');
   const fitShortcut = shortcut.label('viewerFitRestore');
   const viewportRef = useRef<HTMLDivElement>(null);
+  const imagePositionRef = useRef<HTMLDivElement>(null);
   const imageIdentity = documentKey ?? `${src}:${editSource?.kind ?? ''}:${editSource?.url ?? ''}`;
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number; keyboard?: boolean } | null>(null);
   const [closeToolbarMenuSignal, setCloseToolbarMenuSignal] = useState(0);
   const dragRef = useRef<{ pointerId: number; origin: Point; pan: Point } | null>(null);
+  const panMovedRef = useRef(false);
+  const suppressDoubleClickRef = useRef(false);
+  const suppressDoubleClickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Identity-tagged load state prevents a late passive effect from undoing an already-fired load event.
   const [loadedImage, setLoadedImage] = useState<{ identity: string; status: 'ready' | 'error'; size: Point } | null>(null);
   const imageState = loadedImage?.identity === imageIdentity ? loadedImage.status : 'loading';
@@ -91,7 +95,11 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const viewGestureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     setViewInteracting(false);
-    return () => { clearTimeout(viewGestureTimer.current); };
+    suppressDoubleClickRef.current = false;
+    return () => {
+      clearTimeout(viewGestureTimer.current);
+      clearTimeout(suppressDoubleClickTimer.current);
+    };
   }, [imageIdentity]);
   const previousDpr = useRef(dpr);
   useEffect(() => {
@@ -231,9 +239,15 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
 
   function toggleFitActualSize(event: ReactMouseEvent<HTMLDivElement>) {
     if (event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
+    if (suppressDoubleClickRef.current) {
+      suppressDoubleClickRef.current = false;
+      clearTimeout(suppressDoubleClickTimer.current);
+      return;
+    }
     const viewport = viewportRef.current;
-    if (!viewport) return;
-    const imageBounds = event.currentTarget.getBoundingClientRect();
+    const imagePosition = imagePositionRef.current;
+    if (!viewport || !imagePosition) return;
+    const imageBounds = imagePosition.getBoundingClientRect();
     if (event.clientX < imageBounds.left || event.clientX > imageBounds.right
       || event.clientY < imageBounds.top || event.clientY > imageBounds.bottom) return;
 
@@ -300,6 +314,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
@@ -309,11 +324,21 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    setPan({ x: drag.pan.x + event.clientX - drag.origin.x, y: drag.pan.y + event.clientY - drag.origin.y });
+    const delta = { x: event.clientX - drag.origin.x, y: event.clientY - drag.origin.y };
+    if (delta.x !== 0 || delta.y !== 0) panMovedRef.current = true;
+    setPan({ x: drag.pan.x + delta.x, y: drag.pan.y + delta.y });
   }
 
   function stopPan(event: ReactPointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; if (rawFrame) setViewInteracting(false); }
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (panMovedRef.current) {
+      // Pointer capture can retarget the trailing click sequence into a false viewport double-click.
+      suppressDoubleClickRef.current = true;
+      clearTimeout(suppressDoubleClickTimer.current);
+      suppressDoubleClickTimer.current = setTimeout(() => { suppressDoubleClickRef.current = false; }, 500);
+    }
+    if (rawFrame) setViewInteracting(false);
   }
 
   useLayoutEffect(() => {
@@ -404,14 +429,14 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
         if (handled) event.preventDefault();
       }}
       onWheel={handleWheel}
+      onDoubleClick={toggleFitActualSize}
       onContextMenu={openContextMenu}
       onPointerDown={startPan}
       onPointerMove={movePan}
       onPointerUp={stopPan}
       onPointerCancel={stopPan}
     >
-      <div className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
-        onDoubleClick={toggleFitActualSize}
+      <div ref={imagePositionRef} className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>

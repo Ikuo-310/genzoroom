@@ -1178,21 +1178,35 @@ describe('Viewer image double-click Fit and Actual Size toggle', () => {
     act(() => target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, button, clientX: x, clientY: y })));
   }
 
+  function pointer(viewport: HTMLElement, type: 'pointerdown' | 'pointerup' | 'pointermove', x: number, y: number) {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 7 });
+    act(() => viewport.dispatchEvent(event));
+  }
+
+  function ordinaryDoubleClickSequence(viewport: HTMLElement, x: number, y: number) {
+    pointer(viewport, 'pointerdown', x, y); pointer(viewport, 'pointerup', x, y);
+    act(() => viewport.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, detail: 1, clientX: x, clientY: y })));
+    pointer(viewport, 'pointerdown', x, y); pointer(viewport, 'pointerup', x, y);
+    act(() => viewport.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, detail: 2, clientX: x, clientY: y })));
+    doubleClick(viewport, x, y);
+  }
+
   it('toggles JPEG Fit to 100% around the clicked point, clamps at the image edge, then restores Fit', () => {
     act(() => root.render(<Harness />));
-    prepareViewport();
+    const viewport = prepareViewport();
     act(() => mockImage.onLoad?.(800, 600));
     const position = imagePosition();
-    doubleClick(position, 400, 200);
+    doubleClick(viewport, 400, 200);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
     expect(position.style.transform).toContain('-100px');
 
     click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === 'Fit')!);
-    doubleClick(position, 100, 50);
+    doubleClick(viewport, 100, 50);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
     expect(position.style.transform).toContain('+ 200px');
     expect(position.style.transform).toContain('+ 150px');
-    doubleClick(position, 400, 200);
+    doubleClick(viewport, 400, 200);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
     expect(position.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
   });
@@ -1203,16 +1217,16 @@ describe('Viewer image double-click Fit and Actual Size toggle', () => {
     act(() => root.render(<ImageViewer src="blob:raw" documentKey="raw" previewPixels
       rawFrame={{ nativeWidth: 2000, nativeHeight: 1500, geometryId: 'a'.repeat(64) }} onRawViewChange={changed}
       alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
-    prepareViewport();
+    const viewport = prepareViewport();
     const rawImage = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
     Object.defineProperty(rawImage, 'naturalWidth', { configurable: true, value: 2000 });
     Object.defineProperty(rawImage, 'naturalHeight', { configurable: true, value: 1500 });
     act(() => rawImage.dispatchEvent(new Event('load')));
     const position = imagePosition();
-    doubleClick(position, 300, 200);
+    doubleClick(viewport, 300, 200);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
     expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ scale: 0.5, dpr: 2, fit: false }));
-    doubleClick(position, 300, 200);
+    doubleClick(viewport, 300, 200);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('40%');
     expect(position.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
     expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ fit: true, panX: 0, panY: 0 }));
@@ -1220,30 +1234,62 @@ describe('Viewer image double-click Fit and Actual Size toggle', () => {
 
   it('ignores unloaded images, non-left clicks, active drags, and points outside the image bounds', () => {
     act(() => root.render(<Harness />));
-    prepareViewport();
+    const viewport = prepareViewport();
     const position = imagePosition();
     act(() => mockImage.onLoad?.(800, 600));
-    doubleClick(position, 300, 200, 2);
-    doubleClick(position, 99, 50);
+    doubleClick(viewport, 300, 200, 2);
+    doubleClick(viewport, 99, 50);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
     click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
-    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
-    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
-    const pointerDown = new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 200, clientY: 150 });
-    Object.defineProperty(pointerDown, 'pointerId', { value: 7 });
-    act(() => viewport.dispatchEvent(pointerDown));
-    doubleClick(position, 300, 200);
+    const capture = vi.fn();
+    Object.defineProperty(viewport, 'setPointerCapture', { value: capture });
+    pointer(viewport, 'pointerdown', 200, 150);
+    doubleClick(viewport, 300, 200);
     expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(capture).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves RAW view state unchanged before the image is ready', () => {
+  it('handles the normal pointer capture click sequence when toggling Actual Size back to Fit', () => {
+    act(() => root.render(<Harness />));
+    const viewport = prepareViewport();
+    act(() => mockImage.onLoad?.(800, 600));
+    const capture = vi.fn();
+    Object.defineProperty(viewport, 'setPointerCapture', { value: capture });
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    imagePosition();
+    ordinaryDoubleClickSequence(viewport, 300, 200);
+    expect(capture).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('50%');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe('translate(calc(-50% + 0px), calc(-50% + 0px))');
+  });
+
+  it('ignores RAW double-clicks before the image is ready', () => {
     const changed = vi.fn();
     act(() => root.render(<ImageViewer src="blob:raw" documentKey="raw" previewPixels
       rawFrame={{ nativeWidth: 2000, nativeHeight: 1500, geometryId: 'a'.repeat(64) }} onRawViewChange={changed}
       alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
     prepareViewport();
-    doubleClick(imagePosition(), 300, 200);
+    imagePosition();
+    doubleClick(host.querySelector<HTMLElement>('.viewer-viewport')!, 300, 200);
     expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ fit: true, scale: 0.2, panX: 0, panY: 0 }));
+  });
+
+  it('does not turn an actual pan drag into an accidental Fit toggle', () => {
+    act(() => root.render(<Harness />));
+    const viewport = prepareViewport();
+    act(() => mockImage.onLoad?.(800, 600));
+    const capture = vi.fn();
+    Object.defineProperty(viewport, 'setPointerCapture', { value: capture });
+    click([...host.querySelectorAll<HTMLButtonElement>('.zoom-controls button')].find(button => button.textContent === '1:1')!);
+    imagePosition();
+    pointer(viewport, 'pointerdown', 200, 150);
+    pointer(viewport, 'pointermove', 250, 180);
+    pointer(viewport, 'pointerup', 250, 180);
+    doubleClick(viewport, 300, 200);
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.zoom-controls output')!.textContent).toBe('100%');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('+ 50px');
+    expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toContain('+ 30px');
   });
 
   it('keeps wheel zoom, pan, Fit, and Actual Size controls available alongside the toggle', () => {
