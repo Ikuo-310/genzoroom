@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Changed
+
+- Reorganized JPEG development controls into Color, Basic, and Color Grading. Temperature and Tint now live under Color with Vibrance and Saturation. Per-adjustment ON/OFF switches were removed while retaining compatibility with existing saved Recipes.
+
 - JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
 
 ## [0.2.5] - 2026-10-26

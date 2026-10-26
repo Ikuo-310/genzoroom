@@ -2,9 +2,17 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## JPEG共通仕様 Phase 1C-C4-Eのmainバックポート（2026-10-26）
+
+LightCraft統合ブランチで先行していたJPEG共通仕様がmainに未反映だったため、Phase 1C-C4-EをJPEG共通部分に限定してバックポートした。暗室カテゴリをColor（Temperature / Tint / Vibrance / Saturation）→ Basic → Color Gradingへ整理し、個別Adjustment ON/OFF UIとコンテキスト操作を廃止した。個別Reset、Basic／Color GradingカテゴリON/OFF、Color Gradingの各range ON/OFF、History／Undo／Redoは維持した。Color Toggleは`whiteBalanceEnabled`と`colorEnabled`を同期する1件のHistory operationとし、Color Resetは4値を1件でResetしてReset前のAND有効状態へ同期する。
+
+Recipe v18とSQLite schemaは維持し、形式変更とDB migrationを回避した。16個の`adjustmentEnabled`をlegacy storageとして保存・読込する。既存のtrue／falseを読み込み時に書き換えず、Frontend／BackendのJPEG processingとedited-state判定では個別bypassとして無視する。旧個別Toggleと独立Color Historyの読込互換を保ち、新しい`toggleAdjustment`はno-opとした。JPEG画素処理式、Before／After、Export、rendered thumbnail、既存のoperation-boundary Historyを維持した。RAW／Windows／LightCraft固有コードは持ち込んでいない。
+
+自動テスト、TypeScript typecheck、production buildは成功した。実ブラウザーとNASでの表示・動作確認は別途必要。Commitは`57b4cb72e8592c7669776aeb0f1329e2352f63ee`。
+
 ## JPEG Historyを操作境界で確定（2026-10-26）
 
-JPEG暗室のkeyboard／wheel調整は、同じAdjustmentを続けて操作する間、入力間隔やAutosaveでHistoryを分割しない。別Adjustmentの操作開始、Viewer操作、Undo／Redo、History Jump、Adjustment Reset、Category Reset／Toggle、Individual Adjustment Toggle、All Reset、Paste、Asset／Filmstrip切替、暗室離脱や保存・終了処理でgestureを確定する。pointer dragはpointer終了、数値入力はEnter／blurで確定する従来の境界を維持する。
+JPEG暗室のkeyboard／wheel調整は、同じAdjustmentを続けて操作する間、入力間隔やAutosaveでHistoryを分割しない。別Adjustmentの操作開始、Viewer操作、Undo／Redo、History Jump、Adjustment Reset、Category Reset／Toggle、Color Grading range Toggle、All Reset、Paste、Asset／Filmstrip切替、暗室離脱や保存・終了処理でgestureを確定する。個別Adjustment Toggleは新しい操作として作成しない。pointer dragはpointer終了、数値入力はEnter／blurで確定する従来の境界を維持する。
 
 Autosaveはpending gestureを含む保存用snapshotを作るが、live sessionのgestureは継続する。History圧縮は既存機能として維持し、gesture確定の代わりには使わない。保存形式や既存Historyの書き換えは伴わない。
 
@@ -1367,10 +1375,3 @@ Galleryの戻るボタンはカレンダー日付詳細で「カレンダーに�
 既存のCalendar date-detail限定監査はHigh 0／Medium 0／Low 1で、唯一のLow（disabled日付矢印のcursor表示）は修正済み。今回照合したリリース対象の記録に未解決のHigh／Medium指摘はない一方、全項目に独立したseverity集計が残っているわけではなく、今回新たなコード監査は行っていない。温度補正の実ブラウザー／WebGPU、`generate_thumbnail()`統合、Backend全体テスト、Gallery戻るボタンの実機確認が未検証として残る。
 
 安定版のバージョンは`vMAJOR.MINOR.PATCH`タグから配布workflowへ渡されるため、`frontend/package.json`の`0.0.0`などを手動変更していない。v0.2.2のGitタグ、コンテナイメージ、GitHub Releaseはまだ作成・公開されておらず、CHANGELOG・設計文書の確定までを記録する。
-
-
-## JPEG共通仕様 Phase 1C-C4-Eのmainバックポート
-
-JPEG暗室をColor（Temperature / Tint / Vibrance / Saturation）→ Basic → Color Gradingへ統合。個別電源とそのコンテキスト操作を廃止し、個別Reset、カテゴリ電源、Color Gradingのrange電源を維持した。Color Toggleは2つの保存フラグを1件で同期し、Color Resetは4値を1件でリセットしてReset前のAND有効状態へ同期する。
-
-Recipe v18とSQLite schemaは維持し、16個の`adjustmentEnabled`をlegacyフィールドとして保存・読込する。既存falseを読込時に変更せず、JPEG画素処理と編集済み判定では無視する。旧個別Toggleと独立Color Historyも読込互換を維持し、新しい`toggleAdjustment`はno-opとした。既存のoperation-boundary Historyを維持し、LightCraft / RAW / Windows固有実装は対象外。
