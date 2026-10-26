@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- The shared photo Viewer now toggles between Fit and Actual Size on image double-click, and offers a configurable corner Zoom Navigator for locating and panning around magnified images.
 - RAW Whole-frame previews now adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
 - Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
 

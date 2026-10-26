@@ -24,6 +24,14 @@ The native patch keeps canonical Native geometry identity separate from sampling
 
 The current LightCraft update procedure's authoritative steps and checks live in [`UPDATE_GUIDE.md`](research/lightcraft/UPDATE_GUIDE.md). The U3 review linked above is a dated v0.10→v0.14 investigation/implementation record, not the procedure for later updates.
 
+## Shared ImageViewer Zoom and Navigator
+
+`ImageViewer` provides the same Zoom/Pan interactions for RAW and JPEG. A primary double-click on the image toggles between Fit and Actual Size: Fit enters Actual Size around the clicked image point, moving it toward the viewport center within the normal Pan bounds; any non-Fit zoom returns to Fit with centered Pan. JPEG Actual Size is scale `1`; RAW Actual Size is `1/devicePixelRatio`, preserving native-pixel-to-physical-pixel 1:1 while presenting 100% in the UI. Pan movement still updates its position during pointer jitter, but movement below 4 px does not count as a drag for suppressing an accidental double-click; a drag of 4 px or more does.
+
+The Zoom Navigator is shared by RAW and JPEG, appears only above the existing Fit scale, and can be disabled or placed in any viewport corner through the browser-saved `Zoom Navigator Position` preference. Its default is `bottom-right`; absent or invalid values resolve to that default. It shows a reduced whole-image view and a frame for the image area visible through the Viewer viewport, derived from the same image size, scale, Pan, and viewport geometry used by the Viewer. Zoom and Pan update the frame. Clicking outside the frame centers the corresponding image point in the Viewer; dragging the frame preserves the grabbed offset. Both operations use the Viewer Pan bounds, and frame dragging ends on pointer up or cancel. Only a pointer-up trailing click is suppressed, so cancellation does not consume the next normal click. Navigator wheel and double-click input do not reach the Viewer.
+
+For JPEG, the Navigator background is the currently displayed image canvas, including the active Before/After side during adjustment. For RAW, it uses the Whole image and does not composite Region imagery. Navigator movement updates the existing Viewer state and `onRawViewChange` path, so normal Region planning and cleanup follow; it has no separate Region request path. The Navigator frame represents viewport visibility rather than a RAW Region window.
+
 ## LightCraft RAW integration foundation (Phase 1A)
 
 > **Historical record — superseded by Current LightCraft runtime contract.** This section records the Phase 1A state; its v0.10 pin, mandatory environment configuration, lack of discovery and listed unimplemented features are not the current runtime contract.
