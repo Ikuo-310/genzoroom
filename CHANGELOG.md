@@ -6,11 +6,15 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-26
+
 ### Added
 
-- The JPEG Viewer now toggles between Fit and 1:1 on image double-click and includes a configurable corner Zoom Navigator for locating and panning around magnified images.
+- Double-click an image in the JPEG Viewer to toggle between Fit and 1:1; zooming in moves the clicked point toward the center.
+- Use the Zoom Navigator on magnified images to jump to a location or drag the visible-area frame to pan. Choose Off or any of the four corners in Settings.
+- The Zoom Navigator follows the active Before or After image while adjusting a JPEG in Anshitsu.
 
-## [0.2.4] - Planned
+## [0.2.4] - 2026-10-20
 
 ### Fixed
 
