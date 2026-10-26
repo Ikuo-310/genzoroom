@@ -422,10 +422,14 @@ it('does not show an Immich image as the result of failed native rendering', asy
 });
 
 it('shows the ordinary RAW open error instead of blocking by engine version', async () => {
+  desktop();
   vi.mocked(rawApi.openRawDocument).mockRejectedValue(new rawApi.RawApiError('raw_recipe_engine_incompatible', 409));
   await mount();
   expect(host.textContent).toContain('LightCraft RAW Preview failed');
   expect(host.textContent).not.toContain('They are preserved');
+  await clickText('Reset RAW edits');
+  expect(host.textContent).toContain('RAW Recipe and RAW History');
+  expect(host.textContent).toContain('original RAW file and Immich photo will not be deleted');
   expect(vi.mocked(rawApi.rawPreview)).not.toHaveBeenCalled();
   expect(vi.mocked(rawApi.saveRawHistory)).not.toHaveBeenCalled();
 });

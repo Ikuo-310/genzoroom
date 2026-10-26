@@ -297,7 +297,13 @@
       "colorCategory": "カラー",
       "beforeLoading": "RAW Beforeを準備中です。Afterを表示しています。",
       "beforeFailed": "RAW Beforeを比較できませんでした。Afterを表示しています。",
-      "beforeRetry": "Beforeを再試行"
+      "beforeRetry": "Beforeを再試行",
+      "editReset": "RAW編集をリセット",
+      "editResetConfirm": "この写真のRAW RecipeとRAW Historyを削除し、現在のLightCraftの初期状態で開き直します。元RAWファイルとImmich上の写真は削除されません。",
+      "editResetDatabaseFailed": "RAW RecipeとHistoryを削除できませんでした。データベースは変更されていません。",
+      "editResetSessionFailed": "RAW編集セッションを閉じられなかったため、RecipeとHistoryは削除していません。再試行してください。",
+      "editResetReopenFailed": "RAW編集データを削除しましたが、現在のLightCraftで開き直せませんでした。暗室を開き直してください。",
+      "editResetFailed": "RAW編集のリセットを完了できませんでした。もう一度試してください。"
     },
     "historyRetained": "編集履歴あり",
     "name": "暗室",

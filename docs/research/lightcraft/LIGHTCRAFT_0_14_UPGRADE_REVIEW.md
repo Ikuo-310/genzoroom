@@ -389,4 +389,12 @@ hang／OOM／反復の明らかな遅化・異常な増え続け方はこの短�
 
 ### 15.6 ユーザーのWindows確認
 
-`GENZOROOM_LIGHTCRAFT_EXE`に新EXEの絶対pathを指定しBackendを再起動して、Settingsの`LightCraft 0.14.0`、RAW Fit、100% Region、Pan、Before/After、数枚の現像結果を短く確認する。v0.10 Recipeを持つ写真もbest-effort restore後に暗室・スライダー・Previewが開くことを確認する。これを経てv0.14の実機受入を確定する。自動差替え・NASデプロイ・release作業には進んでいない。
+通常のWindows開発起動ではenv指定なしでmanaged artifactを自動検出する。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証・別build試験のoverride用途。Backend再起動後、Settingsの採用版、RAW Fit、100% Region、Pan、Before/After、数枚の現像結果を短く確認する。v0.10 Recipeのbest-effort restoreと「RAW編集をリセット」後の初期状態reopenも確認する。これを経てv0.14の実機受入を確定する。自動download・旧版自動切替・NASデプロイ・release作業には進んでいない。
+
+### 15.7 RAW編集リセットとWindows開発artifact探索
+
+persisted Recipe restore failureからの復旧操作として、Windows RAW APIにAsset単位の編集リセットを追加した。開いているdocumentのownerを検証し、session close成功後だけ、Recipe／History／step／current save receiptを1 transactionで削除する。JPEG編集、Export、Immich metadata、元RAWには触れず、同じAssetを現行engineの初期settingsでreopenする。通常のRAW History paneからも同じ確認付き操作を使える。失敗境界はsession close、SQLite、reopenに分かれる。
+
+env未指定のWindows開発では、`.git`を持つ非frozen checkoutに限りmanifestと同じ`.tmp/lightcraft-<major.minor>`候補を探索する。candidateは実行時のreceipt／SHA／manifest／contract検証が通った場合だけRAW capabilityとSettings版表示に採用する。明示env overrideは探索より優先し、同じstrict検証を受ける。frozen配布版は`.tmp`を探索せず、bundled artifact方式へ独立して接続できる。
+
+開発中は過去LightCraftとの完全互換・画素一致を保証しない。persisted RecipeはAsset/source identity、engine name、対応schemaが一致すればversion／commit差だけで拒否せずbest-effort restoreする。読めなければmigrationなしでRAW編集リセットから現行engineの初期状態へ再開する。追加focused testsはresetのtransaction/API/reopen/現tuple保存、およびdiscoveryの優先順位・候補なし・artifact attestationを確認する。詳細結果は今回の実装報告に記録する。

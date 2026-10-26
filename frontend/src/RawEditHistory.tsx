@@ -32,13 +32,20 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
   return operation + (changes?.length ? `: ${changes.map(change => `${name(change.control)} ${pair(change)}`).join('、')}` : '');
 }
 
-export function RawEditHistory({ raw, disabled }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled: boolean }) {
+export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled: boolean;
+  onReset: (trigger: HTMLElement) => void }) {
   const { t } = useTranslation();
   const steps = raw.historySteps ?? [], offset = raw.historyOffset ?? 0;
   const rows = steps.map((step, index) => {
     return { id: step.stepId, position: offset + index + 1, description: describe(step, t) };
   });
   return <>
+    {raw.resetError && <p role="alert">{t(raw.resetError === 'raw_edit_reset_database_failed' ? 'workspace.rawPreview.editResetDatabaseFailed'
+      : raw.resetError === 'raw_edit_reset_session_failed' ? 'workspace.rawPreview.editResetSessionFailed'
+        : raw.resetError === 'raw_edit_reset_reopen_failed' ? 'workspace.rawPreview.editResetReopenFailed'
+          : 'workspace.rawPreview.editResetFailed')}</p>}
+    <button type="button" className="tool-button" disabled={disabled || !!raw.resetting}
+      onClick={event => onReset(event.currentTarget)}>{t('workspace.rawPreview.editReset')}</button>
     {raw.history && <p role="status">{t('workspace.rawPreview.historyPosition', { cursor: raw.history.cursor, count: raw.history.length })}</p>}
     {raw.historyLoading && <p role="status">{t('workspace.rawPreview.historyLoading')}</p>}
     {raw.historyError && <div role="alert"><p>{t(raw.historyError === 'raw_history_target_missing'

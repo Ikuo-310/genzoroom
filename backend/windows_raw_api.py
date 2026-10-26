@@ -79,10 +79,14 @@ class RawPreviewApi:
         self._history_save = None
         self._history_identity = None
         self._history_initialized = self._history_enabled = self._history_draining = False
+        # A reset can outlive document release; retain its owner so the same request can retry safely.
+        self._reset_asset_id = None
+        self._reset_owner = None
         self.app = Starlette(routes=[
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
             Route("/workspaces/{workspace}", self.endpoint, methods=["DELETE"]),
+            Route("/assets/{asset_id}/edits/reset", self.endpoint, methods=["POST"]),
             Route("/documents", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}", self.endpoint, methods=["GET", "DELETE"]),
             Route("/documents/{handle}/preview", self.endpoint, methods=["POST"]),
@@ -212,7 +216,8 @@ class RawPreviewApi:
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large", "raw_preview_budget_exceeded"} else
                       400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
-                                      "raw_history_unavailable", "raw_history_save_failed", "raw_preview_unsupported", "raw_region_unsupported"} else
+                                      "raw_history_unavailable", "raw_history_save_failed", "raw_edit_reset_database_failed",
+                                      "raw_preview_unsupported", "raw_region_unsupported"} else
                       409 if code in HISTORY_CONFLICTS or code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
@@ -400,14 +405,20 @@ class RawPreviewApi:
     async def _execute(self, request, body):
         async with self._lock:
             path, method = request.url.path, request.method
-            if method != "DELETE":
+            reset_path = method == "POST" and path.endswith("/edits/reset")
+            if method != "DELETE" and not reset_path:
                 self._ready()
+            elif reset_path and (self.manager is None or self._closing):
+                raise LightCraftError("raw_unavailable")
+            if reset_path:
+                return await self._reset_raw_edits(request, body)
             if method == "POST" and path.endswith("/workspaces"):
                 if self.diagnostics_busy():
                     raise LightCraftError("raw_busy")
                 if body or self.workspace is not None:
                     raise LightCraftError("raw_workspace_conflict")
                 self.workspace = secrets.token_hex(16)
+                self._reset_asset_id = self._reset_owner = None
                 self.cache = RawSourceCache()
                 self._workspace_state = "active"
                 self._native_released = False
@@ -1036,10 +1047,11 @@ class RawPreviewApi:
                        generation=handle.generation, revision=snapshot.revision)
         return snapshot, "restored", recipe_revision
 
-    async def _release(self):
+    async def _release(self, *, checkpoint_history=True):
         if self.workspace is None:
             return
-        await self._history_checkpoint()
+        if checkpoint_history:
+            await self._history_checkpoint()
         self.document = None
         self._region_geometry.clear()
         self._recipe_save = None
@@ -1064,6 +1076,65 @@ class RawPreviewApi:
         lightcraft_log("raw.workspace.released", generation=self.manager.status().generation)
         if self._lease_task and self._lease_task is not asyncio.current_task():
             self._lease_task.cancel()
+
+    async def _reset_raw_edits(self, request, body):
+        from raw_recipe_store import InvalidRawRecipe, StoreUnavailable, delete_raw_edits
+        try:
+            asset_id = str(UUID(request.path_params["asset_id"]))
+        except (ValueError, TypeError, AttributeError):
+            raise LightCraftError("raw_invalid_request") from None
+        lightcraft_log("raw.editReset.started", level="info", assetId=asset_id)
+        doc = self.document
+        if doc is not None:
+            required = {"workspaceId", "handle", "generation", "documentToken", "documentRevision"}
+            status = self.manager.status()
+            if (set(body) != required or doc["assetId"] != asset_id or body["workspaceId"] != self.workspace
+                    or body["handle"] != doc["handle"] or body["generation"] != doc["generation"]
+                    or body["documentToken"] != doc["documentToken"]
+                    or type(body["documentRevision"]) is not int or body["documentRevision"] != doc["revision"]
+                    or status.generation != doc["generation"]):
+                raise LightCraftError("raw_stale_handle")
+            self._reset_asset_id, self._reset_owner = asset_id, dict(doc)
+        elif self._reset_asset_id is not None:
+            if self._reset_asset_id != asset_id:
+                raise LightCraftError("raw_workspace_conflict")
+            if self._reset_owner is None:
+                if body:
+                    raise LightCraftError("raw_invalid_request")
+            else:
+                required = {"workspaceId", "handle", "generation", "documentToken", "documentRevision"}
+                expected = {"workspaceId": self._reset_owner["workspaceId"], "handle": self._reset_owner["handle"],
+                    "generation": self._reset_owner["generation"], "documentToken": self._reset_owner["documentToken"],
+                    "documentRevision": self._reset_owner["revision"]}
+                if (body and (set(body) != required or body != expected)) or (self.workspace is not None and not body):
+                    raise LightCraftError("raw_stale_handle")
+        elif body:
+            raise LightCraftError("raw_invalid_request")
+        if self.workspace is not None and self.document is None and self._reset_asset_id != asset_id:
+            raise LightCraftError("raw_workspace_conflict")
+        self._history_draining = True
+        try:
+            if self._reset_asset_id is None:
+                self._reset_asset_id = asset_id
+            if self.workspace is not None:
+                try:
+                    await self._release(checkpoint_history=False)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    lightcraft_log("raw.editReset.sessionCloseFailed", level="error", assetId=asset_id,
+                                   errorCode="raw_edit_reset_session_failed")
+                    raise LightCraftError("raw_edit_reset_session_failed") from None
+            try:
+                result = await run_in_threadpool(delete_raw_edits, asset_id)
+            except (InvalidRawRecipe, StoreUnavailable):
+                lightcraft_log("raw.editReset.databaseFailed", level="error", assetId=asset_id,
+                               errorCode="raw_edit_reset_database_failed")
+                raise LightCraftError("raw_edit_reset_database_failed") from None
+            lightcraft_log("raw.editReset.completed", assetId=asset_id, **result)
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        finally:
+            self._history_draining = False
 
     async def _expire(self):
         try:

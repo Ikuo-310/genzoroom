@@ -6,7 +6,9 @@
 
 当初のU3記録にある「永続Recipeはengine tuple完全一致」「旧Recipeは復元前に拒否」という方針は撤回した。永続RecipeはAsset ID・source content hash・LightCraft名・対応schema（現在1）が一致すればversion／commit差だけで拒否せず、現在engineへそのままrestoreを試す。成功後は通常編集でき、次回保存はv0.14 tupleで別行として保存する。Historyと同一実行snapshotのstrict ownershipは維持し、事前変換やmigration、将来版との完全画素互換は設けない。詳細は[U3結果§15.3](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#153-recipehistoryとversion表示)を参照。
 
-SettingsはImmich情報の下に、実processのhandshake・EXE SHA・manifest・receiptが一致する場合だけ `LightCraft 0.14.0` を表示する。未接続・不正metadata・古い応答では版を推測しない。Backendと生成Frontend identityは同じmanifestを正本とし、将来更新時の手作業の重複を避ける。
+SettingsはImmich情報の下に、実processのhandshake・EXE SHA・manifest・receiptが一致する場合だけ採用artifactのLightCraft版を表示する。Windows開発checkoutで環境変数が未指定ならmanifest versionに対応する`.tmp/lightcraft-<major.minor>` buildを探索し、receipt・SHA・contractが一致した場合だけ利用する。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証や別build向けの優先overrideであり、配布版は開発用`.tmp`を探索しない。未接続・不正metadata・古い応答では版を推測しない。
+
+RAW編集に失敗してpersisted Recipeをrestoreできない場合は、暗室の「RAW編集をリセット」から同AssetのRAW RecipeとRAW Historyだけをtransactionで削除し、sessionを閉じて現行LightCraftの初期状態で開き直せる。元RAW・Immich写真・JPEG編集・Export情報などは対象外。version/commit差による拒否や旧Recipe migrationは行わず、schemaとsource identityが合えばbest-effort restoreし、読めないsettingsは実restore failureとして扱う。将来versionとの完全な画素互換は保証しない。
 
 自動検証では実RAWのCPU/DX12、Whole 1024/1472/2048、Preview→Full、production planner経由Region、Before、Draft/Full、cache OFF/ON、正常終了が成功。CPU/DX12最大差はWhole/Region/Before各1 LSB、同engine cache Fullは一致。短い3回反復で明らかな遅化・異常なRSS増加は観測しなかった。大規模benchmark・旧版比較・C3 tuningは行っていない。数値・SHA・試験範囲・監査は[U3結果](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)に記録する。
 

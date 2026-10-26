@@ -97,6 +97,59 @@ def test_read_absent_and_legacy_recipe_is_lazy(db):
     assert save(value=value(1), revision=1)["revision"] == 2
 
 
+def test_delete_raw_edits_removes_recipe_history_for_one_asset_and_preserves_jpeg(db):
+    from uuid import uuid4
+    from tests.test_export_queue import snapshot
+    from tests.test_raw_recipe_store import A
+
+    other_asset = uuid4()
+    other = identity(assetId=str(other_asset))
+    jpeg = edit_store.put_edit_state(A, 0, uuid4(), snapshot())
+    edit_store.enqueue_export_assets([A])
+    save(identity())
+    append(1, revision=1, baseline=settings())
+    save(other)
+    raw.initialize_raw_history(other, 1, uuid4(), settings())
+
+    before_jpeg = {table: rows(db, table) for table in ("asset_edit_states", "export_queue")}
+    result = raw.delete_raw_edits(str(A))
+    assert result["recipes"] == 1 and result["histories"] == 1
+    assert raw.get_raw_recipe(identity()) == {"recipe": None}
+    assert raw.get_raw_history(identity())["history"] is None
+    assert raw.get_raw_recipe(other)["recipe"] is not None
+    assert raw.get_raw_history(other)["initialized"] is True
+    assert {table: rows(db, table) for table in before_jpeg} == before_jpeg
+    assert edit_store.get_edit_state(A) == jpeg
+
+
+def test_delete_raw_edits_without_history_is_idempotent(db):
+    save()
+    result = raw.delete_raw_edits(str(A))
+    assert result["recipes"] == 1 and result["histories"] == 0
+    assert raw.delete_raw_edits(str(A))["recipes"] == 0
+
+
+def test_delete_raw_edits_with_initialized_empty_history(db):
+    save()
+    raw.initialize_raw_history(identity(), 1, uuid4(), settings())
+    assert raw.get_raw_history(identity())["initialized"] is True
+    assert raw.delete_raw_edits(str(A))["histories"] == 1
+    assert raw.get_raw_history(identity())["history"] is None
+
+
+def test_delete_raw_edits_rolls_back_on_database_failure(db):
+    save()
+    append(1, revision=1, baseline=settings())
+    before = dump(db)
+    with closing(sqlite3.connect(db)) as connection:
+        connection.execute("""CREATE TRIGGER fail_raw_reset BEFORE DELETE ON asset_raw_recipes
+            BEGIN SELECT RAISE(ABORT, 'injected failure'); END""")
+        connection.commit()
+    with pytest.raises(raw.StoreUnavailable):
+        raw.delete_raw_edits(str(A))
+    assert dump(db) == before
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_first_step_and_explicit_initialization(db, legacy):
     if legacy:

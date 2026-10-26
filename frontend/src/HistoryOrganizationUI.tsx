@@ -57,7 +57,7 @@ export function HistoryOrganizationMenu({ target, hasHistory, canReset, onSelect
 }
 
 export function HistoryConfirmationDialog({ operation, onConfirm, onCancel, returnFocus }: {
-  operation: 'clearHistory' | 'resetEdits'; onConfirm: () => void; onCancel: () => void; returnFocus?: HTMLElement;
+  operation: 'clearHistory' | 'resetEdits' | 'resetRaw'; onConfirm: () => void; onCancel: () => void; returnFocus?: HTMLElement;
 }) {
   const { t } = useTranslation();
   const titleId = useId(); const bodyId = useId();
@@ -103,8 +103,9 @@ export function HistoryConfirmationDialog({ operation, onConfirm, onCancel, retu
         else if (event.key === 'Enter' && event.target instanceof HTMLButtonElement) { event.preventDefault(); event.target.click(); }
       }
     }}>
-    <h2 id={titleId}>{t(operation === 'clearHistory' ? 'workspace.historyClear' : 'workspace.historyReset')}</h2>
-    <p id={bodyId}>{t(operation === 'clearHistory' ? 'workspace.historyClearConfirm' : 'workspace.historyResetConfirm')}</p>
+    <h2 id={titleId}>{t(operation === 'resetRaw' ? 'workspace.rawPreview.editReset' : operation === 'clearHistory' ? 'workspace.historyClear' : 'workspace.historyReset')}</h2>
+    <p id={bodyId}>{t(operation === 'resetRaw' ? 'workspace.rawPreview.editResetConfirm'
+      : operation === 'clearHistory' ? 'workspace.historyClearConfirm' : 'workspace.historyResetConfirm')}</p>
     {operation === 'resetEdits' && <p className="history-confirmation-warning">
       <span className="history-confirmation-warning-icon" aria-hidden="true">⚠</span>
       {t('workspace.historyResetWarning')}

@@ -543,6 +543,119 @@ def test_windows_restore_failure_never_publishes_default(local, tmp_path, monkey
     asyncio.run(run())
 
 
+def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tuple(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            seeded = seed(asset_id)
+            old_identity = {field: seeded["recipe"][field] for field in store.IDENTITY_FIELDS}
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_asset(http, asset_id)
+                assert doc.status_code == 200
+                assert store.get_raw_recipe(old_identity)["recipe"]
+                store.initialize_raw_history(api._history_identity, doc.json()["recipeRevision"], uuid4(),
+                                             seeded["recipe"]["settings"])
+                with closing(sqlite3.connect(edit_store.DB_PATH)) as connection:
+                    assert connection.execute("SELECT count(*) FROM asset_raw_histories").fetchone()[0] == 1
+                reset = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json={
+                    "workspaceId": workspace, "handle": doc.json()["handle"],
+                    "generation": doc.json()["generation"], "documentToken": doc.json()["documentToken"],
+                    "documentRevision": doc.json()["revision"]})
+                assert reset.status_code == 204, reset.text
+                assert api.document is None and api.workspace is None
+                assert store.get_raw_recipe(old_identity)["recipe"] is None
+                with closing(sqlite3.connect(edit_store.DB_PATH)) as connection:
+                    for table in ("asset_raw_recipes", "raw_history_saves", "asset_raw_histories", "asset_raw_history_steps"):
+                        assert connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+                _, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200 and reopened.json()["recipeStatus"] == "none"
+                doc = reopened.json()
+                settings = await http.post(f'/api/raw/documents/{doc["handle"]}/settings',
+                    json=document_identity(doc))
+                assert settings.status_code == 200 and settings.json()["values"]["light.exposure"] == 0
+                preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
+                assert preview.status_code == 200
+                changed = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=document_identity(doc) | {
+                    "expectedRevision": doc["revision"], "values": {"light.exposure": 1.25}})
+                assert changed.status_code == 200
+                current = changed.json()
+                save_request = document_identity(current) | {"documentRevision": current["revision"],
+                    "expectedRecipeRevision": 0, "saveId": str(uuid4())}
+                saved = await http.put(f'/api/raw/documents/{current["handle"]}/recipe', json=save_request)
+                assert saved.status_code == 200
+                current_identity = api._recipe_save["identity"]
+                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.14.0"
+                assert current_identity["engineCommit"] == ENGINE_COMMIT
+                assert children[-1].photos[1]["settings"]["light"]["exposure"] == 1.25
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_failed_restore_can_be_reset_and_reopened_with_defaults(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            seeded = seed(asset_id)
+            old_identity = {field: seeded["recipe"][field] for field in store.IDENTITY_FIELDS}
+            children[0].mismatch = True
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, failed = await open_asset(http, asset_id)
+                assert failed.status_code == 502 and failed.json() == {"code": "raw_recipe_restore_mismatch"}
+                assert api.document is None and api.workspace is None
+                reset = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json={})
+                assert reset.status_code == 204, reset.text
+                assert store.get_raw_recipe(old_identity)["recipe"] is None
+                _, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200 and reopened.json()["recipeStatus"] == "none"
+                doc = reopened.json()
+                preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
+                assert preview.status_code == 200
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure,code,status", [
+    ("database", "raw_edit_reset_database_failed", 503),
+    ("session", "raw_edit_reset_session_failed", 502),
+])
+def test_raw_reset_failure_boundary_preserves_persisted_recipe(local, tmp_path, monkeypatch, failure, code, status):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            seeded = seed(asset_id)
+            identity = {field: seeded["recipe"][field] for field in store.IDENTITY_FIELDS}
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_asset(http, asset_id)
+                body = {"workspaceId": workspace, "handle": doc.json()["handle"],
+                        "generation": doc.json()["generation"], "documentToken": doc.json()["documentToken"],
+                        "documentRevision": doc.json()["revision"]}
+                if failure == "database":
+                    with monkeypatch.context() as patch:
+                        patch.setattr(store, "delete_raw_edits", lambda _: (_ for _ in ()).throw(store.StoreUnavailable()))
+                        response = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json=body)
+                else:
+                    with monkeypatch.context() as patch:
+                        async def fail(*_, **__): raise LightCraftError("raw_session_lost")
+                        patch.setattr(api.raw, "reset_session", fail)
+                        response = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json=body)
+                assert response.status_code == status and response.json() == {"code": code}
+                assert store.get_raw_recipe(identity)["recipe"] is not None
+                retried = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json=body)
+                assert retried.status_code == 204, retried.text
+                assert store.get_raw_recipe(identity)["recipe"] is None
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_cancelled_restore_http_waiter_keeps_native_owner(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, root = await setup(tmp_path, local, monkeypatch)

@@ -12,7 +12,7 @@ import tempfile
 import uuid
 
 from backend_logging import backend_logger
-from lightcraft_artifact import ENGINE_VERSION, verified_artifact
+from lightcraft_artifact import ENGINE_VERSION, resolve_managed_executable, verified_artifact
 from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_PREVIEW_LINE_BYTES, MCPTransportError
 
 
@@ -276,7 +276,7 @@ class LightCraftManager:
         self._gpu_backend = gpu_backend
         self._environment = dict(os.environ if environment is None else environment)
         self._platform = sys.platform if platform is None else platform
-        self._executable = self._environment.get("GENZOROOM_LIGHTCRAFT_EXE", "").strip()
+        self._executable = resolve_managed_executable(self._environment, self._platform)
         self._spawn = spawn if spawn is not None else asyncio.create_subprocess_exec
         self._timeouts = timeouts or LightCraftTimeouts()
         self._lock = asyncio.Lock()

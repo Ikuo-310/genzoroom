@@ -17,7 +17,8 @@
 - 永続Recipe復元はAsset ID・source content hash・`lightcraft`名・対応settings schema（現在は1）を照合し、engine version／commit差では拒否しない。settingsを現engineへそのままbest-effort restoreし、失敗はnative restore/readbackの実際の境界で扱う。成功後の新規保存は現tupleで別行として記録し、旧Recipeを事前変換・書換えしない。Historyと同一実行内snapshotのstrict ownershipは維持する。完全な将来画素互換は保証しない。schema/DB migrationはない。
 - Settingsはready processのhandshake版と、実EXE SHA／manifest全patch tuple／隣接receiptが一致した場合だけLightCraft版を表示する。未接続、不正／欠落receipt、世代変更で推測表示しない。receipt読取りも既存のbounded daemon検査ownerに含める。
 - RAW編集・Recipe tuple発行も検証済みartifactを必須とし、version文字列しか確認できないprocessへ固定commitを付与しない。不正／欠落receiptではRAW capabilityを無効にし、import前に拒否する。JPEG／Backend起動は独立して継続する。
-- 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。`GENZOROOM_LIGHTCRAFT_EXE`へその絶対pathを指定してBackendを再起動する。自動探索・自動差替えは導入しない。
+- 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。Windows開発checkoutではenv未指定時に現在manifestからこのmanaged candidateを探索する。候補は起動時に隣接receipt・実SHA・manifest tuple・contractをstrict検証し、一つでも一致しない場合RAW unavailableとなる。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証・別build・debug binary用の優先overrideで、override先も同じstrict検証を通す。
+- `.tmp`探索は非frozenのWindows開発checkoutに限定する。配布版の通常runtimeへ持ち込まず、将来のbundled artifactも同じreceipt/manifest検証境界へ接続する。自動downloadや旧LightCraftの自動切替は行わない。
 
 A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_contract`／`stage_cache`と有限budgetの検証、headless job実行・typed metadata、CPU/GPUの実Planを返す`Rendered.frame` sidecar、原本gridへのnative寸法投影、stage保持bufferの計量を含む。`preview.rs`は新規のMCP helperであり、独立した現像／永続cache基盤ではない。変更対象一覧とSHA-256の正本はmanifest。新規依存はworkspaceですでに固定された`sha2`をMCPでも使うためのCargo.toml／lock追記のみで、upstream versionは変えない。
 
@@ -53,9 +54,9 @@ B1では同じ管理patchのPNG envelopeを17 MiBへ拡張し、GenzoRoomの2048
 
 ## 開発・Windows配布との接続
 
-現行GenzoRoomはLightCraftをinstallerに同梱せず、`GENZOROOM_LIGHTCRAFT_EXE`で外部の絶対pathを指定する構成。開発用にも上記scriptでbuild・検証したbinaryを指定する。汎用のTauri開発buildそのものにLightCraftを新たに同梱したり、自動download／本家更新を追加したりしない。
+現行GenzoRoomはLightCraftをinstallerに同梱しない。Windows開発checkoutでは通常のDesktop起動時に現在manifest版のmanaged `.tmp` buildを自動検出し、`GENZOROOM_LIGHTCRAFT_EXE`は明示指定時に優先する。検出・overrideのどちらも実EXE SHAと隣接receipt、manifest、contractsの検証が必要。汎用Tauri開発buildにLightCraftを同梱したり、自動download／本家更新を追加したりしない。
 
-`desktop/packaging/build.ps1`は`-LightCraftExe`または`GENZOROOM_LIGHTCRAFT_EXE`が指定されている場合、packaging開始前に`--binary`を必須実行する。失敗時は配布buildを続行しない。未設定の場合は従来の外部engineなしbuildが可能で、RAW Before対応binaryを含む配布とは扱わない。将来MCPを同梱する場合は、この検証済みbinaryとreceiptを一組としてstageし、bundle検証でも同じ`--binary`を実行する。未検証ファイルを直接copyする経路を作らない。
+`desktop/packaging/build.ps1`は`-LightCraftExe`または`GENZOROOM_LIGHTCRAFT_EXE`が指定されている場合、packaging開始前に`--binary`を必須実行する。失敗時は配布buildを続行しない。未設定の場合は従来の外部engineなしbuildが可能で、RAW Before対応binaryを含む配布とは扱わない。開発用`.tmp`探索はfrozen配布runtimeでは無効である。将来MCPを同梱する場合は、この検証済みbinaryとreceiptを一組としてstageし、bundle検証でも同じ`--binary`を実行する。未検証ファイルを直接copyする経路を作らない。
 
 runtimeはMCPの`render_preview.inputSchema.properties.before.type == boolean`を世代ごとに調べ、Before応答の`kind`、native import fingerprint、geometry、PNG実寸を検証する。schema非対応やBefore基準を確認できないbinaryでは`beforeKey=null`とし比較操作を無効にする。After／RAW編集は従来どおり利用できる。対応schemaだけを持ち、AfterをBeforeとして返すbinaryは画像検証で拒否し、Beforeだけを失敗にする。runtimeのSHA-256診断とbuild receiptで未変更本家binaryと管理buildを識別する。全配布先で既知hashの登録を強制する方式には変更しない。
 

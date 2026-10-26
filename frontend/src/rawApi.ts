@@ -220,6 +220,11 @@ export async function readRawDocument(doc: RawDocument, signal?: AbortSignal) {
 export async function releaseRawWorkspace(workspaceId: string) {
   await request(`/workspaces/${workspaceId}`, { method: 'DELETE' });
 }
+export async function resetRawEdits(assetId: string, doc?: RawSettings) {
+  const body = doc ? { workspaceId: doc.workspaceId, handle: doc.handle, generation: doc.generation,
+    documentToken: doc.documentToken, documentRevision: doc.revision } : {};
+  await request(`/assets/${encodeURIComponent(assetId)}/edits/reset`, post(body));
+}
 function settings(value: RawSettings, doc: RawDocument): RawSettings {
   document(value, doc.workspaceId, doc.assetId);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken

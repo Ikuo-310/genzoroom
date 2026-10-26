@@ -306,7 +306,13 @@
       "colorCategory": "Color",
       "beforeLoading": "Preparing RAW Before; showing After.",
       "beforeFailed": "RAW Before could not be compared; showing After.",
-      "beforeRetry": "Retry Before"
+      "beforeRetry": "Retry Before",
+      "editReset": "Reset RAW edits",
+      "editResetConfirm": "This deletes this photo's RAW Recipe and RAW History, then reopens it with the current LightCraft defaults. The original RAW file and Immich photo will not be deleted.",
+      "editResetDatabaseFailed": "RAW Recipe and History could not be deleted. The database was not changed.",
+      "editResetSessionFailed": "The RAW editing session could not be closed, so Recipe and History were not deleted. Retry the reset.",
+      "editResetReopenFailed": "RAW edit data was deleted, but the photo could not be reopened with the current LightCraft. Reopen the darkroom.",
+      "editResetFailed": "RAW edit reset did not finish. Retry the operation."
     },
     "historyRetained": "Edit history retained",
     "name": "Develop",

@@ -118,7 +118,7 @@ export function AnshitsuPage() {
   const [rangeMenu, setRangeMenu] = useState<GradingRangeMenuTarget | null>(null);
   const rangeDefinition = GRADING_RANGE_CONTROLS.find(range => range.id === rangeMenu?.rangeId);
   const [sliderMenu, setSliderMenu] = useState<AdjustmentSliderMenuTarget | null>(null);
-  const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits'; trigger: HTMLElement } | null>(null);
+  const [historyConfirmation, setHistoryConfirmation] = useState<{ assetId: string; operation: 'clearHistory' | 'resetEdits' | 'resetRaw'; trigger: HTMLElement } | null>(null);
   const [historyError, setHistoryError] = useState(false);
   const [hasClipboard, setHasClipboard] = useState(() => readEditClipboard() !== null);
   const activeDetail = detail?.id === assetId ? detail : null;
@@ -303,7 +303,8 @@ export function AnshitsuPage() {
   function confirmHistoryOperation() {
     const request = historyConfirmation;
     if (request && request.assetId === assetId && clipboardEnabled && !selection && !switchingRef.current && !exitRef.current) {
-      if (!organizeHistory(request.operation)) setHistoryError(true);
+      if (request.operation === 'resetRaw') void rawDocument?.resetEdits().catch(() => {});
+      else if (!organizeHistory(request.operation)) setHistoryError(true);
     }
     setHistoryConfirmation(null);
   }
@@ -712,7 +713,8 @@ export function AnshitsuPage() {
               onClick={() => activeDetail?.is_raw ? rawHistoryAction('redo') : dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           <div className="history-scroll-region">
-          {activeDetail?.is_raw && rawDocument ? <RawEditHistory raw={rawDocument} disabled={workspaceKeyboardBlocked} />
+          {activeDetail?.is_raw && rawDocument ? <RawEditHistory raw={rawDocument} disabled={workspaceKeyboardBlocked}
+            onReset={trigger => setHistoryConfirmation({ assetId, operation: 'resetRaw', trigger })} />
             : session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
             : <EditHistory history={session.history} cursor={session.cursor} disabled={!historyEnabled}
               onMenu={(cursor, trigger, x, y) => openHistoryMenu(cursor, trigger, x, y)}

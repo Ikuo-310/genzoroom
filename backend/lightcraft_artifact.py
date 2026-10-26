@@ -27,6 +27,32 @@ ENGINE_VERSION = MANAGED.get('version')
 ENGINE_COMMIT = MANAGED.get('commit')
 
 
+def resolve_managed_executable(environment, platform, *, project_root=None, frozen=None):
+    """Prefer an explicit override; discover only the current managed build in a dev checkout."""
+    if 'GENZOROOM_LIGHTCRAFT_EXE' in environment:
+        return str(environment.get('GENZOROOM_LIGHTCRAFT_EXE') or '').strip()
+    if platform != 'win32':
+        return ''
+    if frozen is None:
+        frozen = bool(getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS'))
+    if frozen:
+        return ''
+    root = Path(project_root or Path(__file__).resolve().parents[1]).resolve()
+    if not (root / '.git').exists():
+        return ''
+    manifest_path = root / 'native' / 'lightcraft' / 'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        version = manifest.get('version') if isinstance(manifest, dict) else None
+        if manifest != MANAGED or not isinstance(version, str) or not re.fullmatch(r'\d+\.\d+\.\d+', version):
+            return ''
+    except (OSError, ValueError, TypeError):
+        return ''
+    major_minor = '.'.join(version.split('.')[:2])
+    candidate = root / '.tmp' / f'lightcraft-{major_minor}' / 'target' / 'release' / 'lightcraft-cli.exe'
+    return str(candidate) if candidate.is_file() else ''
+
+
 def verified_artifact(executable, digest, version):
     """A receipt identifies this process only when its complete managed tuple matches."""
     try:

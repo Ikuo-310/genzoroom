@@ -243,6 +243,30 @@ def lookup_raw_recipe(identity: dict) -> dict:
             raise
 
 
+def delete_raw_edits(asset_id: str) -> dict:
+    """Atomically remove this Asset's persisted RAW Recipe and History rows."""
+    asset_id = _uuid(asset_id)
+    with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            recipe_receipts = {row[0] for row in connection.execute(
+                "SELECT last_save_id FROM asset_raw_recipes WHERE asset_id=?", (asset_id,))}
+            history_receipts = {row[0] for row in connection.execute(
+                "SELECT save_id FROM raw_history_saves WHERE asset_id=?", (asset_id,))}
+            steps = connection.execute("DELETE FROM asset_raw_history_steps WHERE asset_id=?", (asset_id,)).rowcount
+            histories = connection.execute("DELETE FROM asset_raw_histories WHERE asset_id=?", (asset_id,)).rowcount
+            history_saves = connection.execute("DELETE FROM raw_history_saves WHERE asset_id=?", (asset_id,)).rowcount
+            recipes = connection.execute("DELETE FROM asset_raw_recipes WHERE asset_id=?", (asset_id,)).rowcount
+            for save_id in recipe_receipts | history_receipts:
+                connection.execute("DELETE FROM raw_recipe_saves WHERE save_id=?", (save_id,))
+            connection.commit()
+            return {"recipes": recipes, "histories": histories, "steps": steps,
+                    "historyReceipts": history_saves}
+        except Exception:
+            connection.rollback()
+            raise
+
+
 def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict) -> dict:
     """Atomically save confirmed readback; a saveId binds the entire normalized request forever."""
     identity = normalize_identity(identity)
