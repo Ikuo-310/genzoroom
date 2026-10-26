@@ -38,7 +38,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
     {header('shadows')}
     <AdjustmentSlider key={`${assetId}-shadows-temperature`} adjustmentId="shadowsTemperature"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.shadowsTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'shadowsTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.shadowsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.shadowsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.shadowsTemperature} valueText={formatShadowsTemperature(recipe.adjustments.shadowsTemperature)}
       valueLabel={t('workspace.shadowsTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingShadowsEnabled} resetLabel={t('workspace.shadowsTemperatureReset')}
@@ -49,7 +49,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'shadowsTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-shadows-tint`} adjustmentId="shadowsTint"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.shadowsTint} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'shadowsTint' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.shadowsTintHistory')} label={t('workspace.tint')} {...TINT}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.shadowsTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.shadowsTint} valueText={formatShadowsTint(recipe.adjustments.shadowsTint)}
       valueLabel={t('workspace.shadowsTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingShadowsEnabled} resetLabel={t('workspace.shadowsTintReset')}
@@ -61,7 +61,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
     {header('midtones')}
     <AdjustmentSlider key={`${assetId}-midtones-temperature`} adjustmentId="midtonesTemperature"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.midtonesTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'midtonesTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.midtonesTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.midtonesTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.midtonesTemperature} valueText={formatMidtonesTemperature(recipe.adjustments.midtonesTemperature)}
       valueLabel={t('workspace.midtonesTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingMidtonesEnabled} resetLabel={t('workspace.midtonesTemperatureReset')}
@@ -72,7 +72,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'midtonesTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-midtones-tint`} adjustmentId="midtonesTint"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.midtonesTint} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'midtonesTint' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.midtonesTintHistory')} label={t('workspace.tint')} {...TINT}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.midtonesTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.midtonesTint} valueText={formatMidtonesTint(recipe.adjustments.midtonesTint)}
       valueLabel={t('workspace.midtonesTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingMidtonesEnabled} resetLabel={t('workspace.midtonesTintReset')}
@@ -84,7 +84,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
     {header('highlights')}
     <AdjustmentSlider key={`${assetId}-highlights-temperature`} adjustmentId="highlightsTemperature"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.highlightsTemperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'highlightsTemperature' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.highlightsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.highlightsTemperatureHistory')} label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.highlightsTemperature} valueText={formatHighlightsTemperature(recipe.adjustments.highlightsTemperature)}
       valueLabel={t('workspace.highlightsTemperatureValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingHighlightsEnabled} resetLabel={t('workspace.highlightsTemperatureReset')}
@@ -95,7 +95,7 @@ export function ColorGradingAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'highlightsTemperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-highlights-tint`} adjustmentId="highlightsTint"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.highlightsTint} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'highlightsTint' })} onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.highlightsTintHistory')} label={t('workspace.tint')} {...TINT}
+      enabled hideToggle onOpenContextMenu={onOpenContextMenu} operationName={t('workspace.highlightsTintHistory')} label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.highlightsTint} valueText={formatHighlightsTint(recipe.adjustments.highlightsTint)}
       valueLabel={t('workspace.highlightsTintValue')} precision={0} defaultValue={0}
       disabled={!recipe.colorGradingEnabled || !recipe.gradingHighlightsEnabled} resetLabel={t('workspace.highlightsTintReset')}

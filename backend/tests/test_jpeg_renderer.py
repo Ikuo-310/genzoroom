@@ -69,13 +69,11 @@ class JpegRendererTests(unittest.TestCase):
 
     def test_each_group_bypasses_only_its_members(self):
         groups = {
-            "whiteBalanceEnabled": ("temperature", "tint"),
             "basicEnabled": ("exposure", "contrast", "highlights", "whites", "shadows", "blacks"),
             "colorGradingEnabled": ("shadowsTemperature", "shadowsTint", "midtonesTemperature", "midtonesTint", "highlightsTemperature", "highlightsTint"),
             "gradingShadowsEnabled": ("shadowsTemperature", "shadowsTint"),
             "gradingMidtonesEnabled": ("midtonesTemperature", "midtonesTint"),
             "gradingHighlightsEnabled": ("highlightsTemperature", "highlightsTint"),
-            "colorEnabled": ("vibrance", "saturation"),
         }
         mixed = next(case["adjustments"] for case in CASES if case["name"] == "all sixteen adjustments")
         for flag, members in groups.items():
@@ -83,6 +81,11 @@ class JpegRendererTests(unittest.TestCase):
                 settings = recipe(**mixed)
                 settings[flag] = False
                 expected = recipe(**{**mixed, **dict.fromkeys(members, 0)})
+                self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, expected))
+        for flag in ("whiteBalanceEnabled", "colorEnabled"):
+            with self.subTest(flag=flag):
+                settings = recipe(**mixed); settings[flag] = False
+                expected = recipe(**{**mixed, **dict.fromkeys(("temperature", "tint", "vibrance", "saturation"), 0)})
                 self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, expected))
 
     def test_fractional_gain_settings_match_frozen_frontend_rounding(self):
@@ -101,13 +104,13 @@ class JpegRendererTests(unittest.TestCase):
         below_half = float(np.nextafter(0.5, 0))
         self.assertEqual(self.renderer.render(self.source, recipe(temperature=below_half)), self.source)
 
-    def test_each_individual_bypass_and_category_precedence(self):
+    def test_individual_flags_are_ignored_and_combined_color_category_uses_both_flags(self):
         mixed = next(case["adjustments"] for case in CASES if case["name"] == "all sixteen adjustments")
         for key in BOUNDS:
             with self.subTest(key=key):
                 settings = recipe(**mixed)
                 settings["adjustmentEnabled"][key] = False
-                expected = recipe(**{**mixed, key: 0})
+                expected = recipe(**mixed)
                 self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, expected))
         settings = recipe(**mixed)
         for flag in FLAGS:
@@ -115,7 +118,11 @@ class JpegRendererTests(unittest.TestCase):
         self.assertEqual(self.renderer.render(self.source, settings), self.source)
         settings = recipe(**mixed)
         settings["adjustmentEnabled"] = dict.fromkeys(BOUNDS, False)
-        self.assertEqual(self.renderer.render(self.source, settings), self.source)
+        self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, recipe(**mixed)))
+        settings = recipe(**mixed)
+        settings["whiteBalanceEnabled"] = False
+        expected = recipe(**{**mixed, **dict.fromkeys(("temperature", "tint", "vibrance", "saturation"), 0)})
+        self.assertEqual(self.renderer.render(self.source, settings), self.renderer.render(self.source, expected))
         settings = recipe(shadowsTemperature=100, shadowsTint=100)
         settings["colorGradingEnabled"] = False
         self.assertEqual(self.renderer.render(self.source, settings), self.source)

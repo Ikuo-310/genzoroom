@@ -980,7 +980,7 @@ describe('Anshitsu Filmstrip persistence', () => {
   it('switches after a successful PUT for a numeric adjustment edit', async () => {
     await mount();
     vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);
-    const exposure = container.querySelectorAll<HTMLInputElement>('.adjustment-category input[type="range"]')[2];
+    const exposure = container.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]');
     if (!exposure) throw new Error('Missing Exposure slider');
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(exposure, '0.5');

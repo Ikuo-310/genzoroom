@@ -12,14 +12,12 @@ _SRGB = np.arange(256, dtype=np.float64) / 255
 _DECODE = np.where(_SRGB <= 0.04045, _SRGB / 12.92, ((_SRGB + 0.055) / 1.055) ** 2.4)
 _CHUNK_PIXELS = 16384
 _GROUPS = {
-    "whiteBalanceEnabled": ("temperature", "tint"),
     "basicEnabled": ("exposure", "contrast", "highlights", "whites", "shadows", "blacks"),
     "colorGradingEnabled": ("shadowsTemperature", "shadowsTint", "midtonesTemperature",
                             "midtonesTint", "highlightsTemperature", "highlightsTint"),
     "gradingShadowsEnabled": ("shadowsTemperature", "shadowsTint"),
     "gradingMidtonesEnabled": ("midtonesTemperature", "midtonesTint"),
     "gradingHighlightsEnabled": ("highlightsTemperature", "highlightsTint"),
-    "colorEnabled": ("vibrance", "saturation"),
 }
 
 
@@ -113,8 +111,8 @@ class JpegRenderer:
             if not validated[flag]:
                 for key in keys:
                     adjustments[key] = 0
-        for key, enabled in validated["adjustmentEnabled"].items():
-            if not enabled:
+        if not (validated["whiteBalanceEnabled"] and validated["colorEnabled"]):
+            for key in ("temperature", "tint", "vibrance", "saturation"):
                 adjustments[key] = 0
         # Frontend normalizes these valid fractional settings before gain math.
         # Compare the fraction rather than adding 0.5, which can round early near a tie.

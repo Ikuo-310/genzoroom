@@ -539,34 +539,53 @@ describe('useAssetEdits persistence', () => {
     const saved = api.put.mock.calls[0][1];
     expect(saved.recipeVersion).toBe(18);
     expect(saved.stateFormatVersion).toBe(2);
-    expect(saved.history.map((entry: { kind: string }) => entry.kind)).toEqual(['temperature', 'tint', 'temperatureToggle']);
-    expect(saved.currentRecipe.adjustmentEnabled.temperature).toBe(false);
+    expect(saved.history.map((entry: { kind: string }) => entry.kind)).toEqual(['temperature', 'tint']);
+    expect(saved.currentRecipe.adjustmentEnabled.temperature).toBe(true);
     expect(api.put.mock.calls[0][2]).toBe(4);
     api.get.mockResolvedValue(response(saved, 5));
     await mount(second); await flush(); await mount(first); await flush();
-    expect(latest.session.recipe.adjustmentEnabled.temperature).toBe(false);
+    expect(latest.session.recipe.adjustmentEnabled.temperature).toBe(true);
     expect(latest.session.recipe.adjustments.temperature).toBe(8);
     act(() => latest.dispatch({ type: 'undo' }));
     expect(latest.session.recipe.adjustmentEnabled.temperature).toBe(true);
   });
 
-  it('replays an unanswered individual toggle before saving newer toggles and preserves flags on conflict', async () => {
+  it('loads multiple legacy false flags without saving and preserves them across a new edit', async () => {
+    const session = newSession();
+    Object.assign(session.recipe.adjustmentEnabled, { exposure: false, tint: false, shadowsTemperature: false });
+    session.recipe.adjustments.exposure = 1;
+    const result = createEditStateSnapshot(session, source(first));
+    if (!result.ok) throw new Error('Invalid fixture');
+    const saved = structuredClone(result.value);
+    api.get.mockResolvedValue(response(saved, 4));
+    await mount(); await flush();
+    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'exposure' }));
+    await act(async () => { await latest.save(first); });
+    expect(api.put).not.toHaveBeenCalled();
+    expect(latest.dirty).toBe(false);
+    act(() => latest.dispatch({ type: 'exposure', value: 2 }));
+    await act(async () => { await latest.save(first); });
+    expect(api.put.mock.calls[0][1].currentRecipe.adjustmentEnabled).toEqual(saved.currentRecipe.adjustmentEnabled);
+    expect(result.value).toEqual(saved);
+  });
+
+  it('replays an unanswered category toggle before saving newer toggles and preserves state on conflict', async () => {
     const store = useCasStore();
     await mount(); await flush();
-    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'tint' }));
+    act(() => latest.dispatch({ type: 'toggleColor' }));
     store.loseNextResponse();
     await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'network' } }); });
-    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'exposure' }));
+    act(() => latest.dispatch({ type: 'toggleBasic' }));
     await act(async () => { await latest.save(first); });
     expect(api.put.mock.calls[1].slice(1, 4)).toEqual(api.put.mock.calls[0].slice(1, 4));
     expect(api.put.mock.calls[2][2]).toBe(1);
-    expect(latest.session.recipe.adjustmentEnabled).toMatchObject({ tint: false, exposure: false });
+    expect(latest.session.recipe.adjustmentEnabled).toMatchObject({ tint: true, exposure: true });
     expect(latest.dirty).toBe(false);
     const current = store.rows.get(first)!.state;
     store.externalWrite(first, current);
-    act(() => latest.dispatch({ type: 'toggleAdjustment', id: 'contrast' }));
+    act(() => latest.dispatch({ type: 'toggleGradingShadows' }));
     await act(async () => { expect(await latest.save(first)).toMatchObject({ ok: false, error: { kind: 'conflict' } }); });
-    expect(latest.session.recipe.adjustmentEnabled.contrast).toBe(false);
+    expect(latest.session.recipe.gradingShadowsEnabled).toBe(false);
     expect(latest.dirty).toBe(true);
     expect(store.rows.get(first)!.state).toEqual(current);
   });

@@ -62,6 +62,7 @@ export function isColorGradingDefault(adjustments: EditRecipe['adjustments']): b
   return COLOR_GRADING_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export const COLOR_ADJUSTMENT_KEYS = ['vibrance', 'saturation'] as const;
+export const COLOR_CATEGORY_ADJUSTMENT_KEYS = [...WHITE_BALANCE_ADJUSTMENT_KEYS, ...COLOR_ADJUSTMENT_KEYS] as const;
 // Reuse category membership for all copy modes; never include enabled flags.
 export type GradingRangeId = 'shadows' | 'midtones' | 'highlights';
 export type GradingRangeResetKind = `grading${'Shadows' | 'Midtones' | 'Highlights'}Reset`;
@@ -86,29 +87,25 @@ export function defaultAdjustmentEnabled(): Record<AdjustmentId, boolean> {
 export function resetColorAdjustments<T extends EditRecipe['adjustments']>(adjustments: T): T {
   const result = { ...adjustments };
   const defaults = defaultRecipe().adjustments;
-  for (const key of COLOR_ADJUSTMENT_KEYS) result[key] = defaults[key];
+  for (const key of COLOR_CATEGORY_ADJUSTMENT_KEYS) result[key] = defaults[key];
   return result;
 }
 export function isColorDefault(adjustments: EditRecipe['adjustments']): boolean {
   const defaults = defaultRecipe().adjustments;
-  return COLOR_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
+  return COLOR_CATEGORY_ADJUSTMENT_KEYS.every((key) => adjustments[key] === defaults[key]);
 }
 export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustments'] {
   const basic = recipe.basicEnabled ? recipe.adjustments : resetBasicAdjustments(recipe.adjustments);
-  const whiteBalance = recipe.whiteBalanceEnabled ? basic : resetWhiteBalanceAdjustments(basic);
-  let colorGrading = recipe.colorGradingEnabled ? whiteBalance : resetColorGradingAdjustments(whiteBalance);
+  const colorEnabled = recipe.whiteBalanceEnabled && recipe.colorEnabled;
+  const color = colorEnabled ? basic : resetColorAdjustments(basic);
+  let colorGrading = recipe.colorGradingEnabled ? color : resetColorGradingAdjustments(color);
   if (recipe.colorGradingEnabled) {
     if (!recipe.gradingShadowsEnabled) colorGrading = { ...colorGrading, shadowsTemperature: 0, shadowsTint: 0 };
     if (!recipe.gradingMidtonesEnabled) colorGrading = { ...colorGrading, midtonesTemperature: 0, midtonesTint: 0 };
     if (!recipe.gradingHighlightsEnabled) colorGrading = { ...colorGrading, highlightsTemperature: 0, highlightsTint: 0 };
   }
-  const color = recipe.colorEnabled ? colorGrading : resetColorAdjustments(colorGrading);
-  const disabled = ADJUSTMENT_IDS.filter((id) => !recipe.adjustmentEnabled[id]);
-  if (!disabled.length) return color;
-  const result = { ...color };
-  const defaults = defaultRecipe().adjustments;
-  for (const id of disabled) result[id] = defaults[id];
-  return result;
+  // Preserve legacy v18 flags in stored recipes without bypassing their numeric values.
+  return colorGrading;
 }
 
 export const newSession = (): EditSession => ({ recipe: defaultRecipe(), history: [], cursor: 0, pending: null });
@@ -202,11 +199,8 @@ function commit(state: EditSession): EditSession {
 export function editSession(state: EditSession, action: EditAction): EditSession {
   switch (action.type) {
     case 'toggleAdjustment': {
-      const current = commit(state);
-      return commit({ ...current, pending: { kind: `${action.id}Toggle`, before: current.recipe },
-        recipe: { ...current.recipe, adjustmentEnabled: {
-          ...current.recipe.adjustmentEnabled, [action.id]: !current.recipe.adjustmentEnabled[action.id],
-        } } });
+      // Keep persisted v18 fields readable, but no new individual bypass state may be created.
+      return state;
     }
     case 'paste': {
       const current = commit(state);
@@ -359,7 +353,10 @@ export function editSession(state: EditSession, action: EditAction): EditSession
           : action.type === 'whiteBalanceReset' ? { ...current.recipe, adjustments: resetWhiteBalanceAdjustments(current.recipe.adjustments) }
           : action.type === 'basicReset' ? { ...current.recipe, adjustments: resetBasicAdjustments(current.recipe.adjustments) }
             : action.type === 'colorGradingReset' ? { ...current.recipe, adjustments: resetColorGradingAdjustments(current.recipe.adjustments) }
-            : action.type === 'colorReset' ? { ...current.recipe, adjustments: resetColorAdjustments(current.recipe.adjustments) } : {
+          : action.type === 'colorReset' ? { ...current.recipe,
+            whiteBalanceEnabled: current.recipe.whiteBalanceEnabled && current.recipe.colorEnabled,
+            colorEnabled: current.recipe.whiteBalanceEnabled && current.recipe.colorEnabled,
+            adjustments: resetColorAdjustments(resetWhiteBalanceAdjustments(current.recipe.adjustments)) } : {
           ...current.recipe,
           adjustments: { ...current.recipe.adjustments,
             [action.type === 'temperatureReset' ? 'temperature' : action.type === 'tintReset' ? 'tint' : action.type === 'exposureReset' ? 'exposure'
@@ -379,8 +376,9 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     }
     case 'toggleWhiteBalance': {
       const current = commit(state);
-      return commit({ ...current, pending: { kind: 'whiteBalanceToggle', before: current.recipe },
-        recipe: { ...current.recipe, whiteBalanceEnabled: !current.recipe.whiteBalanceEnabled } });
+      const enabled = !(current.recipe.whiteBalanceEnabled && current.recipe.colorEnabled);
+      return commit({ ...current, pending: { kind: 'colorToggle', before: current.recipe },
+        recipe: { ...current.recipe, whiteBalanceEnabled: enabled, colorEnabled: enabled } });
     }
     case 'toggleBasic': {
       const current = commit(state);
@@ -405,8 +403,9 @@ export function editSession(state: EditSession, action: EditAction): EditSession
     }
     case 'toggleColor': {
       const current = commit(state);
+      const enabled = !(current.recipe.whiteBalanceEnabled && current.recipe.colorEnabled);
       return commit({ ...current, pending: { kind: 'colorToggle', before: current.recipe },
-        recipe: { ...current.recipe, colorEnabled: !current.recipe.colorEnabled } });
+        recipe: { ...current.recipe, whiteBalanceEnabled: enabled, colorEnabled: enabled } });
     }
   }
 }

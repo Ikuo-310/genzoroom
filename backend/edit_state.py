@@ -56,13 +56,13 @@ def has_non_default_recipe(state: dict) -> bool:
     """Classify the validated current Recipe independently of retained History."""
     recipe = state["currentRecipe"]
     return any(recipe["adjustments"][key] != 0 for key in BOUNDS) \
-        or any(not recipe[key] for key in FLAGS) \
-        or any(not flag for flag in recipe.get("adjustmentEnabled", {}).values())
+        or any(not recipe[key] for key in FLAGS)
 
 
 def has_edits(state: dict) -> bool:
     """Classify validated v17/v18 snapshots without bypassing disabled settings."""
-    return bool(state["history"]) or has_non_default_recipe(state)
+    # Legacy toggle-only History is stored data, not an effective edit.
+    return any(entry["kind"] not in INDIVIDUAL_TOGGLE_FIELDS for entry in state["history"]) or has_non_default_recipe(state)
 
 
 def _record(value: object, keys: frozenset[str], code: str) -> dict:
@@ -131,8 +131,19 @@ def _entry(value: object, state_format_version: int, recipe_version: int) -> dic
         valid = not flags and bool(values) and values <= set(ids)
     elif kind in SCALAR_KINDS:
         valid = not flags and values <= {kind}
+    elif kind == "colorToggle":
+        # Old snapshots toggled Color independently; retain their History verbatim.
+        valid = (not values and flags <= {"colorEnabled"}) or (not values and bool(flags)
+            and flags <= {"whiteBalanceEnabled", "colorEnabled"}
+            and after["whiteBalanceEnabled"] == after["colorEnabled"])
     elif kind in TOGGLE_FIELDS:
         valid = not values and flags <= {TOGGLE_FIELDS[kind]}
+    elif kind == "colorReset":
+        color_values = {"temperature", "tint", "vibrance", "saturation"}
+        category_enabled = before["whiteBalanceEnabled"] and before["colorEnabled"]
+        valid = (not flags and values <= RESET_FIELDS[kind]) or (values <= color_values
+            and flags <= {"whiteBalanceEnabled", "colorEnabled"}
+            and after["whiteBalanceEnabled"] == category_enabled and after["colorEnabled"] == category_enabled)
     else:
         valid = not flags and values <= RESET_FIELDS[kind] if kind != "allReset" else True
     if not valid:

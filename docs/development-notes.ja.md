@@ -1367,3 +1367,10 @@ Galleryの戻るボタンはカレンダー日付詳細で「カレンダーに�
 既存のCalendar date-detail限定監査はHigh 0／Medium 0／Low 1で、唯一のLow（disabled日付矢印のcursor表示）は修正済み。今回照合したリリース対象の記録に未解決のHigh／Medium指摘はない一方、全項目に独立したseverity集計が残っているわけではなく、今回新たなコード監査は行っていない。温度補正の実ブラウザー／WebGPU、`generate_thumbnail()`統合、Backend全体テスト、Gallery戻るボタンの実機確認が未検証として残る。
 
 安定版のバージョンは`vMAJOR.MINOR.PATCH`タグから配布workflowへ渡されるため、`frontend/package.json`の`0.0.0`などを手動変更していない。v0.2.2のGitタグ、コンテナイメージ、GitHub Releaseはまだ作成・公開されておらず、CHANGELOG・設計文書の確定までを記録する。
+
+
+## JPEG共通仕様 Phase 1C-C4-Eのmainバックポート
+
+JPEG暗室をColor（Temperature / Tint / Vibrance / Saturation）→ Basic → Color Gradingへ統合。個別電源とそのコンテキスト操作を廃止し、個別Reset、カテゴリ電源、Color Gradingのrange電源を維持した。Color Toggleは2つの保存フラグを1件で同期し、Color Resetは4値を1件でリセットしてReset前のAND有効状態へ同期する。
+
+Recipe v18とSQLite schemaは維持し、16個の`adjustmentEnabled`をlegacyフィールドとして保存・読込する。既存falseを読込時に変更せず、JPEG画素処理と編集済み判定では無視する。旧個別Toggleと独立Color Historyも読込互換を維持し、新しい`toggleAdjustment`はno-opとした。既存のoperation-boundary Historyを維持し、LightCraft / RAW / Windows固有実装は対象外。

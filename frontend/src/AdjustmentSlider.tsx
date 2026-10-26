@@ -18,7 +18,7 @@ type Props = {
   commitPolicy?: 'inactivity' | 'operation-boundary';
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
-  enabled: boolean; onToggle: () => void; operationName?: string;
+  enabled: boolean; hideToggle?: boolean; onToggle?: () => void; operationName?: string;
   onOpenContextMenu?: OpenAdjustmentSliderMenu;
   disabled?: boolean;
   trackGradient?: string;
@@ -194,7 +194,8 @@ export function AdjustmentSlider(props: Props) {
     onContextMenu={(event) => {
       if (!props.onOpenContextMenu || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
       event.preventDefault();
-      const trigger = range.current && !range.current.disabled ? range.current : power.current;
+      // With individual power hidden, Reset is the stable fallback for a disabled range.
+      const trigger = range.current && !range.current.disabled ? range.current : power.current ?? event.currentTarget.querySelector<HTMLButtonElement>('.adjustment-reset');
       if (trigger) props.onOpenContextMenu({ adjustmentId: props.adjustmentId, trigger, x: event.clientX, y: event.clientY });
     }}>
     <label id={labelId} htmlFor={rangeId}>{props.label}</label>
@@ -237,10 +238,10 @@ export function AdjustmentSlider(props: Props) {
         value={numberEditing && draft !== null ? draft : formatNumber(props.value)} aria-label={props.valueLabel} disabled={props.disabled}
         onFocus={() => { focusAdjustmentCategory(); beginNumberEdit(); updateDraft(formatNumber(latest.current.value)); }}
         onChange={changeNumber} onKeyDown={handleNumberKeyDown} onBlur={commitNumberEdit} />
-      <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}`}
+      {!props.hideToggle && props.onToggle && <button ref={power} type="button" className={`adjustment-category-icon adjustment-power${props.enabled ? '' : ' is-off'}`}
         aria-pressed={props.enabled} aria-label={toggleLabel} title={toggleLabel}
         onFocus={focusAdjustmentCategory} onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}
-        onClick={props.onToggle}>⏻</button>
+        onClick={props.onToggle}>⏻</button>}
       <button type="button" className="adjustment-reset" onClick={props.onReset}
         onFocus={focusAdjustmentCategory}
         onKeyDown={(event) => { navigateAdjustments(event.nativeEvent, event.currentTarget); }}

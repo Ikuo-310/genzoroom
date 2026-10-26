@@ -13,10 +13,10 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch, onOp
   return <>
     <AdjustmentSlider key={`${assetId}-temperature`} adjustmentId="temperature"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.temperature} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'temperature' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.temperature')} {...TEMPERATURE}
+      enabled onOpenContextMenu={onOpenContextMenu} hideToggle label={t('workspace.temperature')} {...TEMPERATURE}
       value={recipe.adjustments.temperature} valueText={formatTemperature(recipe.adjustments.temperature)}
       valueLabel={t('workspace.temperatureValue')} precision={0} defaultValue={0}
-      disabled={!recipe.whiteBalanceEnabled} resetLabel={t('workspace.temperatureReset')}
+      disabled={!recipe.whiteBalanceEnabled || !recipe.colorEnabled} resetLabel={t('workspace.temperatureReset')}
       trackGradient={TEMPERATURE_TRACK_GRADIENT}
       onBegin={() => dispatch({ type: 'begin', kind: 'temperature' })}
       onChange={(value) => dispatch({ type: 'temperature', value })}
@@ -24,10 +24,10 @@ export function WhiteBalanceAdjustmentControls({ assetId, recipe, dispatch, onOp
       onReset={() => dispatch({ type: 'temperatureReset' })} />
     <AdjustmentSlider key={`${assetId}-tint`} adjustmentId="tint"
       commitPolicy="operation-boundary"
-      enabled={recipe.adjustmentEnabled.tint} onToggle={() => dispatch({ type: 'toggleAdjustment', id: 'tint' })} onOpenContextMenu={onOpenContextMenu} label={t('workspace.tint')} {...TINT}
+      enabled onOpenContextMenu={onOpenContextMenu} hideToggle label={t('workspace.tint')} {...TINT}
       value={recipe.adjustments.tint} valueText={formatTint(recipe.adjustments.tint)}
       valueLabel={t('workspace.tintValue')} precision={0} defaultValue={0}
-      disabled={!recipe.whiteBalanceEnabled} resetLabel={t('workspace.tintReset')}
+      disabled={!recipe.whiteBalanceEnabled || !recipe.colorEnabled} resetLabel={t('workspace.tintReset')}
       trackGradient={TINT_TRACK_GRADIENT}
       onBegin={() => dispatch({ type: 'begin', kind: 'tint' })}
       onChange={(value) => dispatch({ type: 'tint', value })}

@@ -451,6 +451,54 @@ class EditStateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.request("GET").json()["state"], saved)
 
+    def test_legacy_independent_color_history_and_false_flags_roundtrip_unchanged(self):
+        saved = self.v18_state()
+        before = copy.deepcopy(saved["history"][0]["before"])
+        before["adjustments"].update(temperature=25, vibrance=30, exposure=1)
+        for key in ("exposure", "tint", "shadowsTemperature"):
+            before["adjustmentEnabled"][key] = False
+        toggled = copy.deepcopy(before)
+        toggled["colorEnabled"] = False
+        reset = copy.deepcopy(toggled)
+        reset["adjustments"]["vibrance"] = 0
+        saved.update(currentRecipe=reset, historyCursor=2, history=[
+            {"kind": "colorToggle", "before": before, "after": toggled},
+            {"kind": "colorReset", "before": toggled, "after": reset},
+        ])
+        self.assertEqual(self.request("PUT", payload(saved)).status_code, 200)
+        with self.database() as db:
+            original = db.execute("SELECT * FROM asset_edit_states").fetchone()
+        self.assertEqual(self.request("GET").json()["state"], saved)
+        with self.database() as db:
+            self.assertEqual(db.execute("SELECT * FROM asset_edit_states").fetchone(), original)
+
+    def test_integrated_color_toggle_and_reset_validate_as_single_operations(self):
+        saved = self.v18_state()
+        saved["history"] = []
+        saved["historyCursor"] = 0
+        current = saved["currentRecipe"] = copy.deepcopy(self.v18_state()["history"][0]["before"])
+        current["adjustments"].update(temperature=25, tint=-15, vibrance=30, saturation=-20)
+
+        disabled = copy.deepcopy(current)
+        disabled["whiteBalanceEnabled"] = disabled["colorEnabled"] = False
+        saved["history"].append({"kind": "colorToggle", "before": current, "after": disabled})
+
+        reset = copy.deepcopy(disabled)
+        for key in ("temperature", "tint", "vibrance", "saturation"):
+            reset["adjustments"][key] = 0
+        saved["history"].append({"kind": "colorReset", "before": disabled, "after": reset})
+        saved["currentRecipe"] = reset
+        saved["historyCursor"] = 2
+
+        self.assertEqual(validate_snapshot(saved, ASSET_ID), saved)
+        response = self.request("PUT", payload(saved))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.request("GET").json()["state"], saved)
+
+        invalid = copy.deepcopy(saved)
+        invalid["history"][0]["after"]["colorEnabled"] = True
+        self.assertEqual(self.request("PUT", payload(invalid, revision=1)).status_code, 422)
+
     def test_v18_strict_flag_validation_and_history_semantics_do_not_overwrite_saved_v17(self):
         original = self.request("PUT", payload()).json()
         invalid_states = []

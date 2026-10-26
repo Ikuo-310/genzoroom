@@ -199,7 +199,7 @@ def test_queue_eligibility_uses_current_recipe_with_or_without_history(db):
 
 
 @pytest.mark.parametrize("field", ["numeric", "category", "individual"])
-def test_any_non_default_current_recipe_field_is_queue_eligible(db, field):
+def test_current_recipe_eligibility_ignores_legacy_individual_flags(db, field):
     state = snapshot(edited=False)
     if field == "numeric":
         state["currentRecipe"]["adjustments"]["temperature"] = 12
@@ -210,14 +210,14 @@ def test_any_non_default_current_recipe_field_is_queue_eligible(db, field):
     else:
         state["currentRecipe"]["adjustmentEnabled"]["temperature"] = False
     edit_store.put_edit_state(A, 0, uuid4(), state)
-    assert enqueue(A).status_code == 200
+    assert enqueue(A).status_code == (422 if field == "individual" else 200)
 
 
 def test_queue_eligibility_uses_disabled_recipe_flags_and_current_edits(db):
     state = snapshot(edited=False)
     state["currentRecipe"]["adjustmentEnabled"]["temperature"] = False
     edit_store.put_edit_state(A, 0, uuid4(), state)
-    assert enqueue(A).status_code == 200
+    assert enqueue(A).status_code == 422
     state = snapshot(B, edited=False)
     before, after = copy.deepcopy(state["currentRecipe"]), copy.deepcopy(state["currentRecipe"])
     after["adjustments"]["temperature"] = 12

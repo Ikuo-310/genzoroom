@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { commitAdjustmentsInScope } from './adjustmentFocus';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -32,7 +33,7 @@ vi.mock('./ImageViewer', () => ({
 let host: HTMLDivElement;
 let root: Root;
 const recipe = (): EditRecipe => JSON.parse(host.querySelector('[data-recipe]')!.textContent!);
-const grading = () => host.querySelectorAll<HTMLElement>('.adjustment-category')[3];
+const grading = () => host.querySelector<HTMLButtonElement>('.adjustment-category-title[data-adjustment-category-id="colorGrading"]')!.closest<HTMLElement>('.adjustment-category')!;
 const slider = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="range"]')[index]!;
 const number = (index = 0) => grading().querySelectorAll<HTMLInputElement>('input[type="number"]')[index]!;
 const rangeToggle = (index: number) => grading().querySelectorAll<HTMLButtonElement>('.grading-range-toggle')[index]!;
@@ -139,7 +140,7 @@ describe('Color Grading controls', () => {
 
   it('renders Temperature/Tint in each Shadows, Midtones, and Highlights group', () => {
     expect(Array.from(host.querySelectorAll('.adjustment-category-label'), (item) => item.textContent))
-      .toEqual(['White Balance', 'Basic', 'Color', 'Color Grading']);
+      .toEqual(['Color', 'Basic', 'Color Grading']);
     expect(Array.from(grading().querySelectorAll('.adjustment-subsection-title'), (item) => item.textContent)).toEqual(['Shadows', 'Midtones', 'Highlights']);
     expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['Temperature', 'Tint', 'Temperature', 'Tint', 'Temperature', 'Tint']);
     for (const control of [slider(), slider(1), slider(2), slider(3), slider(4), slider(5)]) {
@@ -152,7 +153,8 @@ describe('Color Grading controls', () => {
     expect(slider(3).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
     expect(slider(4).style.getPropertyValue('--adjustment-track-gradient')).toBe(TEMPERATURE_TRACK_GRADIENT);
     expect(slider(5).style.getPropertyValue('--adjustment-track-gradient')).toBe(TINT_TRACK_GRADIENT);
-    expect(grading().querySelectorAll('.adjustment-power')).toHaveLength(6);
+    expect(grading().querySelectorAll('.adjustment-power')).toHaveLength(0);
+    expect(grading().querySelectorAll('.grading-range-toggle')).toHaveLength(3);
   });
 
   it('localizes the Shadows section label in Japanese', async () => {
@@ -161,18 +163,23 @@ describe('Color Grading controls', () => {
     expect(Array.from(grading().querySelectorAll('label'), (item) => item.textContent)).toEqual(['色温度', '色かぶり補正', '色温度', '色かぶり補正', '色温度', '色かぶり補正']);
     wheel(-1, false, slider(1));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('シャドウ 色かぶり補正 0 → +10');
     wheel(-1, false, slider(2));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('中間調 色温度 0 → +10');
     wheel(-1, false, slider(3));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('中間調 色かぶり補正 0 → +10');
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('ハイライト 色温度 0 → +10');
     wheel(-1, false, slider(5));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('ハイライト 色かぶり補正 0 → +10');
   });
 
@@ -183,6 +190,7 @@ describe('Color Grading controls', () => {
     expect(wheel(1, true, slider(5)).defaultPrevented).toBe(true);
     expect(recipe().adjustments.highlightsTint).toBe(10);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('Highlights Tint 0 → +10');
     act(() => number(5).focus());
     change(number(5), '-25.6');
@@ -202,9 +210,11 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.highlightsTemperature).toBe(10);
     expect(history()).toEqual([]);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()).toEqual(['Highlights Temperature 0 → +10']);
     expect(wheel(-1, false, slider(4)).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(recipe().adjustments.highlightsTemperature).toBe(20);
     act(() => number(4).focus());
     change(number(4), '-25.6');
@@ -224,9 +234,11 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.midtonesTint).toBe(10);
     expect(history()).toEqual([]);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()).toEqual(['Midtones Tint 0 → +10']);
     expect(wheel(-1, false, slider(3)).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(recipe().adjustments.midtonesTint).toBe(20);
     act(() => number(3).focus());
     change(number(3), '-25.6');
@@ -247,9 +259,11 @@ describe('Color Grading controls', () => {
     expect(recipe().adjustments.midtonesTemperature).toBe(10);
     expect(history()).toEqual([]);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('Midtones Temperature 0 → +10');
     expect(wheel(-1, false, slider(2)).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(recipe().adjustments.midtonesTemperature).toBe(20);
     act(() => number(2).focus());
     change(number(2), '-25.6');
@@ -268,10 +282,12 @@ describe('Color Grading controls', () => {
     expect(wheel(1, true, slider(1)).defaultPrevented).toBe(true);
     expect(recipe().adjustments.shadowsTint).toBe(10);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()).toEqual(['Shadows Tint 0 → +10']);
 
     expect(wheel(-1, false, slider(1)).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(recipe().adjustments.shadowsTint).toBe(20);
     act(() => number(1).focus());
     change(number(1), '-25.6');
@@ -312,6 +328,7 @@ describe('Color Grading controls', () => {
     wheel(-1, false, slider(4));
     wheel(1, false, slider(5));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
 
     click(grading().querySelector<HTMLElement>('[aria-pressed]')!);
     expect(recipe().colorGradingEnabled).toBe(false);
@@ -342,6 +359,7 @@ describe('Color Grading controls', () => {
     wheel(-1, false, slider(4));
     wheel(-1, false, slider(5));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     click(grading().querySelector<HTMLElement>('.adjustment-category-reset')!);
     expect(recipe().adjustments.shadowsTemperature).toBe(0);
     expect(recipe().adjustments.shadowsTint).toBe(0);
@@ -362,6 +380,7 @@ describe('Color Grading controls', () => {
 
     wheel(-1, false, slider(4));
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     click(host.querySelector<HTMLButtonElement>('.workspace-section-action:not(.history-menu-trigger)')!);
     expect(recipe()).toEqual(expect.objectContaining({ version: 18, colorGradingEnabled: true }));
     expect(Object.values(recipe().adjustments).every((value) => value === 0)).toBe(true);

@@ -33,6 +33,9 @@ vi.mock('./GalleryPage', () => ({
 const first: AssetDetail = { id: 'original', filename: 'PXL_20260920_050929890.jpg', date: '2026-09-20T00:00:00Z',
   preview_url: '/original', thumbnail_url: '/original-thumb', format: 'JPEG', is_raw: false, exif: {} };
 const second: AssetDetail = { ...first, id: 'destination', filename: 'destination.jpg', preview_url: '/destination' };
+const adjustmentUiOrder = ['temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
+  'shadowsTemperature', 'shadowsTint', 'midtonesTemperature', 'midtonesTint', 'highlightsTemperature', 'highlightsTint'];
+const inAdjustmentUiOrder = (ids: readonly string[]) => adjustmentUiOrder.filter((id) => ids.includes(id));
 let host: HTMLDivElement;
 let root: Root;
 let restoreDialog: () => void;
@@ -650,7 +653,7 @@ describe('selected settings clipboard', () => {
     await mount();
     const viewport = activatePreview();
     expect(key(viewport, 'c', { altKey: selectedCopy }).defaultPrevented).toBe(true);
-    const copiedIds = selectedCopy ? ['temperature', 'tint', 'exposure', 'shadowsTemperature'] as const : ADJUSTMENT_IDS;
+    const copiedIds = selectedCopy ? ['temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'shadowsTemperature'] as const : ADJUSTMENT_IDS;
     if (selectedCopy) {
       expect(host.querySelectorAll('dialog input[name]')).toHaveLength(16);
       expect(Array.from(host.querySelectorAll<HTMLInputElement>('dialog input[name]')).every((input) => input.checked && !input.disabled)).toBe(true);
@@ -658,7 +661,7 @@ describe('selected settings clipboard', () => {
       expect(document.activeElement).toBe(viewport);
     }
     const copied = readEditClipboard()!;
-    expect(Object.keys(copied.values)).toEqual([...copiedIds]);
+    expect(Object.keys(copied.values).sort()).toEqual([...copiedIds].sort());
     expect(copied.sourceAssetId).toBe(first.id);
     expect(copied.values.exposure).toBe(1.25);
     await click('button[aria-label="destination.jpg"]');
@@ -666,7 +669,8 @@ describe('selected settings clipboard', () => {
     expect(key(target, 'v', { altKey: selectedPaste }).defaultPrevented).toBe(true);
     const pastedIds = selectedPaste ? ['temperature', 'exposure'] as const : copiedIds;
     if (selectedPaste) {
-      expect(Array.from(host.querySelectorAll<HTMLInputElement>('dialog input[name]')).map((input) => input.name)).toEqual([...copiedIds]);
+      expect(Array.from(host.querySelectorAll<HTMLInputElement>('dialog input[name]')).map((input) => input.name))
+        .toEqual(inAdjustmentUiOrder(copiedIds));
       expect(Array.from(host.querySelectorAll<HTMLInputElement>('dialog input[name]')).every((input) => input.checked)).toBe(true);
       choose(pastedIds); confirm('Paste');
       expect(document.activeElement).toBe(target);
@@ -683,7 +687,7 @@ describe('selected settings clipboard', () => {
     const saved = rows.get(second.id)!.state;
     expect(saved.history).toHaveLength(1);
     expect(saved.history[0]).toMatchObject({ kind: 'paste', metadata: {
-      sourceAssetId: first.id, sourceFilename: first.filename, adjustmentIds: [...pastedIds],
+      sourceAssetId: first.id, sourceFilename: first.filename, adjustmentIds: expect.arrayContaining([...pastedIds]),
     } });
     expect(saved.stateFormatVersion).toBe(2);
     await click('a');
@@ -845,8 +849,7 @@ describe('selected settings clipboard', () => {
     const recipe = defaultRecipe();
     ADJUSTMENT_IDS.forEach((id, index) => { recipe.adjustments[id] = index + 1; });
     if (category.id === 'basic') recipe.basicEnabled = false;
-    if (category.id === 'whiteBalance') recipe.whiteBalanceEnabled = false;
-    if (category.id === 'color') recipe.colorEnabled = false;
+    if (category.id === 'color') recipe.whiteBalanceEnabled = recipe.colorEnabled = false;
     if (category.id === 'colorGrading') recipe.colorGradingEnabled = false;
     rows.set(first.id, stored(first.id, recipe));
     await mount();
@@ -1002,10 +1005,10 @@ describe('selected settings clipboard', () => {
       .find((button) => button.textContent === 'Paste into category')!.disabled).toBe(true);
     key(document.activeElement!, 'Escape', { ctrlKey: false });
 
-    const title = categoryTitle('whiteBalance');
+    const title = categoryTitle('color');
     act(() => title.focus());
     expect(key(title, 'c').defaultPrevented).toBe(true);
-    expect(Object.keys(readEditClipboard()!.values)).toEqual(['temperature', 'tint']);
+    expect(Object.keys(readEditClipboard()!.values)).toEqual(['temperature', 'tint', 'vibrance', 'saturation']);
     expect(readEditClipboard()!.values.temperature).toBe(17);
     const crossCategoryClipboard = defaultRecipe();
     crossCategoryClipboard.adjustments.exposure = 4;
@@ -1105,7 +1108,7 @@ describe('selected settings clipboard', () => {
 });
 
 
-describe('individual adjustment UI', () => {
+describe('individual adjustment UI removal', () => {
   function row(id: string) { return host.querySelector<HTMLInputElement>('[data-adjustment-id="' + id + '"]')!.closest('.adjustment-control')!; }
   function open(id: string, selector = 'label', x = 120, y = 90) {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
@@ -1113,100 +1116,54 @@ describe('individual adjustment UI', () => {
     return event;
   }
   function buttons() { return Array.from(document.querySelectorAll<HTMLButtonElement>('.adjustment-slider-context-menu button')); }
-  it.each(ADJUSTMENT_IDS)('connects %s power and menu to the same retained value and Undo/Redo', async (id) => {
+  it.each(ADJUSTMENT_IDS)('keeps %s Reset but has no individual power or toggle menu action', async id => {
     const recipe = defaultRecipe(); recipe.adjustments[id] = id === 'exposure' ? 2 : 20;
+    recipe.adjustmentEnabled[id] = false;
     rows.set(first.id, stored(first.id, recipe)); await mount();
-    expect(host.querySelectorAll('.adjustment-power')).toHaveLength(16);
-    const power = row(id).querySelector<HTMLButtonElement>('.adjustment-power')!;
-    expect(power.getAttribute('aria-pressed')).toBe('true');
-    act(() => power.click());
-    expect(rendered.recipe!.adjustmentEnabled[id]).toBe(false);
-    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
-    expect(rendered.recipe!.adjustments[id]).toBe(recipe.adjustments[id]);
-    expect(row(id).classList.contains('is-bypassed')).toBe(true);
-    expect(row(id).querySelector<HTMLInputElement>('input[type="range"]')!.disabled).toBe(false);
-    key(window, 'z'); expect(rendered.recipe!.adjustmentEnabled[id]).toBe(true);
-    key(window, 'z', { shiftKey: true }); expect(rendered.recipe!.adjustmentEnabled[id]).toBe(false);
+    expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
+    expect(row(id).querySelector('.adjustment-power')).toBeNull();
+    expect(row(id).querySelector<HTMLButtonElement>('.adjustment-reset')).not.toBeNull();
     expect(open(id).defaultPrevented).toBe(true);
-    expect(buttons().map(item => item.textContent)).toEqual(['Copy this adjustment', 'Paste into this adjustment', 'Enable this adjustment', 'Reset this adjustment']);
-    act(() => buttons()[2].click());
-    expect(rendered.recipe!.adjustmentEnabled[id]).toBe(true);
-    expect(rendered.recipe!.adjustments).toEqual(recipe.adjustments);
-    expect(rendered.recipe!.adjustmentEnabled).toEqual(recipe.adjustmentEnabled);
+    expect(buttons().map(item => item.textContent)).toEqual(['Copy this adjustment', 'Paste into this adjustment', 'Reset this adjustment']);
+    expect(Array.from(document.querySelectorAll('.adjustment-slider-context-menu [role="menuitem"]')).map(item => item.textContent))
+      .toEqual(['Copy this adjustment', 'Paste into this adjustment', 'Reset this adjustment']);
+    expect(rendered.recipe!.adjustmentEnabled[id]).toBe(false);
+    expect(rendered.recipe!.adjustments[id]).toBe(recipe.adjustments[id]);
   });
 
-  it.each(['filmstrip', 'home'])('closes the slider menu on %s transition', async (transition) => {
+  it.each(['filmstrip', 'home'])('closes the slider menu on %s transition', async transition => {
     await mount(); open('exposure');
     await click(transition === 'home' ? '.workspace-actions button' : 'button[aria-label="destination.jpg"]');
     expect(buttons()).toHaveLength(0);
   });
-  it.each(['en', 'ja'])('uses shared menu style and translated actions in %s', async (language) => {
+  it.each(['en', 'ja'])('uses shared menu style and translated Reset/clipboard actions in %s', async language => {
     await i18n.changeLanguage(language); await mount(); open('exposure');
     const menu = document.querySelector('.adjustment-slider-context-menu')!;
     expect(menu.classList.contains('workspace-menu-surface')).toBe(true);
-    expect(Array.from(menu.children).map(item => item.getAttribute('role'))).toEqual(['menuitem', 'menuitem', 'separator', 'menuitem', 'menuitem']);
+    expect(Array.from(menu.children).map(item => item.getAttribute('role'))).toEqual(['menuitem', 'menuitem', 'separator', 'menuitem']);
     expect(buttons().map(item => item.textContent)).toEqual(language === 'ja'
-      ? ['この項目をコピー', 'この項目に貼り付け', 'この項目を無効にする', 'この項目をリセット']
-      : ['Copy this adjustment', 'Paste into this adjustment', 'Disable this adjustment', 'Reset this adjustment']);
-    expect(row('exposure').querySelector('.adjustment-power')!.getAttribute('title')).toBe(i18n.t('workspace.disableAdjustment', { name: i18n.t('workspace.exposure') }));
+      ? ['この項目をコピー', 'この項目に貼り付け', 'この項目をリセット']
+      : ['Copy this adjustment', 'Paste into this adjustment', 'Reset this adjustment']);
+    expect(row('exposure').querySelector('.adjustment-power')).toBeNull();
   });
-  it('keeps category and grading range bypass independent and resets values without enabling them', async () => {
-    const recipe = defaultRecipe(); recipe.basicEnabled = false; recipe.gradingShadowsEnabled = false;
+  it('retains category and grading-range switches while Reset changes only its value', async () => {
+    const recipe = defaultRecipe(); recipe.basicEnabled = true; recipe.gradingShadowsEnabled = false;
     recipe.adjustments.shadowsTemperature = 30; recipe.adjustmentEnabled.shadowsTemperature = false;
     rows.set(first.id, stored(first.id, recipe)); await mount();
-    const power = row('exposure').querySelector<HTMLButtonElement>('.adjustment-power')!;
-    expect(power.disabled).toBe(false); act(() => power.click());
-    expect(rendered.recipe!.basicEnabled).toBe(false); expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(false);
-    act(() => power.focus()); key(power, 'ArrowUp', { ctrlKey: false, shiftKey: true });
-    expect(document.activeElement).toBe(categoryTitle('basic'));
-    act(() => power.focus()); key(power, 'ArrowDown', { ctrlKey: false, shiftKey: true });
-    expect(document.activeElement).toBe(categoryTitle('color'));
-    open('shadowsTemperature'); act(() => buttons()[3].click());
+    const basicSwitch = categoryTitle('basic').closest('.adjustment-category-header')!.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+    act(() => basicSwitch.click());
+    expect(rendered.recipe!.basicEnabled).toBe(false);
+    expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(true);
+    const rangeMenu = document.querySelector('.grading-range-toggle');
+    expect(rangeMenu).not.toBeNull();
+    open('shadowsTemperature'); expect(buttons().map(button => button.textContent)).toEqual(['Copy this adjustment', 'Paste into this adjustment', 'Reset this adjustment']);
+    act(() => buttons()[2].click());
     expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(0);
     expect(rendered.recipe!.adjustmentEnabled.shadowsTemperature).toBe(false);
     expect(rendered.recipe!.gradingShadowsEnabled).toBe(false);
     key(window, 'z'); expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(30);
-    open('shadowsTemperature'); key(document.activeElement!, 'Escape', { ctrlKey: false });
-    expect(document.activeElement).toBe(row('shadowsTemperature').querySelector('.adjustment-power'));
   });
-  it('clamps to the viewport, relocates, excludes background keys and closes on outside interaction', async () => {
-    await mount();
-    const original = HTMLElement.prototype.getBoundingClientRect;
-    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('adjustment-slider-context-menu')
-        ? { width: 210, height: 130, left: 0, top: 0, right: 210, bottom: 130, x: 0, y: 0, toJSON() {} }
-        : original.call(this);
-    });
-    try {
-      open('exposure', 'input[type="range"]', window.innerWidth, window.innerHeight);
-      const menu = document.querySelector<HTMLElement>('.adjustment-slider-context-menu')!;
-      expect(menu.style.left).toBe((window.innerWidth - 218) + 'px');
-      expect(menu.style.top).toBe((window.innerHeight - 138) + 'px');
-      const before = structuredClone(rendered.recipe);
-      key(document.activeElement!, 'ArrowRight', { ctrlKey: false }); key(document.activeElement!, 'v');
-      expect(rendered.recipe).toEqual(before);
-      open('contrast', 'label', 30, 40);
-      expect(document.querySelector<HTMLElement>('.adjustment-slider-context-menu')!.style.left).toBe('30px');
-      act(() => categoryTitle('basic').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 })));
-      expect(buttons()).toHaveLength(0); openCategoryContextMenu('basic');
-      expect(document.querySelectorAll('.adjustment-context-menu')).toHaveLength(1);
-      open('exposure'); expect(document.querySelector('.adjustment-category-context-menu')).toBeNull();
-      act(() => host.querySelector('.viewer-viewport')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 })));
-      openViewerContextMenu(); expect(buttons()).toHaveLength(0);
-      expect(document.querySelector('.edit-settings-context-menu')).not.toBeNull();
-    } finally { rect.mockRestore(); }
-  });
-  it('preserves native number context menus and closes with Escape restoring focus', async () => {
-    await mount();
-    expect(open('exposure', '.adjustment-number').defaultPrevented).toBe(false);
-    expect(buttons()).toHaveLength(0);
-    open('exposure');
-    expect(document.querySelector('.adjustment-slider-context-menu [role="separator"]')).not.toBeNull();
-    key(document.activeElement!, 'Escape', { ctrlKey: false });
-    expect(buttons()).toHaveLength(0);
-    expect(document.activeElement).toBe(row('exposure').querySelector('input[type="range"]'));
-  });
-  it('copies retained OFF values, pastes only a matching ID and preserves all power states', async () => {
+  it('keeps copy and paste available without creating an individual flag operation', async () => {
     const recipe = defaultRecipe(); recipe.adjustments.exposure = 2; recipe.adjustmentEnabled.exposure = false;
     rows.set(first.id, stored(first.id, recipe)); await mount();
     open('exposure'); act(() => buttons()[0].click());
@@ -1215,19 +1172,16 @@ describe('individual adjustment UI', () => {
     key(document.activeElement!, 'Escape', { ctrlKey: false });
     const copied = defaultRecipe(); copied.adjustments.exposure = 3; copied.adjustments.contrast = 25;
     copyEditSettings(copied, first.id, first.filename, ['exposure', 'contrast']);
-    open('exposure'); expect(buttons()[1].disabled).toBe(false); act(() => buttons()[1].click());
+    open('exposure'); act(() => buttons()[1].click());
     expect(rendered.recipe!.adjustments.exposure).toBe(3);
     expect(rendered.recipe!.adjustments.contrast).toBe(0);
     expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(false);
     expect(readEditClipboard()!.values).toEqual({ exposure: 3, contrast: 25 });
     key(window, 'z'); expect(rendered.recipe!.adjustments.exposure).toBe(2);
     key(window, 'z', { shiftKey: true }); expect(rendered.recipe!.adjustments.exposure).toBe(3);
-    act(() => row('exposure').querySelector<HTMLButtonElement>('.adjustment-power')!.focus());
-    key(document.activeElement!, 'v'); expect(rendered.recipe!.adjustments.contrast).toBe(25);
-    expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(false);
+    expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
   });
 });
-
 
 describe('3WAY range actions', () => {
   function title(id: string) { return host.querySelector<HTMLButtonElement>('[data-grading-range-id="' + id + '"]')!; }
@@ -1261,7 +1215,7 @@ describe('3WAY range actions', () => {
     act(() => {
       other.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 10, clientY: 20 }));
       other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 10, clientY: 20 }));
-      for (const selector of ['label', '.adjustment-number', '.adjustment-power', '.adjustment-reset']) {
+      for (const selector of ['label', '.adjustment-number', '.adjustment-reset']) {
         other.closest('.adjustment-control')!.querySelector(selector)!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
       }
     });

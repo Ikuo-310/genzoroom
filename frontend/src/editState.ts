@@ -118,7 +118,7 @@ const RESET_EDIT_KEYS: Partial<Record<EditKind, readonly (keyof EditRecipe['adju
   whiteBalanceReset: ['temperature', 'tint'],
   basicReset: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'],
   colorGradingReset: ['shadowsTemperature', 'shadowsTint', 'midtonesTemperature', 'midtonesTint', 'highlightsTemperature', 'highlightsTint'],
-  colorReset: ['vibrance', 'saturation'],
+  colorReset: ['temperature', 'tint', 'vibrance', 'saturation'],
   ...Object.fromEntries(GRADING_RANGE_CONTROLS.map(range => [range.reset, range.ids])),
 };
 
@@ -238,9 +238,20 @@ function validateEntry(value: unknown, index: number, stateFormatVersion: unknow
   const numeric = NUMERIC_EDIT_KEYS[kind];
   const toggle = TOGGLE_EDIT_KEYS[kind];
   const reset = RESET_EDIT_KEYS[kind];
-  const valid = kind === 'allReset' || (numeric && changedFlags.length === 0 && changedAdjustments.every((key) => key === numeric))
-    || (toggle && changedAdjustments.length === 0 && changedFlags.every((key) => key === toggle))
-    || (reset && changedFlags.length === 0 && changedAdjustments.every((key) => reset.includes(key)));
+  const colorCategoryFlags = ['whiteBalanceEnabled', 'colorEnabled'] as const;
+  const colorCategoryEnabled = before.whiteBalanceEnabled && before.colorEnabled;
+  // Legacy Color entries remain valid verbatim, including independently toggled category flags.
+  const legacyColor = (kind === 'colorToggle' && changedAdjustments.length === 0 && changedFlags.every(key => key === 'colorEnabled'))
+    || (kind === 'colorReset' && changedFlags.length === 0 && changedAdjustments.every(key => key === 'vibrance' || key === 'saturation'));
+  const valid = legacyColor || kind === 'allReset' || (numeric && changedFlags.length === 0 && changedAdjustments.every((key) => key === numeric))
+    || (kind === 'colorToggle' && changedAdjustments.length === 0 && changedFlags.length > 0
+      && changedFlags.every((key) => colorCategoryFlags.includes(key as typeof colorCategoryFlags[number]))
+      && after.whiteBalanceEnabled === after.colorEnabled)
+    || (toggle && kind !== 'colorToggle' && changedAdjustments.length === 0 && changedFlags.every((key) => key === toggle))
+    || (kind === 'colorReset' && changedAdjustments.every((key) => RESET_EDIT_KEYS.colorReset!.includes(key))
+      && changedFlags.every((key) => colorCategoryFlags.includes(key as typeof colorCategoryFlags[number]))
+      && after.whiteBalanceEnabled === colorCategoryEnabled && after.colorEnabled === colorCategoryEnabled)
+    || (reset && kind !== 'colorReset' && changedFlags.length === 0 && changedAdjustments.every((key) => reset.includes(key)));
   return valid ? [] : [issue('invalid_history_semantics', path, 'History kind does not match changed recipe fields.')];
 }
 

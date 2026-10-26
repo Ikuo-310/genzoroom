@@ -81,9 +81,18 @@ class EditStatusTests(unittest.TestCase):
     def test_all_numeric_and_enabled_fields(self):
         for key in BOUNDS:
             self.assertTrue(has_edits(validate_snapshot(snapshot({'adjustments': {key: 1}}))))
-            self.assertTrue(has_edits(validate_snapshot(snapshot({'adjustmentEnabled': {key: False}}))))
+            self.assertFalse(has_edits(validate_snapshot(snapshot({'adjustmentEnabled': {key: False}}))))
         for key in FLAGS:
             self.assertTrue(has_edits(validate_snapshot(snapshot({'flags': {key: False}}))))
+
+    def test_legacy_individual_toggle_history_alone_is_not_edited(self):
+        state = snapshot({})
+        before = copy.deepcopy(state['currentRecipe'])
+        state['currentRecipe']['adjustmentEnabled']['exposure'] = False
+        state['history'] = [{'kind': 'exposureToggle', 'before': before,
+                             'after': copy.deepcopy(state['currentRecipe'])}]
+        state['historyCursor'] = 1
+        self.assertFalse(has_edits(validate_snapshot(state, ASSET)))
 
     def test_bulk_status_uses_current_recipe_independently_of_history(self):
         for non_default, history in [(False, False), (False, True), (True, False), (True, True)]:

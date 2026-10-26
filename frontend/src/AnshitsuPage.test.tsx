@@ -314,15 +314,10 @@ function historyEntry(before: number, after: number): EditEntry {
 }
 
 describe('explicit Basic History formatting', () => {
-  it.each([
-    ['en', 'exposure', 'Exposure OFF'], ['ja', 'exposure', '露光量 OFF'],
-    ['en', 'shadowsTint', 'Shadows Tint OFF'], ['ja', 'shadowsTint', 'シャドウ 色かぶり補正 OFF'],
-  ] as const)('formats individual bypass History in %s for %s', async (language, id, label) => {
-    await i18n.changeLanguage(language);
+  it.each(['exposure', 'shadowsTint'] as const)('does not create History for the removed %s individual toggle', id => {
     const session = editSession(newSession(), { type: 'toggleAdjustment', id });
-    const markup = renderToStaticMarkup(<EditHistory history={session.history} cursor={1} />);
-    expect(markup).toContain(label);
-    expect(markup).not.toContain(`${id}Toggle`);
+    expect(session.history).toHaveLength(0);
+    expect(session.recipe.adjustmentEnabled[id]).toBe(true);
   });
   it.each([
     ['exposure', 'Exposure', 0.25, '+0.25', '0.00'],
