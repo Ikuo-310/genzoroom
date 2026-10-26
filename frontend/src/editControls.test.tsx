@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ADJUSTMENT_COMMIT_DELAY_MS } from './AdjustmentSlider';
-import { activeAdjustmentId } from './adjustmentFocus';
+import { activeAdjustmentId, commitAdjustmentEdits } from './adjustmentFocus';
 import { isBasicDefault, type EditSession } from './editing';
 import { BasicAdjustmentControls } from './BasicAdjustmentControls';
 import i18n from './i18n';
@@ -138,6 +138,15 @@ describe('edit controls DOM interaction', () => {
     expect(document.activeElement).toBe(reset);
     expect(session().pending).toBeNull();
     expect(session().history).toEqual(history);
+  });
+
+  it('commits a JPEG numeric draft before an explicit adjustment boundary', () => {
+    act(() => number().focus()); changeNumber('0.47');
+    expect(session().history).toHaveLength(0);
+    act(() => commitAdjustmentEdits(host));
+    expect(range().value).toBe('0.47');
+    expect(session().history).toHaveLength(1);
+    expect(session().history[0]).toMatchObject({ before: expect.any(Object), after: expect.any(Object) });
   });
 
   it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])

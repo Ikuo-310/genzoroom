@@ -633,8 +633,6 @@
     },
     "sunday": "日曜日",
     "monday": "月曜日",
-    "zoomNavigatorPosition": "拡大表示ナビゲーターの位置",
-    "zoomNavigatorPositions": { "off": "表示しない", "top-left": "左上", "top-right": "右上", "bottom-left": "左下", "bottom-right": "右下" },
     "initialImage": "暗室の初期表示画像",
     "original": "原版優先",
     "preview": "プレビュー優先",

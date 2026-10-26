@@ -7,6 +7,8 @@ Internal changes are omitted unless they affect users.
 ## [Unreleased]
 
 - JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
+- RAW History now displays all retained steps on initial load instead of paging in groups of 20.
+- Repeated keyboard and wheel adjustments to the same RAW control now stay in one History entry until an operation boundary.
 
 ### Added
 

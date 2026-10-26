@@ -681,6 +681,22 @@ it('commits an open RAW keyboard gesture before a control Reset operation', asyn
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0].doc.values['light.exposure']).toBe(Number(range.value));
 });
 
+it('commits a RAW numeric draft before a section Reset operation', async () => {
+  vi.useFakeTimers(); historyBackend(0); await mount();
+  const input = exposure().closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  act(() => {
+    input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '1.25');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const reset = host.querySelector<HTMLButtonElement>('.raw-adjustment-category:nth-of-type(2) .adjustment-category-reset')!;
+  act(() => reset.click()); await flush();
+  const requests = vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request);
+  expect(requests.map(request => request.action)).toEqual(['initialize', 'commit', 'operate']);
+  expect(requests[1].control).toBe('light.exposure');
+  expect(requests[1].doc.values['light.exposure']).toBe(1.25);
+  expect(requests[2].operation?.kind).toBe('sectionReset');
+});
+
 it.each([
   ['section Reset', 'button.adjustment-category-reset', 'sectionReset'],
   ['section Toggle', 'button[data-category-switch]', 'sectionToggle'],

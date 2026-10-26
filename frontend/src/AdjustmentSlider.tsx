@@ -141,7 +141,8 @@ export function AdjustmentSlider(props: Props) {
   useEffect(() => {
     const element = range.current;
     if (element) registerAdjustment(element, () => {
-      if (interaction.current === 'keyboard' || interaction.current === 'wheel' || interaction.current === 'pointer') commitInteraction();
+      if (interaction.current === 'number') commitNumberEdit();
+      else if (interaction.current === 'keyboard' || interaction.current === 'wheel' || interaction.current === 'pointer') commitInteraction();
     });
     const keydown = (event: KeyboardEvent) => {
       const currentElement = range.current;

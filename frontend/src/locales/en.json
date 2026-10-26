@@ -643,8 +643,6 @@
     },
     "sunday": "Sunday",
     "monday": "Monday",
-    "zoomNavigatorPosition": "Zoom Navigator Position",
-    "zoomNavigatorPositions": { "off": "Off", "top-left": "Top Left", "top-right": "Top Right", "bottom-left": "Bottom Left", "bottom-right": "Bottom Right" },
     "initialImage": "Initial image in Develop",
     "original": "Original preferred",
     "preview": "Preview preferred",

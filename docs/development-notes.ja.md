@@ -14,6 +14,12 @@ RAW編集に失敗してpersisted Recipeをrestoreできない場合は、暗室
 
 **U3自動受入PASS、Windowsの短い画面・画質確認待ち。** 新EXEを明示指定してBackendを再起動し、Settings、RAW Fit、100% Region、Pan、Before/After、数枚の画質をユーザーが確認する。今回agentによる実画面操作、NAS/Firefox受入、配布releaseは行っていない。
 
+## RAW History全件表示と操作境界gesture（2026-10-26）
+
+RAW Historyは初回取得で保持中のstepをすべて順序どおり表示する。20件単位のpagingとそのUI/API状態は廃止したが、保存上限`HISTORY_LIMIT = 200`は維持する。201件目以降の追加では従来どおり古いstepをrolling baselineへ畳み込み、直近200件を保持するため、全件表示は最大200件のHistory horizonを変更しない。
+
+RAWのkeyboard／wheel編集は同じcontrolを続けて操作する間、無操作時間では分割せず1gestureとして保持する。別control、Undo／Redo／History Jump、control Reset、section Reset／Toggle、All Reset、pointer drag終了、数値入力Enter／blur、Viewer操作、Asset切替、暗室離脱、保存・終了境界で確定する。確定前のgesture粒度を操作境界単位にする変更であり、保存済みHistoryを後からmergeするものではない。既存のreceipt、handoff、retryとrolling baselineの保証は維持する。
+
 ## 工程C2：Windows実機受入完了（2026-10-25）
 
 基準Commit `01a6c86832749e7b18857a1d165ca58b663277e1` の文書状態を更新。ユーザーのWindows実機受入報告により、**C2-B PASS、C2-C PASS、C2全体はWindows実機受入PASSとして完了**。C2-Bのowner/capability、中央・四隅・各edge、geometry/overlay配置、Zoom後再要求、Before/After、Whole base/fallback、およびC2-CのFit Whole-only（1472×1107、rho約1.01）、1:1 Full RAW Region（Whole 2048×1540、Region 1280×1536 / F 4064×3056、Whole density 0.5039、Region density 1）、Pan/Zoom/Zoom out、Before/After、明瞭な実効解像度向上を確認した。白抜け・位置ずれ・古いoverlay残留なし。実画面結果はユーザー報告であり、agentによる手動確認ではない。
