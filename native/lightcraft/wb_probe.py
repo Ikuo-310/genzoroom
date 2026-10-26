@@ -15,34 +15,7 @@ from lightcraft_mcp import LightCraftMCP
 from lightcraft_runtime import child_environment
 
 
-def settings_fingerprint(native_text):
-    # Keep native number/string tokens: Python's 1e-07 differs from serde_json's 1e-7.
-    # get_develop text already has recursively sorted keys; strip only insignificant whitespace.
-    if not isinstance(native_text, str) or not isinstance(json.loads(native_text), dict):
-        raise ValueError('native settings JSON object required')
-    compact, quoted, escaped = [], False, False
-    for character in native_text:
-        if quoted:
-            compact.append(character)
-            if escaped:
-                escaped = False
-            elif character == '\\':
-                escaped = True
-            elif character == '"':
-                quoted = False
-        elif character == '"':
-            quoted = True
-            compact.append(character)
-        elif character not in ' \t\r\n':
-            compact.append(character)
-    return hashlib.sha256(''.join(compact).encode()).hexdigest()
-
-
-def result_fingerprint(result):
-    text = next(c['text'] for c in result['content'] if c['type'] == 'text')
-    if json.loads(text) != result['structuredContent']:
-        raise ValueError('native settings text/structuredContent mismatch')
-    return settings_fingerprint(text)
+from raw_white_balance import settings_fingerprint, result_fingerprint
 
 
 def validate_schema(tools):
@@ -126,6 +99,12 @@ async def _probe(binary, backend, expected_version):
                 return candidate
 
             auto = await estimate(identity)
+            # Legacy Recipe process is displayed by develop.get but omitted by the Native hash input.
+            await command('develop.merge', {'settings': {'process': 1}})
+            legacy_result = await client.call_tool_result('get_develop', {'id': photo})
+            legacy_identity = {**identity, 'settingsFingerprint': result_fingerprint(legacy_result)}
+            await estimate(legacy_identity, unchanged=legacy_result['structuredContent'])
+            await command('develop.merge', {'settings': {'process': settings['process']}})
             frames = {}
             execution = None
             for kind in ('after', 'before'):

@@ -24,6 +24,7 @@ export class RawRecipeSave {
   steps: RawHistoryStep[] = [];
   historyLoading = false;
   historyError?: string;
+  operationError?: string;
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
@@ -63,6 +64,7 @@ export class RawRecipeSave {
     const finishingGesture = !!this.operation && !!this.gesture && !this.moving && !this.error;
     if (!this.active || this.locked && !finishingGesture || this.historyLoading || this.historyError || !this.history) return Promise.resolve();
     this.moving = true;
+    this.operationError = undefined;
     this.moveIntent = { action: 'operate', operation: structuredClone(intent) };
     this.options.controls?.endPreview();
     // Share the History fence with navigation and renewal; an accepted Reset drains its gesture first.
@@ -115,6 +117,15 @@ export class RawRecipeSave {
       saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
+      if (operation?.kind === 'wbAuto' && cause instanceof RawSaveError && cause.outcome === 'rejected'
+        && (cause.status === 422 && ['raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
+          'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'].includes(cause.code)
+          || cause.code === 'raw_wb_unavailable' && cause.status === 400)) {
+        // This response certifies that no WB mutation was sent; an unknown/lost response keeps its immutable retry.
+        this.retryRequest = undefined;
+        this.operationError = cause.code;
+        return;
+      }
       if (!(cause instanceof RawSaveError) || cause.outcome !== 'rejected' || cause.status !== 409
         || cause.code !== 'raw_history_target_missing') throw cause;
       // B2 rejects this target before native application or receipt creation. The preceding
@@ -127,6 +138,7 @@ export class RawRecipeSave {
   }
   begin(control: RawControlId) {
     if (!this.active || this.locked || this.paused) return;
+    this.operationError = undefined;
     if (this.gesture?.control === control) return;
     if (this.gesture) {
       this.handoff = { control, ended: false };

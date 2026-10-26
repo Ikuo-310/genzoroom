@@ -60,6 +60,7 @@ class _Session:
     before_preview: bool | None = None
     adaptive_preview: bool | None = None
     region_preview: bool | None = None
+    white_balance: bool | None = None
 
 
 def lightcraft_log(event, *, level="info", **context):
@@ -554,6 +555,29 @@ class LightCraftManager:
             raise LightCraftError("lightcraft_unsupported_raw_command")
         session = self._raw_session(generation)
         result = await session.client.call_tool("command_run", {"id": command, "params": params}, timeout=timeout)
+        self._check_raw_session(session)
+        return result
+
+    async def _raw_native_settings(self, generation, photo_id, *, timeout):
+        session = self._raw_session(generation)
+        result = await session.client.call_tool_result('get_develop', {'id': photo_id}, timeout=timeout)
+        self._check_raw_session(session)
+        return result
+
+    async def _raw_wb_supported(self, generation):
+        from raw_white_balance import supports_wb
+        session = self._raw_session(generation)
+        if session.white_balance is None:
+            tools = await session.client.request('tools/list', timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            session.white_balance = supports_wb(tools)
+        return session.white_balance
+
+    async def _raw_estimate_wb(self, generation, identity, *, timeout):
+        session = self._raw_session(generation)
+        if not await self._raw_wb_supported(generation):
+            raise LightCraftError('raw_wb_unsupported')
+        result = await session.client.call_tool('estimate_white_balance', identity, timeout=timeout)
         self._check_raw_session(session)
         return result
 

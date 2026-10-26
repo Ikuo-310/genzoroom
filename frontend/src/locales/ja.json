@@ -268,6 +268,9 @@
   },
   "workspace": {
     "rawPreview": {
+      "aw": "自動ホワイトバランス",
+      "awNoSamples": "自動ホワイトバランスに適した標本がありませんでした。設定は変更されていません。",
+      "awFailed": "自動ホワイトバランスを適用できませんでした。設定は変更されていません。再試行できない場合は写真を開き直してください。",
       "historyPosition": "履歴 {{cursor}} / {{count}}",
       "historyLoading": "RAW履歴を読み込んでいます…",
       "historyFailed": "RAW履歴を確認できませんでした。再試行して一覧を更新してください。",

@@ -28,7 +28,8 @@ def controls_state(snapshot):
     disabled = settings.get("disabled_sections", [])
     if type(disabled) is not list or any(type(section) is not str for section in disabled):
         raise LightCraftError("raw_invalid_settings")
-    return {"values": values, "sections": {section: section not in disabled for section in ("light", "color")},
+    return {"values": values, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+            "sections": {section: section not in disabled for section in ("light", "color")},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
             "wb": {"available": snapshot.wb_kelvin and wb.get("scale") == "kelvin",
@@ -59,6 +60,6 @@ def validate_history_operation(kind, metadata):
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
              and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
              and type(metadata["enabled"]) is bool
-             or kind == "allReset" and not metadata)
+             or kind in ("allReset", "wbAuto") and not metadata)
     if not valid:
         raise LightCraftError("raw_invalid_request")

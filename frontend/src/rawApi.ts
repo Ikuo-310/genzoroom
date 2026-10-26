@@ -26,7 +26,7 @@ export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
   sections: { light: boolean; color: boolean };
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
-  values: RawValues; process: number;
+  values: RawValues; process: number; wbAutoAvailable?: boolean;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
@@ -42,10 +42,10 @@ export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
   | { kind: 'sectionReset'; metadata: { section: 'light' | 'color' } }
   | { kind: 'sectionToggle'; metadata: { section: 'light' | 'color'; enabled: boolean } }
-  | { kind: 'allReset'; metadata: Record<string, never> };
+  | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset';
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset' | 'wbAuto';
   metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -233,6 +233,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
+    || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
     || !value.sections || typeof value.sections.light !== 'boolean' || typeof value.sections.color !== 'boolean'
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
@@ -328,7 +329,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
       || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !['light', 'color'].includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !['light', 'color'].includes(m.section)
-        : step.kind !== 'allReset' || Object.keys(m).length !== 0)
+        : !['allReset', 'wbAuto'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
           const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;

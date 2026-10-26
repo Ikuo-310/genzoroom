@@ -121,7 +121,9 @@ def test_start_handshake_hash_gpu_and_idempotent_close(tmp_path):
 
 
 @pytest.mark.parametrize("platform,env", [("win32", {}), ("linux", {"GENZOROOM_LIGHTCRAFT_EXE": "/any.exe"})])
-def test_disabled_never_spawns(platform, env):
+def test_disabled_never_spawns(platform, env, monkeypatch):
+    # This fixture tests disabled mode independently of a developer's locally built managed artifact.
+    monkeypatch.setattr('lightcraft_runtime.resolve_managed_executable', lambda *_: '')
     async def run():
         async def spawn(*args, **kwargs):
             pytest.fail("disabled runtime spawned")

@@ -66,6 +66,7 @@ class DevelopSnapshot:
     _fingerprint: tuple | None = field(default=None, repr=False)
     _content_hash: str | None = field(default=None, repr=False)
     wb_kelvin: bool = False
+    wb_auto: bool = False
 
     @property
     def settings(self):
@@ -140,6 +141,7 @@ class _Photo:
     requested_revision: int = 0
     sync: str = "synced"
     wb_kelvin: bool = False
+    wb_auto: bool = False
     as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
     before_fingerprint: str | None = None
     source_size: tuple[int, int] | None = None
@@ -508,7 +510,7 @@ class LightCraftRawSession:
     def _snapshot(self, photo):
         return DevelopSnapshot(photo.handle, photo.applied_revision, photo.settings_json,
                                _fingerprint=photo.fingerprint, _content_hash=photo.content_hash,
-                               wb_kelvin=photo.wb_kelvin)
+                               wb_kelvin=photo.wb_kelvin, wb_auto=photo.wb_auto)
 
     def _discard_pending(self, error=None):
         if self._pending is not None:
@@ -680,6 +682,7 @@ class LightCraftRawSession:
                 lightcraft_log("before.unavailable", level="warn", generation=self._generation, errorCode=error.code)
             settings = await self._read_settings(photo, deadline)
             # Only expose Kelvin editing when the engine supplies a measured as-shot white.
+            photo.wb_auto = await self.manager._raw_wb_supported(self._generation)
             white = info.get("as_shot_wb")
             photo.wb_kelvin = (isinstance(white, list) and len(white) == 2
                                and all(type(v) in (int, float) and math.isfinite(v) for v in white)
@@ -804,7 +807,7 @@ class LightCraftRawSession:
         return actual
 
     async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None,
-                      *, commands=None, check=None):
+                      *, commands=None, check=None, prepare=None):
         photo = self._photo(handle, active=True)
         cost = len(commands) if commands is not None else 1
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
@@ -819,6 +822,7 @@ class LightCraftRawSession:
         self._invalidate()
 
         async def action(deadline):
+            nonlocal params
             sent = False
             try:
                 current = self._photo(handle, active=True)
@@ -828,8 +832,23 @@ class LightCraftRawSession:
                     raise LightCraftError("raw_session_edit_limit")
                 if verify is not None:
                     verify()
+                if prepare is not None:
+                    params = await prepare(photo, deadline)
+                    current = self._photo(handle, active=True)
+                    if current.applied_revision != expected_revision or current.requested_revision != reserved:
+                        raise LightCraftError('raw_revision_conflict')
+                    if verify is not None:
+                        verify()
+                    if params is None:
+                        return self._snapshot(current)
                 self._phase = "applying"
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
+                if prepare is not None or verify is not None:
+                    self._photo(handle, active=True)
+                    if photo.applied_revision != expected_revision or photo.requested_revision != reserved:
+                        raise LightCraftError('raw_revision_conflict')
+                    if verify is not None:
+                        verify()
                 sent = True
                 # Count attempts too: a failed readback must not permit unbounded native History.
                 if commands is not None:
@@ -837,7 +856,6 @@ class LightCraftRawSession:
                         self._edits += 1
                         await self._command(native_command, native_params, deadline)
                     actual = await self._read_settings(photo, deadline)
-                    check(json.loads(actual))
                 elif restored is not None:
                     self._edits += 1
                     actual = await self._restore(photo, restored, deadline)
@@ -845,6 +863,8 @@ class LightCraftRawSession:
                     self._edits += 1
                     await self._command(command, params, deadline)
                     actual = await self._read_settings(photo, deadline)
+                if check is not None:
+                    check(json.loads(actual))
                 if verify is not None:
                     verify()
                 return self._commit(photo, actual, reserved)
@@ -876,9 +896,84 @@ class LightCraftRawSession:
             raise LightCraftError("raw_invalid_controls")
         return await self._mutate(handle, "develop.set", {"values": values}, expected_revision)
 
+    async def auto_white_balance(self, handle, expected_revision, *, prepared, verify):
+        from raw_white_balance import result_fingerprint, validate_candidate
+        photo = self._photo(handle, active=True)
+        original = photo.settings_json
+        epoch = self._epoch
+        expected = None
+
+        def owner():
+            verify()
+            current = self._photo(handle, active=True)
+            if self._epoch != epoch or current.applied_revision != expected_revision or current.settings_json != original:
+                raise LightCraftError('raw_revision_conflict')
+
+        async def estimate(current, deadline):
+            nonlocal expected
+            owner()
+            if not current.wb_auto or not current.wb_kelvin or 'color' in json.loads(original).get('disabled_sections', []):
+                raise LightCraftError('raw_wb_unavailable')
+            lightcraft_log('raw.wb.started', level='info', generation=self._generation, revision=expected_revision)
+            native = await self.manager._raw_native_settings(self._generation, current.photo_id, timeout=self._remaining(deadline))
+            owner()
+            try:
+                fingerprint = result_fingerprint(native)
+                if json.loads(_settings_json(native['structuredContent'])) != json.loads(original):
+                    current.sync = 'desynchronized'
+                    raise ValueError()
+            except (KeyError, TypeError, ValueError, StopIteration, LightCraftError):
+                raise LightCraftError('raw_wb_settings_mismatch') from None
+            identity = {'id': str(current.photo_id), 'wb_contract': 1, 'operation': 'auto',
+                        'settingsFingerprint': fingerprint, 'requestId': uuid.uuid4().hex}
+            result = await self.manager._raw_estimate_wb(self._generation, identity, timeout=self._remaining(deadline))
+            owner()
+            try:
+                candidate = validate_candidate(result, identity)
+                # A read-only estimate cannot authorize applying to a different native snapshot.
+                latest = await self.manager._raw_native_settings(self._generation, current.photo_id, timeout=self._remaining(deadline))
+                owner()
+                if result_fingerprint(latest) != fingerprint:
+                    current.sync = 'desynchronized'
+                    raise LightCraftError('raw_wb_settings_mismatch')
+            except (KeyError, TypeError, ValueError, StopIteration):
+                raise LightCraftError('raw_wb_invalid_response') from None
+            expected = json.loads(original)
+            expected['wb'].update(candidate)
+            prepared(expected)
+            lightcraft_log('raw.wb.estimated', level='debug', generation=self._generation,
+                           revision=expected_revision, requestId=identity['requestId'])
+            return None if expected == json.loads(original) else {'settings': {'wb': candidate}, 'label': 'Auto WB'}
+
+        def check(actual):
+            if actual != expected:
+                raise LightCraftError('raw_operation_readback_mismatch')
+
+        snapshot = await self._mutate(handle, 'develop.merge', None, expected_revision,
+                                      prepare=estimate, verify=owner, check=check)
+        lightcraft_log('raw.wb.completed', level='info', generation=self._generation, revision=snapshot.revision,
+                       result='unchanged' if snapshot.settings == json.loads(original) else 'applied')
+        return snapshot
+
+    async def apply_wb_candidate(self, handle, baseline, expected, expected_revision, *, verify):
+        photo = self._photo(handle, active=True)
+        if json.loads(photo.settings_json) != baseline:
+            raise LightCraftError('raw_history_readback_mismatch')
+
+        def check(actual):
+            if actual != expected:
+                raise LightCraftError('raw_operation_readback_mismatch')
+
+        # Retry only after readback proved the original state; reuse the frozen candidate, never estimate again.
+        return await self._mutate(handle, 'develop.merge', {'settings': {'wb': expected['wb']}, 'label': 'Auto WB'},
+                                  expected_revision, verify=verify, check=check)
+
     async def apply_history_operation(self, handle, kind, metadata, expected_revision):
         from raw_controls import CONTROLS, validate_history_operation
         validate_history_operation(kind, metadata)
+        if kind == 'wbAuto':
+            # AW must pass the separate read-only estimate/candidate fence before any mutation.
+            raise LightCraftError('raw_invalid_request')
         photo = self._photo(handle, active=True)
         before = photo.settings_json
         original = json.loads(before)

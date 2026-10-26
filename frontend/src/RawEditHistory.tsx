@@ -25,7 +25,7 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     const change = step.changes?.find(item => item.control === control);
     return label + (change ? ` ${pair(change)}` : '');
   }
-  const operation = step.kind === 'allReset' ? t('workspace.allReset')
+  const operation = step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
     : t(step.metadata.section === 'light' ? 'workspace.basic' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;

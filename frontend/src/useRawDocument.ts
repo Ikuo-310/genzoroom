@@ -21,7 +21,7 @@ type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' |
   saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
   resetting?: boolean; resetError?: string;
   history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[];
-  historyLoading?: boolean; historyError?: string; canUndo?: boolean; canRedo?: boolean; movingHistory?: boolean };
+  historyLoading?: boolean; historyError?: string; operationError?: string; canUndo?: boolean; canRedo?: boolean; movingHistory?: boolean };
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
@@ -477,7 +477,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         document: confirmed, settings: confirmed, desired: { ...editor!.desired }, pending: editor!.unsettled,
         editError: editor!.error, dirty: saver?.dirty || saver?.moving, saving: saver?.saving, saveError: saver?.error,
         history: saver?.history, historySteps: saver?.steps,
-        historyLoading: saver?.historyLoading, historyError: saver?.historyError, canUndo: saver?.canUndo, canRedo: saver?.canRedo,
+        historyLoading: saver?.historyLoading, historyError: saver?.historyError, operationError: saver?.operationError,
+        canUndo: saver?.canUndo, canRedo: saver?.canRedo,
         movingHistory: saver?.moving,
         locked: frozen.current || saver?.locked, regenerating: restarting, regenerationError }));
       if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && saver?.initialized && !saver.dirty && !saver.locked

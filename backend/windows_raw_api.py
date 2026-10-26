@@ -213,6 +213,9 @@ class RawPreviewApi:
             if code == "lightcraft_invalid_preview":
                 code = "raw_invalid_preview"
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large", "raw_preview_budget_exceeded"} else
+                      422 if code.startswith('raw_wb_') and code in {
+                          'raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
+                          'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'} else
                       400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
                                       "raw_history_unavailable", "raw_history_save_failed", "raw_edit_reset_database_failed",
@@ -721,6 +724,8 @@ class RawPreviewApi:
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
                         and metadata["control"].startswith("wb.") else [metadata["control"]])
+        elif step['kind'] == 'wbAuto':
+            controls = ['wb.temp', 'wb.tint']
         elif step["kind"] in ("sectionToggle", "sectionReset"):
             section = metadata["section"]
             controls = [control for control in CONTROLS if control.startswith(f"{section}.")
@@ -794,7 +799,7 @@ class RawPreviewApi:
         elif action == "operate":
             validate_history_operation(body["kind"], body["metadata"])
             kind, metadata = body["kind"], body["metadata"]
-            if not self._wb_available and (kind == "allReset" or kind == "sectionReset" and metadata["section"] == "color"
+            if not self._wb_available and (kind in ("allReset", "wbAuto") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb.")):
                 raise LightCraftError("raw_wb_unavailable")
         return body
@@ -894,7 +899,12 @@ class RawPreviewApi:
                 snapshot = await self.raw.get_settings(self._raw_handle)
                 self._history_verify(doc)
                 self._confirmed(doc, snapshot)
-                if action in {"initialize", "commit"}:
+                wb_auto = action == 'operate' and body['kind'] == 'wbAuto'
+                if wb_auto:
+                    snapshot = await self._history_wb_auto(doc, pending, snapshot)
+                    self._history_verify(doc)
+                    self._confirmed(doc, snapshot)
+                elif action in {"initialize", "commit"}:
                     if snapshot.revision != body["documentRevision"] or doc["settingsFingerprint"] != body["settingsFingerprint"]:
                         # No mutation was sent here; let the caller resync and submit fresh confirmed intent.
                         self._history_save = None
@@ -909,7 +919,7 @@ class RawPreviewApi:
                         {**pending["identity"], "settings": pending["selected"]}, snapshot.revision)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
-                if action == "operate":
+                if action == "operate" and not wb_auto:
                     pending["stage"] = "applying"
                     snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
                     self._history_verify(doc)
@@ -948,6 +958,46 @@ class RawPreviewApi:
             raise LightCraftError("raw_history_invalid") from None
         except StoreUnavailable:
             raise LightCraftError("raw_history_save_failed") from None
+
+    async def _history_wb_auto(self, doc, pending, snapshot):
+        verify = lambda: self._history_verify(doc)
+        if 'wbExpected' in pending:
+            if snapshot.settings == pending['wbExpected']:
+                return snapshot
+            if snapshot.settings != pending['selected']:
+                raise LightCraftError('raw_history_readback_mismatch')
+            # A serialized readback proved no application. An explicit retry may apply the frozen candidate once.
+            return await self.raw.apply_wb_candidate(self._raw_handle, pending['selected'], pending['wbExpected'],
+                                                     snapshot.revision, verify=verify)
+        body = pending['request']
+        if snapshot.revision != body['documentRevision'] or doc['settingsFingerprint'] != body['settingsFingerprint']:
+            self._history_save = None
+            raise LightCraftError('raw_wb_stale_result')
+        pending['stage'] = 'estimating'
+
+        def prepared(expected):
+            verify()
+            pending['wbExpected'] = expected
+            pending['stage'] = 'applying'
+
+        try:
+            return await self.raw.auto_white_balance(self._raw_handle, snapshot.revision, prepared=prepared, verify=verify)
+        except BaseException as error:
+            if pending['stage'] != 'estimating':
+                raise
+            # Before the candidate fence nothing can have mutated. Do not trap a failed estimate as an unknown save.
+            self._history_save = None
+            if not isinstance(error, Exception):
+                raise
+            safe = getattr(error, 'code', '')
+            if safe in {'raw_revision_conflict', 'raw_not_active', 'raw_stale_handle'}:
+                safe = 'raw_wb_stale_result'
+            if safe not in {'raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
+                            'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'}:
+                safe = 'raw_wb_estimation_failed'
+            lightcraft_log('raw.wb.failed', level='error', generation=doc['generation'],
+                           revision=doc['revision'], errorCode=safe)
+            raise LightCraftError(safe) from None
 
     async def _history_recover(self, doc, body):
         # Explicitly discard an uncommitted native result only after consulting durable SQLite truth.

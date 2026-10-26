@@ -368,3 +368,39 @@ it('retries metadata loading without another save or move and refuses an unverif
   saver.retryHistory(); await drain(); expect(saver.historyError).toBe('raw_history_revision_conflict');
   expect(saver.steps).toHaveLength(3); expect(saver.revision).toBe(11);
 });
+
+
+it('keeps AW behind a slider gesture, locks competing work, and retries its frozen request after a lost reply', async () => {
+  const { saver, controls } = owner(); await saver.save();
+  saver.begin('light.exposure'); saver.change('light.exposure', 1); saver.end();
+  let frozen: api.RawHistoryRequest | undefined;
+  vi.mocked(api.saveRawHistory).mockImplementation(async request => {
+    if (request.action !== 'operate') return rawHistoryResult(request);
+    if (!frozen) { frozen = structuredClone(request); throw new api.RawSaveError('raw_connection_failed', 'unknown'); }
+    expect(request).toEqual(frozen);
+    const settings = { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: fp(9000),
+      wb: { ...request.doc.wb, mode: 'auto' }, values: { ...request.doc.values, 'wb.temp': 5200, 'wb.tint': 11 } };
+    return rawHistoryResult({ ...request, doc: settings }, { history: {
+      initialized: true, cursor: 2, length: 2, selectedStepId: request.saveId } });
+  });
+  const first = saver.operate({ kind: 'wbAuto', metadata: {} });
+  const repeated = saver.operate({ kind: 'wbAuto', metadata: {} });
+  saver.change('light.contrast', 50); await saver.move('undo');
+  await repeated; await expect(first).rejects.toThrow('raw_connection_failed');
+  expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'commit', 'operate']);
+  expect(saver.locked).toBe(true); expect(saver.dirty).toBe(true);
+  await saver.save(true);
+  expect(saver.locked).toBe(false); expect(saver.dirty).toBe(false);
+  expect(controls.confirmed.wb.mode).toBe('auto'); expect(controls.confirmed.values['wb.temp']).toBe(5200);
+  saver.begin('wb.tint'); expect(saver.gesturing).toBe(true);
+});
+
+it('releases a rejected read-only AW estimate without retaining a retry or a dirty gesture', async () => {
+  const { saver } = owner(); await saver.save();
+  vi.mocked(api.saveRawHistory).mockRejectedValueOnce(new api.RawSaveError('raw_wb_no_valid_samples', 'rejected', 422));
+  await saver.operate({ kind: 'wbAuto', metadata: {} });
+  expect(saver.operationError).toBe('raw_wb_no_valid_samples');
+  expect(saver.error).toBeUndefined(); expect(saver.dirty).toBe(false); expect(saver.locked).toBe(false);
+  await saver.save(true); expect(api.saveRawHistory).toHaveBeenCalledTimes(2);
+  saver.begin('wb.temp'); expect(saver.operationError).toBeUndefined();
+});

@@ -8,6 +8,7 @@ LightCraft v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85` の管理パッ�
 - `id`は現在のLightCraft session内の正のphoto IDの十進文字列。active photoへの暗黙fallbackや選択変更はしない。
 - `settingsFingerprint`は`get_develop`で取得する完全なnative DevelopSettingsを`serde_json::Value`へ変換し、再帰的にkey順で並べたcompact JSONをUTF-8でSHA-256化した64桁小文字hex。RFC 8785ではない。呼び出し側は`get_develop`のnative JSON text（既にkey順）から文字列外の空白だけを除去し、数値・文字列tokenを保持してhash化する。構造化objectを別言語で再JSON化してはならない。`wb_probe.py::result_fingerprint()`が参照実装で、指数表記`1e-7`を含む実binary照合と、引用符・escape・文字列内空白・負のzeroの単体試験を行う。
 - `requestId`は32桁小文字hex。identityは入力全体をechoする。GenzoRoomのAsset/document/generation/revisionは将来のBackendが管理し、Nativeへ重複実装しない。MCP直列化はstale対策の代わりにならない。
+- Phase 2接続時の補足: `develop.get`はProcess V1でも表示用に`process:1`を加えるが、Native helperのhash対象である`DevelopSettings`の保存表現ではこのfieldを省略する。Backendの共通fingerprint実装はトップレベルの当該fieldだけをtoken単位で取り除く。他の数値・文字列やネストしたfieldは保持する。Native契約・version・patch・binaryの変更は不要で、V1/V2とも実binary probeで照合する。
 - 編集settings、import defaults、as-shot情報、photo History、Session Undo/Redo、選択を変更しない。`source_now()`と`accept()`は呼ばない。source cacheの参照/LRU更新、decode、Planの内部cacheは読み取り処理の副作用として許容する。
 - WB候補だけを返す。将来の適用側はidentityとrevisionを再検証し、既存mutation/readback/save fenceを利用する。
 

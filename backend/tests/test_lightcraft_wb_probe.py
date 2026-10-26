@@ -20,12 +20,18 @@ def test_native_fingerprint_preserves_number_tokens_and_quoted_whitespace():
 
 
 def test_native_fingerprint_checks_text_and_structured_settings_agree():
-    result = {'content': [{'type': 'text', 'text': '{ "exposure": 1e-7 }'}],
+    result = {'isError': False, 'content': [{'type': 'text', 'text': '{ "exposure": 1e-7 }'}],
               'structuredContent': {'exposure': 1e-7}}
     assert probe.result_fingerprint(result) == hashlib.sha256(b'{"exposure":1e-7}').hexdigest()
     result['structuredContent']['exposure'] = 0.5
     with pytest.raises(ValueError, match='mismatch'):
         probe.result_fingerprint(result)
+
+
+def test_native_legacy_process_omission_keeps_other_tokens_and_nested_process():
+    text = '{"exposure":1e-7,"nested":{"process":1},"process":1,"wb":{"temp":5000.0}}'
+    native = '{"exposure":1e-7,"nested":{"process":1},"wb":{"temp":5000.0}}'
+    assert probe.settings_fingerprint(text) == hashlib.sha256(native.encode()).hexdigest()
 
 
 @pytest.mark.parametrize('text', ['[]', 'null', '"settings"'])

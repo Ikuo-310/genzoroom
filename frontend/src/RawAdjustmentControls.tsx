@@ -34,6 +34,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
       enabled={settings.sections[category === 'basic' ? 'light' : 'color']} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
+      autoWhiteBalance={category === 'color' ? {
+        disabled: actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable,
+        run: () => operate({ kind: 'wbAuto', metadata: {} }),
+      } : undefined}
       onToggle={() => operate({ kind: 'sectionToggle', metadata: { section: category === 'basic' ? 'light' : 'color',
         enabled: !settings.sections[category === 'basic' ? 'light' : 'color'] } })}
       onReset={() => operate({ kind: 'sectionReset', metadata: { section: category === 'basic' ? 'light' : 'color' } })}>
@@ -57,6 +61,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
       })}
     </RawCategory>)}
+    {raw.operationError && <p role="alert">{t(raw.operationError === 'raw_wb_no_valid_samples'
+      ? 'workspace.rawPreview.awNoSamples' : 'workspace.rawPreview.awFailed')}</p>}
     {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
     {raw.regenerationError && <div role="alert"><p>{t('workspace.rawPreview.regenerationFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.regenerating}
@@ -74,9 +80,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   </div>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onReset, children }: {
+function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, onToggle, onReset, children }: {
   category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
   onToggle: () => void; onReset: () => void; children: ReactNode;
+  autoWhiteBalance?: { disabled: boolean; run: () => void };
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
@@ -93,6 +100,10 @@ function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onR
         <span className="adjustment-category-label">{title}</span>
       </button></h3>
       <div className="adjustment-category-actions">
+        {autoWhiteBalance && <button type="button" className="adjustment-category-icon raw-auto-wb" data-category-command disabled={autoWhiteBalance.disabled}
+          onClick={autoWhiteBalance.run} aria-label={t('workspace.rawPreview.aw')} title={t('workspace.rawPreview.aw')}
+          onFocus={focusAdjustmentCategory}
+          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>AW</button>}
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} data-category-switch disabled={disabled}
           aria-pressed={enabled} onClick={onToggle} aria-label={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)}
           title={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)} onFocus={focusAdjustmentCategory}

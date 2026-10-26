@@ -149,7 +149,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(15);
+  expect(actions).toHaveLength(16);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.every(button => !button.disabled)).toBe(true);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -283,19 +283,22 @@ it('keeps the overlaid suffix outside the numeric temperature value during Enter
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
 });
 
-it('navigates RAW category controls in title, toggle, Reset order without activating them', async () => {
+it('navigates RAW category controls in title, AW, toggle, Reset order without activating them', async () => {
   await mount();
   const header = host.querySelector<HTMLElement>('.raw-adjustment-category .adjustment-category-header')!;
   const title = header.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
-  const toggle = header.querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
+  const aw = header.querySelector<HTMLButtonElement>('[data-category-command]')!;
+  const toggle = header.querySelector<HTMLButtonElement>('[data-category-switch]')!;
   const reset = header.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
   const enabled = toggle.getAttribute('aria-pressed');
   const historyCount = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
   const move = (element: HTMLElement, key: string) => historyKey(key, { ctrlKey: false, shiftKey: true }, element);
-  act(() => title.focus()); move(title, 'ArrowRight'); expect(document.activeElement).toBe(toggle);
+  act(() => title.focus()); move(title, 'ArrowRight'); expect(document.activeElement).toBe(aw);
+  move(aw, 'ArrowRight'); expect(document.activeElement).toBe(toggle);
   move(toggle, 'ArrowRight'); expect(document.activeElement).toBe(reset);
   move(reset, 'ArrowLeft'); expect(document.activeElement).toBe(toggle);
-  move(toggle, 'ArrowLeft'); expect(document.activeElement).toBe(title);
+  move(toggle, 'ArrowLeft'); expect(document.activeElement).toBe(aw);
+  move(aw, 'ArrowLeft'); expect(document.activeElement).toBe(title);
   expect(toggle.getAttribute('aria-pressed')).toBe(enabled);
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyCount);
 });
@@ -329,6 +332,7 @@ it.each(['Enter', ' '])('leaves RAW Reset activation to the native %s button act
   const reset = header.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
   act(() => title.focus());
   historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, title);
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, document.activeElement as HTMLElement);
   historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, document.activeElement as HTMLElement);
   expect(document.activeElement).toBe(reset);
   const before = vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action);
@@ -698,6 +702,7 @@ it('commits a RAW numeric draft before a section Reset operation', async () => {
 });
 
 it.each([
+  ['Auto WB', 'button.raw-auto-wb', 'wbAuto'],
   ['section Reset', 'button.adjustment-category-reset', 'sectionReset'],
   ['section Toggle', 'button[data-category-switch]', 'sectionToggle'],
 ] as const)('commits an open RAW keyboard gesture before %s', async (_name, selector, kind) => {
@@ -942,4 +947,63 @@ it.each(['another element', 'another window'])('does not reclaim a RAW slider af
   expect(document.activeElement).toBe(destination === 'another element' ? external : document.body);
   expect(keyboardAdjustment()).toBeNull();
   external.remove();
+});
+
+
+it('runs AW once through History, updates both WB values and Preview, and releases its momentary button', async () => {
+  await mount();
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  commitHistory.mockImplementation(async request => {
+    await pending;
+    const settings = { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: 'f'.repeat(64),
+      wb: { available: true, mode: 'auto', scale: 'kelvin' },
+      values: { ...request.doc.values, 'wb.temp': 5200, 'wb.tint': 11 } };
+    return rawHistoryResult({ ...request, doc: settings }, { history: {
+      initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+  });
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async doc => {
+    const result = rawHistoryData(doc);
+    return { ...result, steps: result.steps.map(step => ({ ...step, kind: 'wbAuto', metadata: {}, changes: [
+      { control: 'wb.temp', before: 6500, after: 5200 }, { control: 'wb.tint', before: 0, after: 11 } ] })) };
+  });
+  const aw = host.querySelector<HTMLButtonElement>('.raw-auto-wb')!;
+  expect(aw.textContent).toBe('AW'); expect(aw.disabled).toBe(false);
+  expect(aw.getAttribute('aria-pressed')).toBeNull();
+  expect(aw.parentElement?.firstElementChild).toBe(aw);
+  act(() => { aw.click(); aw.click(); }); await flush();
+  expect(aw.disabled).toBe(true);
+  expect(host.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(true);
+  historyKey(); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'wbAuto', metadata: {} });
+  await act(async () => finish()); await flush();
+  expect(aw.disabled).toBe(false); expect(aw.getAttribute('aria-pressed')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!.value).toBe('5200');
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!.value).toBe('11');
+  expect(history().textContent).toContain('Auto white balance');
+  expect(history().textContent).toContain('6500 K → 5200 K');
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[0].revision).toBe(2);
+});
+
+it.each(['off', 'wbUnavailable', 'helperUnavailable'])('disables AW when %s while retaining the category actions', async reason => {
+  vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => {
+    const settings = rawSettings(doc);
+    return { ...settings, sections: { ...settings.sections, color: reason !== 'off' },
+      wbAutoAvailable: reason !== 'helperUnavailable', wb: { ...settings.wb, available: reason !== 'wbUnavailable' } };
+  });
+  await mount();
+  expect(host.querySelector<HTMLButtonElement>('.raw-auto-wb')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('[data-category-switch]')!.disabled).toBe(false);
+});
+
+it('shows a rejected AW estimate without locking saved edits or retrying it as an unknown save', async () => {
+  await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_wb_no_valid_samples', 'rejected', 422));
+  const aw = host.querySelector<HTMLButtonElement>('.raw-auto-wb')!;
+  act(() => aw.click()); await flush();
+  expect(host.textContent).toContain('could not find suitable samples');
+  expect(aw.disabled).toBe(false);
+  expect(host.textContent).not.toContain('The RAW recipe could not be saved');
+  expect(history().querySelectorAll('li')).toHaveLength(1);
 });

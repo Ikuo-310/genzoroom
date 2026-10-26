@@ -162,6 +162,15 @@ describe('RAW History transport', () => {
     expect(path).toBe(`/api/raw/documents/${doc.handle}/history`);
     expect(init.headers).toEqual({ 'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': '1', 'X-Raw-Token': doc.documentToken });
   });
+  it.each([false, true])('accepts only empty AW History metadata (%s)', invalid => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0].kind = 'wbAuto'; data.steps[0].metadata = invalid ? { control: 'wb.temp' } : {};
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    if (invalid) return expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+    return expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'wbAuto', metadata: {} }] });
+  });
   it.each(['generation', 'rows', 'cursor', 'metadata', 'changes', 'oversize'])('rejects invalid History %s', async invalid => {
     const request = historyRequest('commit');
     const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });

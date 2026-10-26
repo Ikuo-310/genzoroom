@@ -280,6 +280,16 @@ class LightCraftMCP:
             self.abort("lightcraft_invalid_tool_response")
             raise MCPTransportError("lightcraft_invalid_tool_response")
         if result["isError"]:
+            if name == 'estimate_white_balance' and len(result['content']) == 1 and 'structuredContent' not in result:
+                try:
+                    text = result['content'][0]['text']
+                    value = _decode(text.encode()) if type(text) is str and len(text) <= 256 else None
+                    if type(value) is dict and set(value) == {'code'} and value['code'] in {
+                            'wb_invalid_request', 'wb_settings_mismatch', 'wb_geometry_mismatch', 'wb_point_outside_source',
+                            'wb_source_unavailable', 'wb_no_valid_samples', 'wb_estimation_failed', 'wb_unsupported'}:
+                        raise MCPToolError('raw_' + value['code'])
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    pass
             if name == "render_region_preview" and len(result['content']) == 1:
                 try:
                     text = result['content'][0]['text']

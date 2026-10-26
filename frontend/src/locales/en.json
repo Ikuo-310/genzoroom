@@ -277,6 +277,9 @@
   },
   "workspace": {
     "rawPreview": {
+      "aw": "Auto white balance",
+      "awNoSamples": "Auto white balance could not find suitable samples. Your settings have not changed.",
+      "awFailed": "Auto white balance could not be applied. Your settings have not changed. Reopen the photo if retrying fails.",
       "historyPosition": "History {{cursor}} / {{count}}",
       "historyLoading": "Loading RAW history…",
       "historyFailed": "RAW history could not be verified. Retry to refresh the list.",
