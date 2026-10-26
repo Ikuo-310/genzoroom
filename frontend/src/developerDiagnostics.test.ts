@@ -6,8 +6,16 @@ import {
   exportJpegDiagnosticsReport, exportWebGpuDiagnosticsReport,
 } from './developerDiagnostics';
 import { emptyJpegReport } from './jpegDiagnosticsReport';
+import { createRawViewerReport } from './rawViewerBenchmark';
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('includes RAW Viewer results in Full JSON through an explicit privacy projection', () => {
+  const environment = collectDiagnosticsEnvironment(), raw = createRawViewerReport([], 'idle', 'gpu', 3);
+  const full = createDiagnosticsReport(environment, createWebGpuReport(false, null), new Date(), emptyJpegReport(),
+    { ...raw, assetId: 'PRIVATE', rawPath: 'PRIVATE' } as typeof raw);
+  expect(full.rawPreview.viewer?.conditions.repeats).toBe(3);
+  expect(JSON.stringify(full.rawPreview)).not.toContain('PRIVATE');
+});
 const readBlob = (blob: Blob) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsText(blob);
 });
@@ -100,7 +108,7 @@ it('projects each diagnostic scope explicitly and uses a distinct download name'
   const full = createDiagnosticsReport(environment, webgpu, new Date('2026-10-02T08:30:00.000Z'), jpeg);
   const onlyJpeg = createJpegDiagnosticsReport(environment, jpeg, new Date('2026-10-02T08:30:00.000Z'));
   const onlyWebGpu = createWebGpuDiagnosticsReport(environment, webgpu, new Date('2026-10-02T08:30:00.000Z'));
-  expect(Object.keys(full)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'webgpu', 'jpeg']);
+  expect(Object.keys(full)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'webgpu', 'jpeg', 'rawPreview']);
   expect(Object.keys(onlyJpeg)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'jpeg']);
   expect(Object.keys(onlyWebGpu)).toEqual(['schemaVersion', 'generatedAt', 'environment', 'webgpu']);
   expect(JSON.stringify([full, onlyJpeg, onlyWebGpu])).not.toMatch(/PRIVATE\.JPG|assetId|secret/);

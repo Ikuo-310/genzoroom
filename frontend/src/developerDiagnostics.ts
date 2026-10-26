@@ -1,4 +1,5 @@
 import { downloadDiagnosticJson } from './diagnosticExport';
+import { createRawViewerReport } from './rawViewerBenchmark';
 import type { AdapterInfo, DiagnosticValue, SmokeCode, SmokeState } from './webgpuSmoke';
 import { createJpegReport, emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
 import { collectDiagnosticsEnvironment, type DiagnosticsEnvironment } from './diagnosticsEnvironment';
@@ -99,6 +100,7 @@ export interface DiagnosticsReport {
   environment: DiagnosticsEnvironment;
   webgpu: WebGpuReport;
   jpeg: JpegReport;
+  rawPreview: { viewer: import('./rawViewerBenchmark').RawViewerReport | null };
 }
 export interface JpegDiagnosticsReport { schemaVersion: 1; generatedAt: string; environment: DiagnosticsEnvironment; jpeg: JpegReport }
 export interface WebGpuDiagnosticsReport { schemaVersion: 1; generatedAt: string; environment: DiagnosticsEnvironment; webgpu: WebGpuReport }
@@ -145,9 +147,11 @@ export function createWebGpuReport(apiAvailable: boolean, state: SmokeState | nu
 }
 
 export function createDiagnosticsReport(environment: DiagnosticsEnvironment, webgpu: WebGpuReport,
-  date = new Date(), jpeg: JpegReport = emptyJpegReport()): DiagnosticsReport {
+  date = new Date(), jpeg: JpegReport = emptyJpegReport(), rawViewer: import('./rawViewerBenchmark').RawViewerReport | null = null): DiagnosticsReport {
   // Copy the data snapshot so a run continuing after export cannot alter this report.
-  return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu, jpeg: createJpegReport(jpeg) })) as DiagnosticsReport;
+  return JSON.parse(JSON.stringify({ schemaVersion: 1, generatedAt: date.toISOString(), environment, webgpu, jpeg: createJpegReport(jpeg),
+    rawPreview: { viewer: rawViewer ? createRawViewerReport(rawViewer.trials, rawViewer.status,
+      rawViewer.conditions.backend, rawViewer.conditions.repeats, rawViewer.failure) : null } })) as DiagnosticsReport;
 }
 
 export function createJpegDiagnosticsReport(environment: DiagnosticsEnvironment, jpeg: JpegReport, date = new Date()): JpegDiagnosticsReport {

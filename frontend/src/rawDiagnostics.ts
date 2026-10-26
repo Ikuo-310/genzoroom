@@ -28,7 +28,7 @@ const exact = (v: unknown, keys: string): v is Record<string, unknown> => !!v &&
   && Object.keys(v).sort().join(',') === keys.split(',').sort().join(',');
 const fail = (): never => { throw new RawDiagnosticError('raw_invalid_response'); };
 
-async function post(action: string, body: unknown, signal?: AbortSignal) {
+export async function postRawDiagnostic(action: string, body: unknown, signal?: AbortSignal) {
   const response = await fetch(`${ROOT}/${action}`, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000) });
@@ -42,8 +42,9 @@ async function post(action: string, body: unknown, signal?: AbortSignal) {
   }
   return response;
 }
+const post = postRawDiagnostic;
 
-async function json(action: string, body: unknown, signal?: AbortSignal) {
+export async function rawDiagnosticJson(action: string, body: unknown, signal?: AbortSignal) {
   const response = await post(action, body, signal);
   try {
     if (response.headers.get('content-type')?.split(';')[0] !== 'application/json') return fail();
@@ -52,6 +53,7 @@ async function json(action: string, body: unknown, signal?: AbortSignal) {
   catch { return fail(); }
   finally { await response.body?.cancel().catch(() => {}); }
 }
+const json = rawDiagnosticJson;
 
 export function rawTrialPlan(config: RawDiagnosticConfig): RawTrial[] {
   const rows: RawTrial[] = [];
@@ -147,7 +149,8 @@ export async function fetchRawTrial(runId: string, trial: RawTrial, signal: Abor
 }
 
 export function statistics(values: number[]) {
-  const sorted = values.filter(duration).sort((a, b) => a - b), n = sorted.length;
+  // Aggregation must retain slow observations; each protocol validates its own timing bounds.
+  const sorted = values.filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b), n = sorted.length;
   return n ? { count: n, min: sorted[0], max: sorted[n - 1], median: (sorted[Math.floor((n - 1) / 2)] + sorted[Math.floor(n / 2)]) / 2 }
     : { count: 0, min: null, max: null, median: null };
 }

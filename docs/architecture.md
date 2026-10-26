@@ -1156,6 +1156,16 @@ Environment / Capabilities stays visible above Logs, Real JPEG, WebGPU, Export E
 
 #### RAW Preview measurement owner (A4)
 
+Developer Diagnostics has three image-processing diagnostic families: WebGPU, Real JPEG and RAW Preview. RAW Preview includes the existing Whole micro-trials and a representative Viewer benchmark; neither supplies a performance acceptance threshold.
+
+`RawViewerBenchmark` extends the same authenticated RAW diagnostic owner with `scenario: viewer`. `raw_preview_sequence.py` runs one warm-up sequence and three measured sequences, each in an independent diagnostic process/document: open through initial Full, Whole Draft/Full, one Exposure mutation through Draft, interaction-end Full, Native 100% Region plan, Region render, one outside-cache Pan render, Before and After. Mutation affects only this temporary native document; no saved Recipe/History or Immich state is written. Whole requests use 1024 px; the diagnostic Region window is at most 768 × 576 with context/prefetch 0 and StageCache OFF. These are measurement conditions, not C3, Region or StageCache policy changes.
+
+The Frontend uses the existing bounded transfer and image decode mechanisms, then commits each verified result through the production `ImageViewer`. Its optional `rawDiagnosticView` applies the same Native scale/pan transform for diagnostic 100% and Pan placement; normal Viewer callers omit it. The benchmark retains only the current bitmap and Whole base URLs, releases them on replacement/Stop/departure, and retains failed cleanup ownership for Retry. Late responses cannot publish after Stop. Backend admission excludes normal RAW workspaces through the existing lock. At most 40 serial steps run, with existing operation/decode/deadline limits.
+
+Reports contain individual runs and min/median/max excluding warm-up, engine version/commit/actual EXE SHA, configured GPU backend/adapter, contracts, Native and Whole/Region geometry, Region limiting and StageCache state. Timings separate Backend operation, native, available validation, response wait, transfer, browser decode and React layout adoption. Open includes native document import but excludes process startup/source download. Whole native includes MCP encode/readback; Region native is engine-reported and Region validation is not separately collected. Response wait overlaps Backend work and must not be added to it. Adopt means React layout commit, not compositor presentation. This controlled diagnostic sequence is not a timing measurement of the production scheduler or physical input latency; Smoke separately checks its correctness. No thresholds, automatic old-version comparison, long memory tracking or pixel-perfect old-version comparison exist.
+
+Full diagnostics JSON includes `rawPreview.viewer`; RAW export uses the same `downloadDiagnosticJson` / `downloadJsonReport` path as JPEG/WebGPU (export envelope schemaVersion 2, additive RAW field). Export revalidates and projects the allowlisted metadata and timings, excludes Asset IDs, source paths, Recipe/History and image data, and never automatically persists results. The CLI Smoke uses schemaVersion 1 with stage outcomes, safe geometry snapshots and fixed failure codes; its optional Backend-only samples explicitly leave Viewer timings unavailable.
+
 `RawPreviewDiagnostics` starts only on an explicit action with an Immich RAW Asset UUID, independent of Gallery selection. Windows LocalHost mounts authenticated POST `/api/developer/raw-preview/{start,status,prepare,render,stop}` behind its existing Host, Origin and no-store protection. Docker does not mount these routes. The existing read-only `RawSourceCache` downloads one original into private temporary storage; callers cannot supply a filesystem path. Measurements use import defaults, never the saved editing Recipe.
 
 `RawDiagnosticsApi` owns one run ID, one operation, one image-transfer lease, a source cache and a separate `LightCraftManager`/`LightCraftRawSession`. The normal RAW API's admission lock atomically excludes diagnostics while a workspace, operation or transfer is owned; normal workspace admission is blocked until diagnostic cleanup succeeds. Diagnostic manager creation copies trusted executable configuration and overrides only CPU (`off`) or GPU (`dx12`) configuration. It neither mutates normal process configuration nor writes settings, Recipe, History or Immich. Explicit per-session StageCache options preserve the normal editing environment-variable contract.
@@ -1221,7 +1231,7 @@ Real JPEG timing covers total run and cleanup, automatic asset lookup, original 
 
 Three local JSON downloads use `schemaVersion: 2` and the shared export-time metadata envelope:
 
-- Full: `schemaVersion`, `generatedAt`, `application`, `immich`, `environment`, `webgpu`, `jpeg`.
+- Full: `schemaVersion`, `generatedAt`, `application`, `immich`, `environment`, `webgpu`, `jpeg`, `rawPreview`.
 - JPEG-only: `schemaVersion`, `generatedAt`, `application`, `immich`, `environment`, `jpeg`.
 - WebGPU-only: `schemaVersion`, `generatedAt`, `application`, `immich`, `environment`, `webgpu`.
 

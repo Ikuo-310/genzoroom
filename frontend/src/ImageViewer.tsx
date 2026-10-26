@@ -20,6 +20,7 @@ type ImageViewerProps = {
   rawRegionDisplay?: RawRegionDisplay;
   rawRegionOutline?: boolean;
   onRawViewChange?: (view: RawView) => void;
+  rawDiagnosticView?: { actual: boolean; nativePanX: number; nativePanY: number };
   previewStatus?: 'loading' | 'error';
   statusNote?: string;
   previewPixels?: boolean;
@@ -56,7 +57,7 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 
-export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const shortcut = useShortcutDisplay();
   const beforeShortcut = shortcut.label('viewerBefore');
@@ -285,6 +286,14 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   function stopPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; if (rawFrame) setViewInteracting(false); }
   }
+
+  useLayoutEffect(() => {
+    if (!rawFrame || !rawDiagnosticView) return;
+    // Diagnostics drive the same Native transform without synthesizing trusted pointer capture.
+    setFitMode(!rawDiagnosticView.actual);
+    setScale(rawDiagnosticView.actual ? 1 / dpr : fitScale);
+    setPan({ x: rawDiagnosticView.nativePanX / dpr, y: rawDiagnosticView.nativePanY / dpr });
+  }, [rawDiagnosticView?.actual, rawDiagnosticView?.nativePanX, rawDiagnosticView?.nativePanY, !!rawFrame, fitScale, dpr]);
 
   return <section className="viewer-panel" aria-label={t('workspace.viewer')}>
     <div className="viewer-toolbar">

@@ -1052,5 +1052,13 @@
     "unmatched": "STACK候補外",
     "noCandidates": "STACK候補はまだありません",
     "empty": "Homeで写真を選択してSTACK管理へ送ってください"
+  },
+  "rawViewerBenchmark": {
+    "title": "RAW Viewerベンチマーク",
+    "description": "WebGPU・Real JPEGと並ぶRAW Preview経路の診断です。測定値による合否判定は行いません。",
+    "conditions": "代表RAW 1件、ウォームアップ1シーケンス＋測定3シーケンス。Whole: 1024px、Region: Native 100%・768 × 576の表示領域、Pan 1回、StageCache OFF。",
+    "start": "RAW Viewerベンチマークを実行",
+    "runs": "個別実行結果（ミリ秒）",
+    "notes": "製品のNative adapterとImageViewerを使う診断シーケンスです。製品schedulerの時間は測定しません。adoptはReactのlayout commitであり画面描画完了ではありません。Region nativeはengine報告値、Whole nativeはMCP readbackを含みます。openはprocess起動・source downloadを除きます。ウォームアップは別documentで実行します。性能閾値や長時間memory追跡はありません。"
   }
 }

@@ -4,6 +4,7 @@ import { WebGpuDiagnostics } from './WebGpuDiagnostics';
 import { RealJpegDiagnostics } from './RealJpegDiagnostics';
 import { ExportEngineDiagnostics } from './ExportEngineDiagnostics';
 import { RawPreviewDiagnostics } from './RawPreviewDiagnostics';
+import { createRawViewerReport } from './rawViewerBenchmark';
 import { RawRegionDiagnostics } from './RawRegionDiagnosticsPanel';
 import { DeveloperLogs } from './DeveloperLogsPanel';
 import { frontendLogger } from './frontendLogging';
@@ -22,6 +23,7 @@ export function DeveloperPage() {
   const [webgpu, setWebgpu] = useState(() => createWebGpuReport(environment.gpuApiAvailable, null));
   const [exportFailed, setExportFailed] = useState({ full: false, jpeg: false, webgpu: false });
   const [jpeg, setJpeg] = useState(emptyJpegReport);
+  const [rawViewer, setRawViewer] = useState(() => createRawViewerReport([], 'idle', 'gpu', 3));
   const [selectedTab, setSelectedTab] = useState<DiagnosticTab>('logs');
   const tabButtons = useRef<Partial<Record<DiagnosticTab, HTMLButtonElement | null>>>({});
   const loggingExitHandled = useRef(false);
@@ -33,7 +35,7 @@ export function DeveloperPage() {
   };
   const exportFull = async () => {
     setExportFailed(value => ({ ...value, full: false }));
-    try { await exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu, new Date(), jpeg)); }
+    try { await exportDiagnosticsReport(createDiagnosticsReport(environment, webgpu, new Date(), jpeg, rawViewer)); }
     catch { setExportFailed(value => ({ ...value, full: true })); }
   };
   const exportJpeg = async () => {
@@ -107,7 +109,7 @@ export function DeveloperPage() {
       <ExportEngineDiagnostics />
     </div>
     <div id="rawPreview-panel" role="tabpanel" aria-labelledby="rawPreview-tab" tabIndex={0} hidden={selectedTab !== 'rawPreview'}>
-      <RawPreviewDiagnostics active={selectedTab === 'rawPreview'} />
+      <RawPreviewDiagnostics active={selectedTab === 'rawPreview'} onViewerReport={setRawViewer} />
     </div>
     <div id="rawRegion-panel" role="tabpanel" aria-labelledby="rawRegion-tab" tabIndex={0} hidden={selectedTab !== 'rawRegion'}>
       <RawRegionDiagnostics active={selectedTab === 'rawRegion'} />

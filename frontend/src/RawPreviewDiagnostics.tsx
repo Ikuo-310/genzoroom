@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { downloadJsonReport } from './jsonReportDownload';
+import { RawViewerBenchmark } from './RawViewerBenchmarkPanel';
+import type { RawViewerReport } from './rawViewerBenchmark';
 import { createRawDiagnosticReport, fetchRawTrial, leaveRawDiagnostic, prepareRawTrial, rawComparisons,
   rawDiagnosticClosed, rawStatistics, startRawDiagnostic, stopRawDiagnostic, RawDiagnosticError,
   type RawDiagnosticConfig, type RawTrialResult } from './rawDiagnostics';
@@ -28,8 +30,8 @@ async function decode(blob: Blob, width: number, height: number, signal: AbortSi
   } finally { remove(); image.removeAttribute('src'); URL.revokeObjectURL(url); }
 }
 
-export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnosticDependencies }: {
-  active?: boolean; dependencies?: Dependencies;
+export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnosticDependencies, onViewerReport }: {
+  active?: boolean; dependencies?: Dependencies; onViewerReport?: (report: RawViewerReport) => void;
 }) {
   const { t } = useTranslation();
   const [config, setConfig] = useState(defaults);
@@ -201,5 +203,6 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
     {!comparisons.matches.length && <p>{t('rawDiagnostics.unverified')}</p>}
     {comparisons.matches.map(m => <p key={`${m.temperature}:${m.repeat}`}>{m.temperature} #{m.repeat}: {t(`rawDiagnostics.matches.${m.result}`)}</p>)}
     <p>{t('rawDiagnostics.timingNotes')}</p><p>{t('rawDiagnostics.gpuNotes')}</p>
+    <RawViewerBenchmark active={active && !busy && !owner.current} onReport={onViewerReport} />
   </section>;
 }

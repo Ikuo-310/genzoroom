@@ -23,6 +23,17 @@ IDLE_SECONDS = 120
 
 
 def trial_plan(config):
+    if not isinstance(config, dict):
+        raise LightCraftError('raw_invalid_request')
+    if config.get('scenario') == 'viewer':
+        from raw_preview_sequence import sequence_plan
+        if set(config) != {'assetId', 'scenario', 'backend', 'repeats'} or config['backend'] not in ('cpu', 'gpu') \
+                or type(config['repeats']) is not int or not 1 <= config['repeats'] <= 3:
+            raise LightCraftError('raw_invalid_request')
+        try:
+            return {**config, 'assetId': str(UUID(config['assetId']))}, sequence_plan(config['repeats'])
+        except (ValueError, TypeError, AttributeError):
+            raise LightCraftError('raw_invalid_request') from None
     if set(config) != {"assetId", "quality", "stageCache", "backend", "temperature", "repeats", "budgetBytes"}:
         raise LightCraftError("raw_invalid_request")
     try:
@@ -212,7 +223,11 @@ class RawDiagnosticsApi:
                 raise LightCraftError("raw_diagnostic_binary_changed")
             run["binary"] = binary
             self._check_deadline()
+            opened = monotonic()
             handle, snapshot = await self.raw.open_raw(run["config"]["assetId"], str(run["source"]))
+            if run['config'].get('scenario') == 'viewer':
+                from raw_preview_sequence import RawPreviewSequence
+                run['sequence'] = RawPreviewSequence(self.raw, handle, (monotonic() - opened) * 1000)
             run["handle"] = handle
             fingerprint = hashlib.sha256(snapshot._json.encode()).hexdigest()
             if run["settings"] is not None and run["settings"] != fingerprint:
@@ -243,6 +258,8 @@ class RawDiagnosticsApi:
         self._check_deadline()
         run = self.run
         trial = run["plan"][run["next"]]
+        if run['config'].get('scenario') == 'viewer':
+            return await self._render_sequence(trial)
         gpu_before = await self.manager.get_gpu_info()
         self._check_deadline()
         frame = await self._frame(trial)
@@ -275,6 +292,35 @@ class RawDiagnosticsApi:
         run["next"] += 1
         run["prepared"] = False
         run["touched"] = monotonic()
+        return response
+
+    async def _render_sequence(self, trial):
+        run = self.run
+        data, metadata = await run['sequence'].step(trial)
+        gpu = await self.manager.get_gpu_info()
+        artifact = self.manager.artifact_info()
+        if not artifact:
+            raise LightCraftError('raw_preview_unsupported')
+        self._check_deadline()
+        metadata['engine'] = {'version': artifact['version'], 'commit': artifact['upstreamCommit'],
+            'binarySha256': run['binary'], 'previewContract': 1, 'regionContract': 1,
+            'geometryDescriptor': artifact['geometryDescriptorContract'],
+            'gpuBackend': 'off' if run['config']['backend'] == 'cpu' else 'dx12',
+            'gpuAdapter': gpu.adapter[:200] if gpu.adapter else None}
+        encoded = json.dumps(metadata, separators=(',', ':'), allow_nan=False)
+        if len(encoded) > 16 * 1024:
+            raise LightCraftError('raw_diagnostic_failed')
+        lease = object()
+        self._lease = lease
+        def release():
+            if self._lease is lease:
+                self._lease = None
+        response = _TrialResponse(encoded.encode() if trial['operation'] == 'regionPlan' else data,
+            media_type='application/json' if trial['operation'] == 'regionPlan' else 'image/png', headers={'X-Raw-Diagnostic': encoded})
+        response.release = release
+        run['next'] += 1
+        run['prepared'] = False
+        run['touched'] = monotonic()
         return response
 
     async def _close_native(self):

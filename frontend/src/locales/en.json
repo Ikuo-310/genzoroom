@@ -1062,5 +1062,13 @@
     "unmatched": "Outside stack candidates",
     "noCandidates": "No stack candidates yet",
     "empty": "Select photos on Home and send them to Manage Stacks"
+  },
+  "rawViewerBenchmark": {
+    "title": "RAW Viewer benchmark",
+    "description": "Observe the RAW Preview path alongside WebGPU and Real JPEG diagnostics. Timings do not determine correctness.",
+    "conditions": "One RAW; one warm-up sequence plus three measured sequences. Whole: 1024px; Region viewport: 768 × 576 at Native 100%; one Pan; StageCache OFF.",
+    "start": "Run RAW Viewer benchmark",
+    "runs": "Individual runs (milliseconds)",
+    "notes": "Diagnostic sequence using the production native adapter and ImageViewer; it does not time the production scheduler. Adopt is the React layout commit, not screen presentation. Region native time is engine-reported; Whole native time includes MCP readback. Open excludes process startup and source download. Warm-up uses a separate document. No performance thresholds or memory tracking."
   }
 }

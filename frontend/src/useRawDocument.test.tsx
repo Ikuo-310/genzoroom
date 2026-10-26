@@ -8,6 +8,8 @@ import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryPage, fakeRawHistory } from './test/rawHistory';
 import { regionRequest, regionResponse } from './test/rawRegion';
+import { ImageViewer } from './ImageViewer';
+import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
@@ -228,6 +230,94 @@ it('adopts both Region sides and safely rebinds the unchanged B1 Before base aft
   expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(1);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it('RAW Viewer smoke representative lifecycle', async () => {
+  vi.useFakeTimers(); enableAutomaticNative();
+  const asset = regionRequest().identity.assetId;
+  const report: { stages: Record<string, string>; geometry: Record<string, unknown>; finalState: unknown; failure: unknown } = {
+    stages: {}, geometry: {}, finalState: null, failure: null };
+  let stage = 'open', resize = () => {};
+  const host = document.createElement('div'); document.body.append(host);
+  const viewer = createRoot(host), views = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+  const native = vi.mocked(api.rawPreview).getMockImplementation()!;
+  vi.mocked(api.rawPreview).mockImplementation(async (...args) => {
+    const frame = await native(...args);
+    // Draft bitmap size can differ while the Full coordinate frame remains identical.
+    if (frame.quality === 'draft') return { ...frame, width: frame.width / 2, height: frame.height / 2,
+      blob: new Blob(['draft'], { type: `application/x-size-${frame.width / 2}x${frame.height / 2}` }) };
+    return frame;
+  });
+  const draw = () => act(() => viewer.render(<ImageViewer src={current!.url!} documentKey="smoke"
+    rawFrame={current!.frame} previewPixels onRawViewChange={views} alt="smoke" leftOpen={false} rightOpen={false}
+    onToggleLeft={() => {}} onToggleRight={() => {}} />));
+  const snapshot = () => {
+    const f = current!.frame!, view = views.mock.calls.at(-1)![0];
+    const box = host.querySelector<HTMLElement>('.raw-native-frame')!;
+    return { geometryId: f.geometryId, nativeWidth: f.nativeWidth, nativeHeight: f.nativeHeight,
+      fullWidth: f.fullWidth, fullHeight: f.fullHeight, aspect: f.aspect,
+      bitmapWidth: current!.width, bitmapHeight: current!.height, displayScale: view.scale,
+      displayOffset: { x: view.panX, y: view.panY }, placement: host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform,
+      wholeDisplay: { width: box.style.width, height: box.style.height }, regionActive: !!current!.regionDisplay,
+      revision: current!.imageRevision, viewGeneration: vi.mocked(api.rawPreview).mock.calls.at(-1)![4]!.viewGeneration };
+  };
+  const pass = () => { report.stages[stage] = 'pass'; };
+  const settle = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(250); }); await flush(); };
+  try {
+    await render(asset); await flush();
+    expect(current?.status).toBe('ready'); expect(current?.settings?.controls.length).toBeGreaterThan(0);
+    expect(current?.url).toBeTruthy(); pass();
+    const fit = { width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64),
+      dpr: 1, scale: .25, fit: true, panX: 0, panY: 0, interacting: false };
+    act(() => current!.viewChanged(fit)); await settle();
+    stage = 'wholeDraft';
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); }); await settle();
+    expect(api.setRawControls).toHaveBeenCalledOnce();
+    expect(current?.quality).toBe('draft'); expect(current?.imageRevision).toBe(current?.settings?.revision);
+    draw();
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 750 }); act(() => resize());
+    const draft = snapshot(); report.geometry.draft = draft; pass();
+    stage = 'wholeFull'; act(() => current!.flushControls('light.exposure')); await flush();
+    expect(current?.quality).toBe('full'); draw();
+    const full = snapshot(); report.geometry.full = full; pass();
+    stage = 'geometryStability';
+    const { bitmapWidth: _dw, bitmapHeight: _dh, ...draftGeometry } = draft;
+    const { bitmapWidth: _fw, bitmapHeight: _fh, ...fullGeometry } = full;
+    expect(fullGeometry).toEqual(draftGeometry); expect(full.bitmapWidth).not.toBe(draft.bitmapWidth); pass();
+    stage = 'mutation'; expect(current?.settings?.values['light.exposure']).toBe(1);
+    expect(current?.imageRevision).toBe(2); expect(current?.dirty).toBe(false); pass();
+    stage = 'region'; act(() => current!.viewChanged({ ...fit, scale: 1, fit: false })); await settle();
+    expect(vi.mocked(api.rawRegion).mock.calls.some(call => 'desiredLongEdge' in call[1])).toBe(true);
+    expect(current?.regionDisplay?.after.metadata.documentRevision).toBe(2);
+    expect(current?.regionDisplay?.after.metadata.geometryId).toBe(current?.frame?.geometryId);
+    expect(current?.regionDisplay?.wholeAfter.url).toBe(current?.url); pass();
+    stage = 'pan'; act(() => current!.viewChanged({ ...fit, scale: 1, fit: false, panX: 500 })); await settle();
+    expect(current?.regionDisplay?.after.metadata.quality).toBe('full'); pass();
+    stage = 'zoomOut'; act(() => current!.viewChanged(fit)); await settle();
+    expect(current?.regionDisplay).toBeUndefined(); expect(current?.url).toBeTruthy(); pass();
+    stage = 'beforeAfter'; const after = current!.url;
+    await render(asset, true); await flush(); expect(current?.beforeStatus).toBe('ready'); expect(current?.beforeUrl).toBeTruthy();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[0].documentToken).toBe(current?.document?.documentToken);
+    await render(asset, false); await flush(); expect(current?.url).toBe(after); pass();
+    report.finalState = { revision: current!.imageRevision,
+      viewGeneration: [...vi.mocked(api.rawPreview).mock.calls].reverse().find(call => call[3] === 'after')![4]!.viewGeneration, quality: current!.quality,
+      geometryId: current!.frame!.geometryId, regionActive: !!current!.regionDisplay, ownerReleased: false };
+    stage = 'close'; const delivery = current!.regionDelivery;
+    await render(null); await flush(); expect(current).toBeNull(); expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(delivery?.state.pending).toBeUndefined(); expect(delivery?.state.running).toBeUndefined(); pass();
+    report.finalState = { ...(report.finalState as object), ownerReleased: true };
+  } catch (cause) {
+    report.stages[stage] = 'fail'; report.failure = { stage,
+      code: stage === 'geometryStability' ? 'draft_full_geometry_changed' : 'viewer_transition_failed',
+      expected: 'stage_completed', actual: 'assertion_or_operation_failed' };
+    throw cause;
+  } finally {
+    act(() => viewer.unmount()); host.remove();
+    console.log(`RAW_SMOKE_JSON:${JSON.stringify(report)}`);
+  }
+});
 
 function enableBefore() {
   vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64) }));

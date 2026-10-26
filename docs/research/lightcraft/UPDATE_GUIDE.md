@@ -108,12 +108,29 @@ A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Fronten
 2. 専用のclean checkoutでmanaged patchを追随する。`git apply --check`を含め、部分適用・重複・余分なdiffがないことを確認する。本家の現像式を独自に移植しない。
 3. manifestのversion／commit、patch digest／targetsを更新し、manifestをidentityの正本として保つ。
 4. 変更に関係するNative focused test、build、実binary probeを行い、receipt／manifest tuple／actual binary SHAを照合する。Before／Preview／Region contractsとgeometry descriptorを確認し、CPU／DX12の基本描画を確認する。
-5. GenzoRoom側の関連focused regressionを行う。最低限、persisted RAW Recipeのbest-effort restore、RAW編集Reset、RAW Viewer smokeを確認する。変更が影響しない領域の全suiteは実行しない。
+5. GenzoRoom側の関連focused regressionを行う。RAW Viewer smokeは下記の単一commandで実行する（persisted RAW Recipeのbest-effort restoreとRAW編集Resetも含む）。変更が影響しない領域の全suiteは実行しない。
 6. 短いWindows実機目視でPreview、Before／After、操作可能性を確認する。失敗や明確な異常があれば、観測された範囲だけ追加調査する。
 7. focused regressionに問題がなく、有用な修正・改善がある新versionを採用する。旧versionより高速であることや画素完全一致は条件にしない。
 8. 更新後のmanifest／receiptと変更した関連文書を揃える。旧Recipeの事前変換、旧engine切替やmigration frameworkは導入しない。
 
 性能benchmark、RSS／VRAM長時間測定、Pan trace、scheduler timing matrix、budget policy比較などはこの標準フローに含めない。明確な回帰等の兆候がある場合だけ、原因を絞る追加調査として実施する。
+
+### RAW Viewer Smokeと任意のBenchmark
+
+repository rootのPowerShellで実行する。Frontendの既存npm依存とrepository `.venv`が必要。
+
+```powershell
+.\.venv\Scripts\python.exe native/lightcraft/raw_preview_smoke.py
+.\.venv\Scripts\python.exe native/lightcraft/raw_preview_smoke.py --json-out artifacts/raw-preview-smoke-YYYYMMDD.json
+```
+
+通常はcorrectnessのみ。実managed EXEのready・receipt／SHA・Preview／Region各contract 1・geometry descriptor 2を確認し、Viewer lifecycleはReact／Region fixture、Recipe復元・失敗後Resetは既存API統合fixtureで確認する。Nativeの全面render probeは重複しない。Draft／Fullのbitmap差は許容し、同revision／viewのgeometry・Native／Full寸法・aspect・表示scale／offset／Whole領域を照合する。ブラウザ実動作・実RAW画質の目視を代替しない。`--json`はstdoutへschemaVersion 1のJSON、短い結果はstderrへ出す。失敗はstageと固定codeで記録する。
+
+JSONは更新時の任意の比較資料として保存できる。過去版とのJSON diffや速度比較は必須工程ではない。生成結果を自動commitしない。
+
+RAW Preview Benchmarkは `/developer` → RAW Preview → RAW Viewerベンチマークで利用する正式なDeveloper Diagnostics。代表RAWのAsset UUIDとCPU／DX12を指定し、ウォームアップ1回＋測定3回で個別結果とmin／median／maxを取得する。既存Full JSON exportにも `rawPreview.viewer` として含まれ、RAW側exportも共通download方式を使う。Asset UUID・RAW path・Recipe・PNGはexportしない。性能回帰の疑い、またはViewer／transport等の改善評価時に任意で実行し、数値を更新の必須性能判定にはしない。
+
+CLIでBackend adapter側だけを軽く測る場合は、同じSmokeへ `--benchmark --raw-file <代表RAW> --json-out <保存先>` を追加できる。これはNative／MCP／Backend経路の観測であり、Frontend decode／Viewer adoptは収集しない（JSONにも明示）。Viewer側を含む測定はDeveloper Diagnosticsを使う。Benchmarkの遅さや取得失敗はSmokeのcorrectness結果を変更しない。実行時間の上限はhang検出用で、性能threshold、旧版比較、長時間memory追跡やpolicy tuningは行わない。
 
 ## 上流に同等機能が入った場合
 
