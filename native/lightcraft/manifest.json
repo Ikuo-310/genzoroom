@@ -3,6 +3,7 @@
     {
       "targets": [
         "Cargo.lock",
+        "crates/engine/src/cmd/develop.rs",
         "crates/engine/src/media.rs",
         "crates/engine/src/slide_title.rs",
         "crates/gpu/src/lib.rs",
@@ -19,15 +20,18 @@
         "crates/mcp/src/region_fixtures.json",
         "crates/mcp/src/region_schema.json",
         "crates/mcp/src/tools.rs",
+        "crates/mcp/src/wb.rs",
+        "crates/mcp/src/wb/tests.rs",
         "crates/mcp/tests/it/e2e.rs",
+        "crates/pipeline/src/auto.rs",
         "crates/pipeline/src/geometry.rs",
         "crates/pipeline/src/lib.rs",
         "crates/pipeline/src/tests.rs",
         "crates/ui-egui/src/render.rs"
       ],
       "file": "patches/0002-v0.14-native-contracts.patch",
-      "purpose": "Native Before, adaptive Whole and Region plan/render contract 1 with shared finite StageCache",
-      "sha256": "15d584004cb22db3f08ef315f21d2f7fcdfcd494ee02af502d8bd6f1b2ab2632"
+      "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1",
+      "sha256": "9308d0663de3e4d1f6fd65e564fb04cc7ac1c993b5c1a2aae29ef1f72b521063"
     }
   ],
   "commit": "03c88c166c054c009db2a47187d59991f6232b85",
@@ -36,6 +40,8 @@
   "contracts": {
     "before": 1,
     "preview": 1,
-    "region": 1
-  }
+    "region": 1,
+    "wb": 1
+  },
+  "developmentTargetDir": "target-wb-phase1"
 }

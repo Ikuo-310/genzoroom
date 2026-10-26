@@ -243,7 +243,7 @@ async def create(tmp_path, *, timeouts=QUICK):
     exe.with_suffix('.genzoroom.json').write_text(json.dumps({
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
-        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1}), encoding='utf-8')
+        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

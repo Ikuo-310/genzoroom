@@ -30,6 +30,33 @@ def test_archived_010_manifest_and_patch_remain_reproducible():
     assert value['patches'][0]['sha256'] == '6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc'
 
 
+@pytest.mark.parametrize('changes', [
+    {'contracts': {'before': 1, 'preview': 1, 'region': 1, 'wb': True}},
+    {'contracts': {'before': 1, 'preview': 1, 'region': 1, 'wb': 2}},
+    {'developmentTargetDir': None}, {'developmentTargetDir': 'target'},
+    {'developmentTargetDir': '../target'}, {'developmentTargetDir': 'target/release'},
+])
+def test_wb_manifest_requires_a_supported_contract_and_independent_target(tmp_path, changes):
+    value = {**build.manifest(), **changes}
+    path = tmp_path / 'manifest.json'
+    path.write_text(json.dumps(value), encoding='utf-8')
+    with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target'):
+        build.manifest(path)
+
+
+def test_wb_receipt_adds_only_the_independent_wb_contract(tmp_path):
+    binary = tmp_path / 'engine.exe'
+    binary.write_bytes(b'fixture executable')
+    value = build.manifest()
+    actual = build.receipt(binary, value)
+    assert actual['wbContract'] == 1
+    assert all(actual[key] == 1 for key in ('beforeContract', 'previewContract', 'regionContract'))
+    assert actual['geometryDescriptorContract'] == 2
+    assert actual['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()
+    without_wb = {**value, 'contracts': {'before': 1, 'preview': 1, 'region': 1}}
+    assert 'wbContract' not in build.receipt(binary, without_wb)
+
+
 def test_browser_identity_is_generated_from_the_managed_manifest():
     source = build.ROOT / 'sync_identity.py'
     spec = importlib.util.spec_from_file_location('sync_identity', source)

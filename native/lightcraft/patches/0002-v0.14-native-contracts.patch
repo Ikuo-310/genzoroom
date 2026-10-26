@@ -13,6 +13,29 @@ index 10bb99e6302508b1f697dc6a300e5028744603bd..78357f3d3476e4e536f619fe16f40b3b
  ]
  
  [[package]]
+diff --git a/crates/engine/src/cmd/develop.rs b/crates/engine/src/cmd/develop.rs
+index fbc3d4041a7404175a24e53353a632724ac33a1a..75cc25e398ad0a200fd550b2fac28bcc39d29939 100644
+--- a/crates/engine/src/cmd/develop.rs
++++ b/crates/engine/src/cmd/develop.rs
+@@ -451,17 +451,7 @@ pub fn specs() -> Vec<CommandSpec> {
+             let d = s.develop_of(id).unwrap_or_default();
+             // Sample a small neighbourhood in the oriented source.
+             let o = src.oriented(d.orientation);
+-            let (cx, cy) = ((x.clamp(0.0, 1.0) * o.width as f64) as isize, (y.clamp(0.0, 1.0) * o.height as f64) as isize);
+-            let mut acc = [0.0f32; 3];
+-            for dy in -2..=2 {
+-                for dx in -2..=2 {
+-                    let c = o.get_clamped(cx + dx, cy + dy);
+-                    for i in 0..3 {
+-                        acc[i] += c[i] / 25.0;
+-                    }
+-                }
+-            }
+-            let patch = lightcraft_raster::Rgb32f::filled(4, 4, acc);
++            let patch = lightcraft_pipeline::auto::wb_pick_sample(&o, x, y);
+             let (t, tint) = lightcraft_pipeline::auto::auto_wb(&patch, &info);
+             edit(s, "develop.wbPick", "White Balance", |d| {
+                 lightcraft_pipeline::local::normalize_wb(d, &info);
 diff --git a/crates/engine/src/media.rs b/crates/engine/src/media.rs
 index e76ef8169161f05fc7b5b16b67716e81e64009e0..0f45f2629639419734512c783e58ea7be2260acc 100644
 --- a/crates/engine/src/media.rs
@@ -556,21 +579,22 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..d461c3241df03e058e32a29ffe644def
 +[dev-dependencies]
 +lightcraft-testkit = { workspace = true }
 diff --git a/crates/mcp/src/backend.rs b/crates/mcp/src/backend.rs
-index 6a2c2efb9f59abdf59b639d07963e77385ac1697..c6a542dd399842d74d7e4bb2cded96b6ef0de116 100644
+index 6a2c2efb9f59abdf59b639d07963e77385ac1697..bca68105a05b44e0e4f1016a5a56eb2962cd6bbe 100644
 --- a/crates/mcp/src/backend.rs
 +++ b/crates/mcp/src/backend.rs
-@@ -16,6 +16,9 @@ pub trait Backend {
+@@ -16,6 +16,10 @@ pub trait Backend {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
      /// True when a real UI is attached (`ui.inspect`, `ui.clickWidget`, `ui.pointer` … work).
      fn has_ui(&self) -> bool;
 +    /// Explicit support; a remote backend must not silently ignore adaptive arguments.
 +    fn preview_contract(&self) -> bool { false }
 +    fn region_contract(&self) -> bool { false }
++    fn wb_contract(&self) -> bool { false }
      /// Short human description ("headless", "remote 127.0.0.1:7980").
      fn describe(&self) -> String;
      /// Progress/cancellation for the next headless batch export. Other backends ignore it.
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40e55fac21 100644
+index d62a9a707ef4a77f905e7a30c4addd087efc055f..87fc7c2b61e7b1c94fbd8ed4bb14eaed34964ffc 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
 @@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
@@ -675,11 +699,12 @@ index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -121,13 +198,26 @@ impl Backend for Headless {
+@@ -121,13 +198,27 @@ impl Backend for Headless {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
          let p = if params.is_null() { json!({}) } else { params };
          match method {
 +            "ui.region" => crate::region::execute(self, &p).map_err(str::to_string),
++            "ui.estimateWhiteBalance" => crate::wb::execute(self, &p).map_err(str::to_string),
              "engine.execute" | "ui.menu.invoke" | "command" => {
                  let id = p.get("command").or(p.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
                  let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
@@ -703,7 +728,7 @@ index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -137,14 +227,32 @@ impl Backend for Headless {
+@@ -137,14 +228,32 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -738,17 +763,18 @@ index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40
                  }
              }
              "app.export" => self.export(&p),
-@@ -155,6 +263,9 @@ impl Backend for Headless {
+@@ -155,6 +264,10 @@ impl Backend for Headless {
          }
      }
  
 +    fn preview_contract(&self) -> bool { true }
 +    fn region_contract(&self) -> bool { true }
++    fn wb_contract(&self) -> bool { true }
 +
      fn has_ui(&self) -> bool {
          false
      }
-@@ -214,7 +325,8 @@ mod tests {
+@@ -214,7 +327,8 @@ mod tests {
              for (folder, name) in [(&dir, format!("lower.{ext}")), (&nested, format!("upper.{}", ext.to_ascii_uppercase()))] {
                  let path = folder.join(name);
                  std::fs::write(&path, b"discovery only, not a decoded photo").unwrap();
@@ -758,7 +784,7 @@ index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40
              }
          }
          std::fs::write(nested.join("notes.txt"), b"not a photo").unwrap();
-@@ -225,6 +337,75 @@ mod tests {
+@@ -225,6 +339,75 @@ mod tests {
          std::fs::remove_dir_all(dir).unwrap();
      }
  
@@ -835,10 +861,10 @@ index d62a9a707ef4a77f905e7a30c4addd087efc055f..938163c29ecb65151f779e10b9272c40
      #[test]
      fn headless_sessions_get_the_sam3_model_folder() {
 diff --git a/crates/mcp/src/lib.rs b/crates/mcp/src/lib.rs
-index 4f9251bcba216893241308d83f9f92ea8fc8e204..5a6c578c562bbd15ef50bec75a7997c0f147bad0 100644
+index 4f9251bcba216893241308d83f9f92ea8fc8e204..17a55a139c8741a86fd8aebde55bb4c372a23a8d 100644
 --- a/crates/mcp/src/lib.rs
 +++ b/crates/mcp/src/lib.rs
-@@ -19,6 +19,8 @@
+@@ -19,8 +19,11 @@
  mod backend;
  mod base64;
  mod headless;
@@ -846,7 +872,10 @@ index 4f9251bcba216893241308d83f9f92ea8fc8e204..5a6c578c562bbd15ef50bec75a7997c0
 +mod region;
  mod server;
  mod tools;
++mod wb;
  
+ pub use backend::{Backend, ProgressHook, Remote};
+ pub use base64::{base64_decode, base64_encode};
 diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
 new file mode 100644
 index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0ff2790d65
@@ -4094,7 +4123,7 @@ index 0000000000000000000000000000000000000000..c989e855fd86155f1e67681bbdf368e7
 +  }
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894ec134d92 100644
+index 8f782bb9d903085ad63051d09919415b7a8005ed..d01bcea36029de77faf36ae6d41d667fb65624bc 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -118,6 +118,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
@@ -4123,23 +4152,25 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
-@@ -377,6 +389,7 @@ fn annotations(name: &str, title: &str) -> Value {
+@@ -377,6 +389,8 @@ fn annotations(name: &str, title: &str) -> Value {
              | "list_commands"
              | "doc_inspect"
              | "render_preview"
 +            | "render_region_preview"
++            | "estimate_white_balance"
              | "query_photos"
              | "list_controls"
              | "get_develop"
-@@ -414,6 +427,7 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
+@@ -414,6 +428,8 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
  /// All tools: helpers, plus the generated command tools when `with_commands`.
  pub fn tool_definitions(backend: &mut dyn Backend, with_commands: bool) -> Vec<Value> {
      let mut v = helper_tools(backend.has_ui());
 +    if backend.region_contract() { v.push(crate::region::tool()); }
++    if backend.wb_contract() { v.push(crate::wb::tool()); }
      if with_commands {
          v.extend(command_tools(backend));
      }
-@@ -437,7 +451,7 @@ fn activate(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+@@ -437,7 +453,7 @@ fn activate(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
      Ok(())
  }
  
@@ -4148,7 +4179,7 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
      static N: AtomicU64 = AtomicU64::new(0);
      std::env::temp_dir().join(format!("lightcraft-mcp-{}-{}-{tag}.png", std::process::id(), N.fetch_add(1, Ordering::Relaxed)))
  }
-@@ -445,6 +459,11 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
+@@ -445,6 +461,11 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
  /// Read a PNG the backend wrote, optionally downscale / re-encode as JPEG, and wrap it as image
  /// content (+ a text block with the metadata).
  fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
@@ -4160,7 +4191,7 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
      let bytes = match std::fs::read(file) {
          Ok(b) => b,
          Err(e) => return ToolResult::error(format!("cannot read rendered image {}: {e}", file.display())),
-@@ -484,6 +503,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
+@@ -484,6 +505,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
      } else if let Some(o) = info.as_object_mut() {
          o.remove("path");
      }
@@ -4173,7 +4204,7 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
      ToolResult {
          content: vec![json!({"type": "image", "data": base64_encode(&bytes), "mimeType": mime}), json!({"type": "text", "text": info.to_string()})],
          is_error: false,
-@@ -500,6 +525,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+@@ -500,6 +527,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
  }
  
  fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
@@ -4199,7 +4230,7 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
      if let Err(e) = check_save_path(b, args) {
          return ToolResult::error(e);
      }
-@@ -514,13 +558,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -514,13 +560,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
      let Some(id) = id else { return ToolResult::error("no active photo: import or select one, or pass `id`") };
      let file = temp_path("render");
      let path = file.to_string_lossy().to_string();
@@ -4239,15 +4270,16 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
  }
  
  fn screenshot(b: &mut dyn Backend, args: &Value) -> ToolResult {
-@@ -563,6 +630,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -563,6 +632,8 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
 +        "render_region_preview" => return crate::region::call(b, args),
++        "estimate_white_balance" => crate::wb::call(b, args),
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -618,7 +686,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -618,7 +689,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
@@ -4258,6 +4290,350 @@ index 8f782bb9d903085ad63051d09919415b7a8005ed..7fe638978469a325becc1024ae1e2894
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }
+diff --git a/crates/mcp/src/wb.rs b/crates/mcp/src/wb.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..110730b166c45abaf86eb1f1e0f5c973039ad0b9
+--- /dev/null
++++ b/crates/mcp/src/wb.rs
+@@ -0,0 +1,161 @@
++//! Read-only WB candidates. Identity belongs to the caller; no edit command or source acceptance runs here.
++use crate::{Backend, Headless, ToolResult};
++use lightcraft_engine::{
++    catalog::PhotoId,
++    develop::WbMode,
++    media::{SourceLevel, SourceRef},
++    pipeline,
++};
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++
++pub(crate) fn tool() -> Value {
++    let frame = json!({"type":"object","additionalProperties":false,
++        "required":["kind","geometryId","maxSide","quality","x","y"],"properties":{
++        "kind":{"type":"string","enum":["before","after"]},
++        "geometryId":{"type":"string","pattern":"^[a-f0-9]{64}$"},
++        "maxSide":{"type":"integer","minimum":16,"maximum":65536},
++        "quality":{"type":"string","enum":["draft","full"]},
++        "x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1}}});
++    json!({"name":"estimate_white_balance","title":"Estimate white balance",
++        "description":"Read-only Thumb WB estimate. settingsFingerprint is SHA-256 of compact, recursively key-sorted serde_json settings (get_develop). Pick frame coordinates are normalized Whole output, never Region-local; maxSide/quality reconstruct the displayed Whole Plan. No edit, selection, History or as-shot learning occurs.",
++        "inputSchema":{"type":"object","additionalProperties":false,
++        "required":["id","wb_contract","operation","settingsFingerprint","requestId"],"properties":{
++        "id":{"type":"string","pattern":"^[1-9][0-9]*$"},"wb_contract":{"type":"integer","enum":[1]},
++        "operation":{"type":"string","enum":["auto","pick"]},
++        "settingsFingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},
++        "requestId":{"type":"string","pattern":"^[a-f0-9]{32}$"},"frame":frame}}})
++}
++
++fn hex(v: &Value, len: usize) -> bool {
++    v.as_str().is_some_and(|s| s.len() == len && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
++}
++fn valid(p: &Value) -> bool {
++    let Some(o) = p.as_object() else { return false };
++    if o.len() != if p["operation"] == "pick" { 6 } else { 5 }
++        || o.keys().any(|k| !["id", "wb_contract", "operation", "settingsFingerprint", "requestId", "frame"].contains(&k.as_str()))
++        || p["wb_contract"].as_u64() != Some(1)
++        || !matches!(p["operation"].as_str(), Some("auto" | "pick"))
++        || !p["id"].as_str().is_some_and(|s| s.parse::<u64>().is_ok_and(|n| n > 0 && n.to_string() == s))
++        || !hex(&p["settingsFingerprint"], 64)
++        || !hex(&p["requestId"], 32)
++    {
++        return false;
++    }
++    if p["operation"] == "auto" {
++        return p.get("frame").is_none();
++    }
++    let f = &p["frame"];
++    f.as_object().is_some_and(|o| o.len() == 6 && o.keys().all(|k| ["kind", "geometryId", "maxSide", "quality", "x", "y"].contains(&k.as_str())))
++        && matches!(f["kind"].as_str(), Some("before" | "after"))
++        && hex(&f["geometryId"], 64)
++        && f["maxSide"].as_u64().is_some_and(|n| (16..=65536).contains(&n))
++        && matches!(f["quality"].as_str(), Some("draft" | "full"))
++        && ["x", "y"].iter().all(|k| f[k].as_f64().is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n)))
++}
++pub(crate) fn fingerprint(settings: &lightcraft_engine::develop::DevelopSettings) -> Result<String, &'static str> {
++    // Value's sorted maps make the digest independent of struct declaration order. This is not JCS.
++    let v = serde_json::to_value(settings).map_err(|_| "wb_estimation_failed")?;
++    let bytes = serde_json::to_vec(&v).map_err(|_| "wb_estimation_failed")?;
++    Ok(format!("{:x}", Sha256::digest(bytes)))
++}
++fn error(code: &str) -> ToolResult {
++    let safe = match code {
++        "wb_invalid_request"
++        | "wb_settings_mismatch"
++        | "wb_geometry_mismatch"
++        | "wb_point_outside_source"
++        | "wb_source_unavailable"
++        | "wb_no_valid_samples"
++        | "wb_estimation_failed"
++        | "wb_unsupported" => code,
++        _ => "wb_estimation_failed",
++    };
++    ToolResult::error(json!({"code":safe}).to_string())
++}
++pub(crate) fn call(b: &mut dyn Backend, p: &Value) -> ToolResult {
++    if !valid(p) {
++        return error("wb_invalid_request");
++    }
++    if !b.wb_contract() {
++        return error("wb_unsupported");
++    }
++    match b.call("ui.estimateWhiteBalance", p.clone()) {
++        Ok(v) => ToolResult::json(v),
++        Err(e) => error(&e),
++    }
++}
++pub(crate) fn execute(h: &mut Headless, p: &Value) -> Result<Value, &'static str> {
++    lightcraft_engine::guard::catch("WB estimate", || execute_inner(h, p)).unwrap_or(Err("wb_estimation_failed"))
++}
++
++/// Map continuous Whole output coordinates through the same affine and green-plane warp as rendering.
++fn source_point(frame: &pipeline::geometry::Frame, w: usize, h: usize, x: f64, y: f64) -> Result<(f64, f64), &'static str> {
++    // Unlike the legacy command, an out-of-image centre is never clamped into a plausible sample.
++    frame.wb_source_point(w, h, x, y).ok_or("wb_point_outside_source")
++}
++fn execute_inner(h: &mut Headless, p: &Value) -> Result<Value, &'static str> {
++    if !valid(p) {
++        return Err("wb_invalid_request");
++    }
++    let id = PhotoId(p["id"].as_str().and_then(|s| s.parse().ok()).ok_or("wb_invalid_request")?);
++    let photo = h.session.catalog.photo(id).ok_or("wb_source_unavailable")?.clone();
++    if fingerprint(&photo.develop)? != p["settingsFingerprint"] {
++        return Err("wb_settings_mismatch");
++    }
++    let original = (photo.width as usize, photo.height as usize);
++    // source_now learns as-shot WB and can rewrite legacy settings. Load without accepting/learning instead.
++    let decoded = h.session.media.source_ref(&photo, SourceLevel::Thumb).load_source().map_err(|_| "wb_source_unavailable")?;
++    let src = decoded.image.clone();
++    let info = decoded.info_or(h.session.source_info(id));
++    if src.width == 0 || src.height == 0 || src.width.checked_mul(src.height) != Some(src.data.len()) {
++        return Err("wb_source_unavailable");
++    }
++    let (temp, tint) = if p["operation"] == "auto" {
++        pipeline::auto::try_auto_wb(&src, &info)
++    } else {
++        let f = &p["frame"];
++        let side = f["maxSide"].as_u64().ok_or("wb_invalid_request")? as usize;
++        let mut job = h.session.render_job(id, side, side, f["kind"] == "before", true).ok_or("wb_source_unavailable")?;
++        if f["quality"] == "draft" {
++            job = job.draft();
++        }
++        // Match Region's existing cold-source reservation; this helper does not expand memory budgets.
++        if job.level == SourceLevel::Full
++            && !matches!(job.source, SourceRef::Loaded(_))
++            && original.0.checked_mul(original.1).and_then(|n| n.checked_mul(36)).is_none_or(|n| n > lightcraft_engine::memory::budget())
++        {
++            return Err("wb_source_unavailable");
++        }
++        let loaded = job.source.load_source().map_err(|_| "wb_source_unavailable")?;
++        let image = loaded.image_for(job.settings.denoise_amount());
++        let frame_info = loaded.info_or(job.info.clone());
++        let plan = pipeline::plan(&image, &frame_info, &job.settings, &job.request);
++        let key = format!("{:?}", job.source_key.ok_or("wb_geometry_mismatch")?);
++        let meta = crate::preview::frame_metadata(&plan.frame, original, &key, plan.w, plan.h).map_err(|_| "wb_geometry_mismatch")?;
++        if meta["geometryId"] != f["geometryId"] {
++            return Err("wb_geometry_mismatch");
++        }
++        let (x, y) =
++            source_point(&plan.frame, plan.w, plan.h, f["x"].as_f64().ok_or("wb_invalid_request")?, f["y"].as_f64().ok_or("wb_invalid_request")?)?;
++        let oriented = src.oriented(plan.frame.orient);
++        pipeline::auto::try_auto_wb(&pipeline::auto::wb_pick_sample(&oriented, x, y), &info)
++    }
++    .ok_or("wb_no_valid_samples")?;
++    if !temp.is_finite() || !tint.is_finite() || !(2000.0..=50000.0).contains(&temp) || !(-150.0..=150.0).contains(&tint) {
++        return Err("wb_estimation_failed");
++    }
++    let mut candidate = (*photo.develop).clone();
++    pipeline::local::normalize_wb(&mut candidate, &info);
++    candidate.wb.mode = if p["operation"] == "auto" { WbMode::Auto } else { WbMode::Custom };
++    candidate.wb.temp = temp;
++    candidate.wb.tint = tint;
++    if h.session.catalog.photo(id).is_none_or(|now| *now.develop != *photo.develop) {
++        return Err("wb_settings_mismatch");
++    }
++    Ok(json!({"wbContract":1,"identity":p,"candidate":{
++        "mode":candidate.wb.mode,"scale":candidate.wb.scale,"temp":temp,"tint":tint}}))
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/mcp/src/wb/tests.rs b/crates/mcp/src/wb/tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..decbfb09a62f930a4d7b2e30e9b9f0f95dca49a1
+--- /dev/null
++++ b/crates/mcp/src/wb/tests.rs
+@@ -0,0 +1,171 @@
++use super::*;
++use lightcraft_engine::{
++    Session,
++    catalog::{Op, Photo, Source},
++    develop::DevelopSettings,
++};
++use lightcraft_raster::Rgb32f;
++use std::sync::Arc;
++
++fn host(patch: Value) -> Headless {
++    let mut s = Session::new();
++    let mut photo = Photo::new(PhotoId(1), Source::File { path: "private-never-open.raw".into() }, "fixture", "DNG", 128, 96, "");
++    photo.develop = Arc::new(DevelopSettings::default().merged(&patch).unwrap());
++    s.catalog.apply(Op::AddPhoto { photo: Box::new(photo) }).unwrap();
++    let img = Arc::new(Rgb32f::from_fn(128, 96, |x, y| [0.15 + x as f32 / 1800.0, 0.2 + y as f32 / 2000.0, 0.18]));
++    for level in [SourceLevel::Thumb, SourceLevel::Preview, SourceLevel::Full] {
++        s.media.insert(PhotoId(1), level, img.clone());
++    }
++    Headless::new(s)
++}
++fn request(h: &Headless) -> Value {
++    json!({"id":"1","wb_contract":1,"operation":"auto","settingsFingerprint":fingerprint(&h.session.catalog.photo(PhotoId(1)).unwrap().develop).unwrap(),"requestId":"c".repeat(32)})
++}
++fn pick(h: &mut Headless, before: bool, x: f64, y: f64) -> Value {
++    let job = h.session.render_job(PhotoId(1), 128, 128, before, true).unwrap();
++    let loaded = job.source.load_source().unwrap();
++    let src = loaded.image_for(job.settings.denoise_amount());
++    let info = loaded.info_or(job.info.clone());
++    let plan = pipeline::plan(&src, &info, &job.settings, &job.request);
++    let m = crate::preview::frame_metadata(&plan.frame, (128, 96), &format!("{:?}", job.source_key.unwrap()), plan.w, plan.h).unwrap();
++    let mut p = request(h);
++    p["operation"] = json!("pick");
++    p["frame"] = json!({"kind":if before {"before"} else {"after"},"geometryId":m["geometryId"],"maxSide":128,"quality":"full","x":x,"y":y});
++    p
++}
++fn unchanged(h: &mut Headless, p: &Value) -> ToolResult {
++    let before = serde_json::to_value(h.session.catalog.photo(PhotoId(1)).unwrap()).unwrap();
++    let (undo, redo, selected) = (h.session.undo.len(), h.session.redo.len(), h.session.active());
++    let r = call(h, p);
++    assert_eq!(serde_json::to_value(h.session.catalog.photo(PhotoId(1)).unwrap()).unwrap(), before);
++    assert_eq!((h.session.undo.len(), h.session.redo.len(), h.session.active()), (undo, redo, selected));
++    r
++}
++fn code(r: ToolResult) -> String {
++    assert!(r.is_error);
++    let v: Value = serde_json::from_str(r.content[0]["text"].as_str().unwrap()).unwrap();
++    v["code"].as_str().unwrap().to_string()
++}
++#[test]
++fn auto_and_picker_match_legacy_commands_without_edits_or_selection() {
++    for operation in ["auto", "pick"] {
++        let mut h = host(json!({"light":{"exposure":0.8},"wb":{"mode":"custom","temp":4100,"tint":17}}));
++        let p = if operation == "auto" { request(&h) } else { pick(&mut h, false, 0.4, 0.6) };
++        let r = unchanged(&mut h, &p);
++        assert!(!r.is_error, "{:?}", r.content);
++        let result = r.structured.unwrap();
++        assert_eq!(result["identity"], p);
++        assert_eq!(result["candidate"]["scale"], "legacy");
++        h.session.execute("library.select", &json!({"ids":[1],"active":1,"mode":"replace"})).unwrap();
++        let v = h
++            .session
++            .execute(
++                if operation == "auto" { "develop.wb" } else { "develop.wbPick" },
++                &if operation == "auto" { json!({"mode":"auto"}) } else { json!({"x":0.4,"y":0.6}) },
++            )
++            .unwrap();
++        assert_eq!(result["candidate"]["temp"], v["temp"]);
++        assert_eq!(result["candidate"]["tint"], v["tint"]);
++    }
++}
++#[test]
++fn no_samples_and_every_rejection_preserve_the_complete_photo() {
++    let mut h = host(json!({}));
++    let base = request(&h);
++    for (key, value) in [
++        ("id", json!("2")),
++        ("settingsFingerprint", json!("f".repeat(64))),
++        ("wb_contract", json!(true)),
++        ("operation", json!("preset")),
++        ("requestId", json!("private/path")),
++        ("extra", json!(1)),
++    ] {
++        let mut p = base.clone();
++        p[key] = value;
++        let c = code(unchanged(&mut h, &p));
++        assert!(matches!(c.as_str(), "wb_invalid_request" | "wb_settings_mismatch" | "wb_source_unavailable"));
++    }
++    for value in [0.0, 1e-8, 10.0] {
++        h.session.media.insert(PhotoId(1), SourceLevel::Thumb, Arc::new(Rgb32f::filled(128, 96, [value; 3])));
++        assert_eq!(code(unchanged(&mut h, &base)), "wb_no_valid_samples");
++    }
++    let mut missing = Headless::new(Session::new());
++    assert_eq!(code(call(&mut missing, &base)), "wb_source_unavailable");
++}
++#[test]
++fn picker_uses_before_geometry_and_rejects_stale_and_outside_points() {
++    let mut h =
++        host(json!({"optics":{"distortion":80},"geometry":{"vertical":15},"crop":{"geometry":{"rect":{"x0":0.1,"y0":0.1,"x1":0.9,"y1":0.9}}}}));
++    let after = pick(&mut h, false, 0.45, 0.55);
++    let before = pick(&mut h, true, 0.45, 0.55);
++    assert_ne!(after["frame"]["geometryId"], before["frame"]["geometryId"]);
++    for p in [&after, &before] {
++        let r = unchanged(&mut h, p);
++        assert!(!r.is_error, "{:?}", r.content);
++    }
++    let mut stale = before.clone();
++    stale["frame"]["geometryId"] = after["frame"]["geometryId"].clone();
++    assert_eq!(code(unchanged(&mut h, &stale)), "wb_geometry_mismatch");
++    for v in [json!(-0.1), json!(1.1), json!(null), json!("NaN")] {
++        let mut p = after.clone();
++        p["frame"]["x"] = v;
++        assert_eq!(code(unchanged(&mut h, &p)), "wb_invalid_request");
++    }
++    let mut h = host(json!({"optics":{"distortion":-100}}));
++    let p = pick(&mut h, false, 0.0, 0.0);
++    assert_eq!(code(unchanged(&mut h, &p)), "wb_point_outside_source");
++}
++#[test]
++fn source_failure_is_sanitized_and_never_learns_as_shot() {
++    let mut h = host(json!({"wb":{"mode":"custom","scale":"legacy","temp":4200}}));
++    h.session.media.clear_sources();
++    let p = request(&h);
++    let r = unchanged(&mut h, &p);
++    assert_eq!(code(r), "wb_source_unavailable");
++}
++
++#[test]
++fn crop_flip_and_orientation_match_the_legacy_source_picker() {
++    for orientation in ["Normal", "Rotate90", "Rotate180", "Rotate270", "FlipH", "Transpose", "FlipV", "Transverse"] {
++        for flip in [false, true] {
++            let mut h = host(json!({"orientation":orientation,"crop":{"flip_h":flip,"flip_v":flip,
++                "geometry":{"rect":{"x0":0.2,"y0":0.1,"x1":0.8,"y1":0.9}}}}));
++            let p = pick(&mut h, false, 0.25, 0.75);
++            let r = unchanged(&mut h, &p);
++            assert!(!r.is_error, "{orientation}: {:?}", r.content);
++            let candidate = r.structured.unwrap()["candidate"].clone();
++            h.session.execute("library.select", &json!({"ids":[1],"active":1,"mode":"replace"})).unwrap();
++            let legacy = h.session.execute("develop.wbPick", &json!({"x":if flip {0.65} else {0.35},"y":if flip {0.3} else {0.7}})).unwrap();
++            assert_eq!(candidate["temp"], legacy["temp"], "{orientation} flip={flip}");
++            assert_eq!(candidate["tint"], legacy["tint"], "{orientation} flip={flip}");
++        }
++    }
++}
++
++#[test]
++fn decoder_facts_produce_kelvin_candidates_without_rewriting_legacy_settings() {
++    let mut h = host(json!({"wb":{"mode":"custom","temp":4300,"tint":5}}));
++    h.session.media.clear_sources();
++    h.session.media.file_loader = Some(Arc::new(|_, _| {
++        Ok((
++            Rgb32f::filled(128, 96, [0.18, 0.21, 0.19]),
++            pipeline::SourceInfo {
++                raw: true,
++                relative_wb: false,
++                legacy_relative_wb: true,
++                as_shot_temp: 5100.0,
++                as_shot_tint: 8.0,
++                ..Default::default()
++            },
++        ))
++    }));
++    let p = request(&h);
++    let result = unchanged(&mut h, &p).structured.unwrap();
++    assert_eq!(result["candidate"]["scale"], "kelvin");
++    assert_eq!(result["candidate"]["mode"], "auto");
++    let mut p = pick(&mut h, false, 0.5, 0.5);
++    p["operation"] = json!("pick");
++    let result = unchanged(&mut h, &p).structured.unwrap();
++    assert_eq!(result["candidate"]["scale"], "kelvin");
++    assert_eq!(result["candidate"]["mode"], "custom");
++}
 diff --git a/crates/mcp/tests/it/e2e.rs b/crates/mcp/tests/it/e2e.rs
 index 66cb934605bba2b78f1423a8baeee805bbce6e22..e05a427230e7bbad3880ef68c432347c61f6381a 100644
 --- a/crates/mcp/tests/it/e2e.rs
@@ -4398,8 +4774,61 @@ index 66cb934605bba2b78f1423a8baeee805bbce6e22..e05a427230e7bbad3880ef68c432347c
 +    assert_eq!(tiny["stageCache"]["reason"],"budget");
 +    assert_eq!(tiny["stageCache"]["retainedBytes"],0);
 +}
+diff --git a/crates/pipeline/src/auto.rs b/crates/pipeline/src/auto.rs
+index f3259b5d99bdb756f4c9b805d1bec3d4293e28ce..86fcd5e97178b35ce9bd8c4f74ddc92dc72fbe30 100644
+--- a/crates/pipeline/src/auto.rs
++++ b/crates/pipeline/src/auto.rs
+@@ -144,6 +144,11 @@ pub fn auto_bw_mix(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> [f64
+ 
+ /// Grey-world white balance weighted towards mid-tone, low-chroma pixels. Returns (temp, tint).
+ pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
++    try_auto_wb(src, info).unwrap_or((info.as_shot_temp, info.as_shot_tint))
++}
++
++/// The existing estimator without its as-shot fallback, for callers that must not apply a failed estimate.
++pub fn try_auto_wb(src: &Rgb32f, info: &SourceInfo) -> Option<(f64, f64)> {
+     let img = lightcraft_raster::resample::fit(src, 256, 256, lightcraft_raster::resample::Filter::Box);
+     let (mut acc, mut wsum) = ([0.0f64; 3], 0.0f64);
+     for c in &img.data {
+@@ -161,7 +166,7 @@ pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
+         wsum += w;
+     }
+     if wsum <= 0.0 {
+-        return (info.as_shot_temp, info.as_shot_tint);
++        return None;
+     }
+     let avg = acc.map(|v| v / wsum);
+     // the white that makes `avg` neutral, through the same model the white balance renders with
+@@ -175,9 +180,26 @@ pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
+         }
+     };
+     let (t, tint) = xy_to_temp_tint(seen);
+-    (t.clamp(2000.0, 50000.0).round(), tint.clamp(-150.0, 150.0).round())
++    Some((t.clamp(2000.0, 50000.0).round(), tint.clamp(-150.0, 150.0).round()))
+ }
+ 
++/// Legacy picker neighbourhood, on an already oriented Thumb. Callers own coordinate validation.
++pub fn wb_pick_sample(src: &Rgb32f, x: f64, y: f64) -> Rgb32f {
++    let (cx, cy) = (
++        (x.clamp(0.0, 1.0) * src.width as f64) as isize,
++        (y.clamp(0.0, 1.0) * src.height as f64) as isize,
++    );
++    let mut acc = [0.0f32; 3];
++    for dy in -2..=2 {
++        for dx in -2..=2 {
++            let c = src.get_clamped(cx + dx, cy + dy);
++            for i in 0..3 {
++                acc[i] += c[i] / 25.0;
++            }
++        }
++    }
++    Rgb32f::filled(4, 4, acc)
++}
+ /// Temperature/tint currently in effect (for UI display).
+ pub fn current_wb(info: &SourceInfo, s: &DevelopSettings) -> (f64, f64) {
+     effective_wb(info, s)
 diff --git a/crates/pipeline/src/geometry.rs b/crates/pipeline/src/geometry.rs
-index 3f2766750c3c7f036ff9c4a066176ef51f53e522..4b520482bd65e63b3970d756dedd233c36998de2 100644
+index 3f2766750c3c7f036ff9c4a066176ef51f53e522..80f66fb860c0e23afe4badf9039428d3c7308859 100644
 --- a/crates/pipeline/src/geometry.rs
 +++ b/crates/pipeline/src/geometry.rs
 @@ -175,6 +175,18 @@ impl Frame {
@@ -4421,6 +4850,150 @@ index 3f2766750c3c7f036ff9c4a066176ef51f53e522..4b520482bd65e63b3970d756dedd233c
      /// Size of the (cropped) output at the source's own resolution, in pixels.
      pub fn native_size(&self) -> (f64, f64) {
          let r = self.crop.rect_px(self.ow, self.oh);
+@@ -217,6 +229,42 @@ impl Frame {
+         Affine::scale(1.0 / self.ow, 1.0 / self.oh) * self.out_to_oriented(out_w, out_h)
+     }
+ 
++    /// Continuous Whole output position to the oriented source, for read-only pixel-statistics tools.
++    pub fn wb_source_point(
++        &self,
++        out_w: usize,
++        out_h: usize,
++        x: f64,
++        y: f64,
++    ) -> Option<(f64, f64)> {
++        if self.view.is_some()
++            || out_w == 0
++            || out_h == 0
++            || !x.is_finite()
++            || !y.is_finite()
++            || !(0.0..=1.0).contains(&x)
++            || !(0.0..=1.0).contains(&y)
++        {
++            return None;
++        }
++        let p = self
++            .out_to_oriented(out_w, out_h)
++            .apply(Point::new(x * out_w as f64, y * out_h as f64));
++        if let Some(w) = &self.warp {
++            let l = self.ow.max(self.oh) / 2.0;
++            let m = w.persp_inv.0;
++            let z = m[6] * ((p.x - self.ow / 2.0) / l) + m[7] * ((p.y - self.oh / 2.0) / l) + m[8];
++            // Rendering tolerates a projective horizon; a picker must not sample its clamped approximation.
++            if w.persp.inverse().is_none() || !z.is_finite() || z.abs() < 1e-12 {
++                return None;
++            }
++        }
++        let p = self.warp.as_ref().map_or(p, |w| w.to_source(p, 1));
++        let (x, y) = (p.x / self.ow, p.y / self.oh);
++        (x.is_finite() && y.is_finite() && (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y))
++            .then_some((x, y))
++    }
++
+     /// Normalized oriented coords → output pixel (inverse of `out_to_norm`).
+     pub fn norm_to_out(&self, out_w: usize, out_h: usize) -> Affine {
+         self.out_to_norm(out_w, out_h).inverse().unwrap_or(Affine::IDENTITY)
+@@ -355,6 +403,100 @@ pub const FULL: Rect = Rect::UNIT;
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn wb_mapping_matches_render_warp_pixel_centres_and_rejects_invalid_regions() {
++        for patch in [
++            serde_json::json!({}),
++            serde_json::json!({"geometry":{"vertical":35,"horizontal":-20,"rotate":8}}),
++            serde_json::json!({"optics":{"distortion":80},"crop":{"geometry":{"angle":7}}}),
++        ] {
++            let settings = DevelopSettings::default().merged(&patch).unwrap();
++            let f = Frame::new(128, 96, &settings, true);
++            let (w, h) = f.fit(128, 128);
++            let affine = f.out_to_oriented(w, h);
++            for (x, y) in [(3, 3), (w / 3, h / 3), (w / 2, h / 2), (w - 4, h - 4)] {
++                let p = f.wb_source_point(
++                    w,
++                    h,
++                    (x as f64 + 0.5) / w as f64,
++                    (y as f64 + 0.5) / h as f64,
++                );
++                if let Some(warp) = &f.warp {
++                    if let Some((_, q)) = warp.frame(&affine, x, y) {
++                        if q.x >= 0.0 && q.y >= 0.0 && q.x < f.ow && q.y < f.oh {
++                            let p = p.unwrap();
++                            assert!(
++                                (p.0 - q.x / f.ow).abs() < 1e-12
++                                    && (p.1 - q.y / f.oh).abs() < 1e-12
++                            );
++                        } else {
++                            assert!(p.is_none());
++                        }
++                    } else {
++                        assert!(p.is_none());
++                    }
++                } else {
++                    let p = p.unwrap();
++                    assert!((p.0 - (x as f64 + 0.5) / 128.0).abs() < 1e-12);
++                }
++            }
++            assert!(f.wb_source_point(w, h, f64::NAN, 0.5).is_none());
++            assert!(f.wb_source_point(w, h, f64::INFINITY, 0.5).is_none());
++            assert!(f.wb_source_point(w, h, -0.1, 0.5).is_none());
++            assert!(f.wb_source_point(w, h, 1.1, 0.5).is_none());
++            assert!(
++                f.window(
++                    w,
++                    h,
++                    crate::PixelWindow {
++                        x: 0,
++                        y: 0,
++                        w: 16,
++                        h: 16
++                    }
++                )
++                .wb_source_point(w, h, 0.5, 0.5)
++                .is_none()
++            );
++        }
++    }
++
++    #[test]
++    fn wb_embedded_lens_and_manual_distortion_follow_the_inverse_map() {
++        let mut s = DevelopSettings::default();
++        s.optics.distortion = -100.0;
++        let f = Frame::new(200, 100, &s, true);
++        let p = f.wb_source_point(200, 100, 0.75, 0.5).unwrap();
++        // At (150,50), r²=50²/(100²+50²)=0.2 and the inverse radial scale is 1.04.
++        assert!((p.0 - 0.76).abs() < 1e-12 && (p.1 - 0.5).abs() < 1e-12);
++        assert!(f.wb_source_point(200, 100, 0.0, 0.0).is_none());
++        let lens: EmbeddedLens = serde_json::from_value(
++            serde_json::json!({"warp":{"center":{"x":0.5,"y":0.5},"radius":0.7,
++            "planes":[[1,0.1,0,0,0,0],[1,0.1,0,0,0,0],[1,0.1,0,0,0,0]]}}),
++        )
++        .unwrap();
++        s.optics.distortion = 0.0;
++        s.optics.profile_distortion = 100.0;
++        s.optics.lens_profile = true;
++        let f = Frame::with_lens(200, 100, &s, true, Some(&lens));
++        let p = f.wb_source_point(200, 100, 0.75, 0.5).unwrap();
++        let expected = f
++            .warp
++            .as_ref()
++            .unwrap()
++            .frame(&f.out_to_oriented(200, 100), 149, 49)
++            .unwrap()
++            .1;
++        assert!(p.0 > 0.75);
++        let centre = f
++            .wb_source_point(200, 100, 149.5 / 200.0, 49.5 / 100.0)
++            .unwrap();
++        assert!(
++            (centre.0 - expected.x / 200.0).abs() < 1e-12
++                && (centre.1 - expected.y / 100.0).abs() < 1e-12
++        );
++    }
++
+     #[test]
+     fn default_frame_is_identity() {
+         let s = DevelopSettings::default();
 diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
 index 8f2702760d2d8c36200d512c0b9e72d08ba4c53c..8dbfb7af1d922d2eeb1a1a96307ece784a2650d2 100644
 --- a/crates/pipeline/src/lib.rs
@@ -4580,7 +5153,7 @@ index 8f2702760d2d8c36200d512c0b9e72d08ba4c53c..8dbfb7af1d922d2eeb1a1a96307ece78
  
  /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
 diff --git a/crates/pipeline/src/tests.rs b/crates/pipeline/src/tests.rs
-index 23eca0ba743ceee31a1be43410cd4b6af84cae86..5edafa3aaf5f13a353a8a39bc3041c03511742bf 100644
+index 23eca0ba743ceee31a1be43410cd4b6af84cae86..ec3c623dacf368dccb542c09be82cdeee212a278 100644
 --- a/crates/pipeline/src/tests.rs
 +++ b/crates/pipeline/src/tests.rs
 @@ -11,6 +11,41 @@ fn scene() -> Rgb32f {
@@ -4625,7 +5198,46 @@ index 23eca0ba743ceee31a1be43410cd4b6af84cae86..5edafa3aaf5f13a353a8a39bc3041c03
  #[test]
  fn default_render_is_sane() {
      let r = render(&scene(), &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(240, 240));
-@@ -840,3 +875,60 @@ fn sliver_crops_render_quickly_with_wide_stages_on() {
+@@ -766,11 +801,38 @@ fn custom_white_balance_redevelops_in_camera_space() {
+     // the white-balance picker / auto white balance invert the same model: the card names its white
+     let picked = crate::auto::auto_wb(&Rgb32f::filled(4, 4, card), &info);
+     assert_eq!(picked, (3200.0, 10.0));
++    assert_eq!(crate::auto::try_auto_wb(&Rgb32f::filled(4, 4, card), &info), Some(picked));
+     // the as-shot white needs nothing
+     s.wb.mode = WbMode::AsShot;
+     assert!(wb_matrix_for(&info, &s).is_none());
+ }
+ 
++#[test]
++fn checked_wb_keeps_the_estimator_and_legacy_fallback() {
++    for info in [
++        SourceInfo::default(),
++        SourceInfo {
++            raw: true,
++            camera_color: Some(camera_color(5500.0, 0.0)),
++            as_shot_temp: 5500.0,
++            ..Default::default()
++        },
++    ] {
++        let src = Rgb32f::filled(32, 32, [0.18, 0.22, 0.16]);
++        assert_eq!(
++            crate::auto::try_auto_wb(&src, &info),
++            Some(crate::auto::auto_wb(&src, &info))
++        );
++        for colour in [[0.0; 3], [10.0; 3], [f32::NAN; 3], [f32::INFINITY; 3]] {
++            let src = Rgb32f::filled(32, 32, colour);
++            assert_eq!(crate::auto::try_auto_wb(&src, &info), None);
++            assert_eq!(
++                crate::auto::auto_wb(&src, &info),
++                (info.as_shot_temp, info.as_shot_tint)
++            );
++        }
++    }
++}
+ /// Every stored process number renders with a process this build knows: settings saved before
+ /// process versions existed exactly as V1, and a number from a newer LightCraft exactly as the
+ /// latest process here (`docs/process-versions.md`). Raw (base tone curve), camera-tone and
+@@ -840,3 +902,60 @@ fn sliver_crops_render_quickly_with_wide_stages_on() {
          assert!(r.image.width >= 1 && r.image.height >= 1, "{rect:?}");
      }
  }

@@ -4,6 +4,8 @@
 
 RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。
 
+WB Phase 1では独立した読み取り専用`estimate_white_balance`（`wb_contract:1`）を追加する。契約・座標・settings不変条件は[WB Native契約](WB_NATIVE_CONTRACT.md)を参照する。既存Before/Preview/Region各1、geometry descriptor 2は維持し、manifestの`contracts.wb`とreceiptの`wbContract`を追加する。開発build先はmanifestの`developmentTargetDir`（現在`target-wb-phase1`）を使用し、従来の`target/release`の検証済みEXE/receiptを上書きしない。全Native probe成功後だけ新候補のreceiptを発行する。Frontend/History/RecipeへのWB操作接続はPhase 1に含まない。
+
 ## 標準更新方針
 
 GenzoRoomは開発中のため、LightCraft更新の標準受入は変更に直接関係するfocused regressionに限定する。過去の研究文書やPhase記録は設計背景・当時の受入証跡・問題発生時の調査資料であり、記載された全試験を更新ごとに繰り返す手順ではない。
@@ -53,7 +55,7 @@ GenzoRoomは開発中のため、LightCraft更新の標準受入は変更に直�
 - 永続Recipe復元はAsset ID・source content hash・`lightcraft`名・対応settings schema（現在は1）を照合し、engine version／commit差では拒否しない。settingsを現engineへそのままbest-effort restoreし、失敗はnative restore/readbackの実際の境界で扱う。成功後の新規保存は現tupleで別行として記録し、旧Recipeを事前変換・書換えしない。Historyと同一実行内snapshotのstrict ownershipは維持する。完全な将来画素互換は保証しない。schema/DB migrationはない。
 - Settingsはready processのhandshake版と、実EXE SHA／manifest全patch tuple／隣接receiptが一致した場合だけLightCraft版を表示する。未接続、不正／欠落receipt、世代変更で推測表示しない。receipt読取りも既存のbounded daemon検査ownerに含める。
 - RAW編集・Recipe tuple発行も検証済みartifactを必須とし、version文字列しか確認できないprocessへ固定commitを付与しない。不正／欠落receiptではRAW capabilityを無効にし、import前に拒否する。JPEG／Backend起動は独立して継続する。
-- 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。Windows開発checkoutではenv未指定時に現在manifestからこのmanaged candidateを探索する。候補は起動時に隣接receipt・実SHA・manifest tuple・contractをstrict検証し、一つでも一致しない場合RAW unavailableとなる。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証・別build・debug binary用の優先overrideで、override先も同じstrict検証を通す。
+- 新EXEは `.tmp/lightcraft-0.14/target-wb-phase1/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。Windows開発checkoutではenv未指定時に現在manifestの`developmentTargetDir`からこのmanaged candidateを探索する。候補は起動時に隣接receipt・実SHA・manifest tuple・contractをstrict検証し、一つでも一致しない場合RAW unavailableとなる。`GENZOROOM_LIGHTCRAFT_EXE`は旧版検証・別build・debug binary用の優先overrideで、override先も同じstrict検証を通す。
 - `.tmp`探索は非frozenのWindows開発checkoutに限定する。配布版の通常runtimeへ持ち込まず、将来のbundled artifactも同じreceipt/manifest検証境界へ接続する。自動downloadや旧LightCraftの自動切替は行わない。
 
 > **過去の導入記録／受入証跡:** 以下のA2／P0／P2／B1 probe詳細は、その契約・機能を追加した当時の検証記録であり、LightCraft更新時の標準受入として毎回実行するものではない。契約実装を変更する更新では、変更範囲に直接必要なprobeだけ選択する。
@@ -73,7 +75,7 @@ A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_cont
 $source = Join-Path $PWD '.tmp/lightcraft-0.14'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
-.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target\release\lightcraft-cli.exe"
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-wb-phase1\release\lightcraft-cli.exe"
 ```
 
 `--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。新規管理sourceを完全diffへ含めるため、適用時は`--intent-to-add`を使用する。これは内容のstageではなく、`git diff --cached`が空である制約を維持する。管理外の未追跡sourceは引き続き拒否する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。

@@ -13,7 +13,7 @@ from tests.test_lightcraft_mcp import until
 def write_receipt(executable, **changes):
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
-             'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, **changes}
+             'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1, **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -21,6 +21,7 @@ def write_receipt(executable, **changes):
 @pytest.mark.parametrize('changes', [
     {'version': '0.10.0'}, {'commit': 'a' * 40}, {'binarySha256': 'b' * 64},
     {'patches': []}, {'beforeContract': 2}, {'regionContract': True}, {'geometryDescriptorContract': 1},
+    {'wbContract': True}, {'wbContract': 2}, {'wbContract': None},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'
@@ -39,6 +40,17 @@ def test_missing_malformed_and_replaced_binary_receipts(tmp_path):
     write_receipt(executable)
     assert verified_artifact(executable, digest, ENGINE_VERSION)['version'] == ENGINE_VERSION
     assert verified_artifact(executable, 'c' * 64, ENGINE_VERSION) is None
+
+
+def test_receipt_without_wb_contract_is_not_a_phase_one_artifact(tmp_path):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt['wbContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 
 
 def test_runtime_attestation_belongs_only_to_the_ready_generation(tmp_path):
@@ -87,7 +99,7 @@ def test_managed_executable_discovery_is_dev_only_and_manifest_bound(tmp_path):
     manifest = root / 'native' / 'lightcraft' / 'manifest.json'
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps(MANAGED), encoding='utf-8')
-    executable = root / '.tmp' / 'lightcraft-0.14' / 'target' / 'release' / 'lightcraft-cli.exe'
+    executable = root / '.tmp' / 'lightcraft-0.14' / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b'managed executable')
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(executable)

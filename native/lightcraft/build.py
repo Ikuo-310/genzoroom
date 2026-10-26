@@ -7,6 +7,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 from pathlib import Path
 import struct
 import subprocess
@@ -36,9 +37,13 @@ def manifest(path=None):
     if 'geometryDescriptorContract' in value:
         contracts = value.get('contracts', {'before': 1, 'preview': 1, 'region': 1})
         if type(value['geometryDescriptorContract']) is not int or value['geometryDescriptorContract'] != 2 \
-                or contracts != {'before': 1, 'preview': 1, 'region': 1} \
+                or contracts not in ({'before': 1, 'preview': 1, 'region': 1}, {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}) \
                 or any(type(version) is not int for version in contracts.values()):
             raise ValueError('unsupported managed contracts')
+        if (contracts.get('wb') == 1 or 'developmentTargetDir' in value) and (contracts.get('wb') != 1 or
+                not isinstance(value.get('developmentTargetDir'), str) or
+                not re.fullmatch(r'target(?:-[a-z0-9]+)+', value['developmentTargetDir'])):
+            raise ValueError('invalid managed development target')
     return value
 
 
@@ -258,6 +263,11 @@ def probe(binary, spec=None):
     region_module = importlib.util.module_from_spec(region_spec)
     region_spec.loader.exec_module(region_module)
     region_module.probe_region(binary, expected_version=spec['version'])
+    if spec.get('contracts', {}).get('wb') == 1:
+        wb_spec = importlib.util.spec_from_file_location('genzoroom_wb_probe', ROOT / 'wb_probe.py')
+        wb_module = importlib.util.module_from_spec(wb_spec)
+        wb_spec.loader.exec_module(wb_module)
+        wb_module.probe_wb(binary, expected_version=spec['version'])
 
 
 def valid_execution(value):
@@ -380,7 +390,8 @@ def probe_gpu(binary):
 def receipt(binary, spec):
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
-            "geometryDescriptorContract": spec['geometryDescriptorContract']}
+            "geometryDescriptorContract": spec['geometryDescriptorContract'],
+            **({'wbContract': 1} if spec.get('contracts', {}).get('wb') == 1 else {})}
 
 
 def main():
@@ -399,10 +410,16 @@ def main():
             if state != "patched" and spec["patches"]:
                 raise ValueError("Before patches must be verified before building")
             run(["cargo", "test", "--locked", "-p", "lightcraft-mcp", "--", "--test-threads=1"], cwd=args.source)
-            run(["cargo", "build", "--release", "--locked", "--no-default-features", "-p", "lightcraft-cli"], cwd=args.source)
+            if spec.get('contracts', {}).get('wb') == 1:
+                run(["cargo", "test", "--locked", "-p", "lightcraft-pipeline", "wb", "--", "--test-threads=1"], cwd=args.source)
+                run(["cargo", "test", "--locked", "-p", "lightcraft-pipeline", "custom_white_balance_redevelops_in_camera_space",
+                     "--", "--test-threads=1"], cwd=args.source)
+            target = args.source.resolve() / spec.get('developmentTargetDir', 'target')
+            run(["cargo", "build", "--release", "--locked", "--no-default-features", "-p", "lightcraft-cli",
+                 "--target-dir", str(target)], cwd=args.source)
             if prepare(args.source, spec) != state:
                 raise ValueError("source changed during build")
-            binary = args.source / "target/release/lightcraft-cli.exe"
+            binary = target / "release/lightcraft-cli.exe"
             verified = receipt(binary, spec)
             probe(binary, spec)
             if receipt(binary, spec) != verified:
