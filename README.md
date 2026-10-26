@@ -63,7 +63,7 @@ When working with multiple photos, you can switch between them using the filmstr
 - **Image comparison:**  
   Switch between Immich previews and full-resolution originals, and compare images before and after editing.
 
-- **Zoom Navigator:** While zoomed in, view the full image and current viewport in a corner overview. Choose its position or turn it off in Settings.
+- **Zoom Navigator:** While zoomed in, view the full image and current viewport in a corner overview. Click an image area or drag the viewport frame to navigate. Choose its position or turn it off in Settings.
 
 - **Copy and paste editing recipes:**  
   Copy exposure, color, and other adjustments between photos.  

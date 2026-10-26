@@ -59,6 +59,12 @@ type ImageViewerProps = {
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 
+function clampViewerPan(pan: Point, scale: number, imageSize: Point, viewportSize: Point): Point {
+  const maxX = Math.max(0, (imageSize.x * scale - viewportSize.x) / 2);
+  const maxY = Math.max(0, (imageSize.y * scale - viewportSize.y) / 2);
+  return { x: Math.max(-maxX, Math.min(maxX, pan.x)), y: Math.max(-maxY, Math.min(maxY, pan.y)) };
+}
+
 export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
@@ -112,6 +118,8 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       width: (right - left) / imageSize.x * 100, height: (bottom - top) / imageSize.y * 100 };
   }, [imageSize.x, imageSize.y, scale, pan.x, pan.y, viewportSize.x, viewportSize.y]);
   const navigatorCanvasRef = useRef<HTMLCanvasElement>(null);
+  const navigatorDragRef = useRef<{ pointerId: number; offset: Point; frame: Point } | null>(null);
+  const suppressNavigatorClickRef = useRef(false);
   const navigatorVisibleRef = useRef(showNavigator);
   navigatorVisibleRef.current = showNavigator;
   const [navigatorCanvasRevision, setNavigatorCanvasRevision] = useState(0);
@@ -306,11 +314,9 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     const bounds = viewport.getBoundingClientRect();
     const point = { x: event.clientX - bounds.left - bounds.width / 2, y: event.clientY - bounds.top - bounds.height / 2 };
     const nextPan = zoomAroundPoint(pan, point, scale, nextScale);
-    const maxPanX = Math.max(0, (imageSize.x * nextScale - viewport.clientWidth) / 2);
-    const maxPanY = Math.max(0, (imageSize.y * nextScale - viewport.clientHeight) / 2);
     setFitMode(false);
     setScale(nextScale);
-    setPan({ x: Math.max(-maxPanX, Math.min(maxPanX, nextPan.x)), y: Math.max(-maxPanY, Math.min(maxPanY, nextPan.y)) });
+    setPan(clampViewerPan(nextPan, nextScale, imageSize, { x: viewport.clientWidth, y: viewport.clientHeight }));
   }
 
   useEffect(() => {
@@ -380,6 +386,80 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       suppressDoubleClickTimer.current = setTimeout(() => { suppressDoubleClickRef.current = false; }, 500);
     }
     if (rawFrame) setViewInteracting(false);
+  }
+
+  function navigatorPoint(navigator: HTMLDivElement, clientX: number, clientY: number): Point | null {
+    const image = navigator.querySelector<HTMLImageElement | HTMLCanvasElement>('img, canvas');
+    if (!image) return null;
+    const bounds = image.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return null;
+    return { x: Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width)),
+      y: Math.max(0, Math.min(1, (clientY - bounds.top) / bounds.height)) };
+  }
+
+  function setPanFromNavigatorCenter(center: Point, dragging: boolean) {
+    // Pan is the inverse offset from the normalized image point to keep it at the viewport center.
+    const nextPan = clampViewerPan({ x: (0.5 - center.x) * imageSize.x * scale,
+      y: (0.5 - center.y) * imageSize.y * scale }, scale, imageSize, viewportSize);
+    setPan(nextPan);
+    if (!rawFrame) return;
+    clearTimeout(viewGestureTimer.current);
+    setViewInteracting(true);
+    if (!dragging) viewGestureTimer.current = setTimeout(() => {
+      if (!dragRef.current && !navigatorDragRef.current) setViewInteracting(false);
+    }, 180);
+  }
+
+  function startNavigatorPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    suppressNavigatorClickRef.current = false;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest('.viewer-navigator-frame')) return;
+    const point = navigatorPoint(event.currentTarget, event.clientX, event.clientY);
+    if (!point) return;
+    const frame = { x: navigatorFrame.width / 100, y: navigatorFrame.height / 100 };
+    const left = navigatorFrame.left / 100, top = navigatorFrame.top / 100;
+    navigatorDragRef.current = { pointerId: event.pointerId,
+      offset: { x: Math.max(0, Math.min(frame.x, point.x - left)), y: Math.max(0, Math.min(frame.y, point.y - top)) }, frame };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    clearTimeout(viewGestureTimer.current);
+    if (rawFrame) setViewInteracting(true);
+  }
+
+  function moveNavigatorPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    const drag = navigatorDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = navigatorPoint(event.currentTarget, event.clientX, event.clientY);
+    if (!point) return;
+    const left = Math.max(0, Math.min(1 - drag.frame.x, point.x - drag.offset.x));
+    const top = Math.max(0, Math.min(1 - drag.frame.y, point.y - drag.offset.y));
+    setPanFromNavigatorCenter({ x: left + drag.frame.x / 2, y: top + drag.frame.y / 2 }, true);
+  }
+
+  function stopNavigatorPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    const drag = navigatorDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    navigatorDragRef.current = null;
+    // Captured frame presses may retarget their click to the Navigator itself, even without movement.
+    suppressNavigatorClickRef.current = true;
+    clearTimeout(viewGestureTimer.current);
+    if (rawFrame) setViewInteracting(false);
+  }
+
+  function clickNavigator(event: ReactMouseEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    if (suppressNavigatorClickRef.current) {
+      suppressNavigatorClickRef.current = false;
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.viewer-navigator-frame')) return;
+    const point = navigatorPoint(event.currentTarget, event.clientX, event.clientY);
+    if (point) setPanFromNavigatorCenter(point, false);
   }
 
   useLayoutEffect(() => {
@@ -516,7 +596,10 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
         /> : null}
       </div>
       {showNavigator && <div className="viewer-navigator" data-testid="zoom-navigator" data-position={navigatorPosition}
-        role="img" aria-label={t('workspace.zoomNavigator')} style={{ width: navigatorWidth, height: navigatorHeight }}>
+        role="img" aria-label={t('workspace.zoomNavigator')} style={{ width: navigatorWidth, height: navigatorHeight }}
+        onClick={clickNavigator} onPointerDown={startNavigatorPointer} onPointerMove={moveNavigatorPointer}
+        onPointerUp={stopNavigatorPointer} onPointerCancel={stopNavigatorPointer}
+        onWheel={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
         {editSource && recipe ? <canvas ref={navigatorCanvasRef} aria-hidden="true"
           width={Math.max(1, Math.round(navigatorWidth))} height={Math.max(1, Math.round(navigatorHeight))} />
           : <img src={navigatorImageSrc} alt="" draggable="false" />}
