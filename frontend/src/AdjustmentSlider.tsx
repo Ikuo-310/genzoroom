@@ -15,6 +15,7 @@ export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => v
 
 type Props = {
   adjustmentId: AdjustmentId;
+  commitPolicy?: 'inactivity' | 'operation-boundary';
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
   enabled: boolean; onToggle?: () => void; operationName?: string;
@@ -129,6 +130,8 @@ export function AdjustmentSlider(props: Props) {
   function scheduleCommit(kind: 'keyboard' | 'wheel' = 'keyboard') {
     clearTimeout(timer.current);
     interaction.current = kind;
+    // RAW History keeps keyboard and wheel gestures open until its owner crosses an operation boundary.
+    if (latest.current.commitPolicy === 'operation-boundary') return;
     timer.current = setTimeout(commitAfterInactivity, ADJUSTMENT_COMMIT_DELAY_MS);
   }
   function finishPointer() {

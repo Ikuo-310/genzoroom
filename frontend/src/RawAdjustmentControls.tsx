@@ -45,7 +45,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const value = raw.desired?.[control] ?? settings.values[control];
         const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
         const enabled = settings.sections[category === 'basic' ? 'light' : 'color'];
-        return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} hideToggle
+        return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
           label={t(`workspace.${id}`)} enabled={enabled} onToggle={() => {}}
           onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
-import { isRegisteredAdjustment, keyboardAdjustment } from './adjustmentFocus';
+import { commitAdjustmentEdits, isRegisteredAdjustment, keyboardAdjustment } from './adjustmentFocus';
 import { SettingsProvider } from './SettingsDialog';
 import i18n from './i18n';
 import type { AssetDetail } from './assets';
@@ -646,19 +646,55 @@ it('keeps the RAW History no-op when a numeric edit returns to its starting valu
   expect(model.entries).toHaveLength(0);
 });
 
-it.each(['keyboard', 'wheel'])('uses the existing 500ms %s commit boundary', async kind => {
-  vi.useFakeTimers(); await mount(); const range = exposure();
+it.each(['keyboard', 'wheel'])('keeps RAW %s changes in one gesture across inactivity until another control starts', async kind => {
+  vi.useFakeTimers(); const model = historyBackend(0); await mount(); const range = exposure();
   act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
   for (let i = 0; i < 3; i++) {
     act(() => range.dispatchEvent(kind === 'keyboard'
       ? new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
       : new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true })));
-    await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); }); await flush();
   }
-  await act(async () => { await vi.advanceTimersByTimeAsync(349); }); await flush();
-  expect(commitHistory).not.toHaveBeenCalled();
-  await act(async () => { await vi.advanceTimersByTimeAsync(1); }); await flush();
-  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(['initialize']);
+  expect(model.entries).toHaveLength(0);
+  const contrast = host.querySelector<HTMLInputElement>('[data-adjustment-id="contrast"]')!;
+  act(() => contrast.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+  act(() => contrast.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
+  await flush();
+  const commits = vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request).filter(request => request.action === 'commit');
+  expect(commits).toHaveLength(1);
+  expect(commits[0].control).toBe('light.exposure');
+  expect(commits[0].doc.values['light.exposure']).toBe(Number(range.value));
+  expect(model.entries).toHaveLength(1);
+  expect(model.entries[0].exposure).toBe(Number(range.value));
+});
+
+it('commits an open RAW keyboard gesture before a control Reset operation', async () => {
+  vi.useFakeTimers(); historyBackend(0); await mount(); const range = exposure();
+  act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+  act(() => range.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); await flush();
+  const reset = range.closest('.adjustment-control')!.querySelector<HTMLButtonElement>('.adjustment-reset')!;
+  act(() => reset.click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action))
+    .toEqual(['initialize', 'commit', 'operate']);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0].doc.values['light.exposure']).toBe(Number(range.value));
+});
+
+it.each([
+  ['section Reset', 'button.adjustment-category-reset', 'sectionReset'],
+  ['section Toggle', 'button[data-category-switch]', 'sectionToggle'],
+] as const)('commits an open RAW keyboard gesture before %s', async (_name, selector, kind) => {
+  vi.useFakeTimers(); historyBackend(0); await mount(); const range = exposure();
+  act(() => range.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
+  act(() => range.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); await flush();
+  const operation = host.querySelector<HTMLButtonElement>(selector)!;
+  act(() => operation.click()); await flush();
+  const requests = vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request);
+  expect(requests.map(request => request.action)).toEqual(['initialize', 'commit', 'operate']);
+  expect(requests[1].doc.values['light.exposure']).toBe(Number(range.value));
+  expect(requests[2].operation?.kind).toBe(kind);
 });
 
 it('finishes a gesture when its category unmounts its sliders', async () => {
@@ -814,7 +850,7 @@ function simulateChromiumRangeDisableBlur(range: HTMLInputElement) {
   range.disabled = true;
 }
 
-it.each(['Shift navigation', 'Shift navigation under stationary pointer', 'mouse focus'] as const)('records RAW slider focus across a History commit after %s', async method => {
+it.each(['Shift navigation', 'Shift navigation under stationary pointer', 'mouse focus'] as const)('records RAW slider focus during an explicit boundary commit after %s', async method => {
   vi.useFakeTimers();
   let resolve!: () => void;
   let pendingRequest!: rawApi.RawHistoryRequest;
@@ -838,7 +874,7 @@ it.each(['Shift navigation', 'Shift navigation under stationary pointer', 'mouse
   record('before input');
   expect(document.activeElement).toBe(range); expect(keyboardAdjustment()).toBe(range);
   historyKey('ArrowRight', { ctrlKey: false }, range);
-  act(() => vi.advanceTimersByTime(500)); await flush();
+  act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!)); await flush();
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1);
   // Chromium moves focus off a native range when React applies the RAW save lock.
   if (range.disabled) simulateChromiumRangeDisableBlur(range);
@@ -864,12 +900,12 @@ it.each(['Shift navigation', 'Shift navigation under stationary pointer', 'mouse
   const value = range.getAttribute('aria-valuetext');
   historyKey('ArrowRight', { ctrlKey: false }, method.startsWith('Shift navigation') ? range : document.activeElement!);
   expect(range.getAttribute('aria-valuetext')).not.toBe(value);
-  act(() => vi.advanceTimersByTime(500)); await flush();
+  act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!)); await flush();
   expect(pendingRequest.action).toBe('commit');
   await act(async () => resolve()); await flush();
 });
 
-it.each(['another element', 'another window'])('does not reclaim a RAW slider after focus moves to %s during a save lock', async destination => {
+it.each(['another element', 'another window'])('does not reclaim a RAW slider after focus moves to %s during a boundary save lock', async destination => {
   vi.useFakeTimers();
   let resolve!: () => void;
   let pendingRequest!: rawApi.RawHistoryRequest;
@@ -881,7 +917,7 @@ it.each(['another element', 'another window'])('does not reclaim a RAW slider af
   const range = host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!;
   act(() => category.focus()); historyKey('ArrowDown', { ctrlKey: false, shiftKey: true }, category);
   historyKey('ArrowRight', { ctrlKey: false }, range);
-  act(() => vi.advanceTimersByTime(500)); await flush();
+  act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!)); await flush();
   expect(pendingRequest.action).toBe('commit'); expect(range.disabled).toBe(true);
   simulateChromiumRangeDisableBlur(range);
   const external = document.createElement('button'); document.body.append(external);

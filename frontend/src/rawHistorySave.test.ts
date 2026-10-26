@@ -127,6 +127,21 @@ it('flushes a change without begin and serializes an adjacent control after the 
   expect(saver.dirty).toBe(false);
 });
 
+it('keeps A → B → A as three adjacent control gestures', async () => {
+  const { saver } = owner(); await saver.save();
+  saver.begin('light.exposure'); saver.change('light.exposure', 1);
+  saver.begin('light.contrast'); saver.change('light.contrast', 10);
+  await drain();
+  saver.begin('light.exposure'); saver.change('light.exposure', 2);
+  await drain();
+  saver.end('light.exposure'); await drain();
+  const commits = vi.mocked(api.saveRawHistory).mock.calls.map(([request]) => request).filter(request => request.action === 'commit');
+  expect(commits.map(request => request.control)).toEqual(['light.exposure', 'light.contrast', 'light.exposure']);
+  expect(commits.map(request => [request.doc.values['light.exposure'], request.doc.values['light.contrast']]))
+    .toEqual([[1, 0], [1, 10], [2, 10]]);
+  expect(saver.dirty).toBe(false);
+});
+
 it('retains an adjacent unsent intent across save failure and drains it after explicit retry', async () => {
   const { saver, controls } = owner(); await saver.save();
   vi.mocked(api.saveRawHistory).mockRejectedValueOnce(new api.RawSaveError('raw_history_save_failed', 'unknown'));
