@@ -1016,12 +1016,14 @@ class RawPreviewApi:
         verify()
         if saved["status"] in {"source_mismatch", "engine_incompatible"}:
             raise LightCraftError(f'raw_recipe_{saved["status"]}')
+        recipe_revision = saved.get("revision", 0) if saved["status"] == "matched" and all(
+            saved["recipe"][key] == identity[key] for key in ("engineVersion", "engineCommit")) else 0
         try:
             history = await run_in_threadpool(get_raw_history, identity)
         except (StoreUnavailable, InvalidRawRecipe):
             raise LightCraftError("raw_history_unavailable") from None
         verify()
-        if history["revision"] != saved.get("revision", 0):
+        if history["revision"] != recipe_revision:
             raise LightCraftError("raw_history_revision_conflict")
         self._history_identity = identity
         self._history_initialized = history["initialized"]
@@ -1032,7 +1034,7 @@ class RawPreviewApi:
         verify()
         lightcraft_log("raw.recipe.restored", assetId=identity["assetId"],
                        generation=handle.generation, revision=snapshot.revision)
-        return snapshot, "restored", saved["revision"]
+        return snapshot, "restored", recipe_revision
 
     async def _release(self):
         if self.workspace is None:

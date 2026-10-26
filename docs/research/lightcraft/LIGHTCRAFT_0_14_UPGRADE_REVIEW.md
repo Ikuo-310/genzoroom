@@ -338,7 +338,9 @@ C3の独自source/GPU cache最適化を大きく進める前にU3の結果を得
 
 ### 15.3 Recipe／Historyとversion表示
 
-**互換方針は自動migrationなし・完全engine tuple一致。** 旧v0.10 Recipe／History／save receiptをそのまま保持し、新tupleへの読替えやコピーはしない。旧tupleしかない写真は`raw_recipe_engine_incompatible`で復元前に停止する。画面は「保存された編集は保護されている。保存時のGenzoRoomとLightCraftで開く」旨を案内する。旧アプリ基準と旧binaryを組で用いた復元経路を残す。新しい編集・snapshot・Before keyはv0.14を識別する。Recipe/schema/DB versionは変更しない。
+**旧tupleによる事前拒否方針は撤回。** 永続RecipeはAsset ID・source content hash・`lightcraft` engine name・対応settings schema（現在1）を照合し、engine version／commit差だけでは拒否しない。v0.10 settingsもv0.14へそのまま渡し、復元可否は現在engineの実restore・readback結果で判断する。成功後は通常編集でき、次回保存はv0.14の現tupleで別行に保存する。旧Recipeの事前変換、偽装、migrationは行わない。source/schema/engine-name不一致は従来どおり拒否し、native restore failureは実エラー境界へ落とす。Historyと同一実行snapshotのstrict ownershipは維持する。将来engineとの完全な画素互換は保証しない。新readbackとBefore keyは引き続きv0.14を識別し、Recipe/schema/DB versionは変更しない。
+
+2026-10-26の互換修正後、v0.10→v0.14のrestore・document open・現在tupleでの次回save・native rejection・source/schema guardとRecipe/History storeを含むBackend focused 222件、RAW画面53件、Frontend TypeScript checkがPASS。今回の変更に対する未修正High 0／Medium 0。
 
 Backendのversion/commitはmanifestを正本とし、Frontendのstrict identityも`sync_identity.py`で同じmanifestから生成する。将来版のために複数のproduction codeのversion literalを書換える運用にはしない。SettingsはImmich情報の下へ簡潔に版を表示する。版を表示できるのは、ready generationのhandshakeと実EXE SHA、全patch tuple、整数contract、隣接receiptが一致する場合のみ。未接続／欠落・不正metadata／refresh前の古い応答では版を推測しない。実binaryをBackend managerから起動し、`artifact.version=0.14.0`、descriptor2、Region1のcapability応答も確認した。
 
@@ -387,4 +389,4 @@ hang／OOM／反復の明らかな遅化・異常な増え続け方はこの短�
 
 ### 15.6 ユーザーのWindows確認
 
-`GENZOROOM_LIGHTCRAFT_EXE`に新EXEの絶対pathを指定しBackendを再起動して、Settingsの`LightCraft 0.14.0`、RAW Fit、100% Region、Pan、Before/After、数枚の現像結果を短く確認する。旧Recipeを持つ写真では保存データ保護の案内が出ることも確認する。これを経てv0.14の実機受入を確定する。自動差替え・NASデプロイ・release作業には進んでいない。
+`GENZOROOM_LIGHTCRAFT_EXE`に新EXEの絶対pathを指定しBackendを再起動して、Settingsの`LightCraft 0.14.0`、RAW Fit、100% Region、Pan、Before/After、数枚の現像結果を短く確認する。v0.10 Recipeを持つ写真もbest-effort restore後に暗室・スライダー・Previewが開くことを確認する。これを経てv0.14の実機受入を確定する。自動差替え・NASデプロイ・release作業には進んでいない。

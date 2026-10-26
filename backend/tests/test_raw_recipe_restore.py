@@ -136,6 +136,36 @@ def test_content_hash_case_uses_c3a_normalization(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_v010_recipe_restores_on_v014_and_next_save_uses_current_tuple(tmp_path, monkeypatch):
+    monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            asset_id = str(uuid4())
+            handle, initial = await raw.open_raw(asset_id, files[0])
+            current = raw.recipe_identity(handle)
+            old = {**current, "engineVersion": "0.10.0",
+                   "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}
+            old_saved = store.put_raw_recipe(old, 0, uuid4(), changed_settings())
+
+            matched = store.lookup_raw_recipe(current)
+            assert matched["status"] == "matched"
+            assert matched["recipe"] == old_saved["recipe"]
+            restored = await raw.restore_persisted_settings(handle, matched["recipe"], initial.revision)
+            assert restored.settings == changed_settings()
+            assert children[-1].photos[1]["settings"] == changed_settings()
+
+            saved = store.put_raw_recipe(current, 0, uuid4(), restored.settings)
+            assert saved["recipe"]["engineVersion"] == current["engineVersion"] == ENGINE_VERSION
+            assert saved["recipe"]["engineCommit"] == current["engineCommit"] == ENGINE_COMMIT
+            assert saved["recipe"]["settings"] == changed_settings()
+            assert store.get_raw_recipe(current)["recipe"] == saved["recipe"]
+            assert store.get_raw_recipe(old)["recipe"] == old_saved["recipe"]
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("invalid", ["size", "json-type", "schema", "private-field"])
 def test_persisted_payload_reuses_c3a_validation_before_native_calls(tmp_path, invalid):
     async def run():
@@ -165,9 +195,6 @@ def test_persisted_payload_reuses_c3a_validation_before_native_calls(tmp_path, i
     ({"assetId": str(uuid4())}, "raw_recipe_source_mismatch"),
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
-    ({"engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}, "raw_recipe_engine_incompatible"),
-    ({"engineVersion": "0.10.1"}, "raw_recipe_engine_incompatible"),
-    ({"engineCommit": "b" * 40}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),
 ])
 def test_native_restore_rechecks_identity_before_sending(tmp_path, monkeypatch, change, code):
@@ -225,6 +252,35 @@ def test_native_restore_failure_never_confirms_settings(tmp_path, monkeypatch, f
             with pytest.raises(LightCraftError):
                 raw.request_preview(handle, initial.revision)
             assert child.render_count == 0 and database_rows() == before
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_v010_settings_rejection_is_reported_as_native_restore_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw(str(uuid4()), files[0])
+            old_identity = raw.recipe_identity(handle) | {
+                "engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}
+            saved = store.put_raw_recipe(old_identity, 0, uuid4(), changed_settings())
+            commands = list(children[0].commands)
+            attempted = []
+            command = manager._raw_command
+            async def reject_settings(generation, name, params, **kwargs):
+                attempted.append(name)
+                if name == "develop.merge":
+                    raise LightCraftError("lightcraft_tool_error")
+                return await command(generation, name, params, **kwargs)
+            monkeypatch.setattr(manager, "_raw_command", reject_settings)
+            with pytest.raises(LightCraftError, match="^raw_recipe_restore_failed$"):
+                await raw.restore_persisted_settings(handle, saved["recipe"], initial.revision)
+            assert attempted[-1] == "develop.merge"
+            assert "develop.reset" in [name for name, _ in children[0].commands[len(commands):]]
+            photo = raw._photos[handle.source_key]
+            assert photo.applied_revision == initial.revision and photo.settings_json == initial._json
         finally:
             await raw.close()
     asyncio.run(run())
@@ -335,6 +391,42 @@ def test_no_recipe_for_current_asset_opens_initial_settings(local, tmp_path, mon
     asyncio.run(run())
 
 
+def test_windows_opens_v010_recipe_then_saves_current_tuple(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            old_saved = seed(asset_id, engineVersion="0.10.0",
+                             engineCommit="a2a41383c4fd62fa85a46ccd00998639221f2d3c")
+            old_identity = {key: old_saved["recipe"][key] for key in store.IDENTITY_FIELDS}
+            current_identity = {**old_identity, "engineVersion": ENGINE_VERSION, "engineCommit": ENGINE_COMMIT}
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, response = await open_asset(http, asset_id)
+                assert response.status_code == 200, response.text
+                doc = response.json()
+                assert doc["recipeStatus"] == "restored" and doc["recipeRevision"] == 0
+                settings = await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=document_identity(doc))
+                assert settings.status_code == 200
+                assert settings.json()["values"]["light.exposure"] == 1.25
+                assert children[0].photos[1]["settings"] == old_saved["recipe"]["settings"]
+
+                save_body = {key: doc[key] for key in ("workspaceId", "generation", "documentToken")}
+                save_body.update(documentRevision=doc["revision"], expectedRecipeRevision=0, saveId=str(uuid4()))
+                saved_response = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body)
+                assert saved_response.status_code == 200, saved_response.text
+                assert saved_response.json()["recipeRevision"] == 1
+                current_saved = store.get_raw_recipe(current_identity)["recipe"]
+                assert current_saved["engineVersion"] == ENGINE_VERSION
+                assert current_saved["engineCommit"] == ENGINE_COMMIT
+                assert current_saved["settings"] == old_saved["recipe"]["settings"]
+                assert store.get_raw_recipe(old_identity)["recipe"] == old_saved["recipe"]
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_legacy_scale_omission_is_not_converted_to_kelvin(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -391,9 +483,6 @@ def test_generation_change_during_sqlite_lookup_never_publishes_old_import(local
 @pytest.mark.parametrize("change,code", [
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
-    ({"engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}, "raw_recipe_engine_incompatible"),
-    ({"engineVersion": "0.10.1"}, "raw_recipe_engine_incompatible"),
-    ({"engineCommit": "b" * 40}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),
 ])
 def test_windows_incompatible_recipe_fails_open_and_keeps_db(local, tmp_path, monkeypatch, change, code):

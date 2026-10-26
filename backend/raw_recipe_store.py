@@ -204,7 +204,7 @@ def validate_raw_recipe(recipe: dict) -> dict:
 
 
 def lookup_raw_recipe(identity: dict) -> dict:
-    """Distinguish absence from a changed source/engine without applying alternate rows."""
+    """Find a recipe for the same source and settings schema, preferring the current tuple."""
     identity = normalize_identity(identity)
     with _connection() as connection:
         connection.execute("BEGIN")
@@ -213,15 +213,29 @@ def lookup_raw_recipe(identity: dict) -> dict:
             _read_history(connection, identity, result)
             if result is not None:
                 outcome = {"status": "matched", **result}
-            elif connection.execute("""SELECT 1 FROM asset_raw_recipes
-                    WHERE asset_id=? AND source_content_hash=? LIMIT 1""",
-                    (identity["assetId"], identity["sourceContentHash"])).fetchone():
-                outcome = {"status": "engine_incompatible"}
-            elif connection.execute("SELECT 1 FROM asset_raw_recipes WHERE asset_id=? LIMIT 1",
-                                    (identity["assetId"],)).fetchone():
-                outcome = {"status": "source_mismatch"}
             else:
-                outcome = {"status": "none"}
+                candidates = connection.execute("""SELECT asset_id, source_content_hash, engine_name,
+                    engine_version, engine_commit, settings_schema_version FROM asset_raw_recipes
+                    WHERE asset_id=? AND source_content_hash=? AND engine_name=? AND settings_schema_version=?
+                    ORDER BY updated_at DESC, recipe_revision DESC""",
+                    (identity["assetId"], identity["sourceContentHash"], identity["engineName"],
+                     identity["settingsSchemaVersion"])).fetchall()
+                for row in candidates:
+                    candidate_identity = dict(zip(IDENTITY_FIELDS, row))
+                    candidate = _read_row(connection, candidate_identity)
+                    if candidate is not None:
+                        outcome = {"status": "matched", **candidate}
+                        break
+                else:
+                    if connection.execute("""SELECT 1 FROM asset_raw_recipes
+                            WHERE asset_id=? AND source_content_hash=? LIMIT 1""",
+                            (identity["assetId"], identity["sourceContentHash"])).fetchone():
+                        outcome = {"status": "engine_incompatible"}
+                    elif connection.execute("SELECT 1 FROM asset_raw_recipes WHERE asset_id=? LIMIT 1",
+                                            (identity["assetId"],)).fetchone():
+                        outcome = {"status": "source_mismatch"}
+                    else:
+                        outcome = {"status": "none"}
             connection.commit()
             return outcome
         except Exception:

@@ -4,7 +4,7 @@
 
 正式tag commit `03c88c166c054c009db2a47187d59991f6232b85`を専用checkoutへ固定し、新managed patchでBefore/Preview/Region各1・canonical geometry descriptor 2を維持した。MCP schema、test移動、DecodedSource facts、StageCache計量を保持し、display-fit後のsidecarを無効化、engineのGPU proof gateと診断を同じ条件へ揃えた。旧v0.10 patch・manifest・C2 binary/receiptは保持し、archived manifestで旧sourceの再検証も通した。
 
-Recipe／Historyはengine tuple完全一致の方針を維持する。旧v0.10行は保存されたままで、新版へ黙って変換しない。旧engineの編集がある写真は復元前に拒否し、保存時のGenzoRoom／LightCraftを使う案内を表示する。新readbackとBefore keyはv0.14を識別し、schema/DB migrationは行わない。
+当初のU3記録にある「永続Recipeはengine tuple完全一致」「旧Recipeは復元前に拒否」という方針は撤回した。永続RecipeはAsset ID・source content hash・LightCraft名・対応schema（現在1）が一致すればversion／commit差だけで拒否せず、現在engineへそのままrestoreを試す。成功後は通常編集でき、次回保存はv0.14 tupleで別行として保存する。Historyと同一実行snapshotのstrict ownershipは維持し、事前変換やmigration、将来版との完全画素互換は設けない。詳細は[U3結果§15.3](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#153-recipehistoryとversion表示)を参照。
 
 SettingsはImmich情報の下に、実processのhandshake・EXE SHA・manifest・receiptが一致する場合だけ `LightCraft 0.14.0` を表示する。未接続・不正metadata・古い応答では版を推測しない。Backendと生成Frontend identityは同じmanifestを正本とし、将来更新時の手作業の重複を避ける。
 

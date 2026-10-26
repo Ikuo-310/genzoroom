@@ -989,8 +989,8 @@ class LightCraftRawSession:
             current = self.recipe_identity(handle)
             if any(identity[key] != current[key] for key in ("assetId", "sourceContentHash")):
                 raise LightCraftError("raw_recipe_source_mismatch")
-            if current["engineVersion"] != ENGINE_VERSION or current["settingsSchemaVersion"] != 1 or \
-                    any(identity[key] != current[key] for key in IDENTITY_FIELDS[2:]):
+            if identity["engineName"] != "lightcraft" or identity["settingsSchemaVersion"] != 1 or \
+                    current["engineName"] != "lightcraft" or current["settingsSchemaVersion"] != 1:
                 raise LightCraftError("raw_recipe_engine_incompatible")
 
         verify()

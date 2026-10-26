@@ -405,7 +405,14 @@
   ],
   "benchmarkPolicy": "cold/warm Whole and three warm Region repetitions per backend; no old-engine or policy comparison",
   "budgetsChanged": false,
-  "recipePolicy": "exact engine tuple only; old Recipe/History rows retained, no implicit conversion",
+  "recipePolicy": "persisted Recipe restore matches source identity and supported settings schema; engine version/commit differences are best-effort, successful next save uses current tuple; no migration or cross-version pixel guarantee; History and same-run snapshot ownership remain strict",
+  "recipeCompatibilityFollowup": {
+    "backendFocusedTestsPassed": 222,
+    "frontendRawPreviewTestsPassed": 53,
+    "typescriptCheck": "PASS",
+    "unresolvedHigh": 0,
+    "unresolvedMedium": 0
+  },
   "unresolvedHigh": 0,
   "unresolvedMedium": 0,
   "backendTests": {

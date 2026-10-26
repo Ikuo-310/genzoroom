@@ -14,7 +14,7 @@
 - `build.py`は固定HEADとupstream `Cargo.toml`のversion、patch digest/targets、source全diff、公開Before/Preview/Region各1、geometry descriptor 2、共有Region schema/fixtureを照合する。共有artifact検査をversionで省略しない。
 - manifest更新後は `python native/lightcraft/sync_identity.py` でFrontendのstrict identityを生成し、`frontend/src/lightcraftEngine.ts`を手編集しない。Backendも同じmanifestを読み、Windows配布にも収録する。同期は回帰テストで検査する。
 - `build.py --manifest native/lightcraft/versions/0.10.0.json --source <旧専用checkout> --build` で旧基準を再現できる。`--binary`にも同じ`--manifest`を指定する。旧patch・binary・隣接receiptを上書きしない。
-- Recipe／Historyはengine tuple完全一致のみ復元する。旧v0.10行のコピー・変換・上書きはしない。旧行しかない写真は `raw_recipe_engine_incompatible` で開く前に拒否し、保存時のGenzoRoom／LightCraft版による復元を案内する。旧アプリ基準と旧binaryを組で利用する。自動migration、Recipe/schema/DB version変更はない。
+- 永続Recipe復元はAsset ID・source content hash・`lightcraft`名・対応settings schema（現在は1）を照合し、engine version／commit差では拒否しない。settingsを現engineへそのままbest-effort restoreし、失敗はnative restore/readbackの実際の境界で扱う。成功後の新規保存は現tupleで別行として記録し、旧Recipeを事前変換・書換えしない。Historyと同一実行内snapshotのstrict ownershipは維持する。完全な将来画素互換は保証しない。schema/DB migrationはない。
 - Settingsはready processのhandshake版と、実EXE SHA／manifest全patch tuple／隣接receiptが一致した場合だけLightCraft版を表示する。未接続、不正／欠落receipt、世代変更で推測表示しない。receipt読取りも既存のbounded daemon検査ownerに含める。
 - RAW編集・Recipe tuple発行も検証済みartifactを必須とし、version文字列しか確認できないprocessへ固定commitを付与しない。不正／欠落receiptではRAW capabilityを無効にし、import前に拒否する。JPEG／Backend起動は独立して継続する。
 - 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。`GENZOROOM_LIGHTCRAFT_EXE`へその絶対pathを指定してBackendを再起動する。自動探索・自動差替えは導入しない。

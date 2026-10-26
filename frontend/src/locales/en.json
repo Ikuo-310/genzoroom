@@ -277,7 +277,6 @@
   },
   "workspace": {
     "rawPreview": {
-      "engineIncompatible": "These RAW edits were saved with a different LightCraft engine. They are preserved. Open them with the original GenzoRoom and LightCraft versions; no automatic conversion was applied.",
       "historyPosition": "History {{cursor}} / {{count}}",
       "historyLoading": "Loading RAW history…",
       "historyFailed": "RAW history could not be verified. Retry to refresh the list.",
