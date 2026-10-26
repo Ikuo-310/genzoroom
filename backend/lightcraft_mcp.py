@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from lightcraft_artifact import ENGINE_VERSION
 
 
 MAX_LINE_BYTES = 1024 * 1024
@@ -247,7 +248,7 @@ class LightCraftMCP:
             self.abort("lightcraft_write_failed")
             raise MCPTransportError("lightcraft_write_failed") from None
 
-    async def initialize(self, client_version, *, timeout=10):
+    async def initialize(self, client_version, *, timeout=10, expected_version=ENGINE_VERSION):
         result = await self.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
                                     "clientInfo": {"name": "genzoroom", "version": client_version}}, timeout=timeout)
         if not isinstance(result, dict) or result.get("protocolVersion") != PROTOCOL_VERSION:
@@ -255,7 +256,7 @@ class LightCraftMCP:
         server = result.get("serverInfo")
         if not isinstance(server, dict) or server.get("name") != "lightcraft":
             raise LightCraftError("lightcraft_server_mismatch")
-        if server.get("version") != "0.10.0":
+        if not expected_version or server.get("version") != expected_version:
             raise LightCraftError("lightcraft_version_mismatch")
         await self.notify("notifications/initialized", timeout=timeout)
         return server["version"]

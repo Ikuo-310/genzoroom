@@ -1,3 +1,4 @@
+from lightcraft_artifact import ENGINE_VERSION
 import asyncio
 import hashlib
 import json
@@ -19,7 +20,7 @@ FAST = LightCraftTimeouts(initialize=.3, request=.1, gpu=.1, shutdown=.02, kill=
 
 
 class FakeProcess:
-    def __init__(self, *, version="0.10.0", gpu=None, stall=None, ignore_eof=False):
+    def __init__(self, *, version=ENGINE_VERSION, gpu=None, stall=None, ignore_eof=False):
         self.stdout = asyncio.StreamReader()
         self.stderr = asyncio.StreamReader()
         self.returncode = None
@@ -97,7 +98,7 @@ def test_start_handshake_hash_gpu_and_idempotent_close(tmp_path):
         await manager.start()
         await until(lambda: manager.status().state == "ready")
         status = manager.status()
-        assert status.version == "0.10.0" and status.generation == 1
+        assert status.version == ENGINE_VERSION and status.generation == 1
         assert status.executable_sha256 == hashlib.sha256(b"fake executable").hexdigest()
         assert len(children) == 1
         assert [m["method"] for m in children[0].stdin.messages] == ["initialize", "notifications/initialized", "ping"]
@@ -573,7 +574,7 @@ def test_real_subprocess_stderr_keeps_draining_after_failed_reap(tmp_path):
             "for line in sys.stdin:\n"
             "  m=json.loads(line)\n"
             "  if 'id' not in m: continue\n"
-            f"  r={{'protocolVersion':{PROTOCOL_VERSION!r},'serverInfo':{{'name':'lightcraft','version':'0.10.0'}},'capabilities':{{}}}} if m['method']=='initialize' else {{}}\n"
+            f"  r={{'protocolVersion':{PROTOCOL_VERSION!r},'serverInfo':{{'name':'lightcraft','version':{ENGINE_VERSION!r}}},'capabilities':{{}}}} if m['method']=='initialize' else {{}}\n"
             "  sys.stdout.write(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':r})+'\\n'); sys.stdout.flush()\n"
             "while True: time.sleep(1)\n"
         )

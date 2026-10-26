@@ -23,9 +23,9 @@ from backend_logging import backend_logger
 
 from lightcraft_mcp import LightCraftError, MCPToolError, MCPTransportError, _decode
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
+from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
 
 
-ENGINE_COMMIT = "a2a41383c4fd62fa85a46ccd00998639221f2d3c"
 # A 2048² RGBA preview needs 16 MiB before PNG scanline/compression overhead.
 MAX_IMAGE_BYTES = 17 * 1024 * 1024
 MAX_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
@@ -61,7 +61,7 @@ class DevelopSnapshot:
     handle: RawHandle
     revision: int
     _json: str = field(repr=False)
-    engine_version: str = "0.10.0"
+    engine_version: str = ENGINE_VERSION
     engine_commit: str = ENGINE_COMMIT
     _fingerprint: tuple | None = field(default=None, repr=False)
     _content_hash: str | None = field(default=None, repr=False)
@@ -483,6 +483,12 @@ class LightCraftRawSession:
             raise LightCraftError("raw_session_lost")
         if status.state != "ready":
             raise LightCraftError("lightcraft_not_ready")
+        if status.version != ENGINE_VERSION or not ENGINE_COMMIT:
+            raise LightCraftError("raw_recipe_engine_incompatible")
+        artifact = self.manager.artifact_info()
+        if artifact is None or artifact['version'] != ENGINE_VERSION or artifact['upstreamCommit'] != ENGINE_COMMIT:
+            # A version string cannot authorize stamping a saved Recipe with a source commit.
+            raise LightCraftError('raw_unverified_artifact')
         if self._desynchronized and not allow_desync:
             raise LightCraftError("raw_session_desynchronized")
         if self._generation is None:
@@ -947,7 +953,7 @@ class LightCraftRawSession:
         return await self._mutate(handle, "develop.merge", {"settings": partial}, expected_revision)
 
     async def restore_settings(self, handle, engine_snapshot, expected_revision):
-        if not isinstance(handle, RawHandle) or not isinstance(engine_snapshot, DevelopSnapshot) or engine_snapshot.engine_version != "0.10.0" or \
+        if not isinstance(handle, RawHandle) or not isinstance(engine_snapshot, DevelopSnapshot) or engine_snapshot.engine_version != ENGINE_VERSION or \
                 engine_snapshot.engine_commit != ENGINE_COMMIT or engine_snapshot.handle.source_key != handle.source_key:
             raise LightCraftError("raw_invalid_snapshot")
         photo = self._photo(handle, active=True)
@@ -983,7 +989,7 @@ class LightCraftRawSession:
             current = self.recipe_identity(handle)
             if any(identity[key] != current[key] for key in ("assetId", "sourceContentHash")):
                 raise LightCraftError("raw_recipe_source_mismatch")
-            if current["engineVersion"] != "0.10.0" or current["settingsSchemaVersion"] != 1 or \
+            if current["engineVersion"] != ENGINE_VERSION or current["settingsSchemaVersion"] != 1 or \
                     any(identity[key] != current[key] for key in IDENTITY_FIELDS[2:]):
                 raise LightCraftError("raw_recipe_engine_incompatible")
 
@@ -1017,7 +1023,7 @@ class LightCraftRawSession:
         # The native import fingerprint and current geometry describe the effective Before;
         # After exposure/WB/lens edits must not invalidate this read-only comparison image.
         value = {"source": [photo.content_hash, list(photo.fingerprint)], "document": [handle.source_key,
-                 handle.document_token, handle.generation], "engine": ["0.10.0", ENGINE_COMMIT, "before-v1"],
+                 handle.document_token, handle.generation], "engine": [ENGINE_VERSION, ENGINE_COMMIT, "before-v1"],
                  "import": photo.before_fingerprint, "process": json.loads(photo.settings_json).get("process"),
                  "geometry": self._before_geometry(photo), "maxSide": max_side}
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()

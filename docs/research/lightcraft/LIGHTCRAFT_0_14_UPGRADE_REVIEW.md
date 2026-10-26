@@ -2,6 +2,8 @@
 
 調査日: 2026-10-26。対象: GenzoRoom `feature/lightcraft-integration`。**調査・文書化のみ。U3未実施。**
 
+追記: **§1〜14はU1/U2完了時点の記録。現在のU3実装・自動検証結果は§15。** U3自動受入PASS、短いWindows画面受入は未実施。
+
 ## 1. Executive summary
 
 **判定: 推奨B（価値はあるが、限定的なpatch再設計が必要）。** 次は独立したU3比較実験を推奨する。C3のsource/GPU cacheを独自に作り直す前にU3で経路別の効果を確かめる価値がある。ただし、U3の承認・実施前にC3 policyや現行engineを変更する根拠にはしない。
@@ -304,3 +306,85 @@ C3の独自source/GPU cache最適化を大きく進める前にU3の結果を得
 文書検証: `git diff --check`、新文書のprivate absolute path／実assetId／token／sourceId等の混入確認、固定commitでのpath/symbol照合、内部整合の確認を実施。固定commitへのsourceリンク17件とsymbol63件を機械照合し、分類13行（A5/B8）も集計照合した。最終的な未修正High/Mediumの**調査文書findingは0**。上記U3受入riskは未実行のまま明示して残す。
 
 今回変更は本Markdownのみ。production code、managed patch/manifest、binary、receipt、C2/C3既存記録、README/CHANGELOGは変更していない。Native/Frontend/Backend test、build、browser動的検証を成功したとは報告しない。
+
+## 15. U3実装・検証結果（2026-10-26）
+
+### 15.1 判定・artifact
+
+**U3移行候補の自動受入PASS。** v0.14全体へ追随し、個別backport・大規模benchmark・C3 tuningは行っていない。正式なWindows画面・画質受入はユーザーの短い確認待ち。U1/U2の「実装未検証」という制限は本節の試験範囲で更新するが、過去のC2/C3受入記録は書き換えない。
+
+| 項目 | 新基準 |
+|---|---|
+| upstream | v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`（main未使用） |
+| source | `.tmp/lightcraft-0.14`、独立clean適用検証は `.tmp/lightcraft-0.14-verify` |
+| patch | `native/lightcraft/patches/0002-v0.14-native-contracts.patch`、22 targets |
+| patch SHA-256 | `d0d7653a92ad7db0af526d4595a54356cd0b0480f7757bf2b60487030a7582d3` |
+| EXE | `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe` |
+| EXE SHA-256 | `3d41aff1cf70be79f5fdf54061ce51efc3988e02b4ff354d91423a7113e9423a` |
+| receipt | EXE隣接 `lightcraft-cli.genzoroom.json`。実EXE hash／manifest／probe成功を照合 |
+| contracts | Before 1 / Preview 1 / Region 1 / geometry descriptor 2 |
+| evidence | [安全化結果・receipt summary](LIGHTCRAFT_0_14_UPGRADE_RESULT.json) |
+
+旧patch `0001-native-before.patch`、旧manifest `versions/0.10.0.json`、C1/C2 binary/receiptを保持した。旧patch digestとC2 EXE実hashはU1/U2基準のまま。archived manifestで旧managed sourceの再検証が成功し、新patchも独立clean checkoutから`--apply`→完全diff検証に成功した。旧／新どちらも部分適用・余分なsource・二重適用を許容しない。
+
+### 15.2 主要な再接続
+
+- 13分類の機能を保持。MCPの新annotationsとschema文脈、`tests/it/`への移動を追随した。旧patchで追加した91個の関数／test symbolの存在も照合し、テストを削っていない。
+- DecodedSourceの新factsを保持して既存run/acceptとWB保護を維持。canonical IDのsource/original/nativeAspect/crop/orientation/flip/coordinate-moving warp規則を変更していない。sampling／StageCache keyは別のまま。
+- post-Plan `display_fit`がbitmapを縮小した場合は`Rendered.frame=None`とし、旧Planを実PNGのgeometry証拠として使わない。headless Whole/Regionはdisplay-fitを要求せず、実Plan sidecarを維持する。
+- 追加GPU回帰により、upstream engineの`develop_image`にも旧`req.proof.is_none()` gateが残ることを検出した。新device-profile proof判定をGPU呼出しとexecution reasonで共有し、matrix proofのGPU成功／device-profile proofのunsupportedを検証した。通常RAW Previewのpolicy追加ではない。
+- median/guided filter、Dehaze、decoder/lens/profile、GPU loss/readback等はv0.14の実装をそのまま取り込む。現像式をGenzoRoom側へ複製していない。
+- `build.py`はversion gateを共有Region契約の必須照合へ置き換えた。HEAD＋Cargo version、patch digest/targets、source全diff、contract整数型、actual binary SHA、実probeを検証する。旧manifest指定も対応し、整数1をJSON trueで偽装するreceiptも拒否する。
+
+### 15.3 Recipe／Historyとversion表示
+
+**互換方針は自動migrationなし・完全engine tuple一致。** 旧v0.10 Recipe／History／save receiptをそのまま保持し、新tupleへの読替えやコピーはしない。旧tupleしかない写真は`raw_recipe_engine_incompatible`で復元前に停止する。画面は「保存された編集は保護されている。保存時のGenzoRoomとLightCraftで開く」旨を案内する。旧アプリ基準と旧binaryを組で用いた復元経路を残す。新しい編集・snapshot・Before keyはv0.14を識別する。Recipe/schema/DB versionは変更しない。
+
+Backendのversion/commitはmanifestを正本とし、Frontendのstrict identityも`sync_identity.py`で同じmanifestから生成する。将来版のために複数のproduction codeのversion literalを書換える運用にはしない。SettingsはImmich情報の下へ簡潔に版を表示する。版を表示できるのは、ready generationのhandshakeと実EXE SHA、全patch tuple、整数contract、隣接receiptが一致する場合のみ。未接続／欠落・不正metadata／refresh前の古い応答では版を推測しない。実binaryをBackend managerから起動し、`artifact.version=0.14.0`、descriptor2、Region1のcapability応答も確認した。
+
+RAW編集・Recipe tuple発行自体も同じartifact検証を必須にした。versionだけ一致する未検証processは`raw_unverified_artifact`でimport前に拒否し、固定commitを保存情報へ推測で付与しない。JPEGやBackend起動の可用性とは分離する。
+
+receipt I/OはEXE hashingと同じbounded daemon inspection ownerに置いた。完了監査でdefault executorの追加I/O待ちを避けるよう修正し、stalled receipt読取りでもevent loop／shutdownを保持しない回帰を追加した。Windows frozen packageへmanifestを収録する。DockerはNative未接続のままで、版を偽装しない。
+
+### 15.4 実RAW・画素・短いsanity
+
+既存private実RAW harnessを使用。RAW・path・asset/source identity・Recipe本文は追跡ファイルへ入れていない。
+
+- Whole 1024、adaptive final候補1472、2048、Preview→Full source、canonical Native 4064×3056、production C0 planner経由Region plan/renderがCPU/DX12双方で成功。
+- Draft/Full、Whole Before、Region Before、Before/Afterのread-only整合、cache OFF/ON、source switch後のFull再描画、settings不変を確認。Whole/Region/Beforeの同engine Full cache ON/OFF画素は一致。
+- CPU/DX12のWhole／Region／Beforeで最大各1 LSB。PIL decodeと既存strict PNG/metadata validatorを通し、geometry/orientation/crop contractの異常は検出しなかった。実写真の最終色・見た目の判断は短いWindows確認に残す。
+- v0.10との画素一致・性能比較は行っていない。Dehaze、neutral tone、parametric curve、RAW/WB/lensのcross-version差はupstream変更として存在し得る。旧C1 Whole/Region最大3 LSB差が解消したとは判定しない。
+- Native processはCPU/DX12のharness終了時にexit 0。APIのclose/cancel/reapingとsource所有も自動試験で確認した。
+
+以下は各backend 1 process、同一RAWでの**sanity**。端数を丸めたMCP呼出し＋validator境界であり、kernel単体時間・統計・旧版比較ではない。
+
+| 項目 | CPU | DX12 |
+|---|---:|---:|
+| cold Whole1024 | 933 ms | 911 ms |
+| warm Whole2048（cache ON） | 406 ms | 333 ms |
+| warm Region 3回 | 273 / 263 / 248 ms | 273 / 267 / 297 ms |
+| 同RSS概数 | 230.4 / 230.7 / 231.0 MiB | 646.6 / 654.0 / 654.0 MiB |
+
+hang／OOM／反復の明らかな遅化・異常な増え続け方はこの短い範囲では観測しなかった。長時間leak・VRAM精密追跡を証明したものではない。StageCache admission／実capacity／shared source／OFF/tiny後継続の既存probeも維持し、実RAW Regionのcache admission拒否時にも正常描画を確認。512 MiBは既存の試験用budgetであり、製品budgetを変更していない。rho .85/.95、aggregation180ms、context16、prefetch64、F256刻み、Region2MP、Whole adaptive policyも据え置き。
+
+### 15.5 試験・監査
+
+| 範囲 | 結果 |
+|---|---|
+| Native MCP unit / integration | 74＋11 PASS、helper 1 ignored |
+| Native engine独自回帰 | 3 PASS（display-fit、single decode/accept、execution/fault/proof） |
+| Native pipeline | 208 PASS、既存helper 2 ignored |
+| Native GPU integration / simulated lost poll | 20＋1 PASS、capability probe 1 ignored。実DX12は別binary probeで成功 |
+| Backend関連回帰 | 最終のRAW/Recipe/History/Region/capability/receipt/owner/adaptive関連457件PASS。別の管理／MCP／History store／packaging176件PASSも実施。scope間に重複あり、合算しない |
+| Frontend関連回帰 | 18 filesの現行535件相当を検証。初回246＋288、追加互換メッセージ1件。最終Settings＋RAW画面78件もPASS。無関係な全suiteは未実行 |
+| static / build | repository Python3.14、TypeScript、Frontend production build、Native release build、manifest/receipt/targets、private混入・diff検査 |
+
+途中の失敗は解決済み。sandboxのsocket/TEMP制限はfocused再現後に通常Windows権限で実行した。MCP discovery testは混在separatorをfixture側で絶対path正規化した。Backendのキャンセル試験はbootstrap eventの再利用と、20ms sleepが20ms shutdown deadlineに競合する問題があり、実際の新render開始とchild reapingを明示的に保持する試験へ修正した。HTTPキャンセルでrenderが保持され、Nativeがreapされるまでsourceが削除されない条件を削っていない。製品のcancel/close方針は変更しない。
+
+監査ではtag固定、managed diff完全一致、旧artifact保全、tuple非偽装、contract/geometry維持、strict validator、Settingsと実binary、privacy、C3非変更を確認した。GPU gate、receipt I/O owner、未検証processへの固定commit付与を防ぐMedium findingは修正・再検証済み。**未修正High 0／Medium 0。** 新しいpixel/latency baselineの性能優越は合格条件にしていない。
+
+既存のcraft-fonts未同梱warning、upstream Windows testのunused variable、incremental hard-link→copy、Frontend chunk-size、Node TypeScript stripping実験warningは記録し、無関係な修正は加えていない。full Docker release Smoke Test、Windows配布installer build、実ブラウザ操作、NAS／Firefox受入は行っていない。
+
+### 15.6 ユーザーのWindows確認
+
+`GENZOROOM_LIGHTCRAFT_EXE`に新EXEの絶対pathを指定しBackendを再起動して、Settingsの`LightCraft 0.14.0`、RAW Fit、100% Region、Pan、Before/After、数枚の現像結果を短く確認する。旧Recipeを持つ写真では保存データ保護の案内が出ることも確認する。これを経てv0.14の実機受入を確定する。自動差替え・NASデプロイ・release作業には進んでいない。

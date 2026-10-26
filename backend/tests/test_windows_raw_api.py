@@ -175,14 +175,27 @@ def test_cancelled_http_waiter_does_not_cancel_render_or_delete_source(local, tm
                 await authenticate(http, local)
                 workspace, doc = await open_document(http)
                 gate = children[0].gate = asyncio.Event()
+                # Ignore the bootstrap render; cancellation must target the new in-flight request.
+                children[0].render_started.clear()
                 task = asyncio.create_task(http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc)))
                 await children[0].render_started.wait()
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError): await task
+                assert manager.status().state == 'ready' and api.raw.status().preview_running
+                child = children[0]
+                child.ignore_eof = True
+                kill_requested = asyncio.Event()
+                real_kill = child.kill
+                monkeypatch.setattr(child, 'kill', kill_requested.set)
                 release = asyncio.create_task(http.delete(f"/api/raw/workspaces/{workspace}"))
-                await asyncio.sleep(.02)
-                assert list(root.rglob("*.dng")) and manager.status().state == "ready"
-                gate.set()
+                try:
+                    # A 20 ms sleep races the 20 ms shutdown deadline; hold reaping explicitly.
+                    await asyncio.wait_for(kill_requested.wait(), .5)
+                    assert list(root.rglob("*.dng")) and manager._session is not None
+                finally:
+                    child.kill = real_kill
+                    child.exit(0)
+                    gate.set()
                 assert (await release).status_code == 204
                 assert not list(root.iterdir()) and not api._tasks
         finally: await api.close()

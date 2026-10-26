@@ -1,3 +1,4 @@
+from lightcraft_artifact import ENGINE_VERSION
 import asyncio
 import json
 import sys
@@ -53,7 +54,7 @@ def test_handshake_notifications_unicode_and_errors():
         def respond(message):
             if message.get("method") == "initialize":
                 reply(reader, message, {"protocolVersion": PROTOCOL_VERSION,
-                                       "serverInfo": {"name": "lightcraft", "version": "0.10.0"}})
+                                       "serverInfo": {"name": "lightcraft", "version": ENGINE_VERSION}})
             elif message.get("method") == "ping":
                 reader.feed_data(b'\r\n{"jsonrpc":"2.0","method":"notifications/progress","params":{"message":"private"}}\r\n')
                 reply(reader, message, {"unicode": "日本語"})
@@ -62,7 +63,7 @@ def test_handshake_notifications_unicode_and_errors():
         writer = PipeWriter(respond)
         client = LightCraftMCP(reader, writer, 7)
         try:
-            assert await client.initialize("0.0.0-development") == "0.10.0"
+            assert await client.initialize("0.0.0-development") == ENGINE_VERSION
             await client.ping()
             assert [m["method"] for m in writer.messages] == ["initialize", "notifications/initialized", "ping"]
             assert [m.get("id") for m in writer.messages] == ["7:1", None, "7:2"]
@@ -134,7 +135,7 @@ def test_native_region_diagnostic_reasons_preserve_external_error_code(native_co
         def respond(message):
             if message.get("method") == "initialize":
                 reply(reader, message, {"protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": "lightcraft", "version": "0.10.0"}})
+                    "serverInfo": {"name": "lightcraft", "version": ENGINE_VERSION}})
             elif message.get("method") == "tools/call":
                 reply(reader, message, {"isError": True, "content": [{"type": "text", "text": text}]})
         writer = PipeWriter(respond)

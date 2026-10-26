@@ -1,3 +1,4 @@
+import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { BUILD_INFO } from './buildInfo';
 import { readBounded, type RawGeometry } from './rawApi';
 
@@ -7,7 +8,7 @@ export type RawTrial = { index: number; quality: 'draft' | 'full'; stageCache: '
   temperature: 'cold' | 'warm'; repeat: number; group: string };
 export type RawTrialMetadata = {
   trial: RawTrial; measuredAt: string;
-  contract: { lightcraftVersion: '0.10.0'; engineCommit: string; previewContract: 1; binarySha256: string };
+  contract: { lightcraftVersion: typeof LIGHTCRAFT_ENGINE.version; engineCommit: string; previewContract: 1; binarySha256: string };
   source: { width: number; height: number; format: string; identity: string }; settingsFingerprint: string; frame: RawGeometry;
   backend: { configured: 'cpu' | 'gpu'; execution: 'cpu' | 'gpu' | 'unconfirmed'; gpuAvailable: boolean; fallbackReported: boolean };
   width: number; height: number; payloadBytes: number;
@@ -94,8 +95,8 @@ export function parseRawTrial(value: unknown, trial: RawTrial): RawTrialMetadata
     || JSON.stringify(value.trial) !== JSON.stringify(trial) || typeof value.measuredAt !== 'string' || !Number.isFinite(Date.parse(value.measuredAt))
     || !hash(value.settingsFingerprint) || value.rssBytes !== null || value.vramBytes !== null) return fail();
   const { contract, source, frame, backend, metrics } = value;
-  if (!exact(contract, 'lightcraftVersion,engineCommit,previewContract,binarySha256') || contract.lightcraftVersion !== '0.10.0'
-    || contract.engineCommit !== 'a2a41383c4fd62fa85a46ccd00998639221f2d3c' || contract.previewContract !== 1 || !hash(contract.binarySha256)
+  if (!exact(contract, 'lightcraftVersion,engineCommit,previewContract,binarySha256') || contract.lightcraftVersion !== LIGHTCRAFT_ENGINE.version
+    || contract.engineCommit !== LIGHTCRAFT_ENGINE.commit || contract.previewContract !== 1 || !hash(contract.binarySha256)
     || !exact(source, 'width,height,format,identity') || !count(source.width) || !source.width || !count(source.height) || !source.height
     || typeof source.format !== 'string' || !/^[A-Z0-9]{1,12}$/.test(source.format) || !hash(source.identity)
     || !exact(frame, 'geometryId,nativeWidth,nativeHeight,aspect,fullWidth,fullHeight,window') || !hash(frame.geometryId)

@@ -1,3 +1,4 @@
+from lightcraft_artifact import ENGINE_VERSION
 import asyncio
 from contextlib import closing
 import copy
@@ -43,7 +44,7 @@ def changed_settings():
 
 def seed(asset_id, **identity_changes):
     identity = {"assetId": str(asset_id), "sourceContentHash": hashlib.sha256(Original().data).hexdigest(),
-                "engineName": "lightcraft", "engineVersion": "0.10.0", "engineCommit": ENGINE_COMMIT,
+                "engineName": "lightcraft", "engineVersion": ENGINE_VERSION, "engineCommit": ENGINE_COMMIT,
                 "settingsSchemaVersion": 1, **identity_changes}
     settings = changed_settings()
     settings["version"] = identity["settingsSchemaVersion"]
@@ -164,6 +165,7 @@ def test_persisted_payload_reuses_c3a_validation_before_native_calls(tmp_path, i
     ({"assetId": str(uuid4())}, "raw_recipe_source_mismatch"),
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
+    ({"engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}, "raw_recipe_engine_incompatible"),
     ({"engineVersion": "0.10.1"}, "raw_recipe_engine_incompatible"),
     ({"engineCommit": "b" * 40}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),
@@ -389,6 +391,7 @@ def test_generation_change_during_sqlite_lookup_never_publishes_old_import(local
 @pytest.mark.parametrize("change,code", [
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
+    ({"engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}, "raw_recipe_engine_incompatible"),
     ({"engineVersion": "0.10.1"}, "raw_recipe_engine_incompatible"),
     ({"engineCommit": "b" * 40}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),

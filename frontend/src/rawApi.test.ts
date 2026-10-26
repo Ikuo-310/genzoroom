@@ -17,7 +17,7 @@ function response(patch: Record<string, string> = {}, bytes = png) {
 afterEach(() => vi.unstubAllGlobals());
 
 it.each([undefined, 1, 2])('keeps Whole availability independent of optional Region capability %s', async regionContract => {
-  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ available: true, version: '0.10.0',
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ available: true, version: '0.14.0',
     ...(regionContract === undefined ? {} : { regionContract }) }), { headers: { 'Content-Type': 'application/json' } }));
   vi.stubGlobal('fetch', fetch);
   expect(await rawCapability()).toBe(true);

@@ -1,12 +1,23 @@
 # LightCraft 更新・GenzoRoomパッチ管理
 
-この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の本家基準は **v0.10.0 / `a2a41383c4fd62fa85a46ccd00998639221f2d3c`**。C4-Dで本家versionは変更していない。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。
+この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`**（U3自動検証PASS、短いWindows実機受入待ち）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
 ## 管理対象
 
 | パッチ | 目的・変更対象 |
 |---|---|
-| `0001-native-before.patch` | MCPのBefore＋adaptive品質・frame・StageCacheおよび独立Region plan/render契約。pipeline/GPUの実Plan sidecarとbuffer計量、Engine/stand-inの戻り値追随、MCP/native fixtureを含む。全targets・digestはmanifestで管理 |
+| `0002-v0.14-native-contracts.patch` | 現行v0.14用。MCPのBefore＋adaptive品質・frame・StageCacheおよび独立Region plan/render契約。pipeline/GPUの実Plan sidecarとbuffer計量、Engine/stand-inの戻り値追随、MCP/native fixtureを含む。全targets・digestはmanifestで管理 |
+| `0001-native-before.patch` | 旧v0.10用。変更せず保持。`versions/0.10.0.json`が旧commit・digest・targetsを固定する |
+
+### U3以降の管理と互換性
+
+- `build.py`は固定HEADとupstream `Cargo.toml`のversion、patch digest/targets、source全diff、公開Before/Preview/Region各1、geometry descriptor 2、共有Region schema/fixtureを照合する。共有artifact検査をversionで省略しない。
+- manifest更新後は `python native/lightcraft/sync_identity.py` でFrontendのstrict identityを生成し、`frontend/src/lightcraftEngine.ts`を手編集しない。Backendも同じmanifestを読み、Windows配布にも収録する。同期は回帰テストで検査する。
+- `build.py --manifest native/lightcraft/versions/0.10.0.json --source <旧専用checkout> --build` で旧基準を再現できる。`--binary`にも同じ`--manifest`を指定する。旧patch・binary・隣接receiptを上書きしない。
+- Recipe／Historyはengine tuple完全一致のみ復元する。旧v0.10行のコピー・変換・上書きはしない。旧行しかない写真は `raw_recipe_engine_incompatible` で開く前に拒否し、保存時のGenzoRoom／LightCraft版による復元を案内する。旧アプリ基準と旧binaryを組で利用する。自動migration、Recipe/schema/DB version変更はない。
+- Settingsはready processのhandshake版と、実EXE SHA／manifest全patch tuple／隣接receiptが一致した場合だけLightCraft版を表示する。未接続、不正／欠落receipt、世代変更で推測表示しない。receipt読取りも既存のbounded daemon検査ownerに含める。
+- RAW編集・Recipe tuple発行も検証済みartifactを必須とし、version文字列しか確認できないprocessへ固定commitを付与しない。不正／欠落receiptではRAW capabilityを無効にし、import前に拒否する。JPEG／Backend起動は独立して継続する。
+- 新EXEは `.tmp/lightcraft-0.14/target/release/lightcraft-cli.exe`、receiptは隣接 `lightcraft-cli.genzoroom.json`。`GENZOROOM_LIGHTCRAFT_EXE`へその絶対pathを指定してBackendを再起動する。自動探索・自動差替えは導入しない。
 
 A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_contract`／`stage_cache`と有限budgetの検証、headless job実行・typed metadata、CPU/GPUの実Planを返す`Rendered.frame` sidecar、原本gridへのnative寸法投影、stage保持bufferの計量を含む。`preview.rs`は新規のMCP helperであり、独立した現像／永続cache基盤ではない。変更対象一覧とSHA-256の正本はmanifest。新規依存はworkspaceですでに固定された`sha2`をMCPでも使うためのCargo.toml／lock追記のみで、upstream versionは変えない。
 
@@ -18,7 +29,7 @@ A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_cont
 2. GenzoRoomのリポジトリPythonから準備scriptを実行する（PowerShell例、`$source`は専用checkoutの絶対path）。
 
 ```powershell
-$source = 'I:\code\raw-test\lightcraft-v0.10.0-gpu-poc'
+$source = Join-Path $PWD '.tmp/lightcraft-0.14'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
 .\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target\release\lightcraft-cli.exe"

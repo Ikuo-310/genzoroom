@@ -15,6 +15,7 @@ from lightcraft_raw import (DevelopSnapshot, LightCraftRawSession, PreviewFrame,
                             SUPERSEDED, _settings_json, _validate_png)
 from lightcraft_mcp import LightCraftError, MCPTransportError
 from lightcraft_runtime import LightCraftManager
+from lightcraft_artifact import MANAGED
 from tests.test_lightcraft_mcp import reply, until
 from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 
@@ -238,6 +239,11 @@ class RawProcess(FakeProcess):
 async def create(tmp_path, *, timeouts=QUICK):
     exe = tmp_path / "engine.exe"
     exe.write_bytes(b"fake")
+    # RAW fixtures attest their exact synthetic executable, like a managed production process.
+    exe.with_suffix('.genzoroom.json').write_text(json.dumps({
+        **{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
+        'binarySha256': hashlib.sha256(b'fake').hexdigest(),
+        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

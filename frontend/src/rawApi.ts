@@ -1,3 +1,4 @@
+import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { RAW_WHOLE_MAX_SIDE, RAW_WHOLE_MAX_BYTES } from './rawWholePreview';
 import { frontendLogger } from './frontendLogging';
 import { checkRegionResponse, confirmRegionFullFrame, validateRegionFrameRequest, validateRegionRequest,
@@ -105,7 +106,7 @@ const post = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Con
 
 export async function rawCapability(signal?: AbortSignal) {
   const value = await json('/capabilities', { signal });
-  if (typeof value.available !== 'boolean' || value.version !== '0.10.0') throw new RawApiError('raw_invalid_response');
+  if (typeof value.available !== 'boolean' || value.available && value.version !== LIGHTCRAFT_ENGINE.version) throw new RawApiError('raw_invalid_response');
   return value.available as boolean;
 }
 

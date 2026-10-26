@@ -421,6 +421,15 @@ it('does not show an Immich image as the result of failed native rendering', asy
   expect(adjusted).not.toHaveBeenCalled();
 });
 
+it('explains that older-engine RAW edits are preserved without applying or saving them', async () => {
+  vi.mocked(rawApi.openRawDocument).mockRejectedValue(new rawApi.RawApiError('raw_recipe_engine_incompatible', 409));
+  await mount();
+  expect(host.textContent).toContain('They are preserved');
+  expect(host.textContent).toContain('no automatic conversion');
+  expect(vi.mocked(rawApi.rawPreview)).not.toHaveBeenCalled();
+  expect(vi.mocked(rawApi.saveRawHistory)).not.toHaveBeenCalled();
+});
+
 it('keeps the RAW loading status until the preview is ready', async () => {
   vi.mocked(rawApi.rawPreview).mockImplementation(() => new Promise(() => {}));
   await mount();

@@ -48,6 +48,7 @@
     "error": "GPUエラー · CPU"
   },
   "connection": {
+    "unavailable": "利用不可",
     "sectionLabel": "サービス接続状況",
     "backend": "Backend",
     "immich": "Immich",
@@ -267,6 +268,7 @@
   },
   "workspace": {
     "rawPreview": {
+      "engineIncompatible": "異なるLightCraft版で保存されたRAW編集を保護しています。保存時のGenzoRoomとLightCraftで開いてください。設定やHistoryの自動変換は行っていません。",
       "historyPosition": "履歴 {{cursor}} / {{count}}",
       "historyLoading": "RAW履歴を読み込んでいます…",
       "historyFailed": "RAW履歴を確認できませんでした。再試行して一覧を更新してください。",

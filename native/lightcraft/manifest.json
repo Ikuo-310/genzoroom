@@ -7,7 +7,7 @@
         "crates/engine/src/slide_title.rs",
         "crates/gpu/src/lib.rs",
         "crates/gpu/src/render.rs",
-        "crates/gpu/tests/equivalence.rs",
+        "crates/gpu/tests/it/equivalence.rs",
         "crates/mcp/Cargo.toml",
         "crates/mcp/src/backend.rs",
         "crates/mcp/src/headless.rs",
@@ -19,18 +19,23 @@
         "crates/mcp/src/region_fixtures.json",
         "crates/mcp/src/region_schema.json",
         "crates/mcp/src/tools.rs",
-        "crates/mcp/tests/e2e.rs",
+        "crates/mcp/tests/it/e2e.rs",
         "crates/pipeline/src/geometry.rs",
         "crates/pipeline/src/lib.rs",
         "crates/pipeline/src/tests.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "file": "patches/0001-native-before.patch",
+      "file": "patches/0002-v0.14-native-contracts.patch",
       "purpose": "Native Before, adaptive Whole and Region plan/render contract 1 with shared finite StageCache",
-      "sha256": "6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc"
+      "sha256": "d0d7653a92ad7db0af526d4595a54356cd0b0480f7757bf2b60487030a7582d3"
     }
   ],
-  "commit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",
-  "version": "0.10.0",
-  "geometryDescriptorContract": 2
+  "commit": "03c88c166c054c009db2a47187d59991f6232b85",
+  "version": "0.14.0",
+  "geometryDescriptorContract": 2,
+  "contracts": {
+    "before": 1,
+    "preview": 1,
+    "region": 1
+  }
 }

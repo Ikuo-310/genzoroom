@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import tomllib
 import zlib
 
 ROOT = Path(__file__).resolve().parent
@@ -20,11 +21,24 @@ def run(args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
 
 
-def manifest():
-    value = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+def manifest(path=None):
+    value = json.loads((path or ROOT / "manifest.json").read_text(encoding="utf-8"))
     for patch in value["patches"]:
+        if 'geometryDescriptorContract' in value and (not isinstance(patch.get('targets'), list) or not patch['targets']):
+            raise ValueError('managed patch targets are required')
         if hashlib.sha256((ROOT / patch["file"]).read_bytes()).hexdigest() != patch["sha256"]:
             raise ValueError("patch digest mismatch")
+        if "targets" in patch:
+            text = (ROOT / patch["file"]).read_text(encoding="utf-8")
+            targets = [line.split(" b/", 1)[1] for line in text.splitlines() if line.startswith("diff --git ")]
+            if targets != patch["targets"] or len(targets) != len(set(targets)):
+                raise ValueError("patch targets mismatch")
+    if 'geometryDescriptorContract' in value:
+        contracts = value.get('contracts', {'before': 1, 'preview': 1, 'region': 1})
+        if type(value['geometryDescriptorContract']) is not int or value['geometryDescriptorContract'] != 2 \
+                or contracts != {'before': 1, 'preview': 1, 'region': 1} \
+                or any(type(version) is not int for version in contracts.values()):
+            raise ValueError('unsupported managed contracts')
     return value
 
 
@@ -33,6 +47,10 @@ def source_state(source, spec):
         return subprocess.check_output(["git", "-C", str(source), *args])
     if git("rev-parse", "HEAD").decode().strip() != spec["commit"]:
         raise ValueError("LightCraft HEAD differs from the manifest; review UPDATE_GUIDE.md")
+    if 'geometryDescriptorContract' in spec:
+        upstream = tomllib.loads(git('show', 'HEAD:Cargo.toml').decode())
+        if upstream['workspace']['package']['version'] != spec['version']:
+            raise ValueError('upstream version differs from the manifest')
     if git("diff", "--cached", "--name-only").strip():
         raise ValueError("staged source changes are not allowed")
     if git("ls-files", "--others", "--exclude-standard").strip():
@@ -61,7 +79,8 @@ def prepare(source, spec, apply=False):
         if source_state(source, spec) != "patched":
             raise ValueError("patch verification failed")
     state = source_state(source, spec)
-    if state == 'patched' and spec['version'] == '0.10.0':
+    # Every managed Region build shares the same artifacts, regardless of engine version.
+    if state == 'patched' and 'geometryDescriptorContract' in spec:
         shared = ROOT.parents[1]
         for native, original in [('region_schema.json','frontend/src/rawRegion.schema.json'),
                 ('region_contract.json','frontend/src/rawRegionContract.json'),
@@ -74,8 +93,9 @@ def prepare(source, spec, apply=False):
     return state
 
 
-def probe(binary):
+def probe(binary, spec=None):
     """Probe the actual binary with a synthetic file; never infer capabilities from its version."""
+    spec = spec or manifest()
     with tempfile.TemporaryDirectory(prefix="genzoroom-before-") as folder:
         source = Path(folder) / "probe.png"
         def chunk(kind, data):
@@ -137,11 +157,11 @@ def probe(binary):
             raise ValueError("probe response too large")
         replies = {item["id"]: item for line in process.stdout.splitlines() if (item := json.loads(line)).get("id")}
         server = replies[1]["result"]["serverInfo"]
-        if server.get("name") != "lightcraft" or server.get("version") != manifest()["version"]:
+        if server.get("name") != "lightcraft" or server.get("version") != spec["version"]:
             raise ValueError("binary version mismatch")
         preview = next(t for t in replies[2]["result"]["tools"] if t["name"] == "render_preview")
         region = next(t for t in replies[2]["result"]["tools"] if t["name"] == "render_region_preview")
-        if region.get('_meta', {}).get('genzoroom.geometryDescriptorContract') != manifest()['geometryDescriptorContract']:
+        if region.get('_meta', {}).get('genzoroom.geometryDescriptorContract') != spec['geometryDescriptorContract']:
             raise ValueError('binary geometry descriptor contract mismatch')
         properties = preview["inputSchema"]["properties"]
         if properties.get("before", {}).get("type") != "boolean" \
@@ -237,7 +257,7 @@ def probe(binary):
     region_spec = importlib.util.spec_from_file_location('genzoroom_region_probe', ROOT/'region_probe.py')
     region_module = importlib.util.module_from_spec(region_spec)
     region_spec.loader.exec_module(region_module)
-    region_module.probe_region(binary)
+    region_module.probe_region(binary, expected_version=spec['version'])
 
 
 def valid_execution(value):
@@ -369,8 +389,9 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--manifest", type=Path, help="Archived manifest for a reproducible older engine")
     args = parser.parse_args()
-    spec = manifest()
+    spec = manifest(args.manifest)
     if args.source:
         state = prepare(args.source, spec, args.apply)
         print(f"LightCraft {spec['version']}: {state}")
@@ -383,7 +404,7 @@ def main():
                 raise ValueError("source changed during build")
             binary = args.source / "target/release/lightcraft-cli.exe"
             verified = receipt(binary, spec)
-            probe(binary)
+            probe(binary, spec)
             if receipt(binary, spec) != verified:
                 raise ValueError("binary changed during probe")
             binary.with_suffix(".genzoroom.json").write_text(json.dumps(verified, indent=2) + "\n", encoding="utf-8")
@@ -393,9 +414,10 @@ def main():
     if args.binary:
         actual = receipt(args.binary, spec)
         saved = json.loads(args.binary.with_suffix(".genzoroom.json").read_text(encoding="utf-8"))
-        if saved != actual:
+        # JSON booleans must not compare equal to integer contract versions.
+        if json.dumps(saved, sort_keys=True) != json.dumps(actual, sort_keys=True):
             raise ValueError("binary/patch receipt mismatch; rebuild with this manifest")
-        probe(args.binary)
+        probe(args.binary, spec)
         if receipt(args.binary, spec) != actual:
             raise ValueError("binary changed during probe")
         print("Adaptive Before/After binary capability and SHA-256 verified")

@@ -14,14 +14,53 @@ spec.loader.exec_module(build)
 
 def test_manifest_patch_digest_and_targets():
     value = build.manifest()
-    assert value["version"] == "0.10.0"
-    assert value["commit"] == "a2a41383c4fd62fa85a46ccd00998639221f2d3c"
+    assert value["version"] == "0.14.0"
+    assert value["commit"] == "03c88c166c054c009db2a47187d59991f6232b85"
     assert value['geometryDescriptorContract'] == 2
     assert len(value["patches"]) == 1
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
     assert '"before"' in patch and 'render_job(id, size, size, true, true)' in patch
     assert all(f"a/{target}" in patch for target in value["patches"][0]["targets"])
     assert 'GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2' in patch and '"nativeAspect":native_aspect' in patch
+
+
+def test_archived_010_manifest_and_patch_remain_reproducible():
+    value = build.manifest(build.ROOT / 'versions/0.10.0.json')
+    assert value['version'] == '0.10.0'
+    assert value['patches'][0]['sha256'] == '6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc'
+
+
+def test_browser_identity_is_generated_from_the_managed_manifest():
+    source = build.ROOT / 'sync_identity.py'
+    spec = importlib.util.spec_from_file_location('sync_identity', source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (build.ROOT.parents[1] / 'frontend/src/lightcraftEngine.ts').read_text(encoding='utf-8') == module.identity_source(build.manifest())
+
+
+@pytest.mark.parametrize('version', ['0.10.0', '0.14.0'])
+def test_shared_region_artifact_gate_cannot_be_skipped_by_version(tmp_path, monkeypatch, version):
+    shared = tmp_path / 'repository'
+    managed = shared / 'native/lightcraft'
+    managed.mkdir(parents=True)
+    source = tmp_path / 'upstream'
+    for native, original in [('region_schema.json', 'frontend/src/rawRegion.schema.json'),
+                             ('region_contract.json', 'frontend/src/rawRegionContract.json'),
+                             ('region_fixtures.json', 'frontend/src/test-fixtures/raw-region-v1.json'),
+                             ('region_schema.json', 'backend/raw_region_schema.json')]:
+        target = source / 'crates/mcp/src' / native
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'{}\n')
+        expected = shared / original
+        expected.parent.mkdir(parents=True, exist_ok=True)
+        expected.write_bytes(b'{}\n')
+    monkeypatch.setattr(build, 'ROOT', managed)
+    monkeypatch.setattr(build, 'source_state', lambda *_: 'patched')
+    spec = {'version': version, 'geometryDescriptorContract': 2}
+    assert build.prepare(source, spec) == 'patched'
+    (source / 'crates/mcp/src/region_schema.json').write_bytes(b'{"foreign":true}\n')
+    with pytest.raises(ValueError, match='shared contract artifact mismatch'):
+        build.prepare(source, spec)
 
 
 def test_patch_apply_verify_duplicate_and_unknown_changes_fail_closed(tmp_path, monkeypatch):

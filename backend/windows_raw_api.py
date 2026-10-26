@@ -17,6 +17,7 @@ from starlette.routing import Route
 from lightcraft_mcp import LightCraftError
 from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
+from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
 from raw_controls import CONTROLS, controls_state, validate_controls, validate_history_operation
 
@@ -115,8 +116,14 @@ class RawPreviewApi:
             except LightCraftError:
                 # Optional Region negotiation must not hide healthy B1 Whole availability.
                 pass
-        return JSONResponse({"available": bool(status and status.state == "ready" and not self._closing),
-                             "state": status.state if status else "disabled", "version": "0.10.0",
+        current = self.manager.status() if self.manager else None
+        if current != status:
+            region = {}
+        status = current
+        artifact = self.manager.artifact_info() if status and not self._closing else None
+        return JSONResponse({"available": bool(status and status.state == "ready" and status.version == ENGINE_VERSION and artifact and not self._closing),
+                             "state": status.state if status else "disabled", "version": status.version if status else None,
+                             "artifact": artifact,
                              "workspaceState": self._workspace_state,
                              "cleanupPending": bool(self.cache and self.cache.cleanup_pending),
                              "maxSide": MAX_PREVIEW_SIDE, "maxImageBytes": MAX_IMAGE_BYTES, **region}, headers={"Cache-Control": "no-store"})

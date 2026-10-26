@@ -1,0 +1,422 @@
+{
+  "phase": "U3",
+  "automatedCandidate": "PASS",
+  "windowsAcceptance": "pending",
+  "engine": {
+    "version": "0.14.0",
+    "commit": "03c88c166c054c009db2a47187d59991f6232b85",
+    "patches": [
+      {
+        "targets": [
+          "Cargo.lock",
+          "crates/engine/src/media.rs",
+          "crates/engine/src/slide_title.rs",
+          "crates/gpu/src/lib.rs",
+          "crates/gpu/src/render.rs",
+          "crates/gpu/tests/it/equivalence.rs",
+          "crates/mcp/Cargo.toml",
+          "crates/mcp/src/backend.rs",
+          "crates/mcp/src/headless.rs",
+          "crates/mcp/src/lib.rs",
+          "crates/mcp/src/preview.rs",
+          "crates/mcp/src/region.rs",
+          "crates/mcp/src/region/tests.rs",
+          "crates/mcp/src/region_contract.json",
+          "crates/mcp/src/region_fixtures.json",
+          "crates/mcp/src/region_schema.json",
+          "crates/mcp/src/tools.rs",
+          "crates/mcp/tests/it/e2e.rs",
+          "crates/pipeline/src/geometry.rs",
+          "crates/pipeline/src/lib.rs",
+          "crates/pipeline/src/tests.rs",
+          "crates/ui-egui/src/render.rs"
+        ],
+        "file": "patches/0002-v0.14-native-contracts.patch",
+        "purpose": "Native Before, adaptive Whole and Region plan/render contract 1 with shared finite StageCache",
+        "sha256": "d0d7653a92ad7db0af526d4595a54356cd0b0480f7757bf2b60487030a7582d3"
+      }
+    ],
+    "binarySha256": "3d41aff1cf70be79f5fdf54061ce51efc3988e02b4ff354d91423a7113e9423a",
+    "beforeContract": 1,
+    "previewContract": 1,
+    "regionContract": 1,
+    "geometryDescriptorContract": 2
+  },
+  "preserved010": {
+    "commit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",
+    "patchSha256": "6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc",
+    "c2BinarySha256": "7f4f76fd5c8989bf8439206c3bba778a753cf5e5b56359fb495cc14c4e914111"
+  },
+  "realRawSanity": [
+    {
+      "backend": "off",
+      "recipeRevision": 163,
+      "exactRawMatched": true,
+      "sanity": {
+        "wholeMs": [
+          933.2299000002422,
+          215.4529000004004,
+          382.018600000265
+        ],
+        "warmWholeMs": 405.7784999999967,
+        "warmRegionMs": [
+          272.99989999983154,
+          262.91779999974096,
+          247.73310000000492
+        ],
+        "warmRssBytes": [
+          241606656,
+          241922048,
+          242262016
+        ],
+        "draftWholeAndRegion": true,
+        "beforeWholeAndRegion": true,
+        "cacheFullPixelsIdentical": true
+      },
+      "settingsUnchanged": true,
+      "geometryDescriptorContract": 2,
+      "previewContract": 1,
+      "regionContract": 1,
+      "whole": [
+        {
+          "requestedSide": 1024,
+          "bitmap": [
+            1024,
+            770
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "cpu",
+            "outcome": "cpu_not_tried",
+            "reason": "gpu_disabled"
+          }
+        },
+        {
+          "requestedSide": 1472,
+          "bitmap": [
+            1472,
+            1107
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "cpu",
+            "outcome": "cpu_not_tried",
+            "reason": "gpu_disabled"
+          }
+        },
+        {
+          "requestedSide": 2048,
+          "bitmap": [
+            2048,
+            1540
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "cpu",
+            "outcome": "cpu_not_tried",
+            "reason": "gpu_disabled"
+          }
+        }
+      ],
+      "canonicalGeometryMatches": true,
+      "planSucceeded": true,
+      "actualF": [
+        4064,
+        3056
+      ],
+      "planSourceLevel": "Full",
+      "renderSucceeded": true,
+      "renderSourceLevel": "Full",
+      "window": {
+        "x": 1280,
+        "y": 768,
+        "w": 1280,
+        "h": 1536
+      },
+      "validRegion": {
+        "x": 1296,
+        "y": 784,
+        "w": 1248,
+        "h": 1504
+      },
+      "nativePlacement": {
+        "x0": 1280,
+        "y0": 768,
+        "x1": 2560,
+        "y1": 2304
+      },
+      "visibleNativeRect": {
+        "x0": 1056,
+        "y0": 980,
+        "x1": 3008,
+        "y1": 2076
+      },
+      "limited": true,
+      "bitmap": [
+        1280,
+        1536
+      ],
+      "pngBytes": 3474754,
+      "execution": {
+        "backend": "cpu",
+        "outcome": "cpu_not_tried",
+        "reason": "gpu_disabled"
+      },
+      "cacheSourceTransition": {
+        "fullPixelsIdentical": true,
+        "wholeCache": {
+          "applied": true,
+          "budgetBytes": 536870912,
+          "cpuBytes": 172677120,
+          "gpuBytes": 0,
+          "mode": "on",
+          "reason": "none",
+          "retainedBytes": 172677120
+        },
+        "regionCache": {
+          "applied": false,
+          "budgetBytes": 536870912,
+          "cpuBytes": 0,
+          "gpuBytes": 0,
+          "mode": "on",
+          "reason": "budget",
+          "retainedBytes": 0
+        }
+      }
+    },
+    {
+      "backend": "dx12",
+      "recipeRevision": 163,
+      "exactRawMatched": true,
+      "sanity": {
+        "wholeMs": [
+          911.1082000003989,
+          167.2734999997374,
+          295.839899999919
+        ],
+        "warmWholeMs": 332.5343999999859,
+        "warmRegionMs": [
+          273.01219999981186,
+          266.6727999999239,
+          296.9074999996337
+        ],
+        "warmRssBytes": [
+          677986304,
+          685756416,
+          685772800
+        ],
+        "draftWholeAndRegion": true,
+        "beforeWholeAndRegion": true,
+        "cacheFullPixelsIdentical": true
+      },
+      "settingsUnchanged": true,
+      "geometryDescriptorContract": 2,
+      "previewContract": 1,
+      "regionContract": 1,
+      "whole": [
+        {
+          "requestedSide": 1024,
+          "bitmap": [
+            1024,
+            770
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "gpu",
+            "outcome": "gpu_success",
+            "reason": "none"
+          }
+        },
+        {
+          "requestedSide": 1472,
+          "bitmap": [
+            1472,
+            1107
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "gpu",
+            "outcome": "gpu_success",
+            "reason": "none"
+          }
+        },
+        {
+          "requestedSide": 2048,
+          "bitmap": [
+            2048,
+            1540
+          ],
+          "native": [
+            4064,
+            3056
+          ],
+          "execution": {
+            "backend": "gpu",
+            "outcome": "gpu_success",
+            "reason": "none"
+          }
+        }
+      ],
+      "canonicalGeometryMatches": true,
+      "planSucceeded": true,
+      "actualF": [
+        4064,
+        3056
+      ],
+      "planSourceLevel": "Full",
+      "renderSucceeded": true,
+      "renderSourceLevel": "Full",
+      "window": {
+        "x": 1280,
+        "y": 768,
+        "w": 1280,
+        "h": 1536
+      },
+      "validRegion": {
+        "x": 1296,
+        "y": 784,
+        "w": 1248,
+        "h": 1504
+      },
+      "nativePlacement": {
+        "x0": 1280,
+        "y0": 768,
+        "x1": 2560,
+        "y1": 2304
+      },
+      "visibleNativeRect": {
+        "x0": 1056,
+        "y0": 980,
+        "x1": 3008,
+        "y1": 2076
+      },
+      "limited": true,
+      "bitmap": [
+        1280,
+        1536
+      ],
+      "pngBytes": 3474762,
+      "execution": {
+        "backend": "gpu",
+        "outcome": "gpu_success",
+        "reason": "none"
+      },
+      "cacheSourceTransition": {
+        "fullPixelsIdentical": true,
+        "wholeCache": {
+          "applied": true,
+          "budgetBytes": 536870912,
+          "cpuBytes": 59136000,
+          "gpuBytes": 175790080,
+          "mode": "on",
+          "reason": "none",
+          "retainedBytes": 234926080
+        },
+        "regionCache": {
+          "applied": false,
+          "budgetBytes": 536870912,
+          "cpuBytes": 0,
+          "gpuBytes": 0,
+          "mode": "on",
+          "reason": "budget",
+          "retainedBytes": 0
+        }
+      }
+    },
+    {
+      "cpuDx12Comparison": {
+        "whole": {
+          "maxLsb": 1,
+          "meanLsb": 0.0005957665381493507
+        },
+        "region": {
+          "maxLsb": 1,
+          "meanLsb": 0.0004630194769965278
+        },
+        "before": {
+          "maxLsb": 1,
+          "meanLsb": 0.00025048193993506494
+        }
+      }
+    }
+  ],
+  "settingsCapability": {
+    "available": true,
+    "state": "ready",
+    "version": "0.14.0",
+    "artifact": {
+      "version": "0.14.0",
+      "upstreamCommit": "03c88c166c054c009db2a47187d59991f6232b85",
+      "managedPatch": true,
+      "geometryDescriptorContract": 2
+    },
+    "workspaceState": "empty",
+    "cleanupPending": false,
+    "maxSide": 2048,
+    "maxImageBytes": 17825792,
+    "regionContract": 1
+  },
+  "nativeTests": [
+    {
+      "scope": "mcp unit",
+      "passed": 74,
+      "ignored": 1
+    },
+    {
+      "scope": "mcp integration",
+      "passed": 11,
+      "ignored": 0
+    },
+    {
+      "scope": "engine genzoroom",
+      "passed": 3,
+      "ignored": 0
+    },
+    {
+      "scope": "pipeline unit",
+      "passed": 208,
+      "ignored": 2
+    },
+    {
+      "scope": "gpu integration",
+      "passed": 20,
+      "ignored": 1
+    },
+    {
+      "scope": "simulated lost poll",
+      "passed": 1,
+      "ignored": 0
+    }
+  ],
+  "benchmarkPolicy": "cold/warm Whole and three warm Region repetitions per backend; no old-engine or policy comparison",
+  "budgetsChanged": false,
+  "recipePolicy": "exact engine tuple only; old Recipe/History rows retained, no implicit conversion",
+  "unresolvedHigh": 0,
+  "unresolvedMedium": 0,
+  "backendTests": {
+    "focusedRawRegressionPassed": 457,
+    "managementHistoryPackagingPassed": 176,
+    "scopesOverlap": true
+  },
+  "frontendTests": {
+    "files": 18,
+    "distinctPassed": 535,
+    "finalSettingsAndRawPagePassed": 78
+  },
+  "artifactRequiredForRawTuple": true
+}

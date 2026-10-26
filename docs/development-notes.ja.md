@@ -1,5 +1,17 @@
 # GenzoRoom 開発ノート
 
+## U3：LightCraft v0.14.0管理buildへ追随（2026-10-26）
+
+正式tag commit `03c88c166c054c009db2a47187d59991f6232b85`を専用checkoutへ固定し、新managed patchでBefore/Preview/Region各1・canonical geometry descriptor 2を維持した。MCP schema、test移動、DecodedSource facts、StageCache計量を保持し、display-fit後のsidecarを無効化、engineのGPU proof gateと診断を同じ条件へ揃えた。旧v0.10 patch・manifest・C2 binary/receiptは保持し、archived manifestで旧sourceの再検証も通した。
+
+Recipe／Historyはengine tuple完全一致の方針を維持する。旧v0.10行は保存されたままで、新版へ黙って変換しない。旧engineの編集がある写真は復元前に拒否し、保存時のGenzoRoom／LightCraftを使う案内を表示する。新readbackとBefore keyはv0.14を識別し、schema/DB migrationは行わない。
+
+SettingsはImmich情報の下に、実processのhandshake・EXE SHA・manifest・receiptが一致する場合だけ `LightCraft 0.14.0` を表示する。未接続・不正metadata・古い応答では版を推測しない。Backendと生成Frontend identityは同じmanifestを正本とし、将来更新時の手作業の重複を避ける。
+
+自動検証では実RAWのCPU/DX12、Whole 1024/1472/2048、Preview→Full、production planner経由Region、Before、Draft/Full、cache OFF/ON、正常終了が成功。CPU/DX12最大差はWhole/Region/Before各1 LSB、同engine cache Fullは一致。短い3回反復で明らかな遅化・異常なRSS増加は観測しなかった。大規模benchmark・旧版比較・C3 tuningは行っていない。数値・SHA・試験範囲・監査は[U3結果](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)に記録する。
+
+**U3自動受入PASS、Windowsの短い画面・画質確認待ち。** 新EXEを明示指定してBackendを再起動し、Settings、RAW Fit、100% Region、Pan、Before/After、数枚の画質をユーザーが確認する。今回agentによる実画面操作、NAS/Firefox受入、配布releaseは行っていない。
+
 ## 工程C2：Windows実機受入完了（2026-10-25）
 
 基準Commit `01a6c86832749e7b18857a1d165ca58b663277e1` の文書状態を更新。ユーザーのWindows実機受入報告により、**C2-B PASS、C2-C PASS、C2全体はWindows実機受入PASSとして完了**。C2-Bのowner/capability、中央・四隅・各edge、geometry/overlay配置、Zoom後再要求、Before/After、Whole base/fallback、およびC2-CのFit Whole-only（1472×1107、rho約1.01）、1:1 Full RAW Region（Whole 2048×1540、Region 1280×1536 / F 4064×3056、Whole density 0.5039、Region density 1）、Pan/Zoom/Zoom out、Before/After、明瞭な実効解像度向上を確認した。白抜け・位置ずれ・古いoverlay残留なし。実画面結果はユーザー報告であり、agentによる手動確認ではない。

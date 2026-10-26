@@ -39,7 +39,7 @@ describe('shared Settings modal', () => {
   it('unlocks and saves RAW and Both only after the Windows RAW capability is available', async () => {
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
-      ? new Response(JSON.stringify({ available: true, version: '0.10.0' }), { headers: { 'Content-Type': 'application/json' } }) : fallback(url));
+      ? new Response(JSON.stringify({ available: true, version: '0.14.0' }), { headers: { 'Content-Type': 'application/json' } }) : fallback(url));
     await click(host.querySelector('button')!);
     const radios = [...dialog().querySelectorAll<HTMLInputElement>('.anshitsu-selection-options input')];
     expect(radios.every(radio => !radio.disabled)).toBe(true);
@@ -232,7 +232,7 @@ describe('shared Settings modal', () => {
   it('shows independent connection and safe server information', async () => {
     await click(host.querySelector('button')!);
     const groups = dialog().querySelectorAll<HTMLElement>('.settings-connection-group');
-    expect(groups).toHaveLength(2);
+    expect(groups).toHaveLength(3);
     expect(groups[0].querySelector('h4')?.textContent).toBe('GenzoRoom');
     expect(groups[0].textContent).toContain('Backend: Connected');
     expect(groups[1].querySelector('h4')?.textContent).toBe('Immich');
@@ -244,6 +244,37 @@ describe('shared Settings modal', () => {
     expect(dialog().textContent).toContain('v3.0.0');
     expect(dialog().textContent).toContain('release');
     expect(dialog().querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(true);
+  });
+  it.each([
+    { state: 'disabled', artifact: null },
+    { state: 'ready', version: '0.14.0', artifact: { version: '0.14.0' } },
+    { state: 'ready', version: '0.14.0', artifact: { version: '9.9.9', upstreamCommit: 'a'.repeat(40), managedPatch: true, geometryDescriptorContract: 2 } },
+    null,
+  ])('does not claim a LightCraft version from unavailable or malformed metadata %#', async metadata => {
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
+      ? { ok: true, json: async () => metadata } : fallback(url));
+    await click(host.querySelector('button')!);
+    const group = dialog().querySelectorAll('.settings-connection-group')[2];
+    expect(group.textContent).toContain('Unavailable');
+    expect(group.textContent).not.toContain('0.14.0');
+  });
+  it('shows the verified process version and discards a response from before refresh', async () => {
+    const fallback = fetchMock.getMockImplementation()!;
+    const waiting: ((value: unknown) => void)[] = [];
+    const metadata = (version: string) => ({ state: 'ready', available: true, version,
+      artifact: { version, upstreamCommit: 'a'.repeat(40), managedPatch: true, geometryDescriptorContract: 2 } });
+    fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
+      ? { ok: true, json: () => new Promise(resolve => waiting.push(resolve)) } : fallback(url));
+    await click(host.querySelector('button')!);
+    fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
+      ? { ok: true, json: async () => metadata('0.14.0') } : fallback(url));
+    await click([...dialog().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check again')!);
+    expect(dialog().querySelectorAll('.settings-connection-group')[2].textContent).toContain('LightCraft 0.14.0');
+    await act(async () => waiting.forEach(resolve => resolve(metadata('9.9.9'))));
+    expect(dialog().querySelectorAll('.settings-connection-group')[2].textContent).toContain('LightCraft 0.14.0');
+    expect(dialog().textContent).not.toContain('9.9.9');
+    expect(dialog().textContent).toContain('v3.0.0');
   });
   it.each(['authentication_failed', 'unreachable'])('does not conflate %s about failure with the working photo connection', async error_code => {
     fetchMock.mockImplementation(async (url: string) => ({ ok: true, json: async () => url.endsWith('/health') ? { status: 'ok' }

@@ -733,7 +733,8 @@ export function AnshitsuPage() {
           previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.displayError && !rawDocument.url ? 'error' : undefined}
           statusNote={rawDocument ? (rawDocument.pending && !rawDocument.editError)
             || (rawDocument.status === 'ready' && !rawDocument.editError && !rawDocument.displayError) ? undefined
-            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
+            : t(rawDocument.code === 'raw_recipe_engine_incompatible' ? 'workspace.rawPreview.engineIncompatible'
+              : `workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           rawFrame={rawDocument?.frame}
           rawRegionDisplay={rawDocument?.regionDisplay}

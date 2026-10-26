@@ -4,6 +4,18 @@
 
 This document describes the current implementation and possible future extensions. The architecture remains provisional: components, interfaces, and deployment choices may change during development.
 
+## Current managed LightCraft identity (U3)
+
+U3 advances the managed engine to v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`, with automated acceptance complete and short Windows visual acceptance pending. This supersedes the engine version pins in historical phase records below. `native/lightcraft/manifest.json` owns the version, commit, patch digest/targets and geometry descriptor 2; Before/Preview/Region remain contract 1. `sync_identity.py` generates the Frontend strict identity from it. The Backend reads this manifest at startup, including the frozen Windows package's copy. Docker has no native artifact and claims no installed engine version.
+
+The manager's per-generation `_artifact` owns only receipt-verified version/commit/managed-patch/descriptor metadata. Existing bounded daemon inspection owns both EXE hashing and receipt reading, so stalled I/O cannot hold the event loop or default-executor shutdown. Restart clears it before any new work; it is exposed only while ready. Settings requires the complete manifest patch tuple, integer contract versions, actual EXE SHA and handshake version to match the receipt. Raw stderr and receipt/source paths are not added to diagnostics.
+
+RAW editing and Recipe identity issuance also require this attestation, independently of JPEG readiness. A version-matching but unverified process is rejected before import with `raw_unverified_artifact`; a reported version alone cannot authorize saving the pinned source commit.
+
+Recipe/History retains exact composite engine identity matching. New readback and Before keys identify v0.14; retained v0.10 rows are neither relabelled nor automatically migrated. An old-engine-only saved row blocks opening with `raw_recipe_engine_incompatible`, with an explicit preservation/recovery message. Recipe, History, revision and save receipts remain unchanged. Recovery uses the old GenzoRoom baseline with the preserved v0.10 binary/receipt and archived manifest. There is no schema migration or cross-version pixel-equivalence claim.
+
+The native patch keeps canonical Native geometry identity separate from sampling/window cache keys. Post-Plan Desktop display fitting clears its geometry sidecar rather than attesting a resized bitmap with the old Plan; headless Whole/Region do not request display fitting. Engine GPU admission and execution diagnostics share the v0.14 device-profile proof predicate. C3 policy and budgets are unchanged. See [U3 results](research/lightcraft/LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26) for evidence and manual acceptance.
+
 ## LightCraft RAW integration foundation (Phase 1A)
 
 The Windows Python Backend owns an optional, single LightCraft v0.10.0 headless MCP child. Phase 1A supplies process and communication infrastructure; the internal Phase 1B adapter below adds RAW import/settings/Preview operations. Export, Recipe/History integration and RAW UI remain unimplemented. The [research index](research/lightcraft/README.md) retains source findings and prior PoC measurements; [Phase 1A design](research/lightcraft/PHASE1A_DESIGN.md) remains the original design and completion record.

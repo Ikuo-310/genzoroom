@@ -147,8 +147,37 @@ function ConnectionInformation() {
           : <p role="status">{t('connection.checking')}</p>}
         <button type="button" className="tool-button" onClick={() => setAttempt(value => value + 1)}>{t('settings.refresh')}</button>
       </div>
+      <LightCraftInformation attempt={attempt} />
     </div>
   </>;
+}
+
+function LightCraftInformation({ attempt }: { attempt: number }) {
+  const { t } = useTranslation();
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController(); let active = true;
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    setLabel(null);
+    void fetch('/api/raw/capabilities', { signal: controller.signal, cache: 'no-store' }).then(async response => {
+      if (!response.ok) throw new Error('LightCraft unavailable');
+      const data: unknown = await response.json();
+      if (!active || controller.signal.aborted) return;
+      const value = data as { state?: unknown; version?: unknown; artifact?: Record<string, unknown> } | null;
+      const artifact = value?.artifact;
+      // Only the backend's receipt/SHA-verified process identity may claim an installed version.
+      const valid = value?.state === 'ready' && artifact && typeof artifact.version === 'string'
+        && /^\d+\.\d+\.\d+$/.test(artifact.version) && artifact.version === value.version
+        && typeof artifact.upstreamCommit === 'string' && /^[a-f0-9]{40}$/.test(artifact.upstreamCommit)
+        && artifact.managedPatch === true && artifact.geometryDescriptorContract === 2;
+      setLabel(valid ? artifact.version as string : null);
+    }).catch(() => { if (active) setLabel(null); }).finally(() => window.clearTimeout(timeout));
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
+  }, [attempt]);
+  return <div className="settings-connection-group">
+    <h4>LightCraft</h4>
+    <p role="status">{label ? `LightCraft ${label}` : t('connection.unavailable')}</p>
+  </div>;
 }
 export function SettingsDialog({ gpu, onClose }: { gpu: GpuStatus | null; onClose: () => void }) {
   const { t } = useTranslation(); const settings = useAppSettings();

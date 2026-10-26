@@ -250,7 +250,7 @@ class RawDiagnosticsApi:
         self._check_deadline()
         cpu = run["config"]["backend"] == "cpu" and not gpu_before.enabled and not gpu_after.enabled
         metadata = {"trial": trial, "measuredAt": datetime.now(timezone.utc).isoformat(),
-            "contract": {"lightcraftVersion": "0.10.0", "engineCommit": ENGINE_COMMIT,
+            "contract": {"lightcraftVersion": self.manager.status().version, "engineCommit": ENGINE_COMMIT,
                 "previewContract": 1, "binarySha256": run["binary"]},
             "source": run["sourceMetadata"], "settingsFingerprint": run["settings"], "frame": frame.frame,
             "backend": {"configured": run["config"]["backend"], "execution": "cpu" if cpu else "unconfirmed",

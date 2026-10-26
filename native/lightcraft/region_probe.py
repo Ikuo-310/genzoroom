@@ -19,7 +19,7 @@ from lightcraft_runtime import child_environment
 from raw_region import MAX_LINE_BYTES, MAX_PNG_BYTES, supports_region, validate_result
 
 
-async def _probe(binary, backend):
+async def _probe(binary, backend, expected_version):
     with tempfile.TemporaryDirectory(prefix='genzoroom-region-') as folder:
         source=Path(folder)/'noise.png'
         Image.frombytes('RGB',(2048,1536),random.Random(17).randbytes(2048*1536*3)).save(source)
@@ -29,7 +29,7 @@ async def _probe(binary, backend):
             **({'creationflags':0x08000000} if os.name=='nt' else {}))
         client=LightCraftMCP(process.stdout,process.stdin,1)
         try:
-            await client.initialize('c1-probe',timeout=30)
+            await client.initialize('c1-probe',timeout=30, expected_version=expected_version)
             tools=await client.request('tools/list',timeout=10)
             if not supports_region(tools):
                 raise ValueError('binary Region capability mismatch')
@@ -162,7 +162,7 @@ async def _probe(binary, backend):
                 process.kill();await process.wait()
 
 
-def probe_region(binary):
-    summaries=[asyncio.run(_probe(binary,'off'))]
-    if os.name=='nt':summaries.append(asyncio.run(_probe(binary,'dx12')))
+def probe_region(binary, *, expected_version):
+    summaries=[asyncio.run(_probe(binary,'off',expected_version))]
+    if os.name=='nt':summaries.append(asyncio.run(_probe(binary,'dx12',expected_version)))
     return summaries

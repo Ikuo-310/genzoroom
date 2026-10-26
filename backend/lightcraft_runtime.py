@@ -12,6 +12,7 @@ import tempfile
 import uuid
 
 from backend_logging import backend_logger
+from lightcraft_artifact import ENGINE_VERSION, verified_artifact
 from lightcraft_mcp import LightCraftError, LightCraftMCP, MAX_PREVIEW_LINE_BYTES, MCPTransportError
 
 
@@ -215,7 +216,10 @@ async def _inspect_executable(value, stop, register_thread):
 
     def inspect():
         try:
-            outcome = (_executable_info(value), None)
+            executable, digest = _executable_info(value)
+            # Receipt I/O has the same bounded daemon owner as hashing, never the loop executor.
+            artifact = verified_artifact(executable, digest, ENGINE_VERSION)
+            outcome = ((executable, digest, artifact), None)
         except LightCraftError as error:
             outcome = (None, error.code)
         except Exception:
@@ -281,6 +285,12 @@ class LightCraftManager:
         self._generation = 0
         self._state = "stopped" if self._platform == "win32" and self._executable else "disabled"
         self._version = self._sha256 = self._error = None
+        self._artifact = None
+
+    def artifact_info(self):
+        # A restart invalidates this generation's attestation before another response can use it.
+        status = self.status()
+        return dict(self._artifact) if status.state == 'ready' and self._artifact else None
 
     def status(self):
         return LightCraftStatus(self._state, self._generation, self._version, self._sha256, self._error)
@@ -300,6 +310,7 @@ class LightCraftManager:
             return
         self._generation += 1
         self._version = self._sha256 = self._error = None
+        self._artifact = None
         session = _Session(self._generation)
         self._session = session
         self._state = "starting"
@@ -327,12 +338,13 @@ class LightCraftManager:
                 inspected = await _inspect_executable(self._executable, session.stop, self._register_inspection)
                 if inspected is None:
                     return
-                executable, digest = inspected
+                executable, digest, artifact = inspected
             if session.stop.is_set():
                 return
             if self._current(session):
                 self._sha256 = digest
-            lightcraft_log("process.artifact", generation=session.generation, sha256=digest)
+            lightcraft_log("process.artifact", generation=session.generation, sha256=digest,
+                           managedArtifact=bool(artifact))
             await _bounded_temp_io(_create_temp_directory, session, timeout=self._timeouts.temp_io)
             if session.stop.is_set():
                 return
@@ -362,6 +374,7 @@ class LightCraftManager:
             if session.stop.is_set():
                 return
             if self._current(session):
+                self._artifact = artifact if artifact and artifact['version'] == version else None
                 self._state, self._version = "ready", version
                 lightcraft_log("process.ready", generation=session.generation, version=version)
             stop_task = asyncio.create_task(session.stop.wait(), name=f"lightcraft-stop-{session.generation}")
