@@ -49,6 +49,11 @@ def test_viewer_sequence_uses_isolated_native_owner_and_safe_metadata(local, tmp
                     assert meta['operation'] == trial['operation'] and meta['warmup'] == trial['warmup']
                     assert meta['payloadBytes'] == (0 if trial['operation'] == 'regionPlan' else len(response.content))
                     assert meta['engine']['geometryDescriptor'] == 2
+                    if trial['operation'] == 'regionPlan':
+                        assert meta['timing']['regionPlan']['sourceKind'] == 'loaded'
+                        assert meta['timing']['regionPlan']['plannerMs'] == 1
+                    else:
+                        assert 'regionPlan' not in meta['timing']
                     assert config['assetId'] not in json.dumps(meta)
                     assert all(key not in json.dumps(meta) for key in ('documentToken', 'sourceId', 'PRIVATE', 'settings'))
                 assert len(children) == 3  # Editing process plus one isolated document per sequence.

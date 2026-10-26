@@ -31,6 +31,7 @@ class RawPreviewSequence:
             snapshot = await self.raw.set_controls(self.handle, {'light.exposure': 0.25}, snapshot.revision)
         region = None
         native_ms = validation_ms = None
+        plan_timing = None
         if operation in ('regionPlan', 'regionFull', 'pan'):
             if not self.whole:
                 raise LightCraftError('raw_diagnostic_sequence_invalid')
@@ -46,6 +47,7 @@ class RawPreviewSequence:
                     raise LightCraftError('raw_diagnostic_superseded')
                 self.plan = result.metadata['response']
                 native_ms = result.metadata['diagnostics']['nativeMs']
+                plan_timing = result.metadata['diagnostics'].get('planTiming')
                 frame = self.whole
             else:
                 if not self.plan:
@@ -87,4 +89,5 @@ class RawPreviewSequence:
             'wholeRequestedSide': 1024, 'stageCache': {'mode': 'off', 'applied': False},
             'timing': {'backendOperationMs': elapsed + (self.open_ms if operation == 'open' else 0),
                        'openMs': self.open_ms if operation == 'open' else None,
-                       'nativeMs': native_ms, 'validationMs': validation_ms}, 'payloadBytes': len(data)}
+                       'nativeMs': native_ms, 'validationMs': validation_ms,
+                       **({'regionPlan': plan_timing} if plan_timing is not None else {})}, 'payloadBytes': len(data)}

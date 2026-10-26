@@ -8,12 +8,16 @@ export type RawViewerOperation = typeof RAW_VIEWER_OPERATIONS[number];
 export type RawViewerConfig = { assetId: string; scenario: 'viewer'; backend: 'cpu' | 'gpu'; repeats: number };
 export type RawViewerTrial = { index: number; operation: RawViewerOperation; repeat: number; warmup: boolean;
   quality: 'draft' | 'full'; stageCache: 'off'; temperature: 'cold'; group: string };
+export type RawRegionPlanTiming = { sourceKind: 'loaded' | 'fit' | 'file' | 'other';
+  sourcePreparationMs: number; sourceAcquisitionMs: number; imageSelectionMs: number;
+  plannerMs: number; geometryMs: number; sourceRetentionMs: number; otherMs: number };
 export type RawViewerMetadata = {
   operation: RawViewerOperation; repeat: number; warmup: boolean; revision: number; viewGeneration: number;
   quality: 'draft' | 'full'; geometry: RawGeometry; bitmap: { width: number; height: number };
   region: { fullWidth: number; fullHeight: number; window: { x: number; y: number; w: number; h: number }; limited: boolean } | null;
   wholeRequestedSide: 1024; stageCache: { mode: 'off'; applied: false }; payloadBytes: number;
-  timing: { backendOperationMs: number; openMs: number | null; nativeMs: number | null; validationMs: number | null };
+  timing: { backendOperationMs: number; openMs: number | null; nativeMs: number | null; validationMs: number | null;
+    regionPlan?: RawRegionPlanTiming };
   engine: { version: string; commit: string; binarySha256: string; previewContract: 1; regionContract: 1;
     geometryDescriptor: 2; gpuBackend: 'off' | 'dx12'; gpuAdapter: string | null };
 };
@@ -46,12 +50,21 @@ export function parseRawViewerMetadata(v: unknown, trial: RawViewerTrial): RawVi
     || typeof g.aspect !== 'number' || !Number.isFinite(g.aspect) || g.aspect <= 0 || g.window !== null
     || !exact(b, 'width,height') || !positive(b.width) || !positive(b.height) || Math.max(b.width, b.height) > 2048
     || !exact(c, 'mode,applied') || c.mode !== 'off' || c.applied !== false
-    || !exact(t, 'backendOperationMs,openMs,nativeMs,validationMs') || !duration(t.backendOperationMs)
+    || !exact(t, `backendOperationMs,openMs,nativeMs,validationMs${t && typeof t === 'object' && 'regionPlan' in t ? ',regionPlan' : ''}`) || !duration(t.backendOperationMs)
     || !['openMs', 'nativeMs', 'validationMs'].every(k => t[k] === null || duration(t[k]))
     || !exact(e, 'version,commit,binarySha256,previewContract,regionContract,geometryDescriptor,gpuBackend,gpuAdapter')
     || e.version !== LIGHTCRAFT_ENGINE.version || e.commit !== LIGHTCRAFT_ENGINE.commit || !hash(e.binarySha256)
     || e.previewContract !== 1 || e.regionContract !== 1 || e.geometryDescriptor !== 2 || !['off', 'dx12'].includes(String(e.gpuBackend))
     || !(e.gpuAdapter === null || typeof e.gpuAdapter === 'string' && e.gpuAdapter.length <= 200)) return fail();
+  if ('regionPlan' in t) {
+    const p = t.regionPlan;
+    const keys = ['sourcePreparationMs', 'sourceAcquisitionMs', 'imageSelectionMs', 'plannerMs',
+      'geometryMs', 'sourceRetentionMs', 'otherMs'];
+    if (trial.operation !== 'regionPlan' || !exact(p, `sourceKind,${keys.join(',')}`)
+      || typeof p.sourceKind !== 'string' || !['loaded', 'fit', 'file', 'other'].includes(p.sourceKind)
+      || !keys.every(k => duration(p[k])) || !duration(t.nativeMs)
+      || Math.abs(keys.reduce((sum, k) => sum + Number(p[k]), 0) - t.nativeMs) > 0.01) return fail();
+  }
   if (r !== null) {
     if (!['regionFull', 'pan'].includes(trial.operation) || !exact(r, 'fullWidth,fullHeight,window,limited')
       || !positive(r.fullWidth) || !positive(r.fullHeight) || typeof r.limited !== 'boolean'

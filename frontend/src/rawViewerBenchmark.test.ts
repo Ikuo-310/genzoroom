@@ -3,6 +3,18 @@ import { createRawViewerReport, fetchRawViewerTrial, parseRawViewerMetadata, raw
 import { viewerMetadata } from './test/rawViewerBenchmark';
 afterEach(() => vi.unstubAllGlobals());
 
+it('exports a bounded native plan partition and rejects inconsistent or private timing fields', () => {
+  const trial = rawViewerPlan(3).find(t => t.operation === 'regionPlan')!, metadata = viewerMetadata(trial);
+  const regionPlan = { sourceKind: 'file', sourcePreparationMs: 1, sourceAcquisitionMs: 650,
+    imageSelectionMs: 0, plannerMs: 1, geometryMs: 1, sourceRetentionMs: 1, otherMs: 1 };
+  const timing = { ...metadata.timing, nativeMs: 655, regionPlan };
+  expect(parseRawViewerMetadata({ ...metadata, timing }, trial).timing.regionPlan).toEqual(regionPlan);
+  for (const bad of [{ ...regionPlan, sourceKind: 'PRIVATE' }, { ...regionPlan, sourceKind: ['file'] }, { ...regionPlan, sourceAcquisitionMs: -1 },
+    { ...regionPlan, plannerMs: NaN }, { ...regionPlan, geometryMs: 2 }, { ...regionPlan, path: 'PRIVATE' }]) {
+    expect(() => parseRawViewerMetadata({ ...metadata, timing: { ...timing, regionPlan: bad } }, trial)).toThrow();
+  }
+});
+
 it('bounds the plan to one warm-up and three measured representative sequences', () => {
   const plan = rawViewerPlan(3);
   expect(plan).toHaveLength(40); expect(plan.filter(t => t.warmup)).toHaveLength(10);

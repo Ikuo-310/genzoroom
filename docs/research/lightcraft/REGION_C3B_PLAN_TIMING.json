@@ -1,0 +1,462 @@
+{
+  "schemaVersion": 1,
+  "engine": {
+    "version": "0.14.0",
+    "commit": "03c88c166c054c009db2a47187d59991f6232b85",
+    "binarySha256": "437308df5f9eb17951bdccfec4fa56675714f68b4a8403b2e201c33130baacee",
+    "gpuBackend": "dx12",
+    "gpuAdapter": "Radeon RX 580 Series (Dx12)"
+  },
+  "conditions": {
+    "warmups": 1,
+    "measured": 3,
+    "wholeRequestedSide": 1024,
+    "regionWindow": {
+      "width": 768,
+      "height": 576
+    },
+    "stageCache": "off"
+  },
+  "samples": [
+    {
+      "repeat": 0,
+      "warmup": true,
+      "phase": "firstPlan",
+      "timing": {
+        "backendOperationMs": 705.652199999804,
+        "openMs": null,
+        "nativeMs": 697.4927,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.08510000000000001,
+          "imageSelectionMs": 0.0021,
+          "otherMs": 0.023400000000082757,
+          "plannerMs": 0.0617,
+          "sourceAcquisitionMs": 697.1682999999999,
+          "sourceKind": "file",
+          "sourcePreparationMs": 0.1404,
+          "sourceRetentionMs": 0.0117
+        }
+      },
+      "geometry": {
+        "aspect": 1.3298701298701299,
+        "fullHeight": 770,
+        "fullWidth": 1024,
+        "geometryId": "afe9eacdf14e991b86cb0182b189be71bdc68c2140c8af980ec6aee33ec0cbcc",
+        "nativeHeight": 3000,
+        "nativeWidth": 3990,
+        "window": null
+      }
+    },
+    {
+      "repeat": 0,
+      "warmup": true,
+      "phase": "secondPlan",
+      "timing": {
+        "backendOperationMs": 8.28189999992901,
+        "openMs": null,
+        "nativeMs": 0.35100000000000003,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.050300000000000004,
+          "imageSelectionMs": 0.003,
+          "otherMs": 0.0078000000000000074,
+          "plannerMs": 0.0602,
+          "sourceAcquisitionMs": 0.0017000000000000001,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.22440000000000002,
+          "sourceRetentionMs": 0.0036
+        }
+      }
+    },
+    {
+      "repeat": 0,
+      "warmup": true,
+      "phase": "afterPanPlan",
+      "timing": {
+        "backendOperationMs": 7.688099999995757,
+        "openMs": null,
+        "nativeMs": 0.31320000000000003,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.0423,
+          "imageSelectionMs": 0.0007999999999999999,
+          "otherMs": 0.006800000000000037,
+          "plannerMs": 0.0531,
+          "sourceAcquisitionMs": 0.0009,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.2056,
+          "sourceRetentionMs": 0.0037
+        }
+      }
+    },
+    {
+      "repeat": 1,
+      "warmup": false,
+      "phase": "firstPlan",
+      "timing": {
+        "backendOperationMs": 664.6224999999504,
+        "openMs": null,
+        "nativeMs": 658.8366,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.0785,
+          "imageSelectionMs": 0.0018,
+          "otherMs": 0.022999999999938153,
+          "plannerMs": 0.0679,
+          "sourceAcquisitionMs": 658.5308,
+          "sourceKind": "file",
+          "sourcePreparationMs": 0.12530000000000002,
+          "sourceRetentionMs": 0.009300000000000001
+        }
+      },
+      "geometry": {
+        "aspect": 1.3298701298701299,
+        "fullHeight": 770,
+        "fullWidth": 1024,
+        "geometryId": "afe9eacdf14e991b86cb0182b189be71bdc68c2140c8af980ec6aee33ec0cbcc",
+        "nativeHeight": 3000,
+        "nativeWidth": 3990,
+        "window": null
+      }
+    },
+    {
+      "repeat": 1,
+      "warmup": false,
+      "phase": "secondPlan",
+      "timing": {
+        "backendOperationMs": 5.474600000070495,
+        "openMs": null,
+        "nativeMs": 0.2108,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.030100000000000002,
+          "imageSelectionMs": 0.0007,
+          "otherMs": 0.005199999999999989,
+          "plannerMs": 0.037200000000000004,
+          "sourceAcquisitionMs": 0.0007999999999999999,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.1344,
+          "sourceRetentionMs": 0.0024
+        }
+      }
+    },
+    {
+      "repeat": 1,
+      "warmup": false,
+      "phase": "afterPanPlan",
+      "timing": {
+        "backendOperationMs": 5.828199999996286,
+        "openMs": null,
+        "nativeMs": 0.219,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.033800000000000004,
+          "imageSelectionMs": 0.001,
+          "otherMs": 0.004999999999999987,
+          "plannerMs": 0.041100000000000005,
+          "sourceAcquisitionMs": 0.001,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.1343,
+          "sourceRetentionMs": 0.0028
+        }
+      }
+    },
+    {
+      "repeat": 2,
+      "warmup": false,
+      "phase": "firstPlan",
+      "timing": {
+        "backendOperationMs": 689.6976000002724,
+        "openMs": null,
+        "nativeMs": 682.1268,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.052199999999999996,
+          "imageSelectionMs": 0.002,
+          "otherMs": 0.017800000000066214,
+          "plannerMs": 0.0543,
+          "sourceAcquisitionMs": 681.8634999999999,
+          "sourceKind": "file",
+          "sourcePreparationMs": 0.12860000000000002,
+          "sourceRetentionMs": 0.0084
+        }
+      },
+      "geometry": {
+        "aspect": 1.3298701298701299,
+        "fullHeight": 770,
+        "fullWidth": 1024,
+        "geometryId": "afe9eacdf14e991b86cb0182b189be71bdc68c2140c8af980ec6aee33ec0cbcc",
+        "nativeHeight": 3000,
+        "nativeWidth": 3990,
+        "window": null
+      }
+    },
+    {
+      "repeat": 2,
+      "warmup": false,
+      "phase": "secondPlan",
+      "timing": {
+        "backendOperationMs": 6.752400000095804,
+        "openMs": null,
+        "nativeMs": 0.2539,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.037200000000000004,
+          "imageSelectionMs": 0.0007999999999999999,
+          "otherMs": 0.006500000000000021,
+          "plannerMs": 0.0392,
+          "sourceAcquisitionMs": 0.0011,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.1659,
+          "sourceRetentionMs": 0.0031999999999999997
+        }
+      }
+    },
+    {
+      "repeat": 2,
+      "warmup": false,
+      "phase": "afterPanPlan",
+      "timing": {
+        "backendOperationMs": 6.611699999666598,
+        "openMs": null,
+        "nativeMs": 0.2236,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.0332,
+          "imageSelectionMs": 0.0007999999999999999,
+          "otherMs": 0.004699999999999989,
+          "plannerMs": 0.0382,
+          "sourceAcquisitionMs": 0.001,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.1428,
+          "sourceRetentionMs": 0.0029000000000000002
+        }
+      }
+    },
+    {
+      "repeat": 3,
+      "warmup": false,
+      "phase": "firstPlan",
+      "timing": {
+        "backendOperationMs": 667.2388000001774,
+        "openMs": null,
+        "nativeMs": 660.0944,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.056,
+          "imageSelectionMs": 0.0019,
+          "otherMs": 0.02139999999997888,
+          "plannerMs": 0.0569,
+          "sourceAcquisitionMs": 659.8211,
+          "sourceKind": "file",
+          "sourcePreparationMs": 0.1301,
+          "sourceRetentionMs": 0.007
+        }
+      },
+      "geometry": {
+        "aspect": 1.3298701298701299,
+        "fullHeight": 770,
+        "fullWidth": 1024,
+        "geometryId": "afe9eacdf14e991b86cb0182b189be71bdc68c2140c8af980ec6aee33ec0cbcc",
+        "nativeHeight": 3000,
+        "nativeWidth": 3990,
+        "window": null
+      }
+    },
+    {
+      "repeat": 3,
+      "warmup": false,
+      "phase": "secondPlan",
+      "timing": {
+        "backendOperationMs": 6.478599999809376,
+        "openMs": null,
+        "nativeMs": 0.2817,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.0422,
+          "imageSelectionMs": 0.0007999999999999999,
+          "otherMs": 0.006500000000000023,
+          "plannerMs": 0.045899999999999996,
+          "sourceAcquisitionMs": 0.0012,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.18159999999999998,
+          "sourceRetentionMs": 0.0035
+        }
+      }
+    },
+    {
+      "repeat": 3,
+      "warmup": false,
+      "phase": "afterPanPlan",
+      "timing": {
+        "backendOperationMs": 5.726900000354362,
+        "openMs": null,
+        "nativeMs": 0.2129,
+        "validationMs": null,
+        "regionPlan": {
+          "geometryMs": 0.031,
+          "imageSelectionMs": 0.0007,
+          "otherMs": 0.0057000000000000245,
+          "plannerMs": 0.0373,
+          "sourceAcquisitionMs": 0.0007999999999999999,
+          "sourceKind": "loaded",
+          "sourcePreparationMs": 0.13449999999999998,
+          "sourceRetentionMs": 0.0029000000000000002
+        }
+      }
+    }
+  ],
+  "statistics": {
+    "firstPlan": {
+      "nativeMs": {
+        "min": 658.8366,
+        "median": 660.0944,
+        "max": 682.1268
+      },
+      "backendOperationMs": {
+        "min": 664.6224999999504,
+        "median": 667.2388000001774,
+        "max": 689.6976000002724
+      },
+      "geometryMs": {
+        "min": 0.052199999999999996,
+        "median": 0.056,
+        "max": 0.0785
+      },
+      "imageSelectionMs": {
+        "min": 0.0018,
+        "median": 0.0019,
+        "max": 0.002
+      },
+      "otherMs": {
+        "min": 0.017800000000066214,
+        "median": 0.02139999999997888,
+        "max": 0.022999999999938153
+      },
+      "plannerMs": {
+        "min": 0.0543,
+        "median": 0.0569,
+        "max": 0.0679
+      },
+      "sourceAcquisitionMs": {
+        "min": 658.5308,
+        "median": 659.8211,
+        "max": 681.8634999999999
+      },
+      "sourcePreparationMs": {
+        "min": 0.12530000000000002,
+        "median": 0.12860000000000002,
+        "max": 0.1301
+      },
+      "sourceRetentionMs": {
+        "min": 0.007,
+        "median": 0.0084,
+        "max": 0.009300000000000001
+      }
+    },
+    "secondPlan": {
+      "nativeMs": {
+        "min": 0.2108,
+        "median": 0.2539,
+        "max": 0.2817
+      },
+      "backendOperationMs": {
+        "min": 5.474600000070495,
+        "median": 6.478599999809376,
+        "max": 6.752400000095804
+      },
+      "geometryMs": {
+        "min": 0.030100000000000002,
+        "median": 0.037200000000000004,
+        "max": 0.0422
+      },
+      "imageSelectionMs": {
+        "min": 0.0007,
+        "median": 0.0007999999999999999,
+        "max": 0.0007999999999999999
+      },
+      "otherMs": {
+        "min": 0.005199999999999989,
+        "median": 0.006500000000000021,
+        "max": 0.006500000000000023
+      },
+      "plannerMs": {
+        "min": 0.037200000000000004,
+        "median": 0.0392,
+        "max": 0.045899999999999996
+      },
+      "sourceAcquisitionMs": {
+        "min": 0.0007999999999999999,
+        "median": 0.0011,
+        "max": 0.0012
+      },
+      "sourcePreparationMs": {
+        "min": 0.1344,
+        "median": 0.1659,
+        "max": 0.18159999999999998
+      },
+      "sourceRetentionMs": {
+        "min": 0.0024,
+        "median": 0.0031999999999999997,
+        "max": 0.0035
+      }
+    },
+    "afterPanPlan": {
+      "nativeMs": {
+        "min": 0.2129,
+        "median": 0.219,
+        "max": 0.2236
+      },
+      "backendOperationMs": {
+        "min": 5.726900000354362,
+        "median": 5.828199999996286,
+        "max": 6.611699999666598
+      },
+      "geometryMs": {
+        "min": 0.031,
+        "median": 0.0332,
+        "max": 0.033800000000000004
+      },
+      "imageSelectionMs": {
+        "min": 0.0007,
+        "median": 0.0007999999999999999,
+        "max": 0.001
+      },
+      "otherMs": {
+        "min": 0.004699999999999989,
+        "median": 0.004999999999999987,
+        "max": 0.0057000000000000245
+      },
+      "plannerMs": {
+        "min": 0.0373,
+        "median": 0.0382,
+        "max": 0.041100000000000005
+      },
+      "sourceAcquisitionMs": {
+        "min": 0.0007999999999999999,
+        "median": 0.001,
+        "max": 0.001
+      },
+      "sourcePreparationMs": {
+        "min": 0.1343,
+        "median": 0.13449999999999998,
+        "max": 0.1428
+      },
+      "sourceRetentionMs": {
+        "min": 0.0028,
+        "median": 0.0029000000000000002,
+        "max": 0.0029000000000000002
+      }
+    }
+  },
+  "limitations": [
+    "backendAdapterOnlyNoFrontendDecodeOrViewerAdopt",
+    "sameDocumentSecondPlanAndOnePanOnly",
+    "newDocumentPerRepeat",
+    "fileSystemCacheNotFlushed",
+    "noSeparateViewerWindowMeasurement",
+    "initialCandidateUsedDifferentRawAndIsExcluded"
+  ],
+  "baselineGeometryMatches": true
+}

@@ -26,6 +26,20 @@ def tool():
         'operation':{'type':'string','enum':['plan','render']},'target':{'oneOf':[region.SCHEMA['$defs']['frameRequest'],region.SCHEMA['$defs']['request']]}}}}
 
 
+def test_plan_timing_partition_is_bounded_and_plan_only():
+    timing = dict(sourceKind='file', sourcePreparationMs=1, sourceAcquisitionMs=650,
+                  imageSelectionMs=0, plannerMs=1, geometryMs=1, sourceRetentionMs=1, otherMs=1)
+    diagnostics = dict(sourceLevel='Full', sourceHostBytes=4096, sourceCacheBytes=4096,
+                       nativeMs=655, planTiming=timing)
+    region._diagnostics(diagnostics, 'plan', None)
+    for changes in ({'sourceKind': 'PRIVATE'}, {'path': 'PRIVATE'}, {'sourceAcquisitionMs': -1},
+                    {'plannerMs': float('nan')}, {'geometryMs': True}, {'geometryMs': 2}):
+        with pytest.raises(ValueError):
+            region._diagnostics({**diagnostics, 'planTiming': {**timing, **changes}}, 'plan', None)
+    with pytest.raises(ValueError):
+        region._diagnostics(diagnostics, 'render', None)
+
+
 def target(raw, handle, *, operation='render', kind='after', view=1):
     t = {'contractVersion':1,'mode':'region','quality':'full','geometryId':'a'*64,
          'identity':raw.region_identity(handle,kind),'documentRevision':raw._photo(handle).applied_revision,
@@ -43,6 +57,8 @@ def result(t, operation, *, cache='off', budget=0):
         d.update(beforeFingerprint='b'*16,effectiveBeforeFingerprint='c'*16)
     if operation == 'plan':
         r.update(nativeWidth=32,nativeHeight=24,fullWidth=16,fullHeight=12)
+        d['planTiming'] = dict(sourceKind='loaded', sourcePreparationMs=0.25, sourceAcquisitionMs=0,
+                               imageSelectionMs=0, plannerMs=1, geometryMs=0, sourceRetentionMs=0, otherMs=0)
     else:
         r.update(width=t['window']['w'],height=t['window']['h'])
         d.update(workWindow=t['window'],execution={'outcome':'cpu_not_tried','backend':'cpu','reason':'gpu_disabled'},

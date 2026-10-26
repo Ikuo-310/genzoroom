@@ -1446,10 +1446,10 @@ index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0f
 +}
 diff --git a/crates/mcp/src/region.rs b/crates/mcp/src/region.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..c6cd15a266aff73f9939b1117a3e9038a072e66d
+index 0000000000000000000000000000000000000000..cd3c5597eed78cdcf581d1689f66fc5ce5552c66
 --- /dev/null
 +++ b/crates/mcp/src/region.rs
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,390 @@
 +//! Independent, fail-closed Region contract. The caller owns view planning, LC owns effective geometry.
 +use crate::{Backend, Headless, ToolResult};
 +use lightcraft_engine::{
@@ -1688,23 +1688,41 @@ index 0000000000000000000000000000000000000000..c6cd15a266aff73f9939b1117a3e9038
 +    {
 +        return Err("region_budget_exceeded");
 +    }
++    let source_preparation_ms = started.elapsed().as_secs_f64() * 1000.0;
++    let source_kind = match &job.source {
++        SourceRef::Loaded(_) => "loaded",
++        SourceRef::Fit { .. } => "fit",
++        SourceRef::File { .. } => "file",
++        _ => "other",
++    };
++    let phase = Instant::now();
 +    let decoded = job.source.load_source().map_err(|_| "region_render_failed")?;
++    let source_acquisition_ms = phase.elapsed().as_secs_f64() * 1000.0;
++    let phase = Instant::now();
 +    let source = decoded.image_for(job.settings.denoise_amount());
 +    let info = decoded.info_or(job.info.clone());
++    let image_selection_ms = phase.elapsed().as_secs_f64() * 1000.0;
++    let phase = Instant::now();
 +    let mut whole = pipeline::plan(&source, &info, &job.settings, &job.request);
++    let mut planner_ms = phase.elapsed().as_secs_f64() * 1000.0;
++    let phase = Instant::now();
 +    let native = whole.frame.native_size_at(original.0, original.1).ok_or("region_geometry_native_frame_missing")?;
 +    let (nw, nh) = (native.0.round().max(1.0) as usize, native.1.round().max(1.0) as usize);
 +    if nw > 65536 || nh > 65536 {
 +        return Err("region_budget_exceeded");
 +    }
++    let mut geometry_ms = phase.elapsed().as_secs_f64() * 1000.0;
 +    if planning && (whole.w > nw || whole.h > nh) {
++        let phase = Instant::now();
 +        drop(whole);
 +        job.request.max_w = job.request.max_w.min(nw);
 +        job.request.max_h = job.request.max_h.min(nh);
 +        whole = pipeline::plan(&source, &info, &job.settings, &job.request);
++        planner_ms += phase.elapsed().as_secs_f64() * 1000.0;
 +    }
-+    let meta = crate::preview::frame_metadata(&whole.frame, original, &source_key, whole.w, whole.h)
-+        .map_err(|_| "region_geometry_metadata_mismatch")?;
++    let phase = Instant::now();
++    let meta =
++        crate::preview::frame_metadata(&whole.frame, original, &source_key, whole.w, whole.h).map_err(|_| "region_geometry_metadata_mismatch")?;
 +    if meta["geometryId"] != t["geometryId"] {
 +        return Err("region_geometry_id_mismatch");
 +    }
@@ -1716,7 +1734,10 @@ index 0000000000000000000000000000000000000000..c6cd15a266aff73f9939b1117a3e9038
 +    }
 +    let (fw, fh) = (whole.w, whole.h);
 +    drop(whole);
++    geometry_ms += phase.elapsed().as_secs_f64() * 1000.0;
++    let phase = Instant::now();
 +    h.session.accept_preview_source(&job, decoded.clone());
++    let source_retention_ms = phase.elapsed().as_secs_f64() * 1000.0;
 +    let mut response = t.clone();
 +    response["contractVersion"] = json!(1);
 +    response["mode"] = json!("region");
@@ -1736,7 +1757,14 @@ index 0000000000000000000000000000000000000000..c6cd15a266aff73f9939b1117a3e9038
 +        response["nativeHeight"] = json!(nh);
 +        response["fullWidth"] = json!(fw);
 +        response["fullHeight"] = json!(fh);
-+        diagnostics["nativeMs"] = json!(started.elapsed().as_secs_f64() * 1000.0);
++        let native_ms = started.elapsed().as_secs_f64() * 1000.0;
++        // CPU wall times partition preflight; this path never submits GPU work or uses StagePool.
++        diagnostics["planTiming"] = json!({"sourceKind":source_kind,
++            "sourcePreparationMs":source_preparation_ms,"sourceAcquisitionMs":source_acquisition_ms,
++            "imageSelectionMs":image_selection_ms,"plannerMs":planner_ms,"geometryMs":geometry_ms,
++            "sourceRetentionMs":source_retention_ms,
++            "otherMs":(native_ms-source_preparation_ms-source_acquisition_ms-image_selection_ms-planner_ms-geometry_ms-source_retention_ms).max(0.0)});
++        diagnostics["nativeMs"] = json!(native_ms);
 +        return Ok(json!({"response":response,"diagnostics":diagnostics}));
 +    }
 +    if (fw, fh) != (n(t, "fullWidth"), n(t, "fullHeight")) {
@@ -1814,10 +1842,10 @@ index 0000000000000000000000000000000000000000..c6cd15a266aff73f9939b1117a3e9038
 +mod tests;
 diff --git a/crates/mcp/src/region/tests.rs b/crates/mcp/src/region/tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..c231572fe62d9278140205f8c6ff2664725234fc
+index 0000000000000000000000000000000000000000..6d83387307e2d698b42bb297ff79818044c87676
 --- /dev/null
 +++ b/crates/mcp/src/region/tests.rs
-@@ -0,0 +1,464 @@
+@@ -0,0 +1,488 @@
 +use super::*;
 +use lightcraft_engine::{
 +    Session,
@@ -1892,6 +1920,30 @@ index 0000000000000000000000000000000000000000..c231572fe62d9278140205f8c6ff2664
 +    assert!(!r.is_error, "{:?}", r.content);
 +    let bytes = crate::base64_decode(r.image().unwrap().0).unwrap();
 +    lightcraft_codecs::decode(&bytes, Default::default()).unwrap().to_srgb8()
++}
++#[test]
++fn plan_timing_partitions_native_time_without_changing_settings() {
++    let mut h = host_size(DevelopSettings::default(), 2200, 1650);
++    let mut t = target(&mut h, false);
++    t["desiredLongEdge"] = json!(2200);
++    let settings = h.session.catalog.photo(PhotoId(1)).unwrap().develop.clone();
++    for _ in 0..2 {
++        let r = call(&mut h, &tool_args("plan", t.clone()));
++        assert!(!r.is_error);
++        let d = &r.structured.as_ref().unwrap()["diagnostics"];
++        let p = &d["planTiming"];
++        assert_eq!(p["sourceKind"], "loaded");
++        let sum: f64 = ["sourcePreparationMs", "sourceAcquisitionMs", "imageSelectionMs", "plannerMs", "geometryMs", "sourceRetentionMs", "otherMs"]
++            .iter()
++            .map(|k| {
++                let n = p[k].as_f64().unwrap();
++                assert!(n.is_finite() && n >= 0.0);
++                n
++            })
++            .sum();
++        assert!((sum - d["nativeMs"].as_f64().unwrap()).abs() < 0.01);
++        assert_eq!(*h.session.catalog.photo(PhotoId(1)).unwrap().develop, *settings);
++    }
 +}
 +#[test]
 +fn c0_shared_coordinate_fixtures() {

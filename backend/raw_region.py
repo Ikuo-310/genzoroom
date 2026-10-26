@@ -93,6 +93,11 @@ def _diagnostics(d, operation, before_fingerprint):
         keys |= {'execution', 'stageCache', 'workWindow'}
     if before_fingerprint is not None:
         keys |= {'beforeFingerprint', 'effectiveBeforeFingerprint'}
+    if isinstance(d, dict) and 'planTiming' in d:
+        if operation != 'plan':
+            raise ValueError()
+        validate_plan_timing(d['planTiming'], d.get('nativeMs'))
+        keys.add('planTiming')
     if not isinstance(d, dict) or set(d) != keys or d['sourceLevel'] not in ('Thumb', 'Preview', 'Full'):
         raise ValueError()
     for key in ('sourceHostBytes', 'sourceCacheBytes'):
@@ -119,6 +124,17 @@ def _diagnostics(d, operation, before_fingerprint):
                 or e['outcome'] == 'cpu_not_tried' and e['backend'] == 'cpu'
                 and e['reason'] in ('cpu_requested','shutdown','gpu_disabled','unsupported','gpu_unavailable')):
             raise ValueError()
+
+
+def validate_plan_timing(value, native_ms):
+    durations = {'sourcePreparationMs', 'sourceAcquisitionMs', 'imageSelectionMs',
+                 'plannerMs', 'geometryMs', 'sourceRetentionMs', 'otherMs'}
+    if not isinstance(value, dict) or set(value) != durations | {'sourceKind'} \
+            or value['sourceKind'] not in ('loaded', 'fit', 'file', 'other') \
+            or any(type(value[k]) not in (int, float) or not math.isfinite(value[k]) or value[k] < 0 for k in durations) \
+            or type(native_ms) not in (int, float) or not math.isfinite(native_ms) \
+            or abs(sum(value[k] for k in durations) - native_ms) > 0.01:
+        raise ValueError()
 
 
 def validate_result(result, target, operation, photo_id, before_fingerprint=None):
