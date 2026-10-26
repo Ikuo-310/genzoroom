@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applicationBuildLabel, SettingsButton, SettingsProvider } from './SettingsDialog';
 import { changeAppLanguage } from './i18n';
-import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, ZOOM_NAVIGATOR_POSITION_KEY, updateSetting } from './appSettings';
 import { WebGpuAdjustmentRenderer } from './webgpuAdjustmentRenderer';
 
 vi.mock('./webgpuAdjustmentRenderer', () => ({ WebGpuAdjustmentRenderer: { create: vi.fn() } }));
@@ -19,6 +19,7 @@ beforeEach(async () => {
   await changeAppLanguage('en');
   updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto');
   updateSetting('showKeyboardShortcuts', true);
+  updateSetting('zoomNavigatorPosition', 'bottom-right');
   vi.stubGlobal('isSecureContext', false);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
@@ -32,6 +33,21 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('localizes and persists all Zoom Navigator positions in General settings', async () => {
+    await click(host.querySelector('button')!);
+    const row = [...dialog().querySelectorAll('label')].find(label => label.textContent?.includes('Zoom Navigator Position'))!;
+    const select = row.querySelector<HTMLSelectElement>('select')!;
+    expect(select.value).toBe('bottom-right');
+    expect([...select.options].map(option => [option.value, option.textContent])).toEqual([
+      ['off', 'Off'], ['top-left', 'Top Left'], ['top-right', 'Top Right'],
+      ['bottom-left', 'Bottom Left'], ['bottom-right', 'Bottom Right'],
+    ]);
+    act(() => { select.value = 'off'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(localStorage.getItem(ZOOM_NAVIGATOR_POSITION_KEY)).toBe('off');
+    await act(async () => changeAppLanguage('ja'));
+    expect(row.textContent).toContain('拡大表示ナビゲーターの位置');
+    expect([...select.options].map(option => option.textContent)).toEqual(['表示しない', '左上', '右上', '左下', '右下']);
+  });
   it('localizes each embedded release channel and does not present validation as stable', async () => {
     const { default: i18n } = await import('./i18n');
     const tr = (key: string) => i18n.t(key);

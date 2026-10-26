@@ -537,6 +537,14 @@
     "autoWeek": "自動（地域設定に従う）",
     "dateLocale": "日付・時刻のロケール",
     "weekStart": "カレンダーの週初め",
+    "zoomNavigatorPosition": "拡大表示ナビゲーターの位置",
+    "zoomNavigatorPositions": {
+      "off": "表示しない",
+      "top-left": "左上",
+      "top-right": "右上",
+      "bottom-left": "左下",
+      "bottom-right": "右下"
+    },
     "sunday": "日曜日",
     "monday": "月曜日",
     "initialImage": "暗室の初期表示画像",

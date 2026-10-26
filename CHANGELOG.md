@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- The JPEG Viewer now toggles between Fit and 1:1 on image double-click and includes a configurable corner Zoom Navigator for locating and panning around magnified images.
+
 ## [0.2.4] - Planned
 
 ### Fixed
