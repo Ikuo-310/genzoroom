@@ -120,6 +120,24 @@ it('waits for both Full Whole bases when Full Region arrives first', async () =>
   expect(h.overlay.display!.after.metadata.quality).toBe('full'); expect(h.overlay.display!.wholeBefore!.quality).toBe('full');
 });
 
+it.each(['revision', 'beforeKey', 'asset', 'source', 'geometry'] as const)(
+  'does not display a Before Whole with stale %s even when its cached pixels are retained', async boundary => {
+    const h = harness(true), before = h.whole(), after = h.whole();
+    if (boundary === 'revision') before.doc = { ...before.doc, revision: before.doc.revision - 1 };
+    if (boundary === 'beforeKey') before.doc = { ...before.doc, beforeKey: 'f'.repeat(64) };
+    if (boundary === 'asset') before.doc = { ...before.doc, assetId: 'ffffffff-ffff-ffff-ffff-ffffffffffff' };
+    if (boundary === 'geometry') before.frame = { ...before.frame, geometryId: 'f'.repeat(64) };
+    h.setWhole(after, before);
+    const candidate = h.candidate('before');
+    if (boundary === 'source') candidate.item = { ...candidate.item,
+      identity: { ...candidate.item.identity, sourceId: 'f'.repeat(64) } };
+    h.overlay.offer(h.candidate()); h.overlay.offer(candidate);
+    h.decodes[0].resolve(); await tick();
+    h.decodes[1]?.resolve(); await tick();
+    expect(h.overlay.display).toBeUndefined();
+    h.overlay.clear();
+  });
+
 it('does not resurrect a decoded stage when a later Whole arrives after plan supersession', async () => {
   const h = harness(); h.setWhole(h.whole('draft'));
   h.overlay.offer(h.candidate()); h.decodes[0].resolve(); await tick(); expect(h.overlay.display).toBeUndefined();

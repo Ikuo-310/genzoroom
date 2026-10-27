@@ -194,7 +194,8 @@ it('publishes a distinct owner lookup failure instead of leaving capability inde
   expect(api.rawRegion).not.toHaveBeenCalled();
 });
 
-it('adopts both Region sides and safely rebinds the unchanged B1 Before base after an After revision', async () => {
+it.each(['currentBefore', 'oldBeforeReceipt', 'staleAfter', 'beforeKeyChange', 'assetSwitch', 'staleGeometry'] as const)(
+  'keeps retained Before sampling ownership correct after an After revision: %s', async boundary => {
   const asset = regionRequest().identity.assetId; enableBefore();
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
     handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
@@ -221,13 +222,54 @@ it('adopts both Region sides and safely rebinds the unchanged B1 Before base aft
   };
   await submit(100);
   expect(current!.regionDisplay?.before?.metadata.kind).toBe('before');
-  const baseline = current!.regionDisplay!.wholeBefore!.url;
+  const originalBefore = current!.regionDisplay!.wholeBefore!;
+  const baseline = originalBefore.url;
   await render(asset, false); await act(async () => { current!.changeControls({ 'light.exposure': 1 }); current!.flushControls(); }); await flush();
   expect(current!.imageRevision).toBe(2);
   await render(asset, true); await flush(); await submit(200);
   expect(current!.regionDisplay?.wholeBefore?.url).toBe(baseline);
   expect(current!.regionDisplay?.wholeBefore?.doc.revision).toBe(2);
+  // The bitmap is retained, but the old receipt object is not the displayed sampling owner.
+  expect(originalBefore.doc.revision).toBe(1);
+  expect(current!.regionDisplay!.wholeBefore).not.toBe(originalBefore);
   expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(1);
+  await act(async () => current!.togglePick()); await flush();
+  expect(current!.pickActive).toBe(true);
+  await submit(300);
+  const displayed = current!.regionDisplay!.wholeBefore!;
+  expect(displayed.doc.beforeKey).toBe(current!.document!.beforeKey);
+  expect(current!.regionDisplay!.before!.metadata.identity.sourceId).toBe(current!.regionDelivery!.owner!.sourceId);
+  const target: api.RawPickTarget = { url: displayed.url, doc: displayed.doc,
+    frame: { kind: 'before', geometryId: displayed.frame.geometryId, maxSide: displayed.maxSide!, quality: displayed.quality } };
+  if (boundary === 'oldBeforeReceipt') target.doc = originalBefore.doc;
+  if (boundary === 'staleAfter') {
+    Object.assign(target, current!.pickTargets.after!);
+    target.doc = { ...target.doc, revision: target.doc.revision - 1 };
+  }
+  if (boundary === 'staleGeometry') target.frame = { ...target.frame, geometryId: 'f'.repeat(64) };
+  if (boundary === 'beforeKeyChange') {
+    vi.mocked(api.setRawControls).mockImplementationOnce(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
+      beforeKey: 'f'.repeat(64), settingsFingerprint: 'f'.repeat(64), values: { ...rawSettings(doc).values, ...patch } }));
+    await act(async () => { current!.changeControls({ 'light.exposure': 2 }); current!.flushControls(); }); await flush();
+    expect(current!.document!.beforeKey).not.toBe(target.doc.beforeKey);
+    await act(async () => current!.togglePick()); await flush();
+  }
+  if (boundary === 'assetSwitch') {
+    await render('next-photo', true); await flush();
+    expect(current!.assetId).not.toBe(target.doc.assetId);
+    await act(async () => current!.togglePick()); await flush();
+  }
+  expect(current!.pickActive).toBe(true);
+  commitHistory.mockClear();
+  await act(async () => current!.pick(target, { x: .4, y: .6 })); await flush();
+  if (boundary !== 'currentBefore') {
+    expect(commitHistory).not.toHaveBeenCalled();
+    return;
+  }
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].doc.revision).toBe(2);
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'wbPick', metadata: {}, frame: {
+    kind: 'before', geometryId: 'a'.repeat(64), maxSide: displayed.maxSide, quality: displayed.quality, x: .4, y: .6 } });
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
