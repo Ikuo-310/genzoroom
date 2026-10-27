@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## RAW Auto WB・WBスポイト実装完了（2026-10-27）
+
+Windowsネイティブ版（Tauri WebView2）のRAW暗室へAuto White Balance（AW）とWBスポイトを統合した。Phase 1ではLightCraft v0.14.0の既存推定処理を利用する読み取り専用Native `estimate_white_balance`契約を追加し、Phase 2ではAWを既存RAW操作・History・Recipeへ接続した。Phase 3ではスポイトUI、ViewerのWhole正規化座標変換、Before／After・Region表示のgeometry所有権検証、Native Picker呼出しを接続した。Recipe形式、DB schema、NativeのBefore／Preview／Region契約とgeometry descriptorは変更していない。
+
+Phase 3の初回GitHubレビューでは、Region表示中に再利用するBefore Wholeのdocument revisionが古いまま残り、正常な採取が拒否される可能性がMedium Findingとして指摘された。既存のWhole生成・保持・再利用とRegion照合を調査した結果、Before画像URLを再利用する場合も、source identity・`beforeKey`・geometry・render条件が一致した表示receiptは現在revisionへ更新され、Regionの所有権もそのreceiptに照合されるため、この経路では懸念が成立しないと確認した。旧receiptを保持したまま採取する回帰テストを含むfocused testを追加し、ソース本体の修正は不要と判定した。After側のstale revision、beforeKey変更、Asset切替、stale geometryも回帰確認した。最終レビューで未解決High／Medium／Low Findingはない。
+
+関連CommitはPhase 1 `0d213decdf41a75c927c0a1421d374cc22bef497`、Phase 2 `eddb32666ec96f29e30e358e7b1f87a2c2217265`、Phase 3 `e5d169537d951c410ca53a7bcd2ad22bf2bd521a`、Phase 3レビュー回帰テスト `bdcbcb58db260b4a59849e0b2c1e694442d15336`。各実装段階ではNative／Backend契約とPickerのFocused test、Phase 2／3のHistory・Recipe・Preview連携テスト、Frontend関連test、TypeScript checkおよびproduction buildを実施した。Phase 3ではNative binary probeとmanaged artifactの検証も実施した。レビュー後は関連Frontend focused test 305件、所有権hook focused test 80件、TypeScript checkが成功した。既存production buildのchunk警告は別記録どおり残る。全suiteを実行したという記録ではない。
+
+実機確認は自動検証と区別する。ユーザーから、Auto WBとWBスポイトの両方についてWindowsネイティブ版で実RAWを使った動作確認が完了し「動作OK」と報告された。個別の座標位置・被写体条件や全エラー経路など、報告に含まれない試験項目を個別PASSとは扱わない。JPEG暗室、Docker版RAW、RAW Exportへの機能追加を示すものではない。
+
 ## U3：LightCraft v0.14.0管理buildへ追随（2026-10-26）
 
 正式tag commit `03c88c166c054c009db2a47187d59991f6232b85`を専用checkoutへ固定し、新managed patchでBefore/Preview/Region各1・canonical geometry descriptor 2を維持した。MCP schema、test移動、DecodedSource facts、StageCache計量を保持し、display-fit後のsidecarを無効化、engineのGPU proof gateと診断を同じ条件へ揃えた。旧v0.10 patch・manifest・C2 binary/receiptは保持し、archived manifestで旧sourceの再検証も通した。
