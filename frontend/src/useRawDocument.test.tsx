@@ -635,13 +635,13 @@ describe('RAW native Before cache', () => {
     await act(async () => current!.prepareSave());
     expect(current?.saveError).toBeUndefined();
   });
-  it('requests Draft on acknowledged interaction and Full on end without another mutation', async () => {
+  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const)('requests Draft on acknowledged %s interaction and Full on end without another mutation', async control => {
     await render('a'); await flush();
-    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    act(() => { current!.beginControls(control); current!.changeControls({ [control]: 1 }); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 170)); }); await flush();
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('draft');
     const revision = current!.settings!.revision;
-    act(() => current!.flushControls('light.exposure')); await flush();
+    act(() => current!.flushControls(control)); await flush();
     const calls = vi.mocked(api.rawPreview).mock.calls;
     expect(calls.at(-1)?.[4]?.quality).toBe('full');
     expect(calls.at(-1)?.[0].revision).toBe(revision);
@@ -1016,7 +1016,7 @@ describe('bounded RAW session renewal', () => {
     vi.mocked(api.saveRawHistory).mockImplementation(async request => {
       if (request.action === 'initialize') return rawHistoryResult(request, saved ? { history: saved.history } : {});
       const next = { ...request.doc, revision: request.doc.revision + 1, mutationAttempts: 201,
-        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false },
+        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false, detail: true },
         values: { ...request.doc.values, 'wb.temp': 4875, 'wb.tint': 13 } };
       saved = rawHistoryResult({ ...request, doc: next }, { history: { initialized: true, length: 1, cursor: 1, selectedStepId: request.saveId } });
       return saved;

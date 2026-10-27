@@ -19,7 +19,7 @@ from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSE
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
-from raw_controls import CONTROLS, controls_state, validate_controls, validate_history_operation
+from raw_controls import CONTROLS, CONTROL_PATHS, controls_state, validate_controls, validate_history_operation
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
@@ -744,7 +744,7 @@ class RawPreviewApi:
 
         changes = []
         for control in controls:
-            group, key = control.split(".", 1)
+            group, key = CONTROL_PATHS[control]
             before_group, after_group = before_settings.get(group), after_settings.get(group)
             if type(before_group) is not dict or type(after_group) is not dict:
                 return None

@@ -1,4 +1,5 @@
 import { ADJUSTMENT_IDS, type AdjustmentId } from './editing';
+import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { isNativeEditingTarget } from './editShortcuts';
 import { adjustmentRowPosition, horizontalAdjustmentTarget, revealAdjustment } from './adjustmentNavigation';
 
@@ -103,7 +104,7 @@ export function commitAdjustmentsInScope(scope: ParentNode | null) {
   for (const item of scope.querySelectorAll<HTMLInputElement>('.adjustment-range')) adjustments.get(item)?.();
 }
 
-export function restoreAdjustmentFocus(panel: HTMLElement, lastId: AdjustmentId | null): boolean {
+export function restoreAdjustmentFocus(panel: HTMLElement, lastId: SliderAdjustmentId | null): boolean {
   const available = Array.from(panel.querySelectorAll<HTMLInputElement>('.adjustment-range')).filter(item => {
     if (!isAvailable(item)) return false;
     for (let node: HTMLElement | null = item; node; node = node.parentElement) {

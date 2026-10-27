@@ -94,7 +94,8 @@ def test_before_cache_is_read_only_across_category_reset_and_history_branch(loca
 
 
 @pytest.mark.parametrize("control", ["light.exposure", "light.contrast", "light.highlights", "light.whites",
-    "light.shadows", "light.blacks", "color.vibrance", "color.saturation", "wb.temp", "wb.tint"])
+    "light.shadows", "light.blacks", "color.vibrance", "color.saturation", "wb.temp", "wb.tint",
+    "detail.sharpenAmount", "detail.sharpenMasking"])
 def test_control_reset_off_as_shot_history_and_replay(local, tmp_path, monkeypatch, control):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -105,7 +106,7 @@ def test_control_reset_off_as_shot_history_and_replay(local, tmp_path, monkeypat
                 values = {"wb.temp": 11000., "wb.tint": 26.} if control.startswith("wb.") else {control: 1.}
                 doc = await patch(http, doc, values)
                 doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": control}})
-                section = "light" if control.startswith("light.") else "color"
+                section = "light" if control.startswith("light.") else "detail" if control.startswith("detail.") else "color"
                 before_values = doc["values"]
                 doc = await edit(http, doc, "sectionToggle", {"section": section, "enabled": False})
                 assert doc["values"] == before_values and doc["sections"][section] is False
@@ -158,7 +159,7 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 attempts = api.raw.status().edits
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
-                assert doc["sections"] == {"light": False, "color": False}
+                assert doc["sections"] == {"light": False, "color": False, "detail": False}
                 actual = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
@@ -280,7 +281,7 @@ def test_as_shot_requires_every_reference_field(local, tmp_path, monkeypatch, fi
 
 
 @pytest.mark.parametrize("kind,metadata", [("command", {"command": "develop.reset"}),
-    ("controlReset", {"control": "hdr.maxEv"}), ("sectionToggle", {"section": "detail", "enabled": False}),
+    ("controlReset", {"control": "hdr.maxEv"}), ("sectionToggle", {"section": "enhance", "enabled": False}),
     ("sectionToggle", {"section": "color", "enabled": 0}), ("allReset", {"settings": {}})])
 def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkeypatch, kind, metadata):
     async def run():
@@ -341,6 +342,7 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 doc = await open_history(http, local, api)
                 values = {control: -1.234567891234567 for control in doc["values"]}
                 values["wb.temp"] = 23456.123456789
+                values.update({"detail.sharpenAmount": 123.4567891234567, "detail.sharpenMasking": 98.7654321987654})
                 for _ in range(10):
                     doc = await patch(http, doc, values)
                     doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
@@ -348,7 +350,7 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and len(response.content) <= 16384
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 10 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == 12 for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

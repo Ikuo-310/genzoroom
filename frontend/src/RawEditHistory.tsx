@@ -7,10 +7,12 @@ import type { RawControlId, RawHistoryStep } from './rawApi';
 
 const labels: Record<RawControlId, string> = { 'wb.temp': 'temperature', 'wb.tint': 'tint', 'light.exposure': 'exposure', 'light.contrast': 'contrast',
   'light.highlights': 'highlights', 'light.whites': 'whites', 'light.shadows': 'shadows', 'light.blacks': 'blacks',
-  'color.vibrance': 'vibrance', 'color.saturation': 'saturation' } as const;
+  'color.vibrance': 'vibrance', 'color.saturation': 'saturation',
+  'detail.sharpenAmount': 'rawPreview.sharpenAmount', 'detail.sharpenMasking': 'rawPreview.sharpenMasking' } as const;
 const formatters: Record<RawControlId, (value: number) => string> = { 'wb.temp': value => `${Math.round(value)} K`, 'wb.tint': formatTint,
   'light.exposure': formatExposure, 'light.contrast': formatContrast, 'light.highlights': formatHighlights, 'light.whites': formatWhites,
-  'light.shadows': formatShadows, 'light.blacks': formatBlacks, 'color.vibrance': formatVibrance, 'color.saturation': formatSaturation };
+  'light.shadows': formatShadows, 'light.blacks': formatBlacks, 'color.vibrance': formatVibrance, 'color.saturation': formatSaturation,
+  'detail.sharpenAmount': value => value.toFixed(0), 'detail.sharpenMasking': value => value.toFixed(0) };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
   const control = step.metadata.control;
@@ -26,7 +28,8 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     return label + (change ? ` ${pair(change)}` : '');
   }
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
-    : t(step.metadata.section === 'light' ? 'workspace.basic' : 'workspace.rawPreview.colorCategory')
+    : t(step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
+      ? 'workspace.rawPreview.detailCategory' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;
   return operation + (changes?.length ? `: ${changes.map(change => `${name(change.control)} ${pair(change)}`).join('、')}` : '');

@@ -137,9 +137,10 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(10);
+  expect(sliders).toHaveLength(12);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
+    'detail.sharpenAmount', 'detail.sharpenMasking',
   ]);
   expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
   expect(sliders[1].min).toBe('-150'); expect(sliders[4].step).toBe('0.01');
@@ -149,7 +150,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(17);
+  expect(actions).toHaveLength(21);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.filter(button => !button.classList.contains('raw-wb-pick')).every(button => !button.disabled)).toBe(true);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -182,8 +183,78 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   for (let index = 5; index < 10; index++) {
     moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
   }
-  expect(sliders.slice(4).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+  expect(sliders.slice(4, 10).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
+  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
+  moveDown(sliders[9]); expect(document.activeElement).toBe(detailTitle);
+  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[10]);
+  moveDown(sliders[10]); expect(document.activeElement).toBe(sliders[11]);
+  act(() => viewer.focus());
+  act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(sliders[11]);
 });
+it.each(['detail.sharpenAmount', 'detail.sharpenMasking'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
+  await mount();
+  const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
+  const row = range.closest('.adjustment-control')!;
+  const number = row.querySelector<HTMLInputElement>('input[type="number"]')!;
+  expect(range.min).toBe('0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
+  expect(range.value).toBe(control.endsWith('Amount') ? '40' : '0');
+  const set = (element: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  act(() => { range.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true })); set(range, '60'); });
+  expect(commitHistory).not.toHaveBeenCalled();
+  act(() => window.dispatchEvent(new MouseEvent('pointerup', { button: 0, bubbles: true }))); await flush();
+  expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { [control]: 60 });
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ control, action: 'commit' }));
+  const commits = commitHistory.mock.calls.length;
+  act(() => { range.focus(); range.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })); });
+  expect(range.value).toBe('70');
+  act(() => { range.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, shiftKey: true, bubbles: true, cancelable: true })); });
+  expect(range.value).toBe('71');
+  // The next input is a boundary on the same shared slider, not a separate save owner.
+  act(() => { number.focus(); set(number, '73'); number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+  await flush();
+  expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { [control]: 73 });
+  expect(commitHistory.mock.calls.length).toBe(commits + 1);
+  act(() => row.querySelector<HTMLButtonElement>('.adjustment-reset')!.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate',
+    operation: { kind: 'controlReset', metadata: { control } } }));
+  expect(adjusted).not.toHaveBeenCalled();
+});
+
+it('reuses Detail category collapse, action navigation, toggle and Reset', async () => {
+  commitHistory.mockImplementation(async request => {
+    const next = structuredClone(request.doc);
+    next.revision++; next.settingsFingerprint = String(next.revision).padStart(64, '0');
+    if (request.operation?.kind === 'sectionToggle') next.sections.detail = request.operation.metadata.enabled;
+    if (request.operation?.kind === 'sectionReset') Object.assign(next.values, { 'detail.sharpenAmount': 0, 'detail.sharpenMasking': 0 });
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  expect([...host.querySelectorAll('.raw-adjustment-category .adjustment-category-label')].map(item => item.textContent))
+    .toEqual(['Color', 'Basic', 'Detail']);
+  const category = host.querySelectorAll('.raw-adjustment-category')[2];
+  expect(category.textContent).toContain('Sharpening');
+  const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  const toggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+  const reset = category.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+  act(() => title.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, title);
+  expect(document.activeElement).toBe(toggle);
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, toggle); expect(document.activeElement).toBe(reset);
+  act(() => title.click()); expect(category.querySelector('.adjustment-range')).toBeNull();
+  act(() => title.click()); expect(category.querySelectorAll('.adjustment-range')).toHaveLength(2);
+  act(() => toggle.click()); await flush();
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('40');
+  expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(true);
+  act(() => reset.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: { kind: 'sectionReset', metadata: { section: 'detail' } } }));
+  expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('0');
+  act(() => toggle.click()); await flush(); expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(false);
+});
+
 it('skips unavailable WB sliders when acquiring initial RAW focus', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), wb: { available: false, mode: 'asShot', scale: 'legacy' } }));
   await mount();
@@ -219,7 +290,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(10);
+  expect(rows).toHaveLength(12);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
@@ -252,7 +323,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(2);
+  expect(categories).toHaveLength(3);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Color');
   const toggle = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;

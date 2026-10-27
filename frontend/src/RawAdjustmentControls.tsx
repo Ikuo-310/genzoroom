@@ -3,22 +3,24 @@ import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
   restorePendingAdjustmentFocus } from './adjustmentFocus';
-import type { AdjustmentId } from './editing';
+import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
-import type { RawControlId, RawHistoryOperation } from './rawApi';
+import type { RawControlId, RawHistoryOperation, RawSectionId } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
-type RawCategoryId = 'basic' | 'color';
+type RawCategoryId = 'basic' | 'color' | 'detail';
+const sections: Record<RawCategoryId, RawSectionId> = { basic: 'light', color: 'color', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
   raw_wb_settings_mismatch: 'wbSettingsMismatch', raw_wb_invalid_response: 'wbInvalidResponse',
   raw_wb_connection_failed: 'wbConnectionFailed', raw_wb_timeout: 'wbTimeout',
 };
-const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: AdjustmentId[] }[] = [
+const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: SliderAdjustmentId[] }[] = [
   { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
+  { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenMasking'], ids: ['detail.sharpenAmount', 'detail.sharpenMasking'] },
 ];
 
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
@@ -38,7 +40,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   }}>
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
-      enabled={settings.sections[category === 'basic' ? 'light' : 'color']} disabled={actionsLocked}
+      enabled={settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       picker={category === 'color' ? { disabled: actionsLocked || !raw.pickAvailable, active: !!raw.pickActive,
         run: () => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePick(); } } : undefined}
@@ -46,23 +48,25 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         disabled: actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable,
         run: () => operate({ kind: 'wbAuto', metadata: {} }),
       } : undefined}
-      onToggle={() => operate({ kind: 'sectionToggle', metadata: { section: category === 'basic' ? 'light' : 'color',
-        enabled: !settings.sections[category === 'basic' ? 'light' : 'color'] } })}
-      onReset={() => operate({ kind: 'sectionReset', metadata: { section: category === 'basic' ? 'light' : 'color' } })}>
+      onToggle={() => operate({ kind: 'sectionToggle', metadata: { section: sections[category],
+        enabled: !settings.sections[sections[category]] } })}
+      onReset={() => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}>
       {category === 'color' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
+      {category === 'detail' && <h4 className="adjustment-subsection-title">{t('workspace.rawPreview.sharpening')}</h4>}
       {controls.map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = ids[index];
         const value = raw.desired?.[control] ?? settings.values[control];
         const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
-        const enabled = settings.sections[category === 'basic' ? 'light' : 'color'];
+        const enabled = settings.sections[sections[category]];
+        const labelKey = category === 'detail' ? `rawPreview.${control.split('.')[1]}` : id;
         return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
-          label={t(`workspace.${id}`)} enabled={enabled} onToggle={() => {}}
+          label={t(`workspace.${labelKey}`)} enabled={enabled} onToggle={() => {}}
           onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
-          defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${id}Reset`)} valueLabel={t(`workspace.${id}Value`)}
+          defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={locked || !enabled || control.startsWith('wb.') && !settings.wb.available}
           resetDisabled={actionsLocked || control.startsWith('wb.') && !settings.wb.available}
@@ -96,7 +100,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const contentId = useId();
-  const title = t(category === 'color' ? 'workspace.rawPreview.colorCategory' : `workspace.${category}`);
+  const title = t(category === 'color' ? 'workspace.rawPreview.colorCategory' : category === 'detail' ? 'workspace.rawPreview.detailCategory' : `workspace.${category}`);
   const titleKey = category[0].toUpperCase() + category.slice(1);
   return <section className={`adjustment-category raw-adjustment-category${enabled ? '' : ' is-disabled'}`}>
     <div className="adjustment-category-header">

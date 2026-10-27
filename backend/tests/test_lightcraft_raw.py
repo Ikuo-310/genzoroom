@@ -24,6 +24,10 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
            "disabled_sections": [],
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
            "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
+           "detail": {"sharpen_amount": 40., "sharpen_radius": 1., "sharpen_detail": 25., "sharpen_masking": 0.,
+                      "nr_luminance": 0., "nr_detail": 50., "nr_contrast": 0., "nr_color": 25.,
+                      "nr_color_detail": 50., "nr_color_smoothness": 50.},
+           "enhance": {"denoise": 0., "raw_details": False, "super_resolution": False},
            "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
 
@@ -43,6 +47,9 @@ def image_result(photo=1, data=None, w=16, h=12):
 def merge(base, patch):
     for k, v in patch.items():
         if k not in base:
+            # Native serde recognizes this optional field even when it was omitted in readback.
+            if k == 'denoise_on' and type(v) is bool:
+                base[k] = v
             continue
         if isinstance(base[k], dict) and isinstance(v, dict):
             merge(base[k], v)
@@ -190,12 +197,17 @@ class RawProcess(FakeProcess):
             value = {"ok": True}
         elif command == "develop.resetControl":
             group, key = params["control"].split(".")
-            self.photos[self.active]["settings"][group][key] = DEFAULT[group][key]
+            key = {"sharpenAmount": "sharpen_amount", "sharpenMasking": "sharpen_masking"}.get(key, key)
+            self.photos[self.active]["settings"][group][key] = 0. if group == "detail" else DEFAULT[group][key]
             value = {"ok": True}
         elif command == "develop.resetSection":
             settings = self.photos[self.active]["settings"]
             section = params["section"]
             settings[section] = copy.deepcopy(DEFAULT[section])
+            if section == "detail":
+                settings["detail"].update(sharpen_amount=0., nr_color=0.)
+                settings["enhance"]["denoise"] = 0.
+                settings["enhance"].pop("denoise_on", None)
             if section == "color":
                 settings["wb"].update(mode="asShot", temp=6500., tint=0.)
             value = {"ok": True}
@@ -210,6 +222,7 @@ class RawProcess(FakeProcess):
             if command == "develop.set":
                 for k, v in params["values"].items():
                     section, key = k.split(".")
+                    key = {"sharpenAmount": "sharpen_amount", "sharpenMasking": "sharpen_masking"}.get(key, key)
                     if section not in settings or key not in settings[section]:
                         return self.tool(message, error=True)
                     settings[section][key] = v

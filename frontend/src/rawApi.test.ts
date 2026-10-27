@@ -84,6 +84,10 @@ describe('RAW History transport', () => {
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },
     { kind: 'sectionToggle', metadata: { section: 'color', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'light' } },
+    { kind: 'controlReset', metadata: { control: 'detail.sharpenAmount' } },
+    { kind: 'controlReset', metadata: { control: 'detail.sharpenMasking' } },
+    { kind: 'sectionToggle', metadata: { section: 'detail', enabled: false } },
+    { kind: 'sectionReset', metadata: { section: 'detail' } },
     { kind: 'allReset', metadata: {} },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
@@ -217,19 +221,21 @@ describe('bounded RAW binary contract', () => {
       recipeFingerprint: 'a'.repeat(64), lastSaveId: null, updatedAt: null }), { headers: { 'Content-Type': 'application/json' } }));
     await expect(readRawRecipe(doc)).rejects.toThrow('raw_invalid_response');
   });
-  it('resynchronizes settings and sends allowlisted changes with the confirmed expectedRevision', async () => {
+  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1 }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);
-    const result = await setRawControls(doc, { 'light.exposure': 1 });
+    const result = await setRawControls(doc, { [control]: 1 });
     expect(result.revision).toBe(doc.revision + 1);
     expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toEqual({ workspaceId: doc.workspaceId, generation: doc.generation,
-      documentToken: doc.documentToken, expectedRevision: doc.revision, values: { 'light.exposure': 1 } });
+      documentToken: doc.documentToken, expectedRevision: doc.revision, values: { [control]: 1 } });
     expect((await readRawSettings(doc)).revision).toBe(result.revision);
     expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/settings`);
   });
   it('rejects stale identity and malformed control metadata in settings responses', async () => {
-    for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} }, { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } }]) {
+    for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} },
+      { sections: { light: true, color: true } }, { sections: { light: true, color: true, detail: 1 } },
+      { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } }]) {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), ...patch }),
         { headers: { 'Content-Type': 'application/json' } })));
       await expect(readRawSettings(doc)).rejects.toThrow('raw_invalid_response');

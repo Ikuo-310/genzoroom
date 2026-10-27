@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { AdjustmentId } from './editing';
+import { isJpegAdjustmentId, type SliderAdjustmentId } from './adjustmentSliderIds';
 import { isNativeEditingTarget, sliderSteps } from './editShortcuts';
 import {
   activateFromMouse, blurAdjustmentRange, enterAdjustmentRange, focusAdjustmentCategory,
@@ -14,7 +15,7 @@ export type AdjustmentSliderMenuTarget = AdjustmentMenuPosition & { adjustmentId
 export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => void;
 
 type Props = {
-  adjustmentId: AdjustmentId;
+  adjustmentId: SliderAdjustmentId;
   commitPolicy?: 'inactivity' | 'operation-boundary';
   label: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
@@ -219,7 +220,8 @@ export function AdjustmentSlider(props: Props) {
   }, [props.disabled]);
   return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group" aria-labelledby={labelId}
     onContextMenu={(event) => {
-      if (!props.onOpenContextMenu || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
+      if (!props.onOpenContextMenu || !isJpegAdjustmentId(props.adjustmentId)
+        || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
       event.preventDefault();
       const trigger = range.current && !range.current.disabled ? range.current
         : power.current ?? event.currentTarget.querySelector<HTMLButtonElement>('.adjustment-reset');

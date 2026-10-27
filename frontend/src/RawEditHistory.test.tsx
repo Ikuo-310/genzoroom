@@ -13,6 +13,23 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('labels Detail controls, Reset and category operations in %s', async language => {
+    await i18n.changeLanguage(language);
+    const operations: Pick<RawHistoryStep, 'kind' | 'metadata' | 'changes'>[] = [
+      { kind: 'control', metadata: { control: 'detail.sharpenAmount' }, changes: [{ control: 'detail.sharpenAmount', before: 40, after: 120 }] },
+      { kind: 'controlReset', metadata: { control: 'detail.sharpenMasking' }, changes: [{ control: 'detail.sharpenMasking', before: 60, after: 0 }] },
+      { kind: 'sectionToggle', metadata: { section: 'detail', enabled: false }, changes: [] },
+      { kind: 'sectionReset', metadata: { section: 'detail' }, changes: [] },
+    ];
+    const steps = operations.map((step, index) => ({ ...step, stepId: String(index), createdAt: '2026-10-27T00:00:00Z' }));
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? 'シャープ量' : 'Sharpening Amount');
+    expect(markup).toContain(language === 'ja' ? 'マスクをリセット' : 'Reset masking');
+    expect(markup).toContain(language === 'ja' ? 'ディテール OFF' : 'Detail OFF');
+    expect(markup).toContain(language === 'ja' ? 'ディテール リセット' : 'Detail Reset');
+    expect(markup).toContain('40 → 120'); expect(markup).toContain('60 → 0');
+  });
+
   it.each([['wbAuto', true], ['wbAuto', false], ['wbPick', true], ['wbPick', false]] as const)('labels %s as one operation (%s)', (kind, numeric) => {
     const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind, metadata: {},
       createdAt: '2026-10-27T00:00:00Z', changes: numeric ? [

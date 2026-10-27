@@ -36,6 +36,9 @@ def changed_settings():
     settings["wb"].update(mode="custom", temp=5700., tint=9., scale="legacy")
     settings["light"].update(exposure=1.25, shadows=12.)
     settings["color"].update(vibrance=17., saturation=-7.)
+    settings["detail"].update(sharpen_amount=83., sharpen_masking=47., sharpen_radius=2.1,
+                              sharpen_detail=66., nr_luminance=27., nr_contrast=31., nr_color=42.)
+    settings["enhance"].update(denoise=63., denoise_on=False, raw_details=True)
     # Geometry and curve are intentionally outside the ten C2 sliders.
     settings["geometry"]["scale"] = 115.
     settings["curve"]["master"][0]["y"] = .125

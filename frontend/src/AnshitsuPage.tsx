@@ -42,6 +42,7 @@ import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { AdjustmentCategoryMenu, type AdjustmentCategoryMenuTarget } from './AdjustmentCategoryMenu';
 import { ADJUSTMENT_SELECTION_CATEGORIES, type AdjustmentCategoryId } from './adjustmentSelection';
 import type { AdjustmentSliderMenuTarget } from './AdjustmentSlider';
+import { sliderAdjustmentId, type SliderAdjustmentId } from './adjustmentSliderIds';
 import { AdjustmentContextMenu } from './AdjustmentContextMenu';
 import { editClipboardShortcut, isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { rememberWorkspaceSession } from './workspaceResume';
@@ -251,7 +252,7 @@ export function AnshitsuPage() {
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
   const selectedOperationPanelRef = useRef<HTMLElement>(null);
   const commitJpegAdjustmentGesture = useCallback(() => commitAdjustmentsInScope(selectedOperationPanelRef.current), []);
-  const lastFocusedAdjustment = useRef<AdjustmentId | null>(null);
+  const lastFocusedAdjustment = useRef<SliderAdjustmentId | null>(null);
   const closeHistoryMenu = useCallback(() => setHistoryMenu(null), []);
   const basicResetDisabled = isBasicDefault(session.recipe.adjustments);
   const colorGradingResetDisabled = isColorGradingDefault(session.recipe.adjustments);
@@ -676,7 +677,7 @@ export function AnshitsuPage() {
   return <main className={`workspace-page${viewerFocusMode ? ' viewer-focus-mode' : ''}`} onFocus={event => {
     if (event.target instanceof HTMLInputElement && event.target.matches('.adjustment-range')
       && selectedOperationPanelRef.current?.contains(event.target)) {
-      lastFocusedAdjustment.current = ADJUSTMENT_IDS.find(id => id === event.target.dataset.adjustmentId) ?? null;
+      lastFocusedAdjustment.current = sliderAdjustmentId(event.target.dataset.adjustmentId);
     }
   }} onKeyDown={event => enterSelectedOperationPanel(event.nativeEvent)}>
     <header className="workspace-header">

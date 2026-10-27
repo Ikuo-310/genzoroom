@@ -971,7 +971,7 @@ class LightCraftRawSession:
                                   expected_revision, verify=verify, check=check)
 
     async def apply_history_operation(self, handle, kind, metadata, expected_revision):
-        from raw_controls import CONTROLS, validate_history_operation
+        from raw_controls import CONTROLS, CONTROL_PATHS, DETAIL_RESET_DEFAULTS, validate_history_operation
         validate_history_operation(kind, metadata)
         if kind in ('wbAuto', 'wbPick'):
             # WB must pass the separate read-only estimate/candidate fence before any mutation.
@@ -998,7 +998,7 @@ class LightCraftRawSession:
 
         def check(actual):
             for control in CONTROLS:
-                group, key = control.split(".")
+                group, key = CONTROL_PATHS[control]
                 values = actual.get(group)
                 if type(values) is not dict or type(values.get(key)) not in (int, float):
                     raise LightCraftError("raw_operation_readback_mismatch")
@@ -1019,20 +1019,37 @@ class LightCraftRawSession:
                 elif needs_wb:
                     expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
                 else:
-                    group, key = metadata["control"].split(".")
+                    group, key = CONTROL_PATHS[metadata["control"]]
                     expected[group][key] = CONTROLS[metadata["control"]][3]
                 # Native defaults can encode 0 as 0.0; compare full values, not numeric JSON spelling.
                 if actual != expected:
                     raise LightCraftError("raw_operation_readback_mismatch")
             elif kind == "sectionReset":
                 section = metadata["section"]
+                if section == "detail":
+                    expected = json.loads(before)
+                    if type(expected.get("detail")) is not dict or type(expected.get("enhance")) is not dict:
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    expected["detail"].update(DETAIL_RESET_DEFAULTS)
+                    # Native resets AI amount and removes its optional override, but preserves
+                    # raw_details, super_resolution and all unrelated settings.
+                    expected["enhance"]["denoise"] = 0
+                    expected["enhance"].pop("denoise_on", None)
+                    detail, enhance = actual.get("detail"), actual.get("enhance")
+                    if (type(detail) is not dict or type(enhance) is not dict
+                            or any(type(detail.get(key)) not in (int, float) for key in DETAIL_RESET_DEFAULTS)
+                            or type(enhance.get("denoise")) not in (int, float)
+                            or any(type(enhance.get(key)) is not bool for key in ("raw_details", "super_resolution"))
+                            or actual != expected):
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    return
                 reset_groups = {"light", "hdr"} if section == "light" else {"color", "wb"}
                 if ({key: value for key, value in actual.items() if key not in reset_groups}
                         != {key: value for key, value in original.items() if key not in reset_groups}):
                     raise LightCraftError("raw_operation_readback_mismatch")
                 for control, spec in CONTROLS.items():
                     if control.startswith(f"{section}."):
-                        group, key = control.split(".")
+                        group, key = CONTROL_PATHS[control]
                         if actual.get(group, {}).get(key) != spec[3]:
                             raise LightCraftError("raw_operation_readback_mismatch")
 

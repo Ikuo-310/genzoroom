@@ -20,11 +20,13 @@ export class RawSuperseded extends Error {
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
-  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'] as const;
+  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
+export const RAW_SECTION_IDS = ['light', 'color', 'detail'] as const;
+export type RawSectionId = typeof RAW_SECTION_IDS[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
-  sections: { light: boolean; color: boolean };
+  sections: Record<RawSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
   values: RawValues; process: number; wbAutoAvailable?: boolean;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
@@ -42,14 +44,14 @@ export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string
 export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
 export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
-  | { kind: 'sectionReset'; metadata: { section: 'light' | 'color' } }
-  | { kind: 'sectionToggle'; metadata: { section: 'light' | 'color'; enabled: boolean } }
+  | { kind: 'sectionReset'; metadata: { section: RawSectionId } }
+  | { kind: 'sectionToggle'; metadata: { section: RawSectionId; enabled: boolean } }
   | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset' | 'wbAuto' | 'wbPick';
-  metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string;
+  metadata: { control?: RawControlId; section?: RawSectionId; enabled?: boolean }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
@@ -237,7 +239,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
-    || !value.sections || typeof value.sections.light !== 'boolean' || typeof value.sections.color !== 'boolean'
+    || !value.sections || !RAW_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
     || new Set(value.controls.map(c => c.id)).size !== RAW_CONTROL_IDS.length
@@ -330,8 +332,8 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
       || !m || typeof m !== 'object' || Array.isArray(m)
       || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
-        : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !['light', 'color'].includes(m.section) || typeof m.enabled !== 'boolean'
-        : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !['light', 'color'].includes(m.section)
+        : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
+        : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_SECTION_IDS.includes(m.section)
         : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {

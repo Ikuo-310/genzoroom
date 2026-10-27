@@ -1,4 +1,4 @@
-"""C2 allowlist from LightCraft v0.10.0 develop/src/controls.rs; never JPEG Recipe values."""
+"""RAW allowlist from LightCraft v0.14.0 develop/src/controls.rs; never JPEG Recipe values."""
 
 import math
 
@@ -12,14 +12,26 @@ CONTROLS = {
     "wb.tint": (-150, 150, 1, 0, 0),
     "color.vibrance": (-100, 100, 1, 0, 0),
     "color.saturation": (-100, 100, 1, 0, 0),
+    "detail.sharpenAmount": (0, 150, 1, 0, 0),
+    "detail.sharpenMasking": (0, 100, 1, 0, 0),
 }
+
+SECTIONS = ("light", "color", "detail")
+# Native command IDs are not JSON field names; every readback and History delta uses this mapping.
+CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
+    "detail.sharpenAmount": ("detail", "sharpen_amount"),
+    "detail.sharpenMasking": ("detail", "sharpen_masking"),
+}
+# A native Detail reset includes controls not exposed by GenzoRoom yet.
+DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=25, sharpen_masking=0,
+    nr_luminance=0, nr_detail=50, nr_contrast=0, nr_color=0, nr_color_detail=50, nr_color_smoothness=50)
 
 
 def controls_state(snapshot):
     settings = snapshot.settings
     values = {}
     for control in CONTROLS:
-        section, key = control.split(".")
+        section, key = CONTROL_PATHS[control]
         value = settings.get(section, {}).get(key)
         if type(value) not in (int, float) or not math.isfinite(value):
             raise LightCraftError("raw_invalid_settings")
@@ -29,7 +41,7 @@ def controls_state(snapshot):
     if type(disabled) is not list or any(type(section) is not str for section in disabled):
         raise LightCraftError("raw_invalid_settings")
     return {"values": values, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
-            "sections": {section: section not in disabled for section in ("light", "color")},
+            "sections": {section: section not in disabled for section in SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
             "wb": {"available": snapshot.wb_kelvin and wb.get("scale") == "kelvin",
@@ -56,9 +68,9 @@ def validate_history_operation(kind, metadata):
     valid = (kind == "controlReset" and set(metadata) == {"control"}
              and type(metadata["control"]) is str and metadata["control"] in CONTROLS
              or kind == "sectionReset" and set(metadata) == {"section"}
-             and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
+             and type(metadata["section"]) is str and metadata["section"] in SECTIONS
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
-             and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
+             and type(metadata["section"]) is str and metadata["section"] in SECTIONS
              and type(metadata["enabled"]) is bool
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:
