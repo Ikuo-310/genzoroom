@@ -635,7 +635,8 @@ describe('RAW native Before cache', () => {
     await act(async () => current!.prepareSave());
     expect(current?.saveError).toBeUndefined();
   });
-  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const)('requests Draft on acknowledged %s interaction and Full on end without another mutation', async control => {
+  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('requests Draft on acknowledged %s interaction and Full on end without another mutation', async control => {
     await render('a'); await flush();
     act(() => { current!.beginControls(control); current!.changeControls({ [control]: 1 }); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 170)); }); await flush();
@@ -969,6 +970,17 @@ describe('RAW History document integration', () => {
 
 
 describe('bounded RAW session renewal', () => {
+  it.each(['detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)(
+    'saves and restores %s after native renewal without another owner', async control => {
+    vi.useFakeTimers(); renewal();
+    await render('a'); await drain();
+    act(() => { current!.beginControls(control); current!.changeControls({ [control]: 73 }); current!.flushControls(control); });
+    await drain();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(current?.document?.generation).toBe(2);
+    expect(current?.settings?.values[control]).toBe(73);
+    expect(current?.locked).toBe(false); expect(current?.dirty).toBe(false);
+  });
   function renewal() {
     let generation = 1, attempts = 199;
     let saved: api.RawHistoryRequest | undefined;

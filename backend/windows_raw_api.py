@@ -23,7 +23,8 @@ from raw_controls import CONTROLS, CONTROL_PATHS, controls_state, validate_contr
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
-MAX_HISTORY_RESPONSE_BYTES = 256 * 1024
+# 200 steps can each expose 17 full-precision deltas; keep the listing bounded without truncation.
+MAX_HISTORY_RESPONSE_BYTES = 512 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",

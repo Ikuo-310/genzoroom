@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
-  RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
+  RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
 import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
@@ -80,6 +80,20 @@ it('sends Before kind and validates its opaque key separately from After', async
   expect(JSON.parse(init.body as string).kind).toBe('before');
 });
 describe('RAW History transport', () => {
+  it('accepts 200 steps with 17 full precision deltas above 256KiB and rejects above 512KiB', async () => {
+    const data = rawHistoryData(rawSettings(doc));
+    data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+      kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
+      changes: RAW_CONTROL_IDS.map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
+    data.history = { initialized: true, cursor: 200, length: 200, selectedStepId: data.steps[199].stepId };
+    const encoded = JSON.stringify(data);
+    expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(256 * 1024);
+    expect(new TextEncoder().encode(encoded).length).toBeLessThan(512 * 1024);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(encoded, { headers: { 'Content-Type': 'application/json' } })));
+    expect((await readRawHistory(doc)).steps).toHaveLength(200);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(' '.repeat(512 * 1024) + encoded, { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(doc)).rejects.toThrow('raw_invalid_response');
+  });
   it.each<RawHistoryOperation>([
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },
     { kind: 'sectionToggle', metadata: { section: 'color', enabled: false } },
@@ -184,7 +198,7 @@ describe('RAW History transport', () => {
     if (invalid === 'cursor') data.history = { ...data.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
     if (invalid === 'metadata') data.steps[0].metadata.control = 'native.unknown' as never;
     if (invalid === 'changes') data.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
-    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(262144) : JSON.stringify(data);
+    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(512 * 1024) : JSON.stringify(data);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
   });
@@ -221,7 +235,8 @@ describe('bounded RAW binary contract', () => {
       recipeFingerprint: 'a'.repeat(64), lastSaveId: null, updatedAt: null }), { headers: { 'Content-Type': 'application/json' } }));
     await expect(readRawRecipe(doc)).rejects.toThrow('raw_invalid_response');
   });
-  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
+  it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1 }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);

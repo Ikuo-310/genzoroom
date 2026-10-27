@@ -13,6 +13,21 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('distinguishes luminance/color NR Detail and all five NR reset names in %s', async language => {
+    await i18n.changeLanguage(language);
+    const controls = ['detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
+    const steps: RawHistoryStep[] = controls.flatMap((control, index) => [
+      { stepId: `${index}-edit`, kind: 'control', metadata: { control }, createdAt: '2026-10-27T00:00:00Z', changes: [{ control, before: 50, after: 73 }] },
+      { stepId: `${index}-reset`, kind: 'controlReset', metadata: { control }, createdAt: '2026-10-27T00:00:00Z', changes: [{ control, before: 73, after: 0 }] },
+    ]);
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? '輝度ノイズ軽減のディテール' : 'Luminance Noise Reduction Detail');
+    expect(markup).toContain(language === 'ja' ? 'カラーノイズ軽減のディテール' : 'Color Noise Reduction Detail');
+    expect(markup).toContain(language === 'ja' ? 'カラーノイズ軽減の滑らかさをリセット' : 'Reset color noise reduction smoothness');
+    expect(markup).not.toContain('workspace.');
+    expect(markup).toContain('50 → 73');
+  });
+
   it.each(['ja', 'en'])('labels Detail controls, Reset and category operations in %s', async language => {
     await i18n.changeLanguage(language);
     const operations: Pick<RawHistoryStep, 'kind' | 'metadata' | 'changes'>[] = [

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
@@ -20,8 +20,14 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
   { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
-  { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenMasking'], ids: ['detail.sharpenAmount', 'detail.sharpenMasking'] },
+  { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
+    ids: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+      'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] },
 ];
+const detailHeadings: Partial<Record<RawControlId, string>> = {
+  'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
+};
 
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
   const { t } = useTranslation();
@@ -53,7 +59,6 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       onReset={() => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}>
       {category === 'color' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
-      {category === 'detail' && <h4 className="adjustment-subsection-title">{t('workspace.rawPreview.sharpening')}</h4>}
       {controls.map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = ids[index];
@@ -61,16 +66,19 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
         const enabled = settings.sections[sections[category]];
         const labelKey = category === 'detail' ? `rawPreview.${control.split('.')[1]}` : id;
-        return <AdjustmentSlider key={`${raw.assetId}:${control}`} adjustmentId={id} commitPolicy="operation-boundary" hideToggle
+        return <Fragment key={`${raw.assetId}:${control}`}>
+          {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
+          <AdjustmentSlider adjustmentId={id} commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
-          label={t(`workspace.${labelKey}`)} enabled={enabled} onToggle={() => {}}
+          label={t(`workspace.${labelKey}`)} accessibleLabel={control === 'detail.nrDetail' || control === 'detail.nrColorDetail'
+            ? t(`workspace.${labelKey}Name`) : undefined} enabled={enabled} onToggle={() => {}}
           onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={locked || !enabled || control.startsWith('wb.') && !settings.wb.available}
           resetDisabled={actionsLocked || control.startsWith('wb.') && !settings.wb.available}
-          onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
+          onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}
     </RawCategory>)}
     {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}

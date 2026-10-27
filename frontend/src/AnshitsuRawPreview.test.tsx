@@ -137,10 +137,11 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(12);
+  expect(sliders).toHaveLength(17);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
     'detail.sharpenAmount', 'detail.sharpenMasking',
+    'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
   ]);
   expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
   expect(sliders[1].min).toBe('-150'); expect(sliders[4].step).toBe('0.01');
@@ -150,7 +151,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(21);
+  expect(actions).toHaveLength(26);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.filter(button => !button.classList.contains('raw-wb-pick')).every(button => !button.disabled)).toBe(true);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -188,17 +189,20 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   moveDown(sliders[9]); expect(document.activeElement).toBe(detailTitle);
   moveDown(detailTitle); expect(document.activeElement).toBe(sliders[10]);
   moveDown(sliders[10]); expect(document.activeElement).toBe(sliders[11]);
+  for (let index = 12; index < 17; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
   act(() => viewer.focus());
   act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
-  expect(document.activeElement).toBe(sliders[11]);
+  expect(document.activeElement).toBe(sliders[16]);
 });
-it.each(['detail.sharpenAmount', 'detail.sharpenMasking'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
+it.each(['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
+  'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
   await mount();
   const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
   const row = range.closest('.adjustment-control')!;
   const number = row.querySelector<HTMLInputElement>('input[type="number"]')!;
   expect(range.min).toBe('0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
-  expect(range.value).toBe(control.endsWith('Amount') ? '40' : '0');
+  expect(range.value).toBe(control.endsWith('Amount') ? '40' : control === 'detail.nrColor' ? '25'
+    : ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness'].includes(control) ? '50' : '0');
   const set = (element: HTMLInputElement, value: string) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
     element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -229,7 +233,8 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
     const next = structuredClone(request.doc);
     next.revision++; next.settingsFingerprint = String(next.revision).padStart(64, '0');
     if (request.operation?.kind === 'sectionToggle') next.sections.detail = request.operation.metadata.enabled;
-    if (request.operation?.kind === 'sectionReset') Object.assign(next.values, { 'detail.sharpenAmount': 0, 'detail.sharpenMasking': 0 });
+    if (request.operation?.kind === 'sectionReset') Object.assign(next.values,
+      Object.fromEntries(next.controls.filter(spec => spec.id.startsWith('detail.')).map(spec => [spec.id, spec.default])));
     return rawHistoryResult({ ...request, doc: next });
   });
   await mount();
@@ -244,7 +249,7 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   expect(document.activeElement).toBe(toggle);
   historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, toggle); expect(document.activeElement).toBe(reset);
   act(() => title.click()); expect(category.querySelector('.adjustment-range')).toBeNull();
-  act(() => title.click()); expect(category.querySelectorAll('.adjustment-range')).toHaveLength(2);
+  act(() => title.click()); expect(category.querySelectorAll('.adjustment-range')).toHaveLength(7);
   act(() => toggle.click()); await flush();
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('40');
@@ -252,7 +257,33 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   act(() => reset.click()); await flush();
   expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: { kind: 'sectionReset', metadata: { section: 'detail' } } }));
   expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('0');
+  expect(category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!.value).toBe('50');
+  expect(category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrColor"]')!.value).toBe('0');
   act(() => toggle.click()); await flush(); expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(false);
+});
+
+it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zero-amount dependents in %s', async language => {
+  await i18n.changeLanguage(language);
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => {
+    const settings = rawSettings(doc);
+    settings.values['detail.nrColor'] = 0;
+    return settings;
+  });
+  await mount();
+  const category = host.querySelectorAll('.raw-adjustment-category')[2];
+  expect([...category.querySelectorAll('h4')].map(item => item.textContent)).toEqual(language === 'ja'
+    ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
+  const lum = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!;
+  const color = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrColorDetail"]')!;
+  expect(lum.getAttribute('aria-label')).toBe(language === 'ja' ? '輝度ノイズ軽減のディテール' : 'Luminance Noise Reduction Detail');
+  expect(color.getAttribute('aria-label')).toBe(language === 'ja' ? 'カラーノイズ軽減のディテール' : 'Color Noise Reduction Detail');
+  expect(lum.closest('.adjustment-control')!.querySelector('label')!.textContent).toBe(language === 'ja' ? 'ディテール' : 'Detail');
+  expect(color.closest('.adjustment-control')!.querySelector('label')!.textContent).toBe(language === 'ja' ? 'ディテール' : 'Detail');
+  for (const id of ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness']) {
+    const range = category.querySelector<HTMLInputElement>(`[data-adjustment-id="${id}"]`)!;
+    expect(range.disabled).toBe(false);
+    expect(range.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!.disabled).toBe(false);
+  }
 });
 
 it('skips unavailable WB sliders when acquiring initial RAW focus', async () => {
@@ -290,7 +321,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(12);
+  expect(rows).toHaveLength(17);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;

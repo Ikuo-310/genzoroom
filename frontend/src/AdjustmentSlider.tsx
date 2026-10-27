@@ -17,7 +17,7 @@ export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => v
 type Props = {
   adjustmentId: SliderAdjustmentId;
   commitPolicy?: 'inactivity' | 'operation-boundary';
-  label: string; value: number; min: number; max: number; step: number; valueText: string;
+  label: string; accessibleLabel?: string; value: number; min: number; max: number; step: number; valueText: string;
   valueLabel: string; precision: number; defaultValue: number; resetLabel: string;
   enabled: boolean; onToggle?: () => void; operationName?: string;
   onOpenContextMenu?: OpenAdjustmentSliderMenu;
@@ -218,7 +218,8 @@ export function AdjustmentSlider(props: Props) {
     if (document.activeElement === document.body || document.activeElement === document.documentElement)
       element.focus({ preventScroll: true });
   }, [props.disabled]);
-  return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group" aria-labelledby={labelId}
+  return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group"
+    aria-label={props.accessibleLabel} aria-labelledby={props.accessibleLabel ? undefined : labelId}
     onContextMenu={(event) => {
       if (!props.onOpenContextMenu || !isJpegAdjustmentId(props.adjustmentId)
         || (event.target instanceof Element && event.target.closest('.adjustment-number'))) return;
@@ -230,7 +231,7 @@ export function AdjustmentSlider(props: Props) {
     <label id={labelId} htmlFor={rangeId}>{props.label}</label>
     <input ref={range} id={rangeId} data-adjustment-id={props.adjustmentId} className={props.trackGradient ? "adjustment-range has-gradient" : "adjustment-range"} type="range"
       style={props.trackGradient ? { "--adjustment-track-gradient": props.trackGradient } as CSSProperties : undefined} min={props.min} max={props.max} step={props.step}
-      value={props.value} aria-valuetext={props.valueText} disabled={props.disabled}
+      value={props.value} aria-label={props.accessibleLabel} aria-valuetext={props.valueText} disabled={props.disabled}
       onPointerEnter={(event) => {
         hovered.current = true;
         enterAdjustmentRange(range.current, event);

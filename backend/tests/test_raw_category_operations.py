@@ -95,7 +95,8 @@ def test_before_cache_is_read_only_across_category_reset_and_history_branch(loca
 
 @pytest.mark.parametrize("control", ["light.exposure", "light.contrast", "light.highlights", "light.whites",
     "light.shadows", "light.blacks", "color.vibrance", "color.saturation", "wb.temp", "wb.tint",
-    "detail.sharpenAmount", "detail.sharpenMasking"])
+    "detail.sharpenAmount", "detail.sharpenMasking", "detail.nrLuminance", "detail.nrDetail",
+    "detail.nrColor", "detail.nrColorDetail", "detail.nrColorSmoothness"])
 def test_control_reset_off_as_shot_history_and_replay(local, tmp_path, monkeypatch, control):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -117,7 +118,7 @@ def test_control_reset_off_as_shot_history_and_replay(local, tmp_path, monkeypat
                     assert result["wb"] == {"available": True, "mode": "asShot", "scale": "kelvin"}
                     assert (result["values"]["wb.temp"], result["values"]["wb.tint"]) == (4875., 13.)
                 else:
-                    assert result["values"][control] == 0.
+                    assert result["values"][control] == (50 if control in ('detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness') else 0)
                 page = (await http.get(url(result), headers=headers(result))).json()
                 changes = page["steps"][-1]["changes"]
                 assert {change["control"] for change in changes} == ({"wb.temp", "wb.tint"} if control.startswith("wb.") else {control})
@@ -343,14 +344,15 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 values = {control: -1.234567891234567 for control in doc["values"]}
                 values["wb.temp"] = 23456.123456789
                 values.update({"detail.sharpenAmount": 123.4567891234567, "detail.sharpenMasking": 98.7654321987654})
+                values.update({control: 12.34567891234567 for control in values if control.startswith('detail.nr')})
                 for _ in range(10):
                     doc = await patch(http, doc, values)
                     doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
                     doc = await edit(http, doc, "allReset", {})
                 response = await http.get(url(doc), headers=headers(doc))
-                assert response.status_code == 200 and len(response.content) <= 16384
+                assert response.status_code == 200 and len(response.content) <= 256 * 1024
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 12 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == 17 for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

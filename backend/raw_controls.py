@@ -14,6 +14,11 @@ CONTROLS = {
     "color.saturation": (-100, 100, 1, 0, 0),
     "detail.sharpenAmount": (0, 150, 1, 0, 0),
     "detail.sharpenMasking": (0, 100, 1, 0, 0),
+    "detail.nrLuminance": (0, 100, 1, 0, 0),
+    "detail.nrDetail": (0, 100, 1, 50, 0),
+    "detail.nrColor": (0, 100, 1, 0, 0),
+    "detail.nrColorDetail": (0, 100, 1, 50, 0),
+    "detail.nrColorSmoothness": (0, 100, 1, 50, 0),
 }
 
 SECTIONS = ("light", "color", "detail")
@@ -21,6 +26,11 @@ SECTIONS = ("light", "color", "detail")
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.sharpenAmount": ("detail", "sharpen_amount"),
     "detail.sharpenMasking": ("detail", "sharpen_masking"),
+    "detail.nrLuminance": ("detail", "nr_luminance"),
+    "detail.nrDetail": ("detail", "nr_detail"),
+    "detail.nrColor": ("detail", "nr_color"),
+    "detail.nrColorDetail": ("detail", "nr_color_detail"),
+    "detail.nrColorSmoothness": ("detail", "nr_color_smoothness"),
 }
 # A native Detail reset includes controls not exposed by GenzoRoom yet.
 DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=25, sharpen_masking=0,

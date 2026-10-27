@@ -20,7 +20,8 @@ export class RawSuperseded extends Error {
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
-  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'detail.sharpenAmount', 'detail.sharpenMasking'] as const;
+  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'detail.sharpenAmount', 'detail.sharpenMasking',
+  'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export const RAW_SECTION_IDS = ['light', 'color', 'detail'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
@@ -315,7 +316,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
 }
 export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> {
   const value = await json(`/documents/${doc.handle}/history`, { headers: {
-    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 256 * 1024);
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 512 * 1024);
   document(value, doc.workspaceId, doc.assetId);
   const h = value.history;
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken

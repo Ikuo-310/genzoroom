@@ -30,6 +30,11 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
            "enhance": {"denoise": 0., "raw_details": False, "super_resolution": False},
            "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
+NATIVE_DETAIL_CONTROLS = {
+    'sharpenAmount': ('sharpen_amount', 0), 'sharpenMasking': ('sharpen_masking', 0),
+    'nrLuminance': ('nr_luminance', 0), 'nrDetail': ('nr_detail', 50), 'nrColor': ('nr_color', 0),
+    'nrColorDetail': ('nr_color_detail', 50), 'nrColorSmoothness': ('nr_color_smoothness', 50),
+}
 
 
 def png(w=16, h=12):
@@ -197,8 +202,8 @@ class RawProcess(FakeProcess):
             value = {"ok": True}
         elif command == "develop.resetControl":
             group, key = params["control"].split(".")
-            key = {"sharpenAmount": "sharpen_amount", "sharpenMasking": "sharpen_masking"}.get(key, key)
-            self.photos[self.active]["settings"][group][key] = 0. if group == "detail" else DEFAULT[group][key]
+            field, default = NATIVE_DETAIL_CONTROLS[key] if group == 'detail' else (key, DEFAULT[group][key])
+            self.photos[self.active]["settings"][group][field] = default
             value = {"ok": True}
         elif command == "develop.resetSection":
             settings = self.photos[self.active]["settings"]
@@ -222,7 +227,7 @@ class RawProcess(FakeProcess):
             if command == "develop.set":
                 for k, v in params["values"].items():
                     section, key = k.split(".")
-                    key = {"sharpenAmount": "sharpen_amount", "sharpenMasking": "sharpen_masking"}.get(key, key)
+                    key = NATIVE_DETAIL_CONTROLS[key][0] if section == 'detail' and key in NATIVE_DETAIL_CONTROLS else key
                     if section not in settings or key not in settings[section]:
                         return self.tool(message, error=True)
                     settings[section][key] = v
