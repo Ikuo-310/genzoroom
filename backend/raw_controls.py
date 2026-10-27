@@ -12,6 +12,7 @@ CONTROLS = {
     "wb.tint": (-150, 150, 1, 0, 0),
     "color.vibrance": (-100, 100, 1, 0, 0),
     "color.saturation": (-100, 100, 1, 0, 0),
+    **{f"effects.{key}": (-100, 100, 1, 0, 0) for key in ("texture", "clarity", "dehaze")},
     "detail.sharpenAmount": (0, 150, 1, 0, 0),
     "detail.sharpenMasking": (0, 100, 1, 0, 0),
     "detail.nrLuminance": (0, 100, 1, 0, 0),
@@ -21,7 +22,7 @@ CONTROLS = {
     "detail.nrColorSmoothness": (0, 100, 1, 50, 0),
 }
 
-SECTIONS = ("light", "color", "detail")
+SECTIONS = ("light", "color", "effects", "detail")
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.sharpenAmount": ("detail", "sharpen_amount"),

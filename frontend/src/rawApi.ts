@@ -20,10 +20,11 @@ export class RawSuperseded extends Error {
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
-  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'detail.sharpenAmount', 'detail.sharpenMasking',
+  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'effects.texture', 'effects.clarity', 'effects.dehaze',
+  'detail.sharpenAmount', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
-export const RAW_SECTION_IDS = ['light', 'color', 'detail'] as const;
+export const RAW_SECTION_IDS = ['light', 'color', 'effects', 'detail'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;

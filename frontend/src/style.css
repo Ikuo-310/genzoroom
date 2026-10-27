@@ -501,6 +501,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-category-content { min-width: 0; transition: opacity 120ms ease; }
 .adjustment-category.is-disabled .adjustment-category-content { opacity: 0.45; }
 .adjustment-subsection-title { margin: 5px 0 4px; color: #bdbdc0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
+.raw-adjustment-subsection-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
+.raw-adjustment-subsection-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grading-range-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
 .grading-range-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grading-range-toggle { flex: 0 0 26px; }

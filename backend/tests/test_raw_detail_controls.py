@@ -250,8 +250,9 @@ def test_two_hundred_full_detail_history_deltas_fit_response_budget(local, tmp_p
                 monkeypatch.setattr(api, '_history_load', full_history)
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and 256 * 1024 < len(response.content) <= 512 * 1024
+                print(f'History 200 steps / {len(CONTROLS)} controls: {len(response.content)} bytes')
                 steps = response.json()['steps']
-                assert len(steps) == 200 and all(len(step['changes']) == 17 for step in steps)
+                assert len(steps) == 200 and all(len(step['changes']) == len(CONTROLS) for step in steps)
                 assert all('settings' not in step for step in steps)
         finally:
             await api.close()

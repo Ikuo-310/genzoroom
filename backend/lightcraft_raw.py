@@ -1026,6 +1026,14 @@ class LightCraftRawSession:
                     raise LightCraftError("raw_operation_readback_mismatch")
             elif kind == "sectionReset":
                 section = metadata["section"]
+                if section == "effects":
+                    expected = json.loads(before)
+                    # Native Effects reset excludes vignette/style and grain/seed, unlike its eye.
+                    expected["effects"].update(texture=0, clarity=0, dehaze=0)
+                    if (any(type(actual["effects"].get(key)) not in (int, float)
+                            for key in ("texture", "clarity", "dehaze")) or actual != expected):
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    return
                 if section == "detail":
                     expected = json.loads(before)
                     if type(expected.get("detail")) is not dict or type(expected.get("enhance")) is not dict:

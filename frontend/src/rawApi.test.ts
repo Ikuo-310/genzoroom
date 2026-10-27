@@ -80,7 +80,7 @@ it('sends Before kind and validates its opaque key separately from After', async
   expect(JSON.parse(init.body as string).kind).toBe('before');
 });
 describe('RAW History transport', () => {
-  it('accepts 200 steps with 17 full precision deltas above 256KiB and rejects above 512KiB', async () => {
+  it('accepts 200 steps with 20 full precision deltas above 256KiB and rejects above 512KiB', async () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
@@ -102,6 +102,11 @@ describe('RAW History transport', () => {
     { kind: 'controlReset', metadata: { control: 'detail.sharpenMasking' } },
     { kind: 'sectionToggle', metadata: { section: 'detail', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'detail' } },
+    { kind: 'controlReset', metadata: { control: 'effects.texture' } },
+    { kind: 'controlReset', metadata: { control: 'effects.clarity' } },
+    { kind: 'controlReset', metadata: { control: 'effects.dehaze' } },
+    { kind: 'sectionToggle', metadata: { section: 'effects', enabled: false } },
+    { kind: 'sectionReset', metadata: { section: 'effects' } },
     { kind: 'allReset', metadata: {} },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
@@ -236,7 +241,7 @@ describe('bounded RAW binary contract', () => {
     await expect(readRawRecipe(doc)).rejects.toThrow('raw_invalid_response');
   });
   it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
-    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
+    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness', 'effects.texture', 'effects.clarity', 'effects.dehaze'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1 }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);

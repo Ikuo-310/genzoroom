@@ -137,9 +137,10 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(17);
+  expect(sliders).toHaveLength(20);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
+    'effects.texture', 'effects.clarity', 'effects.dehaze',
     'detail.sharpenAmount', 'detail.sharpenMasking',
     'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
   ]);
@@ -151,7 +152,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(26);
+  expect(actions).toHaveLength(30);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.filter(button => !button.classList.contains('raw-wb-pick')).every(button => !button.disabled)).toBe(true);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -185,22 +186,27 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
     moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
   }
   expect(sliders.slice(4, 10).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
-  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
-  moveDown(sliders[9]); expect(document.activeElement).toBe(detailTitle);
-  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[10]);
-  moveDown(sliders[10]); expect(document.activeElement).toBe(sliders[11]);
-  for (let index = 12; index < 17; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  const effectsTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
+  const effectsSubtitle = host.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
+  moveDown(sliders[9]); expect(document.activeElement).toBe(effectsTitle);
+  moveDown(effectsTitle); expect(document.activeElement).toBe(effectsSubtitle);
+  moveDown(effectsSubtitle); expect(document.activeElement).toBe(sliders[10]);
+  for (let index = 11; index < 13; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
+  moveDown(sliders[12]); expect(document.activeElement).toBe(detailTitle);
+  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[13]);
+  for (let index = 14; index < 20; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
   act(() => viewer.focus());
   act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
-  expect(document.activeElement).toBe(sliders[16]);
+  expect(document.activeElement).toBe(sliders[19]);
 });
-it.each(['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
+it.each(['effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
   'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
   await mount();
   const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
   const row = range.closest('.adjustment-control')!;
   const number = row.querySelector<HTMLInputElement>('input[type="number"]')!;
-  expect(range.min).toBe('0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
+  expect(range.min).toBe(control.startsWith('effects.') ? '-100' : '0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
   expect(range.value).toBe(control.endsWith('Amount') ? '40' : control === 'detail.nrColor' ? '25'
     : ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness'].includes(control) ? '50' : '0');
   const set = (element: HTMLInputElement, value: string) => {
@@ -239,8 +245,8 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   });
   await mount();
   expect([...host.querySelectorAll('.raw-adjustment-category .adjustment-category-label')].map(item => item.textContent))
-    .toEqual(['Color', 'Basic', 'Detail']);
-  const category = host.querySelectorAll('.raw-adjustment-category')[2];
+    .toEqual(['Color', 'Basic', 'Effects', 'Detail']);
+  const category = host.querySelectorAll('.raw-adjustment-category')[3];
   expect(category.textContent).toContain('Sharpening');
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const toggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
@@ -262,6 +268,59 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   act(() => toggle.click()); await flush(); expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(false);
 });
 
+it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effects in %s', async language => {
+  await i18n.changeLanguage(language);
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    values: { ...rawSettings(doc).values, 'effects.texture': -31, 'effects.clarity': 62, 'effects.dehaze': 93 } }));
+  commitHistory.mockImplementation(async request => {
+    if (request.action !== 'operate') return rawHistoryResult(request);
+    const next = structuredClone(request.doc);
+    next.revision++; next.settingsFingerprint = String(next.revision).padStart(64, '0');
+    if (request.operation?.kind === 'sectionToggle') next.sections.effects = request.operation.metadata.enabled;
+    if (request.operation?.kind === 'sectionReset') Object.assign(next.values,
+      { 'effects.texture': 0, 'effects.clarity': 0, 'effects.dehaze': 0 });
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  const categories = host.querySelectorAll('.raw-adjustment-category');
+  expect([...categories].map(category => category.querySelector('.adjustment-category-label')!.textContent)).toEqual(language === 'ja'
+    ? ['カラー', '基本補正', 'エフェクト', 'ディテール'] : ['Color', 'Basic', 'Effects', 'Detail']);
+  const category = categories[2];
+  const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  const subtitle = category.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
+  const reset = category.querySelector<HTMLButtonElement>('.raw-adjustment-subsection-header button')!;
+  const toggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+  expect(category.querySelector('.adjustment-category-header .adjustment-category-reset')).toBeNull();
+  expect(subtitle.textContent).toBe(language === 'ja' ? '基本エフェクト' : 'Basic Effects');
+  expect(reset.getAttribute('aria-label')).toBe(language === 'ja' ? '基本エフェクトをリセット' : 'Reset Basic Effects');
+  act(() => subtitle.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, subtitle);
+  expect(document.activeElement).toBe(reset);
+  historyKey('ArrowLeft', { ctrlKey: false, shiftKey: true }, reset); expect(document.activeElement).toBe(subtitle);
+  const ranges = () => [...category.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  expect(ranges().map(range => range.value)).toEqual(['-31', '62', '93']);
+  act(() => toggle.click()); await flush();
+  expect(ranges().every(range => range.disabled)).toBe(true);
+  expect(ranges().map(range => range.value)).toEqual(['-31', '62', '93']);
+  expect(reset.disabled).toBe(false);
+  act(() => toggle.click()); await flush(); expect(ranges().every(range => !range.disabled)).toBe(true);
+  // The subsection action must close the number gesture before its save lock can disable Reset.
+  const number = ranges()[0].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const pointer = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+  act(() => {
+    number.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '-52');
+    number.dispatchEvent(new Event('input', { bubbles: true })); reset.dispatchEvent(pointer);
+  });
+  expect(pointer.defaultPrevented).toBe(true);
+  act(() => reset.click()); await flush();
+  expect(commitHistory.mock.calls.slice(-2).map(([request]) => request.action)).toEqual(['commit', 'operate']);
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: { kind: 'sectionReset', metadata: { section: 'effects' } } }));
+  expect(ranges().map(range => range.value)).toEqual(['0', '0', '0']);
+  expect(category.querySelectorAll('h4')).toHaveLength(1);
+  expect(category.textContent).not.toMatch(/Vignette|Grain|周辺光量|粒子|workspace\./);
+  await act(async () => title.click()); await flush(); expect(ranges()).toHaveLength(0);
+  await act(async () => title.click()); await flush(); expect(ranges()).toHaveLength(3);
+});
+
 it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zero-amount dependents in %s', async language => {
   await i18n.changeLanguage(language);
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => {
@@ -270,7 +329,7 @@ it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zer
     return settings;
   });
   await mount();
-  const category = host.querySelectorAll('.raw-adjustment-category')[2];
+  const category = host.querySelectorAll('.raw-adjustment-category')[3];
   expect([...category.querySelectorAll('h4')].map(item => item.textContent)).toEqual(language === 'ja'
     ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
   const lum = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!;
@@ -321,7 +380,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(17);
+  expect(rows).toHaveLength(20);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
@@ -354,7 +413,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(3);
+  expect(categories).toHaveLength(4);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Color');
   const toggle = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;

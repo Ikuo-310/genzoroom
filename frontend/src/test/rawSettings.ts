@@ -6,7 +6,7 @@ export function rawSettings(doc: RawDocument): RawSettings {
   return { ...doc, settingsFingerprint: doc.settingsFingerprint ?? String(doc.revision).padStart(64, '0'),
     recipeRevision: doc.recipeRevision ?? 0, recipeFingerprint: doc.recipeFingerprint ?? null,
     mutationAttempts: 0, mutationLimit: 256, regenerationThreshold: 200,
-    process: 2, wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, detail: true },
+    process: 2, wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, effects: true, detail: true },
     values: Object.fromEntries(RAW_CONTROL_IDS.map(id => [id, id === 'wb.temp' ? 6500 : id === 'detail.sharpenAmount' ? 40
       : id === 'detail.nrColor' ? 25 : nrDefaults[id] ?? 0])) as RawValues,
     controls: RAW_CONTROL_IDS.map(id => ({ id, min: id.startsWith('detail.') ? 0 : id === 'wb.temp' ? 2000 : id === 'light.exposure' ? -5 : id === 'wb.tint' ? -150 : -100,

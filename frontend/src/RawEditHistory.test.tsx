@@ -13,6 +13,23 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('distinguishes Effects toggle from Basic Effects Reset and formats all three values in %s', async language => {
+    await i18n.changeLanguage(language);
+    const controls = ['effects.texture', 'effects.clarity', 'effects.dehaze'] as const;
+    const steps: RawHistoryStep[] = controls.flatMap((control, index) => [
+      { stepId: `${index}-edit`, kind: 'control', metadata: { control }, createdAt: '2026-10-27T00:00:00Z', changes: [{ control, before: -40, after: 73 }] },
+      { stepId: `${index}-reset`, kind: 'controlReset', metadata: { control }, createdAt: '2026-10-27T00:00:00Z', changes: [{ control, before: 73, after: 0 }] },
+    ]);
+    steps.push({ stepId: 'off', kind: 'sectionToggle', metadata: { section: 'effects', enabled: false }, createdAt: '2026-10-27T00:00:00Z', changes: [] },
+      { stepId: 'reset', kind: 'sectionReset', metadata: { section: 'effects' }, createdAt: '2026-10-27T00:00:00Z',
+        changes: controls.map(control => ({ control, before: 73, after: 0 })) });
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? 'エフェクト OFF' : 'Effects OFF');
+    expect(markup).toContain(language === 'ja' ? '基本エフェクト リセット' : 'Basic Effects Reset');
+    for (const label of language === 'ja' ? ['テクスチャ', '明瞭度', 'かすみの除去'] : ['Texture', 'Clarity', 'Dehaze']) expect(markup).toContain(label);
+    expect(markup).toContain('-40 → 73'); expect(markup).toContain('73 → 0'); expect(markup).not.toContain('workspace.');
+  });
+
   it.each(['ja', 'en'])('distinguishes luminance/color NR Detail and all five NR reset names in %s', async language => {
     await i18n.changeLanguage(language);
     const controls = ['detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;

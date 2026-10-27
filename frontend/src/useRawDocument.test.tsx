@@ -970,7 +970,7 @@ describe('RAW History document integration', () => {
 
 
 describe('bounded RAW session renewal', () => {
-  it.each(['detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)(
+  it.each(['effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)(
     'saves and restores %s after native renewal without another owner', async control => {
     vi.useFakeTimers(); renewal();
     await render('a'); await drain();
@@ -1028,7 +1028,7 @@ describe('bounded RAW session renewal', () => {
     vi.mocked(api.saveRawHistory).mockImplementation(async request => {
       if (request.action === 'initialize') return rawHistoryResult(request, saved ? { history: saved.history } : {});
       const next = { ...request.doc, revision: request.doc.revision + 1, mutationAttempts: 201,
-        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false, detail: true },
+        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false, effects: true, detail: true },
         values: { ...request.doc.values, 'wb.temp': 4875, 'wb.tint': 13 } };
       saved = rawHistoryResult({ ...request, doc: next }, { history: { initialized: true, length: 1, cursor: 1, selectedStepId: request.saveId } });
       return saved;

@@ -64,7 +64,7 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
   const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
   const position = adjustmentRowPosition(current);
-  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .adjustment-range'))
+  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || isAvailable(item)));
   const index = position ? ordered.indexOf(position) : -1;
@@ -150,7 +150,7 @@ export function activateFromMouse(element: HTMLInputElement) {
   const focused = element.ownerDocument.activeElement;
   // Release stale operation focus so Copy and arrows share the hover target, without ending text edits.
   if (focused instanceof HTMLElement && focused !== element
-    && ((focused instanceof HTMLInputElement && adjustments.has(focused)) || focused.matches('.adjustment-category-title, .grading-range-title'))) focused.blur();
+    && ((focused instanceof HTMLInputElement && adjustments.has(focused)) || focused.matches('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title'))) focused.blur();
 }
 
 export function registerAdjustment(element: HTMLInputElement, commit: () => void) {

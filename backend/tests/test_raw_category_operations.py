@@ -160,7 +160,7 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 attempts = api.raw.status().edits
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
-                assert doc["sections"] == {"light": False, "color": False, "detail": False}
+                assert doc["sections"] == {"light": False, "color": False, "effects": True, "detail": False}
                 actual = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
@@ -352,7 +352,7 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and len(response.content) <= 256 * 1024
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 17 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == 20 for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

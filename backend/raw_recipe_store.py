@@ -333,11 +333,12 @@ HISTORY_LIMIT = 200
 MAX_HISTORY_METADATA_BYTES = 1024
 MAX_HISTORY_RECEIPT_BYTES = 4096
 HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.saturation",
+                            "effects.texture", "effects.clarity", "effects.dehaze",
                             "light.exposure", "light.contrast", "light.highlights", "light.whites",
                             "light.shadows", "light.blacks", "detail.sharpenAmount", "detail.sharpenMasking",
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
-HISTORY_SECTIONS = frozenset(("light", "color", "detail"))
+HISTORY_SECTIONS = frozenset(("light", "color", "effects", "detail"))
 
 
 class InvalidRawHistory(InvalidRawRecipe):
