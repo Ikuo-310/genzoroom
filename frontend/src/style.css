@@ -495,6 +495,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-category-icon:hover:not(:disabled), .adjustment-category-reset:hover:not(:disabled) { background: #303033; }
 .adjustment-category-icon:focus-visible, .adjustment-category-reset:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .adjustment-category-icon.is-off { color: #858589; background: #1b1b1d; }
+.raw-wb-pick svg { vertical-align: middle; }
+.raw-wb-pick.is-selected { color: #fff; border-color: #92abc7; background: #3a485b; }
 .adjustment-category-reset:disabled { cursor: default; opacity: 0.35; }
 .adjustment-category-content { min-width: 0; transition: opacity 120ms ease; }
 .adjustment-category.is-disabled .adjustment-category-content { opacity: 0.45; }

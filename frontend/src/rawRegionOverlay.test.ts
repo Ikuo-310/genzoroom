@@ -153,6 +153,7 @@ it('decodes an explicit Whole descriptor through the same bounded display queue 
   expect(h.decode).toHaveBeenCalledTimes(1); h.decodes[0].resolve(); await tick();
   expect(h.overlay.display).toBeUndefined(); h.decodes[1].resolve(); await tick();
   expect(h.overlay.display!.wholeAfter.quality).toBe('draft');
+  expect(h.overlay.display!.wholeAfter.maxSide).toBe(2000);
   expect(h.overlay.display!.wholeAfter.frame.fullWidth).toBe(2000);
   expect(h.overlay.display!.wholeAfter.url).not.toBe(h.bases().after.url);
   h.overlay.clear(); expect(h.urls.size).toBe(1);

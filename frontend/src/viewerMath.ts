@@ -3,6 +3,14 @@ export const MAX_ZOOM = 8;
 
 export type Point = { x: number; y: number };
 
+export function wholeImagePoint(point: Point, bounds: { left: number; top: number; width: number; height: number }): Point | null {
+  if (![point.x, point.y, bounds.left, bounds.top, bounds.width, bounds.height].every(Number.isFinite)
+    || bounds.width <= 0 || bounds.height <= 0) return null;
+  // DOM bounds already include CSS pan/zoom. DPR belongs to resolution planning, not pointer coordinates.
+  const x = (point.x - bounds.left) / bounds.width, y = (point.y - bounds.top) / bounds.height;
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
+}
+
 export function clampViewerPan(pan: Point, scale: number, image: Point, viewport: Point): Point {
   const maxX = Math.max(0, (image.x * scale - viewport.x) / 2);
   const maxY = Math.max(0, (image.y * scale - viewport.y) / 2);

@@ -40,7 +40,11 @@ class WBProcess(native.RawProcess):
             return reply(self.stdout, message, {'tools': [
                 {'name': 'estimate_white_balance', 'inputSchema': {'type': 'object', 'additionalProperties': False,
                     'required': list(props), 'properties': props}},
-                {'name': 'render_preview', 'inputSchema': {'properties': {'before': {'type': 'boolean'}}}}]})
+                {'name': 'render_preview', 'inputSchema': {'properties': {'before': {'type': 'boolean'},
+                    **({'quality': {'type': 'string', 'enum': ['draft', 'full']},
+                        'preview_contract': {'type': 'integer', 'enum': [1]},
+                        'stage_cache': {'type': 'string', 'enum': ['off', 'on']},
+                        'stage_cache_budget_bytes': {'type': 'integer'}} if self.adaptive_supported else {})}}}]})
         if message['method'] == 'tools/call':
             name, args = message['params']['name'], message['params']['arguments']
             if name == 'get_develop':

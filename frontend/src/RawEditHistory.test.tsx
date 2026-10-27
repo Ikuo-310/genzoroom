@@ -13,12 +13,12 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
-  it.each([true, false])('labels AW as one operation including mode-only changes (%s)', numeric => {
-    const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind: 'wbAuto', metadata: {},
+  it.each([['wbAuto', true], ['wbAuto', false], ['wbPick', true], ['wbPick', false]] as const)('labels %s as one operation (%s)', (kind, numeric) => {
+    const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind, metadata: {},
       createdAt: '2026-10-27T00:00:00Z', changes: numeric ? [
         { control: 'wb.temp', before: 6500, after: 5200 }, { control: 'wb.tint', before: 0, after: 11 }] : [] };
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
-    expect(markup).toContain('自動ホワイトバランス');
+    expect(markup).toContain(kind === 'wbAuto' ? '自動ホワイトバランス' : 'WBスポイト');
     if (numeric) { expect(markup).toContain('6500 K → 5200 K'); expect(markup).toContain('0 → +11'); }
   });
 

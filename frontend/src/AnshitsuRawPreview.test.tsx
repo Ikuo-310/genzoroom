@@ -149,9 +149,9 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(16);
+  expect(actions).toHaveLength(17);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.every(button => !button.disabled)).toBe(true);
+  expect(actions.filter(button => !button.classList.contains('raw-wb-pick')).every(button => !button.disabled)).toBe(true);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -986,6 +986,51 @@ it('runs AW once through History, updates both WB values and Preview, and releas
   expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[0].revision).toBe(2);
 });
 
+it('toggles Picker, cancels with Escape/other edits/Asset change, and submits one frozen displayed Whole point', async () => {
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+    quality: target?.quality ?? 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      fullWidth: 16, fullHeight: 12, aspect: 4/3, window: null } }));
+  await mount();
+  const picker = () => host.querySelector<HTMLButtonElement>('.raw-wb-pick')!;
+  expect(picker().disabled).toBe(false);
+  expect(picker().previousElementSibling?.textContent).toBe('AW');
+  const aw = picker().previousElementSibling as HTMLButtonElement;
+  act(() => aw.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, aw);
+  expect(document.activeElement).toBe(picker());
+  act(() => picker().click()); await flush(); expect(picker().getAttribute('aria-pressed')).toBe('true');
+  act(() => picker().click()); await flush(); expect(picker().getAttribute('aria-pressed')).toBe('false');
+  act(() => picker().click()); await flush();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await flush(); expect(picker().getAttribute('aria-pressed')).toBe('false');
+  act(() => picker().click()); await flush();
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+  const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+  vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 50, top: 20, width: 800, height: 600 } as DOMRect);
+  const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+  Object.defineProperty(base, 'naturalWidth', { value: 16 }); Object.defineProperty(base, 'naturalHeight', { value: 12 });
+  act(() => base.dispatchEvent(new Event('load')));
+  commitHistory.mockImplementation(async request => rawHistoryResult({ ...request,
+    doc: { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: 'e'.repeat(64),
+      wb: { available: true, mode: 'custom', scale: 'kelvin' }, values: { ...request.doc.values, 'wb.temp': 5300, 'wb.tint': 12 } } },
+    { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } }));
+  act(() => {
+    for (const type of ['pointerdown', 'pointerup']) viewport.dispatchEvent(new MouseEvent(type,
+      { bubbles: true, button: 0, clientX: 250, clientY: 470 }));
+  }); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'wbPick', metadata: {}, frame: {
+    kind: 'after', geometryId: 'a'.repeat(64), maxSide: 1024, quality: 'full', x: .25, y: .75 } });
+  expect(picker().getAttribute('aria-pressed')).toBe('false');
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!.value).toBe('5300');
+  act(() => picker().click()); await flush();
+  await editRaw(); expect(picker().getAttribute('aria-pressed')).toBe('false');
+  act(() => picker().click()); await flush();
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
+  expect(picker().getAttribute('aria-pressed')).toBe('false');
+});
+
 it.each(['off', 'wbUnavailable', 'helperUnavailable'])('disables AW when %s while retaining the category actions', async reason => {
   vi.mocked(rawApi.readRawSettings).mockImplementationOnce(async doc => {
     const settings = rawSettings(doc);
@@ -994,6 +1039,7 @@ it.each(['off', 'wbUnavailable', 'helperUnavailable'])('disables AW when %s whil
   });
   await mount();
   expect(host.querySelector<HTMLButtonElement>('.raw-auto-wb')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('.raw-wb-pick')!.disabled).toBe(true);
   expect(host.querySelector<HTMLButtonElement>('[data-category-switch]')!.disabled).toBe(false);
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
   releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
-  type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry } from './rawApi';
+  type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
@@ -338,7 +338,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         url = candidate;
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
-        wholeSurfaces.current.after = frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality } : undefined;
+        wholeSurfaces.current.after = frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality, maxSide } : undefined;
         const baseline = wholeSurfaces.current.before;
         if (baseline && frame.frame && baseline.doc.assetId === doc.assetId && baseline.doc.handle === doc.handle
           && baseline.doc.generation === doc.generation && baseline.doc.documentToken === doc.documentToken
@@ -766,7 +766,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (!currentIntent()) return;
           url = candidate; candidate = undefined;
           wholeSurfaces.current.before = frame.frame ? { url, doc: { ...transmitted!.doc }, frame: frame.frame,
-            quality: frame.quality ?? afterQuality } : undefined;
+            quality: frame.quality ?? afterQuality, maxSide: afterSide } : undefined;
           overlayRef.current?.refresh();
           publishDiagnosticRef.current();
           evaluateAutoRef.current();
@@ -818,6 +818,23 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     return editor && doc?.generation === editor.confirmed.generation
       && doc.documentToken === editor.confirmed.documentToken ? editor : null;
   };
+  const [pickOwner, setPickOwner] = useState<string | null>(null);
+  const pickTag = `${assetId}:${visible?.document?.generation}:${visible?.document?.documentToken}`;
+  const pickStart = useRef(0);
+  const cancelPick = () => { pickStart.current++; setPickOwner(null); };
+  const pickAvailable = !!visible && visible.status === 'ready' && !visible.locked && !visible.pending
+    && !!visible.frame && visible.imageRevision === visible.document?.revision
+    && !visible.editError && !visible.historyError && !visible.historyLoading && !!visible.history
+    && !!visible.settings?.sections.color && !!visible.settings?.wb.available && !!visible.settings?.wbAutoAvailable;
+  const pickActive = pickOwner === pickTag && pickAvailable;
+  useEffect(() => { if (!pickAvailable || pickOwner !== pickTag) setPickOwner(null); }, [pickAvailable, pickTag, pickOwner]);
+  const pickTarget = (kind: 'before' | 'after'): RawPickTarget | undefined => {
+    const surface = wholeSurfaces.current[kind], doc = visible?.document;
+    if (!surface?.maxSide || !doc || surface.doc.handle !== doc.handle || surface.doc.generation !== doc.generation
+      || surface.doc.documentToken !== doc.documentToken || surface.doc.revision !== doc.revision) return;
+    return { url: surface.url, doc: { ...doc }, frame: { kind, geometryId: surface.frame.geometryId,
+      quality: surface.quality, maxSide: surface.maxSide } };
+  };
   const resume = () => {
     if (!activeEditor()) return;
     if (renewalLockedRef.current()) return;
@@ -830,6 +847,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     await restartWaitRef.current();
     const editor = activeEditor(), saver = saverRef.current;
     if (!editor || !saver) return; // No editable document has been exposed yet.
+    cancelPick();
     frozen.current = true;
     suspendDisplayRef.current();
     saver.pause();
@@ -851,10 +869,38 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     } while (saver.dirty || editor.unsettled);
   };
   const moveHistory = (action: 'undo' | 'redo' | 'jump', targetStepId?: string | null) => {
+    cancelPick();
     if (!callbackEditor() || frozen.current) return;
     void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   return visible && { ...visible, beforeAvailable: !!beforeKey,
+    pickActive, pickAvailable,
+    cancelPick,
+    togglePick: () => {
+      if (!pickAvailable || frozen.current || !callbackEditor()) return;
+      const ticket = ++pickStart.current, editor = callbackEditor(), saver = saverRef.current;
+      if (pickActive) { setPickOwner(null); return; }
+      saver?.end();
+      // Finish the existing gesture on its queue before enabling sampling; departure invalidates this owner.
+      void saver?.save().then(() => {
+        if (pickStart.current === ticket && callbackEditor() === editor && !frozen.current && !saver.locked)
+          setPickOwner(pickTag);
+      }).catch(() => {});
+    },
+    pickTargets: { after: pickTarget('after'), before: pickTarget('before') },
+    pick: (target: RawPickTarget, point: Pick<RawPickFrame, 'x' | 'y'>) => {
+      cancelPick();
+      const editor = callbackEditor(), display = overlayRef.current?.display;
+      const retained = target.frame.kind === 'before' ? display?.wholeBefore : display?.wholeAfter;
+      const surface = retained?.url === target.url ? retained : wholeSurfaces.current[target.frame.kind];
+      // The click owns its displayed frame; queued work cannot silently rebind it to a later revision.
+      if (!pickActive || frozen.current || !editor || !surface || surface.url !== target.url
+        || editor.confirmed.revision !== target.doc.revision || editor.confirmed.documentToken !== target.doc.documentToken
+        || surface.doc.revision !== target.doc.revision || surface.frame.geometryId !== target.frame.geometryId
+        || surface.maxSide !== target.frame.maxSide || surface.quality !== target.frame.quality) return;
+      void saverRef.current?.operate({ kind: 'wbPick', metadata: {}, frame: { ...target.frame, ...point } })
+        .catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
+    },
     regionDelivery: regionRef.current,
     regionDisplay: overlayRef.current?.display,
     regionOutline,
@@ -868,16 +914,18 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     retryBefore: () => requestBeforeRef.current(true),
     undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
     operate: (operation: RawHistoryOperation) => {
+      cancelPick();
       if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>
         log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
     },
     jumpHistory: (stepId: string | null) => moveHistory('jump', stepId),
     retryHistory: () => { if (callbackEditor() && !frozen.current) saverRef.current?.retryHistory(); },
     changeControls: (values: Partial<RawValues>) => {
+      cancelPick();
       if (!frozen.current && callbackEditor()) for (const [control, value] of Object.entries(values))
         saverRef.current?.change(control as RawControlId, value!);
     },
-    beginControls: (control: RawControlId) => { if (callbackEditor() && !frozen.current) saverRef.current?.begin(control); },
+    beginControls: (control: RawControlId) => { cancelPick(); if (callbackEditor() && !frozen.current) saverRef.current?.begin(control); },
     flushControls: (control?: RawControlId) => { if (callbackEditor()) saverRef.current?.end(control); },
     retryRegeneration: () => { if (callbackEditor() && visible.regenerationError) void restartRef.current(true).catch(() => {}); }, retryControls: () => callbackEditor()?.retry(), prepareSave, resumeEditing: resume,
     retrySave: async () => { try { await prepareSave(true); } catch (cause) {

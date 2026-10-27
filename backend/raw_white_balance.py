@@ -2,6 +2,27 @@
 import hashlib
 import json
 import math
+import re
+
+
+def validate_pick_frame(frame):
+    if (type(frame) is not dict or set(frame) != {'kind', 'geometryId', 'maxSide', 'quality', 'x', 'y'}
+            or frame['kind'] not in ('before', 'after') or frame['quality'] not in ('draft', 'full')
+            or type(frame['geometryId']) is not str or not re.fullmatch('[a-f0-9]{64}', frame['geometryId'])
+            or type(frame['maxSide']) is not int or not 16 <= frame['maxSide'] <= 2048
+            or any(type(frame[k]) not in (int, float) or not math.isfinite(frame[k]) or not 0 <= frame[k] <= 1
+                   for k in ('x', 'y'))):
+        raise ValueError('WB frame invalid')
+    return dict(frame)
+
+
+def _typed_equal(a, b):
+    # Nested frame identity must reject bool/number equality as well as altered coordinates.
+    if type(a) is not type(b):
+        return False
+    if type(a) is dict:
+        return set(a) == set(b) and all(_typed_equal(a[k], b[k]) for k in a)
+    return a == b
 
 
 def settings_fingerprint(native_text):
@@ -78,13 +99,11 @@ def supports_wb(tools):
 def validate_candidate(result, identity):
     if type(result) is not dict or set(result) != {'wbContract', 'identity', 'candidate'} \
             or type(result['wbContract']) is not int or result['wbContract'] != 1 \
-            or type(result['identity']) is not dict or set(result['identity']) != set(identity) \
-            or any(type(result['identity'][key]) is not type(value) or result['identity'][key] != value
-                   for key, value in identity.items()):
+            or not _typed_equal(result['identity'], identity):
         raise ValueError('WB identity mismatch')
     candidate = result['candidate']
     if type(candidate) is not dict or set(candidate) != {'mode', 'scale', 'temp', 'tint'} \
-            or candidate['mode'] != 'auto' or candidate['scale'] not in ('kelvin', 'legacy') \
+            or candidate['mode'] != ('custom' if identity.get('operation') == 'pick' else 'auto') or candidate['scale'] not in ('kelvin', 'legacy') \
             or any(type(candidate[k]) not in (int, float) or not math.isfinite(candidate[k]) for k in ('temp', 'tint')) \
             or not 2000 <= candidate['temp'] <= 50000 or not -150 <= candidate['tint'] <= 150:
         raise ValueError('WB candidate invalid')

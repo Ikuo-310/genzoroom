@@ -370,7 +370,9 @@ it('retries metadata loading without another save or move and refuses an unverif
 });
 
 
-it('keeps AW behind a slider gesture, locks competing work, and retries its frozen request after a lost reply', async () => {
+it.each(['wbAuto', 'wbPick'] as const)('keeps %s behind a slider and retries its frozen request after a lost reply', async kind => {
+  const intent: api.RawHistoryOperation = kind === 'wbAuto' ? { kind, metadata: {} } : { kind, metadata: {},
+    frame: { kind: 'before', geometryId: 'a'.repeat(64), maxSide: 1024, quality: 'full', x: .2, y: .7 } };
   const { saver, controls } = owner(); await saver.save();
   saver.begin('light.exposure'); saver.change('light.exposure', 1); saver.end();
   let frozen: api.RawHistoryRequest | undefined;
@@ -383,8 +385,8 @@ it('keeps AW behind a slider gesture, locks competing work, and retries its froz
     return rawHistoryResult({ ...request, doc: settings }, { history: {
       initialized: true, cursor: 2, length: 2, selectedStepId: request.saveId } });
   });
-  const first = saver.operate({ kind: 'wbAuto', metadata: {} });
-  const repeated = saver.operate({ kind: 'wbAuto', metadata: {} });
+  const first = saver.operate(intent);
+  const repeated = saver.operate(intent);
   saver.change('light.contrast', 50); await saver.move('undo');
   await repeated; await expect(first).rejects.toThrow('raw_connection_failed');
   expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'commit', 'operate']);

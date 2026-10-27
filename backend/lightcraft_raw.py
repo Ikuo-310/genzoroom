@@ -896,7 +896,7 @@ class LightCraftRawSession:
             raise LightCraftError("raw_invalid_controls")
         return await self._mutate(handle, "develop.set", {"values": values}, expected_revision)
 
-    async def auto_white_balance(self, handle, expected_revision, *, prepared, verify):
+    async def estimate_white_balance(self, handle, expected_revision, *, prepared, verify, frame=None):
         from raw_white_balance import result_fingerprint, validate_candidate
         photo = self._photo(handle, active=True)
         original = photo.settings_json
@@ -926,6 +926,8 @@ class LightCraftRawSession:
                 raise LightCraftError('raw_wb_settings_mismatch') from None
             identity = {'id': str(current.photo_id), 'wb_contract': 1, 'operation': 'auto',
                         'settingsFingerprint': fingerprint, 'requestId': uuid.uuid4().hex}
+            if frame is not None:
+                identity.update(operation='pick', frame=dict(frame))
             result = await self.manager._raw_estimate_wb(self._generation, identity, timeout=self._remaining(deadline))
             owner()
             try:
@@ -943,7 +945,7 @@ class LightCraftRawSession:
             prepared(expected)
             lightcraft_log('raw.wb.estimated', level='debug', generation=self._generation,
                            revision=expected_revision, requestId=identity['requestId'])
-            return None if expected == json.loads(original) else {'settings': {'wb': candidate}, 'label': 'Auto WB'}
+            return None if expected == json.loads(original) else {'settings': {'wb': candidate}, 'label': 'White Balance'}
 
         def check(actual):
             if actual != expected:
@@ -965,14 +967,14 @@ class LightCraftRawSession:
                 raise LightCraftError('raw_operation_readback_mismatch')
 
         # Retry only after readback proved the original state; reuse the frozen candidate, never estimate again.
-        return await self._mutate(handle, 'develop.merge', {'settings': {'wb': expected['wb']}, 'label': 'Auto WB'},
+        return await self._mutate(handle, 'develop.merge', {'settings': {'wb': expected['wb']}, 'label': 'White Balance'},
                                   expected_revision, verify=verify, check=check)
 
     async def apply_history_operation(self, handle, kind, metadata, expected_revision):
         from raw_controls import CONTROLS, validate_history_operation
         validate_history_operation(kind, metadata)
-        if kind == 'wbAuto':
-            # AW must pass the separate read-only estimate/candidate fence before any mutation.
+        if kind in ('wbAuto', 'wbPick'):
+            # WB must pass the separate read-only estimate/candidate fence before any mutation.
             raise LightCraftError('raw_invalid_request')
         photo = self._photo(handle, active=True)
         before = photo.settings_json

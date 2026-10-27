@@ -60,6 +60,6 @@ def validate_history_operation(kind, metadata):
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
              and type(metadata["section"]) is str and metadata["section"] in ("light", "color")
              and type(metadata["enabled"]) is bool
-             or kind in ("allReset", "wbAuto") and not metadata)
+             or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:
         raise LightCraftError("raw_invalid_request")

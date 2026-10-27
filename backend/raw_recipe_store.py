@@ -364,7 +364,7 @@ def _history_metadata(kind, metadata):
     elif kind == "sectionReset":
         valid = set(metadata) == {"section"} and type(metadata["section"]) is str and metadata["section"] in HISTORY_SECTIONS
     else:
-        valid = kind in ("allReset", "wbAuto") and not metadata
+        valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
     if not valid:
         raise InvalidRawHistory()
     encoded = _json(metadata)

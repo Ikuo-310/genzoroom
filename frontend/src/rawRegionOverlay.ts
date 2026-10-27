@@ -17,7 +17,7 @@ export class RawPreviewUrls {
   get size() { return this.refs.size; }
   owns(url: string) { return this.refs.has(url); }
 }
-export type RawWholeSurface = { url: string; doc: RawDocument; frame: RawGeometry; quality: 'draft' | 'full' };
+export type RawWholeSurface = { url: string; doc: RawDocument; frame: RawGeometry; quality: 'draft' | 'full'; maxSide?: number };
 export type RawRegionLayer = { url: string; metadata: RegionResponse; planGeneration: number;
   nativePlacement: RegionRect; validNativeRect: RegionRect };
 export type RawRegionDisplay = { after: RawRegionLayer; before?: RawRegionLayer;
@@ -190,8 +190,8 @@ export class RawRegionOverlay {
     const c = this.options.context(); if (!c.owner || c.owner.blocked) return;
     if (candidate.result.operation === 'whole') {
       const frame = candidate.result.frame;
-      if (!frame.frame || !frame.quality) return;
-      const whole: RawWholeSurface = { url: this.options.urls.create(frame.blob), doc: { ...c.owner.doc }, frame: frame.frame, quality: frame.quality };
+      if (!frame.frame || !frame.quality || candidate.item.mode !== 'whole') return;
+      const whole: RawWholeSurface = { url: this.options.urls.create(frame.blob), doc: { ...c.owner.doc }, frame: frame.frame, quality: frame.quality, maxSide: candidate.item.maxSide };
       const controller = new AbortController(), epoch = this.epoch; this.running = controller;
       void (this.options.decode ?? decode)(whole.url, frame, controller.signal).then(() => {
         if (controller.signal.aborted || epoch !== this.epoch || !this.options.current(candidate)) { this.options.urls.release(whole.url); return; }

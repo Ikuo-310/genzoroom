@@ -66,6 +66,7 @@ class RawPreviewApi:
         self._lease_tickets = {}
         self._preview_latest = {}
         self._region_geometry = {}
+        self._wb_frames = {}
         self._history_tasks = set()
         self._closing = False
         self._lease_task = None
@@ -215,7 +216,8 @@ class RawPreviewApi:
             status = (413 if code in {"raw_request_too_large", "raw_source_too_large", "raw_preview_budget_exceeded"} else
                       422 if code.startswith('raw_wb_') and code in {
                           'raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
-                          'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'} else
+                          'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result',
+                          'raw_wb_geometry_mismatch', 'raw_wb_point_outside_source', 'raw_wb_connection_failed', 'raw_wb_timeout'} else
                       400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
                                       "raw_history_unavailable", "raw_history_save_failed", "raw_edit_reset_database_failed",
@@ -470,6 +472,7 @@ class RawPreviewApi:
                 self._raw_handle = handle
                 self._preview_latest.clear()
                 self._region_geometry.clear()
+                self._wb_frames.clear()
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
@@ -584,6 +587,12 @@ class RawPreviewApi:
                     return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced"})
                 headers["X-Raw-Frame"] = json.dumps(native_frame, separators=(",", ":"), ensure_ascii=True)
                 self._region_geometry[(kind, frame.quality)] = (doc["revision"], native_frame["geometryId"], native_geometry)
+                # Retained overlay bases may use a former Whole size. Attest exact render conditions, bounded per owner.
+                key = (kind, frame.quality, body['maxSide'], native_frame['geometryId'])
+                self._wb_frames.pop(key, None)
+                self._wb_frames[key] = (doc['revision'], doc.get('beforeKey'), native_geometry)
+                while len(self._wb_frames) > 16:
+                    self._wb_frames.pop(next(iter(self._wb_frames)))
         if frame.key:
             headers["X-Raw-Before-Key"] = frame.key
         lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
@@ -724,7 +733,7 @@ class RawPreviewApi:
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
                         and metadata["control"].startswith("wb.") else [metadata["control"]])
-        elif step['kind'] == 'wbAuto':
+        elif step['kind'] in ('wbAuto', 'wbPick'):
             controls = ['wb.temp', 'wb.tint']
         elif step["kind"] in ("sectionToggle", "sectionReset"):
             section = metadata["section"]
@@ -774,6 +783,13 @@ class RawPreviewApi:
             required |= {"kind", "metadata"}
         elif action == "jump":
             required.add("targetStepId")
+        if action == 'operate' and body.get('kind') == 'wbPick':
+            required.add('frame')
+            from raw_white_balance import validate_pick_frame
+            try:
+                validate_pick_frame(body.get('frame'))
+            except ValueError:
+                raise LightCraftError('raw_invalid_request') from None
         if (set(body) != required or any(type(body.get(key)) is not int or not 0 <= body[key] < 2**53
                 for key in ("generation", "documentRevision", "expectedRecipeRevision"))
                 or type(body.get("settingsFingerprint")) is not str
@@ -799,7 +815,7 @@ class RawPreviewApi:
         elif action == "operate":
             validate_history_operation(body["kind"], body["metadata"])
             kind, metadata = body["kind"], body["metadata"]
-            if not self._wb_available and (kind in ("allReset", "wbAuto") or kind == "sectionReset" and metadata["section"] == "color"
+            if not self._wb_available and (kind in ("allReset", "wbAuto", "wbPick") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb.")):
                 raise LightCraftError("raw_wb_unavailable")
         return body
@@ -899,9 +915,9 @@ class RawPreviewApi:
                 snapshot = await self.raw.get_settings(self._raw_handle)
                 self._history_verify(doc)
                 self._confirmed(doc, snapshot)
-                wb_auto = action == 'operate' and body['kind'] == 'wbAuto'
-                if wb_auto:
-                    snapshot = await self._history_wb_auto(doc, pending, snapshot)
+                wb_operation = action == 'operate' and body['kind'] in ('wbAuto', 'wbPick')
+                if wb_operation:
+                    snapshot = await self._history_wb(doc, pending, snapshot)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 elif action in {"initialize", "commit"}:
@@ -919,7 +935,7 @@ class RawPreviewApi:
                         {**pending["identity"], "settings": pending["selected"]}, snapshot.revision)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
-                if action == "operate" and not wb_auto:
+                if action == "operate" and not wb_operation:
                     pending["stage"] = "applying"
                     snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
                     self._history_verify(doc)
@@ -959,7 +975,7 @@ class RawPreviewApi:
         except StoreUnavailable:
             raise LightCraftError("raw_history_save_failed") from None
 
-    async def _history_wb_auto(self, doc, pending, snapshot):
+    async def _history_wb(self, doc, pending, snapshot):
         verify = lambda: self._history_verify(doc)
         if 'wbExpected' in pending:
             if snapshot.settings == pending['wbExpected']:
@@ -980,20 +996,46 @@ class RawPreviewApi:
             pending['wbExpected'] = expected
             pending['stage'] = 'applying'
 
+        native_frame = None
+        def verify_frame():
+            verify()
+            if body['kind'] != 'wbPick':
+                return
+            f = body['frame']
+            mapping = self._wb_frames.get((f['kind'], f['quality'], f['maxSide'], f['geometryId']))
+            if (not mapping or (f['kind'] == 'after' and mapping[0] != body['documentRevision'])
+                    or f['kind'] == 'before' and mapping[1] != doc.get('beforeKey')):
+                raise LightCraftError('raw_wb_geometry_mismatch')
+            return {**f, 'geometryId': mapping[2]}
+
         try:
-            return await self.raw.auto_white_balance(self._raw_handle, snapshot.revision, prepared=prepared, verify=verify)
+            native_frame = verify_frame()
+            return await self.raw.estimate_white_balance(self._raw_handle, snapshot.revision, prepared=prepared, verify=verify_frame, frame=native_frame)
         except BaseException as error:
             if pending['stage'] != 'estimating':
+                # A post-fence frame failure cannot certify that no mutation was sent.
+                # Keep the candidate/readback recovery instead of publishing a safe-estimate 422.
+                if getattr(error, 'code', '').startswith('raw_wb_'):
+                    raise LightCraftError('raw_history_readback_mismatch') from None
                 raise
             # Before the candidate fence nothing can have mutated. Do not trap a failed estimate as an unknown save.
             self._history_save = None
             if not isinstance(error, Exception):
                 raise
             safe = getattr(error, 'code', '')
+            if safe in {'lightcraft_timeout', 'lightcraft_busy_timeout', 'raw_operation_timeout', 'raw_busy_timeout'}:
+                safe = 'raw_wb_timeout'
+            elif safe in {'lightcraft_session_lost', 'raw_session_lost', 'lightcraft_closed', 'lightcraft_eof',
+                          'lightcraft_read_failed', 'lightcraft_write_failed', 'lightcraft_not_ready'}:
+                safe = 'raw_wb_connection_failed'
+            elif safe in {'lightcraft_invalid_json', 'lightcraft_invalid_response', 'lightcraft_invalid_tool_response',
+                          'lightcraft_truncated_response', 'lightcraft_response_too_large'}:
+                safe = 'raw_wb_invalid_response'
             if safe in {'raw_revision_conflict', 'raw_not_active', 'raw_stale_handle'}:
                 safe = 'raw_wb_stale_result'
             if safe not in {'raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
-                            'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'}:
+                            'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result',
+                            'raw_wb_geometry_mismatch', 'raw_wb_point_outside_source', 'raw_wb_connection_failed', 'raw_wb_timeout'}:
                 safe = 'raw_wb_estimation_failed'
             lightcraft_log('raw.wb.failed', level='error', generation=doc['generation'],
                            revision=doc['revision'], errorCode=safe)
@@ -1098,6 +1140,7 @@ class RawPreviewApi:
             await self._history_checkpoint()
         self.document = None
         self._region_geometry.clear()
+        self._wb_frames.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
         self._history_initialized = self._history_enabled = False
@@ -1241,6 +1284,7 @@ class RawPreviewApi:
         self.cache = None
         self.workspace = self.document = None
         self._region_geometry.clear()
+        self._wb_frames.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
         self._history_initialized = self._history_enabled = False

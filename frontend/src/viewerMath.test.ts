@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint } from './viewerMath';
+import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint } from './viewerMath';
 
 describe('viewer math', () => {
+  it('maps CSS Whole bounds at Fit and pan/zoom without clamping or applying DPR', () => {
+    const fit = { left: 100, top: 50, width: 800, height: 600 };
+    expect(wholeImagePoint({ x: 500, y: 350 }, fit)).toEqual({ x: .5, y: .5 });
+    expect(wholeImagePoint({ x: 900, y: 650 }, fit)).toEqual({ x: 1, y: 1 });
+    expect(wholeImagePoint({ x: 99, y: 350 }, fit)).toBeNull();
+    expect(wholeImagePoint({ x: 900.01, y: 350 }, fit)).toBeNull();
+    expect(wholeImagePoint({ x: 500, y: 350 }, { left: -300, top: -250, width: 1600, height: 1200 })).toEqual({ x: .5, y: .5 });
+    expect(wholeImagePoint({ x: NaN, y: 350 }, fit)).toBeNull();
+    expect(wholeImagePoint({ x: 500, y: 350 }, { ...fit, width: 0 })).toBeNull();
+  });
   it('fits the entire image inside the viewport', () => {
     expect(calculateFitScale({ x: 1000, y: 600 }, { x: 2000, y: 800 })).toBe(0.5);
     expect(calculateFitScale({ x: 600, y: 1000 }, { x: 800, y: 2000 })).toBe(0.5);

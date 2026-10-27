@@ -117,8 +117,9 @@ export class RawRecipeSave {
       saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
-      if (operation?.kind === 'wbAuto' && cause instanceof RawSaveError && cause.outcome === 'rejected'
+      if ((operation?.kind === 'wbAuto' || operation?.kind === 'wbPick') && cause instanceof RawSaveError && cause.outcome === 'rejected'
         && (cause.status === 422 && ['raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
+          'raw_wb_geometry_mismatch', 'raw_wb_point_outside_source', 'raw_wb_connection_failed', 'raw_wb_timeout',
           'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result'].includes(cause.code)
           || cause.code === 'raw_wb_unavailable' && cause.status === 400)) {
         // This response certifies that no WB mutation was sent; an unknown/lost response keeps its immutable retry.

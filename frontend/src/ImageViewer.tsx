@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
+import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
 import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
@@ -11,6 +11,7 @@ import type { EditRecipe } from './editing';
 import type { EditImageSource } from './editImageSource';
 import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu';
 import type { HistogramChangeHandler } from './histogram';
+import type { RawPickTarget } from './rawApi';
 import type { RawView } from './rawWholePreview';
 import type { RawRegionDisplay } from './rawRegionOverlay';
 
@@ -19,6 +20,10 @@ type ImageViewerProps = {
   documentKey?: string;
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   rawRegionDisplay?: RawRegionDisplay;
+  rawPickActive?: boolean;
+  rawPickTargets?: { after?: RawPickTarget; before?: RawPickTarget };
+  onRawPick?: (target: RawPickTarget, point: Point) => void;
+  onRawPickCancel?: () => void;
   rawRegionOutline?: boolean;
   onRawViewChange?: (view: RawView) => void;
   rawDiagnosticView?: { actual: boolean; nativePanX: number; nativePanY: number };
@@ -59,8 +64,9 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
+const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 
-export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -155,6 +161,29 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
   const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;
   const regionBase = showBeforeAdjustments ? regionDisplay?.wholeBefore : regionDisplay?.wholeAfter;
+  const displayedKind = showBeforeAdjustments ? 'before' : 'after';
+  const baseTarget = rawPickTargets?.[displayedKind];
+  const displayedPickTarget: RawPickTarget | undefined = regionBase?.maxSide ? {
+    url: regionBase.url, doc: regionBase.doc, frame: { kind: displayedKind, geometryId: regionBase.frame.geometryId,
+      quality: regionBase.quality, maxSide: regionBase.maxSide },
+  } : baseTarget;
+  const displayedUrl = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
+  const pickReady = rawPickActive && !keyboardBlocked && !previewStatus && imageState === 'ready'
+    && !!displayedPickTarget && displayedPickTarget.url === displayedUrl;
+  const pickPointer = useRef<{ id: number; origin: Point; target: RawPickTarget; bounds: DOMRect; moved: boolean } | null>(null);
+  useEffect(() => {
+    pickPointer.current = null;
+    if (keyboardBlocked) onRawPickCancel?.();
+  }, [rawPickActive, imageIdentity, keyboardBlocked]);
+  useEffect(() => {
+    if (!rawPickActive) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      event.preventDefault(); onRawPickCancel?.();
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [rawPickActive, onRawPickCancel]);
   const navigatorImageSrc = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
   useLayoutEffect(() => {
     onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
@@ -283,7 +312,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function toggleFitActualSize(event: ReactMouseEvent<HTMLDivElement>) {
-    if (event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
+    if (rawPickActive || event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
     if (suppressDoubleClickRef.current) {
       suppressDoubleClickRef.current = false;
       clearTimeout(suppressDoubleClickTimer.current);
@@ -361,6 +390,15 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (rawPickActive) {
+      if (event.button === 0 && pickReady && displayedPickTarget && imagePositionRef.current
+        && wholeImagePoint({ x: event.clientX, y: event.clientY }, imagePositionRef.current.getBoundingClientRect())) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        pickPointer.current = { id: event.pointerId, origin: { x: event.clientX, y: event.clientY },
+          target: structuredClone(displayedPickTarget), bounds: imagePositionRef.current.getBoundingClientRect(), moved: false };
+      }
+      return;
+    }
     if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0) return;
     onInteractionStart?.();
@@ -370,6 +408,11 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
+    const pick = pickPointer.current;
+    if (pick && pick.id === event.pointerId) {
+      if (Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) >= 4) pick.moved = true;
+      return;
+    }
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const delta = { x: event.clientX - drag.origin.x, y: event.clientY - drag.origin.y };
@@ -378,6 +421,19 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function stopPan(event: ReactPointerEvent<HTMLDivElement>) {
+    const pick = pickPointer.current;
+    if (pick && pick.id === event.pointerId) {
+      pickPointer.current = null;
+      const bounds = imagePositionRef.current?.getBoundingClientRect();
+      const point = bounds && wholeImagePoint({ x: event.clientX, y: event.clientY }, bounds);
+      const stable = bounds && (['left', 'top', 'width', 'height'] as const).every(key => bounds[key] === pick.bounds[key]);
+      if (event.type !== 'pointercancel' && !pick.moved && Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) < 4
+        && stable && pickReady && point
+        && JSON.stringify(pick.target) === JSON.stringify(displayedPickTarget)) {
+        onRawPick?.(pick.target, point);
+      }
+      return;
+    }
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     if (panMovedRef.current) {
@@ -526,6 +582,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       tabIndex={0}
       aria-label={alt}
       className={`viewer-viewport${zoomed ? ' pannable' : ''}`}
+      style={rawPickActive ? { cursor: pickReady ? PICK_CURSOR : 'not-allowed' } : undefined}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
         if (keyboardBlocked || document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;

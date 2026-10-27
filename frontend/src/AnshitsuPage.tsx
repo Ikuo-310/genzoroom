@@ -742,6 +742,10 @@ export function AnshitsuPage() {
             || (rawDocument.status === 'ready' && !rawDocument.editError && !rawDocument.displayError) ? undefined
             : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
+          rawPickActive={rawDocument?.pickActive}
+          rawPickTargets={rawDocument?.pickTargets}
+          onRawPick={rawDocument?.pick}
+          onRawPickCancel={rawDocument?.cancelPick}
           rawFrame={rawDocument?.frame}
           rawRegionDisplay={rawDocument?.regionDisplay}
           rawRegionOutline={rawDocument?.regionOutline}

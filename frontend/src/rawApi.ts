@@ -39,13 +39,16 @@ export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: numbe
 export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
   documentRevision: number; settingsFingerprint: string };
 export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
+export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
+export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
   | { kind: 'sectionReset'; metadata: { section: 'light' | 'color' } }
   | { kind: 'sectionToggle'; metadata: { section: 'light' | 'color'; enabled: boolean } }
+  | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset' | 'wbAuto';
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset' | 'wbAuto' | 'wbPick';
   metadata: { control?: RawControlId; section?: 'light' | 'color'; enabled?: boolean }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -329,7 +332,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
       || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !['light', 'color'].includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !['light', 'color'].includes(m.section)
-        : !['allReset', 'wbAuto'].includes(step.kind) || Object.keys(m).length !== 0)
+        : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
           const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;

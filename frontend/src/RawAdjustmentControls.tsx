@@ -9,6 +9,12 @@ import type { RawControlId, RawHistoryOperation } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
 type RawCategoryId = 'basic' | 'color';
+const wbErrors: Record<string, string> = {
+  raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
+  raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
+  raw_wb_settings_mismatch: 'wbSettingsMismatch', raw_wb_invalid_response: 'wbInvalidResponse',
+  raw_wb_connection_failed: 'wbConnectionFailed', raw_wb_timeout: 'wbTimeout',
+};
 const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: AdjustmentId[] }[] = [
   { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
@@ -34,6 +40,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
       enabled={settings.sections[category === 'basic' ? 'light' : 'color']} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
+      picker={category === 'color' ? { disabled: actionsLocked || !raw.pickAvailable, active: !!raw.pickActive,
+        run: () => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePick(); } } : undefined}
       autoWhiteBalance={category === 'color' ? {
         disabled: actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable,
         run: () => operate({ kind: 'wbAuto', metadata: {} }),
@@ -61,8 +69,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
       })}
     </RawCategory>)}
-    {raw.operationError && <p role="alert">{t(raw.operationError === 'raw_wb_no_valid_samples'
-      ? 'workspace.rawPreview.awNoSamples' : 'workspace.rawPreview.awFailed')}</p>}
+    {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}
     {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
     {raw.regenerationError && <div role="alert"><p>{t('workspace.rawPreview.regenerationFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.regenerating}
@@ -80,9 +87,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   </div>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, onToggle, onReset, children }: {
+function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, children }: {
   category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
   onToggle: () => void; onReset: () => void; children: ReactNode;
+  picker?: { disabled: boolean; active: boolean; run: () => void };
   autoWhiteBalance?: { disabled: boolean; run: () => void };
 }) {
   const { t } = useTranslation();
@@ -104,6 +112,15 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
           onClick={autoWhiteBalance.run} aria-label={t('workspace.rawPreview.aw')} title={t('workspace.rawPreview.aw')}
           onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>AW</button>}
+        {picker && <button type="button" className={`adjustment-category-icon raw-wb-pick${picker.active ? ' is-selected' : ''}`}
+          data-category-command disabled={picker.disabled} aria-pressed={picker.active}
+          aria-label={t('workspace.rawPreview.wbPick')} title={t('workspace.rawPreview.wbPick')}
+          onClick={picker.run} onFocus={focusAdjustmentCategory}
+          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" />
+          </svg>
+        </button>}
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} data-category-switch disabled={disabled}
           aria-pressed={enabled} onClick={onToggle} aria-label={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)}
           title={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)} onFocus={focusAdjustmentCategory}

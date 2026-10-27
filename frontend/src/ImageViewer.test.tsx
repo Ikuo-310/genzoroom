@@ -187,6 +187,51 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it.each([1, 1.25, 2])('samples the displayed retained Whole, rejects drag/outside/stale identity at DPR %s', dpr => {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
+    const picked = vi.fn(), cancel = vi.fn();
+    const metadata = regionResponse(), geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };
+    const whole = { url: 'blob:retained-after', doc: { workspaceId: 'w', handle: 'h', ...metadata.identity, revision: 2 },
+      frame: { ...geometry, fullWidth: 4000, fullHeight: 3000, aspect: 4/3, window: null }, quality: 'full' as const, maxSide: 1472 };
+    const display: RawRegionDisplay = { after: { url: 'blob:region', metadata, planGeneration: 1,
+      ...regionLayerPlacement(metadata, geometry) }, wholeAfter: whole, wholeBefore: { ...whole, url: 'blob:retained-before' },
+      before: { url: 'blob:before-region', metadata, planGeneration: 1, ...regionLayerPlacement(metadata, geometry) } };
+    const render = (before = false, active = true) => act(() => root.render(<ImageViewer src="blob:new-whole" documentKey="raw"
+      rawFrame={geometry} rawRegionDisplay={display} previewPixels rawPickActive={active} onRawPick={picked} onRawPickCancel={cancel}
+      beforeSrc="blob:before-whole" persistentBeforeAdjustments={before} alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    render();
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: -300, top: -250, width: 1600, height: 1200 } as DOMRect);
+    const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(base, 'naturalWidth', { value: 1472 }); Object.defineProperty(base, 'naturalHeight', { value: 1104 });
+    act(() => base.dispatchEvent(new Event('load')));
+    const pointer = (type: string, x: number, y: number) => act(() => viewport.dispatchEvent(new MouseEvent(type,
+      { bubbles: true, button: 0, clientX: x, clientY: y })));
+    // The rectangle is the Whole CSS transform even when a pointer-transparent Region is on top.
+    pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    expect(picked).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:retained-after',
+      frame: { kind: 'after', geometryId: metadata.geometryId, maxSide: 1472, quality: 'full' } }), { x: .5, y: .5 });
+    picked.mockClear();
+    pointer('pointerdown', -301, 350); pointer('pointerup', -301, 350); expect(picked).not.toHaveBeenCalled();
+    pointer('pointerdown', 500, 350); pointer('pointermove', 520, 350); pointer('pointerup', 520, 350);
+    expect(picked).not.toHaveBeenCalled();
+    pointer('pointerdown', 500, 350); pointer('pointercancel', 500, 350); pointer('pointerup', 500, 350);
+    expect(picked).not.toHaveBeenCalled();
+    pointer('pointerdown', 500, 350); render(true); pointer('pointerup', 500, 350);
+    expect(picked).not.toHaveBeenCalled();
+    pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    expect(picked).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:retained-before',
+      frame: expect.objectContaining({ kind: 'before' }) }), { x: .5, y: .5 });
+    key('keydown', window, { key: 'Escape', code: 'Escape' }); expect(cancel).toHaveBeenCalled();
+    // A stale overlay cannot provide geometry for the fallback Whole URL.
+    display.after.metadata = { ...metadata, geometryId: 'f'.repeat(64) };
+    render(); picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    expect(picked).not.toHaveBeenCalled();
+    render(false, false); picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    expect(picked).not.toHaveBeenCalled();
+  });
   it.each([1, 1.25, 1.5, 2])('shares Native scale, pan and comparison placement at DPR %s', dpr => {
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
     const metadata = regionResponse(), geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };

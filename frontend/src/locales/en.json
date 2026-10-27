@@ -278,8 +278,16 @@
   "workspace": {
     "rawPreview": {
       "aw": "Auto white balance",
+      "wbGeometryMismatch": "The displayed image geometry has changed. Wait for the preview and sample again.",
+      "wbPointOutside": "This point cannot be sampled. Choose a point inside the image.",
+      "wbSourceUnavailable": "The image source is unavailable. White balance was not applied.",
+      "wbSettingsMismatch": "The image settings changed during estimation. White balance was not applied.",
+      "wbInvalidResponse": "The white balance estimate was invalid. Your settings have not changed.",
+      "wbConnectionFailed": "The RAW engine connection was lost during estimation. Reopen the photo.",
+      "wbTimeout": "White balance estimation timed out. Reopen the photo if retrying fails.",
+      "wbPick": "White balance picker",
       "awNoSamples": "Auto white balance could not find suitable samples. Your settings have not changed.",
-      "awFailed": "Auto white balance could not be applied. Your settings have not changed. Reopen the photo if retrying fails.",
+      "awFailed": "White balance could not be applied. Your settings have not changed. Reopen the photo if retrying fails.",
       "historyPosition": "History {{cursor}} / {{count}}",
       "historyLoading": "Loading RAW history…",
       "historyFailed": "RAW history could not be verified. Retry to refresh the list.",
