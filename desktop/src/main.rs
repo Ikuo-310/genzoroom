@@ -12,6 +12,8 @@ mod report_download;
 mod single_instance;
 #[cfg(feature = "webview-smoke")]
 mod smoke;
+#[cfg(windows)]
+mod titlebar;
 
 use connection::{allowed_navigation, user_root, Connection};
 use tauri::{
@@ -56,8 +58,12 @@ fn open_diagnostics(app: &tauri::AppHandle, port: u16) {
             .on_page_load(observe_page)
             .on_document_title_changed(observe_title)
             .build();
-        if result.is_err() {
-            eprintln!("GenzoRoom desktop: diagnostics_window_failed");
+        match result {
+            Ok(window) => {
+                #[cfg(windows)]
+                titlebar::apply_dark_theme(&window);
+            }
+            Err(_) => eprintln!("GenzoRoom desktop: diagnostics_window_failed"),
         }
     });
 }
@@ -220,7 +226,7 @@ fn run() -> Result<(), &'static str> {
             config.url = WebviewUrl::External(bootstrap.clone());
             let handle = app.handle().clone();
             let downloads = report_download::Downloads::default();
-            WebviewWindowBuilder::from_config(app, &config)?
+            let main_window = WebviewWindowBuilder::from_config(app, &config)?
                 .initialization_script(lifecycle::bridge(unready_smoke))
                 .initialization_script(MENU_SHORTCUT_BRIDGE)
                 .initialization_script(report_download::bridge())
@@ -243,6 +249,8 @@ fn run() -> Result<(), &'static str> {
                 .on_page_load(observe_page)
                 .on_document_title_changed(observe_title)
                 .build()?;
+            #[cfg(windows)]
+            titlebar::apply_dark_theme(&main_window);
             state.monitor(app.handle());
             Ok(())
         })
