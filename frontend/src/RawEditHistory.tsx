@@ -9,6 +9,9 @@ const labels: Record<RawControlId, string> = { 'wb.temp': 'temperature', 'wb.tin
   'light.highlights': 'highlights', 'light.whites': 'whites', 'light.shadows': 'shadows', 'light.blacks': 'blacks',
   'color.vibrance': 'vibrance', 'color.saturation': 'saturation',
   'effects.texture': 'rawPreview.texture', 'effects.clarity': 'rawPreview.clarity', 'effects.dehaze': 'rawPreview.dehaze',
+  'vignette.amount': 'rawPreview.vignetteAmount', 'vignette.midpoint': 'rawPreview.vignetteMidpoint',
+  'vignette.feather': 'rawPreview.vignetteFeather', 'vignette.roundness': 'rawPreview.vignetteRoundness',
+  'vignette.highlights': 'rawPreview.vignetteHighlights',
   'detail.sharpenAmount': 'rawPreview.sharpenAmount', 'detail.sharpenMasking': 'rawPreview.sharpenMasking',
   'detail.nrLuminance': 'rawPreview.nrLuminance', 'detail.nrDetail': 'rawPreview.nrDetailName',
   'detail.nrColor': 'rawPreview.nrColor', 'detail.nrColorDetail': 'rawPreview.nrColorDetailName',
@@ -17,12 +20,16 @@ const formatters: Record<RawControlId, (value: number) => string> = { 'wb.temp':
   'light.exposure': formatExposure, 'light.contrast': formatContrast, 'light.highlights': formatHighlights, 'light.whites': formatWhites,
   'light.shadows': formatShadows, 'light.blacks': formatBlacks, 'color.vibrance': formatVibrance, 'color.saturation': formatSaturation,
   'effects.texture': value => value.toFixed(0), 'effects.clarity': value => value.toFixed(0), 'effects.dehaze': value => value.toFixed(0),
+  'vignette.amount': value => value.toFixed(0), 'vignette.midpoint': value => value.toFixed(0),
+  'vignette.feather': value => value.toFixed(0), 'vignette.roundness': value => value.toFixed(0), 'vignette.highlights': value => value.toFixed(0),
   'detail.sharpenAmount': value => value.toFixed(0), 'detail.sharpenMasking': value => value.toFixed(0),
   'detail.nrLuminance': value => value.toFixed(0), 'detail.nrDetail': value => value.toFixed(0),
   'detail.nrColor': value => value.toFixed(0), 'detail.nrColorDetail': value => value.toFixed(0),
   'detail.nrColorSmoothness': value => value.toFixed(0) };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
+  if (step.kind === 'vignetteStyle')
+    return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   const control = step.metadata.control;
   const reset = step.kind === 'controlReset';
   const name = (id: RawControlId) => t(`workspace.${labels[id]}`);
@@ -36,7 +43,8 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     return label + (change ? ` ${pair(change)}` : '');
   }
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
-    : t(step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
+    : t(step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
+      : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
       : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
       ? 'workspace.rawPreview.detailCategory' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');

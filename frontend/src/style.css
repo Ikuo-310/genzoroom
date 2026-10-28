@@ -503,6 +503,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-subsection-title { margin: 5px 0 4px; color: #bdbdc0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
 .raw-adjustment-subsection-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
 .raw-adjustment-subsection-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.raw-vignette-mode { margin: 5px 0 8px; gap: 6px; font-size: 0.7rem; }
+.raw-vignette-mode .binary-radio-options { min-width: 0; }
+.raw-vignette-mode .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }
+.raw-vignette-mode .binary-radio-options span { padding: 5px 7px; font-size: 0.7rem; }
+.raw-vignette-mode input:disabled + span { opacity: 0.5; cursor: default; }
 .grading-range-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
 .grading-range-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grading-range-toggle { flex: 0 0 26px; }

@@ -984,7 +984,11 @@ class LightCraftRawSession:
                     or kind == "controlReset" and metadata["control"].startswith("wb."))
         if needs_wb and photo.as_shot_wb is None:
             raise LightCraftError("raw_wb_unavailable")
-        if kind == "sectionToggle":
+        if kind == "vignetteStyle":
+            if original.get("vignette", {}).get("style") == metadata["style"]:
+                return self.confirmed_settings(handle, expected_revision)
+            commands = [("develop.merge", {"settings": {"vignette": {"style": metadata["style"]}}})]
+        elif kind == "sectionToggle":
             commands = [("develop.sectionEnabled", metadata)]
         elif kind == "controlReset":
             commands = [("develop.wb", {"mode": "asShot"})] if needs_wb else [("develop.resetControl", metadata)]
@@ -1012,9 +1016,11 @@ class LightCraftRawSession:
                 if any(wb.get(key) != value for key, value in
                        (("mode", "asShot"), ("temp", temp), ("tint", tint), ("scale", "kelvin"))):
                     raise LightCraftError("raw_as_shot_mismatch")
-            if kind in ("sectionToggle", "controlReset"):
+            if kind in ("sectionToggle", "controlReset", "vignetteStyle"):
                 expected = json.loads(before)
-                if kind == "sectionToggle":
+                if kind == "vignetteStyle":
+                    expected["vignette"]["style"] = metadata["style"]
+                elif kind == "sectionToggle":
                     expected["disabled_sections"] = expected_disabled
                 elif needs_wb:
                     expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
@@ -1026,12 +1032,13 @@ class LightCraftRawSession:
                     raise LightCraftError("raw_operation_readback_mismatch")
             elif kind == "sectionReset":
                 section = metadata["section"]
-                if section == "effects":
+                if section in ("effects", "vignette"):
                     expected = json.loads(before)
-                    # Native Effects reset excludes vignette/style and grain/seed, unlike its eye.
-                    expected["effects"].update(texture=0, clarity=0, dehaze=0)
-                    if (any(type(actual["effects"].get(key)) not in (int, float)
-                            for key in ("texture", "clarity", "dehaze")) or actual != expected):
+                    # Each subsection resets only its numeric controls; style, seed and the eye survive.
+                    keys = [CONTROL_PATHS[c][1] for c in CONTROLS if c.startswith(f"{section}.")]
+                    expected[section].update({CONTROL_PATHS[c][1]: spec[3] for c, spec in CONTROLS.items()
+                                              if c.startswith(f"{section}.")})
+                    if (any(type(actual[section].get(key)) not in (int, float) for key in keys) or actual != expected):
                         raise LightCraftError("raw_operation_readback_mismatch")
                     return
                 if section == "detail":

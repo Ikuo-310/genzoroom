@@ -137,10 +137,11 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(20);
+  expect(sliders).toHaveLength(25);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
     'effects.texture', 'effects.clarity', 'effects.dehaze',
+    'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
     'detail.sharpenAmount', 'detail.sharpenMasking',
     'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
   ]);
@@ -152,9 +153,9 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(30);
+  expect(actions).toHaveLength(35);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.filter(button => !button.classList.contains('raw-wb-pick')).every(button => !button.disabled)).toBe(true);
+  expect(actions.filter(button => button.disabled)).toHaveLength(5);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -193,22 +194,28 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   moveDown(effectsSubtitle); expect(document.activeElement).toBe(sliders[10]);
   for (let index = 11; index < 13; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
   const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
-  moveDown(sliders[12]); expect(document.activeElement).toBe(detailTitle);
-  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[13]);
-  for (let index = 14; index < 20; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  const vignetteTitle = host.querySelectorAll<HTMLElement>('.raw-adjustment-subsection-title')[1];
+  const mode = host.querySelector<HTMLInputElement>('.raw-vignette-mode input:checked')!;
+  moveDown(sliders[12]); expect(document.activeElement).toBe(vignetteTitle);
+  moveDown(vignetteTitle); expect(document.activeElement).toBe(mode);
+  moveDown(mode); expect(document.activeElement).toBe(sliders[13]);
+  moveDown(sliders[13]); expect(document.activeElement).toBe(detailTitle);
+  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[18]);
+  for (let index = 19; index < 25; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
   act(() => viewer.focus());
   act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
-  expect(document.activeElement).toBe(sliders[19]);
+  expect(document.activeElement).toBe(sliders[24]);
 });
-it.each(['effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
+it.each(['vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
   'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
+  if (control.startsWith('vignette.') && control !== 'vignette.amount') vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), values: { ...rawSettings(doc).values, 'vignette.amount': -50 } }));
   await mount();
   const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
   const row = range.closest('.adjustment-control')!;
   const number = row.querySelector<HTMLInputElement>('input[type="number"]')!;
-  expect(range.min).toBe(control.startsWith('effects.') ? '-100' : '0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
+  expect(range.min).toBe(control.startsWith('effects.') || control === 'vignette.amount' || control === 'vignette.roundness' ? '-100' : '0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
   expect(range.value).toBe(control.endsWith('Amount') ? '40' : control === 'detail.nrColor' ? '25'
-    : ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness'].includes(control) ? '50' : '0');
+    : ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness', 'vignette.midpoint', 'vignette.feather'].includes(control) ? '50' : '0');
   const set = (element: HTMLInputElement, value: string) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
     element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -268,6 +275,30 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   act(() => toggle.click()); await flush(); expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.disabled).toBe(false);
 });
 
+it('commits a number gesture before mode selection, updates Preview and makes reselect a no-op', async () => {
+  commitHistory.mockImplementation(async request => {
+    if (request.operation?.kind !== 'vignetteStyle') return rawHistoryResult(request);
+    return rawHistoryResult({ ...request, doc: { ...request.doc, revision: request.doc.revision + 1,
+      settingsFingerprint: 'e'.repeat(64), vignetteStyle: request.operation.metadata.style } });
+  });
+  await mount();
+  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="vignette.amount"]')!.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  const paint = host.querySelector<HTMLInputElement>('.raw-vignette-mode input[value="paintOverlay"]')!;
+  act(() => {
+    number.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '-73');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    paint.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+    paint.click();
+  }); await flush();
+  expect(commitHistory.mock.calls.map(([request]) => request.action)).toEqual(['commit', 'operate']);
+  expect(commitHistory.mock.calls[0][0].control).toBe('vignette.amount');
+  expect(commitHistory.mock.calls[1][0].operation).toEqual({ kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } });
+  expect(paint.checked).toBe(true); expect(number.value).toBe('-73');
+  expect(rawApi.rawPreview).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![0]).toMatchObject({ vignetteStyle: 'paintOverlay', revision: 3 });
+  act(() => paint.click()); await flush(); expect(commitHistory).toHaveBeenCalledTimes(2);
+});
+
 it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effects in %s', async language => {
   await i18n.changeLanguage(language);
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
@@ -296,7 +327,7 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   act(() => subtitle.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, subtitle);
   expect(document.activeElement).toBe(reset);
   historyKey('ArrowLeft', { ctrlKey: false, shiftKey: true }, reset); expect(document.activeElement).toBe(subtitle);
-  const ranges = () => [...category.querySelectorAll<HTMLInputElement>('.adjustment-range')];
+  const ranges = () => [...category.querySelectorAll<HTMLInputElement>('.adjustment-range[data-adjustment-id^="effects."]')];
   expect(ranges().map(range => range.value)).toEqual(['-31', '62', '93']);
   act(() => toggle.click()); await flush();
   expect(ranges().every(range => range.disabled)).toBe(true);
@@ -315,8 +346,8 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   expect(commitHistory.mock.calls.slice(-2).map(([request]) => request.action)).toEqual(['commit', 'operate']);
   expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: { kind: 'sectionReset', metadata: { section: 'effects' } } }));
   expect(ranges().map(range => range.value)).toEqual(['0', '0', '0']);
-  expect(category.querySelectorAll('h4')).toHaveLength(1);
-  expect(category.textContent).not.toMatch(/Vignette|Grain|周辺光量|粒子|workspace\./);
+  expect(category.querySelectorAll('h4')).toHaveLength(2);
+  expect(category.textContent).not.toMatch(/Grain|粒子|workspace\./);
   await act(async () => title.click()); await flush(); expect(ranges()).toHaveLength(0);
   await act(async () => title.click()); await flush(); expect(ranges()).toHaveLength(3);
 });
@@ -359,7 +390,7 @@ it('disables only WB when Kelvin capability is unknown', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders.slice(0, 2).every(slider => slider.disabled)).toBe(true);
-  expect(sliders.slice(2).every(slider => !slider.disabled)).toBe(true);
+  expect(sliders.slice(2).filter(slider => slider.disabled).map(slider => slider.dataset.adjustmentId)).toEqual(['vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights']);
 });
 
 it('shows a five-digit temperature with an overlaid K suffix while WB Reset updates both fields', async () => {
@@ -380,7 +411,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(20);
+  expect(rows).toHaveLength(25);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;

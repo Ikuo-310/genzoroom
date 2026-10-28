@@ -13,6 +13,18 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('labels Vignette modes and its independent Reset in %s', async language => {
+    await i18n.changeLanguage(language);
+    const steps: RawHistoryStep[] = [
+      ...(['highlightPriority', 'colorPriority', 'paintOverlay'] as const).map(style => ({ stepId: style, kind: 'vignetteStyle' as const,
+        metadata: { style }, changes: [], createdAt: '2026-10-28T00:00:00Z' })),
+      { stepId: 'reset', kind: 'sectionReset', metadata: { section: 'vignette' }, changes: [{ control: 'vignette.amount', before: -73, after: 0 }], createdAt: '2026-10-28T00:00:00Z' },
+    ];
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 4) as never} disabled={false} onReset={() => {}} />);
+    for (const label of language === 'ja' ? ['ハイライト', 'カラー', 'ペイント', '周辺光量補正 リセット'] : ['Highlight', 'Color', 'Paint', 'Vignette Reset']) expect(markup).toContain(label);
+    expect(markup).toContain('-73 → 0'); expect(markup).not.toContain('workspace.');
+  });
+
   it.each(['ja', 'en'])('distinguishes Effects toggle from Basic Effects Reset and formats all three values in %s', async language => {
     await i18n.changeLanguage(language);
     const controls = ['effects.texture', 'effects.clarity', 'effects.dehaze'] as const;

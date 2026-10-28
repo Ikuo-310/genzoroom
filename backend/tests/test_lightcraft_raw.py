@@ -211,7 +211,10 @@ class RawProcess(FakeProcess):
         elif command == "develop.resetSection":
             settings = self.photos[self.active]["settings"]
             section = params["section"]
-            settings[section] = copy.deepcopy(DEFAULT[section])
+            if section == 'vignette':
+                settings[section].update({key: value for key, value in DEFAULT[section].items() if key != 'style'})
+            else:
+                settings[section] = copy.deepcopy(DEFAULT[section])
             if section == "detail":
                 settings["detail"].update(sharpen_amount=0., nr_color=0.)
                 settings["enhance"]["denoise"] = 0.

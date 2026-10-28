@@ -13,6 +13,11 @@ CONTROLS = {
     "color.vibrance": (-100, 100, 1, 0, 0),
     "color.saturation": (-100, 100, 1, 0, 0),
     **{f"effects.{key}": (-100, 100, 1, 0, 0) for key in ("texture", "clarity", "dehaze")},
+    "vignette.amount": (-100, 100, 1, 0, 0),
+    "vignette.midpoint": (0, 100, 1, 50, 0),
+    "vignette.feather": (0, 100, 1, 50, 0),
+    "vignette.roundness": (-100, 100, 1, 0, 0),
+    "vignette.highlights": (0, 100, 1, 0, 0),
     "detail.sharpenAmount": (0, 150, 1, 0, 0),
     "detail.sharpenMasking": (0, 100, 1, 0, 0),
     "detail.nrLuminance": (0, 100, 1, 0, 0),
@@ -23,6 +28,9 @@ CONTROLS = {
 }
 
 SECTIONS = ("light", "color", "effects", "detail")
+# Vignette has a Native reset section, but its eye belongs to Effects.
+RESET_SECTIONS = (*SECTIONS, "vignette")
+VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.sharpenAmount": ("detail", "sharpen_amount"),
@@ -48,10 +56,13 @@ def controls_state(snapshot):
             raise LightCraftError("raw_invalid_settings")
         values[control] = value
     wb = settings.get("wb", {})
+    style = settings.get("vignette", {}).get("style")
+    if type(style) is not str or style not in VIGNETTE_STYLES:
+        raise LightCraftError("raw_invalid_settings")
     disabled = settings.get("disabled_sections", [])
     if type(disabled) is not list or any(type(section) is not str for section in disabled):
         raise LightCraftError("raw_invalid_settings")
-    return {"values": values, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+    return {"values": values, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
             "sections": {section: section not in disabled for section in SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
@@ -79,10 +90,12 @@ def validate_history_operation(kind, metadata):
     valid = (kind == "controlReset" and set(metadata) == {"control"}
              and type(metadata["control"]) is str and metadata["control"] in CONTROLS
              or kind == "sectionReset" and set(metadata) == {"section"}
-             and type(metadata["section"]) is str and metadata["section"] in SECTIONS
+             and type(metadata["section"]) is str and metadata["section"] in RESET_SECTIONS
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
              and type(metadata["section"]) is str and metadata["section"] in SECTIONS
              and type(metadata["enabled"]) is bool
+             or kind == "vignetteStyle" and set(metadata) == {"style"}
+             and type(metadata["style"]) is str and metadata["style"] in VIGNETTE_STYLES
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:
         raise LightCraftError("raw_invalid_request")

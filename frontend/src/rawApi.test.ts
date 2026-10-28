@@ -80,7 +80,7 @@ it('sends Before kind and validates its opaque key separately from After', async
   expect(JSON.parse(init.body as string).kind).toBe('before');
 });
 describe('RAW History transport', () => {
-  it('accepts 200 steps with 20 full precision deltas above 256KiB and rejects above 512KiB', async () => {
+  it('accepts 200 steps with 25 full precision deltas above 256KiB and rejects above 512KiB', async () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
@@ -107,6 +107,10 @@ describe('RAW History transport', () => {
     { kind: 'controlReset', metadata: { control: 'effects.dehaze' } },
     { kind: 'sectionToggle', metadata: { section: 'effects', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'effects' } },
+    { kind: 'sectionReset', metadata: { section: 'vignette' } },
+    { kind: 'vignetteStyle', metadata: { style: 'highlightPriority' } },
+    { kind: 'vignetteStyle', metadata: { style: 'colorPriority' } },
+    { kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } },
     { kind: 'allReset', metadata: {} },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
@@ -123,6 +127,15 @@ describe('RAW History transport', () => {
   const historyRequest = (action: 'initialize' | 'commit'): RawHistoryRequest => ({ doc: rawSettings(doc),
     action, control: action === 'commit' ? 'light.exposure' : undefined,
     expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' });
+  it.each(['highlightPriority', 'colorPriority', 'paintOverlay', 'invalid', null])('validates mode History metadata %s', async style => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request);
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'vignetteStyle', metadata: { style: style as never }, changes: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    if (style === 'invalid' || style === null) await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+    else await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ metadata: { style } }] });
+  });
   it.each(['initialize', 'commit'] as const)('sends bounded %s metadata without settings bodies', async action => {
     const request = historyRequest(action), result = rawHistoryResult(request);
     const fetch = vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } }));
@@ -241,7 +254,8 @@ describe('bounded RAW binary contract', () => {
     await expect(readRawRecipe(doc)).rejects.toThrow('raw_invalid_response');
   });
   it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
-    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness', 'effects.texture', 'effects.clarity', 'effects.dehaze'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
+    'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness', 'effects.texture', 'effects.clarity', 'effects.dehaze',
+    'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'] as const)('resynchronizes settings and sends %s with the confirmed expectedRevision', async control => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1 }),
       { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);
@@ -255,6 +269,7 @@ describe('bounded RAW binary contract', () => {
   it('rejects stale identity and malformed control metadata in settings responses', async () => {
     for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} },
       { sections: { light: true, color: true } }, { sections: { light: true, color: true, detail: 1 } },
+      { vignetteStyle: 'invalid' }, { vignetteStyle: undefined }, { vignetteStyle: 1 },
       { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } }]) {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), ...patch }),
         { headers: { 'Content-Type': 'application/json' } })));

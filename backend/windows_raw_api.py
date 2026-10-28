@@ -23,7 +23,9 @@ from raw_controls import CONTROLS, CONTROL_PATHS, controls_state, validate_contr
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
-# 200 steps can each expose 17 full-precision deltas; keep the listing bounded without truncation.
+# Full-precision values plus 25 control specs and the History receipt exceed 4 KiB.
+MAX_SETTINGS_RESPONSE_BYTES = 8192
+# 200 steps can each expose 25 full-precision deltas; keep the listing bounded without truncation.
 MAX_HISTORY_RESPONSE_BYTES = 512 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
@@ -731,6 +733,8 @@ class RawPreviewApi:
     @staticmethod
     def _history_changes(step, before_settings, after_settings):
         metadata = step["metadata"]
+        if step['kind'] == 'vignetteStyle':
+            return []
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
                         and metadata["control"].startswith("wb.") else [metadata["control"]])
@@ -758,7 +762,7 @@ class RawPreviewApi:
         return changes
 
     @staticmethod
-    def _history_json(payload, limit=MAX_JSON_BYTES):
+    def _history_json(payload, limit=MAX_SETTINGS_RESPONSE_BYTES):
         response = JSONResponse(payload, headers={"Cache-Control": "no-store"})
         if len(response.body) > limit:
             raise LightCraftError("raw_history_response_too_large")

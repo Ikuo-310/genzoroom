@@ -43,7 +43,7 @@ async def operation(http, doc, action, request=None):
     response = await http.post(url(doc, action), json=body(doc) if request is None else request)
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
-    assert len(response.content) <= 4096
+    assert len(response.content) <= 8192
     return response.json()
 
 

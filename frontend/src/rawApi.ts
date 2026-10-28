@@ -19,18 +19,25 @@ export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
+// Match the Backend bound for 25 control specs, full-precision values and a History receipt.
+const RAW_SETTINGS_RESPONSE_BYTES = 8192;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'effects.texture', 'effects.clarity', 'effects.dehaze',
+  'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
   'detail.sharpenAmount', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export const RAW_SECTION_IDS = ['light', 'color', 'effects', 'detail'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
+export const RAW_RESET_SECTION_IDS = [...RAW_SECTION_IDS, 'vignette'] as const;
+export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
+export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paintOverlay'] as const;
+export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
   sections: Record<RawSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
-  values: RawValues; process: number; wbAutoAvailable?: boolean;
+  values: RawValues; vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
   controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
@@ -46,14 +53,15 @@ export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string
 export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
 export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
-  | { kind: 'sectionReset'; metadata: { section: RawSectionId } }
+  | { kind: 'sectionReset'; metadata: { section: RawResetSectionId } }
+  | { kind: 'vignetteStyle'; metadata: { style: RawVignetteStyle } }
   | { kind: 'sectionToggle'; metadata: { section: RawSectionId; enabled: boolean } }
   | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'allReset' | 'wbAuto' | 'wbPick';
-  metadata: { control?: RawControlId; section?: RawSectionId; enabled?: boolean }; createdAt: string;
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick';
+  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
@@ -241,6 +249,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
+    || !RAW_VIGNETTE_STYLES.includes(value.vignetteStyle)
     || !value.sections || !RAW_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
     || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
@@ -251,10 +260,10 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
 }
 const identityBody = (doc: RawDocument) => ({ workspaceId: doc.workspaceId, generation: doc.generation, documentToken: doc.documentToken });
 export async function readRawSettings(doc: RawDocument): Promise<RawSettings> {
-  return settings(await json(`/documents/${doc.handle}/settings`, post(identityBody(doc))), doc);
+  return settings(await json(`/documents/${doc.handle}/settings`, post(identityBody(doc)), RAW_SETTINGS_RESPONSE_BYTES), doc);
 }
 export async function setRawControls(doc: RawDocument, values: Partial<RawValues>): Promise<RawSettings> {
-  const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values })), doc);
+  const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values }), RAW_SETTINGS_RESPONSE_BYTES), doc);
   if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
   return result;
 }
@@ -297,7 +306,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
       ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' ? operation : {}),
-      ...(action === 'jump' ? { targetStepId } : {}) }));
+      ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
     accepted = true;
     settings(value, doc);
     const h = value.history, ack = value.ack;
@@ -335,7 +344,8 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
       || !m || typeof m !== 'object' || Array.isArray(m)
       || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
-        : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_SECTION_IDS.includes(m.section)
+        : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
+        : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
         : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {

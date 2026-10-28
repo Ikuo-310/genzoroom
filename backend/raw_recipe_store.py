@@ -334,11 +334,13 @@ MAX_HISTORY_METADATA_BYTES = 1024
 MAX_HISTORY_RECEIPT_BYTES = 4096
 HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.saturation",
                             "effects.texture", "effects.clarity", "effects.dehaze",
+                            "vignette.amount", "vignette.midpoint", "vignette.feather", "vignette.roundness", "vignette.highlights",
                             "light.exposure", "light.contrast", "light.highlights", "light.whites",
                             "light.shadows", "light.blacks", "detail.sharpenAmount", "detail.sharpenMasking",
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
 HISTORY_SECTIONS = frozenset(("light", "color", "effects", "detail"))
+HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
 
 
 class InvalidRawHistory(InvalidRawRecipe):
@@ -365,7 +367,10 @@ def _history_metadata(kind, metadata):
         valid = (set(metadata) == {"section", "enabled"} and type(metadata["section"]) is str
                  and metadata["section"] in HISTORY_SECTIONS and type(metadata["enabled"]) is bool)
     elif kind == "sectionReset":
-        valid = set(metadata) == {"section"} and type(metadata["section"]) is str and metadata["section"] in HISTORY_SECTIONS
+        valid = set(metadata) == {"section"} and type(metadata["section"]) is str and metadata["section"] in HISTORY_RESET_SECTIONS
+    elif kind == "vignetteStyle":
+        valid = (set(metadata) == {"style"} and type(metadata["style"]) is str
+                 and metadata["style"] in ("highlightPriority", "colorPriority", "paintOverlay"))
     else:
         valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
     if not valid:

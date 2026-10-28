@@ -970,7 +970,7 @@ describe('RAW History document integration', () => {
 
 
 describe('bounded RAW session renewal', () => {
-  it.each(['effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)(
+  it.each(['vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)(
     'saves and restores %s after native renewal without another owner', async control => {
     vi.useFakeTimers(); renewal();
     await render('a'); await drain();
@@ -988,18 +988,28 @@ describe('bounded RAW session renewal', () => {
     vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
       workspaceId, assetId, handle: `handle-${generation}`, generation, documentToken: `token-${generation}`, revision: 1 }));
     vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), mutationAttempts: attempts,
-      ...(saved ? { values: saved.doc.values, settingsFingerprint: saved.doc.settingsFingerprint,
+      ...(saved ? { values: saved.doc.values, vignetteStyle: saved.doc.vignetteStyle, settingsFingerprint: saved.doc.settingsFingerprint,
         recipeFingerprint: saved.doc.settingsFingerprint, recipeRevision: saved.expectedRecipeRevision + 1 } : {}) }));
     vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => ({ ...doc as api.RawSettings,
       revision: doc.revision + 1, mutationAttempts: ++attempts, settingsFingerprint: String(attempts).padStart(64, '0'),
       values: { ...(doc as api.RawSettings).values, ...patch } }));
     commitHistory.mockImplementation(async request => {
-      saved = request;
-      return rawHistoryResult(request);
+      const next = request.operation?.kind === 'vignetteStyle' ? { ...request.doc,
+        vignetteStyle: request.operation.metadata.style, revision: request.doc.revision + 1,
+        mutationAttempts: ++attempts, settingsFingerprint: String(attempts).padStart(64, '0') } : request.doc;
+      saved = { ...request, doc: next };
+      return rawHistoryResult(saved);
     });
     vi.mocked(api.releaseRawWorkspace).mockImplementation(async () => { generation++; attempts = 1; });
     return { saved: () => saved };
   }
+  it('persists mode before native renewal and restores the confirmed style', async () => {
+    vi.useFakeTimers(); renewal(); await render('a'); await drain();
+    act(() => current!.operate({ kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } })); await drain();
+    expect(current?.settings?.vignetteStyle).toBe('paintOverlay');
+    expect(current?.document?.generation).toBe(2); expect(current?.locked).toBe(false);
+    expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate', operation: { kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } } }));
+  });
   async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
   it('reacquires native Before after renewal and revokes the previous generation URL', async () => {
     renewal();

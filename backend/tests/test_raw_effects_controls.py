@@ -16,8 +16,8 @@ from tests.test_raw_recipe_api import headers
 from tests.test_raw_recipe_restore import open_asset
 
 
-@pytest.mark.parametrize('control', ['vignette.amount', 'vignette.style', 'grain.amount', 'grain.seed'])
-def test_effects_does_not_publish_vignette_or_grain(control):
+@pytest.mark.parametrize('control', ['vignette.style', 'grain.amount', 'grain.seed'])
+def test_effects_does_not_publish_style_as_numeric_or_grain(control):
     with pytest.raises(LightCraftError, match='raw_invalid_controls'):
         validate_controls({control: 1}, True)
 

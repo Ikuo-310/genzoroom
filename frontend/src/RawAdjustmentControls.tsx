@@ -2,10 +2,10 @@ import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 're
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
-  restorePendingAdjustmentFocus } from './adjustmentFocus';
+  preservePendingAdjustmentFocus, restorePendingAdjustmentFocus } from './adjustmentFocus';
 import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
-import type { RawControlId, RawHistoryOperation, RawSectionId } from './rawApi';
+import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryOperation, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
 type RawCategoryId = 'basic' | 'color' | 'effects' | 'detail';
@@ -20,8 +20,10 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
   { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
-  { category: 'effects', controls: ['effects.texture', 'effects.clarity', 'effects.dehaze'],
-    ids: ['effects.texture', 'effects.clarity', 'effects.dehaze'] },
+  { category: 'effects', controls: ['effects.texture', 'effects.clarity', 'effects.dehaze',
+    'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'],
+    ids: ['effects.texture', 'effects.clarity', 'effects.dehaze',
+      'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'] },
   { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
     ids: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
@@ -29,6 +31,10 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
 ];
 const detailHeadings: Partial<Record<RawControlId, string>> = {
   'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
+};
+const vignetteLabels: Partial<Record<RawControlId, string>> = {
+  'vignette.amount': 'vignetteAmount', 'vignette.midpoint': 'vignetteMidpoint', 'vignette.feather': 'vignetteFeather',
+  'vignette.roundness': 'vignetteRoundness', 'vignette.highlights': 'vignetteHighlights',
 };
 
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
@@ -43,7 +49,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
   return <div className="raw-adjustment-controls" ref={panel} onPointerDownCapture={event => {
-    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button'))
+    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label'))
       preserveAdjustmentNumberFocus(event);
   }}>
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
@@ -69,8 +75,17 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const value = raw.desired?.[control] ?? settings.values[control];
         const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
         const enabled = settings.sections[sections[category]];
-        const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${control.split('.')[1]}` : id;
+        const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
+          && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
+        const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
+          {control === 'vignette.amount' && <>
+            <RawSubcategoryHeader name={t('workspace.rawPreview.vignette')} disabled={actionsLocked}
+              onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'vignette' } })} />
+            <RawVignetteMode value={settings.vignetteStyle} disabled={actionsLocked || !enabled}
+              onReselect={() => { if (panel.current) commitAdjustmentEdits(panel.current); }}
+              onChange={style => operate({ kind: 'vignetteStyle', metadata: { style } })} />
+          </>}
           {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
           <AdjustmentSlider adjustmentId={id} commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
@@ -80,8 +95,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
           valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
-          disabled={locked || !enabled || control.startsWith('wb.') && !settings.wb.available}
-          resetDisabled={actionsLocked || control.startsWith('wb.') && !settings.wb.available}
+          disabled={locked || !enabled || dependent || control.startsWith('wb.') && !settings.wb.available}
+          resetDisabled={actionsLocked || dependent || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}
     </RawCategory>)}
@@ -100,6 +115,29 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.locked}
         onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
+  </div>;
+}
+
+function RawVignetteMode({ value, disabled, onChange, onReselect }: {
+  value: RawVignetteStyle; disabled: boolean; onChange: (style: RawVignetteStyle) => void; onReselect: () => void;
+}) {
+  const { t } = useTranslation();
+  const name = useId();
+  return <div className="binary-radio-choice raw-vignette-mode" role="radiogroup" aria-label={t('workspace.rawPreview.vignetteMode')}
+    onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
+    <span>{t('workspace.rawPreview.mode')}</span>
+    <div className="binary-radio-options">
+      {RAW_VIGNETTE_STYLES.map(style => <label key={style}>
+        <input type="radio" name={name} value={style} checked={value === style} disabled={disabled}
+          onClick={() => { if (value === style) onReselect(); }} onChange={event => {
+          if (style === value) return;
+          // The operation lock temporarily disables this radio; retain focus unless the user leaves it.
+          if (document.activeElement === event.currentTarget) preservePendingAdjustmentFocus(event.currentTarget);
+          onChange(style);
+        }} />
+        <span>{t(`workspace.rawPreview.vignetteStyles.${style}`)}</span>
+      </label>)}
+    </div>
   </div>;
 }
 

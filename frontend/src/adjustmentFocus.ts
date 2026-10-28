@@ -9,7 +9,7 @@ let activeAdjustment: HTMLInputElement | null = null;
 // Scrolling can emit pointer enter/leave without mouse movement. Keep keyboard ownership until it moves.
 let keyboardNavigation = false;
 let mousePosition: { x: number; y: number } | null = null;
-// A RAW commit can disable the focused Reset button; restore it only if focus stayed on the document.
+// A RAW commit can disable its Reset or mode control; restore focus only if the user stayed here.
 let pendingAdjustmentFocus: HTMLElement | null = null;
 
 function clearPendingAdjustmentFocus() {
@@ -25,6 +25,12 @@ function cancelPendingAdjustmentFocus(event: Event) {
 
 export function clearAdjustmentFocusTarget(target: HTMLElement) {
   if (pendingAdjustmentFocus === target) clearPendingAdjustmentFocus();
+}
+
+export function preservePendingAdjustmentFocus(target: HTMLElement) {
+  pendingAdjustmentFocus = target;
+  document.addEventListener('focusin', cancelPendingAdjustmentFocus);
+  window.addEventListener('blur', clearPendingAdjustmentFocus);
 }
 
 export function restorePendingAdjustmentFocus(scope: Element) {
@@ -64,9 +70,9 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
   const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
   const position = adjustmentRowPosition(current);
-  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title, .adjustment-range'))
+  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title, .raw-vignette-mode input:checked, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
-      && (!(item instanceof HTMLInputElement) || isAvailable(item)));
+      && (!(item instanceof HTMLInputElement) || item.type !== 'range' || isAvailable(item)));
   const index = position ? ordered.indexOf(position) : -1;
   // A category-disabled row still has an operable individual power button.
   const direction = event.key === 'ArrowDown' ? 1 : -1;
@@ -77,9 +83,10 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const destination = horizontal ? horizontalAdjustmentTarget(current, event.key === 'ArrowRight' ? 1 : -1)
     : adjacent;
   if (destination) {
-    const preserveRawReset = current.matches('.adjustment-number') && !!current.closest('.raw-adjustment-controls')
-      && destination.matches('.adjustment-reset');
-    focusAdjustmentTarget(destination, !horizontal, preserveRawReset);
+    const preserveRawAction = !!current.closest('.raw-adjustment-controls')
+      && (current.matches('.adjustment-number') && destination.matches('.adjustment-reset')
+        || destination.matches('.raw-vignette-mode input'));
+    focusAdjustmentTarget(destination, !horizontal, preserveRawAction);
   }
   return true;
 }
@@ -90,9 +97,7 @@ function focusAdjustmentTarget(destination: HTMLElement, reveal: boolean, preser
   keyboardNavigation = true;
   activeAdjustment = destination instanceof HTMLInputElement && destination.matches('.adjustment-range') ? destination : null;
   if (preserveIfTemporarilyDisabled) {
-    pendingAdjustmentFocus = destination;
-    document.addEventListener('focusin', cancelPendingAdjustmentFocus);
-    window.addEventListener('blur', clearPendingAdjustmentFocus);
+    preservePendingAdjustmentFocus(destination);
   }
   destination.focus({ preventScroll: true });
   if (reveal) revealAdjustment(destination);
