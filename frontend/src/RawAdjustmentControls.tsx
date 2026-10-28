@@ -81,7 +81,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
             <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
-            <RawSubcategoryHeader name={t('workspace.rawPreview.vignette')} disabled={actionsLocked}
+            <RawSubcategoryHeader name={t('workspace.rawPreview.vignette')} disabled={actionsLocked} className="is-vignette"
               onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'vignette' } })} />
             <RawVignetteMode value={settings.vignetteStyle} disabled={actionsLocked || !enabled}
               onReselect={() => { if (panel.current) commitAdjustmentEdits(panel.current); }}
@@ -143,9 +143,9 @@ function RawVignetteMode({ value, disabled, onChange, onReselect }: {
   </div>;
 }
 
-function RawSubcategoryHeader({ name, disabled, onReset }: { name: string; disabled: boolean; onReset: () => void }) {
+function RawSubcategoryHeader({ name, disabled, onReset, className = '' }: { name: string; disabled: boolean; onReset: () => void; className?: string }) {
   const { t } = useTranslation();
-  return <div className="raw-adjustment-subsection-header">
+  return <div className={`raw-adjustment-subsection-header ${className}`}>
     <h4 className="adjustment-subsection-title raw-adjustment-subsection-title" tabIndex={0}
       onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{name}</h4>
     <button type="button" className="adjustment-category-reset" disabled={disabled} onClick={onReset}

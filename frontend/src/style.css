@@ -503,8 +503,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .adjustment-subsection-title { margin: 5px 0 4px; color: #bdbdc0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
 .raw-adjustment-subsection-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
 .raw-adjustment-subsection-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.raw-adjustment-subsection-header.is-vignette .adjustment-subsection-title { margin: 0 0 2px; }
 .raw-adjustment-subcategory-divider { height: 1px; margin: 8px 0; background: #353538; }
-.raw-vignette-mode { margin: 0 0 2px; gap: 6px; font-size: 0.7rem; }
+.raw-vignette-mode { margin: 0; gap: 6px; font-size: 0.7rem; }
 .raw-vignette-mode > span { line-height: 1; }
 .raw-vignette-mode .binary-radio-options { min-width: 0; }
 .raw-vignette-mode .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }

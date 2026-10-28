@@ -22,6 +22,7 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   expect(ranges().map(e => e.disabled)).toEqual([false, true, true, true, true]);
   expect(ranges().slice(1).every(e => e.closest('.adjustment-control')?.classList.contains('is-dependent-disabled'))).toBe(true);
   expect(ranges()[0].closest('.adjustment-control')?.classList.contains('is-dependent-disabled')).toBe(false);
+  expect(host.querySelector('.raw-adjustment-subsection-header.is-vignette')).not.toBeNull();
   const radios = [...host.querySelectorAll<HTMLInputElement>('.raw-vignette-mode input')];
   expect(radios.map(e => e.value)).toEqual([...RAW_VIGNETTE_STYLES]);
   expect(radios.every(e => !e.disabled)).toBe(true);
