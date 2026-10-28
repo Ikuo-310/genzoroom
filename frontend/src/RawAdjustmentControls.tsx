@@ -80,6 +80,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
+            <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
             <RawSubcategoryHeader name={t('workspace.rawPreview.vignette')} disabled={actionsLocked}
               onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'vignette' } })} />
             <RawVignetteMode value={settings.vignetteStyle} disabled={actionsLocked || !enabled}
@@ -87,7 +88,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
               onChange={style => operate({ kind: 'vignetteStyle', metadata: { style } })} />
           </>}
           {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
-          <AdjustmentSlider adjustmentId={id} commitPolicy="operation-boundary" hideToggle
+          <AdjustmentSlider adjustmentId={id} className={dependent ? 'is-dependent-disabled' : undefined}
+          commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
           label={t(`workspace.${labelKey}`)} accessibleLabel={control === 'detail.nrDetail' || control === 'detail.nrColorDetail'
             ? t(`workspace.${labelKey}Name`) : undefined} enabled={enabled} onToggle={() => {}}

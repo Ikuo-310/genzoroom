@@ -20,6 +20,8 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   const ranges = () => [...host.querySelectorAll<HTMLInputElement>('[data-adjustment-id^="vignette."]')];
   draw();
   expect(ranges().map(e => e.disabled)).toEqual([false, true, true, true, true]);
+  expect(ranges().slice(1).every(e => e.closest('.adjustment-control')?.classList.contains('is-dependent-disabled'))).toBe(true);
+  expect(ranges()[0].closest('.adjustment-control')?.classList.contains('is-dependent-disabled')).toBe(false);
   const radios = [...host.querySelectorAll<HTMLInputElement>('.raw-vignette-mode input')];
   expect(radios.map(e => e.value)).toEqual([...RAW_VIGNETTE_STYLES]);
   expect(radios.every(e => !e.disabled)).toBe(true);
@@ -28,6 +30,7 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   act(() => radios[2].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } });
   raw.desired = { 'vignette.amount': -1 }; draw();
   expect(ranges().every(e => !e.disabled)).toBe(true);
+  expect(ranges().every(e => !e.closest('.adjustment-control')?.classList.contains('is-dependent-disabled'))).toBe(true);
   settings.vignetteStyle = 'colorPriority'; draw(); expect(ranges()[4].disabled).toBe(false);
   settings.values['vignette.amount'] = -50; raw.desired = { 'vignette.amount': 0 }; draw();
   expect(ranges().slice(1).every(e => e.disabled)).toBe(true);
@@ -40,4 +43,5 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   act(() => resets[1].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'vignette' } });
   act(() => resets[0].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'effects' } });
   expect(host.textContent).not.toContain('workspace.');
+  expect(host.querySelectorAll('.raw-adjustment-subcategory-divider')).toHaveLength(1);
 });

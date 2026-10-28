@@ -29,6 +29,7 @@ type Props = {
   valueSuffix?: string;
   resetDisabled?: boolean;
   trackGradient?: string;
+  className?: string;
   onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
 
@@ -218,7 +219,7 @@ export function AdjustmentSlider(props: Props) {
     if (document.activeElement === document.body || document.activeElement === document.documentElement)
       element.focus({ preventScroll: true });
   }, [props.disabled]);
-  return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}`} role="group"
+  return <div className={`adjustment-control${props.enabled ? '' : ' is-bypassed'}${props.className ? ` ${props.className}` : ''}`} role="group"
     aria-label={props.accessibleLabel} aria-labelledby={props.accessibleLabel ? undefined : labelId}
     onContextMenu={(event) => {
       if (!props.onOpenContextMenu || !isJpegAdjustmentId(props.adjustmentId)
