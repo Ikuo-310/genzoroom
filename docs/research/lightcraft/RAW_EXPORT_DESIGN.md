@@ -3,6 +3,8 @@
 調査日：2026-10-29。対象：`feature/lightcraft-integration` のローカル作業ツリー。
 本書は設計案であり、製品実装・実RAW PoC・Immich書き込みの完了記録ではない。
 
+> **現行の確定方針（2026-10-29）**：RAWの現像とJPEGエンコードはLightCraftが行う。完成JPEGへGenzoRoomが撮影metadata・識別情報を付与し、JPEG圧縮データを再エンコードせず既存`ExportArtifact`／Immich registrarへ渡す。§11のP0aは旧推奨案を含む実測記録として保持し、本決定と異なる推奨・必須条件は本節・§12で置き換える。JPEGの現像・エンコード・Retry仕様は変更しない。
+
 ## 1. 既存JPEG Exportの確定仕様一覧
 
 LightCraft調査に先立ち、必読文書から以下を基準として作成し、JPEGコードで照合した。
@@ -37,12 +39,12 @@ READMEは利用者向け公開範囲、開発ノートは変更理由・過去�
 | Queueと管理画面 | 同じAsset Queue、Q/W、armed/selection、polling、Start/Stop/Retry。RAW適格判定とGallery/FilmstripのRAW除外を拡張。JPEG診断候補filterは維持 |
 | 永続Runtime | 同じrun/item、transaction、serial順序、ownership、Stop/reclaim。snapshotの型とvalidatorにRAW variantが必要 |
 | 原本取得・family検索 | Immich detail/original、完全family検索と既存命名を利用。RAW描画入力のhash照合を追加 |
-| Encoder | `RenderedImage`のfull-size sRGB RGB8に接続できれば、既存品質95/4:4:4/ICC encoderをそのまま利用可能 |
-| メタデータ | allowlist・validator・再構成・上限・決定的timestampを再利用。JPEGを開く取得部だけRAW metadata adapterへ分離が必要 |
+| Encoder | RAWはLightCraft内蔵JPEG encoderで品質95/4:4:4/sRGB ICCを生成。既存GenzoRoom encoderは使わない |
+| メタデータ | RAW containerから許可リストの標準情報を抽出し、既存serializerの安全な検証・EXIF/XMP構成を再利用できるか確認。生成JPEGへmarker metadataだけを付与し、圧縮画像データを保持 |
 | 登録 | `ExportArtifact(filename,jpeg)`とsource detailを渡す既存registrar。Album/Stack/COVER/Favorite/tag意味は変えない |
-| 障害と診断 | item failure、Retry/recovery、safe code/ID中心のstructured logs。RAW engine identity・generation・restore失敗境界を追加 |
+| 障害と診断 | item failure、Retry/recovery、safe code/ID中心のstructured logs。RAW現像・metadata処理の失敗境界を追加。JPEG byte一致やengine固定は追加しない |
 
-`create_export_artifact()`は原本を`decode_jpeg()`するためRAW bytesを直接渡せない。`JpegRenderer`へRAW settingsを変換する案も採らない。共通化は生成画素／検証済みmetadataから先の境界で行う。
+`create_export_artifact()`はJPEG原本をdecodeしGenzoRoom encoderで再生成するため、RAW成果物へ流用しない。RAW専用Artifact生成処理でLightCraft完成JPEGをmetadata-onlyで更新して検証後、既存`ExportArtifact(filename,jpeg)`へ渡す。JPEG圧縮データは再圧縮しない。
 
 ## 3. 調査対象と証拠の範囲
 
@@ -90,7 +92,7 @@ READMEは利用者向け公開範囲、開発ノートは変更理由・過去�
 
 現行GenzoRoomの安全な復元手順は `lightcraft_raw.py:_restore`：対象選択 → `develop.reset` → 完全settingsの `develop.merge` → `get_develop` readbackと正規化JSON一致確認。Exportにもこの意味を継承し、復元不一致は出力中止。Native PhotoId／active selection／generationの所有を一連操作全体で守る。個々のMCP要求がserialでも、複数要求間への別編集の割り込みは防げない。
 
-現行RAW保存はschema 1、明示processと全settings、Asset ID、sourceContentHash、engine name/version/commitを保持する。version/commit差だけでは通常編集へのrestoreを拒否しないが、出力再実行のbyte identityにはより厳しい実行環境固定が必要（§6）。古いRecipeを復元して現在engineで保存する場合も古いrowは書き換えない。
+現行RAW保存はschema 1、明示processと全settings、Asset ID、sourceContentHash、engine name/version/commitを保持する。version/commit差だけでは通常編集へのrestoreを拒否しない。RAW Exportも保存RecipeのEngine tupleを実行engineの固定条件にせず、古いRecipeを復元して現在engineで出力しても古いrowを書き換えない。
 
 ### 4.3 原寸・品質・色
 
@@ -100,7 +102,7 @@ READMEは利用者向け公開範囲、開発ノートは変更理由・過去�
 | 寸法 | `output_size`→`native_output_size`、crop/orientation/geometryを反映した現像後native寸法 | センサー格納寸法と常に同じではない。実RAWで期待寸法を検証 |
 | 品質95 | `quality:95` → JPEG codecへ95を渡す | 「95」はcodec依存。Pillowの95と同じbytes／量子化表とは限らない |
 | 4:4:4 | `encode_with_metadata` は `limitKb`なしならS444、ありならS420 | 明示subsampling引数はない。preset/limitKb禁止で条件固定 |
-| sRGB ICC | `colorSpace:"srgb"`、8-bit SDRへ描画し `icc::write_named(Srgb)` を埋込 | 最終既存encoderを使う場合はGenzoRoomの決定的ICCへ置換 |
+| sRGB ICC | `colorSpace:"srgb"`、8-bit SDRへ描画し `icc::write_named(Srgb)` を埋込 | LightCraft生成JPEGのsRGB ICCを検証し、GenzoRoom encoderで置換しない |
 | 追加処理 | `hdr:false`, `sharpen:"none"`、watermarkなしを固定 | settings内HDRが有効な場合のSDR表示差もPoC対象。形式設定UIは追加しない |
 
 ### 4.4 Previewとの一致条件と限界
@@ -118,13 +120,13 @@ READMEは利用者向け公開範囲、開発ノートは変更理由・過去�
 - upstream `render_weight` の見積もりはsource約12 B/px＋出力約36 B/px。24 MPなら約1.15 GB相当であり、Backendバッファ、Preview常駐cache、Base64/JSON、codec、GPU staging、denoise model等は別に加わる。ソース内24 MP約1.2 GBのコメントは今回の実測ではない。
 - `too_big_for_memory` は主にnative以上への拡大を抑止する条件であり、原寸Export全体を安全にadmitするメモリ上限ではない。GenzoRoomでpixel/encoded bytes/同時process/peak予算を別に設定する。
 - 既存v0.9.1 Linux CPU測定（Pixel約1.04 GiB、Pentax約1.60 GiB）は過去環境の値。v0.14 Windows DX12、managed patch、今回のExport経路の速度・peak RSS/VRAMは未測定。
-- 推奨初期方針：ExportはCPU固定で再実行の決定性を先に確立。DX12はPoCでfallbackを含むbytes再現性を評価してから採否を決める。CPU固定が遅すぎる場合も同一run recoveryでCPU/GPUを黙って切り替えず、既存JPEGの重複回復保証を弱めない。
+- ExportはCPU/DX12のどちらも許容する。§11 P0aで各方式を動作・性能測定したが、CPU/DX12 byte一致やcross-process GPU一致は確認しておらずRAW要件でもない。実行backendは利用可能なら診断用に記録し、fallbackやNative failureは通常のitem failure/retryとして扱う。JPEGの重複回復保証は変えない。
 
 ### 4.6 転送・timeout・cancel・無変更保証
 
-標準MCP Exportは一時画像fileを必要とする。ただしNative engine内部には `PreparedExport::run` → `Exported.bytes` というメモリ境界が既にあり、managed MCP拡張ならfilesystem writeを省略できる。画素をlossless PNG等にして返しBackendで一度だけJPEG化するか、Native JPEGを再圧縮せずAPP metadataだけ再構成する方式を比較する（§8）。既存 `render_preview` は小画像専用であり、上限を外すだけの転用は採らない。
+標準MCP Exportは同期的に指定pathへ完成JPEGを出力し、画像bytesをresponseへ含めない。初期案ではBackendが所有するjobごとの隔離fileへ書き、完了後にJPEGをstream/chunkで読み出してbounded validation・metadata updateし、成功／失敗どちらでも一時fileをcleanupする。画像返却用のPreview APIは使わない。Native `Exported.bytes`のMCP転送拡張は必須でない。
 
-現行 `backend/lightcraft_mcp.py`：通常応答1 MiB、Whole preview特例24 MiB、Region特例13 MiB。`lightcraft_raw.py`：画像17 MiB、settings256 KiB、Whole長辺2048。画像返却toolは名前でresponse limitを切り替えるため新tool追加時も更新が必要。RAW原寸PNGやRGBを既存特例に入れてはいけない。RGBは最低3×pixelCount、Base64で約4/3、JSONや複製も追加。新契約には有限pixel/encoded/decoded/line上限とheader検証が必要。大画像を見て無制限に上限を上げない。
+現行 `backend/lightcraft_mcp.py`の通常1 MiB／Preview 24 MiB／Region 13 MiB、`lightcraft_raw.py`のPreview17 MiB・settings256 KiB・長辺2048上限は現行契約であり、原寸Export response上限ではない。JPEG file取得後に必要なfile・メモリ・MCP処理deadlineと、ICC/EXIF/XMP等のAPP marker上限をP1で設計する。PNG/Base64転送の上限候補は現方針に適用しない。
 
 現行manager timeoutはrequest5秒、gpu15秒、RAW adapterはimport/preview60秒・command5秒。Export専用timeoutは未実装。PoCでcold/warm full-size時間を測り有限上限を決める。送信後timeout/cancelはtransportをabortしgenerationを失効する。Native serverの `notifications/cancelled` は無操作で、同期decode/renderを途中停止しない。Stopはこの機構を使わず、現行どおりcurrent item完了を待つ。強制終了はtimeout/異常終了専用とし、出力未確認時は登録しない。process再生成後はimportとfrozen settings restoreからやり直す。
 
@@ -140,7 +142,9 @@ LightCraftにはXMP auto-writeもある（`engine/src/lib.rs:execute`、`sidecar
 
 managed `crates/meta/src/container.rs` はTIFF/DNG等、CR3、MRW、RAF等のcontainer抽出を持つ。`lightcraft_meta::Metadata`は共通型へ正規化するため、全標準tag／元表現を保持しない。`export_metadata()` はさらにcatalogのsubsetへ落とす。既存 `photo.inspect` 等の表示metadataも完全EXIF取得APIではない。
 
-初期のPixel DNGとPentax TIFF系RAWでは、Nativeの既存container/TIFF readerを利用し**GenzoRoom allowlistに必要な標準tagだけ**を型付きで返すmanaged契約を推奨する。元TIFF blockはRAW全体を含み得るためBackendへ丸ごと返さない。MakerNoteの再配置／無条件コピーやvendor serialの保持はしない。別のBackend parserを追加する場合は対応形式、依存配布、malformed container制限をPoCで比較してから選ぶ。LightCraft共通Metadata型を使うだけでは下表の差を閉じられない。
+第一候補はGenzoRoom側でRAW原本からallowlistの標準tagを抽出し、LightCraftの完成JPEGへmetadata-onlyで付与する方式。既存JPEG metadata処理にJPEG source parsingとEXIF/XMP serializationが結合しているため、JPEG画像データを保つmarker-only更新を小さく安全に実装できる既存ライブラリ／Pillowの機能を調査し、再圧縮なしをbytes-levelで検証する。元TIFF blockはRAW全体を含み得るためBackendへ丸ごと返さない。MakerNoteの再配置／無条件コピーやvendor serialの保持はしない。
+
+RAW container parserは、対応形式・依存配布・malformed container制限をPoCで評価して選ぶ。まずは既存Backend依存や安全な標準機能で実現可能か調査する。LightCraft `Metadata`は標準tagの一部と catalog subsetで情報が落ちるため、それだけで要件が満たせるとはしない。GenzoRoom側の方法で必要tagを安全に取得できず、Native既存機能の追加が明らかに小さく更新保守も軽いと確認できた場合のみ、追加Native patchを代替案として再評価する。新しいNative patchを前提にしない。
 
 | 情報 | JPEGの現行管理 | LightCraft経路で分かること／RAW差分 |
 |---|---|---|
@@ -160,7 +164,7 @@ LightCraft `Metadata`にはcamera/lens serialもあるが、GenzoRoom許可リ�
 
 ### 5.2 必須・欠落許容・競合
 
-- **出力必須**：検証済みJPEG、現像後寸法、upright、sRGB8/ICC、品質95/4:4:4の生成条件、Software/CreatorTool、妥当な永続export timestamp、入力source hashとsnapshot ownership。ここが不明／不一致なら登録しない。
+- **出力必須**：検証済みLightCraft JPEG、現像後寸法、upright、sRGB8/ICC、品質95/4:4:4の要求条件、Software/CreatorTool、妥当なexport timestamp、入力sourceとfrozen snapshotの所有関係。JPEG圧縮データを変更せずmetadataだけを更新する。Engine/backend間の画素やbyte一致は必須にしない。
 - **取得できれば保持する重要情報**：撮影日時・offset/subsecond、カメラ／レンズ／露出、GPS、著作権・作者・説明・タイトル。元にない値は欠落を許容し、推測で作らない。標準tagが存在するのにadapterが捨てる差は「元にない」と扱わずPoC不合格。GPS方向等を非対応のままリリースするなら仕様差を明記して判断が必要。
 - **malformed optional field/container**：既存JPEG同様、正常な画素処理が成立するなら個別drop／再生成を許容しwarnのsafe reason/countを記録。文字値や座標はログしない。parserが不正containerを単なる空metadataへ落とす場合はmissingとinvalidを区別できる契約へ補強する。
 - **除外**：MakerNote、serials、vendor/private tags、embedded preview/thumbnail、元Software/ICC/構造、Recipe/History、LightCraft `lc:*`/CRS編集packet、Motion Photo/gain map等。APP13/IIMやextended XMPを新たに継承対象へ広げない。
@@ -178,8 +182,8 @@ LightCraft `Metadata`にはcamera/lens serialもあるが、GenzoRoom許可リ�
 |---|---|
 | Queue intent | 既存Queue store。enqueueは保存済みRAW currentとverified import-default比較で判定。History lengthを判定に使わない |
 | RAW snapshot | Startの同一writer transaction。kind、Asset ID、source hash、保存Recipeの全identity/settings、recipe revision、settings schema/process、出力契約versionを固定 |
-| 実行engine | Start前にready attestationを確認し、version/commit/patch digest/contracts/binary hashとCPU policyをsnapshotへ固定。取得元Recipeのengine tupleとは区別 |
-| item timestamp | 既存store。再起動は同値、同一registration failure Retryも完全identity一致時だけ同値 |
+| 実行engine | 保存Recipeのsettings/processをsnapshotへ固定。実行に利用したLightCraftのversion/backendは診断情報として記録候補だが、古いengineやCPU/GPU policyを固定しない |
+| item timestamp | 既存storeのrun item値を成果物metadataへ渡す。RAWではtimestampやRetryによるJPEG bytes一致を契約にしない |
 | Native PhotoId/generation | 1回のExport実行のみ。DBへ保存しない。再起動時は原RAW再取得・hash照合・再import・全settings復元 |
 | 出力bytes | itemローカルのみ。DB/cacheへ永続しない。検証済みartifactだけregistrarへ渡す |
 
@@ -189,9 +193,9 @@ Start後の追加編集・Undo/Redo・default resetはrun itemを変更しない
 
 RAW rowはidentity別に複数存在し得る。`get_raw_edit_statuses` はupdated_at降順→recipe_revision降順で最新rowを選び、`importDefaultsFingerprint`、旧行ではHistory baselineを比較、判定不能はNone。Export用selection/eligibilityを同一writer transactionで共用するhelperが必要。完全同時刻・同revisionの異なるidentityのtieは現照会に最終tie-breakがないため、Exportでは曖昧な候補をfail closedとし、通常表示と不一致を生まない共通化を実装時に決める。最初に見つかったrowを推測で採用しない。
 
-Retryでは新runのcurrent保存Recipeを採用する既存仕様を維持。registration_failed時のtimestamp再利用条件にはRAW kind/source/settings/revisionに加え実行engine/patch/binary、render policy、metadata/encoding contractも含める。別engineで同じtimestampを使って異なるbytesになるのを防ぐ。
+Retryでは既存仕様どおり新run作成時点の保存Recipeを採用する。RAWの再生成結果はEngine version更新やCPU/DX12差で画素・bytesが異なってよい。JPEG用のRetry identity・timestamp再利用・byte一致機構は変更しない。RAWで同一failure後に部分Assetが登録済みか判断できない場合や`-GenzoNN`が競合した場合は、現在のfamily検索とImmich duplicate応答で実際にどう処理されるかを§12の受入項目として検証し、重複Assetを許容する。新しいbyte一致契約やEngine固定で抑止しない。
 
-再起動時に固定engineが利用不能なら、古いengineを自動download／fallbackしない。RAW itemは登録前の固定safe failureとして残して後続JPEGを進められる設計を推奨する（DB破損は従来どおりworker停止）。手動Retryは現在engineを使う新attemptになり、部分出力重複の可能性を隠さない。JPEG recoveryは従来のsource/toolchain同一前提を維持する。CPUでもNative code／codec更新後のbyte一致は保証しない。
+再起動復旧では既存Runtimeのfrozen RAW Recipeを現在利用可能なLightCraftで復元し、処理・登録を先頭から再実行する。停止・通常失敗・metadata failureのqueue状態は共通Runtimeの規則を使う。既存JPEGのbyte-stable recovery/dedup契約はそのまま維持し、RAWには持ち込まない。
 
 ### 6.2 Backend接続箇所
 
@@ -201,8 +205,8 @@ Retryでは新runのcurrent保存Recipeを採用する既存仕様を維持。re
 | `raw_recipe_store.py` | 最新保存選択・baseline適格判定の共通化、default save/reset時のmutable Queue cleanup。Recipe/History本文・形式は変更しない |
 | `export_runtime_store.py` | JPEG専用validator、frozen columns/serialization、create/retry/read/reclaimのRAW variant。旧JPEG run/Queueとfailure code互換 |
 | `export_runtime.py` | detail.format/is_rawのJPEG専用拒否からsnapshotに従う適格source検証へ。JPEG `_artifact`を保持し、RAW描画adapterを追加。serial worker/Stop/registrarは共有 |
-| `export_artifact.py` / `jpeg_metadata.py` | RAWへJPEG decodeを強制しない入力境界。共通命名・metadata serializer・encoderを利用。JPEG source検証は弱めない |
-| LightCraft manager/adapter | Export能力/schema/receipt確認、専用job lifetime、全settings復元、原寸出力、有限応答／timeout、generationとsource identity照合、cleanup |
+| `export_artifact.py` / 新RAW artifact / `jpeg_metadata.py` | JPEG実装は維持。RAW用artifact builderでLightCraft JPEGを検証し、RAW parserのtyped allowlist値からmetadata-only更新。Marker追加で画像scan/entropyが不変なことを検証。共通命名と`ExportArtifact`型を再利用 |
+| LightCraft manager/adapter | 現行Export APIによるJPEG生成、専用job lifetime、保存済み全settings復元、原寸出力、finite timeout、Native photo/source identity照合、cleanup。PNG/Base64転送拡張や追加Native patchを必須にしない |
 | `main.py` / `windows_local.py` | renderer依存注入とrecovery順序の調整。現common lifespanが先にruntime.recoverし、その内側でLocalHostがmanagerを作るため、そのままではRAW recoveryが間に合わない |
 | `immich_export.py` | `ExportArtifact`とsource AssetDetailを既存registerへ渡せる。現registrarにJPEG source限定の拒否はない。Album/Stack/Favorite/tagアルゴリズムは変更不要 |
 
@@ -221,18 +225,18 @@ Windows localでRAW providerの準備後に共通Runtimeのrecoveryへ進むか�
 
 ### 7.1 実装前の最小PoC（Immich無書込）
 
-これは実行案であり、今回は未実施。新build環境を作らず既存attested EXEを使う。利用者の指定したPixel DNGとPentax RAWの**copy**を小さな隔離tempへ置き、原本／copyと保存Recipe/Historyを読み取り対象として扱う。settings JSONはtemp copyだけを作る。永続LightCraft libraryなし、XMP auto-write off、network登録なし。共有DBへのsave/migrationを起動しない。
+この節はP0a実施前の計画記録であり、実施結果は後続の§11に記録した。現行方針での次の検証はP1設計の下で行い、Immichへの書き込みを行わない。新build環境を作らず既存attested EXEを使う。利用者の指定したPixel DNGとPentax RAWの**copy**を小さな隔離tempへ置き、原本／copyと保存Recipe/Historyを読み取り対象として扱う。settings JSONはtemp copyだけを作る。永続LightCraft libraryなし、XMP auto-write off、network登録なし。共有DBへのsave/migrationを起動しない。
 
 1. source hashと既存保存identity・全settingsを取得。各RAWにつきdefaultと、保存済みの目立つWB/露光/色・geometryを含む代表設定を選ぶ。対応UIにない設定を推測で作らない。
 2. 隔離MCP Sessionでimport→select→reset→merge全settings→get/readback一致。前後settings/source hash/sidecar有無を確認。
 3. §4.1の明示要求でJPEGを隔離出力。full-sizeをcrop/orientation込みのNative計画と実JPEG SOF寸法で照合。品質95は呼出条件とcodec経路で確認し、SOF sampling factorが全component 1×1（4:4:4）、ICCが読めるsRGBであることを独立parserで検査。「JPEGの品質値95」という標準tagがあるとは扱わない。
 4. Native raw metadata→catalog→Native JPEGの差をtag単位で採取し、表§5の欠落を実fixtureで確定。特にPixelのoffset/subsecond/GPS方向、Pentax camera/lens/露出。値や原本pathsを通常ログへ書かず、PoC成果は限定公開の検証資料として管理。
-5. Native PNG Export（longEdge0/sRGB8/HDR off/metadata none/sharpen none）も隔離出力し、Backendでlossless decode→`RenderedImage`→既存encoderを呼ぶstandalone試行を計画する。Native JPEGのdecode→JPEG再encodeはしない。metadata adapter未実装時は「metadata同等性未達」と分離して測る。
+5. P0aではNative PNGから既存encoderへ渡す案も試験した。実施値は§11の履歴データとして保持するが、製品方式としては不採用。P1 PoCではLightCraftが生成したJPEGのsRGB/ICC、品質95、4:4:4、寸法を検証し、metadata-only更新前後のJPEG compressed scan bytesが同一であることを確認する。
 6. settled Full After Previewと原寸結果の縮小を並べる。default/代表編集、保存→新Session復元の結果を比較。Before/RegionやDraftを基準画像へ混ぜない。目視は利用者のWindows実機確認とし、自動pixel差と区別。
-7. 同一source/settings/export timestamp/CPUで冷起動2回とwarm2回の出力checksumを比較。途中failure後再生成も比較。CPU/DX12の速度、peak RSS/VRAM、source+PNG+Backend encodeの合計時間・peakを分けて測る。DX12のfallbackと再実行checksumも調べ、固定policyを決める。
+7. Retry／再起動でfrozen settingsが復元され、原本とRecipe/Historyを変更しないことを確認する。CPU/DX12の動作・時間・メモリは性能情報として測定し、画像・byte一致条件や固定backend policyにはしない。
 8. malformed settings／復元不一致、出力dir不可／disk full相当、timeout／process終了時に成果物が登録扱いにならないこと、原本hashと保存Recipe/Historyが不変なことを確認。PoCはImmich upload/tag/Album/Stackの呼出を一切持たない。
 
-最小PoCの合格条件：両fixtureで原寸と固定JPEG条件を満たす、保存復元後の代表設定が反映、標準metadataの取得可否一覧が埋まる、同一CPU/toolchainで再生成が決定的、メモリ・時間が有限予算へ収まること。Native patch経由の無file転送は既存EXEでは検証できず、次の限定契約PoCへ分ける。未達を新QueueやJPEG仕様変更で回避しない。
+この次段階の合格条件：両fixtureでLightCraft完成JPEGが原寸・当面のJPEG条件を満たす、保存復元後の代表設定が反映される、metadata allowlistの取得・欠落一覧が整理される、metadata追加が画像compressed scanを変えない、失敗時も原本・Recipe/Historyが不変。決定的JPEG checksumは条件としない。Native patchによるbytes転送は必須でない。
 
 ### 7.2 正式実装後の自動テスト
 
@@ -243,7 +247,7 @@ Windows localでRAW providerの準備後に共通Runtimeのrecoveryへ進むか�
 | `test_export_artifact.py` / JPEG codec/renderer tests | JPEG bytes・metadata互換維持、RAW allowlist、malformed/overflow/DTD、二重回転／二重JPEGなし |
 | `test_raw_recipe_store.py` / `test_raw_history_store.py` | verified default／non-default／unknown、旧baseline、複数identity、Undoでdefault、save/resetとQueue cleanupのatomicity |
 | `test_export_queue.py` / `test_export_runtime.py` | RAW/JPEG混在、100件atomic freeze、保存競合、Start後編集、kind/source mismatch、serial順とbuffer解放 |
-| `test_export_recovery.py` / `test_export_retry_identity.py` | current RAWでStop、未開始release、generation喪失、再import/restore、engine mismatch、timestamp再利用条件、JPEG後続継続 |
+| `test_export_recovery.py` / `test_export_retry_identity.py` | current RAWでStop、未開始release、generation喪失、再import/restore、現行Engineで再開、JPEG後続継続。厳密なRetry identity/timestamp再利用テストは既存JPEG仕様を維持し、RAWへ適用しない |
 | `test_lightcraft_mcp.py` / runtime/raw/patch tests | 新契約schema・実応答、上限、timeout/cancel、invalid pixels/dimensions/hash、process reap、原本/sidecar不変、live編集を変更しない |
 | `test_immich_export.py` / `test_immich_export_albums.py` | RAW sourceと生成JPEGでFavorite ON/OFF、tag、non-COVER source、Album union→新COVER→cleanup、partial retry duplicate収束をfake transportで確認 |
 | Frontend Queue/管理/RAW保存 tests | Q保存drain、unknown拒否、RAW/JPEG Stack任意member、format filter、locked/failed解除、Retry優先、uncertain Start/canonical refresh、engine unavailableでも解除可能 |
@@ -257,51 +261,50 @@ WindowsのPixel/Pentax実RAWでPreviewとの見た目、原寸・保存復元・
 
 AlbumはImmichの**生membership**とnative UI、新COVERと旧member、GenzoRoom Galleryを併せて検証する。Gallery枚数だけで合格にしない。原RAWと既存Recipe/History不変、生成JPEGのSoftware/ICC/tag、既存JPEG ExportのNAS回帰も利用者確認項目。今回ブラウザ起動・NAS確認・Immich書込は実施していない。
 
-## 8. 採用推奨案・代替案
+## 8. 旧案の比較（現行決定は§12）
 
 | 案 | 利点 | 制約／判断 |
 |---|---|---|
-| A. 既存MCPでlossless原寸PNG temp→Backend既存JPEG encoder | Native変更なしで画素・色・時間のPoC可能。既存Encoder/metadata責任を維持 | 一時出力I/O、PNG容量、cleanupが必要。metadata取得不足は別に解消が必要。**実装前PoCに推奨** |
+| A. 既存MCPでlossless原寸PNG temp→Backend既存JPEG encoder | Native変更なしで画素・色・時間のPoC可能 | **P0aで技術的に成立したが、製品方式として不採用**。PNG転送・既存encoder共用は現行方針に不要 |
 | B. 既存CLI `render` | 1回のprocessに隔離、`--settings`と `--size 0 --quality 95 --opt colorSpace=srgb --opt hdr=false --opt sharpen=none --opt metadata=none` 等で既存engine利用 | 入力/設定/出力fileが必要、毎回import/decode、readback契約が弱い。`--settings`もmerge。stdout bytes返却はない。再圧縮回避にはPNG出力。MCPより有利かは実測。fallback候補 |
-| C. managed MCPへExport専用lossless bytes契約 | 原寸sRGB画素をBackendで既存JPEG化。temp成果物なし。identity echo/limits/metadataを契約化できる | Native/transport/receipt拡張、Base64とPNGのメモリ。**正式実装の第一推奨**、限定PoCで予算を満たすことが条件 |
-| D. Native JPEG bytes＋JPEG marker単位のmetadata置換 | JPEG一度だけ、transferが小さい。Native標準95/S444/sRGBを利用 | 既存Encoderを通らずJPEG marker安全再構成が新規責務。entropyを変えずICC/EXIF/XMPを置換する実装・bounds・決定性の検証負担。Cのメモリが成立しない場合の代替 |
+| C. 現行LightCraft Export file＋GenzoRoom metadata-only更新 | 既存APIの完成JPEGを保持。追加Native patch不要、JPEG再圧縮なし。完成JPEGを既存Artifact/registrarへ渡せる | GenzoRoom側でRAW allowlist抽出と、JPEG marker/EXIF/XMPのbounded更新を実装・検証する |
+| D. Native JPEG bytes＋JPEG marker単位のmetadata mux | 圧縮データを一度だけ生成、transferは小さい | 現行APIはfile出力。bytes応答にはNative変更が必要。metadata取得も解決しない。GenzoRoom側の方式よりNative patchが明らかに小さく、保守負担も低いと確認できる場合だけ代替再評価 |
 
-Native JPEGをPillow decodeして既存JPEG encodeする方式は二重非可逆圧縮になるため採らない。既存Preview上限を単純撤廃する案、別Queue/Runtime/page、NASへNative追加、JPEG Recipe v18へRAW設定変換も不採用。
+LightCraft JPEGをPillow decodeして既存JPEG encodeする方式は二重非可逆圧縮になるため採らない。既存Preview上限を単純撤廃する案、別Queue/Runtime/page、NASへNative追加、JPEG Recipe v18へRAW設定変換も不採用。
 
 正式推奨経路：
 
 ```text
 既存Queue / Start transaction（JPEGまたはRAW snapshot固定）
  → 同じserial ExportRuntime
- → JPEG: 現行decoder + JpegRenderer
-   RAW: 隔離Export Session + source照合 + 全settings復元
-        + native export_job（原寸 / Full / sRGB8 / CPU）
-        → bounded lossless bytes（提案契約）→ RenderedImage
- → 共通allowlist metadata再構成 + 既存JPEG encoder
+ → JPEG: 現行decoder + JpegRenderer + GenzoRoom encoder
+   RAW: LightCraft隔離Export Session + source照合 + frozen settings復元
+        + LightCraft export（原寸 / sRGB / quality95 / 4:4:4）
+        → 完成JPEGを一時成果物として取得・検証
+        → 原RAW由来allowlist metadataを付与（marker-only、再圧縮なし）
  → ExportArtifact
  → 既存Immich registrar（Album/Stack/COVER/Favorite/tag）
 ```
 
-新契約の名前やschema version番号は実装前のcontract設計で決定する。最低限、request/job ID、Native photo/source identity、settings fingerprint、engine tuple、render dimensions/space/quality、encoded bytes長/hash、metadata取得のmissing/invalid/unsupported区別、safe fixed errorを返す。完全settings本文は通常ログに出さず、原本pathをpublic responseに含めない。Native Exported.bytesを返すだけではfull settings固定とmetadata差を解決しない。
+LightCraft現行MCPは同期Exportをfileへ書き出し、画像bytesを応答しない。Backend所有の隔離先へ書き出して取得・検証する案を第一候補にする。request/job ID、Native photo/source identity、settings readback、Native export path/サイズ、出力寸法・色・sampling/ICC、metadataのmissing/invalid/unsupported区別、safe fixed errorを検証する。Export bytes転送契約やoutput hashをRetry同一性へ使う要件は設けない。完全settings本文・原本pathを通常ログ/public responseに含めない。Native JPEG出力後のGenzoRoom metadata更新は、画像scan/entropyを保持したことを検証する。
 
-Session隔離は同じExportRuntime内の描画依存として扱う。初期はon-demand Export用childを既存managerの起動/attestation/cleanup基盤で管理する案を推奨し、編集用managerのsettingsを変更しない。**同時に重いRAW処理を走らせない共通admission**が必要。PreviewとExportのメモリを足して予算超過ならExport開始をboundedで待たせる／失敗させる。live編集sessionを無断reset/closeして節約しない。2 child分の常駐・cacheが成立しなければ、同一process内の独立Sessionを持つmanaged契約へ変更して限定PoCで再評価する。別Queueやworkerは増やさない。
+Exportは暗室live settings/Historyを変更しない隔離されたjob/session境界を使い、同じExportRuntimeのserial workerで実行する。P0aで測定したLightCraft process memory/timeを初期見積に使い、正式実装時にはPreviewと共存する状態で必要な有限上限を確かめる。CPU/DX12どちらも許容し、性能・driver failure時の通常失敗処理を設ける。byte一致を実現するための追加admission、CPU固定、engine attestationは導入しない。別Queueやworkerは増やさない。
 
 ## 9. 正式実装の段階案と残存リスク
 
-1. **P0a：無書込PoC**。§7.1を既存EXE・隔離fileで実施し、metadata欠落、CPU決定性、時間/メモリを確定する。画質や機種対応はsourceだけで完了としない。
-2. **P0b：Native契約の小さなPoC**。C案の原寸lossless transfer＋標準RAW metadata抽出、別Sessionとadmissionを固定。既存binaryでは不足するため、この段階で初めてmanaged patch更新・通常update guideに沿うbuild/receipt/schema受入を行う。今回は行わない。
-3. **P1：保存snapshotとartifact境界**。RAW/JPEG variant、旧JPEG行互換、atomic eligibility/freeze/Retry identity、raw metadata adapterと既存serializer接続。migration設計はbackup/rollback/旧version拒否までレビューしてから実装。
-4. **P2：既存Runtimeに描画接続**。同じserial worker、generation、Stop/recovery、Windows起動終了順、異常cleanupと固定failure。fake registrarで混在runを検証してからremote書込へ進む。
-5. **P3：既存Frontend操作へ拡張**。RAW Q/badge/Stack候補、保存drain、format filter／Retry、capability guard。新設定UI／管理pageは作らない。
-6. **P4：Immich正式受入**。既存registrarをそのまま用い、§7.3を利用者環境で確認。必要な利用者文書更新はこの完成確認後の別変更で判断する。
+1. **P0a：隔離PoC完了**。実測は§11を参照。LightCraft JPEGの原寸・色・sampling、RAW metadata差、CPU/DX12時間・メモリ、Preview比較を記録済み。PNG→GenzoRoom encoderは成立した技術検証であり、製品方針では不採用。
+2. **P1：LightCraft JPEG・metadata-only Artifact**。保存RAW Recipe復元後、LightCraft JPEG Exportを実行するRAW専用adapter/artifact生成を実装。RAW標準metadataの取得・allowlist再構成、jpeg compressed scanを変えないEXIF/XMP/ICC整合、品質95/4:4:4/sRGB/原寸の検証、filename・ExportArtifact接続を行う。Native patchは前提にせず、必要性と保守差が確認された場合だけ再評価する。
+3. **P2：既存Export Queue／RuntimeへRAW対応**。Queue/Startの保存状態・Recipe snapshot、schema/validatorと旧JPEG行互換、single serial worker、Stop/Retry/restart recovery、Windows lifecycle/readinessを接続。RAW RetryはJPEG byte identityを求めず、不確定な部分登録・連番競合時の実挙動をテストする。Immich登録とStack管理は既存registrarに委譲する。
+4. **P3：Frontend Queue・Export管理統合**。Gallery/Filmstrip/暗室のRAW Queue操作、保存drain、RAW適格性、mixed format filter/status/Retryを既存UIへ接続。新設定UI・RAW専用管理ページは作らない。
+5. **P4：統合受入・最終監査**。Pixel/Pentax実RAW、Preview/保存復元、mixed Queue、Immich Favorite/tag/Album/Stack/COVER、失敗・Retry・再起動を受け入れる。生Album membershipも確認する。必要な利用者文書更新は完成確認後に判断する。
 
 ### 確定事項と未検証事項
 
-**sourceで確定**：原寸API、quality/S444/sRGB条件、file出力の応答形、settings merge/readback経路、Native metadataの情報落ち、現行transport制限、JPEG-only store/runtime/UI guard、registrar再利用境界、recoveryの初期化順問題。
+**sourceで確定**：原寸API、quality/S444/sRGB条件、file出力の応答形、settings merge/readback経路、Native metadataの情報落ち、現行transport制限、JPEG-only store/runtime/UI guard、registrar再利用境界、recoveryの初期化順問題。LightCraft JPEGは既存APIから直接得られ、GenzoRoomでの再エンコードは不要。
 
-**PoCが必要**：Pixel/Pentax個別tagとRAW decode、現像後寸法・見た目、保存復元、CPU/GPU出力決定性、full-sizeメモリ/時間、lossless転送の上限、異常終了後の資源解放。実際のImmich重複判定・権限・Album/Stack収束は正式実装後の実機確認が必要。
+**追加PoC/実装検証が必要**：複数RAW形式における標準EXIF/XMPの直接抽出・悪意あるcontainer上限、既存serializerのRAW metadata入力、LightCraft JPEGへEXIF/XMPを追加した際のcompressed scan不変、EXIF Orientation/dimensions/sRGB ICCの整合、実保存Recipe、Preview/Exportの利用者受入、出力file失敗時cleanup。実際のImmich partial result、duplicate応答、filename競合、Album/Stack収束は正式統合後の実機確認が必要。CPU/DX12間やengine version更新後のbytes/checksum一致は要件ではない。
 
-特にCPU/DX12差やengine更新で同一snapshotのJPEG bytesが変わると、partial upload後Retry／recoveryの重複回復が破れる。ここは既存JPEGの安全仕様に直結するため、単にExport APIが呼べたことを完了条件にしない。分散filename予約なし、remote multi-step transactionなし、partial成功rollbackなしという既存の制約も継承する。
+既存JPEGのpartial upload回復はJPEGの現像・encoder identityで成立しているため、その仕様は変更しない。RAWではRetry／recoveryの再現性より、現在のLightCraftでfrozen Recipeを再実行し元RAW等を保護することを重視する。Immichのmulti-step登録、分散filename予約なし、partial成功rollbackなしという共通制約は継承し、RAWで不確定結果となる場面は許容重複も含め明示して検証する。
 
 本調査で変更したのは本書のみ。製品・テスト・patch・既存設計書・README・CHANGELOGは変更せず、DB/migration、画像/Recipe/History書込、Native build、Immich mutation、Commit/Pushを行っていない。
 
@@ -330,13 +333,13 @@ Session隔離は同じExportRuntime内の描画依存として扱う。初期は
 | `crates/meta/src/container.rs` / `exif.rs` / `datetime.rs` | TIFF系・その他container、標準tag読取、millisecond正規化 |
 | `apps/lightcraft-cli/src/main.rs` | `read_settings`（648）、`render`（670）、file writeとOriginalGuard |
 
-文書のみの変更として、実行テスト・型チェック・production buildは対象外。静的照合、patch reverse-check、EXE/patch hash照合と文書の差分／空白検査を実施した。実RAW PoC・Native契約binary確認・ブラウザ／Immich実機検証は未実施。
+先行調査は文書のみの変更で、実行テスト・型チェック・production buildは対象外だった。静的照合、patch reverse-check、EXE/patch hash照合と文書の差分／空白検査を実施している。P0a時点で新しいExport契約のbinary確認、ブラウザ／Immich実機検証は未実施だった。
 
 ## 11. P0a実施結果（2026-10-29）
 
-**総合判定：P0a完了。P0bの限定契約PoCへ条件付きで進行可能。製品RAW Exportの完成・利用者の画質受入を意味しない。** 原寸JPEGとPNG→既存Encoderは両素材で成立し、CPUの再生成も一致した。一方、標準Export metadataだけではJPEG側の継承仕様を満たさず、原寸PNGは既存Preview転送上限を超える。P0bはこの2点と隔離Session／資源制御を解決する契約に限定する。
+**P0a当時の総合判定（後続設計で superseded）**：P0bの限定契約PoCへ条件付きで進行可能としていた。原寸JPEG、PNG→既存EncoderとCPU内再生成の計測結果は引き続き有効。一方「PNGがPreview転送上限を超えたのでP0b Native bytes契約が必要」という設計上の帰結は§12で撤回した。これらは製品RAW Exportの完成・利用者の画質受入を意味しない。
 
-§1～10は先行Phase 0の調査・提案記録として保持した。「今回未実施」等の記述は先行調査時の範囲を指す。本節がP0aの実測記録であり、ここに記載のない製品実装・Immich登録・ブラウザ確認は行っていない。
+§1～10には先行調査時の実装観測と提案が含まれる。後続方針との違いは§11.8と§12で明示した。「未実施」等の履歴記述はそれぞれの調査時点を指す。本節がP0aの実測記録であり、ここに記載のない製品実装・Immich登録・ブラウザ確認は行っていない。
 
 ### 11.1 環境・固定identity・原本保護
 
@@ -426,7 +429,7 @@ PNG画素を基準にJPEG復号画素を比較したPSNR（dB）は、Pixel初�
 
 `metadata:all` のNative JPEGはSoftware=`LightCraft`、XMPもNativeが生成する。原本packetそのものではない。PixelのXMP `exif:DateTimeOriginal` はoffsetと3桁fractionを保持するが、原6桁やEXIF Offset/Subsec tagを補う契約にはならない。最終JPEGでは既存serializerでSoftware/CreatorTool=`GenzoRoom`、Orientation=1、rendered寸法、ColorSpace=1、永続timestampを作る必要がある。
 
-ここで「なし」は標準tag／対象XMP propertyの不在であり、MakerNoteや未知namespaceに類似情報がないという主張ではない。Lens/説明/DC/GPS方向の非空fixture不足はP0b後のcoverage課題として残す。RAW metadata adapterは元tagを安全に読み、既存validator/allowlistで再構成する境界が必要。Native JPEGのmetadataやMCP catalogだけを使う案は不採用。
+ここで「なし」は標準tag／対象XMP propertyの不在であり、MakerNoteや未知namespaceに類似情報がないという主張ではない。Lens/説明/DC/GPS方向の非空fixture不足は後続coverage課題として残す。RAW metadata adapterは元tagを安全に読み、既存validator/allowlistで再構成する境界が必要。LightCraft JPEGのmetadataやMCP catalogだけを原RAW撮影情報の代用にする案は不採用。
 
 ### 11.5 再生成の決定性
 
@@ -441,9 +444,9 @@ CPU Native JPEGの基準hash：
 | Pentax初期 | `7473775b7e8e7caea7fd532fcec1a7f1da177314ca3e8b9fff8f7ec1c0505d98` |
 | Pentax代表 | `1cc12a971cd9eef376971cdfd18abf591e5b479cd3a78ada4f40db1caab31d29` |
 
-DX12要求では各条件の同一process内2回で3形式全て一致。CPUとのbytes一致は要求しなかった。CPU/DX12のlossless PNG画素差はMAE 0.00007～0.00068 /255、PSNR 79.81～89.70 dBだった。小さな丸め差でもJPEG checksumは変わるので、同じattemptのrecoveryでCPU/DX12を黙って切り替える設計は採れない。
+DX12要求では各条件の同一process内2回で3形式全て一致。CPUとのbytes一致は要求しなかった。CPU/DX12のlossless PNG画素差はMAE 0.00007～0.00068 /255、PSNR 79.81～89.70 dBだった。この計測はbackend差でbytesが変わり得ることを示す。RAW ExportではCPU/DX12双方を許容し、同一checksumを約束しない。
 
-NativeをExport中に終了した後、新processで原RAW再import・同じ完全settings復元・再生成したPentax JPEGも基準hashと一致した。これはisolated再生成の検証であり、製品Runtimeのclaim/recoveryやImmich duplicate uploadの実試験ではない。今回metadata noneなので時刻由来差はなく、既存Encoderのcanonical ICCも決定的だった。最終metadataを付けたRAW artifactの永続timestamp付き決定性はP0b以降の必須試験。
+NativeをExport中に終了した後、新processで原RAW再import・同じ完全settings復元・再生成したPentax JPEGも基準hashと一致した。これはisolated再生成の検証であり、製品Runtimeのclaim/recoveryやImmich duplicate uploadの実試験ではない。今回metadata noneなので時刻由来差はなく、既存Encoderのcanonical ICCも決定的だった。最終metadata付きartifactのtimestamp付きbyte決定性はRAWの必須条件ではない。
 
 ### 11.6 Preview・性能・リソース
 
@@ -514,17 +517,69 @@ DX12は各Export時間が短くても、process初回のPreview/GPU準備を含�
 
 実際の整理では今回領域内の84 file、770,404,454 bytesを削除し、約310.8 MiBを保持した。削除対象は解決済み絶対pathがPoC root内にある個別fileだけに限定した。整理後にも原本／copy／元DB hashとEXE attestationを再確認して一致、patch reverse-checkも成功した。
 
-### 11.8 P0bへの判断と必要な契約
+### 11.8 P0a時点の判断（後続決定で superseded）
 
-**進行条件**は、製品Queueをまだ変更せず、原寸lossless bytes＋原標準metadata allowlist抽出の小さなNative契約を実装・測定すること。P0aの成功を根拠に既存Previewの上限だけを外さない。
+当時は、製品Queueを変更する前に原寸lossless bytes＋標準metadata allowlist抽出のNative契約を実装・測定する案を進行条件に置いていた。2026-10-29の決定でこのNative契約は必須ではなくなった。LightCraftが既に生成するJPEGを使い、まずGenzoRoom側metadata-only経路を評価する。P0aの成功を根拠に既存Preview上限を外さないという判断は維持する。
 
-1. **転送・資源上限候補（未受入）**：まず対象を20,000,000 output pixels以下、各辺8192以下、opaque sRGB RGB8、PNG64 MiB以下、Base64 JSON line86 MiB以下、metadata別枠64 KiB以下に限定する。入力もRAW decoded sensor pixels21,000,000以下・compressed source128 MiB以下を候補とし、大きいRAWの小cropが出力上限だけを通ってメモリを超過しないよう別に検査する。これは今回最大約19.96 MP出力／約20.17 MP格納RAWからの小さな検証枠であり、全RAW対応上限ではない。64 MiBに収まらない正当な画像は明示拒否し、勝手に縮小しない。Native2 GiB＋転送/validation/encoder側1 GiB、合計3 GiB相当を初期検証予算候補とし、live Preview cacheとの合計・JSON複製を含め再測定する。測定値からの候補であって強制peak制限の実装や保証ではない。
-2. **時間上限候補（未受入）**：import60秒、restore/readback15秒、Export120秒、decode/validate/encode30秒、job全体180秒の有限deadlineを試す。今回の約1～2秒Exportを全機種の上限としない。process開始GPU準備、denoise/model、複雑maskは未検証。タイムアウトはgeneration失効・子回収・成果物不受理へつなぎ、Stopのcurrent完了仕様は変えない。
-3. **identityと画素契約**：source content hash、完全settings fingerprint、job/request ID、engine/patch/binary tuple、geometry/native寸法、sRGB/Full/After/SDR、encoded長/hashを検証する。可能ならExport jobのexecution backend/fallbackも返す。Previewの縮小画像やMCP active selectionを出力snapshotの代用にしない。
+1. **転送・資源上限候補（旧Native PNG案の試算）**：20,000,000 output pixels、各辺8192、PNG64 MiB、Base64 JSON line86 MiBなどはPNG/bytes転送案の未受入候補だった。現方針ではRAW実装の条件として適用しない。LightCraft JPEG file、EXIF/XMP処理、Preview共存を含むmemory/disk上限をP1で測定する。正当な画像を暗黙に縮小しない。
+2. **時間上限候補（旧案）**：import60秒、restore/readback15秒、Export120秒、decode/validate/encode30秒、job全体180秒は現行受入値ではない。P1で通常RAWの長時間処理とCancel/timeout後cleanupを測り有限期限を決める。Stopのcurrent完了仕様は維持する。
+3. **identityと生成結果**：sourceとfrozen settingsの所有関係、job/request ID、geometry/native寸法、sRGB/Full/After/SDR、output length/typeを検証する。execution backend/fallbackは診断情報として利用可能なら記録する。Engine tuple・output hashをRetry同一性やCPU/GPU選択固定に使わない。Previewの縮小画像やMCP active selectionを出力snapshotの代用にしない。
 4. **metadata契約**：原RAW公開tagからOffset/Subsecの元文字列、Make/Model分離、露出bias/35mm焦点、GPS高度/日時などをtypedで抽出。missing/empty/invalid/unsupportedを区別し、既存validator/serializerへ渡す。MakerNoteや原TIFF blobを返さない。出力Softwareと永続timestampはGenzoRoom側の責任にする。
-5. **隔離と決定性**：編集用live settings/Historyを変更しない独立Session、同時RAW heavy jobのadmission、プロセス終了後の再import/full restoreを検証。初期CPU固定を推奨。DX12は今回同process2回のみで、別processやfallback時の決定性が未確定。metadata込み最終artifactのchecksum再現、製品Retry/Recovery、mixed Queue、Immich duplicate/Album/Stack/COVERは後続段階で検証する。
+5. **隔離と再実行**：編集用live settings/Historyを変更しないjob/session境界、プロセス終了後の再import/full restoreを検証する。CPUとDX12を許容し、byte/hash一致を合格条件にしない。製品Retry/Recovery、mixed Queue、Immich duplicate/Album/Stack/COVERは後続段階で検証する。
 6. **残る受入項目**：実保存Recipe fixture、非空の説明/DC配列・Unicode/レンズ仕様/GPS方向、複雑geometry・mask・denoise、より大きいRAW、WebView2での見た目。今回の2素材だけでこれらをPASSにしない。
 
-Native JPEG bytes＋metadata marker再構成の代替案は残すが、今回PNG→既存Encoderが成立しCPU checksumも一致したため、既存JPEG encoder/allowlistを再利用する第一推奨は維持する。P0bのbytes転送ではfile経路にないBase64/JSONコストが増えるので、上限候補の実測を必須とする。
+Native JPEG marker muxはLightCraft追加patchがGenzoRoom方式より小さく、upstream更新の保守負担も軽いという根拠が得られた場合にだけ比較し直す。P0aのPNG→既存Encoder結果は過去の技術的事実として残し、RAW製品実装の必須条件から外す。
 
-P0aでは製品コード・既存tests・patch・schema・README・CHANGELOGを変更していない。通常test suite/typecheck/buildは対象外とし、ここに列挙した実EXE隔離試験を実施した。最終文書は測定JSON・EXE/patch識別情報と照合し、`git diff --check` と変更対象確認を行う。Commit/Pushは今回の依頼で明示許可された本書だけを対象とする。
+P0aでは製品コード・既存tests・patch・schema・README・CHANGELOGを変更していない。通常test suite/typecheck/buildは対象外とし、ここに列挙した実EXE隔離試験を実施した。最終文書は測定JSON・EXE/patch識別情報と照合し、`git diff --check` と変更対象確認を行う。Commit/PushはP0a当時の依頼条件であり、今回の作業履歴ではない。
+
+## 12. RAW Export基本方針の確定（2026-10-29）
+
+### 12.1 現行構成
+
+RAWとJPEGは現像・JPEGエンコードを独立させ、出力管理から先を共有する。
+
+```text
+JPEG Asset → GenzoRoom JPEG Recipe v18現像 → GenzoRoom JPEG encoder ─┐
+                                                                     ├→ ExportArtifact
+RAW Asset → frozen RAW Recipe → LightCraft現像 + LightCraft JPEG encoder
+         → EXIF/XMP metadata-only更新（JPEG圧縮データ保持） ──────────┘
+  → 既存ExportRuntime / ImmichExportRegistrar
+  → `-GenzoNN.jpg` / Immich tag・Favorite・Album・Stack/COVER
+```
+
+RAWの出力はJPEG・sRGB・ICC埋込・現像後フル解像度、LightCraft quality 95・4:4:4を当面固定する。Export時は`hdr:false`、`sharpen:none`、`metadata:none`、`addToPhotos:false`を指定し、HDR出力・resize・watermark・形式設定UIを追加しない。`longEdge:0`はLightCraft v0.14.0のExport APIで原寸指定としてP0a確認済み。JPEG bytes、量子化特性、見た目をGenzoRoom JPEG Exportと一致させない。完成JPEGをGenzoRoom Pillow encoderへ渡さず、marker-level metadata追加時もJPEG compressed scanを変更しない。
+
+LightCraft現行MCP Exportは完成JPEGを指定fileへ同期書込し、画像bytesは返さない。Backend所有の隔離出力先で生成したJPEGを取得し、形式・寸法・ICC・4:4:4・上限を検証する案を第一候補にする。元RAWから許可した標準撮影情報を取得し、`Software=GenzoRoom`および必要なGenzoRoom XMP識別・出力日時・現像後寸法・Orientation=1・sRGB情報をmetadata-onlyで設定する。LightCraft標準JPEG metadataは正本とせず、元RAWにない値は推測しない。MakerNote、serial、vendor/private tagは無条件コピーしない。
+
+### 12.2 metadata-only更新の実装判断
+
+`jpeg_metadata.prepare_metadata()`は現在JPEG原本をPillowで読み、metadataを構成する。`create_export_artifact()`はさらにsource JPEGをdecodeしてvalidationし、最後に`jpeg_codec.encode_jpeg()`で再圧縮する。このartifact関数・encoderはRAWへ流用しない。初期実装はRAW専用builderとし、必要ならallowlist値のvalidator/serializerを小さく共通化し、JPEG経路のbytes/metadata仕様を維持する。
+
+Pillow metadata serializerや既存依存を再利用できる場合でも、Pillowによる画像保存を経由して再エンコードしない。適切なmarker-only library/APIが既存にない場合は、JPEG segment/scan境界の厳密なparser・再構成が必要な実装量とテストを評価する。EXIF APP1/XMP APP1/ICC APP2の付与、既存marker置換、重複marker、長さ上限、不正JPEG、SOI/SOS/EOI、scan data中のstuffed bytes/restart markersを検証し、metadata前後のcompressed scan bytesを同一と確認する。RAW EXIF extractionとJPEG marker rewriteは別の安全境界として扱う。
+
+LightCraft Native MUXは代替案に留める。GenzoRoom側metadata-only方式の実装が困難または依存負担が大きく、Native既存APIを拡張する方が変更範囲・upstream更新時の保守負担とも明らかに小さい根拠を得たときにのみ比較し直す。追加Native patch、Export bytes応答、巨大PNG/Base64 transportを初期設計の前提にしない。
+
+### 12.3 Runtime・Retry・Immich責務境界
+
+既存Asset Queue・管理画面・永続Export Runtimeの順序、保存状態、Start時のfrozen Recipe snapshot、単一worker、Stop（current完了後に後続release）、Retry（新run開始時点の最新保存Recipe）、再起動復旧を最大限共用する。RAW snapshot/validator/storeには形式variantが必要で、現行JPEG-only `frozen_recipe_json`/processing versionを曖昧に再利用しない。Recipe/Historyの内容・形式をRAW Exportが更新しない。Start後編集は現在runのsnapshotを変更しない。
+
+RAWの再生成bytes・画素はRetry／再起動でも一致を要求しない。現在利用できるLightCraft versionでfrozen settingsを再実行できることを優先し、CPU・DX12を許容する。JPEG専用の厳密なduplicate recovery、timestamp/byte identity条件、engine pinningや新しい再現性契約は維持しない。通常のQueue failure/Stop/worker ownership、入力保護、登録結果の検証は共通基盤に従う。部分登録後に状態が不明な場合や番号が競合した場合の結果は現行`-GenzoNN` family検出、Immich duplicate response、registrar順に沿って実装前に整理し、重複Assetが生じることを許容する。新しいbyte一致契約やEngine固定で抑止しない。JPEG Retryの挙動は変更しない。
+
+生成物は既存`ExportArtifact`形式に入れ、既存`ImmichExportRegistrar`へ渡す。GenzoRoom tag、source FavoriteのON/OFF、現在のAlbum union、Stack member保持、新COVER設定、最終非COVER Album正規化は再実装しない。RAWであることを理由に新Queue、Runtime、管理ページ、Immich書込経路を作らない。
+
+RAWは現行でWindows LightCraft runtimeを持つが、JPEG Exportは共通Backend Dockerでも動く。初回RAW対応はWindows local renderer readiness時だけ有効とし、Dockerの既存JPEG経路・ports・deploymentを変更しない。RAWを含む旧Queue intentをDockerがどう安全に読み・解除・拒否するかをP2で確定する。現行lifespanのrecoveryとWindows manager初期化順は設計時の静的照合課題であり、起動順の変更範囲をP2で限定する。
+
+### 12.4 旧P0a結果と製品要件の区分
+
+§11は削除・改変せず、P0a時点の全観測値を保存する。Pixel/Pentaxの原寸、LightCraft sRGB ICC/4:4:4、CPU/DX12性能・メモリ、metadataの欠落・精度、Preview比較、原本/Recipe/Historyの保護確認は有効な技術検証結果である。
+
+一方、PNG→GenzoRoom encoderは**技術的に成立したが製品方式として不採用**。PNG/Base64転送サイズ、existing `RenderedImage`/encoder共用、CPU固定、CPU内のcold/warm SHA-256一致はRAW Export実装の必須条件ではない。P0aのLightCraft JPEGとGenzoJPEGの比較・hashは測定記録であり、現在のLightCraft JPEGを強制する仕様でない。再生成hash一致やCPU/DX12相互一致を要求しない。Native patch必須化を導いた旧P0b判定は本節の設計で置き換えた。
+
+### 12.5 Phase計画・残る確認
+
+1. **P1：LightCraft JPEG／RAW metadata／Artifact** — 現行Export APIを利用し、隔離JPEG生成、metadata extraction/marker-only付与、形式検証、専用Artifact builder、`-GenzoNN.jpg`を完成する。Pixel/Pentax PoCでscan不変・metadata・原本保護・容量/timeout/cleanupを確認する。Native patchは不可避性が根拠付きで判明した場合だけ再評価。
+2. **P2：既存Queue／Runtime** — frozen RAW Recipe variant、DB互換migration、Queue適格性、Start/Stop/Retry/restart、Windows lifecycle、DockerでのJPEG互換とRAW safe refusalを統合。
+3. **P3：Frontend Queue／管理** — RAW Queue操作・保存drain・Stack候補・status/Retryを既存画面に統合し、既存選択/armed/Retry優先との整合を検証。
+4. **P4：受入・監査** — Pixel/Pentax実機・Recipe restore・Preview比較、混在Queue、実Immich Favorite/tag/Album/Stack/COVER、partial failure・Retry・再起動を利用者環境で確認。生Album membershipを検査。
+
+追加で調べる項目は、複数RAW形式からの安全な標準tag extraction、既存serializer/依存でmarker-only追加を実現する最小法、LightCraft JPEGの品質/ICC/SOF検証方法、large-output・disk failure時cleanup、Recipe restore後のPreview/Export条件、partial Immich result後の連番競合である。実保存Recipe fixtureと実機WebView2の見た目・Immich統合はP4受入まで未確認。Source static inspectionだけでの確定と実RAW／Immich PoCでの確認を混同しない。
