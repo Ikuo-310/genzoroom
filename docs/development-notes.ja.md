@@ -1,5 +1,19 @@
 # GenzoRoom 開発ノート
 
+## RAW rendered-thumbnail Phase 1（2026-10-30）
+
+JPEGの既存rendered-thumbnail契約、scheduler/request/GET/cache、Windows RAW Preview、RAW Export P0〜P4を確認し、Backend生成経路だけを追加した。`generate_thumbnail(..., input_kind="raw")`から独立したRAW generatorへ分岐し、省略時は既存JPEG処理を維持する。保存連動、Reset連動、request/GETのRAW適格判定、Frontend表示は未接続で、今回cacheを作成してもRAW表示受入の完了を意味しない。
+
+保存状態は`get_raw_saved_state()`から既存Badge/Export共通selectorをread transactionで利用し、最新保存current stateの`exportEligible is True`だけを対象とする。missing/default/unknownはsource取得・Native起動前に除外する。完全な保存DevelopSettingsを、編集用とは別manager/sessionへ既存restore/readback経路で適用する。元RAWは既存Immich read adapterで一時copyへ取得し、Native import前にXMP auto-writeを無効化する。既存Preview APIのfull quality・最大辺1024・stage cache offから得た検証済みPNGを、既存encoderで表示用JPEG（quality 95、4:4:4、sRGB ICC）へ変換する。原寸ExportやJPEG Recipe/rendererは使用しない。
+
+返却bytesは既存Asset ID単位ThumbnailCacheへ格納できる。成功物だけを公開し、失敗時の既存cache保持はJPEGと同じ。Native/session closeと一時copy回収をfinallyで行い、取消時も既存ownerのcleanup保証を利用する。新しいcache/scheduler/API/Native patch、RAW拡張子allowlist、保存形式変更は追加していない。
+
+自動検証：Backendの新RAW生成・JPEG thumbnail/API/cache/scheduler・RAW store/history/restore・LightCraft RAW/runtime関連393件成功。監査でHistoryが存在する場合の不変と生成失敗後の一時file回収・旧cache保持を明示する回帰を追加し、最終thumbnail関連68件成功。Frontendの既存thumbnail API／Immersive Preview回帰30件成功。通常sandboxではpytest一時directory作成が拒否されたため、同じrepository Python 3.14を権限制限外で実行した。Backendのみの実装変更であり、Frontend build/typecheck、全suite、Docker Smoke Testは実行していない。
+
+実Windows API/CLIでは、通常保存DBと既存P4検証保存DBの隔離copyを用い、実Immichから取得したPixel 7 ProとPentax K-S2 DNGの保存RecipeからJPEGを生成した。Pixel 770×1024／329,040 bytes、Pentax 683×1024／170,462 bytes。既存ThumbnailCacheの隔離directoryで保存・再読込を確認した。source copyのhashとsidecar不在、通常保存DBのRAW Recipe/History不変、別managerで開いた編集sentinelのsettings・session status不変、Native終了を確認した。先行probeでは通常保存済みPixel 13件も成功した。これらはBackend生成の実測であり、GUI/Computer Use・Gallery/Filmstrip受入は行っていない。
+
+完了監査ではJPEG処理の維持、原寸Export非利用、編集session分離、共通cache契約、default/unknown除外、Recipe/History/source保護、取消・失敗時cleanupを確認。既知High/Medium未修正Findingなし。後続PhaseでRAW保存/Reset/API適格判定と表示を接続する必要がある。README/CHANGELOGは変更しない。
+
 ## RAW Export P0〜P4完了記録（2026-10-29）
 
 P0aで実RAW（Pixel/Pentax DNG）を用いてLightCraft v0.14.0の直接JPEG Exportを検証し、PNG→GenzoRoom Encoder案を不採用とした。JPEGとRAWの現像・encoderは独立し、完成ExportArtifact以降のQueue/Runtime/Immich登録を共通化する。

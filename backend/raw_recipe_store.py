@@ -227,6 +227,15 @@ def select_raw_export_state(connection, asset_id):
             "processingVersion": RAW_EXPORT_PROCESSING_VERSION, "exportEligible": eligible}
 
 
+def get_raw_saved_state(asset_id: UUID) -> dict | None:
+    """Read current saved settings and badge eligibility in one read-only snapshot."""
+    with _connection() as connection:
+        connection.execute("BEGIN")
+        result = select_raw_export_state(connection, asset_id)
+        connection.commit()
+        return result
+
+
 def get_raw_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool | None]:
     if not asset_ids:
         return {}

@@ -81,8 +81,15 @@ def _render_preview(content: bytes, recipe: dict) -> bytes:
 async def generate_thumbnail(
     asset_id: UUID, *, immich_url: str | None, api_key: str | None,
     transport: httpx.AsyncBaseTransport | None = None,
+    input_kind: str = "jpeg",
 ) -> bytes:
     """Read the latest saved current Recipe at invocation and return JPEG bytes."""
+    # Phase 1 callers opt in explicitly; existing save/request eligibility remains JPEG-only.
+    if input_kind == "raw":
+        from raw_thumbnail_generator import generate_raw_thumbnail
+        return await generate_raw_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, transport=transport)
+    if input_kind != "jpeg":
+        raise ThumbnailGenerationError("unsupported_input_kind")
     _log("started", asset_id)
     try:
         recipe = await run_in_threadpool(_load_recipe, asset_id)
