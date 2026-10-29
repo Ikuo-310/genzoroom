@@ -583,3 +583,40 @@ RAWは現行でWindows LightCraft runtimeを持つが、JPEG Exportは共通Back
 4. **P4：受入・監査** — Pixel/Pentax実機・Recipe restore・Preview比較、混在Queue、実Immich Favorite/tag/Album/Stack/COVER、partial failure・Retry・再起動を利用者環境で確認。生Album membershipを検査。
 
 追加で調べる項目は、複数RAW形式からの安全な標準tag extraction、既存serializer/依存でmarker-only追加を実現する最小法、LightCraft JPEGの品質/ICC/SOF検証方法、large-output・disk failure時cleanup、Recipe restore後のPreview/Export条件、partial Immich result後の連番競合である。実保存Recipe fixtureと実機WebView2の見た目・Immich統合はP4受入まで未確認。Source static inspectionだけでの確定と実RAW／Immich PoCでの確認を混同しない。
+
+## 13. P1実装・検証結果（2026-10-29）
+
+**総合判定：P1の独立Artifact経路は実装・Pixel/Pentax隔離検証完了。実保存RecipeおよびWindows目視、Immich実機受入は未実施。** 開始HEADは`cd6a150770774ceb0d6b7f26c63d16022b686211`、作業ツリーclean。manifest v0.14.0/commit、適用patch reverse-check、EXE SHA-256とreceiptは§11.1と同一で整合。Native source・patch・binaryは変更・再buildしていない。
+
+### 13.1 実装判断とP2契約
+
+新`backend/raw_export_artifact.py`の`RawExportInput`はsource bytes、source_filename、callerが取得したfamily_filenames、保存済みの完全DevelopSettings、timezone-aware timestampを受ける。`await export_raw_artifact(request, manager=..., temp_root=...)`が`ExportArtifact(filename,jpeg)`を返す。`manager`を渡す場合はそのGPU policyを引き継いだ独立Managerを既存clone機構で生成し、渡した編集Managerの状態には触らない。省略時も既存Windows管理Engine解決を利用しDX12 policyを使う。Engine tupleは安全な実行binaryのattestation用途であり、Recipeの旧Engineに固定する契約ではない。
+
+P2側の責務は保存Recipe/snapshot選択、source identity照合、Queue/Runtime/失敗codeとの接続。P1はDB、saved Recipe/History、Frontend、Immichへアクセスしない。settingsを最初のawait前に複製し、Native reset/merge/get一致後、`metadata:none`の既存JPEG Exportを行う。Export後もsettings一致を確認する。Native PhotoIdはこの呼出内だけの値。独立Sessionはlive選択・settings・Undoの変更を回避するため採用した。source copyとoutputをjob専用tempに置き、close/reap後にdirectoryをcleanupする。既存Managerの終了処理を再利用し、失敗・取消でも後処理する。各Native call120秒、ready待ち20秒を初期有限期限とする。
+
+既存依存にはPillowのmetadata serializerと既存JPEGのallowlist/parserがあるが、既存JPEG Artifactはencoderを呼ぶため使用不可。追加依存を入れず、新RAW builderでEXIF/XMP APP1だけを置換する方法を採った。Pillowの画像保存は使用しない。`create_raw_export_artifact(source,jpeg,source_filename,family_filenames,timestamp=...)`は完成済みLightCraft JPEGを受け、既存`next_export_filename()`で命名する同期境界。`RenderedImage`/`JpegRenderer`/`encode_jpeg()`は一切呼ばない。EXIF/XMP以外のmarker、ICC、coding tables、scan/entropyをそのままコピーする。元にEXIF/XMPがあれば置換し、重複APP1を作らない。Native baseline single scan以外や壊れたJPEGは拒否する。
+
+RAW metadataはclassic TIFF/DNG IFD0/EXIF/GPSと埋込標準XMPのみ。入力512 MiB、IFD16個・各4096entry、tag payload65,504 bytes、settings256 KiB、JPEG256 MiB・100 MPの初期ガードを置いた。strip/SubIFDの画素やMakerNoteには進まない。非TIFF RAW（CR3/RAF等）は`raw_export_unsupported_metadata_container`で明示拒否し、対応済みと表示しない。壊れたIFD構造は失敗、optional標準値は既存validatorの範囲でdropする。EXIF/XMP aggregate上限・標準text/GPS検証も既存JPEG実装を変更せず利用する。
+
+### 13.2 自動テスト・実RAW
+
+repository Python 3.14で`tests/test_raw_export_artifact.py tests/test_export_artifact.py tests/test_jpeg_codec.py`を実行：**47 passed、68 subtests passed**。metadata置換の冪等性、coded scan/ICC保持、原情報/識別情報、malformed JPEG/TIFF・循環IFD、timestamp、XMP/private除外、正常・復元不一致・Native失敗・取消のtemp cleanup、settings不変を確認。既存JPEG関連テストも同じ最終コード状態で成功。sandboxのpytest temp作成エラーは同一コマンドの権限付き実行で解消。Frontend/build/full suiteは変更範囲外。
+
+P0aの隔離copyと保存済み人工代表settingsを使い、新Artifact APIから生成した。今回の4条件はいずれもDX12 policyで実行し、CPU固定していない。現在のWindows設定・binaryで成功した事実であって全GPU/全RAWの保証ではない。
+
+| 条件 | SOF実寸法 | 完成JPEG bytes | 復号・sRGB ICC・4:4:4・GenzoRoom識別 |
+|---|---|---:|---|
+| Pixel初期 | 4064×3056 | 4,430,085 | PASS |
+| Pixel代表crop/Rotate90 | 2445×3251 | 3,236,547 | PASS |
+| Pentax初期 | 5472×3648 | 10,181,973 | PASS |
+| Pentax代表crop/Rotate90 | 2918×4378 | 7,082,587 | PASS |
+
+全4条件でP0aの同一DX12/source/settingsによるLightCraft JPEGと、EXIF/XMP以外の全segment・coding tables・ICC・scan bytesが一致した。これに加えてbuilder単体テストでmetadata付与前後の同じ入力に対するcoded-data不変を確認した。これは同一生成物のmetadata処理が画像を変えない検証であり、Retry時の再生成一致要件ではない。quality95は固定要求・Native source経路で確認し、JPEG内の架空のquality tagには依存しない。全完成JPEGをPillowでloadして復号可能と確認したが、Immichへのupload/readbackは行っていない。
+
+Pixelはroot標準2項目、capture16項目、GPS8項目、Pentaxはroot2/capture13/GPS0を取得してoutputと比較した。Make/Model、LensModel等の存在tag、PixelのOffsetTimeOriginal/SubsecTimeOriginal原文字列・GPS高度/時刻・露出bias/35mm焦点を保存する。Pentaxの標準GPS等の不在は補完しない。§11.4の元tag不在一覧は有効。非空LensSpecification/著作権/GPS方向はsynthetic testで補い、fixtureにない情報の実RAW受入と混同しない。既存validatorで非ASCII EXIF textはdropされ、Unicodeは標準XMP経路で扱う。
+
+原本SHA-256はP0a baselineと一致、source bytes/settingsも不変。SQLiteや保存APIを呼ぶコードはなくRecipe/History書込を行っていない。生成JPEGとprivate検証script/summaryはGit ignore対象`.tmp/raw-export-p1*`にのみ置き、個人metadata・画像・原本pathはcommitしない。
+
+### 13.3 残存事項
+
+実保存Recipeが今回2素材に対応していないため人工settingsで復元を確認した。利用者のWindows/WebView2でPreviewと最終JPEGの目視比較は未受入。P0aのPreview比較は有効だが今回の実画面確認ではない。TIFF/DNG以外のRAW metadata、悪意ある入力へのさらなる形式別coverage、live Preview同居時の合計資源・大画像・disk full・実OOM/driver lossは未確認。Immich読込・mixed Queue・Stack/Album/COVER・Retry再起動はP2以降。P1はRuntime等へ接続せず、今のJPEG Export仕様も変更していない。

@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## RAW Export P1：LightCraft JPEG・Metadata・Artifact（2026-10-29）
+
+`raw_export_artifact.py`に独立したRAW Artifact生成を追加。既存Managerのcloneで編集Sessionを保護し、完全settingsをreset/merge/readbackしてLightCraft既存MCP Exportで原寸JPEGを生成する。TIFF/DNG標準IFDから撮影情報を取得し既存allowlist validatorを利用、PillowでEXIF/XMLのみserializeした後にAPP1を置換する。画像scan・coding tables・ICCは保持し、JPEG再エンコードは行わない。Queue/Runtime/Frontend/Immichは未接続で、Native追加patch/buildも不要。
+
+実RAWはPixel初期4064×3056／代表2445×3251、Pentax初期5472×3648／代表2918×4378で完成JPEGを生成。4:4:4・sRGB ICC・GenzoRoom識別と復号成功、P0aの同じDX12/source/settingsのNative JPEGに対するscan/tables/ICC一致を確認。PixelはMake/Model、offset/subsecond、GPS高度/日時を含む標準情報を保持。原本hashは不変、DB/Recipe/Historyへの書込経路はない。
+
+関連テスト47 passed、既存68 subtests passed。通常sandboxではpytest一時directory作成が拒否されたため、同じrepository Python 3.14で権限付き再実行した。対象は新RAWテストと既存JPEG artifact/codecのみ。初期fixtureのrational型修正とmetadata adapterのIFD受渡し修正後の最終状態で全対象を再確認した。実保存Recipeはfixture未入手、WebView2利用者目視・Immichは未受入。metadata対応はclassic TIFF/DNGのみで、非TIFF RAW・複数scan JPEGは明示拒否する。詳細とP2契約は[RAW Export設計§13](research/lightcraft/RAW_EXPORT_DESIGN.md#13-p1実装検証結果2026-10-29)。
+
 ## RAW補正済みバッジ（2026-10-29）
 
 RAWの完全なDevelopSettingsを写真固有のLightCraft import defaultsと比較し、既存のEditedBadgeをHomeとFilmstripで再利用した。HomeのRecent／Albums／Calendar／Favorites、既存のStack集約、補正済みフィルターへ状態を接続した。Historyだけが残る場合は補正済みにせず、カテゴリをOFFにしても初期値と異なる補正値が保持されていればバッジを残す。ALLリセットとRAW編集リセットでは初期状態へ戻り、バッジが消える。RAWのバッジは表示するがExport Queue操作は提供しない。Filmstripは編集中の現在設定を使い、Homeは保存済み状態を使う。
