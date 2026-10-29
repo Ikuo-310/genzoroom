@@ -331,3 +331,200 @@ Session隔離は同じExportRuntime内の描画依存として扱う。初期は
 | `apps/lightcraft-cli/src/main.rs` | `read_settings`（648）、`render`（670）、file writeとOriginalGuard |
 
 文書のみの変更として、実行テスト・型チェック・production buildは対象外。静的照合、patch reverse-check、EXE/patch hash照合と文書の差分／空白検査を実施した。実RAW PoC・Native契約binary確認・ブラウザ／Immich実機検証は未実施。
+
+## 11. P0a実施結果（2026-10-29）
+
+**総合判定：P0a完了。P0bの限定契約PoCへ条件付きで進行可能。製品RAW Exportの完成・利用者の画質受入を意味しない。** 原寸JPEGとPNG→既存Encoderは両素材で成立し、CPUの再生成も一致した。一方、標準Export metadataだけではJPEG側の継承仕様を満たさず、原寸PNGは既存Preview転送上限を超える。P0bはこの2点と隔離Session／資源制御を解決する契約に限定する。
+
+§1～10は先行Phase 0の調査・提案記録として保持した。「今回未実施」等の記述は先行調査時の範囲を指す。本節がP0aの実測記録であり、ここに記載のない製品実装・Immich登録・ブラウザ確認は行っていない。
+
+### 11.1 環境・固定identity・原本保護
+
+| 項目 | 確認結果 |
+|---|---|
+| GenzoRoom | `feature/lightcraft-integration`、開始HEAD `2842e0c9a622e8fe3b78477f72cfaf102be57649`、開始時working tree clean |
+| OS / CPU / RAM | Windows 11 Pro build 26300、AMD Ryzen 7 3700X（8 cores / 16 logical processors）、物理RAM約31.92 GiB |
+| GPU | Radeon RX 580 Series、DX12。VRAM peakは未測定 |
+| Python / libraries | repository `.venv` Python 3.14.5、Pillow 12.3.0、NumPy 2.5.3。製品の既存 `jpeg_codec.encode_jpeg` / `RenderedImage` をそのままimport |
+| LightCraft | v0.14.0、upstream `03c88c166c054c009db2a47187d59991f6232b85` |
+| patch | `0002-v0.14-native-contracts.patch`、SHA-256 `9308d0663de3e4d1f6fd65e564fb04cc7ac1c993b5c1a2aae29ef1f72b521063`。reverse `--check`成功、適用状態の変更なし |
+| EXE | 既存 `target-wb-phase1/release/lightcraft-cli.exe`、SHA-256 `b872315ccd11c5c2e945f473d8ca48022127a4cc196b95d16ff3d8fb75004251` |
+| attestation | 実EXE hash・隣接receipt・manifest tupleを製品 `verified_artifact` で照合。実MCP initializeでversion確認。tools/listでExport/Preview schema確認、Full After Preview契約1の実応答を取得 |
+| Session | `mcp --headless --compact`、永続libraryを開かず、import前に `library.xmpPreferences {autoWrite:false}`。Backend製品serverとImmich clientは起動せず、OS runtimeのallowlist環境だけを子へ渡した |
+| CPU条件 | `LIGHTCRAFT_GPU=0` / backend off。スレッド数上限・CPU affinityは追加せずNative既定、同時RAW処理なし |
+| DX12条件 | backend dx12、app.gpu enabled/availableを確認。Preview実応答は `gpu_success`。ExportにgpuFallbackなし、最終lastFallbackなし。ただし標準Export応答にper-job execution証明はなく、全stageのGPU実行を証明したとはしない |
+
+既存研究資料で所在が確認できるPixel DNGとPentax DNGを使用した。入力はそれぞれ16,422,322 bytes / 20,529,090 bytes。実パス・撮影日時・位置・原画像は本書へ載せない。両原本をGit管理外の隔離先へコピーし、コピー前後のSHA-256一致を確認した。終了時も両原本・コピーのhash、原本directoryのentry一覧が不変、copy隣のXMP追加なしを確認。
+
+実ユーザーのGenzoRoom標準保存先から5 DBを発見し、DB/WAL/SHM計11 fileのhashを記録して隔離コピー上だけで照会した。元SQLite接続・migration・saveはしていない。SHA-256と実importのNative source hashの両方で検索したが、この2素材に一致する保存済みRAW Recipeはなかった。終了時は11 fileのhashとDB sidecarの存在集合も不変。**実保存Recipeによる復元は未実施**であり、以下の代表設定による完全settings復元と区別する。
+
+通常sandboxではPythonの非同期処理開始前に停止したため、同じrepository Pythonで権限付き実行へ切り替えた。待機したPoC用Pythonだけを終了し、重複Native起動を防いだ。Native再ビルド、checkout/target作成、実ディスク枯渇、OSメモリ枯渇、Immichへの通信・書込は行っていない。
+
+### 11.2 試験条件・結果一覧
+
+初期設定はImport後にFull 1024px Previewを一度生成してas-shot WB解決を済ませ、`get_develop`で全settingsを固定した。代表設定は公開controlsからExposure +0.7、Contrast +12、Dehaze +15、Vibrance +10、WB Temp 6000 / Tint +8を設定し、中央80% crop（x/yとも0.1～0.9）とRotate90を追加して全settingsを固定した。保存Recipe由来ではない人工的な検証設定である。
+
+各Sessionで明示PhotoId選択→reset→full merge→get/readback完全一致を確認。Export後もsettings一致を確認した。初回harnessで配列tool結果をstructuredContentと仮定したため代表設定準備が失敗したが、配列text JSONを解析するよう**一時スクリプトのみ**修正し、未完了の代表条件だけ再実行した。これはEngine不具合や合格試験には数えない。
+
+| 試験 | Pixel | Pentax | 判定の範囲 |
+|---|---|---|---|
+| 初期・代表 settings完全復元/readback | PASS | PASS | Nativeメモリ内snapshot。実DB Recipeではない |
+| 原寸JPEG・PNG・既存Encoder JPEG | PASS | PASS | 初期と代表、CPUとDX12要求の両方 |
+| crop/orientation期待寸法 | PASS | PASS | 下表。格納RAWや埋込thumbnailの寸法を原寸と混同しない |
+| JPEG SOF precision/sampling、ICC | PASS | PASS | 8-bit、3 componentとも1×1、sRGB ICC |
+| CPU Cold2＋Warm2の決定性 | PASS | PASS | 各設定・各形式でhash/bytes/寸法一致 |
+| DX12同一process内2回の決定性 | PASS | PASS | 各設定・各形式。別process間GPU決定性は未実施 |
+| PNG→既存Encoder接続 | PASS | PASS | lossless PNG→RGB8→製品encoder、一度だけJPEG化 |
+| metadata none | PASS | PASS | EXIF/XMPなし。ICCは存在。意図した条件 |
+| 標準Export metadata allによるJPEG継承同等性 | 未達 | 未達 | 比較用に追加出力。重要tag欠落。§11.4 |
+| Previewとの数値・生成画像比較 | 実施 | 実施 | 細部差あり。Windows実画面の利用者受入は未実施 |
+| 不正settings/出力先/書込/Native終了 | PASS | PASS相当の終了試験 | 詳細は§11.7。全異常を機種ごとに重複実行していない |
+| 原本・Recipe/History保護 | PASS | PASS | file hash・directory・元DB hash不変 |
+| Immich登録・mixed Queue・製品Retry/recovery | 未実施 | 未実施 | 製品未接続。PoCから呼ばない |
+
+### 11.3 寸法・JPEG条件・Encoder接続
+
+本試験のExport指定は `format:jpeg/png, longEdge:0, quality:95, colorSpace:srgb, bitDepth:8, hdr:false, sharpen:none, metadata:none, addToPhotos:false`。limitKb/watermark/presetは未指定。PNGでも同じ明示条件を送り、PNGはlossless中間表現として扱った。
+
+| 素材・設定 | 期待＝実測寸法 | CPU Native JPEG bytes | CPU PNG bytes | CPU既存Encoder JPEG bytes |
+|---|---|---:|---:|---:|
+| Pixel 初期 | 4064×3056 | 4,428,845 | 18,128,685 | 4,611,599 |
+| Pixel 代表 | 2445×3251 | 3,235,545 | 11,766,965 | 3,377,417 |
+| Pentax 初期 | 5472×3648 | 10,181,055 | 35,117,928 | 10,753,022 |
+| Pentax 代表 | 2918×4378 | 7,081,936 | 21,928,562 | 7,427,808 |
+
+独立TIFF header walkでPixel RAW IFD 4080×3072、DefaultCropSize 4064×3056、Pentax RAW IFD 5504×3664、DefaultCropSize 5472×3648を確認。初期出力はDefaultCropSizeと一致する。初期orientationはいずれもNormal。代表は80% cropと軸交換から独立計算し四捨五入した寸法に一致し、Native応答の寸法とJPEG SOF寸法も一致した。これで過去研究に残っていたsample2の格納／crop寸法の未確認を、この入力について埋めた。
+
+JPEG markerを別途走査し、Native/既存EncoderともSOF 8-bit、3 componentのsampling全て1×1（4:4:4）を確認。Pillow/LittleCMSでICCを読み、RGB→XYZ profile、sRGB descriptionを確認。CPU4条件×Native JPEG/PNG/既存Encoderの計12 profileについて216色gridをcanonical sRGB profileへ変換した最大差は0/255。DX12各出力も同じheader/ICC検査に合格した。品質95は要求と固定sourceの `encode_with_metadata`→S444／品質95、既存 `encode_jpeg`→quality95/subsampling0の経路で確認した。JPEG内の品質tagから判定したものではない。
+
+PNGはRGBとして読み、ICCの色空間を確認したうえで、追加色変換・補正・orientation操作をせず `RenderedImage(width,height,rgb.tobytes())` へ渡した。LightCraft JPEGをdecodeしてJPEG化する経路は使っていない。EXIF/XMP再構成はこの接続PoCに含めず、生成JPEGのSoftware等が製品仕様を満たすとは報告しない。
+
+PNG画素を基準にJPEG復号画素を比較したPSNR（dB）は、Pixel初期 Native 43.33 / 既存Encoder 43.22、代表42.41 / 42.32、Pentax初期38.85 / 38.78、代表38.63 / 38.56。既存EncoderのfileはNativeより約4～6%大きい。どちらも一度のJPEG圧縮であり、同じ品質数値でも別codecのbytesや誤差は一致しない。PSNRだけで主観的な画質の優劣は決めない。
+
+### 11.4 RAW・MCP metadata・生成JPEGの比較
+
+原RAWをboundedな独立TIFF/EXIF/GPS walkerで解析し、MCP `photo.inspect` のcatalog metadataと比較した。標準reader内部のMetadata型はMCP catalogと同じではないため、「catalogで未公開」と「Native内部でも取得不能」を同一視しない。さらに各素材1枚ずつ `metadata:all` の比較用JPEGを隔離生成し、実EXIF/XMPを検査した。通常条件 `metadata:none` の全JPEGはEXIF/XMPを持たないので、そこでの欠落は仕様どおり。
+
+分類：**取得**＝原値取得・数値同等、**変化**＝表現／型／精度の変化、**欠落**＝原RAWにあるが公開catalogまたは標準Exportで失う、**なし**＝対象の公開標準tagが原RAWにない。非公開MakerNoteを調べて無理に補完はしない。
+
+| 項目 | Pixel | Pentax | 既存allowlist／RAW adapterへの意味 |
+|---|---|---|---|
+| DateTimeOriginal | 取得。標準JPEGの秒まで一致 | 取得。標準JPEGの秒まで一致 | 原標準tagを既存date validatorへ渡せる |
+| OffsetTimeOriginal | 原RAWあり、catalogと出力XMP日時にはoffsetあり、出力EXIFでは欠落 | 原RAWになし | 原tagからEXIFへ再構成が必要。XMP日時があるだけで既存EXIF継承達成とはしない |
+| SubsecTimeOriginal | 原6桁→catalog/XMPは3桁。出力EXIFでは欠落 | 原RAWになし | 元文字列をadapterで保持。Native正規化から6桁を復元不能 |
+| Make / Model | Make原tagはcatalogのcameraへ結合。出力Make欠落、Modelは結合表現へ変化 | Make欠落、Modelはcamera由来の表現へ変化 | 両tagを原RAWから分離取得する必要 |
+| LensMake / LensModel | LensMake欠落、LensModelは原値一致 | 両標準tagなし | PixelのMakeを失わないadapterが必要 |
+| LensSpecification / DNG LensInfo | 両方なし | 両方なし | 存在するfixtureでの継承は未検証。値を推測しない |
+| ExposureTime / FNumber / ISO / FocalLength | 取得。Native JPEGの数値は原tagと同等 | 同左 | rational→表示文字列/float→rationalという変化あり。adapterは元型を直接共通validatorへ |
+| ExposureBiasValue / 35mm焦点距離 | 原RAWあり、catalogと標準JPEGでは欠落 | 同左 | 公開標準tag直接抽出が必要 |
+| GPS緯度経度/ref | 原RAWあり、catalogはsigned decimal、標準JPEGはDMS/refへ変化 | 標準GPSなし | 型・範囲・変換精度の検証が必要 |
+| GPS高度/ref、日時 | 原RAWあり、catalog／標準JPEGで欠落 | 標準GPSなし | 高度、GPSDateStamp、GPSTimeStampをadapterで取得 |
+| GPS撮影方向/ref | 原RAWになし | 原RAWになし | 取得可能性の実機検証は未実施。Native共通型不足は先行source調査どおり |
+| Artist / Copyright | tagなし | tagはあるが空文字、catalog／出力では省略 | 非空作者・著作権の実RAW往復は未検証。空値省略を情報喪失と数えない |
+| ImageDescription | なし | なし | 非空fixture未検証 |
+| XMP DC title/description/creator/rights/subject | 対象propertyなし | 同左 | 非空配列・Unicode実RAW往復は未検証。既存bounded allowlist parserの再利用候補 |
+
+`metadata:all` のNative JPEGはSoftware=`LightCraft`、XMPもNativeが生成する。原本packetそのものではない。PixelのXMP `exif:DateTimeOriginal` はoffsetと3桁fractionを保持するが、原6桁やEXIF Offset/Subsec tagを補う契約にはならない。最終JPEGでは既存serializerでSoftware/CreatorTool=`GenzoRoom`、Orientation=1、rendered寸法、ColorSpace=1、永続timestampを作る必要がある。
+
+ここで「なし」は標準tag／対象XMP propertyの不在であり、MakerNoteや未知namespaceに類似情報がないという主張ではない。Lens/説明/DC/GPS方向の非空fixture不足はP0b後のcoverage課題として残す。RAW metadata adapterは元tagを安全に読み、既存validator/allowlistで再構成する境界が必要。Native JPEGのmetadataやMCP catalogだけを使う案は不採用。
+
+### 11.5 再生成の決定性
+
+CPUでは各素材・各設定について、Session 1の初回、別processのSession 2初回、その同一process内のWarm1/Warm2の計4回を比較した。Coldは「別Native process」であり、OS file cacheをcold化した試験ではない。各Sessionはsettings凍結前にbootstrap Previewを行っている。Native JPEG・PNG・既存Encoder JPEGそれぞれのSHA-256、bytes、寸法は全て一致した（CPU 4条件×3形式×4反復）。
+
+CPU Native JPEGの基準hash：
+
+| 条件 | SHA-256 |
+|---|---|
+| Pixel初期 | `dabdbc296fd13ab7ea576c2aef0a3d03eda0b499ba32409180470ef48388100c` |
+| Pixel代表 | `ac7fa17ebef96969ddf3762f97de9915843fce147a72f078a3c30f92cb2e4dfb` |
+| Pentax初期 | `7473775b7e8e7caea7fd532fcec1a7f1da177314ca3e8b9fff8f7ec1c0505d98` |
+| Pentax代表 | `1cc12a971cd9eef376971cdfd18abf591e5b479cd3a78ada4f40db1caab31d29` |
+
+DX12要求では各条件の同一process内2回で3形式全て一致。CPUとのbytes一致は要求しなかった。CPU/DX12のlossless PNG画素差はMAE 0.00007～0.00068 /255、PSNR 79.81～89.70 dBだった。小さな丸め差でもJPEG checksumは変わるので、同じattemptのrecoveryでCPU/DX12を黙って切り替える設計は採れない。
+
+NativeをExport中に終了した後、新processで原RAW再import・同じ完全settings復元・再生成したPentax JPEGも基準hashと一致した。これはisolated再生成の検証であり、製品Runtimeのclaim/recoveryやImmich duplicate uploadの実試験ではない。今回metadata noneなので時刻由来差はなく、既存Encoderのcanonical ICCも決定的だった。最終metadataを付けたRAW artifactの永続timestamp付き決定性はP0b以降の必須試験。
+
+### 11.6 Preview・性能・リソース
+
+既存製品が使うNative `render_preview` 契約1、After、quality full、stage_cache off、長辺1024を呼び、settings/crop/orientationを共通化した。原寸PNGをPillow LanczosでPreview寸法に縮小したものとの差（CPU）は以下。比較画像も隔離保存し、エージェントが画像として確認した。WebView2での色管理や利用者による実画面受入は未実施。
+
+| 条件 | Preview寸法 | MAE /255 | PSNR dB | p99絶対差 /255 |
+|---|---|---:|---:|---:|
+| Pixel初期 | 1024×770 | 2.297 | 35.10 | 16 |
+| Pixel代表 | 770×1024 | 2.920 | 32.97 | 21 |
+| Pentax初期 | 1024×683 | 0.846 | 44.39 | 5 |
+| Pentax代表 | 683×1024 | 1.448 | 39.78 | 9 |
+
+画像確認ではcrop・向きと大きなWB/露光/Dehazeの傾向は対応するが、Previewの細部が滑らかで原寸縮小側のdetailが強い。Pixelは細部差が比較的大きい。RGB channel平均差の絶対最大は0.550/255だった。ただし平均が小さいことだけで局所トーン差を否定できず、厳密な「体系的差なし」の受入は残す。実装時にはPreview/fullのsource level・detail/denoise・resampler差を分けて評価する必要がある。DX12 Preview比較もほぼ同程度の数値だった。
+
+時間はperf_counterの実測wall time。主反復の範囲、Native peakはWindows `GetProcessMemoryInfo.PeakWorkingSetSize`。20ms sampled working setも取得し、process全体のpeakと区別した。
+
+| 素材・設定 | CPU JPEG s | CPU PNG s | DX12要求 JPEG s | DX12要求 PNG s | Native CPU peak MiB | Native DX12要求 peak MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Pixel初期 | 1.324～1.441 | 1.480～1.537 | 1.151～1.171 | 1.266～1.325 | 938.4 | 765.0 |
+| Pixel代表 | 1.368～1.426 | 1.486～1.587 | 1.039～1.094 | 1.086～1.155 | 739.7 | 800.7 |
+| Pentax初期 | 1.824～1.937 | 2.114～2.207 | 1.508～1.545 | 1.737～1.756 | 1446.1 | 1040.9 |
+| Pentax代表 | 1.952～2.039 | 2.123～2.151 | 1.506～1.520 | 1.659～1.668 | 1035.0 | 881.0 |
+
+これらはPreview常駐製品とは別processのExport Sessionで、bootstrap Previewと反復も含むprocess lifetime peak。独立した製品Preview processの常駐量を足した値ではない。GPU peak VRAM、実CPU使用率、renderer内部各stage時間は未測定。DX12 Exportにはper-job backend telemetryがなく、上表は「DX12要求／fallback報告なし」として読む。
+
+Encoder測定はNative processとは別の新Python processで各条件1回ずつ行い、画像差分解析を含めなかった。
+
+| 条件 | PNG decode/RGB化 s | 既存JPEG encode s | 合計 s | PoC process peak RSS MiB |
+|---|---:|---:|---:|---:|
+| Pixel初期 | 0.2913 | 0.0928 | 0.3841 | 226.2 |
+| Pixel代表 | 0.1997 | 0.0647 | 0.2643 | 160.4 |
+| Pentax初期 | 0.2817 | 0.1635 | 0.4451 | 344.6 |
+| Pentax代表 | 0.1904 | 0.1102 | 0.3006 | 236.9 |
+
+なお初回の全解像度NumPy差分解析を含むharnessではsampled PoC RSSが最大1572.8 MiBになった。後続の差分解析はrow chunkへ変更した。この解析用メモリをBackend JPEG encoder単体の必要量と取り違えない。製品ASGI Backendは起動していないため、その全体peakは未測定。
+
+起動／Import／復元を分けるため、初期設定のPNG経路を追加で各1回計測した。合計は記載phaseの和で、startup、Import/select、bootstrap Preview、reset/merge/readback、原寸PNG Export、PNG decode＋既存Encoderを含む。事前hash確認、原本copy、比較解析、終了処理は含めない。
+
+| 素材・mode | startup s | Import/select s | bootstrap Preview s | 復元/readback s | PNG Export s | 経路合計 s |
+|---|---:|---:|---:|---:|---:|---:|
+| Pixel CPU | 0.0493 | 0.0275 | 0.8953 | 0.0026 | 1.4745 | 2.8651 |
+| Pentax CPU | 0.0304 | 0.0224 | 0.6016 | 0.0036 | 2.1471 | 3.3515 |
+| Pixel DX12要求 | 0.0318 | 0.0274 | 2.2373 | 0.0026 | 1.2750 | 3.9934 |
+| Pentax DX12要求 | 0.0337 | 0.0237 | 2.0347 | 0.0031 | 1.7815 | 4.3700 |
+
+DX12は各Export時間が短くても、process初回のPreview/GPU準備を含む経路ではCPUより長かった。常駐cacheを含む実製品の応答時間やNAS性能へ一般化しない。一時成果物の単一最大はDX12 Pentax初期PNGの35,117,935 bytes（約33.49 MiB）。Base64だけで46,823,916 bytes（約44.65 MiB）になり、既存24 MiB応答上限は不足する。Pixel初期PNGも約17.29 MiBで既存17 MiB画像枠を超えた。
+
+### 11.7 異常系・後処理・再現手順
+
+| 異常系 | 実施と観測 |
+|---|---|
+| 不正DevelopSettings | PixelでWB tempを文字列にした要求を拒否。前後full settings一致 |
+| readback不一致 | harnessで期待exposureだけを故意にずらし、不一致guardがExportを送らず成果物なし。Nativeが自然に不一致を返した試験ではない |
+| 不正な出力先 | 隔離regular fileをparentに指定。Export失敗、targetなし、既存file不変 |
+| 書込失敗 | 隔離directory自体を出力fileに指定。失敗、directory不変。権限変更やdisk fullは使わない |
+| 不正Export要求 | quality101を拒否、成果物なし |
+| 原本guard | コピー元ではなく隔離RAW copyへExportを試み、拒否とcopy hash不変を確認 |
+| Native終了 | Pentax原寸Export送信50ms後にその子processだけ終了。要求失敗、final出力なし、隔離job folderに残存fileなし |
+| 再生成 | 新processで原RAWcopyと同じ完全settingsから生成し、既存cold JPEG hashと一致 |
+
+不正出力試験でも `*.tmp` 残存なし。これはwrite途中の全timingでのatomicity保証ではなく、実施したtimingと失敗条件の観測。partial画像を故意に製品へ渡す試験やOS枯渇試験は行っていない。新契約ではtemp/bytesを検証してからartifactとして公開する必要がある。
+
+一時領域はrepository直下のGit ignore対象 `.tmp/raw-export-p0a/`。原本copy、PoC scripts、完全settings、計測JSON、生成画像を置いた。`results.json` は12成功Sessionの24組（CPU16、DX12要求8）のJPEG/PNG/既存Encoder JPEGのhash/サイズ/寸法/時間を記録し、`supplement.json` はmetadataと異常系、`phases.json` は追加phase測定、`summary.json` は集計を持つ。これらはGitへ追加しない。
+
+再現はrepository Pythonで `prepare.py`（文書で確認した素材の存在確認・hashコピー・元DBはcopyだけ）、`poc.py`（probe）、`prepare.py`（Native hashでもRecipe照合）、`poc.py --run`、`supplement.py`、`encode_measure.py <pixel|pentax> <default|representative>`、`phases.py`、`summarize.py` の順。いずれもGit管理外の今回限りのharnessであり製品testではない。JSONはUTF-8として読む。Nativeの配列tool結果はstructuredContentがないためcontent textからJSONを読む。
+
+比較受入用にCPU初回の原寸JPEG/PNG/既存Encoder JPEGとPreview比較画像、DX12初回の対応画像を隔離保持する。hash比較済みの重複反復画像、追加phase用画像、比較用metadata-all画像、不要なDBコピーは今回領域内だけで削除する。残すprivate JSONには入力対応情報があるため公開・添付せず、利用者の画像確認後にこのPoC領域を削除する。元素材・実DB・managed source/receiptには触れない。
+
+実際の整理では今回領域内の84 file、770,404,454 bytesを削除し、約310.8 MiBを保持した。削除対象は解決済み絶対pathがPoC root内にある個別fileだけに限定した。整理後にも原本／copy／元DB hashとEXE attestationを再確認して一致、patch reverse-checkも成功した。
+
+### 11.8 P0bへの判断と必要な契約
+
+**進行条件**は、製品Queueをまだ変更せず、原寸lossless bytes＋原標準metadata allowlist抽出の小さなNative契約を実装・測定すること。P0aの成功を根拠に既存Previewの上限だけを外さない。
+
+1. **転送・資源上限候補（未受入）**：まず対象を20,000,000 output pixels以下、各辺8192以下、opaque sRGB RGB8、PNG64 MiB以下、Base64 JSON line86 MiB以下、metadata別枠64 KiB以下に限定する。入力もRAW decoded sensor pixels21,000,000以下・compressed source128 MiB以下を候補とし、大きいRAWの小cropが出力上限だけを通ってメモリを超過しないよう別に検査する。これは今回最大約19.96 MP出力／約20.17 MP格納RAWからの小さな検証枠であり、全RAW対応上限ではない。64 MiBに収まらない正当な画像は明示拒否し、勝手に縮小しない。Native2 GiB＋転送/validation/encoder側1 GiB、合計3 GiB相当を初期検証予算候補とし、live Preview cacheとの合計・JSON複製を含め再測定する。測定値からの候補であって強制peak制限の実装や保証ではない。
+2. **時間上限候補（未受入）**：import60秒、restore/readback15秒、Export120秒、decode/validate/encode30秒、job全体180秒の有限deadlineを試す。今回の約1～2秒Exportを全機種の上限としない。process開始GPU準備、denoise/model、複雑maskは未検証。タイムアウトはgeneration失効・子回収・成果物不受理へつなぎ、Stopのcurrent完了仕様は変えない。
+3. **identityと画素契約**：source content hash、完全settings fingerprint、job/request ID、engine/patch/binary tuple、geometry/native寸法、sRGB/Full/After/SDR、encoded長/hashを検証する。可能ならExport jobのexecution backend/fallbackも返す。Previewの縮小画像やMCP active selectionを出力snapshotの代用にしない。
+4. **metadata契約**：原RAW公開tagからOffset/Subsecの元文字列、Make/Model分離、露出bias/35mm焦点、GPS高度/日時などをtypedで抽出。missing/empty/invalid/unsupportedを区別し、既存validator/serializerへ渡す。MakerNoteや原TIFF blobを返さない。出力Softwareと永続timestampはGenzoRoom側の責任にする。
+5. **隔離と決定性**：編集用live settings/Historyを変更しない独立Session、同時RAW heavy jobのadmission、プロセス終了後の再import/full restoreを検証。初期CPU固定を推奨。DX12は今回同process2回のみで、別processやfallback時の決定性が未確定。metadata込み最終artifactのchecksum再現、製品Retry/Recovery、mixed Queue、Immich duplicate/Album/Stack/COVERは後続段階で検証する。
+6. **残る受入項目**：実保存Recipe fixture、非空の説明/DC配列・Unicode/レンズ仕様/GPS方向、複雑geometry・mask・denoise、より大きいRAW、WebView2での見た目。今回の2素材だけでこれらをPASSにしない。
+
+Native JPEG bytes＋metadata marker再構成の代替案は残すが、今回PNG→既存Encoderが成立しCPU checksumも一致したため、既存JPEG encoder/allowlistを再利用する第一推奨は維持する。P0bのbytes転送ではfile経路にないBase64/JSONコストが増えるので、上限候補の実測を必須とする。
+
+P0aでは製品コード・既存tests・patch・schema・README・CHANGELOGを変更していない。通常test suite/typecheck/buildは対象外とし、ここに列挙した実EXE隔離試験を実施した。最終文書は測定JSON・EXE/patch識別情報と照合し、`git diff --check` と変更対象確認を行う。Commit/Pushは今回の依頼で明示許可された本書だけを対象とする。
