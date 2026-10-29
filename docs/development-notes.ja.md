@@ -1,14 +1,16 @@
 # GenzoRoom 開発ノート
 
-## RAW Export P4 API/CLI実機受入・原本取得修正（2026-10-29、画面受入保留）
+## RAW Export P0〜P4完了記録（2026-10-29）
 
-基準1623483で公式Windows起動・実Immich接続とmanaged LightCraft v0.14.0の実EXE/receiptを確認。ユーザーのコンピューターUSE禁止指示後は画面操作を停止し、隔離DB＋実Native/実ImmichをAPI/CLIで検証した。実DNGがImmichExportSourceからJPEG専用get_asset_originalへ入りNative前に拒否されるHighを再現し、755636bでExport sourceだけRAW opt-inに修正。JPEG defaultのformat/MIME検査は保持、RAW MIME/拡張子allowlist・別Downloader/Runtime/Registrarは追加しない。
+P0aで実RAW（Pixel/Pentax DNG）を用いてLightCraft v0.14.0の直接JPEG Exportを検証し、PNG→GenzoRoom Encoder案を不採用とした。JPEGとRAWの現像・encoderは独立し、完成ExportArtifact以降のQueue/Runtime/Immich登録を共通化する。
 
-Pixel/Pentax初期・代表補正の完成JPEG、既存Preview APIとの寸法/画素統計、sRGB ICC/4:4:4/Orientation/標準EXIF/XMP、編集Manager不変を確認。混在JPEG/RAW/JPEG/RAWが1 Start・4件成功。Tag/Favorite ON/OFF・Stack作成/追加/member保持/COVERが成立。Album作成403のためユーザー指定既存Albumを使用し、生APIで既存83件保持・最新COVER 2件の85件、union継承と非COVER正規化を確認した。Stop、私有copyの不正入力での実Native失敗後JPEG継続、新RecipeでのRetry、隔離Runtimeの別プロセスrecoveryも成功。通常GUIホストのNative稼働中中断は行わない。原本ローカル/remote hashと兄弟file、ユーザーDBのRecipe/History/Queueは不変。検証Asset/生成JPEGとStack/COVER更新はImmichへ残す。
+P1は`raw_export_artifact.py`でLightCraft現像・JPEG生成と非再圧縮EXIF/XMP更新を実装。P2は保存済み完全RecipeをStart時に固定し既存serial RuntimeでJPEG/RAW分岐、同じRegistrarへ接続。RAW Retryは新snapshot、recoveryは固定snapshotを使用する。P3はGallery/Stack/Filmstrip/Anshitsuと既存Export管理へRAW Qを接続。未保存DevelopSettingsは送らず、RAW saved status trueを確認してIDをQueueへ登録する。
 
-P1 Artifact約2.58～3.25秒/件、計測7子processのpeak working set約573～865MiB・exit=0、一時job空を確認。全体RSS/VRAMや常駐warm processは未計測、最適化なし。Backend関連607 passed・68 subtests、Frontend関連23 files/891 passed、TypeScript/production build（既存chunk size警告）・diff check成功。既知High/Medium未修正Findingなし。P1/Native/schema/Frontend/保存/Registrarの変更なし。
+P4は基準`1623483`、修正`755636b`で実施。実RAW原本取得が既存JPEG-only guardで拒否されるHigh Findingを実Immichで再現し、Export sourceだけ`allow_raw=True`をopt-inする最小修正を行った。JPEG default guardを維持。managed Native v0.14.0・実Pixel/Pentax DNG・実Immichで混在Queue、出力/metadata、Tag、Favorite ON/OFF、Album union・非COVER正規化、Stack/COVER、Stop、Retry、隔離Runtime recovery、原本/Recipe/History保護を確認した。受入Albumの既存83件を保持し、新COVER 2件追加後85件。性能はArtifact約2.58〜3.25秒/件、計測したNative子processのpeak working set約573〜865MiB。既知High/Medium未修正Findingはない。
 
-P4は実画面受入が未完了。Q保存drain、Arm/Undo等のブラウザー操作とViewer目視比較は自動テスト/Native APIの確認から区別する。実Album cleanup障害、他RAW形式、通常WindowsホストのNative/登録中recoveryも未確認。詳細はRAW_EXPORT_DESIGN §18。README/CHANGELOGは正式受入として更新しない。
+P4のAPI/CLI検証に加え、利用者自身が通常の画面操作でRAW現像→Q→予約→Export→Immich→Stack/COVERを確認した。この受入記録に基づきP4完了とする。追加Computer UseによるGUI自動操作は行っていない。Backend 607 passed・68 subtests、Frontend 23 files/891 passed、TypeScript・production build・diff check成功。READMEは変更せず、CHANGELOGも正式リリース時の更新とする。
+
+未検証の他RAW形式、強制終了中の通常Windows host recovery、実Album cleanup failure、GenzoRoom全体RSS/VRAMは任意の追加調査として残る。詳細とP0〜P4の仕様・測定は[RAW Export設計§18](research/lightcraft/RAW_EXPORT_DESIGN.md#18-p4実機受入api-cli利用者画面受入2026-10-29)を参照。
 
 ## RAW Export P3 Frontend統合（2026-10-29）
 

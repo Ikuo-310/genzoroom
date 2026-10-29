@@ -1,7 +1,7 @@
 # RAW Export Phase 0 — 実装前調査
 
 調査日：2026-10-29。対象：`feature/lightcraft-integration` のローカル作業ツリー。
-本書は初期設計と後続の実測・実装記録を含む。現行状況は後続の完了節を優先し、P0a実測とP1～P3の実装を区別する。P4は§18のAPI/CLI実機受入まで実施済み。ユーザー指示で画面操作を停止したため、実ブラウザー受入は保留し、P4全体は未完了。
+本書は初期設計と後続の実測・実装記録を含む。現行状況は後続の完了節を優先し、P0a実測とP1～P3の実装を区別する。P4は§18に記録したAPI/CLI受入と利用者による実画面受入を完了。追加Computer UseによるGUI自動操作は行っていない。残る任意調査は§18で必須受入と区別する。
 
 > **現行の確定方針（2026-10-29）**：RAWの現像とJPEGエンコードはLightCraftが行う。完成JPEGへGenzoRoomが撮影metadata・識別情報を付与し、JPEG圧縮データを再エンコードせず既存`ExportArtifact`／Immich registrarへ渡す。§11のP0aは旧推奨案を含む実測記録として保持し、本決定と異なる推奨・必須条件は本節・§12で置き換える。JPEGの現像・エンコード・Retry仕様は変更しない。
 
@@ -705,11 +705,11 @@ Export管理・useExportQueueAssetsは元々format/is_rawを保持するため�
 実ブラウザー・Windows Native・実RAW・実ImmichでのP3受入は未実施。Pixel/Pentax、実ImmichのAlbum生membership/Stack/COVER、Retry/Stop/再起動の実機受入はP4に残す。README/CHANGELOGはP4前に正式対応と断定しないため更新しない。
 
 
-## 18. P4実機受入：API/CLI確認・限定修正、画面受入保留（2026-10-29）
+## 18. P4実機受入：API/CLI・利用者画面受入（2026-10-29）
 
 ### 18.1 範囲と実行条件
 
-基準GenzoRoomは`1623483`、実機で発見した接続不具合の修正は`755636b`。公式`run-dev.ps1`で最新Frontendをbuildし、Windows開発ホストの起動・実Immich接続を確認した。その後ユーザーからコンピューターUSE禁止の指示があり、画面操作を停止した。以下のExport/Preview試験はPython 3.14、既存BackendサービスのAPI/CLI、実Nativeと実Immichを使ったもの。Gallery/Filmstrip/Anshitsu/Export管理の実画面操作や目視比較の成功とは扱わない。
+基準GenzoRoomは`1623483`、実機で発見した接続不具合の修正は`755636b`。公式`run-dev.ps1`で最新Frontendをbuildし、Windows開発ホストの起動・実Immich接続を確認した。利用者は通常操作でRAW現像→Q→予約→Export→Immich登録→Stack/COVERまでの実画面受入を完了した（この受入記録に基づく）。追加Computer UseによるGUI自動操作は行っていない。API/CLI試験はPython 3.14、既存Backend、実Nativeと実Immichで実施。
 
 LightCraftは既存managed v0.14.0、upstream `03c88c166c054c009db2a47187d59991f6232b85`、`.tmp/lightcraft-0.14/target-wb-phase1/release/lightcraft-cli.exe`。実EXE SHA-256 `b872315ccd11c5c2e945f473d8ca48022127a4cc196b95d16ff3d8fb75004251`とreceiptの全managed契約を照合した。追加Native patch/rebuildなし。既定DX12要求と既存fallbackを使用し、CPU固定は追加していない。実際のGPU利用内訳は未計測。
 
@@ -745,4 +745,4 @@ BackendはRAW Artifact、実source adapter、Queue/Runtime、Stop/Retry/recovery
 
 最終監査で既知High/Mediumの未修正コードFindingは残していない。P1の現像/metadata、Native patch、SQLite schema、Frontend、保存契約、JPEG identity、Registrarは変更せず、実環境で再現した原本取得境界だけを修正した。
 
-**P4全体は未完了**。ユーザーの画面操作禁止を優先し、Gallery/Stack/Filmstrip/AnshitsuのQ・保存drain、Export管理のArm/Disarm/Undo/操作競合、実Viewer表示・目視Preview比較は実画面で未確認。自動テスト成功とは分離する。通常WindowsホストでNative実行中/登録中の中断復旧、実Album cleanup障害、その他RAW形式の実素材も未確認。cleanupの成功済みupload非巻戻しは今回の自動回帰でのみ確認した。README/CHANGELOGは正式受入完了として更新しない。
+**P4完了**。利用者による実画面受入によりRAW現像→Q→予約→Export→Immich登録→Stack/COVERの製品本線を確認した。追加Computer Useによる操作は行っていない。ARW/PEF/NEF/CR2/CR3実素材、通常Windows hostのNative/registration中断、実Album cleanup failure、全体RSS/VRAMは未確認のまま残すが、P4の必須条件外とする。cleanup時の成功済みupload保護は関連自動回帰で確認した。README/CHANGELOGは本作業の対象外で変更しない。
