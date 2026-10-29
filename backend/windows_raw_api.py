@@ -89,6 +89,7 @@ class RawPreviewApi:
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
             Route("/workspaces/{workspace}", self.endpoint, methods=["DELETE"]),
+            Route("/edit-status", self.endpoint, methods=["POST"]),
             Route("/assets/{asset_id}/edits/reset", self.endpoint, methods=["POST"]),
             Route("/documents", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}", self.endpoint, methods=["GET", "DELETE"]),
@@ -158,6 +159,21 @@ class RawPreviewApi:
             lightcraft_log('region.owner.started', level='debug')
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
+            if request.method == "POST" and request.url.path.endswith("/edit-status"):
+                if set(body) != {"assetIds"} or not isinstance(body["assetIds"], list) or len(body["assetIds"]) > 100:
+                    raise LightCraftError("raw_invalid_request")
+                try:
+                    asset_ids = [UUID(value) for value in body["assetIds"]]
+                except (ValueError, TypeError, AttributeError):
+                    raise LightCraftError("raw_invalid_request") from None
+                if len({str(asset_id) for asset_id in asset_ids}) != len(asset_ids):
+                    raise LightCraftError("raw_invalid_request")
+                from raw_recipe_store import get_raw_edit_statuses, InvalidRawRecipe, StoreUnavailable
+                try:
+                    edited = await run_in_threadpool(get_raw_edit_statuses, asset_ids)
+                except (InvalidRawRecipe, StoreUnavailable):
+                    raise LightCraftError("raw_recipe_unavailable") from None
+                return JSONResponse({"edited": edited}, headers={"Cache-Control": "no-store"})
             if request.url.path.endswith("/preview/cancel"):
                 return self._cancel_preview(request, body)
             if request.url.path.endswith("/region/cancel"):
@@ -467,6 +483,7 @@ class RawPreviewApi:
                 try:
                     source = await self.cache.download(asset_id)
                     handle, snapshot = await self.raw.open_raw(str(asset_id), str(source))
+                    import_defaults_fingerprint = self._fingerprint(snapshot.settings)
                     snapshot, recipe_status, recipe_revision = await self._restore_document(handle, snapshot)
                 except BaseException:
                     # Import may have partially registered the source; reap before deleting it.
@@ -479,7 +496,8 @@ class RawPreviewApi:
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
-                                 "recipeStatus": recipe_status, "recipeRevision": recipe_revision}
+                                 "recipeStatus": recipe_status, "recipeRevision": recipe_revision,
+                                 "importDefaultsFingerprint": import_defaults_fingerprint}
                 self.document.update(self._edit_budget())
                 self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self.document["recipeFingerprint"] = self.document["settingsFingerprint"]
@@ -662,11 +680,13 @@ class RawPreviewApi:
                 raise LightCraftError("raw_revision_conflict")
             # One immutable transport retry belongs to this document, not a photo snapshot store.
             pending = {"request": body, "settings": snapshot.settings,
-                       "identity": self.raw.recipe_identity(self._raw_handle), "fingerprint": doc["settingsFingerprint"], "settled": False}
+                       "identity": self.raw.recipe_identity(self._raw_handle), "fingerprint": doc["settingsFingerprint"],
+                       "importDefaultsFingerprint": doc["importDefaultsFingerprint"], "settled": False}
             self._recipe_save = pending
         try:
             result = await run_in_threadpool(put_raw_recipe, pending["identity"], body["expectedRecipeRevision"],
-                                             body["saveId"], pending["settings"])
+                                             body["saveId"], pending["settings"],
+                                             import_defaults_fingerprint=pending["importDefaultsFingerprint"])
         except StoreConflict as error:
             if error.code == "raw_history_requires_operation":
                 # The store has rejected this new checkpoint without a receipt or a write.
@@ -952,7 +972,8 @@ class RawPreviewApi:
             self._history_verify(doc)
             if self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
                 raise LightCraftError("raw_history_readback_mismatch")
-            kwargs = {"request_fingerprint": pending["fingerprint"]}
+            kwargs = {"request_fingerprint": pending["fingerprint"],
+                      "import_defaults_fingerprint": doc["importDefaultsFingerprint"]}
             args = (pending["identity"], body["expectedRecipeRevision"], body["saveId"], pending["settings"])
             if action == "initialize":
                 result = await run_in_threadpool(initialize_raw_history, *args, **kwargs)

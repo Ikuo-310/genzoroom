@@ -17,10 +17,10 @@ import editStatusCases from './test-fixtures/edit-status.json';
 vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
   stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
 }) }));
-const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
+const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), rawStatuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
-  getAssetEditStatuses: api.statuses, getAssetEditState: api.editState }));
+  getAssetEditStatuses: api.statuses, getRawAssetEditStatuses: api.rawStatuses, getAssetEditState: api.editState }));
 vi.mock('./ImageViewer', () => ({ ImageViewer: () => <div className="viewer-panel" /> }));
 const assets = Array.from({ length: 100 }, (_, index) => ({ id: `asset-${index}`, filename: `photo-${index}.jpg`,
   date: '2026-09-27', thumbnail_url: `/thumb/${index}`, format: index % 2 ? 'DNG' : 'JPEG', is_raw: !!(index % 2) }));
@@ -91,9 +91,10 @@ beforeEach(async () => {
   writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('recentPhotoCount', 100);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  api.recent.mockReset(); api.statuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
+  api.recent.mockReset(); api.statuses.mockReset(); api.rawStatuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
   api.recent.mockResolvedValue(assets);
   api.statuses.mockResolvedValue(Object.fromEntries(assets.map((asset, index) => [asset.id, index === 0])));
+  api.rawStatuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, false])));
   api.detail.mockImplementation(async (id: string) => {
     const asset = assets.find((candidate) => candidate.id === id)!;
     return { ...asset, preview_url: asset.thumbnail_url, exif: {} };
@@ -108,6 +109,30 @@ afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear
   vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
+  it('uses the persisted RAW Recipe status in the existing badge and edited filter', async () => {
+    const raw = assets[1];
+    api.recent.mockResolvedValue([raw]);
+    api.statuses.mockResolvedValue({ [raw.id]: false });
+    api.rawStatuses.mockResolvedValue({ [raw.id]: true });
+    await mount();
+    expect(host.querySelectorAll('.edited-badge')).toHaveLength(1);
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+    changeEditFilter('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+  });
+
+  it('keeps RAW status acquisition failures unknown instead of filtering them as unedited', async () => {
+    const raw = assets[1];
+    api.recent.mockResolvedValue([raw]);
+    api.statuses.mockResolvedValue({ [raw.id]: false });
+    api.rawStatuses.mockRejectedValue(new Error('unavailable'));
+    await mount();
+    expect(host.querySelectorAll('.edited-badge')).toHaveLength(0);
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+  });
+
   it('does not badge or include standalone History-only assets in the edited filter', async () => {
     const historyOnly = editStatusCases.find(test => test.name === 'redo-only')!;
     api.recent.mockResolvedValue([assets[0]]);

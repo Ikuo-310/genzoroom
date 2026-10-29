@@ -96,6 +96,22 @@ export async function getAssetEditStatuses(assetIds: string[], signal: AbortSign
   return edited as AssetEditStatuses;
 }
 
+export async function getRawAssetEditStatuses(assetIds: string[], signal: AbortSignal): Promise<AssetEditStatuses> {
+  const ids = [...new Set(assetIds)];
+  if (ids.length === 0) return {};
+  const response = await request('/api/raw/edit-status', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds: ids }),
+  });
+  const body = await readResponse(response);
+  if (!isRecord(body) || !isRecord(body.edited)) throw new EditStateApiError('invalid_state');
+  const edited = body.edited;
+  if (Object.keys(edited).length !== ids.length || ids.some(id => !(typeof edited[id] === 'boolean' || edited[id] === null))) {
+    throw new EditStateApiError('invalid_state');
+  }
+  return Object.fromEntries(ids.map(id => [id, edited[id] === null ? undefined : edited[id] as boolean]));
+}
+
 export async function putAssetEditState(assetId: string, snapshot: EditStateSnapshot, expectedRevision: number, saveId: string): Promise<Required<EditStateResponse>> {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 15000);

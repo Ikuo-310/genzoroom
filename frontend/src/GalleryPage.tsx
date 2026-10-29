@@ -231,7 +231,11 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
   const editStatusIds = active ? stackEditStatusIds(editStatusAssets) : [];
-  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds);
+  const rawEditStatusIds = active ? [...new Set(editStatusAssets.flatMap(asset => [
+    ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
+    ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
+  ]))] : [];
+  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds);
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
@@ -1085,7 +1089,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   }
 
   function queueStateFor(asset: RecentAsset, queueSnapshot = exportQueue) {
-    const memberIds = stackEditStatusIds([asset]);
+    const memberIds = asset.stackId
+      ? asset.stackMembers?.filter(member => !member.is_raw).map(member => member.id) ?? []
+      : asset.is_raw ? [] : [asset.id];
     const status = (['encoding', 'registering', 'waiting', 'failed', 'queued'] as const)
       .find(status => memberIds.some(id => queueSnapshot.getStatus(id) === status));
     return { memberIds, status, locked: status === 'waiting' || status === 'encoding' || status === 'registering', busy: queueBatchBusyState || memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!queueSnapshot.mutationFor(id).operation) };
@@ -1351,9 +1357,9 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           queueCurrent={exportQueue.canonical}
           queueStatus={queue.status}
           queueBusy={queue.busy}
-          queueDisabled={!exclusionAllowed}
+          queueDisabled={!exclusionAllowed || queue.memberIds.length === 0}
           queueVisible={queueVisible}
-          onQueueToggle={() => { void toggleQueue(asset); }}
+          onQueueToggle={queue.memberIds.length === 0 ? undefined : () => { void toggleQueue(asset); }}
           stackMenu={asset.stackId ? {
             members: !exclusionState.known ? null : exclusionState.excluded ? [] : stackMembers,
             selectedIds: selectedStackIds,

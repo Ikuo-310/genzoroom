@@ -49,9 +49,9 @@ assert bundles and all(value in "".join(path.read_text() for path in bundles)
                        for value in (expected["channel"], expected["version"], expected["commit"]))
 assert Path("/genzoroom/data/genzoroom.db").is_file()
 with sqlite3.connect("file:/genzoroom/data/genzoroom.db?mode=rw", uri=True) as connection:
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
     connection.execute("SELECT export_timestamp FROM export_run_items LIMIT 0")
-    connection.execute("SELECT develop_settings_json, recipe_revision, last_save_id FROM asset_raw_recipes LIMIT 0")
+    connection.execute("SELECT develop_settings_json, recipe_revision, last_save_id, import_defaults_fingerprint FROM asset_raw_recipes LIMIT 0")
     connection.execute("SELECT save_id, request_hash FROM raw_recipe_saves LIMIT 0")
     connection.execute("SELECT baseline_settings_json, history_cursor, last_save_id FROM asset_raw_histories LIMIT 0")
     connection.execute("SELECT position, step_id, kind, metadata_json, develop_settings_json, created_at, save_id FROM asset_raw_history_steps LIMIT 0")

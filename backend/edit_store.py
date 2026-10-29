@@ -11,7 +11,7 @@ from backend_logging import backend_logger
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from storage import DB_PATH, StorageInitializationError
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE asset_edit_states (
@@ -214,8 +214,15 @@ def _create_v8(connection: sqlite3.Connection) -> None:
     )""")
 
 
+def _create_v9(connection: sqlite3.Connection) -> None:
+    # Older Recipe-only rows have no History baseline from which Home can recover import defaults.
+    connection.execute("""ALTER TABLE asset_raw_recipes ADD COLUMN import_defaults_fingerprint TEXT
+        CHECK (import_defaults_fingerprint IS NULL OR
+            (length(import_defaults_fingerprint) = 64 AND import_defaults_fingerprint NOT GLOB '*[^0-9a-f]*'))""")
+
+
 MIGRATIONS = {0: _create_v1, 1: _create_v2, 2: _create_v3, 3: _create_v4, 4: _create_v5,
-              5: _create_v6, 6: _create_v7, 7: _create_v8}
+              5: _create_v6, 6: _create_v7, 7: _create_v8, 8: _create_v9}
 
 
 def _queue_log(event: str, *, level: str = "info", **context) -> None:

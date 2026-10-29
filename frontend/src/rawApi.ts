@@ -7,7 +7,7 @@ import { C1_REGION_BUDGET, validRegionGeometry, type RegionGeometry } from './ra
 
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
-  recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string;
+  recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string; importDefaultsFingerprint?: string;
   beforeKey?: string | null;
 };
 export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
@@ -35,6 +35,7 @@ export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paint
 export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
 export type RawValues = Record<RawControlId, number>;
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  importDefaultsFingerprint: string;
   sections: Record<RawSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
   values: RawValues; vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
@@ -243,7 +244,8 @@ export async function resetRawEdits(assetId: string, doc?: RawSettings) {
 function settings(value: RawSettings, doc: RawDocument): RawSettings {
   document(value, doc.workspaceId, doc.assetId);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || !fingerprint(value.settingsFingerprint) || value.beforeKey != null && !fingerprint(value.beforeKey) || !integer(value.recipeRevision)
+    || !fingerprint(value.settingsFingerprint) || !fingerprint(value.importDefaultsFingerprint)
+    || value.beforeKey != null && !fingerprint(value.beforeKey) || !integer(value.recipeRevision)
     || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
     || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'

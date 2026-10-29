@@ -398,4 +398,14 @@ describe('Filmstrip Queue buttons', () => {
     expect(host.querySelector('.edited-badge')!.getAttribute('aria-busy')).toBe('true');
     expect(item(0).disabled).toBe(false);
   });
+  it('shows the RAW edited badge without exposing an export queue action', () => {
+    const toggle = vi.fn();
+    const raw = { ...assets[0], is_raw: true, format: 'DNG' };
+    act(() => root.render(<Filmstrip assets={[raw]} activeAssetId="a" onActivate={activate}
+      editStatuses={{ a: true }} queueKnown queueStatusFor={() => undefined} onQueueToggle={toggle} />));
+    const badge = host.querySelector('.edited-badge');
+    expect(badge?.tagName).toBe('SPAN');
+    act(() => badge?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(toggle).not.toHaveBeenCalled();
+  });
 });

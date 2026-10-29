@@ -21,7 +21,8 @@ const adjusted = vi.hoisted(() => vi.fn());
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchAssetDetail: vi.fn(async id => [base, jpeg, rawB].find(asset => asset.id === id)) }));
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
-  getAssetEditState: vi.fn(async () => ({ state: null })), getAssetEditStatuses: vi.fn(async () => ({})) }));
+  getAssetEditState: vi.fn(async () => ({ state: null })), getAssetEditStatuses: vi.fn(async () => ({})),
+  getRawAssetEditStatuses: vi.fn(async () => ({ [rawB.id]: true })) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(), listExportQueue: vi.fn(async () => []) }));
 vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjusted(props); return <div data-jpeg-renderer />; } }));
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
@@ -47,6 +48,8 @@ beforeEach(async () => {
   vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.clearAllMocks(); await i18n.changeLanguage('en');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('Image', class { src = ''; naturalWidth = 16; naturalHeight = 12; decode() { return Promise.resolve(); } removeAttribute() {} });
   vi.stubGlobal('URL', class extends URL { static createObjectURL = () => 'blob:lightcraft'; static revokeObjectURL = vi.fn(); });
@@ -80,6 +83,17 @@ async function clickText(text: string, scope: ParentNode = host) {
   const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!;
   expect(button).toBeDefined(); act(() => button.click()); await flush();
 }
+
+it('uses persisted RAW badges and confirms RAW reset independently of JPEG clipboard support', async () => {
+  const reset = vi.spyOn(rawApi, 'resetRawEdits').mockResolvedValue(undefined);
+  await mount();
+  expect(host.querySelectorAll('.edited-badge').length).toBeGreaterThan(0);
+  await clickText(i18n.t('workspace.rawPreview.editReset'));
+  expect(host.querySelector('dialog')).not.toBeNull();
+  await clickText(i18n.t('workspace.historyContinue'), host.querySelector('dialog')!);
+  expect(reset).toHaveBeenCalledWith(base.id, expect.any(Object));
+  reset.mockRestore();
+});
 function desktop() {
   const respond = vi.fn(async () => {});
   window.__GENZOROOM_DESKTOP__ = { respond };

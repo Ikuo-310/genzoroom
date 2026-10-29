@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 from threading import Barrier
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -28,8 +28,9 @@ def settings(**changes):
     return {**copy.deepcopy(DEFAULT), **changes}
 
 
-def save(key=None, value=None, revision=0, save_id=None):
-    return raw.put_raw_recipe(key or identity(), revision, save_id or uuid4(), value or settings())
+def save(key=None, value=None, revision=0, save_id=None, import_defaults_fingerprint=None):
+    return raw.put_raw_recipe(key or identity(), revision, save_id or uuid4(), value or settings(),
+                              import_defaults_fingerprint=import_defaults_fingerprint)
 
 
 def rows(path, table):
@@ -365,3 +366,58 @@ def test_release_smoke_sqlite_assertions_against_current_database(db):
     module = ast.Module(body=[block], type_ignores=[])
     client = SimpleNamespace(connect=lambda *a, **kw: sqlite3.connect(db))
     exec(compile(module, "release-smoke-sqlite", "exec"), {"sqlite3": client})
+
+
+def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
+    asset_id = UUID(identity()["assetId"])
+    initial = settings()
+    # The native import defaults include As Shot WB and nonzero detail defaults.
+    initial["wb"].update(mode="asShot", temp=4875.0, tint=13.0)
+    assert initial["wb"]["mode"] == "asShot"
+    assert initial["detail"]["sharpen_amount"] != 0
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+
+    saved = save(value=initial)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): None}
+    fingerprint = raw._digest(raw._settings_json(initial, 1))
+    initialized = raw.initialize_raw_history(identity(), saved["revision"], uuid4(), initial,
+                                             import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+
+    changed = copy.deepcopy(initial)
+    changed["disabled_sections"] = ["detail"]
+    changed["detail"]["nr_color"] = 33
+    step_id = uuid4()
+    appended = raw.append_raw_history(identity(), initialized["current"]["revision"], uuid4(), changed,
+                                      kind="sectionToggle", metadata={"section": "detail", "enabled": False},
+                                      step_id=step_id, baseline_settings=initial)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
+
+    reset = raw.append_raw_history(identity(), appended["current"]["revision"], uuid4(), initial,
+                                    kind="allReset", metadata={}, baseline_settings=changed)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+    reverted = raw.move_raw_history_cursor(identity(), reset["current"]["revision"], uuid4(), initial,
+                                           target_step_id=None)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+    assert raw.get_raw_history(identity())["history"]["steps"]
+
+    raw.delete_raw_edits(str(asset_id))
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+
+
+def test_raw_edit_status_keeps_native_baseline_for_legacy_recipe_only_row(db):
+    asset_id = UUID(identity()["assetId"])
+    initial = settings()
+    initial["wb"].update(mode="asShot", temp=4875.0, tint=13.0)
+    changed = copy.deepcopy(initial)
+    changed["detail"]["nr_color"] = 33
+    fingerprint = raw._digest(raw._settings_json(initial, 1))
+
+    saved = save(value=changed, import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
+    # Old Recipe-only rows initialize History from the saved settings; the native baseline remains authoritative.
+    initialized = raw.initialize_raw_history(identity(), saved["revision"], uuid4(), changed,
+                                             import_defaults_fingerprint=fingerprint)
+    assert initialized["current"]["historyLength"] == 0
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
+    assert raw.get_raw_recipe(identity())["importDefaultsFingerprint"] == fingerprint

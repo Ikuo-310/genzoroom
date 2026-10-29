@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEditStateSaveId, getAssetEditState, getAssetEditStatuses, putAssetEditState, EditStateApiError } from './editStateApi';
+import { createEditStateSaveId, getAssetEditState, getAssetEditStatuses, getRawAssetEditStatuses, putAssetEditState, EditStateApiError } from './editStateApi';
 import { createEditStateSnapshot } from './editState';
 import { newSession } from './editing';
 
@@ -34,6 +34,10 @@ describe('edit-state API client', () => {
     vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(0); return bytes; } } as unknown as Crypto);
     const id = createEditStateSaveId();
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+  it('accepts unresolved RAW baselines without certifying them as clean', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ edited: { a: true, b: null } }))));
+    expect(await getRawAssetEditStatuses(['a', 'b'], new AbortController().signal)).toEqual({ a: true, b: undefined });
   });
 
   it('reads an absent or saved state and rejects a mismatched source identity', async () => {

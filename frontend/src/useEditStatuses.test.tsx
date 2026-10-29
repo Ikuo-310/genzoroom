@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssetEditStatuses } from './editStatus';
 import { useEditStatuses, useEditStatusesSnapshot } from './useEditStatuses';
 
-const api = vi.hoisted(() => ({ statuses: vi.fn() }));
-vi.mock('./editStateApi', () => ({ getAssetEditStatuses: api.statuses }));
+const api = vi.hoisted(() => ({ statuses: vi.fn(), rawStatuses: vi.fn() }));
+vi.mock('./editStateApi', () => ({ getAssetEditStatuses: api.statuses, getRawAssetEditStatuses: api.rawStatuses }));
 let host: HTMLDivElement;
 let root: Root;
 function Harness({ ids }: { ids: string[] }) {
@@ -16,6 +16,10 @@ function Harness({ ids }: { ids: string[] }) {
 function StateHarness({ ids }: { ids: string[] }) {
   const snapshot = useEditStatusesSnapshot(ids);
   return <output>{snapshot.state}</output>;
+}
+function RawHarness({ ids, rawIds }: { ids: string[]; rawIds: string[] }) {
+  const statuses = useEditStatuses(ids, rawIds);
+  return <output>{ids.map(id => statuses[id] === undefined ? 'unknown' : statuses[id] ? 'edited' : 'clean').join(',')}</output>;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -29,6 +33,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.statuses.mockReset();
+  api.rawStatuses.mockReset();
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -51,6 +56,16 @@ describe('useEditStatuses batches', () => {
     await render(ids);
     expect(api.statuses.mock.calls.map(([batch]) => batch.length)).toEqual([100]);
     expect(host.querySelector('output')!.textContent!.split(',')).toEqual(Array(100).fill('edited'));
+  });
+
+  it('merges persisted RAW statuses with JPEG statuses and preserves unknown failures', async () => {
+    api.statuses.mockImplementation(async (batch: string[]) => Object.fromEntries(batch.map(id => [id, false])));
+    api.rawStatuses.mockImplementation(async (batch: string[]) => Object.fromEntries(batch.map(id => [id,
+      id === 'raw-edited' ? true : id === 'raw-clean' ? false : undefined])));
+    await act(async () => root.render(<RawHarness ids={['jpeg', 'raw-edited', 'raw-clean', 'raw-unknown']}
+      rawIds={['raw-edited', 'raw-clean', 'raw-unknown']} />));
+    expect(api.rawStatuses).toHaveBeenCalledWith(['raw-edited', 'raw-clean', 'raw-unknown'], expect.any(AbortSignal));
+    expect(host.querySelector('output')!.textContent).toBe('clean,edited,clean,unknown');
   });
 
   it('splits 150 assets into 100 and 50 and merges both results', async () => {

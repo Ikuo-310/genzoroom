@@ -49,6 +49,21 @@ async def open_document(http):
     return workspace, response.json()
 
 
+def test_raw_edit_status_route_uses_raw_store_without_open_workspace(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                asset_id = str(uuid4())
+                response = await http.post("/api/raw/edit-status", json={"assetIds": [asset_id]})
+                assert response.status_code == 200, response.text
+                assert response.json() == {"edited": {asset_id: False}}
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def preview_body(doc, serial=1):
     return {key: doc[key] for key in ("workspaceId", "generation", "documentToken", "revision")} | {"serial": serial}
 
@@ -101,6 +116,7 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                 workspace, doc = await open_document(http)
                 assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId",
                                     "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint",
+                                    "importDefaultsFingerprint",
                                     "mutationAttempts", "mutationLimit", "regenerationThreshold", "beforeKey"}
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})

@@ -97,7 +97,7 @@ export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onA
           : <EditedBadge edited={editStatuses[asset.id]} queueKnown={queueKnown} queueCurrent={queueCurrent}
           queueStatus={queueStatusFor?.(asset.id)} busy={queueBusyFor?.(asset.id)}
           disabled={disabled || keyboardBlocked}
-          onQueueToggle={onQueueToggle ? () => onQueueToggle(asset.id) : undefined} />}
+          onQueueToggle={onQueueToggle && !asset.is_raw ? () => onQueueToggle(asset.id) : undefined} />}
         {onExclude && <button type="button" className="filmstrip-exclude"
           disabled={disabled || keyboardBlocked || excludeDisabled || assets.length <= 1 || excludeBusyFor?.(asset.id)}
           aria-label={t('workspace.excludePhoto', { filename: asset.filename })}

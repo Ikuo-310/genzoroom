@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RecentAsset } from './assets';
-import { collapseImmichStacks } from './immichStacks';
+import { aggregateStackEditStatuses, collapseImmichStacks, filterImmichStacksByEditStatus } from './immichStacks';
 
 function asset(id: string, stackId?: string | null, primaryAssetId?: string | null): RecentAsset {
   return { id, stackId, primaryAssetId, filename: `${id}.jpg`, date: '2026-09-01',
@@ -72,5 +72,16 @@ describe('Immich stack display collapse', () => {
     expect(collapseImmichStacks(input)).toEqual([x, primary, y]);
     expect(input.map(a => a.id)).toEqual(['x', 'b', 'a', 'y']);
     expect(collapseImmichStacks(input)[1]).toBe(input[2]);
+  });
+});
+
+describe('stack edit status aggregation', () => {
+  it('uses any edited member and preserves unknown members for conservative filtering', () => {
+    const raw = { ...member, filename: 'member.dng', format: 'DNG', is_raw: true };
+    const card = { ...primary, stackMemberIds: [primary.id, raw.id], stackAssetCount: 2 };
+    expect(aggregateStackEditStatuses([card], { [primary.id]: false, [raw.id]: true })[primary.id]).toBe(true);
+    expect(filterImmichStacksByEditStatus([card], 'edited', { [primary.id]: false, [raw.id]: true })).toEqual([card]);
+    expect(filterImmichStacksByEditStatus([card], 'edited', { [primary.id]: false, [raw.id]: undefined })).toEqual([card]);
+    expect(filterImmichStacksByEditStatus([card], 'unedited', { [primary.id]: false, [raw.id]: undefined })).toEqual([card]);
   });
 });

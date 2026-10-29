@@ -40,14 +40,22 @@ def dump(db):
     return {table: rows(db, table) for table in TABLES}
 
 
-@pytest.mark.parametrize("version", range(1, 8))
+@pytest.mark.parametrize("version", range(1, 9))
 def test_migration_preserves_all_existing_rows_and_columns(db, version):
     before = old_database(db, version)
     if version == 7:
         with closing(sqlite3.connect(db)) as connection:
+            edit_store.MIGRATIONS[7](connection)
+            connection.execute("PRAGMA user_version=8")
             encoded = edit_store._json(value())
-            raw._write_recipe(connection, identity(), None, 0, str(uuid4()), encoded,
-                              raw._request_hash(identity(), encoded, 0))
+            save_id, timestamp = str(uuid4()), "2026-10-22T00:00:00.000Z"
+            connection.execute("INSERT INTO raw_recipe_saves VALUES (?, ?, 1, ?)",
+                               (save_id, raw._request_hash(identity(), encoded, 0), timestamp))
+            connection.execute("""INSERT INTO asset_raw_recipes
+                (asset_id, source_content_hash, engine_name, engine_version, engine_commit,
+                 settings_schema_version, develop_settings_json, recipe_revision, last_save_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                (*identity().values(), encoded, save_id, timestamp))
             connection.commit()
         for table in ("asset_raw_recipes", "raw_recipe_saves"):
             with closing(sqlite3.connect(db)) as connection:
@@ -56,11 +64,33 @@ def test_migration_preserves_all_existing_rows_and_columns(db, version):
     edit_store.initialize_database()
     storage.validate_existing_database(db)
     with closing(sqlite3.connect(db)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
         for table, (columns, previous) in before.items():
             assert connection.execute(f"SELECT {','.join(columns)} FROM {table}").fetchall() == previous
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
     assert all(not rows(db, table) for table in TABLES[2:])
+
+
+def test_v9_migration_preserves_legacy_raw_recipe_and_leaves_fingerprint_unknown(db):
+    old_database(db, 8)
+    legacy_id, timestamp = str(uuid4()), "2026-10-22T00:00:00.000Z"
+    encoded = edit_store._json(value())
+    digest = "a" * 64
+    with closing(sqlite3.connect(db)) as connection:
+        connection.execute("""INSERT INTO asset_raw_recipes VALUES
+            (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            (*identity().values(), encoded, legacy_id, timestamp))
+        connection.execute("INSERT INTO raw_recipe_saves VALUES (?, ?, 1, ?)", (legacy_id, digest, timestamp))
+        connection.commit()
+        old_columns = [row[1] for row in connection.execute("PRAGMA table_info(asset_raw_recipes)")]
+        old_row = connection.execute("SELECT * FROM asset_raw_recipes").fetchone()
+
+    storage.validate_existing_database(db)
+    edit_store.initialize_database()
+    with closing(sqlite3.connect(db)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute(f"SELECT {','.join(old_columns)} FROM asset_raw_recipes").fetchone() == old_row
+        assert connection.execute("SELECT import_defaults_fingerprint FROM asset_raw_recipes").fetchone() == (None,)
 
 
 @pytest.mark.parametrize("version", [1, 6, 7])

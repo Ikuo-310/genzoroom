@@ -6,6 +6,7 @@ const controlDefaults: Partial<RawValues> = { 'detail.nrDetail': 50, 'detail.nrC
 export function rawSettings(doc: RawDocument): RawSettings {
   return { ...doc, settingsFingerprint: doc.settingsFingerprint ?? String(doc.revision).padStart(64, '0'),
     recipeRevision: doc.recipeRevision ?? 0, recipeFingerprint: doc.recipeFingerprint ?? null,
+    importDefaultsFingerprint: doc.importDefaultsFingerprint ?? 'b'.repeat(64),
     mutationAttempts: 0, mutationLimit: 256, regenerationThreshold: 200,
     process: 2, vignetteStyle: 'highlightPriority', wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, effects: true, detail: true },
     values: Object.fromEntries(RAW_CONTROL_IDS.map(id => [id, id === 'wb.temp' ? 6500 : id === 'detail.sharpenAmount' ? 40

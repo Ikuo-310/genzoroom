@@ -86,7 +86,11 @@ export function AnshitsuPage() {
   const [excludeFailure, setExcludeFailure] = useState(false);
   const activeRouteRef = useRef(assetId);
   activeRouteRef.current = assetId;
-  const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id));
+  const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id),
+    [...new Set(selectedAssets.flatMap(asset => [
+      ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
+      ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
+    ]))]);
   const exportQueue = useExportQueue();
   const queueToggleRef = useRef<(id: string) => Promise<void>>(async () => {});
   const queueOperations = useRef(new Set<string>());
@@ -222,6 +226,9 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
+  const rawResetEnabled = !!activeDetail?.is_raw && !!rawDocument && !rawDocument.resetting
+    && (rawDocument.status === 'error' || !rawDocument.saving && !rawDocument.pending && !rawDocument.regenerating)
+    && !switching && !exitSaving && !failedSwitch && !exitFailure;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (workspaceKeyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
@@ -264,8 +271,9 @@ export function AnshitsuPage() {
   useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
   useEffect(() => {
     if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); }
-    if (!clipboardEnabled) setHistoryConfirmation(null);
-  }, [historyEnabled, clipboardEnabled]);
+    // RAW reset owns a separate availability gate because JPEG clipboard support excludes RAW.
+    if (historyConfirmation?.operation === 'resetRaw' ? !rawResetEnabled : !clipboardEnabled) setHistoryConfirmation(null);
+  }, [historyEnabled, clipboardEnabled, rawResetEnabled, historyConfirmation]);
 
   function openHistoryMenu(cursor: number | undefined, trigger: HTMLElement, x?: number, y?: number) {
     if (!historyEnabled || switchingRef.current || exitRef.current) return;
@@ -305,7 +313,8 @@ export function AnshitsuPage() {
 
   function confirmHistoryOperation() {
     const request = historyConfirmation;
-    if (request && request.assetId === assetId && clipboardEnabled && !selection && !switchingRef.current && !exitRef.current) {
+    if (request && request.assetId === assetId && (request.operation === 'resetRaw' ? rawResetEnabled : clipboardEnabled)
+      && !selection && !switchingRef.current && !exitRef.current) {
       if (request.operation === 'resetRaw') void rawDocument?.resetEdits().catch(() => {});
       else if (!organizeHistory(request.operation)) setHistoryError(true);
     }
@@ -853,8 +862,12 @@ export function AnshitsuPage() {
       </>}
       filmstrip={<Filmstrip
         assets={visibleAssets}
-        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
-        historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, localStateFor(asset.id).historyOnly]))}
+        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.is_raw
+          ? asset.id === assetId && rawDocument?.settings
+            ? rawDocument.settings.settingsFingerprint !== rawDocument.settings.importDefaultsFingerprint
+            : savedEditStatuses[asset.id]
+          : localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
+        historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, !asset.is_raw && localStateFor(asset.id).historyOnly]))}
         activeAssetId={assetId}
         recipeChangeRevision={recipeChangeRevision}
         disabled={switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null}
@@ -867,7 +880,7 @@ export function AnshitsuPage() {
         queueCurrent={exportQueue.canonical}
         queueStatusFor={exportQueue.getStatus}
         queueBusyFor={id => queueBusy.has(id) || !!exportQueue.mutationFor(id).operation || localStateFor(id).saving}
-        onQueueToggle={id => { void queueToggleRef.current(id); }}
+        onQueueToggle={id => { if (!selectedAssets.find(asset => asset.id === id)?.is_raw) void queueToggleRef.current(id); }}
         onActivate={(nextId) => { void activateAsset(nextId); }}
       />}
     />

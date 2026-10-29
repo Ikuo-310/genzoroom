@@ -145,6 +145,14 @@ def _metadata(row):
     return revision, updated
 
 
+def _import_defaults_fingerprint(value):
+    if value is None:
+        return None
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise InvalidRawRecipe()
+    return value
+
+
 def _result(identity, encoded, revision, save_id, updated):
     return {"recipe": {**identity, "settings": json.loads(encoded)}, "revision": revision,
             "lastSaveId": save_id, "updatedAt": updated}
@@ -165,6 +173,7 @@ def _read_row(connection, identity):
         settings = json.loads(encoded, object_pairs_hook=_pairs)
         encoded = _settings_json(settings, identity["settingsSchemaVersion"])
         revision, updated = _metadata(row)
+        defaults_fingerprint = _import_defaults_fingerprint(row["import_defaults_fingerprint"])
         save_id = _uuid(row["last_save_id"])
         if save_id != row["last_save_id"]:
             raise InvalidRawRecipe()
@@ -172,7 +181,8 @@ def _read_row(connection, identity):
         if receipt is None or _metadata(receipt) != (revision, updated) or \
                 receipt["request_hash"] != _request_hash(identity, encoded, revision - 1):
             raise InvalidRawRecipe()
-        return _result(identity, encoded, revision, save_id, updated)
+        return _result(identity, encoded, revision, save_id, updated) | {
+            "importDefaultsFingerprint": defaults_fingerprint}
     except (ValueError, TypeError, KeyError, IndexError, RecursionError, UnicodeError):
         # Corrupt persisted content must not authorize an overwrite or leak its contents.
         raise StoreUnavailable() from None
@@ -189,6 +199,44 @@ def get_raw_recipe(identity: dict) -> dict:
             _read_history(connection, identity, result)
             connection.commit()
             return {"recipe": None} if result is None else result
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def get_raw_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool | None]:
+    """Compare each saved Recipe with its verified import-default History baseline."""
+    result: dict[str, bool | None] = {str(asset_id): False for asset_id in asset_ids}
+    if not result:
+        return result
+    placeholders = ",".join("?" for _ in result)
+    with _connection() as connection:
+        connection.execute("BEGIN")
+        try:
+            rows = connection.execute(
+                f"""SELECT * FROM asset_raw_recipes WHERE asset_id IN ({placeholders})
+                ORDER BY updated_at DESC, recipe_revision DESC""", tuple(result)
+            ).fetchall()
+            seen: set[str] = set()
+            for row in rows:
+                asset_id = row["asset_id"]
+                if asset_id in seen:
+                    continue
+                identity = dict(zip(IDENTITY_FIELDS, (row[column] for column in IDENTITY_COLUMNS)))
+                current = _read_row(connection, identity)
+                history = _read_history(connection, identity, current)
+                if current is None:
+                    raise StoreUnavailable()
+                seen.add(asset_id)
+                # A legacy Recipe without a verified import baseline cannot safely be called clean.
+                defaults_fingerprint = current.get("importDefaultsFingerprint")
+                result[asset_id] = (
+                    _digest(_settings_json(current["recipe"]["settings"], identity["settingsSchemaVersion"])) != defaults_fingerprint
+                    if defaults_fingerprint is not None else None if history is None else
+                    _json(current["recipe"]["settings"]) != _json(history["baselineSettings"])
+                )
+            connection.commit()
+            return result
         except Exception:
             connection.rollback()
             raise
@@ -267,12 +315,14 @@ def delete_raw_edits(asset_id: str) -> dict:
             raise
 
 
-def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict) -> dict:
+def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict,
+                   *, import_defaults_fingerprint: str | None = None) -> dict:
     """Atomically save confirmed readback; a saveId binds the entire normalized request forever."""
     identity = normalize_identity(identity)
     if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
         raise InvalidRawRecipe()
     save_id = _uuid(save_id)
+    import_defaults_fingerprint = _import_defaults_fingerprint(import_defaults_fingerprint)
     encoded = _settings_json(settings, identity["settingsSchemaVersion"])
     digest = _request_hash(identity, encoded, expected_revision)
     with _connection() as connection:
@@ -296,13 +346,15 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
                     raise StoreUnavailable()
                 connection.commit()
                 # Return the original ack even after newer saves, without rolling the current row back.
-                return _result(identity, encoded, revision, save_id, updated)
+                return _result(identity, encoded, revision, save_id, updated) | {
+                    "importDefaultsFingerprint": current.get("importDefaultsFingerprint")}
             if (0 if current is None else current["revision"]) != expected_revision:
                 raise StoreConflict()
             # A checkpoint may advance the receipt, but cannot rewrite an immutable History step.
             if history is not None and encoded != _settings_json(current["recipe"]["settings"], identity["settingsSchemaVersion"]):
                 raise StoreConflict("raw_history_requires_operation")
-            _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest)
+            _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest,
+                          import_defaults_fingerprint)
             result = _read_row(connection, identity)
             connection.commit()
             return result
@@ -311,19 +363,24 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
             raise
 
 
-def _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest):
+def _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest,
+                  import_defaults_fingerprint=None):
     """Share the existing CAS write without owning a second transaction."""
     revision = expected_revision + 1
     updated = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     connection.execute("INSERT INTO raw_recipe_saves VALUES (?, ?, ?, ?)",
                        (save_id, digest, revision, updated))
     if current is None:
-        connection.execute("INSERT INTO asset_raw_recipes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                           (*identity.values(), encoded, revision, save_id, updated))
+        columns = ",".join((*IDENTITY_COLUMNS, "develop_settings_json", "recipe_revision", "last_save_id",
+                            "updated_at", "import_defaults_fingerprint"))
+        connection.execute(f"INSERT INTO asset_raw_recipes ({columns}) VALUES ({','.join(['?'] * 11)})",
+                           (*identity.values(), encoded, revision, save_id, updated, import_defaults_fingerprint))
     else:
         changed = connection.execute(f"""UPDATE asset_raw_recipes SET develop_settings_json=?,
-            recipe_revision=?, last_save_id=?, updated_at=? WHERE {KEY_WHERE} AND recipe_revision=?""",
-            (encoded, revision, save_id, updated, *identity.values(), expected_revision)).rowcount
+            recipe_revision=?, last_save_id=?, updated_at=?,
+            import_defaults_fingerprint=COALESCE(import_defaults_fingerprint, ?)
+            WHERE {KEY_WHERE} AND recipe_revision=?""",
+            (encoded, revision, save_id, updated, import_defaults_fingerprint, *identity.values(), expected_revision)).rowcount
         if changed != 1:
             raise StoreConflict()
     return revision, updated
@@ -553,23 +610,29 @@ def get_raw_history(identity: dict, *, initial_settings: dict | None = None) -> 
             raise
 
 
-def initialize_raw_history(identity, expected_revision, save_id, settings, *, request_fingerprint=None):
+def initialize_raw_history(identity, expected_revision, save_id, settings, *, request_fingerprint=None,
+                           import_defaults_fingerprint=None):
     """Persist a baseline checkpoint, not an invented editing operation."""
-    return _save_history(identity, expected_revision, save_id, settings, {"type": "initialize"}, None, request_fingerprint)
+    return _save_history(identity, expected_revision, save_id, settings, {"type": "initialize"}, None,
+                         request_fingerprint, import_defaults_fingerprint)
 
 
 def append_raw_history(identity, expected_revision, save_id, settings, *, kind, metadata=None,
-                       step_id=None, baseline_settings=None, request_fingerprint=None):
+                       step_id=None, baseline_settings=None, request_fingerprint=None,
+                       import_defaults_fingerprint=None):
     """Append one confirmed operation; supply the initial readback for an unsaved RAW."""
     operation = {"type": "append", "kind": kind, "metadata": {} if metadata is None else metadata,
                  "stepId": _history_uuid(save_id if step_id is None else step_id)}
-    return _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint)
+    return _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings,
+                         request_fingerprint, import_defaults_fingerprint)
 
 
-def move_raw_history_cursor(identity, expected_revision, save_id, settings, *, target_step_id, request_fingerprint=None):
+def move_raw_history_cursor(identity, expected_revision, save_id, settings, *, target_step_id, request_fingerprint=None,
+                            import_defaults_fingerprint=None):
     """Confirm Undo/Redo/jump readback against a stable step UUID; None selects baseline."""
     return _save_history(identity, expected_revision, save_id, settings,
-                         {"type": "move", "targetStepId": target_step_id}, None, request_fingerprint)
+                         {"type": "move", "targetStepId": target_step_id}, None, request_fingerprint,
+                         import_defaults_fingerprint)
 
 
 def _history_summary(current, history):
@@ -611,11 +674,13 @@ def get_raw_history_save(identity, save_id, *, request_fingerprint):
             raise
 
 
-def _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint):
+def _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint,
+                  import_defaults_fingerprint=None):
     identity = normalize_identity(identity)
     if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
         raise InvalidRawHistory()
     save_id = _history_uuid(save_id)
+    import_defaults_fingerprint = _import_defaults_fingerprint(import_defaults_fingerprint)
     operation = _operation(operation)
     encoded = _settings_json(settings, identity["settingsSchemaVersion"])
     baseline = None if baseline_settings is None else _settings_json(baseline_settings, identity["settingsSchemaVersion"])
@@ -687,7 +752,8 @@ def _save_history(identity, expected_revision, save_id, settings, operation, bas
             elif encoded != _json(previous_settings):
                 raise StoreConflict("raw_history_readback_mismatch")
             # A no-op retains the Redo branch, but still receipts its saveId through the shared CAS.
-            revision, updated = _write_recipe(connection, identity, current, expected_revision, save_id, encoded, recipe_digest)
+            revision, updated = _write_recipe(connection, identity, current, expected_revision, save_id, encoded,
+                                              recipe_digest, import_defaults_fingerprint)
             if changed and operation["type"] == "append":
                 history["steps"][-1]["createdAt"] = updated
             ack = {"saveId": save_id, "revision": revision, "updatedAt": updated,
