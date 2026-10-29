@@ -86,3 +86,6 @@ Desktop.ini
 /desktop/target/
 /desktop/packaging/.venv/
 /desktop/gen/
+
+# Generated Tauri frontend assets; synchronized from frontend/dist by build scripts.
+/desktop/assets/

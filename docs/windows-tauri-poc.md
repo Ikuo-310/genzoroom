@@ -57,14 +57,15 @@ application/
 
 ## 自動起動（通常）
 
-Frontendをビルドした後、Tauriを起動します。Immich環境変数は不要で、設定されていても通常モードでは使用しません。既に動いているBackendがある場合は、その所有者側で保存・停止を完了してください。既存Backendを自動で再利用したり停止したりしません。
+リポジトリ直下から次の1コマンドで開発版をビルド・起動します。スクリプトはFrontendをビルドし、出力をTauriの`desktop/assets`へ同期してファイル一覧とSHA-256を照合した後、`cargo run --locked`でDesktopを差分ビルドします。`desktop/assets`はFrontendから再生成するためGit管理せず、配布ビルドも同じ出力を同期します。Desktop開発構成は`.venv`のPythonから現在の作業ツリーにある`backend/windows_local.py --desktop --managed`を直接起動するため、Backendの再ビルドや依存関係の再インストールは行いません。LightCraftは既存manifestと開発用自動探索・receipt検証を使い、再ビルドしません。Immich環境変数は不要です。ビルド中の競合を避けるため、GenzoRoomが起動中なら先に終了してください。
+
+スクリプトはWindows PowerShell 5.1で実行でき、PowerShell 7のインストールは不要です。
 
 ```powershell
-Set-Location I:\code\genzoroom\frontend
-npm run build
-Set-Location ..
-cargo run --manifest-path desktop/Cargo.toml --locked
+I:\code\genzoroom\run-dev.ps1
 ```
+
+このコマンドはFrontendまたはDesktopのビルド失敗時に停止し、古いEXEを起動しません。旧手順のEXE直接起動は、既にビルドされた成果物の実行であり、最新ソースの反映を保証しません。
 
 Rustは固定したPythonパスと引数を直接起動し、シェル経由のコマンドを組み立てません。作業ディレクトリは`backend`、起動経路は`windows_local.py --desktop --managed`です。起動固有IDを私有パイプで渡し、そのIDを含むDPAPI情報とHMAC照合に成功してからウィンドウを開きます。Pythonが資格情報マネージャーからAPIキーを読み、mainのimport前にそのプロセス内の既存Immich環境変数へ設定します。Rustへ秘密を返さず、コマンド引数やハンドオフにも含めません。固定ポート3191の競合、30秒の起動待ちタイムアウト、起動失敗は固定エラーコードで終了します。
 

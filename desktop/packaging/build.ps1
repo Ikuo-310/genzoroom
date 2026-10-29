@@ -50,6 +50,10 @@ try {
     $env:VITE_GENZOROOM_COMMIT = $commit
     Push-Location (Join-Path $repository 'frontend')
     try { Invoke-Checked 'npm' @('ci'); Invoke-Checked 'npm' @('run','build') } finally { Pop-Location }
+    $desktopAssets = Join-Path $repository 'desktop/assets'
+    New-Item -ItemType Directory -Path $desktopAssets -Force | Out-Null
+    & robocopy.exe (Join-Path $repository 'frontend/dist') $desktopAssets /MIR /COPY:DAT /DCOPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP
+    if ($LASTEXITCODE -ge 8) { throw "Tauri Frontend asset sync failed with robocopy exit code $LASTEXITCODE." }
     Invoke-Checked $packagePython @((Join-Path $PSScriptRoot 'package_backend.py'),'--output',$run,'--commit',$commit,
         '--channel',$distributionChannel,'--version',$distributionVersion)
     $backend = Join-Path $run 'dist/genzoroom-backend'
