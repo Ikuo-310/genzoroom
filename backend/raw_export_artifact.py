@@ -299,6 +299,7 @@ class RawExportInput:
     family_filenames: tuple[str, ...]
     settings: dict
     timestamp: datetime
+    expected_content_hash: str | None = None
 
 
 async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_root=None):
@@ -354,6 +355,11 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                     raise RawExportError("raw_export_invalid_import")
                 photo = ids[0]
                 await tool("select_photos", {"ids": [photo], "active": photo})
+                if request.expected_content_hash is not None:
+                    # Bind the frozen Recipe to its input; output byte determinism is unrelated.
+                    info = await command("photo.inspect", {"id": photo})
+                    if not isinstance(info, dict) or info.get("content_hash") != request.expected_content_hash:
+                        raise RawExportError("raw_export_source_mismatch")
                 await command("develop.reset", {"ids": [photo]})
                 await command("develop.merge", {"settings": settings})
                 if await tool("get_develop", {"id": photo}) != settings:

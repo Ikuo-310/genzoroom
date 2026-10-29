@@ -431,6 +431,19 @@ def list_export_queue() -> list[dict]:
         raise
 
 
+def _export_saved_state(connection, asset_id):
+    from raw_recipe_store import select_raw_export_state
+    raw = select_raw_export_state(connection, asset_id)
+    if raw is not None:
+        return raw
+    saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
+    return None if saved is None else _snapshot(saved, asset_id) | {"revision": saved["revision"]}
+
+
+def _export_eligible(state):
+    return state is not None and (state["exportEligible"] is True if "exportEligible" in state else has_non_default_recipe(state))
+
+
 def enqueue_export_assets(asset_ids: list[UUID]) -> list[dict]:
     started = monotonic()
     try:
@@ -441,14 +454,10 @@ def enqueue_export_assets(asset_ids: list[UUID]) -> list[dict]:
         with _connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                placeholders = ",".join("?" for _ in asset_ids)
                 ids = [str(asset_id) for asset_id in asset_ids]
-                rows = {row["asset_id"]: row for row in connection.execute(
-                    f"SELECT * FROM asset_edit_states WHERE asset_id IN ({placeholders})", ids)}
-                # Validate the entire batch under the writer lock before inserting any item.
+                # Eligibility and insertion share the writer transaction for JPEG and RAW.
                 for asset_id in asset_ids:
-                    row = rows.get(str(asset_id))
-                    if row is None or not has_non_default_recipe(_snapshot(row, asset_id)):
+                    if not _export_eligible(_export_saved_state(connection, asset_id)):
                         raise QueueRejected("asset_not_eligible")
                 now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                 added = 0

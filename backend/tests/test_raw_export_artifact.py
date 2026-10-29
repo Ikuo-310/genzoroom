@@ -90,7 +90,7 @@ def test_cyclic_ifd_rejected():
         extract_raw_metadata(bytes(raw))
 
 
-@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable'])
+@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch'])
 def test_isolated_session_cleanup(tmp_path, mode):
     from raw_export_artifact import RawExportInput, export_raw_artifact
     settings = {'process': 5, 'test': 'saved'}
@@ -108,6 +108,8 @@ def test_isolated_session_cleanup(tmp_path, mode):
             events.append('close')
         async def call_tool_result(self, name, args, **kwargs):
             value = {}
+            if name == 'command_run' and args['id'] == 'photo.inspect':
+                value = {'content_hash': 'different' if mode == 'source_mismatch' else 'expected'}
             if name == 'import':
                 assert Path(args['paths'][0]).is_file()
                 assert Path(args['paths'][0]).name == ('sample.CR3' if mode == 'non_tiff' else 'source.dng')
@@ -134,17 +136,18 @@ def test_isolated_session_cleanup(tmp_path, mode):
             return Owned()
     raw = b'unsupported metadata container' if mode == 'non_tiff' else source()
     filename = 'sample.CR3' if mode == 'non_tiff' else 'source.dng'
-    request = RawExportInput(raw, filename, (), settings, datetime.now(timezone.utc))
+    request = RawExportInput(raw, filename, (), settings, datetime.now(timezone.utc),
+        expected_content_hash='expected' if mode in ('source_match','source_mismatch') else None)
     async def run():
         return await export_raw_artifact(request, manager=Manager(), temp_root=tmp_path)
-    if mode in ('success', 'non_tiff'):
+    if mode in ('success', 'non_tiff', 'source_match'):
         result = asyncio.run(run())
         assert result.filename == ('sample-Genzo01.jpg' if mode == 'non_tiff' else 'source-Genzo01.jpg')
         with Image.open(BytesIO(result.jpeg)) as image:
             assert image.getexif()[305] == 'GenzoRoom'
             assert image.getexif()[274] == 1
     else:
-        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode in ('mismatch', 'unreadable') else RuntimeError
+        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode in ('mismatch', 'unreadable', 'source_mismatch') else RuntimeError
         with pytest.raises(expected):
             asyncio.run(run())
     assert events == ['start', 'close']

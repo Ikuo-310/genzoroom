@@ -6,12 +6,13 @@ import json
 from uuid import UUID, uuid4
 
 from backend_logging import backend_logger
-from edit_state import InvalidEditState, PROCESSING_VERSION, RECIPE_VERSION, _recipe, has_non_default_recipe
-from edit_store import StoreUnavailable, _connection, _json, _queue_items, _snapshot
+from edit_state import InvalidEditState, PROCESSING_VERSION, RECIPE_VERSION, _recipe
+from edit_store import StoreUnavailable, _connection, _json, _queue_items, _export_saved_state, _export_eligible
+from raw_recipe_store import RAW_EXPORT_PROCESSING_VERSION, validate_raw_recipe, InvalidRawRecipe
 
 
 ACTIVE_ITEM_STATUSES = frozenset(("waiting", "encoding", "registering"))
-FAILURE_CODES = frozenset(("source_fetch_failed", "source_not_jpeg", "family_context_failed",
+FAILURE_CODES = frozenset(("source_fetch_failed", "source_not_jpeg", "source_kind_mismatch", "family_context_failed",
                            "encoding_failed", "registration_failed", "invalid_registration_result",
                            "invalid_jpeg", "not_jpeg", "invalid_icc_profile", "unsupported_jpeg_color_space",
                            "jpeg_encode_failed", "invalid_export_filename", "invalid_export_timestamp",
@@ -59,6 +60,10 @@ class ExportRunItem:
     updated_at: str
     export_timestamp: str
 
+    @property
+    def kind(self):
+        return "raw" if self.processing_version == RAW_EXPORT_PROCESSING_VERSION else "jpeg"
+
 
 @dataclass(frozen=True)
 class ExportRun:
@@ -81,9 +86,14 @@ def _read_run(connection, run_id):
             raise ValueError()
         items = []
         for item in connection.execute("SELECT * FROM export_run_items WHERE run_id=? ORDER BY position", (str(run_id),)):
-            recipe = _recipe(json.loads(item["frozen_recipe_json"]), RECIPE_VERSION)
+            raw = item["processing_version"] == RAW_EXPORT_PROCESSING_VERSION
+            payload = json.loads(item["frozen_recipe_json"])
+            recipe = validate_raw_recipe(payload) if raw else _recipe(payload, RECIPE_VERSION)
+            version_valid = (
+                item["recipe_version"] == recipe["settingsSchemaVersion"] and recipe["assetId"] == item["asset_id"]
+                if raw else item["recipe_version"] == RECIPE_VERSION and item["processing_version"] == PROCESSING_VERSION)
             if item["position"] != len(items) or item["frozen_revision"] < 1 or item["queue_id"] < 1 \
-                    or item["recipe_version"] != RECIPE_VERSION or item["processing_version"] != PROCESSING_VERSION \
+                    or not version_valid \
                     or item["status"] not in (*ACTIVE_ITEM_STATUSES, "succeeded", "failed", "released") \
                     or (item["status"] == "failed") != (item["error_code"] in FAILURE_CODES) \
                     or (item["status"] != "failed" and item["error_code"] is not None) \
@@ -127,7 +137,7 @@ def _read_run(connection, run_id):
                     raise ValueError()
         return ExportRun(UUID(row["run_id"]), row["status"], UUID(row["worker_id"]) if row["worker_id"] else None,
                          _timestamp(row["created_at"]), _timestamp(row["updated_at"]), tuple(items), bool(row["stop_requested"]), current)
-    except (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError, InvalidEditState) as error:
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError, InvalidEditState, InvalidRawRecipe) as error:
         raise StoreUnavailable() from error
 
 
@@ -168,14 +178,14 @@ def create_export_run(asset_ids: list[UUID], *, worker_id: UUID | None = None) -
                         raise RuntimeRejected("queue_item_missing")
                     if queue["status"] != "queued":
                         raise RuntimeRejected("queue_item_not_queued")
-                    saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
-                    if saved is None:
+                    state = _export_saved_state(connection, asset_id)
+                    if state is None:
                         raise RuntimeRejected("saved_recipe_missing")
-                    state = _snapshot(saved, asset_id)
-                    if not has_non_default_recipe(state):
+                    if not _export_eligible(state):
                         raise RuntimeRejected("asset_not_eligible")
-                    if state["recipeVersion"] != RECIPE_VERSION:
+                    if state["processingVersion"] != RAW_EXPORT_PROCESSING_VERSION and state["recipeVersion"] != RECIPE_VERSION:
                         raise RuntimeRejected("unsupported_recipe_version")
+                    saved = state
                     if type(saved["revision"]) is not int or saved["revision"] < 1:
                         raise StoreUnavailable()
                     snapshots.append((queue, saved, state))
@@ -191,9 +201,8 @@ def create_export_run(asset_ids: list[UUID], *, worker_id: UUID | None = None) -
                                    (str(run_id), str(worker_id) if worker_id else None, now, now))
                 # Targets, frozen recipes and waiting locks become visible at one commit.
                 for position, (queue, saved, state) in enumerate(snapshots):
-                    # A failed registration may have uploaded already. Reuse its checksum identity
-                    # only for this Queue entry and frozen snapshot; edits/re-enqueues are new exports.
-                    previous = connection.execute("""SELECT item.export_timestamp FROM export_run_items AS item
+                    # JPEG retry identity is unchanged; RAW regeneration intentionally may differ.
+                    previous = None if state["processingVersion"] == RAW_EXPORT_PROCESSING_VERSION else connection.execute("""SELECT item.export_timestamp FROM export_run_items AS item
                         JOIN export_runs AS run ON run.run_id=item.run_id
                         WHERE item.queue_id=? AND item.asset_id=? AND item.frozen_revision=?
                             AND item.recipe_version=? AND item.processing_version=? AND item.frozen_recipe_json=?
@@ -436,13 +445,12 @@ def retry_export_assets(asset_ids: list[UUID]) -> list[dict]:
                 queue = connection.execute("SELECT * FROM export_queue WHERE asset_id=?", (str(asset_id),)).fetchone()
                 if queue is None or queue["status"] != "failed":
                     raise RuntimeRejected("queue_item_not_failed")
-                saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
-                if saved is None:
+                state = _export_saved_state(connection, asset_id)
+                if state is None:
                     raise RuntimeRejected("saved_recipe_missing")
-                state = _snapshot(saved, asset_id)
-                if not has_non_default_recipe(state):
+                if not _export_eligible(state):
                     raise RuntimeRejected("asset_not_eligible")
-                if state["recipeVersion"] != RECIPE_VERSION:
+                if state["processingVersion"] != RAW_EXPORT_PROCESSING_VERSION and state["recipeVersion"] != RECIPE_VERSION:
                     raise RuntimeRejected("unsupported_recipe_version")
                 if connection.execute("SELECT 1 FROM export_run_items WHERE asset_id=? AND status IN ('waiting','encoding','registering')", (str(asset_id),)).fetchone():
                     raise StoreUnavailable()

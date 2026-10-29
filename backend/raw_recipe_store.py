@@ -204,42 +204,40 @@ def get_raw_recipe(identity: dict) -> dict:
             raise
 
 
+RAW_EXPORT_PROCESSING_VERSION = "raw-lightcraft-v1"
+
+
+def select_raw_export_state(connection, asset_id):
+    """Share the badge's latest saved row and verified-default meaning under the caller's transaction."""
+    row = connection.execute("""SELECT * FROM asset_raw_recipes WHERE asset_id=?
+        ORDER BY updated_at DESC, recipe_revision DESC LIMIT 1""", (str(asset_id),)).fetchone()
+    if row is None:
+        return None
+    identity = dict(zip(IDENTITY_FIELDS, (row[column] for column in IDENTITY_COLUMNS)))
+    current = _read_row(connection, identity)
+    history = _read_history(connection, identity, current)
+    if current is None:
+        raise StoreUnavailable()
+    fingerprint = current.get("importDefaultsFingerprint")
+    eligible = (_digest(_settings_json(current["recipe"]["settings"], identity["settingsSchemaVersion"])) != fingerprint
+                if fingerprint is not None else None if history is None else
+                _json(current["recipe"]["settings"]) != _json(history["baselineSettings"]))
+    return {"currentRecipe": current["recipe"], "revision": current["revision"],
+            "recipeVersion": identity["settingsSchemaVersion"],
+            "processingVersion": RAW_EXPORT_PROCESSING_VERSION, "exportEligible": eligible}
+
+
 def get_raw_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool | None]:
-    """Compare each saved Recipe with its verified import-default History baseline."""
-    result: dict[str, bool | None] = {str(asset_id): False for asset_id in asset_ids}
-    if not result:
-        return result
-    placeholders = ",".join("?" for _ in result)
+    if not asset_ids:
+        return {}
     with _connection() as connection:
         connection.execute("BEGIN")
-        try:
-            rows = connection.execute(
-                f"""SELECT * FROM asset_raw_recipes WHERE asset_id IN ({placeholders})
-                ORDER BY updated_at DESC, recipe_revision DESC""", tuple(result)
-            ).fetchall()
-            seen: set[str] = set()
-            for row in rows:
-                asset_id = row["asset_id"]
-                if asset_id in seen:
-                    continue
-                identity = dict(zip(IDENTITY_FIELDS, (row[column] for column in IDENTITY_COLUMNS)))
-                current = _read_row(connection, identity)
-                history = _read_history(connection, identity, current)
-                if current is None:
-                    raise StoreUnavailable()
-                seen.add(asset_id)
-                # A legacy Recipe without a verified import baseline cannot safely be called clean.
-                defaults_fingerprint = current.get("importDefaultsFingerprint")
-                result[asset_id] = (
-                    _digest(_settings_json(current["recipe"]["settings"], identity["settingsSchemaVersion"])) != defaults_fingerprint
-                    if defaults_fingerprint is not None else None if history is None else
-                    _json(current["recipe"]["settings"]) != _json(history["baselineSettings"])
-                )
-            connection.commit()
-            return result
-        except Exception:
-            connection.rollback()
-            raise
+        result = {}
+        for asset_id in asset_ids:
+            state = select_raw_export_state(connection, asset_id)
+            result[str(asset_id)] = state["exportEligible"] if state is not None else False
+        connection.commit()
+        return result
 
 
 def validate_raw_recipe(recipe: dict) -> dict:

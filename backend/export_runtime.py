@@ -19,6 +19,7 @@ from export_runtime_store import (
 from immich import AssetDetail, ImmichOriginal, get_asset_detail, get_asset_original
 from jpeg_codec import JpegCodecError, decode_jpeg
 from jpeg_renderer import JpegRenderer
+from raw_export_artifact import RawExportInput, RawExportError, export_raw_artifact
 
 
 # One coordinator may execute in this process, even across different event loops/instances.
@@ -93,8 +94,10 @@ def _artifact(source: bytearray, filename: str, family: Sequence[str], recipe: d
 
 class ExportRuntime:
     def __init__(self, *, source: ExportSource | None = None,
-                 family: FamilyFilenameProvider | None = None, registrar: ExportRegistrar | None = None):
+                 family: FamilyFilenameProvider | None = None, registrar: ExportRegistrar | None = None,
+                 raw_artifact=None):
         self._source, self._family, self._registrar = source, family, registrar
+        self._raw_artifact = raw_artifact or export_raw_artifact
         self._start_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._ready: asyncio.Future | None = None
@@ -228,8 +231,10 @@ class ExportRuntime:
         try:
             runtime_log("acquisition.started", level="debug", runId=str(run_id), assetId=str(item.asset_id))
             detail = await self._source.detail(item.asset_id)
-            if detail.id != item.asset_id or detail.format != "JPEG" or detail.is_raw:
-                await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, "source_not_jpeg")
+            valid_source = detail.is_raw if item.kind == "raw" else detail.format == "JPEG" and not detail.is_raw
+            if detail.id != item.asset_id or not valid_source:
+                code = "source_kind_mismatch" if item.kind == "raw" else "source_not_jpeg"
+                await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, code)
                 return
             try:
                 original = await self._source.original(item.asset_id)
@@ -248,7 +253,15 @@ class ExportRuntime:
             await _persist(transition_export_item, run_id, item.asset_id, worker_id, "waiting", "encoding")
             status, phase = "encoding", "encoding"
             runtime_log("encoding.started", level="debug", runId=str(run_id), assetId=str(item.asset_id))
-            artifact = await run_in_threadpool(_artifact, source, detail.filename, family, item.recipe, item.export_timestamp)
+            if item.kind == "raw":
+                request = RawExportInput(bytes(source), detail.filename, tuple(family), item.recipe["settings"],
+                    datetime.fromisoformat(item.export_timestamp.replace("Z", "+00:00")),
+                    expected_content_hash=item.recipe["sourceContentHash"])
+                source.clear()
+                artifact = await self._raw_artifact(request)
+                request = None
+            else:
+                artifact = await run_in_threadpool(_artifact, source, detail.filename, family, item.recipe, item.export_timestamp)
             runtime_log("encoding.completed", runId=str(run_id), assetId=str(item.asset_id), artifactBytes=len(artifact.jpeg))
             await _persist(transition_export_item, run_id, item.asset_id, worker_id, "encoding", "registering")
             status, phase = "registering", "registration"
@@ -266,7 +279,9 @@ class ExportRuntime:
                     "encoding": "encoding_failed", "registration": "registration_failed"}[phase]
             if isinstance(error, JpegCodecError) and error.code in FAILURE_CODES:
                 code = error.code
-            # Retry snapshots current edits again, but unchanged registration failures retain their upload identity.
+            if isinstance(error, RawExportError) and error.code == "raw_export_source_mismatch":
+                code = "source_kind_mismatch"
+            # Retry snapshots current edits; only JPEG registration failures retain checksum identity.
             await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, code)
         finally:
             source.clear()
