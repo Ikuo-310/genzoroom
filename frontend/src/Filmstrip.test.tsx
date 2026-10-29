@@ -16,6 +16,21 @@ it('uses rendered thumbnail URLs without generation POSTs', async () => {
     .toEqual(assets.map(asset => `/api/assets/${asset.id}/rendered-thumbnail`));
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it.each([true, false])('keeps mixed RAW/JPEG URLs across active changes independently of badges (edited=%s)', async edited => {
+  const mixed = [assets[0], { ...assets[1], filename: 'b.dng', format: 'DNG', is_raw: true }, assets[2]];
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  const urls = () => [...host.querySelectorAll('.filmstrip-item img')].map(image => image.getAttribute('src'));
+  const expected = mixed.map(asset => `/api/assets/${asset.id}/rendered-thumbnail`);
+  await act(async () => root.render(<Harness items={mixed} edited={edited} />));
+  expect(urls()).toEqual(expected);
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click());
+  expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('b.dng');
+  expect(urls()).toEqual(expected);
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  expect(urls()).toEqual(expected);
+  expect(fetch).not.toHaveBeenCalled();
+});
 let host: HTMLDivElement;
 let root: Root;
 let activate = vi.fn<(id: string) => void>();

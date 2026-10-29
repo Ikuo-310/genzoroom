@@ -1380,7 +1380,7 @@ The existing `JpegRenderer` applies the Recipe and `encode_jpeg()` produces the 
 
 ### RAW rendered-thumbnail Phase 1 (2026-10-30)
 
-`generate_thumbnail(..., input_kind="raw")` explicitly dispatches to `raw_thumbnail_generator.generate_raw_thumbnail`; the default remains the unchanged JPEG generator. This Backend entry point returns JPEG bytes for the same `ThumbnailCache.store(asset_id, content)` contract. Phase 1 established generation only; Phase 2 below connects saved RAW lifecycle and Backend delivery. Frontend display acceptance remains Phase 3.
+`generate_thumbnail(..., input_kind="raw")` explicitly dispatches to `raw_thumbnail_generator.generate_raw_thumbnail`; the default remains the unchanged JPEG generator. This Backend entry point returns JPEG bytes for the same `ThumbnailCache.store(asset_id, content)` contract. Phase 1 established generation only; Phase 2 below connects saved RAW lifecycle and Backend delivery. Phase 3 records the shared Frontend display contract and pending user visual acceptance.
 
 `raw_recipe_store.get_raw_saved_state()` reads the latest saved row, validated Recipe/History and eligibility in one SQLite read snapshot through the same selector used by RAW Edited Badge and Export. Only `exportEligible is True` authorizes rendering; missing, verified default and unknown states are skipped before source download or Native startup. Neither Recipe nor History is written or migrated.
 
@@ -1397,6 +1397,23 @@ The mounted Windows `RawPreviewApi` resolves that same scheduler through a provi
 POST rendered-thumbnail, GET rendered-thumbnail and GET immersive-preview share a kind-aware saved-eligibility helper. Each resolves trusted Immich detail; known RAW always uses `get_raw_saved_state()` and never falls back to legacy JPEG-preview edit state. Only RAW eligibility `True` can schedule or read rendered cache. POST remains an immediate reservation, returning skipped for default/unknown/missing and clearing pending/stale cache. GET remains read-only: eligible cache is returned as JPEG; a miss or ineligible RAW falls back to the existing Immich thumbnail/Preview respectively. Store and detail lookup failures remain explicit API errors and never authorize stale-cache delivery. Resolving kind therefore requires Immich detail even for a cache hit.
 
 The existing active-result invalidation fence covers RAW as well as JPEG: a save or Reset takes `mutation_lock`, notifies before unlocking, and prevents a pre-mutation result from publishing afterward. Multiple saves coalesce to the latest deadline; generation reads the latest saved Recipe when executed. No new generation counter, RAW queue, API, cache, schema, quality setting or Export behavior is introduced. Frontend state/presentation and Gallery/Filmstrip/Stack visual acceptance are outside Phase 2.
+
+### RAW rendered-thumbnail Phase 3 (2026-10-30)
+
+Implementation complete; user visual acceptance pending. Inspection found that the existing Frontend already routes RAW and JPEG through the same display paths, so Phase 2 enables RAW delivery without new runtime branching. Phase 3 documents that contract, adds a boundary comment and regression coverage; it does not change display behavior or Backend code.
+
+| Surface | Shared RAW/JPEG source | Refresh / mode ownership |
+| --- | --- | --- |
+| Gallery Recent, Favorites, Album photos, Calendar day | `PhotoCard` → `thumbnailUrl(asset, true, refreshKey)` → rendered-thumbnail | Existing Gallery reload and re-entry revision; no RAW refresh state |
+| Filmstrip, active or inactive | `thumbnailUrl(asset)` → rendered-thumbnail | Existing workspace lifecycle and navigation; badge/Queue state does not select URLs |
+| Stack Management | Edited Preview OFF → `asset.thumbnail_url`; ON → `thumbnailUrl()` → rendered-thumbnail | Existing local switch and page-entry revision; COVER/selection/DnD/write state unchanged |
+| Gallery / Stack / Export read-only Immersive Preview | Edited mode → immersive-preview; original mode → preview | Asset order and opening preference are snapshotted for the entire Viewer session |
+
+Frontend format and RAW saved edit status do not authorize cache display; the Backend owns non-default/default/unknown/missing eligibility, legacy JPEG-state exclusion and cache-miss fallback. RAW status remains in its existing badge, filter, Queue and label roles. There was no RAW-only thumbnail/Preview exclusion branch to remove. These read-only image components have no separate JPEG `onError` fallback to extend; existing Backend fallback remains shared, without adding RAW error handling or generation requests.
+
+Anshitsu remains separate: active RAW uses the `useRawDocument()` LightCraft live Preview/blob, native Before/After and Region paths; JPEG uses its existing editing renderer. Filmstrip thumbnails do not replace that editing source. No RAW component/cache/URL/state, timer/polling, Native patch, Export change or detail-fetch optimization is introduced.
+
+User acceptance must verify a visibly edited saved RAW after generation in Gallery and Filmstrip, Stack Edited Preview OFF/ON for RAW/JPEG, read-only Viewer RAW/JPEG navigation, default Reset returning to Immich images, and subsequent edit/save restoring rendered images. Automatic DOM/unit tests establish URL and state contracts only, not decoded image content or actual Windows display quality. Computer Use and browser automation were not performed.
 
 ### Scheduler and queue
 

@@ -276,6 +276,8 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(toggle.parentElement?.nextElementSibling?.classList.contains('thumbnail-size-control')).toBe(true);
   const images = () => [...host.querySelectorAll('.stack-thumbnail img')].map(image => image.getAttribute('src'));
   const original = images();
+  expect(stackPhotoNamed('selected.dng').querySelector('img')?.getAttribute('src')).toBe('/raw');
+  expect(stackPhotoNamed('selected.jpg').querySelector('img')?.getAttribute('src')).toBe('/jpeg');
   await click('[aria-label="Set selected.dng as COVER"]');
   const covers = () => [...host.querySelectorAll('.stack-photo')].map(button => button.getAttribute('aria-pressed'));
   const before = covers();
@@ -284,6 +286,8 @@ it('toggles edited previews locally without changing cover, selection, draft, or
   expect(toggle.getAttribute('aria-checked')).toBe('true');
   expect(toggle.textContent).toBe('ON');
   expect(images().every(url => url?.includes('/rendered-thumbnail'))).toBe(true);
+  expect(stackPhotoNamed('selected.dng').querySelector('img')?.getAttribute('src')).toMatch(/^\/api\/assets\/raw\/rendered-thumbnail\?view=/);
+  expect(stackPhotoNamed('selected.jpg').querySelector('img')?.getAttribute('src')).toMatch(/^\/api\/assets\/jpeg\/rendered-thumbnail\?view=/);
   expect(covers()).toEqual(before);
   await click('.stack-edited-preview-switch');
   expect(toggle.getAttribute('aria-checked')).toBe('false');

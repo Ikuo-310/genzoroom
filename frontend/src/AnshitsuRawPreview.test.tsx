@@ -112,6 +112,10 @@ function desktop() {
 it('keeps mixed Filmstrip order and separates native RAW Preview from the JPEG renderer', async () => {
   await mount();
   expect([...host.querySelectorAll('.filmstrip-item')].map(item => item.getAttribute('aria-label'))).toEqual(['a.DNG', 'b.jpg', 'c.DNG']);
+  const thumbnailSources = () => [...host.querySelectorAll('.filmstrip-item img')].map(image => image.getAttribute('src'));
+  const sources = thumbnailSources();
+  expect(sources).toHaveLength(3);
+  expect(sources.every(src => src?.endsWith('/rendered-thumbnail'))).toBe(true);
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
   expect(host.querySelector('.raw-preview-note')).toBeNull();
   expect(adjusted).not.toHaveBeenCalled();
@@ -121,6 +125,7 @@ it('keeps mixed Filmstrip order and separates native RAW Preview from the JPEG r
   await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
   expect(adjusted.mock.calls.every(([props]) => props.alt === 'b.jpg')).toBe(true);
+  expect(thumbnailSources()).toEqual(sources);
 });
 it('shows the viewing Preview only with an explicit unavailable label', async () => {
   vi.mocked(rawApi.rawCapability).mockResolvedValue(false);

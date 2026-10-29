@@ -25,6 +25,16 @@ const interactionAsset: RecentAsset = {
   id: 'asset-id', filename: 'photo.jpg', date: '2026-09-08', thumbnail_url: '/thumbnail', format: 'JPEG', is_raw: false,
 };
 
+it.each([true, false, undefined])('uses the common rendered URL for RAW independently of badge state (%s)', async edited => {
+  const raw = { ...interactionAsset, id: 'raw', filename: 'photo.dng', format: 'DNG', is_raw: true };
+  await act(async () => root.render(<>
+    {[interactionAsset, raw].map(asset => <PhotoCard key={asset.id} asset={asset} edited={edited}
+      thumbnailRefreshKey="saved" language="en" onSelect={vi.fn()} onToggleSelection={vi.fn()} onExtendSelection={vi.fn()} />)}
+  </>));
+  expect([...host.querySelectorAll('.photo-card img')].map(image => image.getAttribute('src')))
+    .toEqual(['/api/assets/asset-id/rendered-thumbnail?view=saved', '/api/assets/raw/rendered-thumbnail?view=saved']);
+});
+
 it('uses rendered thumbnails and refreshes the image URL without changing card selection', async () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
   const render = (key: string) => <PhotoCard asset={interactionAsset} thumbnailRefreshKey={key} language="en"

@@ -256,11 +256,13 @@ describe('Home Export management', () => {
 });
 
 const queued = (assetId: string, status: ExportQueueItem['status'] = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: 'q', updatedAt: 'u' });
-async function openQueue(items = [queued('a'), queued('b', 'failed'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')]) {
+async function openQueue(items = [queued('a'), queued('b', 'failed'), queued('c'), queued('waiting', 'waiting'), queued('encoding', 'encoding'), queued('registering', 'registering')], rawAssetId?: string) {
   let backendItems = items;
   api.queue.mockImplementation(async () => backendItems);
   api.remove.mockImplementation(async (assetId: string) => { backendItems = backendItems.filter(item => item.assetId !== assetId); });
-  api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id, filename: `${id}.jpg`, preview_url: '', exif: {} }));
+  api.detail.mockImplementation(async (id: string) => ({ ...photos[0], id,
+    filename: `${id}.${id === rawAssetId ? 'dng' : 'jpg'}`, format: id === rawAssetId ? 'DNG' : 'JPEG',
+    is_raw: id === rawAssetId, preview_url: '', exif: {} }));
   api.stackRefresh.mockResolvedValue([{ id: 'stack-x', primaryAssetId: 'a', assets: ['a', 'c', 'outside'].map(id => ({ ...photos[0], id, filename: `${id}.jpg` })) }]);
   await mount(); await key('e');
   return { setItems: (next: ExportQueueItem[]) => { backendItems = next; }, getItems: () => backendItems };
@@ -276,6 +278,18 @@ const exportArmed = () => [...host.querySelectorAll<HTMLElement>('.export-queue-
 
 const previewImage = () => host.querySelector<HTMLImageElement>('.immersive-preview img')!;
 const previewPosition = () => host.querySelector('.immersive-preview-position')?.textContent;
+
+it('uses rendered thumbnails and the same Viewer endpoint for a mixed RAW/JPEG export queue', async () => {
+  await openQueue([queued('a'), queued('b')], 'b');
+  expect(exportCard('b').querySelector('img')?.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?view=1');
+  await cardClick('b'); await key('v');
+  expect(previewImage().alt).toBe('b.dng');
+  expect(previewImage().getAttribute('src')).toBe('/api/assets/b/immersive-preview');
+  await key('ArrowLeft');
+  expect(previewImage().getAttribute('src')).toBe('/api/assets/a/immersive-preview');
+  await key('ArrowRight');
+  expect(previewImage().getAttribute('src')).toBe('/api/assets/b/immersive-preview');
+});
 const previewButton = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.immersive-preview-bottombar button')]
   .find(button => button.textContent?.includes(label))!;
 async function doubleClickExportCard(id: string) {

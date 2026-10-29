@@ -37,6 +37,30 @@ afterEach(() => {
 });
 
 describe('ImmersivePreview', () => {
+  it.each(['gallery', 'exportManagement', 'stackManagement'] as const)('keeps the opening mode across RAW/JPEG navigation for %s', source => {
+    const raw = { ...b, filename: 'b.dng', format: 'DNG', is_raw: true };
+    const { props } = mount({ assets: [a, raw, c], source });
+    expect(image().getAttribute('src')).toBe('/api/assets/b/immersive-preview');
+    act(() => root.render(<ImmersivePreview {...props} assets={[c, raw, a]} preferEditedPreview={false} />));
+    press('ArrowLeft');
+    expect(image().getAttribute('src')).toBe('/api/assets/a/immersive-preview');
+    press('ArrowRight');
+    expect(image().getAttribute('src')).toBe('/api/assets/b/immersive-preview');
+    press('ArrowRight');
+    expect(image().getAttribute('src')).toBe('/api/assets/c/immersive-preview');
+  });
+
+  it('keeps original mode for RAW and JPEG after parent preference changes', () => {
+    const raw = { ...b, filename: 'b.dng', format: 'DNG', is_raw: true };
+    const { props } = mount({ assets: [a, raw], preferEditedPreview: false });
+    expect(image().getAttribute('src')).toBe('/api/assets/b/preview');
+    act(() => root.render(<ImmersivePreview {...props} preferEditedPreview />));
+    press('ArrowLeft');
+    expect(image().getAttribute('src')).toBe('/api/assets/a/preview');
+    press('ArrowRight');
+    expect(image().getAttribute('src')).toBe('/api/assets/b/preview');
+  });
+
   it.each([true, false])('uses a fixed image mode and read-only Stack controls (edited=%s)', preferEditedPreview => {
     const { handlers, props } = mount({ source: 'stackManagement', preferEditedPreview });
     const endpoint = preferEditedPreview ? 'immersive-preview' : 'preview';

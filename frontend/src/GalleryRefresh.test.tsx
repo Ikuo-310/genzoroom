@@ -27,6 +27,22 @@ vi.mock('./StackManagementPage', () => ({ StackManagementPage: ({ onWriteComplet
 const photos: RecentAsset[] = ['one', 'two'].map(id => ({ id, filename: `${id}.jpg`, date: '2026-09-01',
   thumbnail_url: `/thumb/${id}`, format: 'JPEG', is_raw: false }));
 
+it.each(['recent', 'favorites', 'album-detail', 'calendar-day'])('shares RAW/JPEG URLs and return/reload revisions in %s', async view => {
+  const mixed = [photos[0], { ...photos[1], filename: 'two.dng', format: 'DNG', is_raw: true }];
+  for (const loader of [api.recent, api.favorites, api.album, api.day]) loader.mockResolvedValue(mixed);
+  await mount(); await openView(view);
+  const urls = () => [...host.querySelectorAll('.photo-card img')].map(image => image.getAttribute('src'));
+  const initial = urls();
+  expect(initial).toHaveLength(2);
+  mixed.forEach((asset, index) => expect(initial[index]).toMatch(new RegExp(`/api/assets/${asset.id}/rendered-thumbnail\\?view=`)));
+  await click('.gallery-refresh');
+  const reloaded = urls();
+  reloaded.forEach((url, index) => expect(url).not.toBe(initial[index]));
+  await mount(false); await mount(true);
+  urls().forEach((url, index) => expect(url).not.toBe(reloaded[index]));
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
 it.each(['recent', 'favorites', 'album-detail', 'calendar-day'])('uses rendered photo URLs and reloads retained images in %s', async view => {
   await mount(); await openView(view);
   const source = () => host.querySelector('.photo-card img')?.getAttribute('src');

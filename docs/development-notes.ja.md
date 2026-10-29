@@ -1,5 +1,25 @@
 # GenzoRoom 開発ノート
 
+## RAW rendered-thumbnail Phase 3：実装完了・画面受入待ち（2026-10-30）
+
+Phase 1は独立LightCraftによるRAW生成、Phase 2は保存／Reset／scheduler／API lifecycle接続。本Phaseでは既存FrontendのJPEG/RAW共通表示経路を確認し、回帰テストで契約を固定した。調査時点で`thumbnailUrl()`、Gallery PhotoCard、Filmstrip、Stack Edited Preview、Immersive PreviewにRAWをImmich画像へ固定する除外分岐はなく、Phase 2のBackend対応でRAWも通る構造だった。不要な機能変更はせず、共通helperへBackend適格性の責務コメントだけを追加した。削除したRAW専用分岐はない。
+
+GalleryのRecent／Favorites／Album写真／Calendar日別はJPEG/RAWともrendered-thumbnailを使い、既存Reloadと暗室からの再入場revisionでURLを更新する。Filmstripはactive/inactiveやEdited Badge状態に関係なく同じhelperを使う。StackはOFFでImmich thumbnail、ONで共通rendered-thumbnailを使い、既存switch・COVER・選択・DnDの意味を維持する。read-only Immersive PreviewはGallery／Stack／出力管理とも、open時に固定した補正済み設定でimmersive-preview、original系でpreviewを使い、RAW/JPEG移動中や親設定更新で切り替えない。
+
+FrontendのRAW edit statusからcache適格性を再判定しない。default/unknown/missing/cache生成前のfallbackとstale cache拒否はPhase 2のBackendが担当する。対象画像componentには既存JPEG専用onError fallbackもなかったため、新しいRAW fallbackは作らない。暗室RAWはlive LightCraft blob／Before/After／Regionのままで、Filmstripのcache URLとは分離する。JPEG暗室も既存rendererを維持する。Backend、保存、scheduler、generator、Native、Export、画質、サイズ、UI、性能最適化は変更していない。
+
+自動検証：PhotoCard／Gallery refresh／Filmstrip／Stack Management／Immersive Preview／Anshitsu RAW／thumbnail APIの7ファイル415件成功。追加の出力管理RAW/JPEG Viewer、Gallery Edited Badge／Queue／Stack選択、Anshitsu Queue関連5ファイル250件成功。合計12ファイル665件。TypeScriptチェックとproduction build成功、buildには既存500 kB超chunk警告あり。初回sandbox実行は変換一時fileのENOENTでsuiteを読み込めず、同じ対象を権限制限外で再実行した。全Frontend suite、Backend再試験、実Windows画面操作、Computer Useは実施していない。
+
+監査で未修正High/Medium Findingなし。RAW専用component/state/URL、Frontend cache eligibility、暗室source置換、Stack OFFの意味変更、Backend変更、先行最適化を追加していないことを確認した。テストはDOM上のsource URL・navigation・refresh・状態契約を検証したもので、実JPEGの画素や画質の画面受入ではない。README/CHANGELOGは変更しない。
+
+利用者による実画面受入は未実施。以下を確認するまで「実装完了・画面受入待ち」とする。
+
+- RAWを暗室で開き、明確な補正を入れて保存し、生成完了後にGalleryへ戻る（必要なら既存Reload）。Galleryと再入場したFilmstripの補正済み画像を確認する。
+- Stack Edited Preview OFFでImmich画像、ONでRAW補正済み画像となり、JPEGも従来どおり切り替わることを確認する。
+- Galleryからread-only Viewerを開き、補正済みRAWとRAW/JPEG間の移動を確認する。
+- RAWをdefaultへResetしてGalleryに戻り、Immich画像への復帰を確認する。
+- 再編集・保存後、生成完了と既存refreshを経て補正済み画像へ戻ることを確認する。
+
 ## RAW rendered-thumbnail Phase 2（2026-10-30）
 
 Phase 1のRAW generatorを既存保存／Reset／scheduler／API lifecycleへ接続した。共通Backend lifespanの一つのThumbnailSchedulerとThumbnailCacheを維持し、生成callbackがImmich detailの`is_raw`からJPEG/RAWを選択する。Asset IDだけのqueue、60秒debounce、逐次処理、失敗時の旧cache保持、shutdown drainは変更しない。
