@@ -1,7 +1,7 @@
 # RAW Export Phase 0 — 実装前調査
 
 調査日：2026-10-29。対象：`feature/lightcraft-integration` のローカル作業ツリー。
-本書は設計案であり、製品実装・実RAW PoC・Immich書き込みの完了記録ではない。
+本書は初期設計と後続の実測・実装記録を含む。現行状況は後続の完了節を優先し、P0a実測とP1～P3の実装を区別する。P4実機受入は未完了。
 
 > **現行の確定方針（2026-10-29）**：RAWの現像とJPEGエンコードはLightCraftが行う。完成JPEGへGenzoRoomが撮影metadata・識別情報を付与し、JPEG圧縮データを再エンコードせず既存`ExportArtifact`／Immich registrarへ渡す。§11のP0aは旧推奨案を含む実測記録として保持し、本決定と異なる推奨・必須条件は本節・§12で置き換える。JPEGの現像・エンコード・Retry仕様は変更しない。
 
@@ -688,3 +688,18 @@ Stopはcurrent RAW処理・登録を完了した後にwaiting suffixをqueued/re
 監査修正：初期のRAW default/Reset cleanup案はJPEG Queue非干渉回帰を起こしたため削除。新default判定testのint/float fixture差、AssetDetail model copy、Remote既存date契約を修正し実装障害と分離した。原本hashとRecipeの対応検査が抜けないようP1の任意入力照合を追加した。High/Mediumの既知未修正Findingは残していない。P1再設計・Registrar複製・schema migrationは行っていない。
 
 実RAW/Windows Native/実ImmichのP2連携は未実施。P1以前のPixel/Pentax成功をP2実機成功と扱わない。FrontendのRAW Q操作・保存drain・管理画面統合はP3、mixed Queueの実Immich/Album生membership/Stack/COVER・再起動受入はP4。保存rowが同一updated_at/revisionで複数ある場合の順序は既存badgeと共通のままで、新しいengine選択や独自tie制約を導入していない。README/CHANGELOGは今回更新しない。
+
+
+## 17. P3実装：既存Frontendへの接続（2026-10-29）
+
+Galleryのstandalone RAW・Stack RAW member、Filmstrip、暗室のQを既存Queueへ接続した。§6.3のRAW除外・非interactive表示は調査当時の状態であり、本節で解消済み。RAW形式の固定リスト、専用page/status/Queue、JPEG現像・encoderへの経由は追加していない。
+
+保存済みRAWの適格性は既存RAW status APIのtrueだけを採用する。既知のRAWではfalse/unknownもRAW応答を優先し、旧JPEG-preview編集rowのtrueで上書きしない。種別未取得Stack memberの照会では既存JPEG状態とのmergeを維持する。暗室のactive RAW追加は既存rawDocument.prepareSave()でsettings/History保存をdrainしてから、保存済みRAW statusを照会し、Asset IDのみenqueueする。保存中のlockを追加拒否条件にせずdrainへ進め、保存失敗・default・unknownでは追加しない。inactive RAWは保存済み状態を確認するだけで開き直さない。解除は保存・Native readinessを必要とせず、default/unknownへ変わったqueued/failed RAWも既存Qで解除できる。
+
+RAWの補正表示は既存のRAW EditedBadge/status経路を使用し、FrontendにDevelopSettings比較やRecipe適格性判定を複製しない。active RAWの既存fingerprint表示とExport適格性は区別し、Export要求へsettingsやsnapshotを載せない。Start snapshot、Retry時の新snapshot、Stop、recoveryはP2の責務のまま。
+
+Export管理・useExportQueueAssetsは元々format/is_rawを保持するため変更不要だった。混在Queueは一つの順序のまま表示・arm・Start・Retryし、選択、format filter、failed優先、Stop、Undo、polling、応答消失時のcanonical refreshを共用する。GalleryのStack集約は全memberを対象にし、any-member ON・既存lock/batch guardを維持する。JPEG診断用exportQueueCandidatesのJPEG限定は意図どおり維持した。RAW thumbnailは既存Immich画像であり、現像結果thumbnailの生成は追加しない。
+
+監査では旧JPEG-preview状態によるRAW defaultの誤表示と、保存中lockによるQのdrain阻害を修正し、回帰テストを追加した。既存Gallery fixtureにもRAW status応答を明示した。FrontendのQueue/管理/RAW保存/Stack/除外/Reload/shortcut/Undo/応答消失/診断の関連テスト、TypeScriptとproduction build、Backend P2のRAW runtime 14 tests、git diff --checkを確認。Backendは変更せず、P1/Native/SQLite/Registrarも変更していない。既知のHigh/Medium未修正Findingはない。
+
+実ブラウザー・Windows Native・実RAW・実ImmichでのP3受入は未実施。Pixel/Pentax、実ImmichのAlbum生membership/Stack/COVER、Retry/Stop/再起動の実機受入はP4に残す。README/CHANGELOGはP4前に正式対応と断定しないため更新しない。

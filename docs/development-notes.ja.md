@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## RAW Export P3 Frontend統合（2026-10-29）
+
+Gallery/Stack/FilmstripのRAW Q除外を撤廃し、暗室active RAWでは既存prepareSaveの完了後に保存済みRAW status trueを確認してIDだけをenqueueする。保存中もdrainへ進み、失敗/default/unknownでは追加しない。inactive RAWは開き直さず、queued/failed解除は保存不要。旧JPEG-preview trueが既知RAWのfalseを隠す問題を修正し、回帰テストを追加した。Export管理はformat/is_raw・順序を既に維持するため、本体の変更なしで混在Start/Retryを利用する。Stop/Undo/選択/shortcut/polling/応答消失後のcanonical refreshは既存経路を維持した。
+
+Frontend Export・Gallery/Stack・RAW保存・Reload・除外・shortcut・Undo・診断の関連テストを実行。既存fixtureのRAW status応答不足と遅延応答fixtureを補正して再実行し、残存失敗なし。TypeScript/production build成功（既存のchunk size警告あり）、Backend RAW runtime 14 tests成功、diff check成功。監査で保存中lockの過剰な拒否とlegacy status優先を修正し、既知High/Medium未修正Findingなし。Backend/P1/Native/SQLite/Immich登録処理は変更しない。実ブラウザー・Windows Native・実RAW・実Immichは未確認でP4に残す。README/CHANGELOGは正式受入前のため更新しない。
+
 ## RAW Export P2：既存Queue／Runtime接続（2026-10-29）
 
 保存済みRAWを既存Queueへ投入し、Startのwriter transactionで完全Recipe/revisionを固定する処理を接続。RAW badgeと同じ保存row選択・verified baseline判定を共有する。既存processing_versionにraw-lightcraft-v1を識別子として用い、既存列にRAW Recipe全体を格納するためschema/migration追加なし。JPEGは旧payload・processing版・Retry timestamp identityを維持する。RAW Retryは最新保存状態を新Startで固定し新timestampを使用、recoveryは旧snapshotを現行engineで再実行してbytes差とremote重複を許容する。
