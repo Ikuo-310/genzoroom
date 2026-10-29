@@ -15,6 +15,8 @@ import xml.etree.ElementTree as ET
 from PIL import Image, ImageCms, ExifTags, TiffImagePlugin
 
 from export_artifact import ExportArtifact, next_export_filename
+from edit_store import _json
+from raw_recipe_store import MAX_SETTINGS_BYTES
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
 from lightcraft_mcp import MCPToolError
@@ -22,7 +24,6 @@ from lightcraft_mcp import MCPToolError
 
 MAX_RAW_BYTES = 512 * 1024 * 1024
 MAX_JPEG_BYTES = 256 * 1024 * 1024
-MAX_PIXELS = 100_000_000
 XMP_HEADER = b"http://ns.adobe.com/xap/1.0/\0"
 
 
@@ -133,11 +134,11 @@ def _input_filename(filename):
     return stem[:128] + suffix
 
 
-def _metadata_bytes(source, width, height, instant):
+def _metadata_bytes(source, width, height, instant, *, minimal=False):
     if not isinstance(instant, datetime) or instant.tzinfo is None or instant.utcoffset() is None:
         raise RawExportError("invalid_export_timestamp")
     instant = instant.astimezone(timezone.utc)
-    root, capture, gps, user_xmp = _optional_source_metadata(source)
+    root, capture, gps, user_xmp = ({}, {}, {}, {}) if minimal else _optional_source_metadata(source)
     exif = Image.Exif()
     exif.update(root)
     exif.update({305: "GenzoRoom", 274: 1, 306: instant.strftime("%Y:%m:%d %H:%M:%S")})
@@ -161,82 +162,134 @@ def _metadata_bytes(source, width, height, instant):
                 ET.SubElement(array, f"{{{metadata.RDF}}}li", {metadata.XML_LANG: language} if language else {}).text = text
     encoded, xml = exif.tobytes(), ET.tostring(tree, encoding="utf-8")
     if len(encoded) > metadata.MAX_EXIF_BYTES or len(xml) > metadata.MAX_XMP_BYTES:
-        raise RawExportError("metadata_too_large")
+        if minimal:
+            raise RawExportError("metadata_too_large")
+        lightcraft_log("export.metadata_reduced", level="warn", errorCode="metadata_too_large")
+        return _metadata_bytes(source, width, height, instant, minimal=True)
     return encoded, xml
 
 
-def _segments(jpeg):
-    metadata._repair_jpeg_exif(jpeg)
-    position = 2
-    while position < len(jpeg):
-        start = position
-        while jpeg[position] == 255:
-            position += 1
-        marker = jpeg[position]
-        position += 1
-        if marker in (0xDA, 0xD9):
-            if marker == 0xDA:
-                scan = position + int.from_bytes(jpeg[position:position + 2], "big")
-                while scan < len(jpeg):
-                    scan = jpeg.find(b"\xff", scan)
-                    if scan < 0 or scan + 1 >= len(jpeg):
-                        raise RawExportError("raw_export_invalid_jpeg")
-                    following = jpeg[scan + 1]
-                    if following == 0 or 0xD0 <= following <= 0xD7:
-                        scan += 2
-                        continue
-                    # Native produces one baseline scan; reject trailing metadata/extra scans.
-                    if jpeg[scan:] != b"\xff\xd9":
-                        raise RawExportError("raw_export_invalid_jpeg")
-                    break
-            yield marker, b"", jpeg[start:]
-            return
-        length = int.from_bytes(jpeg[position:position + 2], "big")
-        end = position + length
-        yield marker, jpeg[position + 2:end], jpeg[start:end]
-        position = end
+@dataclass(frozen=True)
+class _JpegLayout:
+    width: int
+    height: int
+    # Byte ranges retain scan/table/ICC data without copying full compressed buffers.
+    segments: tuple
 
 
-def inspect_export_jpeg(jpeg):
-    if not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= MAX_JPEG_BYTES:
+def _parse_jpeg(jpeg):
+    if not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= MAX_JPEG_BYTES or jpeg[:2] != b"\xff\xd8":
         raise RawExportError("raw_export_invalid_jpeg")
+    position, frame, scans = 2, None, 0
+    segments, profiles = [], {}
+    profile_count = None
     try:
-        segments = list(_segments(jpeg))
-        frames = [p for m, p, _ in segments if m == 0xC0]
-        if len(frames) != 1:
+        while position < len(jpeg):
+            start = position
+            if jpeg[position] != 255:
+                raise ValueError
+            while position < len(jpeg) and jpeg[position] == 255:
+                position += 1
+            if position >= len(jpeg):
+                raise ValueError
+            marker = jpeg[position]
+            position += 1
+            if marker == 0xD9:
+                if position != len(jpeg) or frame is None or not scans:
+                    raise ValueError
+                segments.append((marker, position, start, position))
+                break
+            if marker in (0, 0xD8) or 0xD0 <= marker <= 0xD7 or position + 2 > len(jpeg):
+                raise ValueError
+            length = int.from_bytes(jpeg[position:position + 2], "big")
+            payload, end = position + 2, position + length
+            if length < 2 or end > len(jpeg):
+                raise ValueError
+            segments.append((marker, payload, start, end))
+            if marker in (0xC0, 0xC1, 0xC2):
+                data = jpeg[payload:end]
+                if frame is not None or len(data) != 15 or data[0] != 8 or data[5] != 3 or any(data[i] != 0x11 for i in (7, 10, 13)):
+                    raise ValueError
+                height, width = int.from_bytes(data[1:3], "big"), int.from_bytes(data[3:5], "big")
+                if not width or not height:
+                    raise ValueError
+                frame = width, height
+            if marker == 0xE2 and jpeg.startswith(b"ICC_PROFILE\0", payload):
+                if end - payload < 14:
+                    raise ValueError
+                index, count = jpeg[payload + 12:payload + 14]
+                if not 1 <= index <= count or index in profiles or profile_count not in (None, count):
+                    raise ValueError
+                profile_count = count
+                profiles[index] = jpeg[payload + 14:end]
+            position = end
+            if marker == 0xDA:
+                if frame is None or end - payload < 6 or jpeg[payload] not in (1, 2, 3) or end - payload != 4 + 2 * jpeg[payload]:
+                    raise ValueError
+                scans += 1
+                scan_start = position
+                # Locate scan boundaries only; entropy and coding tables belong to Native.
+                while True:
+                    at = jpeg.find(b"\xff", position)
+                    if at < 0:
+                        raise ValueError
+                    following = at + 1
+                    while following < len(jpeg) and jpeg[following] == 255:
+                        following += 1
+                    if following >= len(jpeg):
+                        raise ValueError
+                    code = jpeg[following]
+                    if code == 0 or 0xD0 <= code <= 0xD7:
+                        position = following + 1
+                        continue
+                    if at == scan_start:
+                        raise ValueError
+                    segments.append((0, scan_start, scan_start, at))
+                    position = at
+                    break
+        else:
             raise ValueError
-        frame = frames[0]
-        height, width = int.from_bytes(frame[1:3], "big"), int.from_bytes(frame[3:5], "big")
-        if frame[0] != 8 or frame[5] != 3 or any(frame[i] != 0x11 for i in (7, 10, 13)) or width * height > MAX_PIXELS:
+        if profile_count is None or len(profiles) != profile_count:
             raise ValueError
-        with Image.open(BytesIO(jpeg)) as image:
-            if image.format != "JPEG" or image.mode != "RGB" or image.size != (width, height):
-                raise ValueError
-            icc = image.info.get("icc_profile")
-            if not isinstance(icc, bytes) or len(icc) > 1024 * 1024:
-                raise ValueError
-            profile = ImageCms.ImageCmsProfile(BytesIO(icc))
-            if profile.profile.xcolor_space.strip() != "RGB" or "srgb" not in ImageCms.getProfileDescription(profile).lower():
-                raise ValueError
-        return width, height
+        icc = b"".join(profiles[i] for i in range(1, profile_count + 1))
+        if len(icc) > 1024 * 1024:
+            raise ValueError
+        if ImageCms.ImageCmsProfile(BytesIO(icc)).profile.xcolor_space.strip() != "RGB":
+            raise ValueError
+        return _JpegLayout(*frame, tuple(segments))
     except Exception as error:
         raise RawExportError("raw_export_invalid_jpeg") from error
 
 
-def create_raw_export_artifact(source, jpeg, source_filename, family_filenames, *, timestamp):
-    """Attach standard metadata without changing any coded image/table/ICC bytes."""
-    width, height = inspect_export_jpeg(jpeg)
-    exif, xmp = _metadata_bytes(source, width, height, timestamp)
+def _segments(jpeg):
+    # Inspection helper for regression tools; production uses byte ranges directly.
+    for marker, payload, start, end in _parse_jpeg(jpeg).segments:
+        yield marker, jpeg[payload:end], jpeg[start:end]
+
+
+def inspect_export_jpeg(jpeg):
+    layout = _parse_jpeg(jpeg)
+    return layout.width, layout.height
+
+
+def create_raw_export_artifact(source, jpeg, source_filename, family_filenames, *, timestamp,
+                               expected_dimensions=None):
+    """Validate once and replace APP1; all other bytes are copied unchanged."""
+    layout = _parse_jpeg(jpeg)
+    if expected_dimensions is not None and (layout.width, layout.height) != expected_dimensions:
+        raise RawExportError("raw_export_invalid_output")
+    exif, xmp = _metadata_bytes(source, layout.width, layout.height, timestamp)
     def app1(payload):
         return b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
-    output = bytearray(b"\xff\xd8" + app1(exif) + app1(XMP_HEADER + xmp))
-    for marker, payload, encoded in _segments(jpeg):
-        if marker == 0xE1 and (payload.startswith(b"Exif\0\0") or payload.startswith(XMP_HEADER)):
+    parts = [b"\xff\xd8", app1(exif), app1(XMP_HEADER + xmp)]
+    view = memoryview(jpeg)
+    for marker, payload, start, end in layout.segments:
+        if marker == 0xE1 and (jpeg.startswith(b"Exif\0\0", payload) or jpeg.startswith(XMP_HEADER, payload)):
             continue
-        output.extend(encoded)
-    result = bytes(output)
-    inspect_export_jpeg(result)
-    return ExportArtifact(next_export_filename(source_filename, family_filenames), result)
+        parts.append(view[start:end])
+    if sum(len(part) for part in parts) > MAX_JPEG_BYTES:
+        raise RawExportError("raw_export_invalid_output")
+    return ExportArtifact(next_export_filename(source_filename, family_filenames), b"".join(parts))
 
 
 @dataclass(frozen=True)
@@ -254,8 +307,8 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
         raise RawExportError("raw_export_invalid_settings")
     # Freeze before the first await; callers may continue editing their own settings object.
     try:
-        encoded_settings = json.dumps(request.settings, allow_nan=False)
-        if len(encoded_settings.encode("utf-8")) > 256 * 1024:
+        encoded_settings = _json(request.settings)
+        if len(encoded_settings.encode("utf-8")) > MAX_SETTINGS_BYTES:
             raise ValueError
         settings = json.loads(encoded_settings)
     except (TypeError, ValueError, RecursionError) as error:
@@ -311,12 +364,11 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                 if output.is_symlink() or not output.is_file() or output.stat().st_size > MAX_JPEG_BYTES:
                     raise RawExportError("raw_export_invalid_output")
                 jpeg = output.read_bytes()
-                if inspect_export_jpeg(jpeg) != (result.get("width"), result.get("height")):
-                    raise RawExportError("raw_export_invalid_output")
                 if await tool("get_develop", {"id": photo}) != settings:
                     raise RawExportError("raw_export_settings_mismatch")
                 artifact = create_raw_export_artifact(source, jpeg, request.source_filename,
-                    family_filenames, timestamp=request.timestamp)
+                    family_filenames, timestamp=request.timestamp,
+                    expected_dimensions=(result.get("width"), result.get("height")))
                 lightcraft_log("export.completed", artifactBytes=len(artifact.jpeg))
                 return artifact
             finally:

@@ -26,10 +26,10 @@ def source():
     return exif.tobytes()[6:]
 
 
-def jpeg():
+def jpeg(*, progressive=False):
     out = BytesIO()
     icc = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
-    Image.new('RGB', (32, 24), (80, 100, 120)).save(out, 'JPEG', quality=95, subsampling=0, icc_profile=icc)
+    Image.new('RGB', (32, 24), (80, 100, 120)).save(out, 'JPEG', quality=95, subsampling=0, icc_profile=icc, progressive=progressive)
     return out.getvalue()
 
 
@@ -185,3 +185,124 @@ def test_xmp_unicode_and_private_namespace():
     result = create_raw_export_artifact(raw, jpeg(), 'a.dng', (), timestamp=datetime.now(timezone.utc))
     with Image.open(BytesIO(result.jpeg)) as image:
         assert '題名'.encode('utf-8') in image.info['xmp'] and b'hidden' not in image.info['xmp']
+
+@pytest.mark.parametrize('progressive', [False, True])
+def test_scan_layout_and_duplicate_app1(progressive, monkeypatch):
+    import raw_export_artifact as module
+    original = jpeg(progressive=progressive)
+    first = create_raw_export_artifact(source(), original, 'a.dng', (), timestamp=datetime.now(timezone.utc)).jpeg
+    app = next(v for m,p,v in _segments(first) if m == 0xe1)
+    duplicated = first[:2] + app + first[2:]
+    parse = module._parse_jpeg
+    calls = []
+    def counted(value):
+        calls.append(len(value)); return parse(value)
+    monkeypatch.setattr(module, '_parse_jpeg', counted)
+    monkeypatch.setattr(Image.Image, 'save', lambda *a, **k: pytest.fail('re-encode'))
+    monkeypatch.setattr(Image.Image, 'load', lambda *a, **k: pytest.fail('pixel decode'))
+    result = create_raw_export_artifact(source(), duplicated, 'a.dng', (), timestamp=datetime.now(timezone.utc)).jpeg
+    assert len(calls) == 1
+    def coded(b):
+        return b''.join(b[a:z] for m,p,a,z in parse(b).segments if m != 0xe1)
+    assert coded(original) == coded(result)
+    layout = parse(result)
+    assert sum(m == 0xe1 for m,p,a,z in layout.segments) == 2
+    if progressive:
+        assert sum(m == 0xda for m,p,a,z in layout.segments) > 1
+
+
+@pytest.mark.parametrize('damage', ['length', 'scan', 'eoi'])
+def test_marker_boundary_rejection(damage):
+    value = jpeg(progressive=True)
+    if damage == 'length': value = value[:4] + b'\xff\xff' + value[6:]
+    elif damage == 'scan': value = value[:value.index(b'\xff\xda') + 7]
+    else: value = value[:-2]
+    with pytest.raises(RawExportError):
+        create_raw_export_artifact(source(), value, 'a.dng', (), timestamp=datetime.now(timezone.utc))
+
+
+def test_large_header_no_pixel_decode(monkeypatch):
+    value = bytearray(jpeg()); at = value.index(b'\xff\xc0')
+    value[at + 5:at + 9] = struct.pack('>HH', 20000, 20000)
+    monkeypatch.setattr(Image, 'open', lambda *a, **k: pytest.fail('image decode'))
+    assert inspect_export_jpeg(bytes(value)) == (20000, 20000)
+
+
+def test_icc_description_not_contract(monkeypatch):
+    value = jpeg()
+    monkeypatch.setattr(ImageCms, 'getProfileDescription', lambda *a: pytest.fail('description check'))
+    assert inspect_export_jpeg(value) == (32, 24)
+
+
+@pytest.mark.parametrize('exif_over,xmp_over', [(True,False),(False,True),(True,True)])
+def test_metadata_aggregate_fallback(exif_over, xmp_over, monkeypatch):
+    import raw_export_artifact as module
+    root = {k: 'a' * 16000 for k in (271,272,315,33432,270)} if exif_over else {271:'maker'}
+    xmp = {f'{{{module.metadata.DC}}}subject': [(None, 'x' * 16000)] * 5} if xmp_over else {}
+    monkeypatch.setattr(module, '_optional_source_metadata', lambda _: (root.copy(), {}, {}, xmp))
+    events = []
+    monkeypatch.setattr(module, 'lightcraft_log', lambda event, **kwargs: events.append(event))
+    original = jpeg()
+    result = create_raw_export_artifact(source(), original, 'a.dng', (), timestamp=datetime.now(timezone.utc)).jpeg
+    assert events == ['export.metadata_reduced']
+    with Image.open(BytesIO(result)) as image:
+        e = image.getexif();c = e.get_ifd(ExifTags.IFD.Exif)
+        assert e[305] == 'GenzoRoom' and e[274] == 1 and 271 not in e
+        assert (c[40962], c[40963], c[40961]) == (32,24,1)
+        assert b'GenzoRoom' in image.info['xmp']
+    assert [v for m,p,v in _segments(original) if m != 0xe1] == [v for m,p,v in _segments(result) if m != 0xe1]
+
+
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf'), {1,2}, object()])
+def test_non_json_settings_rejected(invalid):
+    from raw_export_artifact import RawExportInput, export_raw_artifact
+    request = RawExportInput(source(), 'a.dng', (), {'bad':invalid}, datetime.now(timezone.utc))
+    with pytest.raises(RawExportError, match='raw_export_invalid_settings'):
+        asyncio.run(export_raw_artifact(request))
+
+@pytest.mark.parametrize('over', [False, True])
+def test_recipe_store_export_size_contract(tmp_path, over):
+    import raw_export_artifact as module
+    from edit_store import _json
+    from raw_recipe_store import _settings_json, InvalidRawRecipe, MAX_SETTINGS_BYTES
+    settings = {'version':1,'process':5,'wb':{'mode':'custom','temp':6000,'tint':0},'label':'題' * 40000}
+    remaining = MAX_SETTINGS_BYTES - len(_json(settings).encode('utf-8'))
+    settings['label'] += 'x' * (remaining + int(over))
+    assert len(json.dumps(settings).encode('utf-8')) > MAX_SETTINGS_BYTES
+    if over:
+        with pytest.raises(InvalidRawRecipe): _settings_json(settings, 1)
+    else:
+        assert len(_settings_json(settings, 1).encode('utf-8')) == MAX_SETTINGS_BYTES
+    class Disabled:
+        async def start(self): pass
+        def status(self): return SimpleNamespace(state='disabled')
+        async def close(self): pass
+    class Manager:
+        _gpu_backend='dx12'
+        def diagnostic_manager(self, backend): return Disabled()
+    request = module.RawExportInput(source(),'a.dng',(),settings,datetime.now(timezone.utc))
+    code = 'raw_export_invalid_settings' if over else 'raw_export_engine_unavailable'
+    with pytest.raises(RawExportError, match=code):
+        asyncio.run(module.export_raw_artifact(request, manager=Manager(), temp_root=tmp_path))
+    assert not list(tmp_path.iterdir())
+
+
+def test_app1_between_progressive_scans():
+    original = jpeg(progressive=True)
+    scans = [a for m,p,a,z in __import__('raw_export_artifact')._parse_jpeg(original).segments if m == 0xda]
+    app = b'\xff\xe1\x00\x08Exif\x00\x00'
+    value = original[:scans[1]] + app + original[scans[1]:]
+    result = create_raw_export_artifact(source(), value, 'a.dng', (), timestamp=datetime.now(timezone.utc)).jpeg
+    assert sum(m == 0xe1 for m,p,v in _segments(result)) == 2
+    assert [v for m,p,v in _segments(original) if m!=0xe1] == [v for m,p,v in _segments(result) if m!=0xe1]
+
+
+def test_renamed_rgb_icc_preserved():
+    original = jpeg().replace(b'\x00s\x00R\x00G\x00B', b'\x00T\x00e\x00s\x00t')
+    with Image.open(BytesIO(original)) as image:
+        profile = ImageCms.ImageCmsProfile(BytesIO(image.info['icc_profile']))
+        assert 'srgb' not in ImageCms.getProfileDescription(profile).lower()
+        icc = image.info['icc_profile']
+    result = create_raw_export_artifact(source(), original, 'a.dng', (), timestamp=datetime.now(timezone.utc)).jpeg
+    with Image.open(BytesIO(result)) as image:
+        assert image.info['icc_profile'] == icc
