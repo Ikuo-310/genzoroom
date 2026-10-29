@@ -1,7 +1,7 @@
 # RAW Export Phase 0 — 実装前調査
 
 調査日：2026-10-29。対象：`feature/lightcraft-integration` のローカル作業ツリー。
-本書は初期設計と後続の実測・実装記録を含む。現行状況は後続の完了節を優先し、P0a実測とP1～P3の実装を区別する。P4実機受入は未完了。
+本書は初期設計と後続の実測・実装記録を含む。現行状況は後続の完了節を優先し、P0a実測とP1～P3の実装を区別する。P4は§18のAPI/CLI実機受入まで実施済み。ユーザー指示で画面操作を停止したため、実ブラウザー受入は保留し、P4全体は未完了。
 
 > **現行の確定方針（2026-10-29）**：RAWの現像とJPEGエンコードはLightCraftが行う。完成JPEGへGenzoRoomが撮影metadata・識別情報を付与し、JPEG圧縮データを再エンコードせず既存`ExportArtifact`／Immich registrarへ渡す。§11のP0aは旧推奨案を含む実測記録として保持し、本決定と異なる推奨・必須条件は本節・§12で置き換える。JPEGの現像・エンコード・Retry仕様は変更しない。
 
@@ -703,3 +703,46 @@ Export管理・useExportQueueAssetsは元々format/is_rawを保持するため�
 監査では旧JPEG-preview状態によるRAW defaultの誤表示と、保存中lockによるQのdrain阻害を修正し、回帰テストを追加した。既存Gallery fixtureにもRAW status応答を明示した。FrontendのQueue/管理/RAW保存/Stack/除外/Reload/shortcut/Undo/応答消失/診断の関連テスト、TypeScriptとproduction build、Backend P2のRAW runtime 14 tests、git diff --checkを確認。Backendは変更せず、P1/Native/SQLite/Registrarも変更していない。既知のHigh/Medium未修正Findingはない。
 
 実ブラウザー・Windows Native・実RAW・実ImmichでのP3受入は未実施。Pixel/Pentax、実ImmichのAlbum生membership/Stack/COVER、Retry/Stop/再起動の実機受入はP4に残す。README/CHANGELOGはP4前に正式対応と断定しないため更新しない。
+
+
+## 18. P4実機受入：API/CLI確認・限定修正、画面受入保留（2026-10-29）
+
+### 18.1 範囲と実行条件
+
+基準GenzoRoomは`1623483`、実機で発見した接続不具合の修正は`755636b`。公式`run-dev.ps1`で最新Frontendをbuildし、Windows開発ホストの起動・実Immich接続を確認した。その後ユーザーからコンピューターUSE禁止の指示があり、画面操作を停止した。以下のExport/Preview試験はPython 3.14、既存BackendサービスのAPI/CLI、実Nativeと実Immichを使ったもの。Gallery/Filmstrip/Anshitsu/Export管理の実画面操作や目視比較の成功とは扱わない。
+
+LightCraftは既存managed v0.14.0、upstream `03c88c166c054c009db2a47187d59991f6232b85`、`.tmp/lightcraft-0.14/target-wb-phase1/release/lightcraft-cli.exe`。実EXE SHA-256 `b872315ccd11c5c2e945f473d8ca48022127a4cc196b95d16ff3d8fb75004251`とreceiptの全managed契約を照合した。追加Native patch/rebuildなし。既定DX12要求と既存fallbackを使用し、CPU固定は追加していない。実際のGPU利用内訳は未計測。
+
+素材はP0a/P1と同じ実Pixel DNGとPentax DNG。JPEG混在用には既存Native生成の初期JPEGを使用した。素材探索範囲の`raw-test`にARW/PEF/NEF/CR2/CR3実ファイルはなく、それらの対応実証はしていない。実Immichへ受入用素材をuploadし、Pixelは既存Assetへのduplicate応答、PentaxとJPEG 2件は新規Assetになった。ユーザーDBには既存Queue 2件があるため、そのDBはread-onlyで照合し、実行用は`.tmp/raw-export-p4/runtime.db`に分離した。RAW設定はNative readback済みの初期/代表完全settingsを既存RAW保存処理で隔離DBに保存・再取得した。実Anshitsu保存操作は未確認。
+
+### 18.2 発見した接続不具合と限定修正
+
+**High：RAW原本取得がJPEG専用guardで拒否される。** 実ImmichのDNGに`ImmichExportSource.original()`を呼び、Native起動前の`ImmichRequestError`を再現した。P2のmock sourceでは検出できなかった境界不具合である。
+
+`immich.get_asset_original(..., allow_raw=False)`へ既存AssetDetail.is_rawに基づくopt-inを追加し、`ImmichExportSource`だけが許可する。通常のJPEG原本endpoint・診断・tag修復のdefaultは従来のJPEG判定/MIME検査を維持する。RAW MIMEはコンテナごとに異なるため固定allowlistにせず、HTTP成功後は既存のsource hash照合とNative decodeで検証する。追加の拡張子制限・専用Downloader/Runtime/Registrarは作らない。DNG/CR3のmock MIMEとstream回収、JPEG MIME/PNG拒否、default JPEG-onlyの回帰を追加。CR3はmockであり実素材検証ではない。
+
+### 18.3 実Native・実Immichの結果
+
+| 項目 | 確認結果と限界 |
+| --- | --- |
+| 混在Queue | JPEG→RAW→JPEG→RAWを既存serial workerの1回Startで4件成功。各成功itemがQueueから除去され、RAW後のJPEGも成功。run全体約34.67秒 |
+| RAW初期/代表出力 | Pixel 4064×3056 / 2445×3251、Pentax 5472×3648 / 2918×4378。代表settingsはExposure/WB/Color/dehaze、crop・Rotate90を含む |
+| Preview比較 | 既存Native Preview API(full, 1024, StageCache off)と完成JPEGの縮小比較。Pixel初期/代表MAE=2.339/2.986、Pentax=0.861/1.459（0～255）。寸法・縦横方向・設定readback整合を確認。数値は受入時の記録であり製品閾値ではない。実Viewer表示・目視品質の確認は保留 |
+| JPEG/metadata | 全4条件で復号成功、4:4:4、sRGB ICC、Orientation=1、実寸法とEXIF寸法・ColorSpace=1、Software/CreatorTool=GenzoRoom、ModifyDate/MetadataDateを確認。Pixel標準root 2/capture 16/GPS 8、Pentax root 2/capture 13/GPS 0の取得項目が意味値で一致。GPS BYTE等のPillow表現差を正規化して比較。MakerNoteなし。quality=95は既存Native Export引数で指定し、Pillowとの圧縮同等性は要求しない |
+| 登録/Stack | 既存Registrarでupload、GenzoRoomタグ、Favorite OFF(Pixel)/ON(Pentax)、連番命名が成立。非所属PentaxのStack作成と既存Pixel Stackへの追加、member保持・新COVERを実APIで確認。混在runで後続出力が前の出力をCOVERから外すのは既存仕様 |
+| Album | 検証Album新規作成はキー権限で403。ユーザー指定の既存Albumを使用。sourceと別Stack memberに分散させた所属から出力が継承し、非COVER所属が正規化された。withStacked=trueの生API検索で既存83件保持・新COVER 2件追加の85件を確認。Gallery表示だけで判定していない |
+| Stop | current RAWが登録まで成功、後続waiting JPEGはreleased/queued。Native強制cancelなし |
+| 失敗/Retry | 受入スクリプトが私有入力copyだけを不正RAWへ置換し、実Native失敗を発生させた。RAWはencoding_failed、後続JPEGは成功。再保存後のexposure=1.13/revision=3を新Startで固定しRetry成功。元RAWや製品処理へ失敗用変更は加えていない。byte一致条件なし |
+| recovery | 隔離CLI Runtimeプロセスをencoding checkpoint直後、Native子起動前に終了。別プロセスでlive Recipeを変更してから既存recoverを実行し、worker ownership更新・旧snapshot/revision保持・実Native/Registrar成功を確認。通常GUIホストのactive Native/登録中中断は未実施。既存ユーザーQueueを中断しないため、この範囲に限定 |
+| 保護/分離 | ローカル/Immichの元RAW SHA-256不変、原本ディレクトリの兄弟file不変(sidecar増加なし)。ユーザーDBのRecipe・History・Queue・既存run各table digest不変。Preview Managerを保持したまま独立Exportを実行し、編集settings不変を確認 |
+| 性能/回収 | P1 Artifact約2.58～3.25秒/件（source取得・Immich登録を除く）。全job独立processなので常駐processのwarm比較ではない。計測7 Export子のpeak working set約573～865MiB、全exit=0、job一時directory空。編集Managerもclose。GenzoRoom全体/RSS・VRAM増加の時系列は未計測。最適化は行わない |
+
+実Immichの受入用Asset・生成JPEG・Stack/COVER更新は削除/巻き戻しせず保持した。指定Albumの無関係な既存83件は保持している。ユーザーDBの既存Queue 2件は実行せず維持した。個人写真の内容、キー、URL、Recipe本文や私有probeの詳細は本書に載せない。
+
+### 18.4 回帰・最終監査・残り
+
+BackendはRAW Artifact、実source adapter、Queue/Runtime、Stop/Retry/recovery、RAW Recipe/History、既存Registrar・Album/Stack/COVER、JPEG Artifact/codecの関連15ファイルで**607 passed・68 subtests passed**。FrontendはP3 Queue/管理・保存・Gallery/Stack/除外/Reload・Filmstrip・shortcut/Undo/polling/応答消失の関連23ファイルで**891 passed**。TypeScript/production build成功（既存chunk size警告）、`git diff --check`成功。全suite・Docker smoke・Native rebuildは実行していない。
+
+最終監査で既知High/Mediumの未修正コードFindingは残していない。P1の現像/metadata、Native patch、SQLite schema、Frontend、保存契約、JPEG identity、Registrarは変更せず、実環境で再現した原本取得境界だけを修正した。
+
+**P4全体は未完了**。ユーザーの画面操作禁止を優先し、Gallery/Stack/Filmstrip/AnshitsuのQ・保存drain、Export管理のArm/Disarm/Undo/操作競合、実Viewer表示・目視Preview比較は実画面で未確認。自動テスト成功とは分離する。通常WindowsホストでNative実行中/登録中の中断復旧、実Album cleanup障害、その他RAW形式の実素材も未確認。cleanupの成功済みupload非巻戻しは今回の自動回帰でのみ確認した。README/CHANGELOGは正式受入完了として更新しない。
