@@ -2,6 +2,12 @@
 
 ## RAW rendered-thumbnail Phase 3：実装完了・画面受入待ち（2026-10-30）
 
+### 画面受入Finding：RAW離脱時の即時予約（修正・再受入待ち）
+
+利用者の画面受入で、RAW生成自体は成功している一方、暗室からGalleryへ戻った直後は補正済みthumbnailにならず、通常の60秒debounce後にGallery Reloadすると表示されることを確認した。原因は、保存通知による通常予約はあるが、RAW暗室離脱時にJPEGと同じimmediate thumbnail reservationを行っていなかったこと。Filmstrip移動、Home退出、active RAW除外の`prepareSave()`成功後に既存`requestThumbnailGeneration()`を呼び、既存rendered-thumbnail POSTへ接続した。default／unknown／missing eligibilityはFrontendで判定せずBackend契約へ委ねる。Home退出ではJPEGの既存`thumbnailAssetIds`とactive RAW IDをSetでまとめ、同じAssetへの重複POSTを避ける。POSTは待たず、Backendの60秒通常debounce・generator・cacheには変更なし。自動テストで順序と失敗時抑止を確認し、利用者による画面再受入は未実施。
+
+今回のFrontend focused testは5 files／267件成功（Anshitsu RAW／Persistence、RAW Queue、Gallery refresh、thumbnail API）。型チェックとproduction buildも成功し、既存500 kB超chunk警告あり。追加で実行した`AnshitsuPage.test.tsx`には、今回の変更と無関係なSSR描画testで`window is not defined`の失敗が1件あったため、要件対象5 suiteを単独で再実行して成功を確認した。Computer Use／画面再受入は未実施。
+
 Phase 1は独立LightCraftによるRAW生成、Phase 2は保存／Reset／scheduler／API lifecycle接続。本Phaseでは既存FrontendのJPEG/RAW共通表示経路を確認し、回帰テストで契約を固定した。調査時点で`thumbnailUrl()`、Gallery PhotoCard、Filmstrip、Stack Edited Preview、Immersive PreviewにRAWをImmich画像へ固定する除外分岐はなく、Phase 2のBackend対応でRAWも通る構造だった。不要な機能変更はせず、共通helperへBackend適格性の責務コメントだけを追加した。削除したRAW専用分岐はない。
 
 GalleryのRecent／Favorites／Album写真／Calendar日別はJPEG/RAWともrendered-thumbnailを使い、既存Reloadと暗室からの再入場revisionでURLを更新する。Filmstripはactive/inactiveやEdited Badge状態に関係なく同じhelperを使う。StackはOFFでImmich thumbnail、ONで共通rendered-thumbnailを使い、既存switch・COVER・選択・DnDの意味を維持する。read-only Immersive PreviewはGallery／Stack／出力管理とも、open時に固定した補正済み設定でimmersive-preview、original系でpreviewを使い、RAW/JPEG移動中や親設定更新で切り替えない。

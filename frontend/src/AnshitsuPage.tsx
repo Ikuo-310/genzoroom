@@ -448,7 +448,10 @@ export function AnshitsuPage() {
       setFailedSwitch(null);
       try {
         await rawDocument.prepareSave(retryRaw);
-        if (queueMounted.current && activeRouteRef.current === assetId) navigateToAsset(nextId);
+        if (queueMounted.current && activeRouteRef.current === assetId) {
+          requestThumbnailGeneration(assetId, 'filmstrip');
+          navigateToAsset(nextId);
+        }
       } catch (cause) {
         setFailedSwitch({ nextId, error: 'unexpected', raw: true, code: cause instanceof RawApiError ? cause.code : 'raw_connection_failed' });
       } finally { switchingRef.current = false; setSwitching(false); }
@@ -503,7 +506,9 @@ export function AnshitsuPage() {
         setExitSaving(false);
         return;
       }
-      for (const id of result.thumbnailAssetIds) requestThumbnailGeneration(id, 'exit');
+      const thumbnailAssetIds = new Set(result.thumbnailAssetIds);
+      if (activeDetail?.is_raw) thumbnailAssetIds.add(assetId);
+      for (const id of thumbnailAssetIds) requestThumbnailGeneration(id, 'exit');
       returnToHome();
     } catch {
       setExitFailure({ assetId, error: 'unexpected' });
@@ -564,7 +569,8 @@ export function AnshitsuPage() {
     pauseAutosave(id);
     logExclusion('start', { assetId: id });
     try {
-      if (id === assetId && activeDetail?.is_raw) await rawDocument?.prepareSave();
+      const activeRawAsset = id === assetId && activeDetail?.is_raw;
+      if (activeRawAsset) await rawDocument?.prepareSave();
       // Unvisited assets have no local edits to save. Validated inactive records use the same save boundary.
       const local = localStateFor(id);
       if (local.dirty && !local.canSave) throw new EditStateApiError('invalid_state');
@@ -575,6 +581,7 @@ export function AnshitsuPage() {
           if (result.clean) break;
         }
       }
+      if (activeRawAsset) requestThumbnailGeneration(id, 'filmstrip');
       if (!queueMounted.current || activeRouteRef.current !== assetId) return;
       const nextExcluded = new Set(excludedIdsRef.current).add(id);
       excludedIdsRef.current = nextExcluded;

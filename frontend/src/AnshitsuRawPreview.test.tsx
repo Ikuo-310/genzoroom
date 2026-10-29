@@ -89,6 +89,9 @@ async function clickText(text: string, scope: ParentNode = host) {
   const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!;
   expect(button).toBeDefined(); act(() => button.click()); await flush();
 }
+function thumbnailPosts() {
+  return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/rendered-thumbnail') && init?.method === 'POST');
+}
 
 it('uses persisted RAW badges and confirms RAW reset independently of JPEG clipboard support', async () => {
   const reset = vi.spyOn(rawApi, 'resetRawEdits').mockResolvedValue(undefined);
@@ -680,6 +683,24 @@ it('blocks RAW to JPEG on a lost save response and retries the exact saveId befo
   await clickText('Retry RAW save', host.querySelector('[role="alertdialog"]')!);
   expect(commitHistory.mock.calls[1][0]).toEqual(first);
   expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+  expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
+});
+
+it('reserves the active RAW after prepareSave and before Filmstrip navigation', async () => {
+  const sequence: string[] = [];
+  const nativeSave = commitHistory.getMockImplementation()!;
+  commitHistory.mockImplementation(async request => { sequence.push('save'); return nativeSave(request); });
+  vi.stubGlobal('fetch', vi.fn(async url => {
+    const isPost = String(url).endsWith('/rendered-thumbnail');
+    sequence.push(isPost ? `post:${host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')}` : 'other');
+    return new Response('{}');
+  }));
+  await mount(); await editRaw();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
+  expect(sequence.indexOf('save')).toBeGreaterThanOrEqual(0);
+  expect(sequence.indexOf(`post:${base.filename}`)).toBeGreaterThan(sequence.indexOf('save'));
+  expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
+  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
 });
 
 it('blocks Gallery return on a failed RAW save, preserves editing on cancel, and exits only after retry', async () => {
@@ -692,6 +713,36 @@ it('blocks Gallery return on a failed RAW save, preserves editing on cancel, and
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   await clickText('Retry RAW save');
   await clickText('Back to Gallery'); expect(host.querySelector('[data-gallery]')).not.toBeNull();
+  expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
+});
+
+it('reserves the active RAW once after Home save succeeds, and does not reserve on save failure', async () => {
+  await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_recipe_save_failed', 'unknown', 503));
+  await editRaw();
+  await clickText('Back to Gallery');
+  expect(host.querySelector('[data-gallery]')).toBeNull();
+  expect(thumbnailPosts()).toHaveLength(0);
+  await clickText(i18n.t('workspace.stayInAnshitsu'));
+  await clickText('Retry RAW save'); await clickText('Back to Gallery');
+  expect(host.querySelector('[data-gallery]')).not.toBeNull();
+  expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
+});
+
+it('does not reserve or exclude the active RAW when prepareSave fails', async () => {
+  await mount();
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_recipe_save_failed', 'unknown', 503));
+  await editRaw();
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude a.DNG from Filmstrip"]')!.click()); await flush();
+  expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('a.DNG');
+  expect(thumbnailPosts()).toHaveLength(0);
+});
+
+it('reserves an active RAW after prepareSave and before exclusion navigation', async () => {
+  await mount(); await editRaw();
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude a.DNG from Filmstrip"]')!.click()); await flush();
+  expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('b.jpg');
+  expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
 });
 
 it('restores the saved RAW readback when returning through JPEG', async () => {
