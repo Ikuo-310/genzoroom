@@ -7,6 +7,7 @@ import httpx
 
 from immich import ImmichRequestError, get_asset_original
 from main import app
+from export_runtime import ImmichExportSource
 
 ASSET_ID = UUID("12345678-1234-4234-9234-123456789abc")
 
@@ -41,6 +42,33 @@ def transport_for(stream, filename="PXL_RAW-01.COVER.jpg", status=200, media_typ
 
 
 class OriginalTests(unittest.TestCase):
+    def test_export_source_streams_raw_without_a_mime_allowlist(self):
+        async def run():
+            for filename, media_type in (("photo.dng", "image/x-adobe-dng"),
+                                         ("photo.cr3", "application/octet-stream")):
+                stream = TrackedStream()
+                source = ImmichExportSource("http://immich", "secret",
+                    transport=transport_for(stream, filename, media_type=media_type))
+                self.assertTrue((await source.detail(ASSET_ID)).is_raw)
+                original = await source.original(ASSET_ID)
+                self.assertEqual(stream.reads, 0)
+                self.assertEqual(sum([len(chunk) async for chunk in original.chunks()]), 3 * 65536)
+                self.assertTrue(stream.closed)
+                self.assertTrue(original.client.is_closed)
+        asyncio.run(run())
+
+    def test_export_source_keeps_jpeg_mime_and_non_raw_guards(self):
+        async def run():
+            for filename, media_type in (("photo.jpg", "application/octet-stream"),
+                                         ("photo.png", "image/png")):
+                stream = TrackedStream()
+                source = ImmichExportSource("http://immich", "secret",
+                    transport=transport_for(stream, filename, media_type=media_type))
+                with self.assertRaises(ImmichRequestError):
+                    await source.original(ASSET_ID)
+                self.assertEqual(stream.reads, 0)
+        asyncio.run(run())
+
     def test_streams_without_reading_ahead_and_closes_on_partial_consumption(self):
         async def run():
             for filename in ("photo.jpeg", "PXL_RAW-01.COVER.jpg"):

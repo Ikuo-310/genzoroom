@@ -77,7 +77,7 @@ class ImmichExportSource:
         return await get_asset_detail(self._url, self._api_key, asset_id, transport=self._transport)
 
     async def original(self, asset_id: UUID) -> ImmichOriginal:
-        return await get_asset_original(self._url, self._api_key, asset_id, transport=self._transport)
+        return await get_asset_original(self._url, self._api_key, asset_id, transport=self._transport, allow_raw=True)
 
 
 def _artifact(source: bytearray, filename: str, family: Sequence[str], recipe: dict, export_timestamp: str | None = None) -> ExportArtifact:

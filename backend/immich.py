@@ -1539,10 +1539,12 @@ async def get_asset_original(
     asset_id: UUID,
     *,
     transport: httpx.AsyncBaseTransport | None = None,
+    allow_raw: bool = False,
 ) -> ImmichOriginal:
     url, key = _require_configuration(immich_url, api_key)
     detail = await get_asset_detail(url, key, asset_id, transport=transport)
-    if detail.format != "JPEG":
+    raw = allow_raw and detail.is_raw
+    if detail.format != "JPEG" and not raw:
         raise ImmichRequestError("unexpected_response", "Only JPEG originals are supported.")
     client = httpx.AsyncClient(
         timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
@@ -1551,11 +1553,12 @@ async def get_asset_original(
     try:
         response = await _immich_request(
             client, "GET", url, f"/assets/{asset_id}/original", stream=True,
-            headers={"x-api-key": key, "Accept": "image/jpeg"},
+            headers={"x-api-key": key, "Accept": "*/*" if raw else "image/jpeg"},
         )
         if response.status_code != 200:
             raise _request_error(response)
-        if response.headers.get("content-type", "").split(";")[0].strip().lower() != "image/jpeg":
+        # RAW containers have varying MIME types; Native decode and source identity validate their bytes.
+        if not raw and response.headers.get("content-type", "").split(";")[0].strip().lower() != "image/jpeg":
             _log_response_failure(response, "unexpected_response")
             raise ImmichRequestError("unexpected_response", "Immich returned an unexpected response.")
         return ImmichOriginal(response=response, client=client)
