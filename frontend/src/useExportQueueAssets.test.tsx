@@ -123,3 +123,13 @@ it('fails metadata resolution when Stack refresh fails instead of treating membe
   await act(async () => pending[0].resolve(detail('a')));
   expect(snapshot.status).toBe('error'); expect(snapshot.assets).toEqual([]);
 });
+
+it('preserves interleaved JPEG/RAW Queue order independently of detail response order', async () => {
+  await render(['j1','r1','j2','r2']);
+  for (const id of ['r2','j2','r1','j1']) {
+    const request = pending.find(p => p.id === id)!;
+    await act(async () => request.resolve({ ...detail(id), is_raw:id.startsWith('r'), format:id.startsWith('r')?'PEF':'JPEG' }));
+  }
+  expect(snapshot.assets.map(a => a.id)).toEqual(['j1','r1','j2','r2']);
+  expect(snapshot.assets.map(a => a.is_raw)).toEqual([false,true,false,true]);
+});

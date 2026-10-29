@@ -95,10 +95,10 @@ export function StackContextMenu({
   }, []);
 
   const validMembers = members?.filter(member => member.isGenzoRoomExport === false) ?? [];
-  const queueMembers = members?.filter(member => !member.is_raw
-    && (editStatuses[member.id] === true || queueFor(member.id).known && queueFor(member.id).status !== undefined)) ?? [];
+  const queueMembers = members?.filter(member =>
+    editStatuses[member.id] === true || queueFor(member.id).known && queueFor(member.id).status !== undefined) ?? [];
   const darkroomStatus = !selectionAvailable ? 'unavailable' : validMembers.length === 0 ? 'empty' : 'ready';
-  const unresolvedEditStatus = members?.some(member => !member.is_raw && editStatuses[member.id] === undefined) ?? false;
+  const unresolvedEditStatus = members?.some(member => editStatuses[member.id] === undefined) ?? false;
   const queueStatus = queueError ? 'error' : !queueLoaded || !queueCurrent ? 'loading'
     : !members ? 'error'
       : queueMembers.length > 0 ? 'ready'

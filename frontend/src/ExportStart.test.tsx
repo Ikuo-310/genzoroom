@@ -7,7 +7,7 @@ import { useExportManagement, type ExportManagementQueue, type ExportManagementS
 import type { ExportQueueItem } from './exportQueueApi';
 import i18n from './i18n';
 vi.mock('./api', () => ({ fetchAssetDetail: async (id: string) => ({ id, filename: id, date: '', thumbnail_url: '',
-  format: 'JPEG', is_raw: false, preview_url: '', exif: {} }), refreshSelectedImmichStacks: async () => [] }));
+  format: ['b', 'failed-b'].includes(id) ? 'PEF' : 'JPEG', is_raw: ['b', 'failed-b'].includes(id), preview_url: '', exif: {} }), refreshSelectedImmichStacks: async () => [] }));
 const item = (assetId: string, status: ExportQueueItem['status'] = 'queued'): ExportQueueItem => ({ assetId, status, queuedAt: '', updatedAt: '' });
 const idle = { runId: null, status: null, stopRequested: false, stopAllowed: false, currentAssetId: null } as const;
 let root: Root, host: HTMLDivElement, queue: ExportManagementQueue, current: ExportManagementState;
@@ -36,7 +36,7 @@ afterEach(() => {
     else Reflect.deleteProperty(HTMLDialogElement.prototype, key);
   }
 });
-it('starts only armed queued IDs in Queue order, independently of selection, after confirmation', async () => {
+it('starts mixed RAW/JPEG armed IDs in Queue order, independently of selection, after confirmation', async () => {
   await render(); expect(host.querySelector<HTMLButtonElement>('.immich-action-button')!.disabled).toBe(true);
   await act(async () => current.selectAll()); await click('.export-arm-toggle');
   expect(host.querySelectorAll('.export-status-armed')).toHaveLength(2);
@@ -57,7 +57,7 @@ it('confirmation cancellation does not Start and repeated Confirm cannot dispatc
   await act(async () => { expect(current.confirmExport()).toBe(true); expect(current.confirmExport()).toBe(false); });
   expect(queue.startRuntime).toHaveBeenCalledTimes(1);
 });
-it('retries failed Queue items through the primary action and starts only that frozen group', async () => {
+it('retries mixed RAW/JPEG failed Queue items through the primary action and starts only that frozen group', async () => {
   queue.items = [item('armed')];
   queue.runtime = idle;
   await render(); await act(async () => current.selectOnly('armed')); await click('.export-arm-toggle');

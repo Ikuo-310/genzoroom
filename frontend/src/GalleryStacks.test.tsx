@@ -27,6 +27,7 @@ vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>
   fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums, fetchCalendarMinYear: api.minYear,
   fetchCalendarHeatmap: api.heatmap }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
+  getRawAssetEditStatuses: (ids: string[], signal: AbortSignal) => api.statuses.getMockImplementation()!(ids, signal),
   getAssetEditStatuses: api.statuses }));
 
 function asset(id: string, isRaw = false): RecentAsset {

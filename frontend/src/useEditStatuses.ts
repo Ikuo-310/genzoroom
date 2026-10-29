@@ -4,11 +4,11 @@ import type { AssetEditStatuses } from './editStatus';
 
 export type EditStatusesSnapshot = { statuses: AssetEditStatuses; state: 'loading' | 'ready' | 'partial' | 'error' };
 
-export function useEditStatusesSnapshot(assetIds: string[], rawAssetIds: string[] = [], refresh = 0): EditStatusesSnapshot {
-  const key = JSON.stringify([assetIds, rawAssetIds]);
+export function useEditStatusesSnapshot(assetIds: string[], rawAssetIds: string[] = [], refresh = 0, knownRawAssetIds: string[] = []): EditStatusesSnapshot {
+  const key = JSON.stringify([assetIds, rawAssetIds, knownRawAssetIds]);
   const [result, setResult] = useState<{ key: string; refresh: number; snapshot: EditStatusesSnapshot } | null>(null);
   useEffect(() => {
-    const [ids, rawIds] = JSON.parse(key) as [string[], string[]];
+    const [ids, rawIds, knownRawIds] = JSON.parse(key) as [string[], string[], string[]];
     if (ids.length === 0 && rawIds.length === 0) { setResult({ key, refresh, snapshot: { statuses: {}, state: 'ready' } }); return; }
     const controller = new AbortController();
     let active = true;
@@ -40,7 +40,8 @@ export function useEditStatusesSnapshot(assetIds: string[], rawAssetIds: string[
         const value = values[index];
         if (!batch.raw && value) Object.assign(statuses, value);
         else if (batch.raw && value) {
-          for (const id of batch.ids) if (value[id] !== false || !Object.hasOwn(statuses, id)) statuses[id] = value[id];
+          // Known RAW uses its own saved state even when a legacy JPEG-preview Recipe remains.
+          for (const id of batch.ids) if (knownRawIds.includes(id) || value[id] !== false || !Object.hasOwn(statuses, id)) statuses[id] = value[id];
         }
       });
       const rawPending = batches.some((batch, index) => batch.raw && values[index] === null);
@@ -56,6 +57,6 @@ export function useEditStatusesSnapshot(assetIds: string[], rawAssetIds: string[
   return result?.key === key && result.refresh === refresh ? result.snapshot : { statuses: {}, state: 'loading' };
 }
 
-export function useEditStatuses(assetIds: string[], rawAssetIds: string[] = [], refresh = 0): AssetEditStatuses {
-  return useEditStatusesSnapshot(assetIds, rawAssetIds, refresh).statuses;
+export function useEditStatuses(assetIds: string[], rawAssetIds: string[] = [], refresh = 0, knownRawAssetIds: string[] = []): AssetEditStatuses {
+  return useEditStatusesSnapshot(assetIds, rawAssetIds, refresh, knownRawAssetIds).statuses;
 }

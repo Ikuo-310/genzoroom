@@ -94,7 +94,7 @@ beforeEach(async () => {
   api.recent.mockReset(); api.statuses.mockReset(); api.rawStatuses.mockReset(); api.detail.mockReset(); api.editState.mockReset();
   api.recent.mockResolvedValue(assets);
   api.statuses.mockResolvedValue(Object.fromEntries(assets.map((asset, index) => [asset.id, index === 0])));
-  api.rawStatuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, false])));
+  api.rawStatuses.mockImplementation((ids: string[], signal: AbortSignal) => api.statuses.getMockImplementation()!(ids, signal));
   api.detail.mockImplementation(async (id: string) => {
     const asset = assets.find((candidate) => candidate.id === id)!;
     return { ...asset, preview_url: asset.thumbnail_url, exif: {} };
@@ -280,6 +280,7 @@ describe('Home bulk edit status', () => {
   it('keeps unknown edit statuses visible while the lookup is pending, then applies the filter', async () => {
     const waiting = deferred<Record<string, boolean | undefined>>();
     api.statuses.mockReturnValueOnce(waiting.promise);
+    api.rawStatuses.mockReturnValueOnce(waiting.promise);
     await mount();
     changeEditFilter('edited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(100);
@@ -342,6 +343,7 @@ describe('Home bulk edit status', () => {
     const recheck = deferred<Response>();
     let healthCalls = 0;
     api.statuses.mockReturnValueOnce(waiting.promise);
+    api.rawStatuses.mockReturnValueOnce(waiting.promise);
     vi.stubGlobal('fetch', vi.fn((url: string) => url === '/api/health' && healthCalls++ > 0
       ? recheck.promise : Promise.resolve(new Response(JSON.stringify(url === '/api/health'
         ? { status: 'ok' } : { configured: true, connected: true })))));
@@ -533,6 +535,7 @@ describe('Home bulk edit status', () => {
     expect(host.textContent).toBe('unknown');
     const waiting = deferred<Record<string, boolean>>();
     api.statuses.mockReturnValueOnce(waiting.promise);
+    api.rawStatuses.mockReturnValueOnce(waiting.promise);
     await act(async () => root.render(<div />));
     await act(async () => root.render(<Harness />));
     const signal = api.statuses.mock.calls.at(-1)![1] as AbortSignal;

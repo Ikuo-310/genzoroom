@@ -33,7 +33,7 @@ import type { AssetHistograms, ImageHistograms } from './histogram';
 import { ScopePanel } from './ScopePanel';
 import { ScopeResizeHandle } from './ScopeResizeHandle';
 import { readScopePanelBasis, saveScopePanelBasis } from './scopeSizing';
-import { EditStateApiError, type EditStateApiErrorKind } from './editStateApi';
+import { getRawAssetEditStatuses, EditStateApiError, type EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
 import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
@@ -86,11 +86,12 @@ export function AnshitsuPage() {
   const [excludeFailure, setExcludeFailure] = useState(false);
   const activeRouteRef = useRef(assetId);
   activeRouteRef.current = assetId;
+  const [rawStatusRefresh, setRawStatusRefresh] = useState(0);
   const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id),
     [...new Set(selectedAssets.flatMap(asset => [
       ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
       ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
-    ]))]);
+    ]))], rawStatusRefresh, selectedAssets.filter(asset => asset.is_raw).map(asset => asset.id));
   const exportQueue = useExportQueue();
   const queueToggleRef = useRef<(id: string) => Promise<void>>(async () => {});
   const queueOperations = useRef(new Set<string>());
@@ -166,16 +167,33 @@ export function AnshitsuPage() {
       || queueOperations.current.has(id) || exportQueue.mutationFor(id).operation) return;
     const status = exportQueue.getStatus(id);
     if (status === 'waiting' || status === 'encoding' || status === 'registering') return;
+    const rawAsset = selectedAssets.find(asset => asset.id === id)?.is_raw
+      ?? (id === assetId && activeDetail?.is_raw) ?? false;
     const removing = status === 'queued' || status === 'failed';
     // A default Recipe has no Queue control, even while saved cleanup membership is still refreshing.
-    if (localStateFor(id).nonDefaultRecipe === false) return;
-    if (!removing && id === assetId && !editable) return;
+    if (!rawAsset && localStateFor(id).nonDefaultRecipe === false) return;
+    if (!removing && id === assetId && (rawAsset
+      ? rawDocument?.status !== 'ready' || !rawDocument.settings || rawDocument.regenerating || rawDocument.resetting
+      : !editable)) return;
     queueOperations.current.add(id);
     setQueueBusy(new Set(queueOperations.current));
     setQueueFailure(null);
     try {
       if (removing) {
         await exportQueue.dequeue(id);
+      } else if (rawAsset) {
+        try {
+          if (id === assetId) await rawDocument!.prepareSave();
+          if (!queueMounted.current || (id === assetId && activeRouteRef.current !== id)) return;
+          // Only Backend-confirmed saved eligibility authorizes enqueue; live settings never enter Queue requests.
+          const statuses = await getRawAssetEditStatuses([id], AbortSignal.timeout(8000));
+          if (!queueMounted.current || (id === assetId && activeRouteRef.current !== id)) return;
+          if (statuses[id] !== true) { setQueueFailure('notEligible'); return; }
+          await exportQueue.enqueue([id]);
+        } finally {
+          if (id === assetId && activeRouteRef.current === id) rawDocument?.resumeEditing();
+          if (queueMounted.current) setRawStatusRefresh(value => value + 1);
+        }
       } else {
         const before = localStateFor(id);
         if (before.dirty || before.saving) {
@@ -880,7 +898,7 @@ export function AnshitsuPage() {
         queueCurrent={exportQueue.canonical}
         queueStatusFor={exportQueue.getStatus}
         queueBusyFor={id => queueBusy.has(id) || !!exportQueue.mutationFor(id).operation || localStateFor(id).saving}
-        onQueueToggle={id => { if (!selectedAssets.find(asset => asset.id === id)?.is_raw) void queueToggleRef.current(id); }}
+        onQueueToggle={id => { void queueToggleRef.current(id); }}
         onActivate={(nextId) => { void activateAsset(nextId); }}
       />}
     />

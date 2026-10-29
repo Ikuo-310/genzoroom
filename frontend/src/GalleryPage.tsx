@@ -235,7 +235,10 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
     ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
     ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
   ]))] : [];
-  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds);
+  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds, 0,
+    editStatusAssets.flatMap(asset => [
+      ...(asset.is_raw ? [asset.id] : []), ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
+    ]));
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
@@ -1090,8 +1093,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function queueStateFor(asset: RecentAsset, queueSnapshot = exportQueue) {
     const memberIds = asset.stackId
-      ? asset.stackMembers?.filter(member => !member.is_raw).map(member => member.id) ?? []
-      : asset.is_raw ? [] : [asset.id];
+      ? asset.stackMembers?.map(member => member.id) ?? asset.stackMemberIds ?? []
+      : [asset.id];
     const status = (['encoding', 'registering', 'waiting', 'failed', 'queued'] as const)
       .find(status => memberIds.some(id => queueSnapshot.getStatus(id) === status));
     return { memberIds, status, locked: status === 'waiting' || status === 'encoding' || status === 'registering', busy: queueBatchBusyState || memberIds.some(id => queueBusy.has(id.toLowerCase()) || !!queueSnapshot.mutationFor(id).operation) };

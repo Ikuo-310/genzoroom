@@ -15,13 +15,13 @@ vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => (
   stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
 }) }));
 const api = vi.hoisted(() => ({ photos: vi.fn(), albums: vi.fn(), minYear: vi.fn(), heatmap: vi.fn(),
-  statuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn() }));
+  statuses: vi.fn(), rawStatuses: vi.fn(), editState: vi.fn(), list: vi.fn(), enqueue: vi.fn(), dequeue: vi.fn() }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchRecentAssets: api.photos, fetchFavoriteAssets: api.photos, fetchAlbumAssets: api.photos,
   fetchCalendarDayAssets: api.photos, fetchAlbums: api.albums, fetchCalendarMinYear: api.minYear,
   fetchCalendarHeatmap: api.heatmap }));
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
-  getAssetEditStatuses: api.statuses, getAssetEditState: api.editState }));
+  getAssetEditStatuses: api.statuses, getRawAssetEditStatuses: api.rawStatuses, getAssetEditState: api.editState }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: api.list, enqueueExportAssets: api.enqueue, dequeueExportAsset: api.dequeue }));
 
@@ -56,6 +56,7 @@ beforeEach(async () => {
   api.photos.mockResolvedValue(photos); api.albums.mockResolvedValue([album]);
   api.minYear.mockResolvedValue(2002); api.heatmap.mockResolvedValue({ year: 2026, month: 10, days: [] });
   api.statuses.mockImplementation(async (requested: string[]) => Object.fromEntries(requested.map(id => [id, id !== ids[3]])));
+  api.rawStatuses.mockImplementation(async requested => api.statuses(requested));
   api.list.mockImplementation(async () => [...items]);
   api.enqueue.mockImplementation(async (requested: string[]) => {
     for (const id of requested) if (!items.some(value => value.assetId === id)) items.push(item(id));
@@ -637,4 +638,20 @@ describe('Home Stack Queue aggregation', () => {
     await act(async () => pending.resolve());
     expect(api.dequeue).toHaveBeenCalledTimes(1); expect(api.list).toHaveBeenCalledTimes(1);
   });
+});
+
+
+it('enqueues saved non-default RAW using the existing badge and ID-only API', async () => {
+  await mount(); await click(badge(1));
+  expect(api.enqueue).toHaveBeenCalledWith([ids[1]], expect.any(AbortSignal));
+  expect(badge(1).getAttribute('aria-pressed')).toBe('true');
+});
+it.each([false, undefined])('does not infer RAW eligibility from old JPEG state (%s)', async status => {
+  api.statuses.mockResolvedValue({ [ids[1]]: true });
+  api.rawStatuses.mockResolvedValue({ [ids[1]]: status });
+  await mount();
+  expect(card(1).querySelector('.edited-badge')).toBeNull();
+  await click(card(1).querySelector<HTMLInputElement>('.photo-selection-input')!);
+  await pressQ();
+  expect(api.enqueue).not.toHaveBeenCalled();
 });

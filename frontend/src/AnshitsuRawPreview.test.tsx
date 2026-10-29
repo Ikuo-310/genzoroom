@@ -9,6 +9,8 @@ import { SettingsProvider } from './SettingsDialog';
 import i18n from './i18n';
 import type { AssetDetail } from './assets';
 import * as rawApi from './rawApi';
+import * as editApi from './editStateApi';
+import * as queueApi from './exportQueueApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
@@ -23,7 +25,7 @@ vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
   getAssetEditState: vi.fn(async () => ({ state: null })), getAssetEditStatuses: vi.fn(async () => ({})),
   getRawAssetEditStatuses: vi.fn(async () => ({ [rawB.id]: true })) }));
-vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(), listExportQueue: vi.fn(async () => []) }));
+vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(), listExportQueue: vi.fn(async () => []), enqueueExportAssets: vi.fn(), dequeueExportAsset: vi.fn(async () => {}) }));
 vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjusted(props); return <div data-jpeg-renderer />; } }));
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(async () => 'workspace'), openRawDocument: vi.fn(async (workspaceId, assetId) => ({
@@ -46,7 +48,11 @@ async function mount() {
 }
 beforeEach(async () => {
   vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
-  vi.clearAllMocks(); await i18n.changeLanguage('en');
+  vi.clearAllMocks();
+  vi.mocked(queueApi.listExportQueue).mockResolvedValue([]);
+  vi.mocked(queueApi.enqueueExportAssets).mockReset().mockImplementation(async ids => ids.map(assetId => ({ assetId, status: 'queued', queuedAt: '2026-10-06T00:00:00.000Z', updatedAt: '2026-10-06T00:00:00.000Z' })));
+  vi.mocked(editApi.getRawAssetEditStatuses).mockReset().mockResolvedValue({ [rawB.id]: true });
+  await i18n.changeLanguage('en');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
@@ -1258,4 +1264,58 @@ it('shows a rejected AW estimate without locking saved edits or retrying it as a
   expect(aw.disabled).toBe(false);
   expect(host.textContent).not.toContain('The RAW recipe could not be saved');
   expect(history().querySelectorAll('li')).toHaveLength(1);
+});
+
+
+it('RAW Q drains history save before enqueue and sends only the Asset ID', async () => {
+  vi.mocked(editApi.getRawAssetEditStatuses).mockResolvedValue({ [base.id]: true, [rawB.id]: true });
+  await mount();
+  let finish!: () => void;
+  commitHistory.mockImplementationOnce(request => new Promise(resolve => { finish = () => resolve(rawHistoryResult(request)); }));
+  await editRaw();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.enqueueExportAssets).not.toHaveBeenCalled();
+  expect(finish).toBeDefined();
+  await act(async () => finish()); await flush();
+  expect(queueApi.enqueueExportAssets).toHaveBeenCalledWith([base.id], expect.any(AbortSignal));
+  expect(rawApi.openRawDocument).toHaveBeenCalledTimes(1);
+});
+
+it.each([false, undefined])('RAW Q revalidates saved eligibility after drain (%s)', async status => {
+  vi.mocked(editApi.getRawAssetEditStatuses).mockResolvedValue({ [base.id]: status, [rawB.id]: true });
+  await mount();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.enqueueExportAssets).not.toHaveBeenCalled();
+});
+
+it('removes stale queued RAW without saving even when saved Recipe is default', async () => {
+  vi.mocked(queueApi.listExportQueue).mockResolvedValue([{ assetId: base.id, status: 'queued', queuedAt: '2026-10-06T00:00:00.000Z', updatedAt: '2026-10-06T00:00:00.000Z' }]);
+  await mount();
+  const before = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.dequeueExportAsset).toHaveBeenCalledWith(base.id, expect.any(AbortSignal));
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(before);
+});
+
+it('RAW save failure prevents Q enqueue', async () => {
+  vi.mocked(editApi.getRawAssetEditStatuses).mockResolvedValue({ [base.id]: true });
+  await mount();
+  commitHistory.mockRejectedValueOnce(new Error('save failed'));
+  await editRaw();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.enqueueExportAssets).not.toHaveBeenCalled();
+});
+
+it('queues an inactive saved RAW from Filmstrip without switching or saving the active document', async () => {
+  await mount();
+  const before = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const inactive = host.querySelectorAll<HTMLElement>('.filmstrip-entry')[2].querySelector<HTMLButtonElement>('.edited-badge')!;
+  act(() => inactive.click()); await flush();
+  expect(queueApi.enqueueExportAssets).toHaveBeenCalledWith([rawB.id], expect.any(AbortSignal));
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(before);
+  expect(rawApi.openRawDocument).toHaveBeenCalledTimes(1);
 });
