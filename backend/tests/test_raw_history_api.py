@@ -680,7 +680,7 @@ def test_uncertain_c3_save_resolves_before_history_optin(local, tmp_path, monkey
                 _, doc = await open_document(http)
                 request = save_body(doc)
                 with monkeypatch.context() as patch:
-                    def fail(*args):
+                    def fail(*args, **kwargs):
                         raise store.StoreUnavailable()
                     patch.setattr(store, "put_raw_recipe", fail)
                     assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=request)).status_code == 503

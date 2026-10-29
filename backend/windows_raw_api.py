@@ -20,6 +20,7 @@ from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
 from raw_controls import CONTROLS, CONTROL_PATHS, controls_state, validate_controls, validate_history_operation
+from thumbnail_lifecycle import mutate_raw_edits
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
@@ -57,6 +58,7 @@ class _ImageResponse(Response):
 class RawPreviewApi:
     def __init__(self):
         self.raw = self.manager = None
+        self.thumbnail_scheduler = lambda: None
         self.cache = None
         self.workspace = self.document = None
         self._lock = asyncio.Lock()
@@ -684,9 +686,10 @@ class RawPreviewApi:
                        "importDefaultsFingerprint": doc["importDefaultsFingerprint"], "settled": False}
             self._recipe_save = pending
         try:
-            result = await run_in_threadpool(put_raw_recipe, pending["identity"], body["expectedRecipeRevision"],
-                                             body["saveId"], pending["settings"],
-                                             import_defaults_fingerprint=pending["importDefaultsFingerprint"])
+            result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"],
+                                           put_raw_recipe, pending["identity"], body["expectedRecipeRevision"],
+                                           body["saveId"], pending["settings"],
+                                           import_defaults_fingerprint=pending["importDefaultsFingerprint"])
         except StoreConflict as error:
             if error.code == "raw_history_requires_operation":
                 # The store has rejected this new checkpoint without a receipt or a write.
@@ -976,11 +979,13 @@ class RawPreviewApi:
                       "import_defaults_fingerprint": doc["importDefaultsFingerprint"]}
             args = (pending["identity"], body["expectedRecipeRevision"], body["saveId"], pending["settings"])
             if action == "initialize":
-                result = await run_in_threadpool(initialize_raw_history, *args, **kwargs)
+                result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], initialize_raw_history, *args, **kwargs)
             elif action in ("commit", "operate"):
-                result = await run_in_threadpool(append_raw_history, *args, kind=body["kind"], metadata=body["metadata"], **kwargs)
+                result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], append_raw_history, *args,
+                                               kind=body["kind"], metadata=body["metadata"], **kwargs)
             else:
-                result = await run_in_threadpool(move_raw_history_cursor, *args, target_step_id=pending["target"], **kwargs)
+                result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], move_raw_history_cursor, *args,
+                                               target_step_id=pending["target"], **kwargs)
             try:
                 self._history_verify(doc)
             except LightCraftError:
@@ -1239,7 +1244,7 @@ class RawPreviewApi:
                                    errorCode="raw_edit_reset_session_failed")
                     raise LightCraftError("raw_edit_reset_session_failed") from None
             try:
-                result = await run_in_threadpool(delete_raw_edits, asset_id)
+                result = await mutate_raw_edits(self.thumbnail_scheduler(), asset_id, delete_raw_edits, asset_id)
             except (InvalidRawRecipe, StoreUnavailable):
                 lightcraft_log("raw.editReset.databaseFailed", level="error", assetId=asset_id,
                                errorCode="raw_edit_reset_database_failed")

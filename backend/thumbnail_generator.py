@@ -84,7 +84,7 @@ async def generate_thumbnail(
     input_kind: str = "jpeg",
 ) -> bytes:
     """Read the latest saved current Recipe at invocation and return JPEG bytes."""
-    # Phase 1 callers opt in explicitly; existing save/request eligibility remains JPEG-only.
+    # Callers resolve Asset kind; rendering never infers RAW eligibility from JPEG-preview edits.
     if input_kind == "raw":
         from raw_thumbnail_generator import generate_raw_thumbnail
         return await generate_raw_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, transport=transport)

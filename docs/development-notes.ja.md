@@ -1,5 +1,23 @@
 # GenzoRoom 開発ノート
 
+## RAW rendered-thumbnail Phase 2（2026-10-30）
+
+Phase 1のRAW generatorを既存保存／Reset／scheduler／API lifecycleへ接続した。共通Backend lifespanの一つのThumbnailSchedulerとThumbnailCacheを維持し、生成callbackがImmich detailの`is_raw`からJPEG/RAWを選択する。Asset IDだけのqueue、60秒debounce、逐次処理、失敗時の旧cache保持、shutdown drainは変更しない。
+
+Windows mounted RAW APIにはLocalHostから同じschedulerのproviderを渡す。Recipe PUT、History initialize/append/Undo/Redo/jump/operateの確定保存、edit Reset/deleteを共通`mutate_raw_edits()`で包み、既存mutation_lock内で保存前後の共通selectorを比較する。transaction成功後のnon-default current Recipe変更だけ予約し、receipt replay／History-only/no-opではdeadlineを延長しない。default/unknown/missingはpending取消・active結果無効化・cache削除を行う。DB保存失敗では通知せず、cache保守失敗だけなら保存成功を維持してwarnを記録する。
+
+rendered-thumbnail POST/GETとimmersive-preview GETは同じkind-aware保存状態判定を共有する。既知RAWではRAW保存状態を優先し、旧JPEG-preview編集のtrueでdefault/unknown/missingを覆わない。POSTは即時予約のみ、GETは適格cache優先／Immich thumbnailまたはPreview fallbackで、生成しない。DB／detail読取失敗はAPI errorとし、stale cacheやdefault扱いへfallbackしない。cache hit時もkind確認のためImmich detail取得が必要になる。
+
+生成中の再保存・Resetには既存schedulerのmutation_lockとactive invalidationを適用する。RAW固有のgeneration機構、queue/cache/API/schema、Native patch、画質変更、Export変更はない。JPEG保存コード、Phase 1のRAW renderer、Frontend実装は変更しない。
+
+自動検証：BackendのRAW lifecycle・generator、JPEG thumbnail/API/cache/scheduler、RAW Recipe/History/store/restore、Windows RAW API/host、RAW Export非干渉の関連472件成功。監査後にRAW store読取失敗時のstale cache拒否を追加し、RAW lifecycle＋JPEG API最終55件成功。Frontend既存thumbnail API／Immersive Preview回帰30件成功。全suite、Frontend typecheck/build、Docker Smoke Test、画面操作は実施していない。
+
+実Windows Native＋実Pixel 7 Pro／Pentax K-S2 DNGを、隔離DB/cacheと認証済みローカルASGI APIで確認した。History initialize→編集→commit保存後に予約し、timerを短縮せず実60秒debounceを経て生成した。Pixelは1024×770／306,149 bytes、Pentaxは1024×683／140,746 bytes。rendered-thumbnail／immersive-preview双方でcache bytes一致を確認し、Undoによるdefault化でcacheを削除、両GETがImmich thumbnail／Previewへfallbackすることを確認した。Redo保存で再予約し、実60秒後の再生成も成功した。最後に既存edit Reset APIでRecipe削除・cache削除・fallbackを両Assetで確認した。追加削除probeの2件目は既存owner retry条件に合わせてdocumentを開き直して再確認し、生成・再生成済み結果は再実行していない。通常保存DBは変更せず、Immichへは読取のみ、Native終了も確認した。これはBackend lifecycle受入であり、GUI/Computer Use／Gallery等の表示受入ではない。
+
+監査で、追加helperの早期importがWindows profile選択前にDB pathを固定する問題を検出し、persistence/cache importを遅延して修正した。Windows CLI起動・graceful shutdownを含む関連98件で修正を確認した。また既存保存障害／待機fixtureの一部が`import_defaults_fingerprint`のkeyword引数を受け取らず、意図した障害ではなくTypeErrorとなっていたためfixtureを補正した。保存APIの失敗・再試行・切断・shutdown時の既存保証は維持している。残存High/Medium Findingはない。
+
+Phase 1記録中の「保存／Reset／API未接続」は当時の範囲であり、本PhaseでBackend接続済み。Gallery/Filmstrip/Stackの表示コード・Frontend state変更と実画面受入はPhase 3へ残す。README/CHANGELOGは変更しない。
+
 ## RAW rendered-thumbnail Phase 1（2026-10-30）
 
 JPEGの既存rendered-thumbnail契約、scheduler/request/GET/cache、Windows RAW Preview、RAW Export P0〜P4を確認し、Backend生成経路だけを追加した。`generate_thumbnail(..., input_kind="raw")`から独立したRAW generatorへ分岐し、省略時は既存JPEG処理を維持する。保存連動、Reset連動、request/GETのRAW適格判定、Frontend表示は未接続で、今回cacheを作成してもRAW表示受入の完了を意味しない。

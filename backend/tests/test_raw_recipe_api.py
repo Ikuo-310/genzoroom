@@ -128,7 +128,7 @@ def test_save_failure_keeps_snapshot_for_exact_retry(local, tmp_path, monkeypatc
                 url, body = f'/api/raw/documents/{doc["handle"]}/recipe', save_body(doc)
                 before = database_rows()
                 with monkeypatch.context() as patch:
-                    def fail(*_): raise store.StoreUnavailable()
+                    def fail(*_, **kwargs): raise store.StoreUnavailable()
                     patch.setattr(store, "put_raw_recipe", fail)
                     failed = await http.put(url, json=body)
                     assert failed.status_code == 503 and failed.json()["code"] == "raw_recipe_save_failed"
@@ -148,10 +148,10 @@ def test_disconnected_save_waiter_keeps_owned_write_and_replays_ack(local, tmp_p
         entered, gate = asyncio.Event(), threading.Event()
         loop = asyncio.get_running_loop()
         put = store.put_raw_recipe
-        def delayed(*args):
+        def delayed(*args, **kwargs):
             loop.call_soon_threadsafe(entered.set)
             gate.wait()
-            return put(*args)
+            return put(*args, **kwargs)
         monkeypatch.setattr(store, "put_raw_recipe", delayed)
         try:
             async with client(local) as http:
@@ -198,10 +198,10 @@ def test_shutdown_during_save_reports_unknown_not_a_successful_stale_document(lo
         api, manager, _, root = await setup(tmp_path, local, monkeypatch)
         entered, gate = asyncio.Event(), threading.Event()
         loop, put = asyncio.get_running_loop(), store.put_raw_recipe
-        def delayed(*args):
+        def delayed(*args, **kwargs):
             loop.call_soon_threadsafe(entered.set)
             gate.wait()
-            return put(*args)
+            return put(*args, **kwargs)
         monkeypatch.setattr(store, "put_raw_recipe", delayed)
         try:
             async with client(local) as http:

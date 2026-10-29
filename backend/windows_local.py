@@ -84,6 +84,8 @@ class LocalHost:
         self.backend = backend
         self.connection = connection
         self.raw_api = RawPreviewApi()
+        # The common lifespan owns the one scheduler; mounted RAW requests use that same instance.
+        self.raw_api.thumbnail_scheduler = lambda: getattr(backend.state, "thumbnail_scheduler", None)
         self.raw_diagnostics = RawDiagnosticsApi(self.raw_api)
 
         @asynccontextmanager

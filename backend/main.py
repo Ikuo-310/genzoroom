@@ -35,6 +35,7 @@ from edit_store import (
 from thumbnail_cache import ThumbnailCache, thumbnail_log
 from thumbnail_generator import generate_thumbnail
 from thumbnail_scheduler import ThumbnailScheduler
+from raw_recipe_store import get_raw_saved_state
 
 from immich import (
     ImmichAbout,
@@ -79,7 +80,7 @@ async def lifespan(app: FastAPI):
     app.state.tag_repair = GenzoRoomTagRepair(url, key)
     cache = ThumbnailCache()
     async def generate(asset_id):
-        return await generate_thumbnail(asset_id, immich_url=url, api_key=key)
+        return await generate_saved_thumbnail(asset_id, immich_url=url, api_key=key)
     scheduler = ThumbnailScheduler(cache, generate)
     app.state.thumbnail_cache = cache
     app.state.thumbnail_scheduler = scheduler
@@ -647,6 +648,29 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
     )
 
 
+async def generate_saved_thumbnail(asset_id, *, immich_url, api_key):
+    detail = await get_asset_detail(immich_url, api_key, asset_id)
+    return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key,
+                                    input_kind="raw" if detail.is_raw else "jpeg")
+
+
+async def thumbnail_recipe_reason(asset_id):
+    try:
+        detail = await get_asset_detail(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
+    if detail.is_raw:
+        # A legacy JPEG-preview record must never authorize a known RAW's stale cache.
+        state = await run_in_threadpool(get_raw_saved_state, asset_id)
+        if state is None:
+            return "recipe_missing"
+        if state["exportEligible"] is None:
+            return "recipe_unknown"
+        return None if state["exportEligible"] is True else "recipe_default"
+    state = (await run_in_threadpool(get_edit_state, asset_id))["state"]
+    return "recipe_missing" if state is None else "recipe_default" if not has_non_default_recipe(state) else None
+
+
 @app.post("/assets/{asset_id}/rendered-thumbnail", status_code=202)
 async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     scheduler = getattr(request.app.state, "thumbnail_scheduler", None)
@@ -654,10 +678,9 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
         raise HTTPException(status_code=503, detail={"code": "thumbnail_scheduler_unavailable"})
     async with scheduler.mutation_lock:
         try:
-            state = (await run_in_threadpool(get_edit_state, asset_id))["state"]
+            reason = await thumbnail_recipe_reason(asset_id)
         except StoreUnavailable as error:
             raise _store_error(error) from error
-        reason = "recipe_missing" if state is None else "recipe_default" if not has_non_default_recipe(state) else None
         try:
             if reason is not None:
                 await scheduler.reset(asset_id)
@@ -676,11 +699,10 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
 async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     cache = getattr(request.app.state, "thumbnail_cache", None)
     try:
-        saved = await run_in_threadpool(get_edit_state, asset_id)
+        reason = await thumbnail_recipe_reason(asset_id)
     except StoreUnavailable as error:
         raise _store_error(error) from error
-    state = saved["state"]
-    has_recipe = state is not None and has_non_default_recipe(state)
+    has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
         return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
@@ -694,11 +716,10 @@ async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
 async def immersive_preview(asset_id: UUID, request: Request) -> Response:
     cache = getattr(request.app.state, "thumbnail_cache", None)
     try:
-        saved = await run_in_threadpool(get_edit_state, asset_id)
+        reason = await thumbnail_recipe_reason(asset_id)
     except StoreUnavailable as error:
         raise _store_error(error) from error
-    state = saved["state"]
-    has_recipe = state is not None and has_non_default_recipe(state)
+    has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
         return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})

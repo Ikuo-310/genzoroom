@@ -1,5 +1,6 @@
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(main.app.state, "thumbnail_cache", cache, raising=False)
     original = AsyncMock(return_value=ImmichThumbnail(b"original", "image/jpeg"))
     monkeypatch.setattr(main, "get_asset_thumbnail", original)
+    monkeypatch.setattr(main, "get_asset_detail", AsyncMock(return_value=SimpleNamespace(is_raw=False)))
     return cache, scheduler, now, generate, original
 
 
