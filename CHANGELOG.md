@@ -14,12 +14,14 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Saved RAW edits are now reflected in thumbnails across Gallery, Filmstrip, Stack Edited Preview, and immersive previews.
 - The shared photo Viewer now toggles between Fit and Actual Size on image double-click, and offers a configurable corner Zoom Navigator for locating and panning around magnified images.
 - RAW Whole-frame previews now adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
 - Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
 
 ### Fixed
 
+- Leaving the RAW darkroom now requests an updated thumbnail promptly after saving, and resetting RAW edits restores the original Immich image.
 - RAW preview StageCache now accounts for GPU buffer capacity and checks budgets against decoded sources and render plans. RAW diagnostics distinguish completed GPU renders from CPU execution and fallback.
 - RAW slider drags now send coalesced updates during continuous input and show acknowledged Draft previews, then request the final Full preview when the gesture ends.
 - Windows PoC Developer Diagnostics now offers a save destination for JSON reports, supports consecutive exports, and reports save failures while treating cancellation normally.

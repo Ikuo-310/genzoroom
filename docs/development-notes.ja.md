@@ -1,30 +1,26 @@
 # GenzoRoom 開発ノート
 
-## RAW rendered-thumbnail Phase 3：実装完了・画面受入待ち（2026-10-30）
+## RAW rendered-thumbnail Phase 1〜3：完了（2026-10-30）
 
-### 画面受入Finding：RAW離脱時の即時予約（修正・再受入待ち）
+保存済みnon-default RAW Recipeから、既存ThumbnailScheduler、独立LightCraft manager/session、最大辺1024pxのPreview、既存encoderによるJPEG化を経て、Asset ID単位の既存ThumbnailCacheへ保存する。JPEGの`JpegRenderer`、active editing document、Undo/Redo、live Preview、RAW Export pipelineは使用しない。source RAW、Recipe、Historyは不変で、XMP sidecarは生成しない。
 
-利用者の画面受入で、RAW生成自体は成功している一方、暗室からGalleryへ戻った直後は補正済みthumbnailにならず、通常の60秒debounce後にGallery Reloadすると表示されることを確認した。原因は、保存通知による通常予約はあるが、RAW暗室離脱時にJPEGと同じimmediate thumbnail reservationを行っていなかったこと。Filmstrip移動、Home退出、active RAW除外の`prepareSave()`成功後に既存`requestThumbnailGeneration()`を呼び、既存rendered-thumbnail POSTへ接続した。default／unknown／missing eligibilityはFrontendで判定せずBackend契約へ委ねる。Home退出ではJPEGの既存`thumbnailAssetIds`とactive RAW IDをSetでまとめ、同じAssetへの重複POSTを避ける。POSTは待たず、Backendの60秒通常debounce・generator・cacheには変更なし。自動テストで順序と失敗時抑止を確認し、利用者による画面再受入は未実施。
+### Phase 1：RAW generator
 
-今回のFrontend focused testは5 files／267件成功（Anshitsu RAW／Persistence、RAW Queue、Gallery refresh、thumbnail API）。型チェックとproduction buildも成功し、既存500 kB超chunk警告あり。追加で実行した`AnshitsuPage.test.tsx`には、今回の変更と無関係なSSR描画testで`window is not defined`の失敗が1件あったため、要件対象5 suiteを単独で再実行して成功を確認した。Computer Use／画面再受入は未実施。
+RAW generatorをJPEG generatorから分岐し、保存済みRAW Recipe／DevelopSettingsを独立LightCraft sessionへ適用する経路を追加した。LightCraft Previewは最大辺1024px、PNGの場合は既存JPEG encoder契約で表示用JPEGへ変換する。既存ThumbnailCacheへ保存可能なbytesを生成し、source／History／編集session保護とtemporary／Native cleanupを確認した。Windows Native＋実Pixel 7 Pro／Pentax K-S2 DNGでBackend生成、寸法、cache、source不変、sidecar不在、Recipe/History不変、別編集session不変を確認した。
 
-Phase 1は独立LightCraftによるRAW生成、Phase 2は保存／Reset／scheduler／API lifecycle接続。本Phaseでは既存FrontendのJPEG/RAW共通表示経路を確認し、回帰テストで契約を固定した。調査時点で`thumbnailUrl()`、Gallery PhotoCard、Filmstrip、Stack Edited Preview、Immersive PreviewにRAWをImmich画像へ固定する除外分岐はなく、Phase 2のBackend対応でRAWも通る構造だった。不要な機能変更はせず、共通helperへBackend適格性の責務コメントだけを追加した。削除したRAW専用分岐はない。
+### Phase 2：保存lifecycleと共通Backend API
 
-GalleryのRecent／Favorites／Album写真／Calendar日別はJPEG/RAWともrendered-thumbnailを使い、既存Reloadと暗室からの再入場revisionでURLを更新する。Filmstripはactive/inactiveやEdited Badge状態に関係なく同じhelperを使う。StackはOFFでImmich thumbnail、ONで共通rendered-thumbnailを使い、既存switch・COVER・選択・DnDの意味を維持する。read-only Immersive PreviewはGallery／Stack／出力管理とも、open時に固定した補正済み設定でimmersive-preview、original系でpreviewを使い、RAW/JPEG移動中や親設定更新で切り替えない。
+RAW Recipe保存／Reset／History commitを既存ThumbnailScheduler／ThumbnailCacheへ接続した。current non-default Recipeの変更だけ通常60秒debounce予約し、replay／History-only／no-opではdeadlineを延長しない。default／unknown／missingではpending取消、active result無効化、cache削除を行う。共通POST/GET/immersive-preview GETはRAW保存状態をauthoritativeに使い、GETは生成せず、cache missや非適格状態ではImmich thumbnail／Previewへfallbackする。Windows API/CLIで実60秒debounce、生成、cache取得、Reset/default後の削除とfallbackを確認した。Windows profile選択前のpersistence/cache importによるDB path固定Findingは遅延importで修正した。
 
-FrontendのRAW edit statusからcache適格性を再判定しない。default/unknown/missing/cache生成前のfallbackとstale cache拒否はPhase 2のBackendが担当する。対象画像componentには既存JPEG専用onError fallbackもなかったため、新しいRAW fallbackは作らない。暗室RAWはlive LightCraft blob／Before/After／Regionのままで、Filmstripのcache URLとは分離する。JPEG暗室も既存rendererを維持する。Backend、保存、scheduler、generator、Native、Export、画質、サイズ、UI、性能最適化は変更していない。
+### Phase 3：共通Frontend表示と受入
 
-自動検証：PhotoCard／Gallery refresh／Filmstrip／Stack Management／Immersive Preview／Anshitsu RAW／thumbnail APIの7ファイル415件成功。追加の出力管理RAW/JPEG Viewer、Gallery Edited Badge／Queue／Stack選択、Anshitsu Queue関連5ファイル250件成功。合計12ファイル665件。TypeScriptチェックとproduction build成功、buildには既存500 kB超chunk警告あり。初回sandbox実行は変換一時fileのENOENTでsuiteを読み込めず、同じ対象を権限制限外で再実行した。全Frontend suite、Backend再試験、実Windows画面操作、Computer Useは実施していない。
+コード確認ではGallery、Filmstrip、Stack Edited Preview、Immersive PreviewがもともとJPEG/RAW共通の表示経路だった。RAW専用表示分岐やFrontend eligibility判定は追加せず、共通契約のコメントと回帰testを加えた。
 
-監査で未修正High/Medium Findingなし。RAW専用component/state/URL、Frontend cache eligibility、暗室source置換、Stack OFFの意味変更、Backend変更、先行最適化を追加していないことを確認した。テストはDOM上のsource URL・navigation・refresh・状態契約を検証したもので、実JPEGの画素や画質の画面受入ではない。README/CHANGELOGは変更しない。
+最初の利用者画面確認では、RAW保存後すぐGalleryへ戻るとImmich thumbnailが表示され、60秒後にReloadすると補正済み画像へ変わった。生成・cache・GET経路は正常で、原因は暗室離脱時のimmediate reservation不足だった。RAWの`prepareSave()`成功後、Filmstripで別Assetへ移動、Home退出、active RAW除外による移動の各経路でJPEGと同じ既存`requestThumbnailGeneration()`／rendered-thumbnail POSTを呼ぶよう修正した。通常60秒予約は維持し、Home退出ではJPEG thumbnail IDとactive RAW IDをAsset ID単位で重複排除した。Frontendはdefault／unknown／missingを判定せずBackendのskip契約に委ねる。
 
-利用者による実画面受入は未実施。以下を確認するまで「実装完了・画面受入待ち」とする。
+再受入では、RAW編集・保存後の補正済みthumbnail生成とGallery／Filmstrip表示、Home復帰時のimmediate reservationによる速やかな反映、Stack Edited PreviewとImmersive PreviewでのRAW cache利用、Reset/default後のImmich画像への復帰、再編集・保存後の再表示を確認した。**RAW rendered-thumbnail Phase 1〜3 完了**。Computer Useは使用していない。
 
-- RAWを暗室で開き、明確な補正を入れて保存し、生成完了後にGalleryへ戻る（必要なら既存Reload）。Galleryと再入場したFilmstripの補正済み画像を確認する。
-- Stack Edited Preview OFFでImmich画像、ONでRAW補正済み画像となり、JPEGも従来どおり切り替わることを確認する。
-- Galleryからread-only Viewerを開き、補正済みRAWとRAW/JPEG間の移動を確認する。
-- RAWをdefaultへResetしてGalleryに戻り、Immich画像への復帰を確認する。
-- 再編集・保存後、生成完了と既存refreshを経て補正済み画像へ戻ることを確認する。
+最終Frontend focused testは関連5 files／267件成功、TypeScriptチェックとproduction build成功（既存500 kB超chunk警告あり）。追加で実行した`AnshitsuPage.test.tsx`には今回と無関係なSSR描画testの`window is not defined`失敗が1件あり、要件対象5 suiteを独立して再実行し全件成功を確認した。Phase 1/2のBackend focused testとWindows Native/API/CLI検証の詳細は各履歴節に記録した。未修正High/Medium Findingはない。
 
 ## RAW rendered-thumbnail Phase 2（2026-10-30）
 
@@ -42,7 +38,7 @@ rendered-thumbnail POST/GETとimmersive-preview GETは同じkind-aware保存状�
 
 監査で、追加helperの早期importがWindows profile選択前にDB pathを固定する問題を検出し、persistence/cache importを遅延して修正した。Windows CLI起動・graceful shutdownを含む関連98件で修正を確認した。また既存保存障害／待機fixtureの一部が`import_defaults_fingerprint`のkeyword引数を受け取らず、意図した障害ではなくTypeErrorとなっていたためfixtureを補正した。保存APIの失敗・再試行・切断・shutdown時の既存保証は維持している。残存High/Medium Findingはない。
 
-Phase 1記録中の「保存／Reset／API未接続」は当時の範囲であり、本PhaseでBackend接続済み。Gallery/Filmstrip/Stackの表示コード・Frontend state変更と実画面受入はPhase 3へ残す。README/CHANGELOGは変更しない。
+Phase 2完了時点では、Phase 1記録中の「保存／Reset／API未接続」はBackend接続済みであり、Gallery/Filmstrip/Stackの共通表示確認と画面受入をPhase 3へ引き継いだ。これは当時の完了境界を示す履歴で、現在の未完了作業ではない。
 
 ## RAW rendered-thumbnail Phase 1（2026-10-30）
 
