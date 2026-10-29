@@ -6,6 +6,7 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+- Windows RAW photos now show the existing Edited badge in Home and the Filmstrip when their saved or current DevelopSettings differ from that photo's import defaults. Stack aggregation and the Edited filter include RAW edit status.
 - Windows native RAW darkroom now offers one-shot Auto White Balance and a WB eyedropper for sampling a neutral point in the image. Both apply through existing RAW History, Undo/Redo, and Recipe saving; the picker supports Before/After views and Viewer Zoom/Pan.
 - JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
 - RAW History now displays all retained steps on initial load instead of paging in groups of 20.

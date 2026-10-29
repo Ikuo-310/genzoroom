@@ -1,5 +1,19 @@
 # GenzoRoom 開発ノート
 
+## RAW補正済みバッジ（2026-10-29）
+
+RAWの完全なDevelopSettingsを写真固有のLightCraft import defaultsと比較し、既存のEditedBadgeをHomeとFilmstripで再利用した。HomeのRecent／Albums／Calendar／Favorites、既存のStack集約、補正済みフィルターへ状態を接続した。Historyだけが残る場合は補正済みにせず、カテゴリをOFFにしても初期値と異なる補正値が保持されていればバッジを残す。ALLリセットとRAW編集リセットでは初期状態へ戻り、バッジが消える。RAWのバッジは表示するがExport Queue操作は提供しない。Filmstripは編集中の現在設定を使い、Homeは保存済み状態を使う。
+
+SQLite v8→v9で`asset_raw_recipes`へnullableなimport-defaults fingerprintを追加し、RecipeとHistoryの保存形式は変更していない。初期値が確認できない旧Recipeと状態取得失敗は未補正と断定しない。FilmstripでRAWをJPEG用`localStateFor()`からRAW判定へ接続し直し、RAW編集リセットの実行条件もJPEG専用`clipboardEnabled`から分離して既存`rawDocument.resetEdits()`へ通した。成功時はRAW RecipeとHistoryを消去して開き直し、失敗は既存エラー表示へ渡す。
+
+ユーザーのWindows実機確認でRAWの補正済みバッジ表示、ALLリセット／RAW編集リセット後の消去、カテゴリOFFでも補正値が保持される場合のバッジ維持が確認された。JPEGの既存テスト失敗4件は、Color Gradingのリセット記号の文字化けと露光量入力の配列添字依存が原因で、記号を`↺`へ修正し入力欄を`data-adjustment-id="exposure"`で選択するテスト修正を行った。対象4テストはPASSし、Frontend typecheckも成功した。Frontend関連6ファイルの後続確認では206件成功、AnshitsuPageのSSRテスト1件が`window is not defined`で失敗したため、Frontend全体がPASSしたとは扱わない。
+
+RAW status／Recipe／History／SQLite migrationのBackend対象5ファイル（`test_windows_raw_api.py`、`test_storage.py`、`test_raw_recipe_store.py`、`test_raw_history_store.py`、`test_edit_status.py`）は、権限制限外の実行で259件と15 subtestsが成功した。sandbox実行ではASGI／Storage関連のfixtureエラー後に処理が停止したが、同じ対象を権限制限外で完了できた。Backend全体テストの結果を示すものではない。
+
+## Windows開発環境整備（2026-10-29）
+
+Windows開発版の標準起動をリポジトリ直下の`run-dev.ps1`へ統一し、Windows PowerShell 5.1対応、Frontend／Desktopの差分ビルド、Backend Pythonソースの直接起動を行う。`desktop/assets`は再生成物としてGit管理から除外し、配布用`build.ps1`にもFrontend資産の同期を追加した。PowerShell 5.1実機でビルド・資産同期・Cargo差分ビルド・起動を確認した。旧LightCraft検証checkoutのCargo成果物を整理し、`.tmp`を76.64 GiB削減した。これらのWindows開発環境整備は利用者向けCHANGELOGの対象外とする。
+
 ## RAW Auto WB・WBスポイト実装完了（2026-10-27）
 
 Windowsネイティブ版（Tauri WebView2）のRAW暗室へAuto White Balance（AW）とWBスポイトを統合した。Phase 1ではLightCraft v0.14.0の既存推定処理を利用する読み取り専用Native `estimate_white_balance`契約を追加し、Phase 2ではAWを既存RAW操作・History・Recipeへ接続した。Phase 3ではスポイトUI、ViewerのWhole正規化座標変換、Before／After・Region表示のgeometry所有権検証、Native Picker呼出しを接続した。Recipe形式、DB schema、NativeのBefore／Preview／Region契約とgeometry descriptorは変更していない。
