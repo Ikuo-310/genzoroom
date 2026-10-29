@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 import json
+import ntpath
 from pathlib import Path
+import re
 import struct
 import tempfile
 import xml.etree.ElementTree as ET
@@ -15,6 +17,7 @@ from PIL import Image, ImageCms, ExifTags, TiffImagePlugin
 from export_artifact import ExportArtifact, next_export_filename
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
+from lightcraft_mcp import MCPToolError
 
 
 MAX_RAW_BYTES = 512 * 1024 * 1024
@@ -102,11 +105,39 @@ def extract_raw_metadata(source):
     return (*metadata._preserve_exif(Source()), metadata._preserve_xmp(xmp))
 
 
+def _optional_source_metadata(source):
+    # Metadata support must not decide whether Native can decode this source format.
+    if not isinstance(source, bytes) or not 8 <= len(source) <= MAX_RAW_BYTES:
+        raise RawExportError("raw_export_invalid_source")
+    try:
+        if source[:4] in (b"II*\0", b"MM\0*"):
+            return extract_raw_metadata(source)
+        with Image.open(BytesIO(source)) as image:
+            return (*metadata._preserve_exif(image), metadata._preserve_xmp(image.info.get("xmp")))
+    except Exception:
+        lightcraft_log("export.metadata_unavailable", level="warn", errorCode="raw_export_metadata_unavailable")
+        return {}, {}, {}, {}
+
+
+def _input_filename(filename):
+    if not isinstance(filename, str):
+        raise RawExportError("invalid_export_filename")
+    # Treat both Windows and POSIX separators as untrusted, irrespective of host OS.
+    name = ntpath.basename(filename)
+    name = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', '_', name).rstrip(' .')
+    if not name or name in ('.', '..'):
+        raise RawExportError("invalid_export_filename")
+    stem, suffix = ntpath.splitext(name)
+    if re.fullmatch(r'(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])', stem):
+        stem = 'source_' + stem
+    return stem[:128] + suffix
+
+
 def _metadata_bytes(source, width, height, instant):
     if not isinstance(instant, datetime) or instant.tzinfo is None or instant.utcoffset() is None:
         raise RawExportError("invalid_export_timestamp")
     instant = instant.astimezone(timezone.utc)
-    root, capture, gps, user_xmp = extract_raw_metadata(source)
+    root, capture, gps, user_xmp = _optional_source_metadata(source)
     exif = Image.Exif()
     exif.update(root)
     exif.update({305: "GenzoRoom", 274: 1, 306: instant.strftime("%Y:%m:%d %H:%M:%S")})
@@ -231,13 +262,17 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
         raise RawExportError("raw_export_invalid_settings") from error
     source = bytes(request.source)
     family_filenames = tuple(request.family_filenames)
-    extract_raw_metadata(source)
+    if not 8 <= len(source) <= MAX_RAW_BYTES:
+        raise RawExportError("raw_export_invalid_source")
+    input_filename = _input_filename(request.source_filename)
     owned = (manager or LightCraftManager()).diagnostic_manager(
         manager._gpu_backend if manager is not None else "dx12")
     lightcraft_log("export.started", sourceBytes=len(source))
     try:
         with tempfile.TemporaryDirectory(prefix="genzoroom-raw-export-", dir=temp_root) as directory:
-            original = Path(directory) / "source.dng"
+            input_directory = Path(directory) / "input"
+            input_directory.mkdir()
+            original = input_directory / input_filename
             output = Path(directory) / "output.jpg"
             original.write_bytes(source)
             try:
@@ -257,8 +292,11 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                 async def command(name, params):
                     return await tool("command_run", {"id": name, "params": params})
                 await command("library.xmpPreferences", {"autoWrite": False})
-                imported = await tool("import", {"paths": [str(original)], "mode": "add"})
-                ids = imported.get("imported")
+                try:
+                    imported = await tool("import", {"paths": [str(original)], "mode": "add"})
+                except MCPToolError as error:
+                    raise RawExportError("raw_export_source_unreadable") from error
+                ids = imported.get("imported") if isinstance(imported, dict) else None
                 if not isinstance(ids, list) or len(ids) != 1 or type(ids[0]) is not int:
                     raise RawExportError("raw_export_invalid_import")
                 photo = ids[0]
@@ -284,6 +322,9 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
             finally:
                 # Reap Native before deleting its source/output files, including cancellation.
                 await owned.close()
+    except MCPToolError as error:
+        lightcraft_log("export.failed", level="error", errorCode="raw_export_native_failed")
+        raise RawExportError("raw_export_native_failed") from error
     except BaseException:
         lightcraft_log("export.failed", level="error", errorCode="raw_export_failed")
         raise

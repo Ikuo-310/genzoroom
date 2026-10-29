@@ -90,7 +90,7 @@ def test_cyclic_ifd_rejected():
         extract_raw_metadata(bytes(raw))
 
 
-@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel'])
+@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable'])
 def test_isolated_session_cleanup(tmp_path, mode):
     from raw_export_artifact import RawExportInput, export_raw_artifact
     settings = {'process': 5, 'test': 'saved'}
@@ -110,6 +110,11 @@ def test_isolated_session_cleanup(tmp_path, mode):
             value = {}
             if name == 'import':
                 assert Path(args['paths'][0]).is_file()
+                assert Path(args['paths'][0]).name == ('sample.CR3' if mode == 'non_tiff' else 'source.dng')
+                assert Path(args['paths'][0]).parent.parent.parent == tmp_path
+                if mode == 'unreadable':
+                    from lightcraft_mcp import MCPToolError
+                    raise MCPToolError()
                 value = {'imported': [1]}
             if name == 'get_develop':
                 value = {} if mode == 'mismatch' else settings
@@ -127,18 +132,49 @@ def test_isolated_session_cleanup(tmp_path, mode):
         def diagnostic_manager(self, backend):
             assert backend == 'dx12'
             return Owned()
-    request = RawExportInput(source(), 'source.dng', (), settings, datetime.now(timezone.utc))
+    raw = b'unsupported metadata container' if mode == 'non_tiff' else source()
+    filename = 'sample.CR3' if mode == 'non_tiff' else 'source.dng'
+    request = RawExportInput(raw, filename, (), settings, datetime.now(timezone.utc))
     async def run():
         return await export_raw_artifact(request, manager=Manager(), temp_root=tmp_path)
-    if mode == 'success':
-        assert asyncio.run(run()).filename == 'source-Genzo01.jpg'
+    if mode in ('success', 'non_tiff'):
+        result = asyncio.run(run())
+        assert result.filename == ('sample-Genzo01.jpg' if mode == 'non_tiff' else 'source-Genzo01.jpg')
+        with Image.open(BytesIO(result.jpeg)) as image:
+            assert image.getexif()[305] == 'GenzoRoom'
+            assert image.getexif()[274] == 1
     else:
-        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode == 'mismatch' else RuntimeError
+        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode in ('mismatch', 'unreadable') else RuntimeError
         with pytest.raises(expected):
             asyncio.run(run())
     assert events == ['start', 'close']
     assert not list(tmp_path.iterdir())
     assert settings == {'process': 5, 'test': 'saved'}
+    assert request.source == raw
+
+
+@pytest.mark.parametrize('filename', ['photo.ARW', 'photo.PEF', 'photo.NEF', 'photo.CR2', 'photo.CR3', 'photo.unknown'])
+def test_input_extension_preserved(filename):
+    from raw_export_artifact import _input_filename
+    assert _input_filename(filename) == filename
+
+
+@pytest.mark.parametrize('filename', ['../../photo.CR3', r'C:\outside\photo.ARW', 'CON.PEF', 'a:b.NEF'])
+def test_input_filename_is_single_safe_component(filename):
+    from raw_export_artifact import _input_filename
+    name = _input_filename(filename)
+    assert '/' not in name and '\\' not in name and ':' not in name
+    assert name not in ('.', '..') and name != 'CON.PEF'
+
+
+@pytest.mark.parametrize('raw', [b'non-TIFF container', b'II*\0' + b'\xff' * 12])
+def test_optional_metadata_does_not_block_artifact(raw):
+    original = jpeg()
+    result = create_raw_export_artifact(raw, original, 'photo.CR3', (), timestamp=datetime.now(timezone.utc))
+    assert [v for m,p,v in _segments(original) if m != 0xe1] == [v for m,p,v in _segments(result.jpeg) if m != 0xe1]
+    with Image.open(BytesIO(result.jpeg)) as image:
+        assert image.getexif()[305] == 'GenzoRoom'
+        assert image.getexif().get_ifd(ExifTags.IFD.Exif)[40961] == 1
 
 
 def test_xmp_unicode_and_private_namespace():

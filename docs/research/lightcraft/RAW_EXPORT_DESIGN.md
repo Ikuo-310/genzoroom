@@ -586,6 +586,8 @@ RAWは現行でWindows LightCraft runtimeを持つが、JPEG Exportは共通Back
 
 ## 13. P1実装・検証結果（2026-10-29）
 
+> 本節はP1初回時点の記録。TIFF/DNG限定・非TIFF拒否は実装時の暫定制約であり製品方針ではない。後続の§14で撤廃した。
+
 **総合判定：P1の独立Artifact経路は実装・Pixel/Pentax隔離検証完了。実保存RecipeおよびWindows目視、Immich実機受入は未実施。** 開始HEADは`cd6a150770774ceb0d6b7f26c63d16022b686211`、作業ツリーclean。manifest v0.14.0/commit、適用patch reverse-check、EXE SHA-256とreceiptは§11.1と同一で整合。Native source・patch・binaryは変更・再buildしていない。
 
 ### 13.1 実装判断とP2契約
@@ -620,3 +622,17 @@ Pixelはroot標準2項目、capture16項目、GPS8項目、Pentaxはroot2/captur
 ### 13.3 残存事項
 
 実保存Recipeが今回2素材に対応していないため人工settingsで復元を確認した。利用者のWindows/WebView2でPreviewと最終JPEGの目視比較は未受入。P0aのPreview比較は有効だが今回の実画面確認ではない。TIFF/DNG以外のRAW metadata、悪意ある入力へのさらなる形式別coverage、live Preview同居時の合計資源・大画像・disk full・実OOM/driver lossは未確認。Immich読込・mixed Queue・Stack/Album/COVER・Retry再起動はP2以降。P1はRuntime等へ接続せず、今のJPEG Export仕様も変更していない。
+
+## 14. P1追加修正：形式制限撤廃（2026-10-29）
+
+RAW Exportは利用中のLightCraftが読み込める形式を基本的に受け入れる。TIFF/DNG限定はP1初期実装の暫定制約であり、現在の製品方針ではない。ARW/PEF/NEF/CR2/CR3等を拡張子の推測リストで許可・拒否しない。Native import/develop/exportで読めない入力は通常の処理失敗となる。
+
+元Asset名は両OSのpath separatorを除いたbasenameへ正規化し、危険文字・Windows device名を無害化、stemを128文字に制限して拡張子の綴り・大小文字を保持する。job専用directory内の`input/`へcopyし、output JPEGとは別directoryに置く。これにより`source.dng`固定を撤廃し、原名が`output.jpg`でも出力と衝突しない。原本pathへの書込は行わない。
+
+標準撮影metadataはoptional。TIFF headerには既存bounded TIFF抽出を使い、他containerはPillowのheader読取で取得可能なEXIF/XMPを既存allowlistへ渡す。画素loadや再エンコードはしない。非対応container・壊れたoptional metadataは`export.metadata_unavailable`／`raw_export_metadata_unavailable`警告を記録して空metadataへfallbackする。元にない撮影情報は作らず、完成JPEGにはGenzoRoom識別、出力日時、Orientation=1、現像後寸法、sRGB情報を必ず付与する。空入力・過大入力等のsource validationとLightCraft decode失敗は別で、前者は`raw_export_invalid_source`、import tool失敗は`raw_export_source_unreadable`、その他Native tool失敗は`raw_export_native_failed`。Native metadata support不足だけでは出力を拒否しない。
+
+既存API調査：managed `crates/engine/src/cmd/query.rs`の`photo.inspect`はcatalog Photoのserializeであり、完全な元EXIF getterではない。`export.rs:export_metadata`もcatalog subsetを使用し、GPS高度はNone、camera→model、capture timeは日時正規化後。P0aの情報欠落・精度変化が残るため、Make分離や元のsubsecond等をここから推測しない。Pillowで取得できない標準情報は欠落を許容する。今回、catalogからの部分補完やNative patchは追加しない。
+
+検証：関連61 tests＋既存68 subtestsが成功。非TIFFのNative mock成功、元拡張子保持（ARW/PEF/NEF/CR2/CR3/未知拡張子）、path安全化、metadataなしの識別情報、Native import失敗、TIFF構造不正時fallback、JPEG scan/tables/ICC保持、cleanup、source/settings不変と既存JPEG回帰を確認した。mockは各camera形式のdecode成功の証明ではない。
+
+実RAW回帰は既存Pixel/Pentax DNGで初期4064×3056／5472×3648、代表crop/rotation2445×3251／2918×4378の4条件を再生成。全件で復号、識別、sRGB ICC、4:4:4、取得標準tag一致、P0a Native参照とのscan/tables/ICC不変を確認。原本hashも不変。ARW/PEF/NEF/CR2/CR3の実素材受入は未実施であり、実機検証項目として残す。Recipe/History/SQLite、Queue/Runtime/Frontend/Immich登録に変更なし。

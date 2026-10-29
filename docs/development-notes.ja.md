@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## RAW Export P1形式制限撤廃（2026-10-29）
+
+P1初期実装のTIFF/DNG限定は暫定制約であり、現在の製品方針ではない。入力copyを`source.dng`固定から元basename・拡張子を安全に保持する方式へ変更。メタデータ読取を任意処理にし、TIFF標準tag抽出またはPillowのheader metadataを試行、取得不能時もGenzoRoom出力情報を付与してLightCraft現像を続ける。Nativeの形式対応を推測する拡張子リストは設けない。metadata警告とNative読込・処理失敗のcodeを分離した。
+
+LightCraft `photo.inspect`はcatalog全体のserializeで、既存Export metadataはそのsubset。P0aで確認した時差・サブ秒精度・Make/GPS高度等の制約が残るため、不足tagの推測補完に使わない。追加Native patchなし。関連テスト61 passed・既存68 subtests passed。Pixel/Pentax DNGの初期・crop/rotationの4条件を隔離再生成し従来寸法を確認。ARW/PEF/NEF/CR2/CR3の実ファイル受入、実保存Recipe・Windows目視・Immichは未実施。以下のP1初回記録にある形式制限は過去時点の記録として扱う。
+
 ## RAW Export P1：LightCraft JPEG・Metadata・Artifact（2026-10-29）
 
 `raw_export_artifact.py`に独立したRAW Artifact生成を追加。既存Managerのcloneで編集Sessionを保護し、完全settingsをreset/merge/readbackしてLightCraft既存MCP Exportで原寸JPEGを生成する。TIFF/DNG標準IFDから撮影情報を取得し既存allowlist validatorを利用、PillowでEXIF/XMLのみserializeした後にAPP1を置換する。画像scan・coding tables・ICCは保持し、JPEG再エンコードは行わない。Queue/Runtime/Frontend/Immichは未接続で、Native追加patch/buildも不要。
