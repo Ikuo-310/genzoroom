@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## RAW Export P1監査Finding限定修正（2026-10-29）
+
+F1/F2：Baseline・単一scan限定を撤廃。公開Artifact builderで一度marker/scan境界を解析し、byte範囲からEXIF/XMP APP1だけを置換する。Progressive・複数scan・scan間APP1を扱い、entropy/tableの内容検査や出力全体の再解析を省いた。memoryview＋最終joinにより圧縮画像の中間slice/list/bytearray複製を削減。F3：保存と同じcompact UTF-8 JSONと256KiB定数へ統一。F5：任意EXIF/XMP合計超過は警告付き最小metadataへfallback。F6：ICC説明文のsRGB文字列依存を撤廃し、readable RGBとICC保持を確認する。F4：100MP制限を撤廃し、JPEGは画像open/decodeせずSOF寸法を取得する。RAW512MiB・JPEG256MiB等の有限上限、独立Manager・timeout・readbackは維持した。
+
+関連79 tests・既存68 subtests成功。Progressive/複数scanはPillow生成テスト素材でありLightCraft出力の実証ではない。Pixel/Pentax DNGの初期・代表4条件は既存寸法・撮影tag・scan/tables/ICC保持と復号を再確認、原本hash不変。ARW等実素材、実保存Recipe、WebView2受入、Immichは未確認。Native/Queue/Runtime/Frontend/保存形式に変更なし。以下の旧P1記録のBaseline/単一scan/100MPは現行制約ではない。
+
 ## RAW Export P1形式制限撤廃（2026-10-29）
 
 P1初期実装のTIFF/DNG限定は暫定制約であり、現在の製品方針ではない。入力copyを`source.dng`固定から元basename・拡張子を安全に保持する方式へ変更。メタデータ読取を任意処理にし、TIFF標準tag抽出またはPillowのheader metadataを試行、取得不能時もGenzoRoom出力情報を付与してLightCraft現像を続ける。Nativeの形式対応を推測する拡張子リストは設けない。metadata警告とNative読込・処理失敗のcodeを分離した。

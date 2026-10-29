@@ -636,3 +636,22 @@ RAW Exportは利用中のLightCraftが読み込める形式を基本的に受け
 検証：関連61 tests＋既存68 subtestsが成功。非TIFFのNative mock成功、元拡張子保持（ARW/PEF/NEF/CR2/CR3/未知拡張子）、path安全化、metadataなしの識別情報、Native import失敗、TIFF構造不正時fallback、JPEG scan/tables/ICC保持、cleanup、source/settings不変と既存JPEG回帰を確認した。mockは各camera形式のdecode成功の証明ではない。
 
 実RAW回帰は既存Pixel/Pentax DNGで初期4064×3056／5472×3648、代表crop/rotation2445×3251／2918×4378の4条件を再生成。全件で復号、識別、sRGB ICC、4:4:4、取得標準tag一致、P0a Native参照とのscan/tables/ICC不変を確認。原本hashも不変。ARW/PEF/NEF/CR2/CR3の実素材受入は未実施であり、実機検証項目として残す。Recipe/History/SQLite、Queue/Runtime/Frontend/Immich登録に変更なし。
+
+
+## 15. P1監査Finding限定修正（2026-10-29）
+
+F1/F2を解消：公開create_raw_export_artifactが未検証JPEGを一度解析する責任を持ち、Native応答寸法も同じSOF情報と比較する。SOF0/SOF1/SOF2の8bit・3 component・4:4:4を扱い、Baseline/単一scan限定を撤廃。scan間metadataを含め全marker位置の標準EXIF/XMP APP1を置換する。marker長・境界・scan終端・EOIは検査するが、Huffman/量子化表やentropyの意味を解釈するデコーダーは作らない。全JPEG反復走査をなくし、byte-rangeとmemoryviewから一度joinする。圧縮scan・tables・ICCを変更せず再エンコードもしない。検証済み入力を仮定する抜け道は公開builderに追加しない。
+
+F3を解消：edit_store._json（ensure_ascii=False、sort_keys、compact separators、非有限値拒否）とraw_recipe_store.MAX_SETTINGS_BYTESを用いる。256KiBは維持し、Unicode/空白/escape表現差で保存可能RecipeをExportだけが拒否する問題を除去した。独自validatorやschemaは追加しない。P2での保存snapshot選択・保存validationという責務は維持する。
+
+F5を解消：通常の許可リスト継承を維持。EXIFまたはXMPの合計がAPP1上限を超えたときだけ、export.metadata_reducedのwarn（metadata_too_large、本文や値はログしない）を記録し、任意の継承情報を落として両packetを最小構成で再生成する。Software/CreatorTool=GenzoRoom、UTC output date、Orientation=1、SOF寸法、ColorSpace=1は保持する。文字列切断はしない。最小構成の生成自体が失敗すればArtifact失敗となる。
+
+F6を解消：ICC存在・chunk連番/構造・読取可能性・RGB profile・保持を検査し、description文字列は検査しない。sRGBはNative Exportへの明示要求と更新時の互換性検証で確認する。名称で色空間の意味を断定しない。
+
+F4：100MPを製品拒否条件から撤廃。JPEG header解析はPillow Image.open/loadを使用せず、JPEGのSOFから寸法を読む。Pillow画像の既定大画像判定を全体無効化する変更は行わない。100MP超のsynthetic SOF（20000×20000）を画素decodeなしに検査できることを確認した。これは400MP実画像の描画/復号やmemory安全性の実測ではない。RAW512MiB、JPEG256MiB（metadata追加後も含む）、ICC1MiB、Recipe256KiB、APP1等の既存上限は維持。
+
+検証：新RAW＋既存JPEG artifact/codec対象で79 passed、既存68 subtests passed。Baseline、Pillow生成Progressiveの複数scan、scan間APP1、APP1有無/重複置換、marker長・途中切れ、no decode/re-encode、圧縮データ/tables/ICC保持、renameしたRGB ICC、EXIF/XMP各単独/両方超過fallback、UTF-8 Recipe256KiBちょうど/超過、非JSON/非有限値を確認。公開builder呼出で解析回数が1回であることをtestで確認。通常sandboxのpytest temp権限問題は同一interpreterの権限付き実行で解消。
+
+Pixel/Pentaxは隔離入力copy・人工代表settings・既存managed EXEを使用。初期4064×3056/5472×3648、crop/Rotate90代表2445×3251/2918×4378の4条件を再生成し、metadata識別・元標準tag・画像復号・P0a同条件Native参照のscan/tables/ICC一致を再確認。原本SHA-256も一致。Recipe/History/SQLiteへの書込なし。実保存RecipeとWebView2受入、ARW/PEF/NEF/CR2/CR3実素材、Immich/Queue連携は未確認。Progressive/複数scanはfixtureの試験であり、現行LightCraftがそれを生成したとは扱わない。
+
+独立Manager/Session、現行finite timeout、前後readback、metadata抽出方式、JPEG Export、Queue/Runtime/Frontend/Immich、Native patchは今回変更しない。serializer共通化とSession再利用も追加しない。§13等のBaseline/単一scan・100MP記述は旧P1時点の履歴であり、本節を現行仕様とする。
