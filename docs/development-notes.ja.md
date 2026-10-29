@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## RAW Export P2：既存Queue／Runtime接続（2026-10-29）
+
+保存済みRAWを既存Queueへ投入し、Startのwriter transactionで完全Recipe/revisionを固定する処理を接続。RAW badgeと同じ保存row選択・verified baseline判定を共有する。既存processing_versionにraw-lightcraft-v1を識別子として用い、既存列にRAW Recipe全体を格納するためschema/migration追加なし。JPEGは旧payload・processing版・Retry timestamp identityを維持する。RAW Retryは最新保存状態を新Startで固定し新timestampを使用、recoveryは旧snapshotを現行engineで再実行してbytes差とremote重複を許容する。
+
+既存serial workerでRAW→P1 export_raw_artifact、JPEG→既存Artifactへ分岐し、同じRegistrarへ渡す。Favorite/tag/Album/Stack/COVERを再実装せず、既存Registrarをmock HTTPで検証。P1の変更はoptional expected_content_hashをNative importと照合する入力保護のみ。現像・metadata・encoder処理の再設計なし。独立Managerがjob内で起動するため編集Managerのstartup順変更も不要。
+
+完了監査では、RAW保存/Resetから共有Queueを削除すると旧JPEGの非干渉保証を壊すことを既存テストで検出し、保存APIは変更しない構成へ修正した。default/保存消失のRAW intentは残り、Start/Retryが再検証して拒否、既存操作で解除可能。Asset種別・Native source hash不一致は登録しない。監査後に残るHigh/Mediumの既知Findingなし（実機未検証は別）。横断527 passed・68 subtests、最終の入力照合/helper修正後は影響152 cases passed。Native非起動・隔離DB・mock transportの検証であり、実RAW/Windows/Immich、P3画面操作、P4受入は未実施。README/CHANGELOGは利用者導線が未接続のため更新しない。
+
 ## RAW Export P1監査Finding限定修正（2026-10-29）
 
 F1/F2：Baseline・単一scan限定を撤廃。公開Artifact builderで一度marker/scan境界を解析し、byte範囲からEXIF/XMP APP1だけを置換する。Progressive・複数scan・scan間APP1を扱い、entropy/tableの内容検査や出力全体の再解析を省いた。memoryview＋最終joinにより圧縮画像の中間slice/list/bytearray複製を削減。F3：保存と同じcompact UTF-8 JSONと256KiB定数へ統一。F5：任意EXIF/XMP合計超過は警告付き最小metadataへfallback。F6：ICC説明文のsRGB文字列依存を撤廃し、readable RGBとICC保持を確認する。F4：100MP制限を撤廃し、JPEGは画像open/decodeせずSOF寸法を取得する。RAW512MiB・JPEG256MiB等の有限上限、独立Manager・timeout・readbackは維持した。

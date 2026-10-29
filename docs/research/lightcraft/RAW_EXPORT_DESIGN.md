@@ -655,3 +655,36 @@ F4：100MPを製品拒否条件から撤廃。JPEG header解析はPillow Image.o
 Pixel/Pentaxは隔離入力copy・人工代表settings・既存managed EXEを使用。初期4064×3056/5472×3648、crop/Rotate90代表2445×3251/2918×4378の4条件を再生成し、metadata識別・元標準tag・画像復号・P0a同条件Native参照のscan/tables/ICC一致を再確認。原本SHA-256も一致。Recipe/History/SQLiteへの書込なし。実保存RecipeとWebView2受入、ARW/PEF/NEF/CR2/CR3実素材、Immich/Queue連携は未確認。Progressive/複数scanはfixtureの試験であり、現行LightCraftがそれを生成したとは扱わない。
 
 独立Manager/Session、現行finite timeout、前後readback、metadata抽出方式、JPEG Export、Queue/Runtime/Frontend/Immich、Native patchは今回変更しない。serializer共通化とSession再利用も追加しない。§13等のBaseline/単一scan・100MP記述は旧P1時点の履歴であり、本節を現行仕様とする。
+
+
+## 16. P2実装：既存Queue／Runtime接続（2026-10-29）
+
+### 16.1 保存選択・snapshot・既存データ互換
+
+既存Queue/APIを拡張し、JPEG保存Recipeに加えて保存済みRAWを投入可能にした。raw_recipe_store.select_raw_export_stateはRAW Edited Badgeと共通でupdated_at降順→recipe_revision降順の最新rowを選択し、verified importDefaultsFingerprint、旧rowはHistory baselineでcurrent設定を比較する。判定trueだけ適格。Historyの長さだけでは適格にしない。RAW rowがあれば同Assetの旧JPEG-preview Recipeより優先し、RAW default/unknownをJPEGとして出力しない。現行Engine tupleとの完全一致や拡張子リストは要求しない。
+
+edit_store._export_saved_state/_export_eligibleをenqueue、Start、Retryで共有。enqueueはintentだけ、StartはBEGIN IMMEDIATE内で全対象の最新保存revision・Recipe/settings・source identity・設定schemaを固定しwaitingへ遷移する。Start後の保存・Reset/History削除はactive itemを変えない。既存JPEG保存/Queue非干渉契約を保つため、RAW保存/Reset APIからQueueを削除しない。RAW defaultや保存消失後もmutable intentは残るが、新Start/Retryは拒否し、既存dequeue操作で解除できる。§6の自動mutable cleanup案はP2では採用しなかった。
+
+schema追加なし。既存export_run_items.processing_version=raw-lightcraft-v1を明示discriminatorにし、recipe_versionへRAW settingsSchemaVersion、frozen_recipe_jsonへfull RAW Recipeを保存する。既存JPEGは従来と同じrecipe v18/processing version/payload。読み出しでRAW validator、schema、Asset IDを検査し、未知・破損payloadは既存StoreUnavailableとして停止。RAW識別子はGenzoRoomのsnapshot契約であってNative engine pinではない。旧binaryはRAW runを解釈できないため旧JPEG validatorで安全に拒否する。既存JPEG-only runの再開形式は変えない。
+
+### 16.2 Runtime・P1・Registrar
+
+既存ExportRuntime._process_itemがsnapshot.kindに従い、JPEGは現decoder/renderer/encoder/_artifact、RAWはRawExportInputとexport_raw_artifactへ分岐。sourceのAsset IDとis_rawを照合し、拡張子では拒否しない。原本取得・family検索・encoding/registering遷移・成功時Queue削除は既存のまま。RAWで返ったExportArtifactは同じImmichExportRegistrarへ渡し、upload/Favorite/tag/Album union/Stack member保持/COVER/非COVER cleanupを再実装しない。raw_artifact依存はテストで注入でき、production既定はP1関数。
+
+P1にはoptional expected_content_hashを追加し、import後の既存photo.inspectでNative source hashを照合してからsettingsを適用する。原本と保存Recipeの対応を保つための入力identity検査であり、Engine version/commitや再生成JPEGのchecksum固定とは別。現像/metadata/encoding設計はP1のまま。kindまたは入力hash不一致はsource_kind_mismatch、通常RAW失敗は既存encoding_failed等により当該itemだけfailedとし後続を続行する。DB/ownership障害は既存どおりactiveを保持してworkerを停止する。
+
+P1はjob内で独立Managerを起動し、元RAW/Recipe/Historyの保存APIを呼ばずclose/reap/cleanupする。このため既存lifespan recoveryが編集Manager起動前でも、RAW Exportが編集Managerのreadyを待つ構造にはしない。Native未配置の環境ではRAW itemが通常失敗し後続JPEGは継続できる。DockerにNative依存・port・build変更は追加しない。
+
+### 16.3 Stop・Retry・recovery
+
+Stopはcurrent RAW処理・登録を完了した後にwaiting suffixをqueued/releasedへ戻す。強制Native cancelへ置換しない。Retryはfailed intentを既存transactionでqueuedへ戻し、新Startでその時点の保存RAWを固定する。RAWはJPEGのregistration_failed timestamp identity検索を通さず、新run timestampを使う。JPEGの同一snapshot時timestamp再利用とduplicate収束保証は維持。
+
+再起動は既存claim/reclaimとworker UUIDを使い、encoding/registeringをwaitingへ戻し、固定RAW Recipeを現行engineへ再適用して登録を先頭から行う。生成JPEGが変わることや重複Assetを許容する。source原本の対応、正常なartifact、remote結果の整合検証は維持する。新Queue、Runtime、remote checkpoint、重複防止永続機構、CPU固定、Native patchは追加しない。
+
+### 16.4 検証・監査・残存事項
+
+横断テスト：P2/既存Queue/Runtime/Stop/Retry/recovery/RAW Recipe・History/既存Registrar/Album/P1 Artifact/JPEG codecの12 filesで527 passed、既存68 subtests passed。最終監査の入力hash照合とhelper整形後は変更影響のP2/P1/RAW Recipe計152 casesが成功。テストは既存fixture、隔離SQLite、Native mock、既存Registrar＋mock HTTP transportを使用した。保存適格性、API投入、混在atomicity、Start時最新状態、Start後編集、RAW失敗後継続、Stop、最新RAW Retry・異なるJPEG bytesの受入、live Reset後recovery、旧Recipe engine tuple、Favorite ON/OFF/tag/Album/Stack/COVERを確認。
+
+監査修正：初期のRAW default/Reset cleanup案はJPEG Queue非干渉回帰を起こしたため削除。新default判定testのint/float fixture差、AssetDetail model copy、Remote既存date契約を修正し実装障害と分離した。原本hashとRecipeの対応検査が抜けないようP1の任意入力照合を追加した。High/Mediumの既知未修正Findingは残していない。P1再設計・Registrar複製・schema migrationは行っていない。
+
+実RAW/Windows Native/実ImmichのP2連携は未実施。P1以前のPixel/Pentax成功をP2実機成功と扱わない。FrontendのRAW Q操作・保存drain・管理画面統合はP3、mixed Queueの実Immich/Album生membership/Stack/COVER・再起動受入はP4。保存rowが同一updated_at/revisionで複数ある場合の順序は既存badgeと共通のままで、新しいengine選択や独自tie制約を導入していない。README/CHANGELOGは今回更新しない。
