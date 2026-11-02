@@ -51,7 +51,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
   return <div className="raw-adjustment-controls" ref={panel} onPointerDownCapture={event => {
-    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label'))
+    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label, .raw-grading-band label'))
       preserveAdjustmentNumberFocus(event);
   }}>
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
@@ -76,7 +76,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         <div className="binary-radio-options">
           {(['shadows', 'midtones', 'highlights'] as const).map(band => <label key={band}>
             <input type="radio" name="raw-grading-band" checked={gradingBand === band} disabled={locked}
-              onFocus={focusAdjustmentCategory} onChange={() => {
+              onFocus={focusAdjustmentCategory} onChange={event => {
+                // Numeric edits can lock the radio before click, and switching unmounts
+                // the old band's number input. Restore here only while focus stays in this panel.
+                const active = document.activeElement;
+                if (active === event.currentTarget || active instanceof HTMLInputElement
+                  && active.matches('.adjustment-number') && panel.current?.contains(active))
+                  preservePendingAdjustmentFocus(event.currentTarget);
                 // Finish edits before unmounting the old band's sliders so History keeps its boundary.
                 if (panel.current) commitAdjustmentEdits(panel.current);
                 setGradingBand(band);

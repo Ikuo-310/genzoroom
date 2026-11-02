@@ -23,7 +23,7 @@ def test_grading_contract(control, lo, hi, default):
     assert control in store.HISTORY_CONTROLS
     for value in (lo, default, hi):
         assert validate_controls({control: value}, False) == {control: value}
-    for value in (lo - 1, hi + 1, True, None, float('nan')):
+    for value in (lo - 1, hi + 1, True, None, '50', float('nan'), float('inf'), -float('inf')):
         with pytest.raises(LightCraftError, match='raw_invalid_controls'):
             validate_controls({control: value}, True)
 
@@ -92,3 +92,9 @@ def test_grading_category_reset_preserves_global_and_undo(local, tmp_path, monke
         finally:
             await api.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('control', ['grading.global.hue', 'grading.unknown.hue', 'grading.shadows.unknown'])
+def test_unexposed_grading_controls_are_rejected(control):
+    with pytest.raises(LightCraftError, match='raw_invalid_controls'):
+        validate_controls({control: 0}, True)

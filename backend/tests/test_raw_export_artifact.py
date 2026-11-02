@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 import struct
 import asyncio
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -90,10 +91,17 @@ def test_cyclic_ifd_rejected():
         extract_raw_metadata(bytes(raw))
 
 
-@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch'])
+@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch', 'legacy_grading'])
 def test_isolated_session_cleanup(tmp_path, mode):
     from raw_export_artifact import RawExportInput, export_raw_artifact
     settings = {'process': 5, 'test': 'saved', 'grading': {'shadows': {'hue': 240, 'sat': 25, 'lum': -4}, 'blending': 67, 'balance': -23}}
+    if mode == 'legacy_grading':
+        settings.pop('grading')
+    original_settings = copy.deepcopy(settings)
+    native_settings = copy.deepcopy(settings)
+    if mode == 'legacy_grading':
+        from tests.test_lightcraft_raw import DEFAULT
+        native_settings['grading'] = copy.deepcopy(DEFAULT['grading'])
     events = []
     class Owned:
         async def start(self):
@@ -121,7 +129,7 @@ def test_isolated_session_cleanup(tmp_path, mode):
             if name == 'command_run' and args['id'] == 'develop.merge':
                 assert args['params']['settings'] == settings
             if name == 'get_develop':
-                value = {} if mode == 'mismatch' else settings
+                value = {} if mode == 'mismatch' else native_settings
             if name == 'export':
                 assert args['quality'] == 95 and args['longEdge'] == 0 and args['metadata'] == 'none'
                 Path(args['path']).write_bytes(jpeg())
@@ -142,7 +150,7 @@ def test_isolated_session_cleanup(tmp_path, mode):
         expected_content_hash='expected' if mode in ('source_match','source_mismatch') else None)
     async def run():
         return await export_raw_artifact(request, manager=Manager(), temp_root=tmp_path)
-    if mode in ('success', 'non_tiff', 'source_match'):
+    if mode in ('success', 'non_tiff', 'source_match', 'legacy_grading'):
         result = asyncio.run(run())
         assert result.filename == ('sample-Genzo01.jpg' if mode == 'non_tiff' else 'source-Genzo01.jpg')
         with Image.open(BytesIO(result.jpeg)) as image:
@@ -154,7 +162,7 @@ def test_isolated_session_cleanup(tmp_path, mode):
             asyncio.run(run())
     assert events == ['start', 'close']
     assert not list(tmp_path.iterdir())
-    assert settings['grading']['shadows'] == {'hue': 240, 'sat': 25, 'lum': -4}
+    assert settings == original_settings
     assert request.source == raw
 
 

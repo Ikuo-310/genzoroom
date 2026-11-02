@@ -421,3 +421,36 @@ def test_raw_edit_status_keeps_native_baseline_for_legacy_recipe_only_row(db):
     assert initialized["current"]["historyLength"] == 0
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
     assert raw.get_raw_recipe(identity())["importDefaultsFingerprint"] == fingerprint
+
+
+@pytest.mark.parametrize('control,value', [('grading.shadows.sat', 1), ('grading.balance', 1), ('grading.blending', 51)])
+def test_grading_only_edit_eligibility_and_default_reset(db, control, value):
+    from raw_controls import control_location
+    initial = settings()
+    fingerprint = raw._digest(raw._settings_json(initial, 1))
+    saved = save(value=initial, import_defaults_fingerprint=fingerprint)
+    asset = identity()['assetId']
+    assert raw.get_raw_saved_state(asset)['exportEligible'] is False
+    changed = copy.deepcopy(initial)
+    parent, key = control_location(changed, control)
+    parent[key] = value
+    saved = save(value=changed, revision=saved['revision'], import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_edit_statuses([asset]) == {asset: True}
+    assert raw.get_raw_saved_state(asset)['exportEligible'] is True
+    save(value=initial, revision=saved['revision'], import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_saved_state(asset)['exportEligible'] is False
+
+
+@pytest.mark.parametrize('fingerprinted', [False, True, 'native'])
+def test_legacy_missing_grading_defaults_do_not_create_an_edit(db, fingerprinted):
+    initial = settings()
+    initial.pop('grading')
+    fingerprint = raw._digest(raw._settings_json(settings() if fingerprinted == 'native' else initial, 1)) if fingerprinted else None
+    saved = save(value=initial, import_defaults_fingerprint=fingerprint)
+    initialized = raw.initialize_raw_history(identity(), saved['revision'], uuid4(), initial,
+                                            import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_saved_state(identity()['assetId'])['exportEligible'] is False
+    current = settings()
+    raw.append_raw_history(identity(), initialized['current']['revision'], uuid4(), current,
+                           kind='control', metadata={'control': 'grading.blending'})
+    assert raw.get_raw_saved_state(identity()['assetId'])['exportEligible'] is False

@@ -235,7 +235,8 @@ def _settings_json(value):
     wb.setdefault("scale", "legacy")
     if wb["scale"] not in ("legacy", "kelvin"):
         raise LightCraftError("raw_invalid_settings")
-    return _object_json(value, MAX_SETTINGS_BYTES)
+    from raw_controls import with_legacy_grading_defaults
+    return _object_json(with_legacy_grading_defaults(value), MAX_SETTINGS_BYTES)
 
 
 def _source_info(value):

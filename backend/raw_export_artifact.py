@@ -17,6 +17,7 @@ from PIL import Image, ImageCms, ExifTags, TiffImagePlugin
 from export_artifact import ExportArtifact, next_export_filename
 from edit_store import _json
 from raw_recipe_store import MAX_SETTINGS_BYTES
+from raw_controls import with_legacy_grading_defaults
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
 from lightcraft_mcp import MCPToolError
@@ -312,6 +313,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
         if len(encoded_settings.encode("utf-8")) > MAX_SETTINGS_BYTES:
             raise ValueError
         settings = json.loads(encoded_settings)
+        expected_settings = with_legacy_grading_defaults(settings)
     except (TypeError, ValueError, RecursionError) as error:
         raise RawExportError("raw_export_invalid_settings") from error
     source = bytes(request.source)
@@ -362,7 +364,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                         raise RawExportError("raw_export_source_mismatch")
                 await command("develop.reset", {"ids": [photo]})
                 await command("develop.merge", {"settings": settings})
-                if await tool("get_develop", {"id": photo}) != settings:
+                if await tool("get_develop", {"id": photo}) != expected_settings:
                     raise RawExportError("raw_export_settings_mismatch")
                 result = await tool("export", {"id": photo, "path": str(output), "format": "jpeg", "longEdge": 0,
                     "quality": 95, "colorSpace": "srgb", "bitDepth": 8, "hdr": False, "sharpen": "none",
@@ -370,7 +372,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                 if output.is_symlink() or not output.is_file() or output.stat().st_size > MAX_JPEG_BYTES:
                     raise RawExportError("raw_export_invalid_output")
                 jpeg = output.read_bytes()
-                if await tool("get_develop", {"id": photo}) != settings:
+                if await tool("get_develop", {"id": photo}) != expected_settings:
                     raise RawExportError("raw_export_settings_mismatch")
                 artifact = create_raw_export_artifact(source, jpeg, request.source_filename,
                     family_filenames, timestamp=request.timestamp,

@@ -60,6 +60,16 @@ def control_location(settings, control):
     return value if isinstance(value, dict) else {}, key
 
 
+def with_legacy_grading_defaults(settings):
+    # Older full snapshots may omit this serde-default section. Do not rewrite stored
+    # receipts or existing (including global) values; normalize only the engine view.
+    if "grading" in settings:
+        return settings
+    return {**settings, "grading": {
+        **{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")},
+        "blending": 50., "balance": 0.}}
+
+
 def controls_state(snapshot):
     settings = snapshot.settings
     values = {}

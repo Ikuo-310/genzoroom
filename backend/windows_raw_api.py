@@ -755,6 +755,9 @@ class RawPreviewApi:
 
     @staticmethod
     def _history_changes(step, before_settings, after_settings):
+        from raw_controls import with_legacy_grading_defaults
+        before_settings = with_legacy_grading_defaults(before_settings)
+        after_settings = with_legacy_grading_defaults(after_settings)
         metadata = step["metadata"]
         if step['kind'] == 'vignetteStyle':
             return []

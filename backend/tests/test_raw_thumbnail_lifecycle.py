@@ -299,3 +299,27 @@ def test_real_raw_history_commit_undo_default_and_redo(local, tmp_path, monkeypa
                 assert asset in scheduler._deadlines
         finally: await api.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('control,value,edited', [
+    ('grading.shadows.sat', 0, False), ('grading.blending', 50, False), ('grading.balance', 0, False),
+    ('grading.shadows.sat', 1, True), ('grading.blending', 51, True), ('grading.balance', 1, True)])
+def test_grading_only_saved_state_controls_thumbnail_eligibility(lifecycle, control, value, edited):
+    from raw_controls import control_location
+    cache, scheduler, _, _ = lifecycle
+    baseline = settings()
+    current = deepcopy(baseline)
+    parent, key = control_location(current, control)
+    # Native numeric readback uses f64 even for integer-step controls.
+    parent[key] = float(value)
+    store.put_raw_recipe(identity(assetId=str(ASSET)), 0, uuid4(), current,
+        import_defaults_fingerprint=store._digest(store._settings_json(baseline, 1)))
+    assert store.get_raw_edit_statuses([ASSET]) == {str(ASSET): edited}
+    cache.store(ASSET, b'old')
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url='http://test') as http:
+            response = await http.post(f'/assets/{ASSET}/rendered-thumbnail')
+            assert response.status_code == (202 if edited else 200)
+            assert list(scheduler._pending) == ([ASSET] if edited else [])
+            assert cache.read(ASSET) == (b'old' if edited else None)
+    asyncio.run(run())

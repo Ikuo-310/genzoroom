@@ -739,3 +739,38 @@ assert 'unconfigured' in str(storage.DB_PATH)
     result = subprocess.run([sys.executable, "-c", code], env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+def test_saved_recipe_without_grading_opens_with_native_defaults(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            key = {"assetId": str(asset_id), "sourceContentHash": hashlib.sha256(Original().data).hexdigest(),
+                   "engineName": "lightcraft", "engineVersion": ENGINE_VERSION, "engineCommit": ENGINE_COMMIT,
+                   "settingsSchemaVersion": 1}
+            legacy = copy.deepcopy(DEFAULT)
+            legacy.pop('grading')
+            saved = store.put_raw_recipe(key, 0, uuid4(), legacy)
+            before = database_rows()
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, response = await open_asset(http, asset_id)
+                assert response.status_code == 200, response.text
+                assert children[0].photos[1]['settings']['grading'] == DEFAULT['grading']
+                assert store.get_raw_recipe(key) == saved
+                assert database_rows() == before
+                from tests.test_raw_history_api import operation, body
+                from tests.test_raw_category_operations import patch
+                doc = await operation(http, response.json(), 'initialize')
+                assert doc['nativeMatchesRecipe'] is True
+                assert 'grading' not in store.get_raw_recipe(key)['recipe']['settings']
+                doc = await patch(http, doc, {'grading.shadows.sat': 1})
+                doc = await operation(http, doc, 'commit', body(doc) | {'kind': 'control', 'metadata': {'control': 'grading.shadows.sat'}})
+                doc = await operation(http, doc, 'undo')
+                assert doc['values']['grading.shadows.sat'] == 0 and doc['nativeMatchesRecipe']
+                doc = await operation(http, doc, 'redo')
+                assert doc['values']['grading.shadows.sat'] == 1 and doc['nativeMatchesRecipe']
+        finally:
+            await api.close()
+    asyncio.run(run())

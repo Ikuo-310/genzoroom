@@ -1422,3 +1422,78 @@ it.each(['shadows', 'midtones', 'highlights'] as const)('edits RAW grading %s th
   expect(vi.mocked(rawApi.rawPreview).mock.calls.length).toBeGreaterThan(1);
   expect(adjusted).not.toHaveBeenCalled();
 });
+
+
+it('switches grading bands while a numeric edit commits without losing the click', async () => {
+  await mount();
+  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!
+    .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '240');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const radio = host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[1];
+  const down = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true });
+  act(() => radio.labels![0].dispatchEvent(down));
+  // Browsers blur the number before click unless pointerdown preserves its focus.
+  if (!down.defaultPrevented) act(() => number.blur());
+  act(() => radio.click()); await flush();
+  expect(host.querySelector('[data-adjustment-id="grading.midtones.hue"]')).not.toBeNull();
+  expect(document.activeElement).toBe(radio);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1);
+  expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { 'grading.shadows.hue': 240 });
+});
+
+
+it('records one drag operation for each of the eleven grading controls and no band-switch operations', async () => {
+  await mount();
+  const ids = rawApi.RAW_CONTROL_IDS.filter(id => id.startsWith('grading.'));
+  for (const control of ids) {
+    const band = control.split('.')[1];
+    const index = ['shadows', 'midtones', 'highlights'].indexOf(band);
+    const before = commitHistory.mock.calls.length;
+    if (index >= 0) act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[index].click());
+    expect(commitHistory.mock.calls.length).toBe(before);
+    const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
+    const value = control.endsWith('.hue') ? 360 : 73;
+    act(() => {
+      range.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }));
+      for (const next of [10, 20, value]) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, String(next));
+        range.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    expect(commitHistory.mock.calls.length).toBe(before);
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { button: 0, bubbles: true }))); await flush();
+    expect(commitHistory.mock.calls.length).toBe(before + 1);
+    expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'commit', control }));
+    expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { [control]: value });
+  }
+});
+
+it('keeps a pending Shadows mutation bound to Shadows after switching to Midtones', async () => {
+  await mount();
+  let finish!: () => void;
+  vi.mocked(rawApi.setRawControls).mockImplementationOnce((doc, patch) => new Promise(resolve => {
+    finish = () => resolve({ ...(doc as rawApi.RawSettings), revision: doc.revision + 1,
+      settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
+      values: { ...(doc as rawApi.RawSettings).values, ...patch } });
+  }));
+  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!
+    .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '240');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[1].click();
+  }); await flush();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.midtones.hue"]')!.value).toBe('0');
+  expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { 'grading.shadows.hue': 240 });
+  act(() => finish()); await flush();
+  const mid = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.midtones.hue"]')!;
+  expect(mid.disabled).toBe(false); expect(mid.value).toBe('0');
+  act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[0].click());
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!.value).toBe('240');
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1);
+});
