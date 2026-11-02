@@ -56,6 +56,9 @@ def test_saved_state_source_history_and_cache(db, tmp_path, monkeypatch, failure
     baseline = settings()
     current = deepcopy(baseline)
     current["light"]["exposure"] = .7
+    for band in ("shadows", "midtones", "highlights"):
+        current["grading"][band].update(hue=240, sat=25, lum=-4)
+    current["grading"].update(blending=67, balance=-23)
     raw.append_raw_history(key, 0, uuid4(), current, kind="control",
         metadata={"control": "light.exposure"}, baseline_settings=baseline,
         import_defaults_fingerprint=raw._digest(raw._settings_json(baseline, 1)))
@@ -76,6 +79,7 @@ def test_saved_state_source_history_and_cache(db, tmp_path, monkeypatch, failure
         return original
     async def render(asset, path, recipe, **kw):
         assert asset == ASSET and recipe == saved["recipe"]
+        assert recipe["settings"]["grading"] == current["grading"]
         assert path.read_bytes() == b"immutable RAW" and path.suffix == ".PEF"
         paths.append(path)
         if failure:

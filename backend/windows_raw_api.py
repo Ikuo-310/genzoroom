@@ -19,15 +19,15 @@ from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSE
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
-from raw_controls import CONTROLS, CONTROL_PATHS, controls_state, validate_controls, validate_history_operation
+from raw_controls import CONTROLS, control_location, controls_state, validate_controls, validate_history_operation
 from thumbnail_lifecycle import mutate_raw_edits
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
-# Full-precision values plus 25 control specs and the History receipt exceed 4 KiB.
-MAX_SETTINGS_RESPONSE_BYTES = 8192
-# 200 steps can each expose 25 full-precision deltas; keep the listing bounded without truncation.
-MAX_HISTORY_RESPONSE_BYTES = 512 * 1024
+# Full-precision values plus 36 control specs and the History receipt exceed 4 KiB.
+MAX_SETTINGS_RESPONSE_BYTES = 16384
+# 200 steps can each expose 36 full-precision deltas; keep the listing bounded without truncation.
+MAX_HISTORY_RESPONSE_BYTES = 1024 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
@@ -772,8 +772,8 @@ class RawPreviewApi:
 
         changes = []
         for control in controls:
-            group, key = CONTROL_PATHS[control]
-            before_group, after_group = before_settings.get(group), after_settings.get(group)
+            before_group, key = control_location(before_settings, control)
+            after_group, _ = control_location(after_settings, control)
             if type(before_group) is not dict or type(after_group) is not dict:
                 return None
             before, after = before_group.get(key), after_group.get(key)

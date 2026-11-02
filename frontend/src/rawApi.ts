@@ -19,15 +19,18 @@ export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
-// Match the Backend bound for 25 control specs, full-precision values and a History receipt.
-const RAW_SETTINGS_RESPONSE_BYTES = 8192;
+// Match the Backend bound for 36 control specs, full-precision values and a History receipt.
+const RAW_SETTINGS_RESPONSE_BYTES = 16384;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
+  'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum',
+  'grading.midtones.hue', 'grading.midtones.sat', 'grading.midtones.lum',
+  'grading.highlights.hue', 'grading.highlights.sat', 'grading.highlights.lum', 'grading.blending', 'grading.balance',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'effects.texture', 'effects.clarity', 'effects.dehaze',
   'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
   'detail.sharpenAmount', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
-export const RAW_SECTION_IDS = ['light', 'color', 'effects', 'detail'] as const;
+export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
 export const RAW_RESET_SECTION_IDS = [...RAW_SECTION_IDS, 'vignette'] as const;
 export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
@@ -328,7 +331,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
 }
 export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> {
   const value = await json(`/documents/${doc.handle}/history`, { headers: {
-    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 512 * 1024);
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 1024 * 1024);
   document(value, doc.workspaceId, doc.assetId);
   const h = value.history;
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken

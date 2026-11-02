@@ -137,3 +137,17 @@ describe('RAW History display', () => {
     expect(markup).toContain('色かぶり補正 +26 → +13');
   });
 });
+
+
+it.each(['ja', 'en'])('labels RAW grading controls and category Reset in %s', async language => {
+  await i18n.changeLanguage(language);
+  const steps: RawHistoryStep[] = [
+    { stepId: 'hue', kind: 'control', metadata: { control: 'grading.midtones.hue' }, createdAt: '', changes: [{ control: 'grading.midtones.hue', before: 0, after: 360 }] },
+    { stepId: 'blend', kind: 'controlReset', metadata: { control: 'grading.blending' }, createdAt: '', changes: [{ control: 'grading.blending', before: 73, after: 50 }] },
+    { stepId: 'reset', kind: 'sectionReset', metadata: { section: 'grading' }, createdAt: '', changes: [] },
+  ];
+  const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 3) as never} disabled={false} onReset={() => {}} />);
+  expect(markup).toContain('0° → 360°'); expect(markup).toContain('73 → 50');
+  expect(markup).toContain(language === 'ja' ? 'カラーグレーディング リセット' : 'Color Grading Reset');
+  expect(markup).not.toContain('workspace.');
+});

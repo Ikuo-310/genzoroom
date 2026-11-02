@@ -23,6 +23,7 @@ from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "tint": 0., "scale": "kelvin"},
            "disabled_sections": [],
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
+           "grading": {**{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")}, "blending": 50., "balance": 0.},
            "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
            "effects": {"texture": 0., "clarity": 0., "dehaze": 0.},
            "vignette": {"amount": 0., "midpoint": 50., "feather": 50., "roundness": 0., "highlights": 0., "style": "highlightPriority"},
@@ -204,9 +205,14 @@ class RawProcess(FakeProcess):
             settings["disabled_sections"] = sections + ([] if params["enabled"] else [params["section"]])
             value = {"ok": True}
         elif command == "develop.resetControl":
-            group, key = params["control"].split(".")
-            field, default = NATIVE_DETAIL_CONTROLS[key] if group == 'detail' else (key, DEFAULT[group][key])
-            self.photos[self.active]["settings"][group][field] = default
+            *parents, key = params["control"].split(".")
+            group = parents[0]
+            target = self.photos[self.active]["settings"]
+            defaults = DEFAULT
+            for parent in parents:
+                target, defaults = target[parent], defaults[parent]
+            field, default = NATIVE_DETAIL_CONTROLS[key] if group == 'detail' else (key, defaults[key])
+            target[field] = default
             value = {"ok": True}
         elif command == "develop.resetSection":
             settings = self.photos[self.active]["settings"]
@@ -232,11 +238,15 @@ class RawProcess(FakeProcess):
             settings = self.photos[self.active]["settings"]
             if command == "develop.set":
                 for k, v in params["values"].items():
-                    section, key = k.split(".")
+                    *parents, key = k.split(".")
+                    section = parents[0]
+                    target = settings
+                    for parent in parents:
+                        target = target.get(parent, {})
                     key = NATIVE_DETAIL_CONTROLS[key][0] if section == 'detail' and key in NATIVE_DETAIL_CONTROLS else key
-                    if section not in settings or key not in settings[section]:
+                    if key not in target:
                         return self.tool(message, error=True)
-                    settings[section][key] = v
+                    target[key] = v
                     if section == "wb":
                         settings["wb"]["mode"] = "custom"
             else:

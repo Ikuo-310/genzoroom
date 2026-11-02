@@ -1,4 +1,4 @@
-"""RAW allowlist from LightCraft v0.14.0 develop/src/controls.rs; never JPEG Recipe values."""
+"""RAW allowlist from LightCraft v0.17.0 develop/src/controls.rs; never JPEG Recipe values."""
 
 import math
 
@@ -8,6 +8,11 @@ CONTROLS = {
     "light.exposure": (-5, 5, .01, 0, 2),
     **{f"light.{key}": (-100, 100, 1, 0, 0)
        for key in ("contrast", "highlights", "shadows", "whites", "blacks")},
+    **{f"grading.{band}.{field}": (lo, hi, 1, 0, 0)
+       for band in ("shadows", "midtones", "highlights")
+       for field, lo, hi in (("hue", 0, 360), ("sat", 0, 100), ("lum", -100, 100))},
+    "grading.blending": (0, 100, 1, 50, 0),
+    "grading.balance": (-100, 100, 1, 0, 0),
     "wb.temp": (2000, 50000, 50, 6500, 0),
     "wb.tint": (-150, 150, 1, 0, 0),
     "color.vibrance": (-100, 100, 1, 0, 0),
@@ -27,7 +32,7 @@ CONTROLS = {
     "detail.nrColorSmoothness": (0, 100, 1, 50, 0),
 }
 
-SECTIONS = ("light", "color", "effects", "detail")
+SECTIONS = ("light", "color", "grading", "effects", "detail")
 # Vignette has a Native reset section, but its eye belongs to Effects.
 RESET_SECTIONS = (*SECTIONS, "vignette")
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
@@ -46,12 +51,21 @@ DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=
     nr_luminance=0, nr_detail=50, nr_contrast=0, nr_color=0, nr_color_detail=50, nr_color_smoothness=50)
 
 
+def control_location(settings, control):
+    # Grading wheels are nested; preserve the native DevelopSettings shape everywhere.
+    *parents, key = CONTROL_PATHS[control]
+    value = settings
+    for parent in parents:
+        value = value.get(parent, {}) if isinstance(value, dict) else {}
+    return value if isinstance(value, dict) else {}, key
+
+
 def controls_state(snapshot):
     settings = snapshot.settings
     values = {}
     for control in CONTROLS:
-        section, key = CONTROL_PATHS[control]
-        value = settings.get(section, {}).get(key)
+        parent, key = control_location(settings, control)
+        value = parent.get(key)
         if type(value) not in (int, float) or not math.isfinite(value):
             raise LightCraftError("raw_invalid_settings")
         values[control] = value

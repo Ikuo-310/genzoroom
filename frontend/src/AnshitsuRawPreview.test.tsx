@@ -165,9 +165,10 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(25);
+  expect(sliders).toHaveLength(30);
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
+    'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum', 'grading.blending', 'grading.balance',
     'effects.texture', 'effects.clarity', 'effects.dehaze',
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
     'detail.sharpenAmount', 'detail.sharpenMasking',
@@ -181,7 +182,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(35);
+  expect(actions).toHaveLength(42);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.filter(button => button.disabled)).toHaveLength(5);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -215,24 +216,30 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
     moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
   }
   expect(sliders.slice(4, 10).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
-  const effectsTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
+  const effectsTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
   const effectsSubtitle = host.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
-  moveDown(sliders[9]); expect(document.activeElement).toBe(effectsTitle);
+  const gradingTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
+  moveDown(sliders[9]); expect(document.activeElement).toBe(gradingTitle);
+  const gradingBand = host.querySelector<HTMLInputElement>('.raw-grading-band input:checked')!;
+  moveDown(gradingTitle); expect(document.activeElement).toBe(gradingBand);
+  moveDown(gradingBand); expect(document.activeElement).toBe(sliders[10]);
+  for (let index = 11; index < 15; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  moveDown(sliders[14]); expect(document.activeElement).toBe(effectsTitle);
   moveDown(effectsTitle); expect(document.activeElement).toBe(effectsSubtitle);
-  moveDown(effectsSubtitle); expect(document.activeElement).toBe(sliders[10]);
-  for (let index = 11; index < 13; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
-  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
+  moveDown(effectsSubtitle); expect(document.activeElement).toBe(sliders[15]);
+  for (let index = 16; index < 18; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(5) .adjustment-category-title')!;
   const vignetteTitle = host.querySelectorAll<HTMLElement>('.raw-adjustment-subsection-title')[1];
   const mode = host.querySelector<HTMLInputElement>('.raw-vignette-mode input:checked')!;
-  moveDown(sliders[12]); expect(document.activeElement).toBe(vignetteTitle);
+  moveDown(sliders[17]); expect(document.activeElement).toBe(vignetteTitle);
   moveDown(vignetteTitle); expect(document.activeElement).toBe(mode);
-  moveDown(mode); expect(document.activeElement).toBe(sliders[13]);
-  moveDown(sliders[13]); expect(document.activeElement).toBe(detailTitle);
-  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[18]);
-  for (let index = 19; index < 25; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
+  moveDown(mode); expect(document.activeElement).toBe(sliders[18]);
+  moveDown(sliders[18]); expect(document.activeElement).toBe(detailTitle);
+  moveDown(detailTitle); expect(document.activeElement).toBe(sliders[23]);
+  for (let index = 24; index < 30; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
   act(() => viewer.focus());
   act(() => viewer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true })));
-  expect(document.activeElement).toBe(sliders[24]);
+  expect(document.activeElement).toBe(sliders[29]);
 });
 it.each(['vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
   'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
@@ -280,8 +287,8 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   });
   await mount();
   expect([...host.querySelectorAll('.raw-adjustment-category .adjustment-category-label')].map(item => item.textContent))
-    .toEqual(['Color', 'Basic', 'Effects', 'Detail']);
-  const category = host.querySelectorAll('.raw-adjustment-category')[3];
+    .toEqual(['Color', 'Basic', 'Color Grading', 'Effects', 'Detail']);
+  const category = host.querySelectorAll('.raw-adjustment-category')[4];
   expect(category.textContent).toContain('Sharpening');
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const toggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
@@ -343,8 +350,8 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
   expect([...categories].map(category => category.querySelector('.adjustment-category-label')!.textContent)).toEqual(language === 'ja'
-    ? ['カラー', '基本補正', 'エフェクト', 'ディテール'] : ['Color', 'Basic', 'Effects', 'Detail']);
-  const category = categories[2];
+    ? ['カラー', '基本補正', 'カラーグレーディング', 'エフェクト', 'ディテール'] : ['Color', 'Basic', 'Color Grading', 'Effects', 'Detail']);
+  const category = categories[3];
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const subtitle = category.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
   const reset = category.querySelector<HTMLButtonElement>('.raw-adjustment-subsection-header button')!;
@@ -388,7 +395,7 @@ it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zer
     return settings;
   });
   await mount();
-  const category = host.querySelectorAll('.raw-adjustment-category')[3];
+  const category = host.querySelectorAll('.raw-adjustment-category')[4];
   expect([...category.querySelectorAll('h4')].map(item => item.textContent)).toEqual(language === 'ja'
     ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
   const lum = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!;
@@ -434,12 +441,12 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   const temp = host.querySelector('[data-adjustment-id="temperature"]')!.closest('.adjustment-control')!;
   const input = temp.querySelector<HTMLInputElement>('input[type="number"]')!;
   expect(input.value).toBe('11000');
-  expect(host.querySelectorAll('.adjustment-number-suffix')).toHaveLength(1);
+  expect(temp.querySelectorAll('.adjustment-number-suffix')).toHaveLength(1);
   expect(temp.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(25);
+  expect(rows).toHaveLength(30);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
@@ -472,7 +479,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(4);
+  expect(categories).toHaveLength(5);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Color');
   const toggle = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
@@ -1374,4 +1381,44 @@ it('queues an inactive saved RAW from Filmstrip without switching or saving the 
   expect(queueApi.enqueueExportAssets).toHaveBeenCalledWith([rawB.id], expect.any(AbortSignal));
   expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(before);
   expect(rawApi.openRawDocument).toHaveBeenCalledTimes(1);
+});
+
+
+it.each(['shadows', 'midtones', 'highlights'] as const)('edits RAW grading %s through the existing preview and History owner', async band => {
+  await mount();
+  const selectBand = (index: number) => act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[index].click());
+  selectBand(['shadows', 'midtones', 'highlights'].indexOf(band));
+  const ids = [`grading.${band}.hue`, `grading.${band}.sat`, `grading.${band}.lum`, 'grading.blending', 'grading.balance'];
+  expect([...host.querySelectorAll<HTMLInputElement>('[data-adjustment-id^="grading."]')].map(e => e.dataset.adjustmentId)).toEqual(ids);
+  for (const control of ids) {
+    const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
+    expect(range.min).toBe(control.endsWith('.lum') || control.endsWith('.balance') ? '-100' : '0');
+    expect(range.max).toBe(control.endsWith('.hue') ? '360' : '100');
+    expect(range.step).toBe('1');
+    if (control.endsWith('.hue')) {
+      expect(range.classList.contains('has-gradient')).toBe(true);
+      expect(range.style.getPropertyValue('--adjustment-track-gradient')).toContain('#f0f');
+      expect(range.getAttribute('aria-valuetext')).toBe('0°');
+    }
+    const number = range.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+    act(() => {
+      number.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, control.endsWith('.hue') ? '360' : '73');
+      number.dispatchEvent(new Event('input', { bubbles: true }));
+      number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    }); await flush();
+    expect(rawApi.setRawControls).toHaveBeenLastCalledWith(expect.anything(), { [control]: control.endsWith('.hue') ? 360 : 73 });
+    expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ control, action: 'commit' }));
+    act(() => range.closest('.adjustment-control')!.querySelector<HTMLButtonElement>('.adjustment-reset')!.click()); await flush();
+    expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate', operation: { kind: 'controlReset', metadata: { control } } }));
+  }
+  // Shared controls keep their identity and value while only the three band sliders change.
+  const blending = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.blending"]')!;
+  const balance = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.balance"]')!;
+  const values = [blending.value, balance.value];
+  selectBand((['shadows', 'midtones', 'highlights'].indexOf(band) + 1) % 3);
+  expect(host.querySelector('[data-adjustment-id="grading.blending"]')).toBe(blending);
+  expect([blending.value, balance.value]).toEqual(values);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.length).toBeGreaterThan(1);
+  expect(adjusted).not.toHaveBeenCalled();
 });

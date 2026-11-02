@@ -93,7 +93,7 @@ def test_cyclic_ifd_rejected():
 @pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch'])
 def test_isolated_session_cleanup(tmp_path, mode):
     from raw_export_artifact import RawExportInput, export_raw_artifact
-    settings = {'process': 5, 'test': 'saved'}
+    settings = {'process': 5, 'test': 'saved', 'grading': {'shadows': {'hue': 240, 'sat': 25, 'lum': -4}, 'blending': 67, 'balance': -23}}
     events = []
     class Owned:
         async def start(self):
@@ -118,6 +118,8 @@ def test_isolated_session_cleanup(tmp_path, mode):
                     from lightcraft_mcp import MCPToolError
                     raise MCPToolError()
                 value = {'imported': [1]}
+            if name == 'command_run' and args['id'] == 'develop.merge':
+                assert args['params']['settings'] == settings
             if name == 'get_develop':
                 value = {} if mode == 'mismatch' else settings
             if name == 'export':
@@ -152,7 +154,7 @@ def test_isolated_session_cleanup(tmp_path, mode):
             asyncio.run(run())
     assert events == ['start', 'close']
     assert not list(tmp_path.iterdir())
-    assert settings == {'process': 5, 'test': 'saved'}
+    assert settings['grading']['shadows'] == {'hue': 240, 'sat': 25, 'lum': -4}
     assert request.source == raw
 
 

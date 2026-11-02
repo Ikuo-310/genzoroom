@@ -8,8 +8,8 @@ import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceA
 import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryOperation, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
-type RawCategoryId = 'basic' | 'color' | 'effects' | 'detail';
-const sections: Record<RawCategoryId, RawSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
+type RawCategoryId = 'basic' | 'color' | 'grading' | 'effects' | 'detail';
+const sections: Record<RawCategoryId, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
@@ -20,6 +20,7 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
   { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
+  { category: 'grading', controls: [], ids: [] },
   { category: 'effects', controls: ['effects.texture', 'effects.clarity', 'effects.dehaze',
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'],
     ids: ['effects.texture', 'effects.clarity', 'effects.dehaze',
@@ -40,6 +41,7 @@ const vignetteLabels: Partial<Record<RawControlId, string>> = {
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
   const { t } = useTranslation();
   const settings = raw.settings;
+  const [gradingBand, setGradingBand] = useState<'shadows' | 'midtones' | 'highlights'>('shadows');
   const panel = useRef<HTMLDivElement>(null);
   const operate = (operation: RawHistoryOperation) => {
     if (panel.current) commitAdjustmentEdits(panel.current);
@@ -69,15 +71,29 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
       {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
         disabled={actionsLocked} onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'effects' } })} />}
-      {controls.map((control, index) => {
+      {category === 'grading' && <div className="binary-radio-choice raw-grading-band" role="radiogroup" aria-label={t('workspace.rawPreview.gradingBand')}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
+        <div className="binary-radio-options">
+          {(['shadows', 'midtones', 'highlights'] as const).map(band => <label key={band}>
+            <input type="radio" name="raw-grading-band" checked={gradingBand === band} disabled={locked}
+              onFocus={focusAdjustmentCategory} onChange={() => {
+                // Finish edits before unmounting the old band's sliders so History keeps its boundary.
+                if (panel.current) commitAdjustmentEdits(panel.current);
+                setGradingBand(band);
+              }} />
+            <span>{t(`workspace.rawPreview.gradingBands.${band}`)}</span>
+          </label>)}
+        </div>
+      </div>}
+      {(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
-        const id = ids[index];
+        const id = category === 'grading' ? control : ids[index];
         const value = raw.desired?.[control] ?? settings.values[control];
-        const trackGradient = control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
+        const trackGradient = control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
         const enabled = settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
           && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
-        const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
+        const labelKey = category === 'grading' ? `rawPreview.${control}` : category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
             <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
@@ -90,13 +106,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
           <AdjustmentSlider adjustmentId={id} className={dependent ? 'is-dependent-disabled' : undefined}
           commitPolicy="operation-boundary" hideToggle
-          trackGradient={trackGradient} valueSuffix={control === 'wb.temp' ? 'K' : undefined}
+          trackGradient={trackGradient} valueSuffix={control.endsWith('.hue') ? '°' : control === 'wb.temp' ? 'K' : undefined}
           label={t(`workspace.${labelKey}`)} accessibleLabel={control === 'detail.nrDetail' || control === 'detail.nrColorDetail'
             ? t(`workspace.${labelKey}Name`) : undefined} enabled={enabled} onToggle={() => {}}
           onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}
           value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
           defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
-          valueText={`${value.toFixed(spec.precision)}${control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
+          valueText={`${value.toFixed(spec.precision)}${control.endsWith('.hue') ? '°' : control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={locked || !enabled || dependent || control.startsWith('wb.') && !settings.wb.available}
           resetDisabled={actionsLocked || dependent || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} /></Fragment>;

@@ -403,7 +403,8 @@ HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.sat
                             "light.shadows", "light.blacks", "detail.sharpenAmount", "detail.sharpenMasking",
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
-HISTORY_SECTIONS = frozenset(("light", "color", "effects", "detail"))
+HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", "midtones", "highlights") for field in ("hue", "sat", "lum")) | {"grading.blending", "grading.balance"}
+HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail"))
 HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
 
 

@@ -267,7 +267,111 @@
     "openSelected": "暗室へ"
   },
   "workspace": {
+    "collapseGrading": "カラーグレーディングを折りたたむ",
+    "expandGrading": "カラーグレーディングを展開",
+    "enableGrading": "カラーグレーディングを有効にする",
+    "disableGrading": "カラーグレーディングを無効にする",
+    "collapseGrading": "カラーグレーディングを折りたたむ",
+    "expandGrading": "カラーグレーディングを展開",
+    "enableGrading": "カラーグレーディングを有効にする",
+    "disableGrading": "カラーグレーディングを無効にする",
     "rawPreview": {
+      "gradingCategory": "カラーグレーディング",
+      "gradingBand": "明度帯",
+      "gradingBands": {
+        "shadows": "シャドウ",
+        "midtones": "中間調",
+        "highlights": "ハイライト"
+      },
+      "grading": {
+        "shadows": {
+          "hue": "シャドウ 色相",
+          "hueValue": "シャドウ 色相の値",
+          "hueReset": "シャドウ 色相をリセット",
+          "sat": "シャドウ 彩度",
+          "satValue": "シャドウ 彩度の値",
+          "satReset": "シャドウ 彩度をリセット",
+          "lum": "シャドウ 輝度",
+          "lumValue": "シャドウ 輝度の値",
+          "lumReset": "シャドウ 輝度をリセット"
+        },
+        "midtones": {
+          "hue": "中間調 色相",
+          "hueValue": "中間調 色相の値",
+          "hueReset": "中間調 色相をリセット",
+          "sat": "中間調 彩度",
+          "satValue": "中間調 彩度の値",
+          "satReset": "中間調 彩度をリセット",
+          "lum": "中間調 輝度",
+          "lumValue": "中間調 輝度の値",
+          "lumReset": "中間調 輝度をリセット"
+        },
+        "highlights": {
+          "hue": "ハイライト 色相",
+          "hueValue": "ハイライト 色相の値",
+          "hueReset": "ハイライト 色相をリセット",
+          "sat": "ハイライト 彩度",
+          "satValue": "ハイライト 彩度の値",
+          "satReset": "ハイライト 彩度をリセット",
+          "lum": "ハイライト 輝度",
+          "lumValue": "ハイライト 輝度の値",
+          "lumReset": "ハイライト 輝度をリセット"
+        },
+        "blending": "ブレンド",
+        "blendingValue": "ブレンドの値",
+        "blendingReset": "ブレンドをリセット",
+        "balance": "バランス",
+        "balanceValue": "バランスの値",
+        "balanceReset": "バランスをリセット"
+      },
+      "gradingCategory": "カラーグレーディング",
+      "gradingBand": "明度帯",
+      "gradingBands": {
+        "shadows": "シャドウ",
+        "midtones": "中間調",
+        "highlights": "ハイライト"
+      },
+      "grading": {
+        "shadows": {
+          "hue": "シャドウ 色相",
+          "hueValue": "シャドウ 色相の値",
+          "hueReset": "シャドウ 色相をリセット",
+          "sat": "シャドウ 彩度",
+          "satValue": "シャドウ 彩度の値",
+          "satReset": "シャドウ 彩度をリセット",
+          "lum": "シャドウ 輝度",
+          "lumValue": "シャドウ 輝度の値",
+          "lumReset": "シャドウ 輝度をリセット"
+        },
+        "midtones": {
+          "hue": "中間調 色相",
+          "hueValue": "中間調 色相の値",
+          "hueReset": "中間調 色相をリセット",
+          "sat": "中間調 彩度",
+          "satValue": "中間調 彩度の値",
+          "satReset": "中間調 彩度をリセット",
+          "lum": "中間調 輝度",
+          "lumValue": "中間調 輝度の値",
+          "lumReset": "中間調 輝度をリセット"
+        },
+        "highlights": {
+          "hue": "ハイライト 色相",
+          "hueValue": "ハイライト 色相の値",
+          "hueReset": "ハイライト 色相をリセット",
+          "sat": "ハイライト 彩度",
+          "satValue": "ハイライト 彩度の値",
+          "satReset": "ハイライト 彩度をリセット",
+          "lum": "ハイライト 輝度",
+          "lumValue": "ハイライト 輝度の値",
+          "lumReset": "ハイライト 輝度をリセット"
+        },
+        "blending": "ブレンド",
+        "blendingValue": "ブレンドの値",
+        "blendingReset": "ブレンドをリセット",
+        "balance": "バランス",
+        "balanceValue": "バランスの値",
+        "balanceReset": "バランスをリセット"
+      },
       "aw": "自動ホワイトバランス",
       "wbGeometryMismatch": "表示画像の形状が変わりました。プレビュー更新後に再度採取してください。",
       "wbPointOutside": "この位置は採取できません。画像内の別の位置を指定してください。",

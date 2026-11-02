@@ -5,7 +5,19 @@ import { formatContrast, formatExposure, formatHighlights, formatShadows, format
   formatBlacks, formatTint, formatTemperature, formatVibrance, formatSaturation } from './editing';
 import type { RawControlId, RawHistoryStep } from './rawApi';
 
-const labels: Record<RawControlId, string> = { 'wb.temp': 'temperature', 'wb.tint': 'tint', 'light.exposure': 'exposure', 'light.contrast': 'contrast',
+const labels: Record<RawControlId, string> = {
+  'grading.shadows.hue': 'rawPreview.grading.shadows.hue',
+  'grading.shadows.sat': 'rawPreview.grading.shadows.sat',
+  'grading.shadows.lum': 'rawPreview.grading.shadows.lum',
+  'grading.midtones.hue': 'rawPreview.grading.midtones.hue',
+  'grading.midtones.sat': 'rawPreview.grading.midtones.sat',
+  'grading.midtones.lum': 'rawPreview.grading.midtones.lum',
+  'grading.highlights.hue': 'rawPreview.grading.highlights.hue',
+  'grading.highlights.sat': 'rawPreview.grading.highlights.sat',
+  'grading.highlights.lum': 'rawPreview.grading.highlights.lum',
+  'grading.blending': 'rawPreview.grading.blending',
+  'grading.balance': 'rawPreview.grading.balance',
+ 'wb.temp': 'temperature', 'wb.tint': 'tint', 'light.exposure': 'exposure', 'light.contrast': 'contrast',
   'light.highlights': 'highlights', 'light.whites': 'whites', 'light.shadows': 'shadows', 'light.blacks': 'blacks',
   'color.vibrance': 'vibrance', 'color.saturation': 'saturation',
   'effects.texture': 'rawPreview.texture', 'effects.clarity': 'rawPreview.clarity', 'effects.dehaze': 'rawPreview.dehaze',
@@ -16,7 +28,19 @@ const labels: Record<RawControlId, string> = { 'wb.temp': 'temperature', 'wb.tin
   'detail.nrLuminance': 'rawPreview.nrLuminance', 'detail.nrDetail': 'rawPreview.nrDetailName',
   'detail.nrColor': 'rawPreview.nrColor', 'detail.nrColorDetail': 'rawPreview.nrColorDetailName',
   'detail.nrColorSmoothness': 'rawPreview.nrColorSmoothness' } as const;
-const formatters: Record<RawControlId, (value: number) => string> = { 'wb.temp': value => `${Math.round(value)} K`, 'wb.tint': formatTint,
+const formatters: Record<RawControlId, (value: number) => string> = {
+  'grading.shadows.hue': value => value.toFixed(0) + '°',
+  'grading.shadows.sat': value => value.toFixed(0),
+  'grading.shadows.lum': value => value.toFixed(0),
+  'grading.midtones.hue': value => value.toFixed(0) + '°',
+  'grading.midtones.sat': value => value.toFixed(0),
+  'grading.midtones.lum': value => value.toFixed(0),
+  'grading.highlights.hue': value => value.toFixed(0) + '°',
+  'grading.highlights.sat': value => value.toFixed(0),
+  'grading.highlights.lum': value => value.toFixed(0),
+  'grading.blending': value => value.toFixed(0),
+  'grading.balance': value => value.toFixed(0),
+ 'wb.temp': value => `${Math.round(value)} K`, 'wb.tint': formatTint,
   'light.exposure': formatExposure, 'light.contrast': formatContrast, 'light.highlights': formatHighlights, 'light.whites': formatWhites,
   'light.shadows': formatShadows, 'light.blacks': formatBlacks, 'color.vibrance': formatVibrance, 'color.saturation': formatSaturation,
   'effects.texture': value => value.toFixed(0), 'effects.clarity': value => value.toFixed(0), 'effects.dehaze': value => value.toFixed(0),
@@ -43,7 +67,7 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     return label + (change ? ` ${pair(change)}` : '');
   }
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
-    : t(step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
+    : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
       : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
       : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
       ? 'workspace.rawPreview.detailCategory' : 'workspace.rawPreview.colorCategory')

@@ -161,7 +161,7 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 attempts = api.raw.status().edits
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
-                assert doc["sections"] == {"light": False, "color": False, "effects": True, "detail": False}
+                assert doc["sections"] == {"light": False, "color": False, "grading": True, "effects": True, "detail": False}
                 actual = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
@@ -345,18 +345,18 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 values = {control: -1.234567891234567 for control in doc["values"]}
                 values["wb.temp"] = 23456.123456789
                 values.update({"detail.sharpenAmount": 123.4567891234567, "detail.sharpenMasking": 98.7654321987654})
-                values.update({control: 12.34567891234567 for control in values if control.startswith('detail.nr') or control in ('vignette.midpoint', 'vignette.feather', 'vignette.highlights')})
+                values.update({control: 12.34567891234567 for control in values if control.startswith('grading.') and not control.endswith('.lum') and control != 'grading.balance' or control.startswith('detail.nr') or control in ('vignette.midpoint', 'vignette.feather', 'vignette.highlights')})
                 for _ in range(10):
                     doc = await patch(http, doc, values)
                     doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
                     ack_bytes = len(json.dumps(doc, ensure_ascii=False, separators=(',', ':')).encode())
-                    assert 4096 < ack_bytes <= 8192
+                    assert 4096 < ack_bytes <= 16384
                     doc = await edit(http, doc, "allReset", {})
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and len(response.content) <= 256 * 1024
-                print(f'History 20 steps / 25 controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
+                print(f'History 20 steps / 36 controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 25 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == 36 for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

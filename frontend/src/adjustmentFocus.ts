@@ -70,7 +70,7 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
   const scope = current.closest('.workspace-side-panel') ?? current.ownerDocument;
   const position = adjustmentRowPosition(current);
-  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title, .raw-vignette-mode input:checked, .adjustment-range'))
+  const ordered = Array.from(scope.querySelectorAll<HTMLElement>('.adjustment-category-title, .grading-range-title, .raw-adjustment-subsection-title, .raw-vignette-mode input:checked, .raw-grading-band input:checked, .adjustment-range'))
     .filter((item) => !item.closest('[hidden], [inert]') && !item.matches(':disabled')
       && (!(item instanceof HTMLInputElement) || item.type !== 'range' || isAvailable(item)));
   const index = position ? ordered.indexOf(position) : -1;
@@ -85,7 +85,7 @@ export function navigateAdjustments(event: Pick<KeyboardEvent, 'key' | 'shiftKey
   if (destination) {
     const preserveRawAction = !!current.closest('.raw-adjustment-controls')
       && (current.matches('.adjustment-number') && destination.matches('.adjustment-reset')
-        || destination.matches('.raw-vignette-mode input'));
+        || destination.matches('.raw-vignette-mode input, .raw-grading-band input'));
     focusAdjustmentTarget(destination, !horizontal, preserveRawAction);
   }
   return true;

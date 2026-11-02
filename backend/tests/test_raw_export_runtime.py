@@ -22,6 +22,10 @@ def save_raw(asset=A, exposure=.7, revision=0, engine=None):
     defaults = settings()
     value = copy.deepcopy(defaults)
     value['light']['exposure'] = float(exposure)
+    if exposure:
+        for band in ('shadows', 'midtones', 'highlights'):
+            value['grading'][band].update(hue=240, sat=25, lum=-4)
+        value['grading'].update(blending=67, balance=-23)
     return raw.put_raw_recipe(key, revision, uuid4(), value,
         import_defaults_fingerprint=raw._digest(raw._settings_json(defaults, 1)))
 
@@ -53,6 +57,8 @@ def test_raw_eligibility_and_start_freeze(db):
     item=run.items[0]
     assert item.kind=='raw' and item.frozen_revision==3
     assert item.recipe['settings']['light']['exposure']==1.1
+    assert item.recipe['settings']['grading']['midtones'] == {'hue': 240, 'sat': 25, 'lum': -4}
+    assert item.recipe['settings']['grading']['blending'] == 67
     save_raw(exposure=2,revision=3)
     assert get_export_run(run.run_id).items[0].recipe==item.recipe
 

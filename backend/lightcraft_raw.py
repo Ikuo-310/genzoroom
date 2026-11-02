@@ -971,7 +971,7 @@ class LightCraftRawSession:
                                   expected_revision, verify=verify, check=check)
 
     async def apply_history_operation(self, handle, kind, metadata, expected_revision):
-        from raw_controls import CONTROLS, CONTROL_PATHS, DETAIL_RESET_DEFAULTS, validate_history_operation
+        from raw_controls import CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS, validate_history_operation
         validate_history_operation(kind, metadata)
         if kind in ('wbAuto', 'wbPick'):
             # WB must pass the separate read-only estimate/candidate fence before any mutation.
@@ -1000,10 +1000,19 @@ class LightCraftRawSession:
                 # An import look may carry bypass flags; preserve even an originally empty list.
                 commands.append(("develop.merge", {"settings": {"disabled_sections": disabled}}))
 
+        if kind == "sectionReset" and metadata["section"] == "grading":
+            # Native resetSection also resets the unexposed global wheel. Merge only our controls
+            # in one mutation so category Reset keeps the existing edit-limit/retry boundary.
+            patch = {"grading": {band: {} for band in ("shadows", "midtones", "highlights")}}
+            for control, spec in CONTROLS.items():
+                if control.startswith("grading."):
+                    parent, key = control_location(patch, control)
+                    parent[key] = spec[3]
+            commands = [("develop.merge", {"settings": patch})]
+
         def check(actual):
             for control in CONTROLS:
-                group, key = CONTROL_PATHS[control]
-                values = actual.get(group)
+                values, key = control_location(actual, control)
                 if type(values) is not dict or type(values.get(key)) not in (int, float):
                     raise LightCraftError("raw_operation_readback_mismatch")
             expected_disabled = ([section for section in disabled if section != metadata["section"]]
@@ -1025,13 +1034,23 @@ class LightCraftRawSession:
                 elif needs_wb:
                     expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
                 else:
-                    group, key = CONTROL_PATHS[metadata["control"]]
-                    expected[group][key] = CONTROLS[metadata["control"]][3]
+                    parent, key = control_location(expected, metadata["control"])
+                    parent[key] = CONTROLS[metadata["control"]][3]
                 # Native defaults can encode 0 as 0.0; compare full values, not numeric JSON spelling.
                 if actual != expected:
                     raise LightCraftError("raw_operation_readback_mismatch")
             elif kind == "sectionReset":
                 section = metadata["section"]
+                if section == "grading":
+                    expected = json.loads(before)
+                    # Keep unexposed global grading values intact when resetting the three bands.
+                    for control, spec in CONTROLS.items():
+                        if control.startswith("grading."):
+                            parent, key = control_location(expected, control)
+                            parent[key] = spec[3]
+                    if actual != expected:
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    return
                 if section in ("effects", "vignette"):
                     expected = json.loads(before)
                     # Each subsection resets only its numeric controls; style, seed and the eye survive.

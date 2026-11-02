@@ -80,7 +80,7 @@ it('sends Before kind and validates its opaque key separately from After', async
   expect(JSON.parse(init.body as string).kind).toBe('before');
 });
 describe('RAW History transport', () => {
-  it('accepts 200 steps with 25 full precision deltas above 256KiB and rejects above 512KiB', async () => {
+  it('accepts 200 steps with 36 full precision deltas above 256KiB and rejects above 1MiB', async () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
@@ -88,10 +88,10 @@ describe('RAW History transport', () => {
     data.history = { initialized: true, cursor: 200, length: 200, selectedStepId: data.steps[199].stepId };
     const encoded = JSON.stringify(data);
     expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(256 * 1024);
-    expect(new TextEncoder().encode(encoded).length).toBeLessThan(512 * 1024);
+    expect(new TextEncoder().encode(encoded).length).toBeLessThan(1024 * 1024);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(encoded, { headers: { 'Content-Type': 'application/json' } })));
     expect((await readRawHistory(doc)).steps).toHaveLength(200);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(' '.repeat(512 * 1024) + encoded, { headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(' '.repeat(1024 * 1024) + encoded, { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(doc)).rejects.toThrow('raw_invalid_response');
   });
   it.each<RawHistoryOperation>([
@@ -216,7 +216,7 @@ describe('RAW History transport', () => {
     if (invalid === 'cursor') data.history = { ...data.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
     if (invalid === 'metadata') data.steps[0].metadata.control = 'native.unknown' as never;
     if (invalid === 'changes') data.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
-    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(512 * 1024) : JSON.stringify(data);
+    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(1024 * 1024) : JSON.stringify(data);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
   });

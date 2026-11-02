@@ -505,12 +505,12 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-adjustment-subsection-header .adjustment-subsection-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .raw-adjustment-subsection-header.is-vignette .adjustment-subsection-title { margin: 0 0 2px; }
 .raw-adjustment-subcategory-divider { height: 1px; margin: 8px 0; background: #353538; }
-.raw-vignette-mode { margin: 0; gap: 6px; font-size: 0.7rem; }
-.raw-vignette-mode > span { line-height: 1; }
-.raw-vignette-mode .binary-radio-options { min-width: 0; }
-.raw-vignette-mode .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }
-.raw-vignette-mode .binary-radio-options span { padding: 3px 7px; font-size: 0.7rem; line-height: 1.2; }
-.raw-vignette-mode input:disabled + span { opacity: 0.5; cursor: default; }
+:is(.raw-vignette-mode, .raw-grading-band) { margin: 0; gap: 6px; font-size: 0.7rem; }
+:is(.raw-vignette-mode, .raw-grading-band) > span { line-height: 1; }
+:is(.raw-vignette-mode, .raw-grading-band) .binary-radio-options { min-width: 0; }
+:is(.raw-vignette-mode, .raw-grading-band) .binary-radio-options label { position: relative; display: block; margin: 0; cursor: pointer; }
+:is(.raw-vignette-mode, .raw-grading-band) .binary-radio-options span { padding: 3px 7px; font-size: 0.7rem; line-height: 1.2; }
+:is(.raw-vignette-mode, .raw-grading-band) input:disabled + span { opacity: 0.5; cursor: default; }
 .raw-adjustment-controls .adjustment-control.is-dependent-disabled { opacity: 0.45; }
 .raw-adjustment-controls .adjustment-control.is-dependent-disabled .adjustment-range,
 .raw-adjustment-controls .adjustment-control.is-dependent-disabled .adjustment-number,

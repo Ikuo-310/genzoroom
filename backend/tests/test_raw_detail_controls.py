@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 
 import raw_recipe_store as store
-from raw_controls import CONTROLS, CONTROL_PATHS, DETAIL_RESET_DEFAULTS, SECTIONS, validate_controls
+from raw_controls import CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS, SECTIONS, validate_controls
 from lightcraft_mcp import LightCraftError
 from edit_store import StoreUnavailable
 from tests.test_windows_local import local, client
@@ -29,7 +29,7 @@ NR_SPECS = [
 
 def test_history_listing_limit_remains_bounded():
     from windows_raw_api import RawPreviewApi, MAX_HISTORY_RESPONSE_BYTES
-    assert MAX_HISTORY_RESPONSE_BYTES == 512 * 1024
+    assert MAX_HISTORY_RESPONSE_BYTES == 1024 * 1024
     response = RawPreviewApi._history_json({'data': 'x' * (400 * 1024)}, MAX_HISTORY_RESPONSE_BYTES)
     assert len(response.body) < MAX_HISTORY_RESPONSE_BYTES
     with pytest.raises(LightCraftError, match='raw_history_response_too_large'):
@@ -240,8 +240,8 @@ def test_two_hundred_full_detail_history_deltas_fit_response_budget(local, tmp_p
                     for index in range(200):
                         after = copy.deepcopy(before)
                         for control, (lo, hi, *_) in CONTROLS.items():
-                            group, key = CONTROL_PATHS[control]
-                            after[group][key] = (lo if index % 2 else hi) + (hi - lo) * (.00000001234567 if index % 2 else -.00000001234567)
+                            parent, key = control_location(after, control)
+                            parent[key] = (lo if index % 2 else hi) + (hi - lo) * (.00000001234567 if index % 2 else -.00000001234567)
                         steps.append({'stepId': str(UUID(int=index + 1)), 'kind': 'allReset', 'metadata': {},
                             'createdAt': '2026-10-27T00:00:00Z', 'settings': after})
                         before = after
@@ -249,7 +249,7 @@ def test_two_hundred_full_detail_history_deltas_fit_response_budget(local, tmp_p
                     return state
                 monkeypatch.setattr(api, '_history_load', full_history)
                 response = await http.get(url(doc), headers=headers(doc))
-                assert response.status_code == 200 and 256 * 1024 < len(response.content) <= 512 * 1024
+                assert response.status_code == 200 and 256 * 1024 < len(response.content) <= 1024 * 1024
                 print(f'History 200 steps / {len(CONTROLS)} controls: {len(response.content)} bytes')
                 steps = response.json()['steps']
                 assert len(steps) == 200 and all(len(step['changes']) == len(CONTROLS) for step in steps)
