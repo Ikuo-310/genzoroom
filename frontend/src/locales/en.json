@@ -280,59 +280,7 @@
     "expandGrading": "Expand Color Grading",
     "enableGrading": "Enable Color Grading",
     "disableGrading": "Disable Color Grading",
-    "collapseGrading": "Collapse Color Grading",
-    "expandGrading": "Expand Color Grading",
-    "enableGrading": "Enable Color Grading",
-    "disableGrading": "Disable Color Grading",
     "rawPreview": {
-      "gradingCategory": "Color Grading",
-      "gradingBand": "Tonal range",
-      "gradingBands": {
-        "shadows": "Shadows",
-        "midtones": "Midtones",
-        "highlights": "Highlights"
-      },
-      "grading": {
-        "shadows": {
-          "hue": "Shadows Hue",
-          "hueValue": "Shadows Hue value",
-          "hueReset": "Shadows Hue reset",
-          "sat": "Shadows Saturation",
-          "satValue": "Shadows Saturation value",
-          "satReset": "Shadows Saturation reset",
-          "lum": "Shadows Luminance",
-          "lumValue": "Shadows Luminance value",
-          "lumReset": "Shadows Luminance reset"
-        },
-        "midtones": {
-          "hue": "Midtones Hue",
-          "hueValue": "Midtones Hue value",
-          "hueReset": "Midtones Hue reset",
-          "sat": "Midtones Saturation",
-          "satValue": "Midtones Saturation value",
-          "satReset": "Midtones Saturation reset",
-          "lum": "Midtones Luminance",
-          "lumValue": "Midtones Luminance value",
-          "lumReset": "Midtones Luminance reset"
-        },
-        "highlights": {
-          "hue": "Highlights Hue",
-          "hueValue": "Highlights Hue value",
-          "hueReset": "Highlights Hue reset",
-          "sat": "Highlights Saturation",
-          "satValue": "Highlights Saturation value",
-          "satReset": "Highlights Saturation reset",
-          "lum": "Highlights Luminance",
-          "lumValue": "Highlights Luminance value",
-          "lumReset": "Highlights Luminance reset"
-        },
-        "blending": "Blending",
-        "blendingValue": "Blending value",
-        "blendingReset": "Blending reset",
-        "balance": "Balance",
-        "balanceValue": "Balance value",
-        "balanceReset": "Balance reset"
-      },
       "gradingCategory": "Color Grading",
       "gradingBand": "Tonal range",
       "gradingBands": {
