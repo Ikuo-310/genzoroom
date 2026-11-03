@@ -1,5 +1,21 @@
 # GenzoRoom 開発ノート
 
+## LightCraft managed engine v0.18.0追随（2026-11-03）
+
+LightCraft v0.18.0のreleaseとupstream commit `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`を確認し、managed pinをv0.14.0から更新した。v0.17.0→v0.18.0の差分は比較的小規模だが、実際のforward-port範囲はv0.14.0→v0.18.0の累積変更である。受入条件はpixel-perfectな画質一致ではなく、GenzoRoomのcontract、plugin経路、DevelopSettingsの保存・復元互換とした。demosaic、AHD、色・階調、dehaze、CPU/GPU描画などupstreamの画質差は許容する。
+
+upstreamで`media.rs`が`media/quick.rs`、`media/render.rs`、`media/session.rs`等へ分割されたため、目的単位でmanaged native contract patchをforward-portした。MCP一時PNGはupstreamのprivate `TempPng`管理を再利用し、独自の一時ファイル実装を重複させていない。upstreamのcrop制限も維持し、Regionのテストfixtureを実効geometryに合わせた。GenzoRoom独自contractの削除・version bumpはない。
+
+manifest、Frontend identity、patch、実binary、隣接receiptを更新した。Before／Preview／Region／WBは各contract 1、geometry descriptorは2のまま。managed tupleのstrict検証は維持する。`developmentTargetDir`は`target-managed`。patch [`0002-v0.18-native-contracts.patch`](../native/lightcraft/patches/0002-v0.18-native-contracts.patch) のSHA-256は`6020b117ed58bdfe9dea1dc1b9b13c54f91313e39f5b285a220f9c7f61056446`、managed binary SHA-256は`3e3acb5fb57785efcf4643a8094cc02d0471c49e84ac79167676f72de4aa0ea5`。receiptにはupstream commit、patch tuple、binary digest、全contractが記録され、runtimeのartifact受理も確認した。
+
+実装からGenzoRoomが使うMCP 8 tools／16 commandsを列挙し、v0.18.0で存在を確認した。実v0.14.0 binaryから採取したsettings fixtureをv0.18.0で復元し、readback round-tripを確認した。36 RAW controlsとColor Grading 11項目（Shadows／Midtones／Highlights H/S/L、Blending、Balance）を確認し、非公開の`grading.global.*`保持と、旧Recipeで`grading`が欠落する場合のdefault補完も検証した。engine version／commit差を理由に旧Recipeを拒否する変更はない。
+
+Before／Whole／Region／WB、geometry metadata、Draft／Full、stage cache、GPU diagnostics／fallback、source保護、XMP自動書込み禁止の既存contractを確認した。CPUとDX12で実binary probeを完走し、GPU successとexecution metadataも確認した。RAW ExportはLightCraftのfull developmentと内蔵JPEG encoderを使う既存経路、rendered-thumbnailはPreview PNGからGenzoRoomがJPEG化して`ThumbnailCache`へ保存する既存経路を維持した。メーカー名や拡張子によるRAW制限は追加していない。
+
+自動検証はBackend 626件、Frontend 647件、Rust 113件成功。Rust補助test 1件は既定ignore。release build、Frontend typecheck／production build、`git diff --check`、RAW Viewer smoke、managed receipt/runtime検証が成功した。メーカー固有情報を含まない合成Bayer DNGでもPreview、Auto WB／picker、settings restore、36 controls、JPEG full-resolution Export、原本保護を確認した。合成DNG probeは[`settings_export_probe.py`](../native/lightcraft/settings_export_probe.py)。
+
+ユーザー報告による実写真手動受入も問題なし。利用可能なPixel系DNGとPentax系RAWでopen、Whole／Region Preview、基本補正、WB、Color Grading、Detail、Effects、保存／再オープン、rendered-thumbnail、full RAW Exportを確認した。これらは代表サンプルであり、GenzoRoomのRAW対応範囲をメーカー限定するものではない。最終Known issueなし。
+
 ## RAW rendered-thumbnail Phase 1〜3：完了（2026-10-30）
 
 保存済みnon-default RAW Recipeから、既存ThumbnailScheduler、独立LightCraft manager/session、最大辺1024pxのPreview、既存encoderによるJPEG化を経て、Asset ID単位の既存ThumbnailCacheへ保存する。JPEGの`JpegRenderer`、active editing document、Undo/Redo、live Preview、RAW Export pipelineは使用しない。source RAW、Recipe、Historyは不変で、XMP sidecarは生成しない。
