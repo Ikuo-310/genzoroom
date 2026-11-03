@@ -1,5 +1,46 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop / Straighten Phase 0 設計監査（2026-11-03）
+
+実装前の設計監査として、LightCraft v0.18.0のCrop / Straighten command、DevelopSettings、幾何変換、MCP headless / Preview / Region / Export経路と、GenzoRoomのRAW document、mutation、Recipe / History、Viewer、Whole / Region、thumbnail / Export経路を読み取り調査した。管理identityはupstream commit `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`、patch `0002-v0.18-native-contracts.patch`（SHA-256 `6020b117ed58bdfe9dea1dc1b9b13c54f91313e39f5b285a220f9c7f61056446`）、geometry descriptor contract 2。ローカルmanaged checkoutのHEADとpatch digestはmanifestに一致した。
+
+**確認した事実：** LightCraftの保存正は`crop.geometry.rect`と`angle`、aspect lock、2つのflip、およびトップレベルorientationから成るDevelopSettingsである。rectはuser orientation後の画像をangle分だけ回した座標空間にある、解像度非依存の正規化軸平行矩形で、angleは度・時計回り正・通常±45°。0〜1に単純clampできない。`crop.set` / `crop.drag` / `crop.aspect` / `crop.rotateAspect` / `crop.straighten` / `crop.reset`とphoto Rotate / Flip commandはengineにあり、MCP `command_run`から呼べる。`develop.set`の数値control `crop.angle`もStraightenと同じcrop refitを行う。dragはNative側で境界・aspect・最小辺2%を制約する。
+
+**確認した事実：** 現行GenzoRoom Backendは36 scalar controlのみを許可し、LightCraft commandの直接公開はない。geometry操作は既存document owner・revision・readback・History saveの境界へ接続する必要がある。現行Whole Previewはcrop適用済みであり、`RawRegionPlanner`もcrop後のoutput座標を使う。geometry descriptor 2のIDはsource、解像度、crop・angle・orientation・flip等の座標変換からNativeで生成され、Backendでdocument owner情報に結び付けられる。Recipe / Historyは完全DevelopSettingsを保存し、RAW thumbnailとExportもそのsettingsから既存LightCraft処理を行う。調査対象の契約やDBを変更した事実はない。
+
+**推奨設計（暫定）：** canonical保存値にLightCraftのCropGeometryを使い、GenzoRoom独自geometryやcoverScaleを永続化しない。mutationは既存owner queue内の型付きgeometry操作とし、Native command後に完全settingsをreadbackしてrevisionを確定する。Crop dragはgesture終了時に1 History stepとする。Rotate / Flip / Aspect swapは相対操作であるため、応答消失時に盲目的に再送しない。DB移行が必要とは確認されず、既存Recipe JSONとHistory snapshotを利用する案が妥当である。Crop Resetに90°回転を含むかは未決定。
+
+固定Crop枠方式は、画像中心を基準にしたStraighten回転、orientation、flip、表示fit、Viewer zoom / panを一つの変換として合成し、pointer入力には同じ変換の逆行列を使えば成立する。aspect、crop原点、flipによるハンドル対応も含める必要があり、CSS rotate単独では不足する。fit scaleは表示時だけ計算する。写真側を独自拡大して保存geometryとの対応を崩さない。
+
+**確認した事実：** 編集に必要なcrop外画素は現行crop済みWhole bitmapには含まれない。**推奨設計（未実装）：** Native documentを変更せず、既存LightCraft render / Preview workerへ明示的なuncropped editing displayを追加する。専用現像engineや別の恒久Preview経路は作らず、この一時表示のreceiptと座標空間を通常Whole / Regionから区別する。
+
+通常crop後のWhole / Regionは新revision・geometryで更新する。古い表示済みWholeは現行UIでは置き換えまで残り得るため、Crop編集中は不一致bitmapと新枠を重ねない失効方針が必要。既存Region plannerの通常crop後座標計算は維持し、confirmed Wholeに対して再planする。未crop編集表示へRegionを重ねるには別途座標変換が必要。Beforeは現在のcrop / orientationを反映するのでgeometry一致が必要。WB pickerは現在表示中のcrop済みWhole frameに結び付いているため、初期案ではuncropped Crop表示中は停止し、通常Wholeへ戻ってから再開する。Undo / Redo後は通常のrevision / geometry ownershipでPreview群を再構築する。
+
+Recipe保存・Reset・Edited判定、rendered-thumbnailのPreview→JPEG→共通cache、およびRAW Exportのfull development→JPEG→metadata挿入・登録は既存経路を再利用する推奨であり、Crop専用thumbnail / Export formatは設けない。右ペインはScopeの下にRAW専用`現像` / `切り抜き`大カテゴリを置く案。選択カテゴリはUI stateとして扱いRecipe / Historyへ保存せず、切替前に編集中操作を確定する。JPEG編集画面への変更は提案していない。
+
+### Phase 1〜6の提案
+
+| Phase | 内容・完了条件 |
+|---|---|
+| 1 | Native未crop編集表示とgeometry API契約を確定し、既存crop command・表示receiptをfocused probeで確認 |
+| 2 | Backend mutation / readback、revision、Recipe / History、失敗・不明応答時の安全な再同期を接続 |
+| 3 | 固定枠の合成・逆変換、ハンドル、portrait / landscape、±45°、90°＋flip、DPRの整合を確認 |
+| 4 | Crop UI、aspect preset / lock / custom、Straighten slider / 数値、Rotate / Flip / Reset、三分割線と大カテゴリを接続 |
+| 5 | Whole / Region / Before / picker、Draft→Full、Zoom / Pan、Undo / Redoとstale結果の統合 |
+| 6 | Recipe再open、Reset、thumbnail cache、Export寸法とEXIF、Export中編集の受入 |
+
+### 未確定事項と追加検証
+
+- Crop category Resetに90° rotationを含めるか。All Resetとの責任分担。
+- Native未crop Previewの引数・応答schema、表示receiptとcache keyの分離方法。
+- Warp / lens補正を含むRecipeで固定枠の内側に欠損を許容するか。CropのNative制約だけではWarp後の全領域を保証しない。
+- 未crop編集中にpost-crop効果が最終画像と異なる場合の許容範囲、およびRegionをCrop表示中に要求するか。
+- geometry commandの送信後応答消失・readback失敗・保存失敗、同じRecipeへのno-op、Undo / Redoのfocused failure tests。
+- crop fieldを欠く過去RecipeのNative default読込とGenzoRoom完全readback validationの整合。
+- crop / angle / orientation / flip / aspectの代表geometryで、Preview・Region・Before・Export寸法とEXIFの整合。
+
+このPhase 0ではソース・テスト・DB・Native patchを変更していない。**Build、テスト、実写真処理および実ブラウザ検証は未実施**であり、固定枠UIや未crop編集表示の実動作を確認したものではない。以上の設計案はPhase 1でcontractと失敗境界を確認してから実装する。
+
 ## LightCraft managed engine v0.18.0追随（2026-11-03）
 
 LightCraft v0.18.0のreleaseとupstream commit `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`を確認し、managed pinをv0.14.0から更新した。v0.17.0→v0.18.0の差分は比較的小規模だが、実際のforward-port範囲はv0.14.0→v0.18.0の累積変更である。受入条件はpixel-perfectな画質一致ではなく、GenzoRoomのcontract、plugin経路、DevelopSettingsの保存・復元互換とした。demosaic、AHD、色・階調、dehaze、CPU/GPU描画などupstreamの画質差は許容する。
