@@ -12,9 +12,10 @@ export type RawDocument = {
 };
 export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
   fullWidth: number; fullHeight: number; window: null };
-export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole'; maxSide: number; viewGeneration: number; geometryId: string | null };
+export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'crop-edit'; maxSide: number; viewGeneration: number; geometryId: string | null };
+export type RawCropDisplay = { canonicalGeometry: { crop: RawCrop; orientation: string }; bitmapSpace: 'oriented-warped-unstraightened-flipped'; settingsFingerprint: string };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
-  quality?: 'draft' | 'full'; frame?: RawGeometry };
+  quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay };
 export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
@@ -416,6 +417,15 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
       kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
       changes: step.changes?.map(change => ({ ...change })) ?? null })) };
 }
+
+export async function recoverRawGeometry(doc: RawSettings) {
+  const value = await json(`/documents/${doc.handle}/history/recover`, post({ ...identityBody(doc), documentRevision: doc.revision,
+    settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision: doc.recipeRevision }), RAW_SETTINGS_RESPONSE_BYTES);
+  settings(value, doc);
+  if (value.historyPending || value.nativeState !== 'synced' || !value.nativeMatchesRecipe || value.ack !== null)
+    throw new RawApiError('raw_save_unconfirmed');
+  return value as RawSettings;
+}
 export async function cancelRawPreview(doc: RawDocument, kind: 'before' | 'after', serial: number) {
   await request(`/documents/${doc.handle}/preview/cancel`, post({ ...identityBody(doc), kind, serial }));
 }
@@ -433,11 +443,14 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
       if (reason !== 'revision' && reason !== 'replaced' && reason !== 'cancelled') throw new RawApiError('raw_invalid_response');
       throw new RawSuperseded(reason);
     }
-    let frame: RawGeometry | undefined, quality: 'draft' | 'full' | undefined;
+    let frame: RawGeometry | undefined, quality: 'draft' | 'full' | undefined, cropDisplay: RawCropDisplay | undefined;
     if (target) {
-      const contract = response.headers.get('x-raw-preview-contract');
+      const editing = target.mode === 'crop-edit';
+      const contract = response.headers.get(editing ? 'x-raw-crop-edit-contract' : 'x-raw-preview-contract');
+      if (editing && (kind !== 'after' || contract !== '1' || response.headers.has('x-raw-preview-contract'))
+        || !editing && response.headers.has('x-raw-crop-edit-contract')) throw new RawApiError('raw_invalid_response');
       const actual = response.headers.get('x-raw-quality');
-      if (response.headers.get('x-raw-mode') !== 'whole' || response.headers.get('x-raw-view-generation') !== String(target.viewGeneration)
+      if (response.headers.get('x-raw-mode') !== target.mode || response.headers.get('x-raw-view-generation') !== String(target.viewGeneration)
         || contract !== '0' && contract !== '1' || actual !== 'full' && actual !== 'draft'
         || (contract === '1' ? actual !== target.quality : actual !== 'full')) throw new RawApiError('raw_invalid_response');
       quality = actual;
@@ -453,6 +466,16 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
           frame = value;
         } catch { throw new RawApiError('raw_invalid_response'); }
       } else if (response.headers.has('x-raw-frame')) throw new RawApiError('raw_invalid_response');
+      if (editing) {
+        try {
+          const encoded = response.headers.get('x-raw-crop');
+          if (!encoded || encoded.length > 16384) throw new Error();
+          cropDisplay = JSON.parse(encoded);
+          if (!cropDisplay || cropDisplay.settingsFingerprint !== doc.settingsFingerprint
+            || cropDisplay.bitmapSpace !== 'oriented-warped-unstraightened-flipped') throw new Error();
+          validateCropSettings(cropDisplay.canonicalGeometry as RawSettings);
+        } catch { throw new RawApiError('raw_invalid_response'); }
+      }
     }
     const numeric = (name: string) => {
       const text = response.headers.get(`x-raw-${name}`);
@@ -481,7 +504,7 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     check();
     if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
     return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
-      kind, quality, frame, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
+      kind, quality, frame, cropDisplay, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
   } finally { await response.body?.cancel().catch(() => {}); }
 }
 

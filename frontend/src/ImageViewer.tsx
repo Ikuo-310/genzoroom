@@ -1,3 +1,5 @@
+import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
+import { cropNativeSize } from './rawCropMath';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
@@ -18,6 +20,7 @@ import type { RawRegionDisplay } from './rawRegionOverlay';
 type ImageViewerProps = {
   src: string;
   documentKey?: string;
+  rawCrop?: RawCropBinding;
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   rawRegionDisplay?: RawRegionDisplay;
   rawPickActive?: boolean;
@@ -66,7 +69,7 @@ const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 
-export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -85,7 +88,11 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const [loadedImage, setLoadedImage] = useState<{ identity: string; status: 'ready' | 'error'; size: Point } | null>(null);
   const imageState = loadedImage?.identity === imageIdentity ? loadedImage.status : 'loading';
   const bitmapSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
-  const logicalWidth = rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = rawFrame?.nativeHeight ?? bitmapSize.y;
+  const [cropBusy, setCropBusy] = useState(false);
+  const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
+  if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: cropNativeSize(rawCrop.surface.display.canonicalGeometry.crop, rawCrop.surface.frame) };
+  const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
+  const logicalWidth = cropSize?.x ?? rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = cropSize?.y ?? rawFrame?.nativeHeight ?? bitmapSize.y;
   const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
   const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
   useEffect(() => {
@@ -104,7 +111,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   const navigatorPosition = settings.zoomNavigatorPosition;
   const navigatorScale = imageSize.x > 0 && imageSize.y > 0
     ? Math.min(NAVIGATOR_LONG_EDGE / Math.max(imageSize.x, imageSize.y), (viewportSize.x - 24) / imageSize.x, (viewportSize.y - 24) / imageSize.y) : 0;
-  const showNavigator = zoomed && navigatorPosition !== 'off' && imageState === 'ready'
+  const showNavigator = !rawCrop?.active && zoomed && navigatorPosition !== 'off' && imageState === 'ready'
     && viewportSize.x > 24 && viewportSize.y > 24 && navigatorScale > 0;
   const navigatorWidth = imageSize.x * navigatorScale;
   const navigatorHeight = imageSize.y * navigatorScale;
@@ -156,7 +163,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       panX: pan.x, panY: pan.y, interacting: viewInteracting });
   }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode, pan.x, pan.y, viewInteracting]);
   const [backslashHeld, setBackslashHeld] = useState(false);
-  const showBeforeAdjustments = beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
+  const showBeforeAdjustments = !rawCrop?.active && beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   const regionDisplay = rawRegionDisplay?.after.metadata.geometryId === rawFrame?.geometryId
     && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
   const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;
@@ -312,7 +319,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function toggleFitActualSize(event: ReactMouseEvent<HTMLDivElement>) {
-    if (rawPickActive || event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
+    if (rawCrop?.active || rawPickActive || event.button !== 0 || imageState !== 'ready' || !imageSize.x || !imageSize.y || dragRef.current) return;
     if (suppressDoubleClickRef.current) {
       suppressDoubleClickRef.current = false;
       clearTimeout(suppressDoubleClickTimer.current);
@@ -347,7 +354,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (keyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
+      if (cropBusy || keyboardBlocked || event.defaultPrevented || event.isComposing || event.repeat
         || isNativeEditingTarget(event.target) || !matchesShortcut(event, 'viewerFitRestore')
         || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
       event.preventDefault();
@@ -365,9 +372,10 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [keyboardBlocked, fitMode, scale, pan, fitScale, onInteractionStart]);
+  }, [cropBusy, keyboardBlocked, fitMode, scale, pan, fitScale, onInteractionStart]);
 
   function zoom(nextValue: number, point: Point = { x: 0, y: 0 }) {
+    if (cropBusy) return;
     if (rawFrame) {
       setViewInteracting(true); clearTimeout(viewGestureTimer.current);
       // C2-C provisional quiet interval; this changes display quality, never the edit/save gesture owner.
@@ -390,6 +398,7 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
   }
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (cropBusy) return;
     if (rawPickActive) {
       if (event.button === 0 && pickReady && displayedPickTarget && imagePositionRef.current
         && wholeImagePoint({ x: event.clientX, y: event.clientY }, imagePositionRef.current.getBoundingClientRect())) {
@@ -616,7 +625,8 @@ export function ImageViewer({ src, documentKey, rawFrame, rawRegionDisplay, rawR
       onPointerUp={stopPan}
       onPointerCancel={stopPan}
     >
-      <div ref={imagePositionRef} className="viewer-image-position" style={{ transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+      {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} />}
+      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>

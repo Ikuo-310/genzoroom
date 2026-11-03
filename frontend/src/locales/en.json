@@ -337,6 +337,7 @@
       "wbInvalidResponse": "The white balance estimate was invalid. Your settings have not changed.",
       "wbConnectionFailed": "The RAW engine connection was lost during estimation. Reopen the photo.",
       "wbTimeout": "White balance estimation timed out. Reopen the photo if retrying fails.",
+      "cropHistory": {"drag": "Crop move / resize", "straighten": "Straighten", "set": "Crop", "aspect": "Crop aspect", "swap": "Swap crop aspect", "reset": "Reset Crop", "rotateLeft": "Rotate left", "rotateRight": "Rotate right", "flipHorizontal": "Flip horizontal", "flipVertical": "Flip vertical"},
       "wbPick": "White balance picker",
       "awNoSamples": "Auto white balance could not find suitable samples. Your settings have not changed.",
       "awFailed": "White balance could not be applied. Your settings have not changed. Reopen the photo if retrying fails.",

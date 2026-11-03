@@ -1,5 +1,28 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 3：固定枠・座標変換・Gesture基盤（2026-11-04）
+
+Phase 1の未crop編集PreviewとPhase 2のGeometry APIをFrontendへ接続した。正式な「現像／切り抜き」パネルは未実装。document所有の内部入口`window.genzoroomCrop.enter()/exit()/straighten(angle)/recover()`を用意した。実装は既存Native managed 0.18.0、upstream `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`を維持し、patch / manifest / binary / artifact receiptを変更していない。
+
+`rawCropMath.ts`が明示的なCSS affine合成・逆行列・投影を担う。未crop bitmap→user-oriented Native pixel→Straighten canonical→crop中心のflip→Viewer scale/pan→viewport CSS pixelを分離した。bitmapへ既に適用されたorientationは再適用しない。flipはbitmapの画像中心反転を戻してから回転し、最終出力と同じcrop中心反転を適用する。正規化座標の逆変換はW/H別々のscaleを使い、DPRを二重適用しない。Fit倍率・cover比はNative確定rectから導出し、Frontendで独立したfittingや保存geometryを作らない。四隅の逆回転によるsource containment検証は入力拒否のためだけに使う。
+
+`RawCropSurface.tsx`に水平・垂直の固定枠、三分割線、半透明暗幕、8ハンドルと枠内moveを追加した。ハンドル入力領域は24 CSS pixel。down時のrect/from/handle/逆行列/viewport boundsを凍結し、中間readbackで入力基準を変更しない。Pointer captureを使い、upは最終位置を送信して終了、cancel/lost capture/unmountは受理済み更新を確定して所有状態を残さない。枠外dragとwheelは既存Viewer pan/zoomを使い、Crop pointer gesture中は競合を止める。表示用状態はRecipeへ保存しない。
+
+`RawRecipeSave`を既存owner queue上で拡張した。begin→最新未送信点を保持するupdate→最終readback→geometry History commitを1 gestureとして扱う。終了・離脱フェンスを同期的に予約し、begin待機中やPointer終了と同じイベントでunmountしてもcommitより先に解放しない。no-opのstep抑止はBackendの既存契約へ委譲した。結果不明mutationは自動再送せず編集を止め、明示recoverでdurable Recipeへ戻す。保存失敗時は凍結saveId/bodyのみ再試行する。診断失敗は既存structured loggerへ安全なowner/revision/sequence/errorCodeで記録する。Geometry Historyに操作名の日本語／英語ラベルを追加した。
+
+Backendの`lightcraft_runtime.py`、`lightcraft_raw.py`、`windows_raw_api.py`で既存Preview経路を拡張した。独立workerを増やさず、Afterのlatest slot、Native lock、PNG検証、readbackを再利用する。Native requestId・token-preserving fingerprint・canonicalGeometry・bitmapSpaceを照合後、HTTPは通常Wholeと別のcontract headerとpublic settings fingerprintを返す。通常と編集のmode不一致は拒否し、編集bitmapからRegion/WB receiptを登録しない。`rawApi.ts`でもmode・frame・fingerprint・canonical geometryを検証する。
+
+`useRawDocument.ts`の既存one-running/one-pending display intentへmodeを追加し、decode後も既存owner検証を行う。Crop bitmapと枠は同一応答から同時公開し、新revisionのACK後は旧surfaceを隠す。mode切替では表示世代とRegion/Before/WBの旧surfaceを失効させる。Crop中はRegion/Before/WBを無効化し、終了時は保存後に通常crop済みWholeを取得してRegion再評価へ戻す。Region Plannerの数学は変更していない。`ImageViewer.tsx`、`AnshitsuPage.tsx`へ内部bindingを渡し、通常JPEG/RAW表示分岐を維持した。
+
+変更ファイルは上記実装群、`RawEditHistory.tsx`、`locales/en.json`・`ja.json`（History操作名のみ）、関連Frontendテスト、`backend/tests/test_raw_geometry.py`、architectureと本記録。README / CHANGELOG、DB、Native patchは変更していない。
+
+検証：関連Frontend 14 files / 657件成功（行列、全handle/move、cancel、capture、ACK中の基準固定、最終点、History集約、同時離脱、結果不明停止、mode境界、decode遅延、既存JPEG/RAW Viewer・controls・History・Before/Region・scheduler）。終了cleanupと診断追加後の関連2 files / 85件も成功。BackendはGeometry 50件成功（実managed Native＋合成DNG＋HTTP＋隔離SQLiteでDraft/Full未crop、通常Wholeとのgeometry ID分離、settings不変、Region/WB receipt非登録を追加確認）、既存Preview/Before/Region/HTTP 95件成功。通常sandbox内のpytest起動が進行しなかったため中断し、同一repository Python 3.14環境をprivileged実行して検証した。回復時のHistory検証・保存応答消失時の凍結receipt再試行を追加し、監査修正後の関連4 files / 374件も成功。さらに8 orientationと正負angle/flipを独立したNative source式と比較し、数学モジュール13件成功。TypeScriptチェック・production build・git diff --check成功（既存の500 kB超chunk警告あり）。
+
+既知の制約：Warp由来の欠損を補完しない。crop-relative effectsは最終crop出力との表示差があり得る。Backend既存のsequence 0..255とedit budgetは引き続き適用される。実写真・実ブラウザ・NASでの手動受入は未実施であり、操作感・見た目の受入を自動テスト成功と混同しない。Native rebuildおよびDocker release Smoke Testは、当該変更がないため未実施。
+
+Phase 4は正式カテゴリ・aspect/lock/custom ratio・Straighten slider・Rotate/Flip・Reset操作UIへこのbindingと既存離散geometry Historyを接続する。Resetはorientationを維持する確定仕様を守る。Phase 5で実写真によるBefore/WB/Region横断受入と画面上の位置合わせを行う。
+
+
 ## RAW Crop Phase 2：Backend Geometry / Recipe / History統合（2026-11-03）
 
 標準Crop操作をBackendの既存Native mutation ownerとRecipe / Historyへ接続した。`raw_geometry.py`でclosed typed operation、有限数値、rect順序、angle、custom aspect、handle、readback CropGeometryを検証する。任意Native commandやphoto IDを外部公開しない。`lightcraft_runtime.py`の内部allowlistへ標準Crop / Rotate / Flipを追加し、`LightCraftRawSession.apply_geometry()`は既存`_mutate()`でcommand→完全settings readback→revision確定を行う。成功値nullを受け入れ、境界制約・aspect・refitはNativeへ委譲する。Crop Resetはorientationを維持し、無関係な現像値の保持もreadbackで検証する。

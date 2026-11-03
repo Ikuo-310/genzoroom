@@ -659,7 +659,7 @@ class LightCraftManager:
                     lightcraft_log('region.tempCleanupFailed', level='warn', generation=generation, errorCode=error.code)
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
-                           quality=None, stage_cache="off", stage_cache_budget_bytes=None):
+                           quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
@@ -670,6 +670,12 @@ class LightCraftManager:
             options = {"quality": quality, "preview_contract": 1, "stage_cache": stage_cache}
             if stage_cache == "on":
                 options["stage_cache_budget_bytes"] = stage_cache_budget_bytes
+        if crop_edit is not None:
+            from lightcraft_artifact import MANAGED
+            if MANAGED.get('cropEditContract') != 1:
+                raise LightCraftError('raw_preview_unsupported')
+            options.pop('preview_contract', None)
+            options.update(display_mode='crop-edit', crop_edit_contract=1, **crop_edit)
         try:
             result = await session.client.call_tool_result("render_preview", {
                 "id": photo_id, "max_side": max_side, "format": "png", **options,

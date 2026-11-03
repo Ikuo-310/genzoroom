@@ -271,6 +271,20 @@ def test_actual_native_geometry_history_reload_and_preview(local, tmp_path, monk
                 preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json={k:doc[k] for k in ('workspaceId','generation','documentToken','revision')} | {'serial': 1,
                     'quality': 'full', 'mode': 'whole', 'maxSide': 64, 'viewGeneration': 1, 'geometryId': None})
                 assert preview.status_code == 200, preview.text[:100]
+                normal_id = json.loads(preview.headers['X-Raw-Frame'])['geometryId']
+                for serial, quality in [(2, 'draft'), (3, 'full')]:
+                    editing = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json={k:doc[k] for k in ('workspaceId','generation','documentToken','revision')} | {'serial': serial,
+                        'quality': quality, 'mode': 'crop-edit', 'maxSide': 64, 'viewGeneration': 2, 'geometryId': None})
+                    assert editing.status_code == 200, editing.text[:100]
+                    assert editing.headers['X-Raw-Crop-Edit-Contract'] == '1'
+                    assert 'X-Raw-Preview-Contract' not in editing.headers
+                    assert json.loads(editing.headers['X-Raw-Frame'])['geometryId'] != normal_id
+                    meta = json.loads(editing.headers['X-Raw-Crop'])
+                    assert meta['canonicalGeometry'] == {k:doc[k] for k in ('crop', 'orientation')}
+                    assert meta['settingsFingerprint'] == doc['settingsFingerprint']
+                    assert not api._wb_frames and not api._region_geometry
+                settings = await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity(doc))
+                assert settings.json()['settingsFingerprint'] == doc['settingsFingerprint']
                 assert (await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')).status_code == 204
                 _, response = await open_asset(http, asset)
                 assert response.status_code == 200, response.text

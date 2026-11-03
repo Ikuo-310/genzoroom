@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
   releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
-  type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry } from './rawApi';
+  type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
@@ -14,7 +14,9 @@ import { RawRegionAuto, REGION_AUTO_PROVISIONAL } from './rawRegionAuto';
 import { createRawRegionDiagnosticsChannel, diagnosticVisibleRect, type RawRegionDiagnosticMessage,
   type RawRegionDiagnosticState, type RawRegionPosition } from './rawRegionDiagnostics';
 
-type RawState = { assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
+declare global { interface Window { genzoroomCrop?: { enter: () => Promise<void>; exit: () => Promise<void>; straighten: (angle: number) => Promise<void>; recover: () => Promise<void> }; } }
+
+type RawState = { cropMode?: boolean; cropDisplay?: RawCropDisplay; imageToken?: string; assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
   requestSide?: number; frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
@@ -79,6 +81,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
+  const cropModeRef = useRef<(enabled: boolean) => Promise<void>>(async () => {});
   const regionRef = useRef<RawRegionDelivery | null>(null);
   const connectRegionRef = useRef<() => Promise<boolean>>(async () => false);
   const publishDiagnosticRef = useRef<() => void>(() => {});
@@ -92,13 +95,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let editor: RawControls | undefined;
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
-    let frameSerial = 0;
+    let frameSerial = 0, cropMode = false;
     // Native geometry is available only after the first validated bitmap; never infer it from the PNG.
     let side = 1024, latestView: RawView | undefined;
     let viewTimer: ReturnType<typeof setTimeout> | undefined;
     let viewAggregationAt = 0;
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
-    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null; side: number } | undefined;
+    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null; side: number; mode: 'whole' | 'crop-edit' } | undefined;
     let transmitted: { doc: RawDocument; serial: number } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
@@ -109,7 +112,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let auto: RawRegionAuto | undefined;
     let autoQueued = false;
     const evaluateAuto = () => {
-      if (autoQueued || !current()) return;
+      if (autoQueued || !current() || cropMode) return;
       autoQueued = true;
       queueMicrotask(() => { autoQueued = false; if (current()) auto?.evaluate(); });
     };
@@ -152,7 +155,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     publishDiagnosticRef.current = publishDiagnosticState;
     const region = new RawRegionDelivery({
       changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); evaluateAuto(); publishDiagnosticState(); } },
-      owner: () => editor && publishedFrame && regionOwner ? {
+      owner: () => !cropMode && editor && publishedFrame && regionOwner ? {
         doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
         blocked: !current() || frozen.current || editor.mutating || editor.unsettled && !editor.interacting || !!saver?.locked,
         wholeBusy: displayRunning || !!displayPending,
@@ -313,7 +316,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (transmitted) void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
     };
     suspendDisplayRef.current = invalidateDisplay;
-    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number, valid = current) => {
+    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number, valid = current, mode: 'whole' | 'crop-edit' = 'whole') => {
       if (!valid()) return;
       let candidate: string | undefined;
       const metrics = editor?.metrics, ackAt = metrics?.ackAt;
@@ -325,7 +328,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const requestSerial = ++frameSerial;
         transmitted = { doc, serial: requestSerial };
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
-          quality, mode: 'whole', maxSide, geometryId, viewGeneration });
+          quality, mode, maxSide, geometryId, viewGeneration });
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal, urls);
         if (!valid()) return;
@@ -338,7 +341,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         url = candidate;
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
-        wholeSurfaces.current.after = frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality, maxSide } : undefined;
+        wholeSurfaces.current.after = mode === 'whole' && frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality, maxSide } : undefined;
         const baseline = wholeSurfaces.current.before;
         if (baseline && frame.frame && baseline.doc.assetId === doc.assetId && baseline.doc.handle === doc.handle
           && baseline.doc.generation === doc.generation && baseline.doc.documentToken === doc.documentToken
@@ -350,7 +353,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         overlay.refresh();
         publishDiagnosticState();
         setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
-          requestSide: maxSide, frame: frame.frame, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
+          requestSide: maxSide, frame: frame.frame, cropDisplay: frame.cropDisplay, imageToken: doc.documentToken, cropMode, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
         if (metrics) {
           if (quality === 'draft') {
@@ -384,7 +387,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!valid()) return;
       displayRunning = true;
       // This slot owns failures and URL cleanup; mutation/save queues never join image work.
-      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid).catch(cause => {
+      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid, intent.mode).catch(cause => {
         if (!valid()) return;
         if (cause instanceof RawSuperseded) {
           if (cause.reason === 'revision') resyncPreview(valid);
@@ -420,7 +423,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
       if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
       const quality = editor?.interacting || latestView?.interacting ? 'draft' : 'full';
-      const key = `${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}`;
+      const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}`;
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
       // desired changed. Native revision and ownership checks still gate adoption.
@@ -432,7 +435,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
         && editor.confirmed.revision === doc.revision;
-      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side };
+      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side, mode: cropMode ? 'crop-edit' : 'whole' };
       pumpDisplay();
       region.refresh();
       overlay.refresh();
@@ -452,8 +455,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     viewRef.current = (view) => {
       if (view) {
-        latestView = view;
-        auto?.viewChanged(view);
+        latestView = cropMode ? { ...view, fit: false } : view;
+        if (!cropMode) auto?.viewChanged(view);
         // One non-extending B1/C2-C aggregation slot samples the latest view during a continuous Pan.
         if (!viewTimer) {
           viewAggregationAt = performance.now();
@@ -507,11 +510,32 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       editorRef.current = editor;
       notifyRef.current = notify;
       setState(previous => ({ ...previous, assetId, status: 'ready', document: settings, settings,
+        ...(cropMode ? { url: undefined, frame: undefined, imageRevision: undefined, cropDisplay: undefined } : {}),
         desired: {}, pending: false, editError: undefined, dirty: true, saving: false, saveError: undefined, locked: true,
         resetting: false, resetError: undefined }));
       // Install runs on the owner queue; schedule initialization rather than awaiting it here.
       void saver.save().then(() => { if (current()) displayPreview(installed.confirmed); }).catch(() => {});
     };
+    const setCropMode = async (enabled: boolean) => {
+      if (!current() || !saver || !editor || frozen.current) throw new RawApiError('raw_document_closed');
+      await saver.save();
+      if (!current()) throw new RawApiError('raw_document_closed');
+      if (cropMode === enabled) return;
+      cropMode = enabled; viewGeneration++; latestView = undefined; side = 1024;
+      invalidateDisplay(); wholeSurfaces.current = {}; publishedFrame = undefined;
+      setState(previous => previous && ({ ...previous, cropMode, url: undefined, frame: undefined, cropDisplay: undefined, imageRevision: undefined }));
+      displayPreview(editor.confirmed);
+    };
+    cropModeRef.current = setCropMode;
+    const cropDiagnostics = {
+      enter: () => setCropMode(true), exit: () => setCropMode(false),
+      straighten: async (angle: number) => {
+        if (!current() || !cropMode || !saver || saver.locked) throw new RawApiError('raw_busy');
+        await saver.operate({ kind:'geometry',metadata:{operation:'straighten'},geometry:{type:'straighten',params:{angle}} });
+      },
+      recover: async () => { if (!current() || !saver) throw new RawApiError('raw_document_closed'); await saver.recoverGeometry(); },
+    };
+    window.genzoroomCrop = cropDiagnostics;
     // Compose release/open on the existing owner queue, never a second lifecycle dispatcher.
     const owned = (action: () => Promise<void>) => new Promise<void>((resolve, reject) => {
       enqueue(async () => { try { await action(); resolve(); } catch (error) { reject(error); } });
@@ -678,6 +702,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const dispose = () => {
       if (!active) return;
       active = false;
+      if (window.genzoroomCrop === cropDiagnostics) delete window.genzoroomCrop;
       auto?.dispose(); evaluateAutoRef.current = () => {};
       region.dispose();
       unsubscribeRegion(); overlay.dispose();
@@ -724,7 +749,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     return () => { window.removeEventListener('pagehide', pagehide); window.removeEventListener('beforeunload', beforeUnload); dispose(); };
   }, [assetId]);
   // A comparison toggle and ordinary After revisions do not own the native Before cache lifetime.
-  const beforeKey = state?.assetId === assetId ? state.document?.beforeKey : null;
+  const beforeKey = !state?.cropMode && state?.assetId === assetId ? state.document?.beforeKey : null;
   const generation = state?.document?.generation, token = state?.document?.documentToken;
   useEffect(() => { beforeSerial.current = 0; }, [generation, token]);
   const afterQuality = state?.quality ?? 'full', afterGeometry = state?.frame?.geometryId, afterSide = state?.requestSide ?? 1024;
@@ -822,7 +847,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const pickTag = `${assetId}:${visible?.document?.generation}:${visible?.document?.documentToken}`;
   const pickStart = useRef(0);
   const cancelPick = () => { pickStart.current++; setPickOwner(null); };
-  const pickAvailable = !!visible && visible.status === 'ready' && !visible.locked && !visible.pending
+  const pickAvailable = !visible?.cropMode && !!visible && visible.status === 'ready' && !visible.locked && !visible.pending
     && !!visible.frame && visible.imageRevision === visible.document?.revision
     && !visible.editError && !visible.historyError && !visible.historyLoading && !!visible.history
     && !!visible.settings?.sections.color && !!visible.settings?.wb.available && !!visible.settings?.wbAutoAvailable;
@@ -871,9 +896,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const moveHistory = (action: 'undo' | 'redo' | 'jump', targetStepId?: string | null) => {
     cancelPick();
     if (!callbackEditor() || frozen.current) return;
-    void saverRef.current?.move(action, targetStepId).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
+    const owner = saverRef.current;
+    void (owner?.cropping ? owner.finishGeometry().then(() => owner.move(action, targetStepId)) : owner?.move(action, targetStepId))?.catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
-  return visible && { ...visible, beforeAvailable: !!beforeKey,
+  const cropSaver = saverRef.current;
+  const cropSurface = visible?.cropMode && visible.cropDisplay && visible.frame && visible.url
+    && visible.imageToken === visible.document?.documentToken && visible.imageRevision === visible.document?.revision
+    ? { url: visible.url, frame: visible.frame, display: visible.cropDisplay } : undefined;
+  return visible && { ...visible,
+    crop: { active: !!visible.cropMode, surface: cropSurface, canStart: !!cropSurface && !visible.locked && !visible.pending && !visible.editError,
+      begin: () => { cancelPick(); if (!callbackEditor() || frozen.current || !cropSaver) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.beginGeometry(); },
+      update: (intent: RawGeometryOperation) => { if (callbackEditor() && !frozen.current) cropSaver?.updateGeometry(intent); },
+      end: () => cropSaver?.finishGeometry() ?? Promise.resolve(),
+      setMode: (enabled: boolean) => { cancelPick(); return cropModeRef.current(enabled); } },
+    beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,
     cancelPick,
     togglePick: () => {
@@ -902,7 +938,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         .catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
     },
     regionDelivery: regionRef.current,
-    regionDisplay: overlayRef.current?.display,
+    regionDisplay: visible.cropMode ? undefined : overlayRef.current?.display,
     regionOutline,
     connectRegion: () => connectRegionRef.current(),
     viewChanged: (view?: RawView) => {

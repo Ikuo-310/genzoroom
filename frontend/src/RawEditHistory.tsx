@@ -52,6 +52,7 @@ const formatters: Record<RawControlId, (value: number) => string> = {
   'detail.nrColorSmoothness': value => value.toFixed(0) };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
+  if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.operation}`);
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   const control = step.metadata.control;

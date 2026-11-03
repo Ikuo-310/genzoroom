@@ -1167,3 +1167,21 @@ describe('bounded RAW session renewal', () => {
     expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.createRawWorkspace).mock.invocationCallOrder[1]);
   });
 });
+
+it('isolates crop display mode, drops delayed edit decode on exit, and disables normal sampling surfaces',async()=>{
+  const crop:api.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+  vi.mocked(api.rawPreview).mockImplementation(async(doc,_serial,_signal,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,quality:'full',
+    frame:{geometryId:target?.mode==='crop-edit'?'e'.repeat(64):'a'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
+    ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop,orientation:'Normal'},bitmapSpace:'oriented-warped-unstraightened-flipped' as const,settingsFingerprint:doc.settingsFingerprint!}}:{})}));
+  await render('a');await flush();
+  await act(async()=>current!.crop.setMode(true));await flush();
+  expect(current!.crop.active).toBe(true);expect(current!.crop.surface?.display.canonicalGeometry.crop).toEqual(crop);
+  expect(current!.pickAvailable).toBe(false);expect(current!.beforeAvailable).toBe(false);expect(current!.regionDisplay).toBeUndefined();
+  const delayed=deferred<void>();decode=()=>delayed.promise;
+  await act(async()=>current!.viewChanged());await flush();
+  await act(async()=>current!.crop.setMode(false));decode=async()=>{};
+  await act(async()=>delayed.resolve());await flush();
+  expect(current!.crop.active).toBe(false);expect(current!.crop.surface).toBeUndefined();
+  expect(current!.frame?.geometryId).toBe('a'.repeat(64));
+  expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.mode).toBe('whole');
+});

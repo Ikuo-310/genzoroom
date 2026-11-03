@@ -1,6 +1,6 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
-import { RawApiError, RawSaveError, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
+import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, readRawSettings, recoverRawGeometry, type RawGeometryOperation, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
   type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import type { RawControls } from './rawControls';
 
@@ -28,6 +28,9 @@ export class RawRecipeSave {
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
+  private cropGesture?: { id: string; ready: boolean; sequence: number; latest?: RawGeometryOperation; running: boolean; ending: boolean;
+    started: Promise<void>; end?: Promise<void>; error?: unknown; commit?: RawHistoryRequest };
+  get cropping() { return !!this.cropGesture; }
   private gesture?: { control: RawControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -39,9 +42,9 @@ export class RawRecipeSave {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
   }
-  get dirty() { return !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
+  get dirty() { return !!this.cropGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get locked() { return !!this.cropGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
   get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
@@ -137,6 +140,107 @@ export class RawRecipeSave {
         assetId: this.confirmed.assetId, recipeRevision: this.revision, errorCode: cause.code } }); } catch { /* Optional diagnostics. */ }
     }
   }
+  private cropFailure(cause: unknown) {
+    this.error = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+    try { frontendLogger.add({ level: 'error', component: 'raw', event: 'geometry.failed', context: {
+      assetId: this.confirmed.assetId, generation: this.confirmed.generation, revision: this.confirmed.revision,
+      sequence: this.cropGesture?.sequence ?? null, errorCode: this.error } }); } catch { /* Optional diagnostics. */ }
+  }
+  beginGeometry(): Promise<void> {
+    if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history)
+      return Promise.reject(new RawApiError('raw_busy'));
+    const preceding = this.save();
+    const g = { id: crypto.randomUUID().replaceAll('-', ''), ready: false, sequence: 0, running: false, ending: false,
+      started: Promise.resolve() } as NonNullable<typeof this.cropGesture>;
+    this.cropGesture = g;
+    g.started = new Promise<void>((resolve, reject) => this.options.schedule(async () => {
+      try {
+        await preceding;
+        if (!this.active || this.cropGesture !== g) throw new RawApiError('raw_document_closed');
+        const confirmed = await beginRawGeometry(this.options.controls!.confirmed, g.id, 'drag');
+        this.confirmed = this.options.controls!.confirmed = confirmed;
+        g.ready = true;
+        this.options.controls!.beginPreview();
+        this.pumpGeometry();
+        resolve();
+      } catch (cause) { g.error = cause; this.cropFailure(cause); reject(cause); }
+      finally { this.options.changed(); }
+    }));
+    this.options.changed();
+    return g.started;
+  }
+  updateGeometry(operation: RawGeometryOperation) {
+    const g = this.cropGesture;
+    if (!g || g.error || g.ending || !this.active) return;
+    g.latest = structuredClone(operation);
+    this.pumpGeometry();
+  }
+  private pumpGeometry() {
+    const g = this.cropGesture;
+    if (!g || !g.ready || g.running || g.error || !g.latest) return;
+    g.running = true;
+    this.options.schedule(async () => {
+      try {
+        while (g.latest && !g.error) {
+          const intent = g.latest; g.latest = undefined;
+          // One owner and latest unsent point. An unknown update is never reconstructed/replayed.
+          const next = await updateRawGeometry(this.options.controls!.confirmed, g.id, g.sequence, intent);
+          this.confirmed = this.options.controls!.confirmed = next; g.sequence++;
+          this.options.changed(); this.options.controls!.refreshPreview();
+        }
+      } catch (cause) { g.error = cause; this.cropFailure(cause); }
+      finally { g.running = false; this.options.changed(); }
+    });
+  }
+  finishGeometry(): Promise<void> {
+    const g = this.cropGesture;
+    if (!g) return Promise.resolve();
+    if (g.end) return g.end;
+    g.ending = true;
+    // Reserve the fence synchronously, including same-event unmount/departure.
+    g.end = new Promise<void>((resolve, reject) => this.options.schedule(async () => {
+        try {
+          await g.started;
+          if (g.error) throw g.error;
+          while (g.latest) {
+            const intent = g.latest; g.latest = undefined;
+            const next = await updateRawGeometry(this.options.controls!.confirmed, g.id, g.sequence, intent);
+            this.confirmed = this.options.controls!.confirmed = next; g.sequence++;
+            this.options.changed();
+          }
+          if (!g.commit) g.commit = { doc: structuredClone(this.options.controls!.confirmed), action: 'commit',
+            expectedRecipeRevision: this.revision, saveId: createEditStateSaveId(), geometryCommit: { gestureId: g.id, operation: 'drag' } };
+          this.retryRequest = g.commit;
+          await this.sendHistory();
+          this.cropGesture = undefined; this.error = undefined;
+          this.options.controls!.endPreview(); this.options.controls!.refreshPreview();
+          resolve();
+        } catch (cause) { g.error = cause; this.cropFailure(cause); reject(cause); }
+        finally { this.options.changed(); }
+      }));
+    return g.end;
+  }
+  recoverGeometry(): Promise<void> {
+    const g = this.cropGesture;
+    if (!g || !g.error) return Promise.reject(new RawApiError('raw_busy'));
+    return new Promise((resolve, reject) => this.options.schedule(async () => {
+      try {
+        const doc = await readRawSettings(this.options.controls!.confirmed);
+        const result = await recoverRawGeometry(doc);
+        const data = await readRawHistory(result);
+        if (data.historyPending || data.nativeState !== 'synced' || !data.nativeMatchesRecipe
+          || data.recipeRevision !== result.recipeRevision || data.recipeFingerprint !== result.settingsFingerprint
+          || result.recipeFingerprint !== result.settingsFingerprint) throw new RawApiError('raw_save_unconfirmed');
+        this.confirmed = this.options.controls!.confirmed = result;
+        this.revision = result.recipeRevision; this.savedFingerprint = result.recipeFingerprint!; this.history = data.history;
+        this.steps = data.steps; this.historyError = undefined;
+        this.cropGesture = undefined; this.retryRequest = undefined; this.error = undefined;
+        this.options.controls!.endPreview(); this.options.controls!.refreshPreview();
+        resolve();
+      } catch (cause) { reject(cause); }
+      finally { this.options.changed(); }
+    }));
+  }
   begin(control: RawControlId) {
     if (!this.active || this.locked || this.paused) return;
     this.operationError = undefined;
@@ -178,6 +282,10 @@ export class RawRecipeSave {
   pause() { this.paused = true; clearTimeout(this.timer); }
   resume() { this.paused = false; this.observe(this.confirmed, true); }
   save(retry = false, force = false): Promise<void> {
+    if (this.cropGesture) {
+      if (retry && this.cropGesture.commit) { this.cropGesture.end = undefined; this.cropGesture.error = undefined; this.error = undefined; }
+      return this.finishGeometry();
+    }
     if (this.operation) return this.operation;
     clearTimeout(this.timer);
     let finish!: () => void, reject!: (error: unknown) => void;

@@ -89,6 +89,11 @@ class PreviewFrame:
     quality: str = "full"
     _frame_json: str | None = field(default=None, repr=False)
     _metrics_json: str | None = field(default=None, repr=False)
+    _crop_json: str | None = field(default=None, repr=False)
+
+    @property
+    def crop_display(self):
+        return json.loads(self._crop_json) if self._crop_json is not None else None
 
     @property
     def frame(self):
@@ -356,6 +361,29 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
     except Exception:
         # Never retain a Pillow/upstream exception (or its image/path-bearing traceback).
         raise LightCraftError("lightcraft_invalid_preview") from None
+
+
+def _validate_crop_png(result, photo_id, max_side, quality, expected):
+    try:
+        text = next(c for c in result['content'] if c.get('type') == 'text')
+        if not isinstance(text['text'], str) or len(text['text'].encode('utf-8')) > MAX_METADATA_BYTES:
+            raise ValueError()
+        meta = _decode(text['text'].encode('utf-8'))
+        extras = {'cropEditContract', 'requestId', 'settingsFingerprint', 'canonicalGeometry', 'bitmapSpace'}
+        if (type(meta['cropEditContract']) is not int or meta['cropEditContract'] != 1 or meta['mode'] != 'crop-edit'
+                or meta['requestId'] != expected['requestId'] or meta['settingsFingerprint'] != expected['settingsFingerprint']
+                or meta['canonicalGeometry'] != expected['canonicalGeometry']
+                or meta['bitmapSpace'] != 'oriented-warped-unstraightened-flipped' or 'previewContract' in meta):
+            raise ValueError()
+        from raw_geometry import geometry_state
+        geometry_state(meta['canonicalGeometry'], required=True)
+        normalized = {k:v for k,v in meta.items() if k not in extras} | {'previewContract':1,'mode':'whole'}
+        replacement = {'type':'text','text':json.dumps(normalized)}
+        validated = _validate_png({**result,'content':[replacement if c is text else c for c in result['content']]},
+                                 photo_id, max_side, quality=quality)
+        return (*validated[:3], meta)
+    except Exception:
+        raise LightCraftError('lightcraft_invalid_preview') from None
 
 
 def _thread_job(function, *args):
@@ -1204,8 +1232,10 @@ class LightCraftRawSession:
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
 
     def request_preview(self, handle, expected_revision, max_side=DEFAULT_PREVIEW_SIDE, *, kind="after",
-                        quality=None, serial=0, view_generation=0, geometry_id=None):
+                        quality=None, serial=0, view_generation=0, geometry_id=None, mode="whole"):
         photo = self._photo(handle, active=True)
+        if mode not in ('whole', 'crop-edit') or mode == 'crop-edit' and (kind != 'after' or quality is None):
+            raise LightCraftError('raw_invalid_preview_request')
         if quality not in (None, "draft", "full"):
             raise LightCraftError("raw_invalid_request")
         if kind not in ("before", "after") or type(max_side) is not int or not 16 <= max_side <= MAX_PREVIEW_SIDE:
@@ -1235,6 +1265,7 @@ class LightCraftRawSession:
             self._discard_pending()
             ticket = PreviewTicket(handle, self._epoch, expected_revision, self._sequence, max_side)
             self._pending = ticket
+        ticket.mode = mode
         ticket.quality, ticket.adaptive = quality or "full", quality is not None
         ticket.serial, ticket.view_generation, ticket.geometry_id = serial, view_generation, geometry_id
         if self._worker is None or self._worker.done():
@@ -1363,6 +1394,17 @@ class LightCraftRawSession:
                         if ticket.adaptive:
                             args.update(quality=ticket.quality, stage_cache=self._stage_mode,
                                         stage_cache_budget_bytes=self._stage_budget)
+                        crop_expected = None
+                        if getattr(ticket, 'mode', 'whole') == 'crop-edit':
+                            from raw_white_balance import result_fingerprint
+                            native = await self.manager._raw_native_settings(self._generation, photo.photo_id, timeout=self._timeouts.preview)
+                            if _settings_json(native['structuredContent']) != photo.settings_json:
+                                raise LightCraftError('raw_revision_conflict')
+                            fingerprint = result_fingerprint(native)
+                            request_id = uuid.uuid4().hex
+                            args['crop_edit'] = {'settings_fingerprint':fingerprint, 'request_id':request_id}
+                            crop_expected = {'requestId':request_id,'settingsFingerprint':fingerprint,
+                                             'canonicalGeometry':self._before_geometry(photo)}
                         native_started = monotonic()
                         try:
                             if ticket.region_operation is not None:
@@ -1412,7 +1454,11 @@ class LightCraftRawSession:
                             ticket._finish()
                         del data, metadata
                         continue
-                    image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
+                    if crop_expected is not None:
+                        image = await self._image(result, photo.photo_id, ticket.max_side,
+                            _validation_job=(_validate_crop_png, (result,photo.photo_id,ticket.max_side,ticket.quality,crop_expected)))
+                    else:
+                        image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
                                               photo.before_fingerprint, geometry,
                                               *([ticket.quality] if ticket.adaptive else []))
                     validation_ms = (monotonic() - validation_started) * 1000
@@ -1443,7 +1489,9 @@ class LightCraftRawSession:
                     if self._ticket_current(ticket):
                         frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
-                                             quality=ticket.quality, _frame_json=json.dumps(metadata["frame"]) if metadata else None,
+                                             quality=ticket.quality,
+                                             _crop_json=json.dumps({k:metadata[k] for k in ('canonicalGeometry','bitmapSpace')}) if crop_expected else None,
+                                             _frame_json=json.dumps(metadata["frame"]) if metadata else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
                                                  "validationMs": validation_ms,
                                                  "pngSha256": digest, "stageCache": metadata["stageCache"],

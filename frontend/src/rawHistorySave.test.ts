@@ -6,7 +6,7 @@ import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
+  beginRawGeometry: vi.fn(), updateRawGeometry: vi.fn(), recoverRawGeometry: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
 let queue: Promise<void>;
 const schedule = (action: () => Promise<void>) => { queue = queue.then(action); };
 const fp = (value: number) => String(value).padStart(64, '0');
@@ -405,4 +405,63 @@ it('releases a rejected read-only AW estimate without retaining a retry or a dir
   expect(saver.error).toBeUndefined(); expect(saver.dirty).toBe(false); expect(saver.locked).toBe(false);
   await saver.save(true); expect(api.saveRawHistory).toHaveBeenCalledTimes(2);
   saver.begin('wb.temp'); expect(saver.operationError).toBeUndefined();
+});
+
+const drag = (x: number): api.RawGeometryOperation => ({type:'drag',params:{handle:'move',from:[.4,.4],to:[x,.5],start:[.2,.2,.8,.8]}});
+it('drains the final geometry update before one immutable History commit and rejects a second owner',async()=>{
+  const {saver,controls}=owner(); await saver.save();
+  vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:0}));
+  const held=gate<api.RawGeometryGesture>();
+  vi.mocked(api.updateRawGeometry).mockImplementationOnce(()=>held.promise).mockImplementation(async(doc,id,sequence)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:fp(1002),gestureId:id,sequence}));
+  await saver.beginGeometry();await expect(saver.beginGeometry()).rejects.toThrow('raw_busy');
+  saver.updateGeometry(drag(.5));await drain();saver.updateGeometry(drag(.6));saver.updateGeometry(drag(.7));
+  const end=saver.finishGeometry();expect(saver.finishGeometry()).toBe(end);
+  held.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0});
+  await end;
+  expect(api.updateRawGeometry).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.updateRawGeometry).mock.calls[1][3]).toEqual(drag(.7));
+  const commits=vi.mocked(api.saveRawHistory).mock.calls.map(([r])=>r).filter(r=>r.action==='commit');
+  expect(commits).toHaveLength(1);expect(commits[0].doc.revision).toBe(2);expect(commits[0].geometryCommit?.operation).toBe('drag');
+  expect(saver.locked).toBe(false);expect(saver.dirty).toBe(false);
+});
+it('does not resend an unknown geometry mutation or commit it as a successful gesture',async()=>{
+  const {saver}=owner();await saver.save();
+  vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:0}));
+  vi.mocked(api.updateRawGeometry).mockRejectedValue(new api.RawApiError('raw_connection_failed'));
+  await saver.beginGeometry();saver.updateGeometry(drag(.5));await drain();
+  await expect(saver.finishGeometry()).rejects.toThrow('raw_connection_failed');
+  await expect(saver.save(true)).rejects.toThrow('raw_connection_failed');
+  expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(saver.locked).toBe(true);
+  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);
+});
+
+it('reserves geometry completion before a same-event departure fence, even while begin is queued',async()=>{
+  const {saver}=owner();await saver.save();
+  vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:0}));
+  vi.mocked(api.updateRawGeometry).mockImplementation(async(doc,id,sequence)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:fp(1002),gestureId:id,sequence}));
+  const begin=saver.beginGeometry();saver.updateGeometry(drag(.7));const end=saver.finishGeometry();
+  let released=false;schedule(async()=>{expect(saver.dirty).toBe(false);expect(saver.locked).toBe(false);released=true;});
+  await begin;await end;await drain();expect(released).toBe(true);expect(api.updateRawGeometry).toHaveBeenCalledOnce();
+});
+
+it('recovers an unknown geometry outcome from durable Recipe and validates History before unlocking',async()=>{
+  const {saver,controls}=owner();await saver.save();const saved=structuredClone(controls.confirmed);
+  vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:0}));
+  vi.mocked(api.updateRawGeometry).mockRejectedValue(new api.RawApiError('raw_connection_failed'));
+  await saver.beginGeometry();saver.updateGeometry(drag(.5));await drain();
+  await expect(saver.finishGeometry()).rejects.toThrow();
+  vi.mocked(api.readRawSettings).mockResolvedValue({...saved,revision:5});
+  vi.mocked(api.recoverRawGeometry).mockResolvedValue({...saved,revision:6});
+  await saver.recoverGeometry();expect(saver.locked).toBe(false);expect(saver.dirty).toBe(false);
+  expect(controls.confirmed.revision).toBe(6);expect(api.updateRawGeometry).toHaveBeenCalledOnce();
+});
+it('retries only the immutable persistence receipt after a lost geometry commit reply',async()=>{
+  const {saver}=owner();await saver.save();
+  vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:0}));
+  vi.mocked(api.updateRawGeometry).mockImplementation(async(doc,id,sequence)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:fp(1002),gestureId:id,sequence}));
+  await saver.beginGeometry();saver.updateGeometry(drag(.5));await drain();
+  vi.mocked(api.saveRawHistory).mockRejectedValueOnce(new api.RawSaveError('raw_connection_failed','unknown'));
+  await expect(saver.finishGeometry()).rejects.toThrow();const lost=vi.mocked(api.saveRawHistory).mock.calls.at(-1)![0];
+  await saver.save(true);expect(vi.mocked(api.saveRawHistory).mock.calls.at(-1)![0]).toEqual(lost);
+  expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(saver.locked).toBe(false);
 });

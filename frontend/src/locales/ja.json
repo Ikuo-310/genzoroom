@@ -328,6 +328,7 @@
       "wbInvalidResponse": "WB推定結果が不正でした。設定は変更されていません。",
       "wbConnectionFailed": "推定中にRAWエンジンとの接続が切れました。写真を開き直してください。",
       "wbTimeout": "WB推定がタイムアウトしました。再試行できない場合は写真を開き直してください。",
+      "cropHistory": {"drag": "切り抜き移動・サイズ変更", "straighten": "水平補正", "set": "切り抜き", "aspect": "切り抜き比率", "swap": "切り抜き比率の入替", "reset": "切り抜きをリセット", "rotateLeft": "左へ90°回転", "rotateRight": "右へ90°回転", "flipHorizontal": "左右反転", "flipVertical": "上下反転"},
       "wbPick": "WBスポイト",
       "awNoSamples": "自動ホワイトバランスに適した標本がありませんでした。設定は変更されていません。",
       "awFailed": "ホワイトバランスを適用できませんでした。設定は変更されていません。再試行できない場合は写真を開き直してください。",

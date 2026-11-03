@@ -397,7 +397,7 @@ class RawPreviewApi:
 
     @staticmethod
     def _valid_display_target(body):
-        return (body.get("mode") == "whole" and type(body.get("maxSide")) is int and 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE
+        return (body.get("mode") in ("whole", "crop-edit") and type(body.get("maxSide")) is int and 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE
             and type(body.get("viewGeneration")) is int and 0 <= body["viewGeneration"] <= 2**53 - 1
             and "geometryId" in body and (body["geometryId"] is None or isinstance(body["geometryId"], str)
                 and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"]) is not None))
@@ -647,10 +647,17 @@ class RawPreviewApi:
                 raise LightCraftError("raw_revision_conflict")
             if adaptive and (not extra <= set(body) or body["quality"] not in ("draft", "full") or not self._valid_display_target(body)):
                 raise LightCraftError("raw_invalid_preview_request")
+            if body.get('mode') == 'crop-edit' and kind != 'after':
+                raise LightCraftError('raw_invalid_preview_request')
             handle = self._raw_handle
             options = {"kind": kind} if kind == "before" else {}
             if adaptive:
                 supported = await self.manager._raw_preview_supported(doc["generation"])
+                if body.get("mode") == "crop-edit":
+                    if not supported: raise LightCraftError("raw_preview_unsupported")
+                    options["mode"] = "crop-edit"
+                    self._region_geometry.clear()
+                    self._wb_frames.clear()
                 options.update(max_side=body["maxSide"], serial=body["serial"], view_generation=body["viewGeneration"],
                                geometry_id=body["geometryId"], quality=body["quality"] if supported else None)
             latest_key = (doc["handle"], kind)
@@ -676,6 +683,8 @@ class RawPreviewApi:
                 or (kind == "after" and frame.revision != doc["revision"]) \
                 or (kind == "before" and frame.frame is None and frame.key != self.raw.before_key(handle)):
             raise LightCraftError("raw_stale_handle")
+        if (body.get('mode') == 'crop-edit') != (frame.crop_display is not None):
+            raise LightCraftError('lightcraft_invalid_preview')
         headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
                    "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
                    "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
@@ -694,13 +703,20 @@ class RawPreviewApi:
                 if body["geometryId"] is not None and body["geometryId"] != native_frame["geometryId"]:
                     return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced"})
                 headers["X-Raw-Frame"] = json.dumps(native_frame, separators=(",", ":"), ensure_ascii=True)
-                self._region_geometry[(kind, frame.quality)] = (doc["revision"], native_frame["geometryId"], native_geometry)
-                # Retained overlay bases may use a former Whole size. Attest exact render conditions, bounded per owner.
-                key = (kind, frame.quality, body['maxSide'], native_frame['geometryId'])
-                self._wb_frames.pop(key, None)
-                self._wb_frames[key] = (doc['revision'], doc.get('beforeKey'), native_geometry)
-                while len(self._wb_frames) > 16:
-                    self._wb_frames.pop(next(iter(self._wb_frames)))
+                if body['mode'] == 'crop-edit':
+                    if frame.crop_display is None: raise LightCraftError('raw_invalid_preview')
+                    headers.pop('X-Raw-Preview-Contract', None)
+                    headers['X-Raw-Crop-Edit-Contract'] = '1'
+                    headers['X-Raw-Mode'] = 'crop-edit'
+                    headers['X-Raw-Crop'] = json.dumps({**frame.crop_display,'settingsFingerprint':doc['settingsFingerprint']}, separators=(',',':'))
+                else:
+                    self._region_geometry[(kind, frame.quality)] = (doc["revision"], native_frame["geometryId"], native_geometry)
+                    # Retained overlay bases may use a former Whole size. Attest exact render conditions, bounded per owner.
+                    key = (kind, frame.quality, body['maxSide'], native_frame['geometryId'])
+                    self._wb_frames.pop(key, None)
+                    self._wb_frames[key] = (doc['revision'], doc.get('beforeKey'), native_geometry)
+                    while len(self._wb_frames) > 16:
+                        self._wb_frames.pop(next(iter(self._wb_frames)))
         if frame.key:
             headers["X-Raw-Before-Key"] = frame.key
         lightcraft_log("raw.preview.complete", level="debug", assetId=doc["assetId"],
