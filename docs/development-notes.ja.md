@@ -8,7 +8,9 @@
 
 **確認した事実：** 現行GenzoRoom Backendは36 scalar controlのみを許可し、LightCraft commandの直接公開はない。geometry操作は既存document owner・revision・readback・History saveの境界へ接続する必要がある。現行Whole Previewはcrop適用済みであり、`RawRegionPlanner`もcrop後のoutput座標を使う。geometry descriptor 2のIDはsource、解像度、crop・angle・orientation・flip等の座標変換からNativeで生成され、Backendでdocument owner情報に結び付けられる。Recipe / Historyは完全DevelopSettingsを保存し、RAW thumbnailとExportもそのsettingsから既存LightCraft処理を行う。調査対象の契約やDBを変更した事実はない。
 
-**推奨設計（暫定）：** canonical保存値にLightCraftのCropGeometryを使い、GenzoRoom独自geometryやcoverScaleを永続化しない。mutationは既存owner queue内の型付きgeometry操作とし、Native command後に完全settingsをreadbackしてrevisionを確定する。Crop dragはgesture終了時に1 History stepとする。Rotate / Flip / Aspect swapは相対操作であるため、応答消失時に盲目的に再送しない。DB移行が必要とは確認されず、既存Recipe JSONとHistory snapshotを利用する案が妥当である。Crop Resetに90°回転を含むかは未決定。
+**推奨設計（暫定）：** canonical保存値にLightCraftのCropGeometryを使い、GenzoRoom独自geometryやcoverScaleを永続化しない。mutationは既存owner queue内の型付きgeometry操作とし、Native command後に完全settingsをreadbackしてrevisionを確定する。Crop dragはgesture終了時に1 History stepとする。Rotate / Flip / Aspect swapは相対操作であるため、応答消失時に盲目的に再送しない。DB移行が必要とは確認されず、既存Recipe JSONとHistory snapshotを利用する案が妥当である。
+
+**Reset仕様確定：** GenzoRoomの「切り抜きをリセット」（英語UI: “Reset Crop”）はLightCraft v0.18.0標準`crop.reset`と同じ動作にする。Crop rectangle、Aspect Ratio、Straighten角度、Flip Horizontal / Verticalを初期化し、独立した`orientation`によるRotate Left / Right（90°回転）は維持する。Reset時に回転を打ち消す追加commandは送らない。LightCraft desktop版で、Crop Reset後も90°回転が維持され、Straightenの角度補正がリセットされることを実際に確認した。このUI観察はPhase 0の設計確認であり、GenzoRoomへの実装や自動テストを意味しない。
 
 固定Crop枠方式は、画像中心を基準にしたStraighten回転、orientation、flip、表示fit、Viewer zoom / panを一つの変換として合成し、pointer入力には同じ変換の逆行列を使えば成立する。aspect、crop原点、flipによるハンドル対応も含める必要があり、CSS rotate単独では不足する。fit scaleは表示時だけ計算する。写真側を独自拡大して保存geometryとの対応を崩さない。
 
@@ -31,7 +33,7 @@ Recipe保存・Reset・Edited判定、rendered-thumbnailのPreview→JPEG→共�
 
 ### 未確定事項と追加検証
 
-- Crop category Resetに90° rotationを含めるか。All Resetとの責任分担。
+- Crop ResetとRAW編集全体のResetをUI上で区別し、カテゴリ操作の境界を保つ。
 - Native未crop Previewの引数・応答schema、表示receiptとcache keyの分離方法。
 - Warp / lens補正を含むRecipeで固定枠の内側に欠損を許容するか。CropのNative制約だけではWarp後の全領域を保証しない。
 - 未crop編集中にpost-crop効果が最終画像と異なる場合の許容範囲、およびRegionをCrop表示中に要求するか。
