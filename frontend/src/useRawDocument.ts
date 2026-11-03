@@ -1,3 +1,4 @@
+import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, type CropPresentation } from './rawCropDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
   releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
@@ -16,7 +17,7 @@ import { createRawRegionDiagnosticsChannel, diagnosticVisibleRect, type RawRegio
 
 declare global { interface Window { genzoroomCrop?: { enter: () => Promise<void>; exit: () => Promise<void>; straighten: (angle: number) => Promise<void>; recover: () => Promise<void> }; } }
 
-type RawState = { cropMode?: boolean; cropDisplay?: RawCropDisplay; imageToken?: string; assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
+type RawState = { cropSnapshot?: CropSnapshot; cropMode?: boolean; cropDisplay?: RawCropDisplay; imageToken?: string; assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
   requestSide?: number; frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
@@ -81,6 +82,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
+  const [cropPresentation,setCropPresentation]=useState<CropPresentation|null>(null);
+  const cropSnapshotRef=useRef<CropSnapshot|null>(null);
+  const cropVisualRef=useRef<{snapshot:CropSnapshot;start:NonNullable<RawSettings['crop']>;latest:NonNullable<RawSettings['crop']>;owner:RawRecipeSave}|null>(null);
   const cropActiveRef = useRef(false);
   const cropModeRef = useRef<(enabled: boolean) => Promise<void>>(async () => {});
   const regionRef = useRef<RawRegionDelivery | null>(null);
@@ -97,7 +101,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
     let frameSerial = 0, cropMode = false, modeChanging = false;
-    cropActiveRef.current = false;
+    cropActiveRef.current = false;cropSnapshotRef.current=null;cropVisualRef.current=null;setCropPresentation(null);
     // Native geometry is available only after the first validated bitmap; never infer it from the PNG.
     let side = 1024, latestView: RawView | undefined;
     let viewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -297,6 +301,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const controller = new AbortController();
     const current = () => active && identity.current === assetId && serial.current === currentSerial;
     const revoke = () => {
+      cropSnapshotRef.current=null;
       if (wholeSurfaces.current.after?.url === url) wholeSurfaces.current.after = undefined;
       if (url) urls.release(url); url = undefined;
     };
@@ -339,6 +344,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         await readRawDocument(doc, controller.signal);
         if (!valid()) return;
         revoke();
+        setCropPresentation(null);
         displayedRevision = doc.revision;
         url = candidate;
         candidate = undefined;
@@ -354,7 +360,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         }
         overlay.refresh();
         publishDiagnosticState();
-        setState(previous => ({ ...previous, assetId, status: 'ready', url, width: frame.width, height: frame.height,
+        const snapshot:CropSnapshot|undefined = mode==='crop-edit' && frame.frame && frame.cropDisplay
+          ? {url,frame:frame.frame,display:frame.cropDisplay,doc:structuredClone(doc as RawSettings),mode:'crop-edit'} : undefined;
+        cropSnapshotRef.current=snapshot ?? null;
+        setState(previous => ({ ...previous, assetId, status: 'ready', cropSnapshot:snapshot, url, width: frame.width, height: frame.height,
           requestSide: maxSide, frame: frame.frame, cropDisplay: frame.cropDisplay, imageToken: doc.documentToken, cropMode, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
         if (metrics) {
@@ -421,6 +430,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     resyncPreviewRef.current = () => resyncPreview();
     const displayPreview = (doc: RawDocument, valid = current) => {
       if (!current() || !valid()) return;
+      // Rect/angle do not change crop-edit pixels. Keep the paired bitmap and give
+      // input/readback priority; request one official Full at the settled boundary.
+      if(cropMode && saver?.cropping)return;
       if (editor && !editor.interacting && (Object.keys(editor.desired).length || Object.keys(editor.pending).length)) return;
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
       if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
@@ -477,6 +489,17 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!current() || !editor) return;
       if (editor.error) log(editor.error, 'controls.failed');
       const confirmed = editor.confirmed;
+      if(saver?.error){cropVisualRef.current=null;setCropPresentation(null);}
+      else {
+        const visual=cropVisualRef.current;
+        // A matching angle ACK may refine the provisional rectangle; a late ACK
+        // must never rotate the image back from the user's latest slider target.
+        if(visual && visual.owner===saver && saver?.cropOperation==='straighten' && confirmed.crop
+          && confirmed.revision>visual.snapshot.doc.revision && confirmed.crop.geometry.angle===visual.latest.geometry.angle
+          && reusableCropBitmap(visual.snapshot,confirmed))setCropPresentation(previous=>previous?.snapshot===visual.snapshot
+            && previous.phase==='provisional' && previous.crop.geometry.angle===confirmed.crop!.geometry.angle
+              ? {...previous,crop:structuredClone(confirmed.crop!),revision:confirmed.revision,fingerprint:confirmed.settingsFingerprint}:previous);
+      }
       saver?.observe(confirmed, !editor.unsettled);
       setState(previous => ({ ...previous, assetId, status: previous?.status ?? 'ready',
         document: confirmed, settings: confirmed, desired: { ...editor!.desired }, pending: editor!.unsettled,
@@ -512,7 +535,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       editorRef.current = editor;
       notifyRef.current = notify;
       setState(previous => ({ ...previous, assetId, status: 'ready', document: settings, settings,
-        ...(cropMode ? { url: undefined, frame: undefined, imageRevision: undefined, cropDisplay: undefined } : {}),
+        ...(cropMode ? { cropSnapshot:undefined, url: undefined, frame: undefined, imageRevision: undefined, cropDisplay: undefined } : {}),
         desired: {}, pending: false, editError: undefined, dirty: true, saving: false, saveError: undefined, locked: true,
         resetting: false, resetError: undefined }));
       // Install runs on the owner queue; schedule initialization rather than awaiting it here.
@@ -527,9 +550,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         await owner.save();
         if (!current() || saver !== owner) throw new RawApiError('raw_document_closed');
         if (cropMode === enabled) return;
-        cropMode = enabled; cropActiveRef.current = enabled; viewGeneration++; latestView = undefined; side = 1024;
+        cropMode = enabled; cropActiveRef.current = enabled;cropSnapshotRef.current=null;cropVisualRef.current=null;setCropPresentation(null); viewGeneration++; latestView = undefined; side = 1024;
         invalidateDisplay(); wholeSurfaces.current = {}; publishedFrame = undefined;
-        setState(previous => previous && ({ ...previous, cropMode, url: undefined, frame: undefined, cropDisplay: undefined, imageRevision: undefined }));
+        setState(previous => previous && ({ ...previous, cropMode, cropSnapshot:undefined, url: undefined, frame: undefined, cropDisplay: undefined, imageRevision: undefined }));
       } finally {
         modeChanging = false;
         if (current()) { frozen.current = false; notify(); displayPreview(editor.confirmed); }
@@ -905,25 +928,67 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const moveHistory = (action: 'undo' | 'redo' | 'jump', targetStepId?: string | null) => {
     cancelPick();
     if (!callbackEditor() || frozen.current) return;
+    cropVisualRef.current=null;setCropPresentation(null);
     const owner = saverRef.current;
     void (owner?.cropping ? owner.finishGeometry().then(() => owner.move(action, targetStepId)) : owner?.move(action, targetStepId))?.catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
   };
   const cropSaver = saverRef.current;
-  const cropSurface = visible?.cropMode && visible.cropDisplay && visible.frame && visible.url
-    && visible.imageToken === visible.document?.documentToken && visible.imageRevision === visible.document?.revision
-    ? { url: visible.url, frame: visible.frame, display: visible.cropDisplay } : undefined;
+  const snapshot=visible?.cropSnapshot,doc=visible?.settings;
+  const cropSurface=visible?.cropMode && !visible.regenerating && !visible.resetting && snapshot && doc && sameCropOwner(snapshot.doc,doc) ? snapshot : undefined;
+  const presentation=cropSurface && cropPresentation?.snapshot===cropSurface && !visible?.saveError
+    && reusableCropBitmap(cropSurface,doc!)
+    && (cropPresentation.phase==='provisional' ? cropVisualRef.current?.snapshot===cropSurface && cropVisualRef.current.owner===cropSaver
+      : cropPresentation.revision===doc!.revision && cropPresentation.fingerprint===doc!.settingsFingerprint) ? cropPresentation : undefined;
+  const cropSourceCurrent=!!cropSurface && !!doc && reusableCropBitmap(cropSurface,doc)
+    && (cropSurface.doc.settingsFingerprint===doc.settingsFingerprint || presentation?.phase==='readback');
+  const finishCrop=()=>{
+    const visual=cropVisualRef.current;
+    const done=cropSaver?.finishGeometry() ?? Promise.resolve();
+    return done.then(()=>{
+      if(!visual || cropVisualRef.current!==visual)return;
+      cropVisualRef.current=null;
+      const confirmed=visual.owner.confirmed;
+      if(cropSnapshotRef.current===visual.snapshot && reusableCropBitmap(visual.snapshot,confirmed))
+        setCropPresentation({snapshot:visual.snapshot,crop:structuredClone(confirmed.crop!),phase:'readback',revision:confirmed.revision,fingerprint:confirmed.settingsFingerprint});
+    },cause=>{if(cropVisualRef.current===visual){cropVisualRef.current=null;setCropPresentation(null);}throw cause;});
+  };
   return visible && { ...visible,
     crop: { operation: cropSaver?.cropOperation,
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
         cancelPick();
-        if (!callbackEditor() || frozen.current || !cropSaver || !cropActiveRef.current) return Promise.reject(new RawApiError('raw_busy'));
-        return cropSaver.operate({ kind: 'geometry', metadata: { operation: operation.type, ...(action ? { action } : {}) }, geometry: operation });
+        if (!callbackEditor() || frozen.current || !cropSaver || cropSaver.locked || !cropActiveRef.current || !cropSourceCurrent) return Promise.reject(new RawApiError('raw_busy'));
+        const base=cropSurface!;
+        return cropSaver.operate({ kind: 'geometry', metadata: { operation: operation.type, ...(action ? { action } : {}) }, geometry: operation }).then(()=>{
+          // Only these closed operations prove unchanged crop-edit source pixels.
+          // History/restore, Rotate and Flip must wait for a newly attested bitmap.
+          if(['set','aspect','swap','straighten','reset'].includes(operation.type) && cropSnapshotRef.current===base
+            && reusableCropBitmap(base,cropSaver.confirmed))setCropPresentation({snapshot:base,crop:structuredClone(cropSaver.confirmed.crop!),
+              phase:'readback',revision:cropSaver.confirmed.revision,fingerprint:cropSaver.confirmed.settingsFingerprint});
+        });
       },
-      recover: () => { if (!callbackEditor() || frozen.current || !cropSaver) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.recoverGeometry(); },
-      active: !!visible.cropMode, surface: cropSurface, canStart: !!cropSurface && !visible.locked && !visible.pending && !visible.editError,
-      begin: (type: 'drag' | 'straighten' = 'drag') => { cancelPick(); if (!callbackEditor() || frozen.current || !cropSaver || !cropActiveRef.current) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.beginGeometry(type); },
-      update: (intent: RawGeometryOperation) => { if (callbackEditor() && !frozen.current) cropSaver?.updateGeometry(intent); },
-      end: () => cropSaver?.finishGeometry() ?? Promise.resolve(),
+      recover: () => { if (!callbackEditor() || frozen.current || !cropSaver) return Promise.reject(new RawApiError('raw_busy')); cropVisualRef.current=null;setCropPresentation(null);return cropSaver.recoverGeometry(); },
+      active: !!visible.cropMode, surface: cropSurface, presentation, canStart: cropSourceCurrent && !visible.locked && !visible.pending && !visible.editError,
+      begin: (type: 'drag' | 'straighten' = 'drag') => {
+        cancelPick();
+        if(!callbackEditor() || frozen.current || !cropSaver || cropSaver.locked || !cropActiveRef.current || !cropSurface || !doc?.crop
+          || !cropSourceCurrent)return Promise.reject(new RawApiError('raw_busy'));
+        // Freeze the displayed source before awaiting Native begin; an older decode
+        // must not replace/revoke the gesture's bitmap while begin is queued.
+        suspendDisplayRef.current();
+        cropVisualRef.current={snapshot:cropSurface,start:structuredClone(doc.crop),latest:structuredClone(doc.crop),owner:cropSaver};
+        setCropPresentation({snapshot:cropSurface,crop:structuredClone(doc.crop),phase:'provisional',revision:doc.revision,fingerprint:doc.settingsFingerprint});
+        return cropSaver.beginGeometry(type).catch(cause=>{cropVisualRef.current=null;setCropPresentation(null);throw cause;});
+      },
+      update: (intent: RawGeometryOperation) => {
+        const visual=cropVisualRef.current;
+        if(callbackEditor() && !frozen.current && !cropSaver?.error && intent.type===cropSaver?.cropOperation && visual?.owner===cropSaver){
+          visual.latest=provisionalCrop(visual.start,intent);
+          setCropPresentation({snapshot:visual.snapshot,crop:visual.latest,phase:'provisional',
+            revision:visual.owner.confirmed.revision,fingerprint:visual.owner.confirmed.settingsFingerprint});
+          cropSaver?.updateGeometry(intent);
+        }
+      },
+      end: finishCrop,
       setMode: (enabled: boolean) => { cancelPick(); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
     beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,

@@ -1,3 +1,4 @@
+import styleCss from './style.css?raw';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -84,4 +85,10 @@ it('rebinds Custom and Straighten display from readback after Undo',async()=>{
  expect(host.querySelector('select')!.value).toBe('custom');expect(host.querySelector<HTMLInputElement>('.raw-crop-custom input')!.value).toBe('13');
  raw.settings.crop.aspect=[2200,1700];raw.settings.crop.geometry.angle=0;await render();
  expect(host.querySelector('select')!.value).toBe('8.5x11');expect(host.querySelector<HTMLInputElement>('.adjustment-number')!.value).toBe('0.0');
+});
+
+it('scopes dark native select and option styling to Crop, including focus and disabled states',()=>{
+ const rules=styleCss.split('\n').filter(line=>line.startsWith('.raw-crop-aspect select')).join('\n');
+ expect(rules).toContain('color-scheme: dark');expect(rules).toContain('background: #252528');expect(rules).toContain('color: #eee');
+ expect(rules).toContain('select option');expect(rules).toContain('select:focus-visible');expect(rules).toContain('select:disabled');
 });

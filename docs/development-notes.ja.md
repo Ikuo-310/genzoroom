@@ -1,5 +1,30 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 4.1：表示保持・即時操作・Fit修正（2026-11-04）
+
+ユーザーのPhase 4実写真／実ブラウザ受入で、ドラッグ開始時のブラックアウト、Straightenごとの消失・フラッシュと約3秒の再表示待ち、縦横Aspectで異なる倍率、端のハンドル、白いselect、crosshairカーソルの問題が報告された。本作業で実ブラウザを操作した結果ではない。
+
+現行コードを確認し、Native ACKでrevisionが進むと`visible.imageRevision === visible.document?.revision`が偽になり、Crop Surfaceが消える経路を特定した。Straightenには暫定表示がなく、Native Preview render→転送→decode→readback確認まで再表示を待っていた。約3秒の各処理の内訳は計測していない。またImageViewerのlogical sizeがCrop寸法であり、Fitが変更のたびにCropを画面へ拡大し、crop中心へ再配置することがAspect挙動の不統一を生んでいた。
+
+`rawCropDisplay.ts`にNative確定のCropSnapshotと表示専用CropPresentationを分離した。snapshotはbitmap URL、frame / geometryId、canonical geometry / bitmap space、mode、画像revision・fingerprintを含む元RawSettingsと全document identityを不変で保持する。現在の確定settingsとは別の表示履歴であり、revision判定を単純に削除したものではない。新Native応答の既存stale rejection、mode／fingerprint検証、decode後のowner照合は維持した。新bitmapと対応metadataを一括交換し、その時点で旧URLを解放する。Asset / token / generation変更、Crop終了、再生成・編集Resetでは旧surfaceと暫定表示を引き継がない。
+
+Crop入力は開始時のsnapshot・canonical rect・Pointer grab・forward/inverse基準・viewport / scale / pan・ownerを固定し、最新Pointer値から表示専用rectを即時更新する。最小限の非反転・aspect feedbackのみを行い、Nativeの境界制約や保存用refitを実装しない。Straightenは同じbitmapの明示的な合成行列で即座に回転し、枠は水平・垂直を保つ。最新入力角と一致するNative ACKだけでrefit後rectを補正し、遅いACKで角度を巻き戻さない。表示の暫定値をsettings / revision / fingerprintへ書き戻さない。
+
+crop-edit contract 1ではrect / angleをbitmapへ適用しないため、drag / Straighten中の中間PNG要求を既存scheduler内で抑止した。Native mutationは従来のlatest-unsent ownerを使い、終了時の最終readback→1 History commit→正式Fullを維持する。geometry begin待機前にも古いdecodeを失効させ、凍結snapshotが操作途中で交換・revokeされないようにした。正式Fullの生成／転送自体を高速化したという主張ではなく、その待ち時間を表示・Pointer応答の必須条件から外す修正である。
+
+Native readbackから表示を補正する場合も、同一ownerとorientation / flip / 現像signatureの一致に加え、画素を変えないclosed Crop操作を通った証拠を要求する。対象はdrag / Straighten gestureと成功したset / Aspect / Swap / Straighten / Resetで、Resetでflipが変わる場合は再利用しない。sourceの古いmetadataとfull fingerprintは不変のまま、別のreadback presentationを現在revision / fingerprintへ束縛する。Rotate / Flip / History復元や任意resyncへ一般化せず、scalarが同じでもfull fingerprintが異なるHistory復元は新bitmapを待つ。正式なNative Fullは必ず最後に取得する。
+
+Crop Fitは元のuser-oriented画像全体と24 CSS pixel余白を基準にし、image中心をViewer中心へ置くようにした。Aspect変更で画像倍率や位置を変えず、確定枠が外へ出る場合だけ自動Fitを必要最小限縮小する。表示用rect / coverScaleは倍率代用にも保存値にも使わない。Viewer resize / source寸法変更は再Fitし、明示Zoom / Panは維持する。操作中の暫定rectでは自動Fitを動かさない。全8ハンドルは24pxを維持し、投影後の位置に合わせew / ns / nwse / nesw-resize、内部move、外部defaultへ変更した。active cursorは開始時の値を保持する。Aspect selectの背景・文字・border・focus・disabled・option・color-schemeをCropだけへ限定してdark化した。
+
+Pointer cancel / capture喪失 / window blur / unmountは既存ownerへ終了を通知し、最終受理入力のreadbackを待つ。mutation / History commit失敗では暫定表示を破棄し、最後の整合したsource pairを残して既存の明示recoveryへ進む。Preview遅延・消失でも表示を保持する。History移動では暫定表示を解除し、新snapshotまたは完全fingerprint一致を待つ。Recipe / History snapshot、No-op抑止、相対commandの結果不明停止・保存retry契約は変更しない。
+
+変更は`frontend/src/useRawDocument.ts`、`RawCropSurface.tsx`、`rawCropDisplay.ts`（新規）、`rawCropMath.ts`、`ImageViewer.tsx`、`RawCropControls.tsx`、`style.css`と関連テスト、architectureと本記録。`rawHistorySave.ts`という実装ファイルはなく、既存所有者は`rawRecipeSave.ts`であり、その実装とBackend / Native / managed patch / manifest / receipt / DBは変更していない。RAW Export / rendered-thumbnailの処理経路、JPEG Crop、Phase 5の横断受入には着手していない。README / CHANGELOGも変更しない。
+
+検証：関連Frontend 16 files / 736件成功。追加の表示保持・Native ACK・暗室／Viewer監査4 files / 330件成功。dark select・各終了境界・旧decode・History復元の追加を含む3 files / 165件も成功（一部重複）。遅延Native ACK、遅延／消失Preview、高頻度入力、8 handle / moveの即時DOM更新、同一img node保持、±45°の即時行列変更、最終readbackと1 step、失敗時draft破棄／recovery、旧decode拒否、異なるfull fingerprintの復元拒否、portrait / landscape Fit、余白、Aspect後の倍率維持、明示zoom維持を検証した。既存RAW Whole・Before / Region / WB・scalar / History / Recipe・JPEG Viewer・Scope・shortcuts・schedulerも関連回帰に含めた。TypeScript・production build・git diff --check成功。buildには従来の500 kB超chunk警告がある。Backend変更がないためBackendテスト、Native rebuild、Docker release Smoke Testは実施しない。
+
+実写真・実ブラウザでの再受入、OS native select popupの見た目、連続操作の体感速度・ちらつき、物理DPRとwindow resize、Native refit後の最終位置補正は未検証。暫定枠はNative制約前に画像外へ出ることがあり、Native readbackで補正する。Warp欠損やcrop-relative effectsの表示差、sequence 0..255 / Native edit budgetは既知の制約を維持する。明示zoom / panで画面外へ出した領域は勝手に再Fitせず、必要な領域へpanして操作する。Phase 5は未着手とし、ユーザー側のPhase 4.1実機再受入を先に行う。
+
+
 ## RAW Crop Phase 4：カテゴリ切替・正式Crop操作パネル（2026-11-04）
 
 RAW右ペインのScope / Histogramと既存Resize handleの後、DevelopPanelの前に「現像 / Develop | 切り抜き / Crop」のテキストradioを追加した。RAWの各Assetは現像から開始する。JPEG UIは従来どおり。ScopeのResizeとpanelのscroll領域を維持し、Cropカテゴリでは見出しを切り抜きに変更、DevelopのAll Resetを表示せず、パネル内へ専用「切り抜きをリセット / Reset Crop」を配置した。native radioのTab / Arrow操作と一時的なdisabled後のfocus復帰を使い、新しいグローバルショートカットは追加していない。

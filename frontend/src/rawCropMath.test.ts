@@ -5,10 +5,10 @@ const frame = (w:number,h:number):RawGeometry => ({geometryId:'edit',nativeWidth
 const crop = (angle=0,flip_h=false,flip_v=false):RawCrop => ({ geometry:{rect:{x0:.4,y0:.4,x1:.6,y1:.6},angle},aspect:null,flip_h,flip_v });
 it.each([0,45,-45])('round trips noncentral normalized coordinates at %s degrees across oriented dimensions/flips/zoom/DPR', angle => {
   for (const [w,h] of [[4000,2000],[2000,4000]]) for (const flipH of [false,true]) for (const flipV of [false,true])
-    for (const dpr of [1,1.5,2]) for (const scale of [.1,1,2]) {
+    for (const dpr of [1,1.5,2]) for (const scale of [.1,1,2]) for (const imageCentered of [false,true]) {
       const c=crop(angle,flipH,flipV); c.geometry.rect={x0:.41,y0:.37,x1:.57,y1:.56};
       // Orientation is already represented by Native dimensions; DPR has no place in the CSS inverse.
-      const p=projectRawCrop(c,frame(w,h),{x:900,y:700},scale/dpr,{x:31,y:-19})!;
+      const p=projectRawCrop(c,frame(w,h),{x:900,y:700},scale/dpr,{x:31,y:-19},{imageCentered})!;
       expect(p).toBeTruthy();
       for(const q of [{x:.41,y:.37},{x:.57,y:.56},{x:.49,y:.42}]) {
         const back=cropPoint(p.viewportToCanonical,cropPoint(p.canonicalToViewport,q));

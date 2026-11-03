@@ -1,3 +1,4 @@
+import type { RawCropBinding } from './RawCropSurface';
 import { SettingsProvider } from './SettingsDialog';
 import { readSettings, updateSetting, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS } from './appSettings';
 // @vitest-environment jsdom
@@ -1891,4 +1892,21 @@ describe('ImageViewer Zoom Navigator', () => {
     localStorage.setItem(ZOOM_NAVIGATOR_POSITION_KEY, 'center');
     expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
   });
+});
+
+it.each([[4000,3000],[3000,4000]])('keeps full-image Crop fit and handle gutters across aspect changes, then preserves explicit zoom (%s/%s)',async(w,h)=>{
+ let resize=()=>{};vi.stubGlobal('ResizeObserver',class {constructor(cb:()=>void){resize=cb;}observe(){}disconnect(){}});
+ const crop={geometry:{rect:{x0:0,y0:0,x1:1,y1:1},angle:0},aspect:null,flip_h:false,flip_v:false};
+ const binding:RawCropBinding={active:true,canStart:true,begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),surface:{url:'blob:edit',frame:{geometryId:'e'.repeat(64),nativeWidth:w,nativeHeight:h,aspect:w/h,fullWidth:400,fullHeight:300,window:null},display:{settingsFingerprint:'f'.repeat(64),bitmapSpace:'oriented-warped-unstraightened-flipped',canonicalGeometry:{crop,orientation:'Normal'}}}};
+ const render=()=>root.render(<ImageViewer src="blob:edit" documentKey="crop" rawFrame={binding.surface!.frame} rawCrop={binding} alt="RAW" leftOpen rightOpen onToggleLeft={()=>{}} onToggleRight={()=>{}}/>);
+ await act(async()=>render());const viewport=host.querySelector<HTMLElement>('.viewer-viewport')!;
+ Object.defineProperty(viewport,'clientWidth',{configurable:true,value:800});Object.defineProperty(viewport,'clientHeight',{configurable:true,value:600});
+ vi.spyOn(viewport,'getBoundingClientRect').mockReturnValue({left:0,top:0,width:800,height:600} as DOMRect);
+ await act(async()=>resize());const image=host.querySelector<HTMLImageElement>('[data-testid=raw-crop-surface] img')!,matrix=image.style.transform,zoom=host.querySelector('.zoom-controls output')!.textContent;
+ for(const handle of host.querySelectorAll<HTMLElement>('[data-crop-handle]')){expect(parseFloat(handle.style.left)).toBeGreaterThanOrEqual(0);expect(parseFloat(handle.style.top)).toBeGreaterThanOrEqual(0);expect(parseFloat(handle.style.left)+24).toBeLessThanOrEqual(800);expect(parseFloat(handle.style.top)+24).toBeLessThanOrEqual(600);}
+ binding.surface!.display.canonicalGeometry.crop={...crop,geometry:{rect:{x0:.4,y0:.1,x1:.6,y1:.9},angle:0}};await act(async()=>render());
+ expect(image.style.transform).toBe(matrix);expect(host.querySelector('.zoom-controls output')!.textContent).toBe(zoom);
+ await act(async()=>viewport.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100,clientX:400,clientY:300})));
+ const manual=image.style.transform;expect(manual).not.toBe(matrix);
+ binding.surface!.display.canonicalGeometry.crop={...crop,geometry:{rect:{x0:.1,y0:.4,x1:.9,y1:.6},angle:0}};await act(async()=>render());expect(image.style.transform).toBe(manual);
 });

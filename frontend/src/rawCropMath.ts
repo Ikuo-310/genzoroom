@@ -26,7 +26,7 @@ export function cropNativeSize(crop: RawCrop, frame: Pick<RawGeometry, 'nativeWi
 }
 export type CropProjection = { bitmapToViewport: CropMatrix; canonicalToViewport: CropMatrix; viewportToCanonical: CropMatrix;
   rect: { left: number; top: number; width: number; height: number }; handles: Record<CropHandle, Point>; coverScale: number };
-export function projectRawCrop(crop: RawCrop, frame: RawGeometry, viewport: Point, scale: number, pan: Point): CropProjection | null {
+export function projectRawCrop(crop: RawCrop, frame: RawGeometry, viewport: Point, scale: number, pan: Point, options: { provisional?: boolean; imageCentered?: boolean } = {}): CropProjection | null {
   const { nativeWidth: w, nativeHeight: h, fullWidth: bw, fullHeight: bh } = frame;
   const r = crop.geometry.rect, angle = crop.geometry.angle * Math.PI / 180;
   if (![w,h,bw,bh,viewport.x,viewport.y,scale].every(n => Number.isFinite(n) && n > 0)
@@ -36,15 +36,16 @@ export function projectRawCrop(crop: RawCrop, frame: RawGeometry, viewport: Poin
   const rotation = about([c,s,-s,c,0,0], w/2,h/2), back = cropInverse(rotation);
   if (!back) return null;
   // Validation only: Native owns fitting. Never shrink or move the stored rectangle here.
-  for (const x of [r.x0*w,r.x1*w]) for (const y of [r.y0*h,r.y1*h]) {
+  if (!options.provisional) for (const x of [r.x0*w,r.x1*w]) for (const y of [r.y0*h,r.y1*h]) {
     const q = cropPoint(back,{x,y});
     if (q.x < -w*1e-6 || q.x > w*(1+1e-6) || q.y < -h*1e-6 || q.y > h*(1+1e-6)) return null;
   }
   const reflect: CropMatrix = [crop.flip_h ? -1 : 1,0,0,crop.flip_v ? -1 : 1,0,0];
-  const view = cropCompose(translate(viewport.x/2+pan.x,viewport.y/2+pan.y), cropCompose(scaling(scale), translate(-center.x,-center.y)));
+  const origin = options.imageCentered ? {x:w/2,y:h/2} : center;
+  const view = cropCompose(translate(viewport.x/2+pan.x,viewport.y/2+pan.y), cropCompose(scaling(scale), translate(-origin.x,-origin.y)));
   // Native bitmap already includes orientation/Warp/flips. Undo its image-centered flips,
   // straighten, then reflect in the crop center as the final cropped Native output does.
-  const canonicalPixels = cropCompose(view,about(reflect,center.x,center.y));
+  const canonicalPixels = cropCompose(view,about(reflect,origin.x,origin.y));
   const canonicalToViewport = cropCompose(canonicalPixels,scaling(w,h));
   const bitmapToViewport = cropCompose(canonicalPixels,cropCompose(rotation,cropCompose(about(reflect,w/2,h/2),scaling(w/bw,h/bh))));
   const inverse = cropInverse(canonicalToViewport);
@@ -57,4 +58,14 @@ export function projectRawCrop(crop: RawCrop, frame: RawGeometry, viewport: Poin
     handles: { topLeft:at(r.x0,r.y0),topRight:at(r.x1,r.y0),bottomRight:at(r.x1,r.y1),bottomLeft:at(r.x0,r.y1),
       top:at(mx,r.y0),right:at(r.x1,my),bottom:at(mx,r.y1),left:at(r.x0,my),move:at(mx,my) },
     coverScale: Math.min(viewport.x/((r.x1-r.x0)*w),viewport.y/((r.y1-r.y0)*h)) / Math.min(viewport.x/w,viewport.y/h) };
+}
+
+export const CROP_GUTTER = 24;
+export function cropFitScale(viewport: Point, frame: Pick<RawGeometry,'nativeWidth'|'nativeHeight'>, crop?: RawCrop) {
+  const w=frame.nativeWidth,h=frame.nativeHeight;
+  const r=crop?.geometry.rect;
+  const extentX=r?Math.max(.5,Math.abs(r.x0-.5),Math.abs(r.x1-.5))*2:1;
+  const extentY=r?Math.max(.5,Math.abs(r.y0-.5),Math.abs(r.y1-.5))*2:1;
+  const x=Math.max(1,viewport.x-2*Math.min(CROP_GUTTER,viewport.x/4)),y=Math.max(1,viewport.y-2*Math.min(CROP_GUTTER,viewport.y/4));
+  return Math.min(x/(w*extentX),y/(h*extentY));
 }

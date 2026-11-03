@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
@@ -1206,4 +1206,92 @@ it('rejects retained Crop mutation callbacks after returning to Develop on the s
  await expect(old.begin()).rejects.toThrow('raw_busy');
  await expect(old.operate({type:'rotateRight',params:{}})).rejects.toThrow('raw_busy');
  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='operate')).toHaveLength(0);
+});
+
+it.each(['drag','straighten'] as const)('retains paired crop pixels through %s ACK and a delayed final Preview, with immediate provisional feedback',async(type)=>{
+ const initial:api.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ vi.mocked(api.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop:structuredClone(initial),orientation:'Normal'}));
+ vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ const ack=deferred<void>(),preview=deferred<void>();let hold=false;
+ const frame=(doc:api.RawDocument,target?:api.RawDisplayTarget):api.RawFrame=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,
+  frame:{geometryId:target?.mode==='crop-edit'?'e'.repeat(64):'a'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
+  ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop:structuredClone((doc as api.RawSettings).crop!),orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped'}}:{})});
+ vi.mocked(api.rawPreview).mockImplementation(async(doc,_n,_signal,_kind,target)=>{if(hold)await preview.promise;return frame(doc,target);});
+ vi.mocked(api.updateRawGeometry).mockImplementation(async(doc,id,sequence,operation)=>{
+  if(sequence===0)await ack.promise;
+  return {...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:String(sequence+2000).padStart(64,'0'),gestureId:id,sequence,
+   crop:{...initial,geometry:{rect:{x0:.31,y0:.31,x1:.69,y1:.69},angle:operation.type==='straighten'?operation.params.angle:0}}};
+ });
+ await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();
+ const snapshot=current!.crop.surface!,before=vi.mocked(api.rawPreview).mock.calls.length;hold=true;
+ await act(async()=>current!.crop.begin(type));
+ const intent=(n:number):api.RawGeometryOperation=>type==='straighten'?{type:'straighten',params:{angle:n}}:{type:'drag',params:{handle:'move',from:[.5,.5],to:[.5+n/1000,.5],start:[.2,.2,.8,.8]}};
+ await act(async()=>current!.crop.update(intent(1)));await flush();
+ await act(async()=>{for(let n=2;n<=45;n++)current!.crop.update(intent(n));});
+ expect(current!.crop.surface).toBe(snapshot);expect(current!.crop.presentation?.phase).toBe('provisional');
+ expect(current!.settings!.crop).toEqual(initial);
+ expect(type==='straighten'?current!.crop.presentation!.crop.geometry.angle:current!.crop.presentation!.crop.geometry.rect.x0).toBeCloseTo(type==='straighten'?45:.245);
+ expect(api.rawPreview).toHaveBeenCalledTimes(before);
+ await act(async()=>ack.resolve());await flush();
+ expect(current!.document!.revision).toBeGreaterThan(snapshot.doc.revision);expect(current!.crop.surface).toBe(snapshot);
+ expect(snapshot.display.canonicalGeometry.crop).toEqual(initial);expect(api.rawPreview).toHaveBeenCalledTimes(before);
+ if(type==='straighten')expect(current!.crop.presentation!.crop.geometry.rect.x0).toBe(.31);
+ await act(async()=>current!.crop.end());await flush();
+ expect(current!.crop.presentation?.phase).toBe('readback');expect(current!.crop.presentation?.crop.geometry.rect.x0).toBe(.31);
+ expect(current!.crop.surface?.url).toBe(snapshot.url);expect(revokeURL).not.toHaveBeenCalledWith(snapshot.url);
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(1);
+ await act(async()=>preview.resolve());await flush();
+ expect(current!.crop.surface?.url).not.toBe(snapshot.url);expect(current!.crop.surface!.display.canonicalGeometry.crop).toEqual(current!.settings!.crop);
+ expect(current!.crop.surface!.doc.settingsFingerprint).toBe(current!.settings!.settingsFingerprint);expect(current!.crop.presentation).toBeUndefined();
+ expect(revokeURL.mock.calls.filter(([u])=>u===snapshot.url)).toHaveLength(1);
+});
+
+it.each(['mutation','commit','preview'] as const)('keeps a coherent Crop snapshot and drops provisional state on %s failure',async(failure)=>{
+ const initial:api.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ vi.mocked(api.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop:structuredClone(initial),orientation:'Normal'}));
+ vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.rawPreview).mockImplementation(async(doc,_n,_s,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,frame:{geometryId:'e'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
+  ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop:structuredClone((doc as api.RawSettings).crop!),orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
+ vi.mocked(api.updateRawGeometry).mockReset().mockImplementation(async(doc,id,sequence)=>{if(failure==='mutation')throw new api.RawApiError('raw_connection_failed');
+  return {...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:'f'.repeat(64),crop:{...initial,geometry:{...initial.geometry,angle:20}},gestureId:id,sequence};});
+ await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();const snapshot=current!.crop.surface!,saved=current!.settings!;
+ if(failure==='commit')commitHistory.mockRejectedValueOnce(new api.RawSaveError('raw_history_save_failed','unknown'));
+ if(failure==='preview')vi.mocked(api.rawPreview).mockRejectedValue(new api.RawApiError('raw_connection_failed'));
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:20}}));await flush();
+ await act(async()=>{try{await current!.crop.end();}catch{}});await flush();
+ expect(current!.crop.surface).toBe(snapshot);expect(snapshot.display.canonicalGeometry.crop).toEqual(initial);expect(revokeURL).not.toHaveBeenCalledWith(snapshot.url);
+ if(failure==='preview'){expect(current!.crop.presentation?.phase).toBe('readback');expect(current!.displayError).toBe('raw_connection_failed');}
+ else {expect(current!.crop.presentation).toBeUndefined();expect(current!.saveError).toBeTruthy();
+  vi.mocked(api.readRawSettings).mockResolvedValue({...saved,revision:4});vi.mocked(api.recoverRawGeometry).mockResolvedValue({...saved,revision:5});
+  await act(async()=>current!.crop.recover());await flush();expect(current!.settings!.crop).toEqual(initial);expect(api.updateRawGeometry).toHaveBeenCalledOnce();}
+});
+
+function cropVisualFixture(){
+ const crop:api.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ vi.mocked(api.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop,orientation:'Normal'}));
+ vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.updateRawGeometry).mockImplementation(async(doc,id,sequence,op)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:'f'.repeat(64),crop:{...crop,geometry:{...crop.geometry,angle:op.type==='straighten'?op.params.angle:0}},gestureId:id,sequence}));
+ vi.mocked(api.rawPreview).mockImplementation(async(doc,_n,_signal,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,
+  frame:{geometryId:'e'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},...(target?.mode==='crop-edit'?{cropDisplay:{settingsFingerprint:doc.settingsFingerprint!,canonicalGeometry:{crop:structuredClone((doc as api.RawSettings).crop!),orientation:'Normal'},bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
+ return crop;
+}
+it('pins the gesture bitmap before Native begin so an older decode cannot replace its source',async()=>{
+ cropVisualFixture();await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();
+ const snapshot=current!.crop.surface!,late=deferred<void>();decode=()=>late.promise;
+ await act(async()=>current!.retryPreview());await flush();
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:20}}));await flush();
+ await act(async()=>late.resolve());await flush();
+ expect(current!.crop.surface).toBe(snapshot);expect(current!.crop.presentation?.crop.geometry.angle).toBe(20);expect(revokeURL).not.toHaveBeenCalledWith(snapshot.url);
+ decode=async()=>{};await act(async()=>current!.crop.end());await flush();
+});
+it('does not authorize old pixels from matching public controls after a History restore changes the full fingerprint',async()=>{
+ const crop=cropVisualFixture();await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();const snapshot=current!.crop.surface!;
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:20}}));await flush();
+ const gate=deferred<void>(),renderPreview=vi.mocked(api.rawPreview).getMockImplementation()!;
+ vi.mocked(api.rawPreview).mockImplementation(async(...args)=>{await gate.promise;return renderPreview(...args);});
+ await act(async()=>current!.crop.end());await flush();expect(current!.crop.presentation?.phase).toBe('readback');
+ commitHistory.mockImplementation(async request=>rawHistoryResult({...request,doc:{...request.doc,revision:request.doc.revision+1,settingsFingerprint:'c'.repeat(64),crop}}, {history:{initialized:true,cursor:0,length:1,selectedStepId:null}}));
+ await act(async()=>current!.undo());await flush();
+ expect(current!.crop.surface).toBe(snapshot);expect(current!.crop.presentation).toBeUndefined();expect(current!.crop.canStart).toBe(false);
+ await act(async()=>gate.resolve());await flush();expect(current!.crop.surface!.doc.settingsFingerprint).toBe('c'.repeat(64));expect(current!.crop.canStart).toBe(true);
 });

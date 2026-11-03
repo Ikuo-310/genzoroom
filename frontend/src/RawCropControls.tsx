@@ -54,7 +54,7 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
   const [busy,setBusy]=useState(false),[error,setError]=useState(false),[angle,setAngle]=useState<number|null>(null);
   const [custom,setCustom]=useState(false),[w,setW]=useState(''),[h,setH]=useState('');
   const crop=raw.settings?.crop;
-  const locked=disabled || busy || !!raw.locked || raw.status!=='ready' || !crop || !raw.crop.surface || !!raw.historyError || !!raw.historyLoading || !!raw.editError;
+  const locked=disabled || busy || !!raw.locked || raw.status!=='ready' || !crop || !raw.crop.surface || raw.crop.canStart === false || !!raw.historyError || !!raw.historyLoading || !!raw.editError;
   const run=(operation:RawGeometryOperation,action?:RawGeometryAction)=>{
     if(pending.current || locked)return;
     if(panel.current)commitAdjustmentEdits(panel.current);

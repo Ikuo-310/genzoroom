@@ -1,5 +1,5 @@
 import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
-import { cropNativeSize } from './rawCropMath';
+import { cropFitScale } from './rawCropMath';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
@@ -90,7 +90,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const bitmapSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
   const [cropBusy, setCropBusy] = useState(false);
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
-  if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: cropNativeSize(rawCrop.surface.display.canonicalGeometry.crop, rawCrop.surface.frame) };
+  if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
   const logicalWidth = cropSize?.x ?? rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = cropSize?.y ?? rawFrame?.nativeHeight ?? bitmapSize.y;
   const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
@@ -264,6 +264,11 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
     previousTransform.current = null;
   }, [imageIdentity]);
 
+  useEffect(()=>{
+    if(rawCrop?.active){setFitMode(true);setPan({x:0,y:0});previousTransform.current=null;}
+  },[rawCrop?.active]);
+  const cropFitView=useRef<{key:string;automatic:boolean}|undefined>(undefined);
+  const cropFitGeometry=rawCrop?.presentation?.phase==='provisional'?undefined:rawCrop?.presentation?.crop ?? rawCrop?.surface?.display.canonicalGeometry.crop;
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || imageSize.x === 0) return;
@@ -271,11 +276,13 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
       const nextViewport = { x: viewport.clientWidth, y: viewport.clientHeight };
       setViewportSize(current => current.x === nextViewport.x && current.y === nextViewport.y
         ? current : nextViewport);
-      const next = calculateFitScale(
-        nextViewport,
-        imageSize,
-      );
+      const fitKey=`${imageIdentity}:${nextViewport.x}:${nextViewport.y}:${imageSize.x}:${imageSize.y}:${!!rawCrop?.active}`;
+      let next = rawCrop?.active ? cropFitScale(nextViewport,{nativeWidth:imageSize.x,nativeHeight:imageSize.y},rawCrop?.presentation?.phase==='provisional'?undefined:cropFitGeometry)
+        : calculateFitScale(nextViewport,imageSize);
       setFitScale(next);
+      // Geometry changes never zoom in. Only a viewport/source change starts a new full-image Fit.
+      if(rawCrop?.active && fitMode && cropFitView.current?.automatic && cropFitView.current.key===fitKey)next=Math.min(scale,next);
+      cropFitView.current={key:fitKey,automatic:fitMode};
       if (fitMode) {
         setScale(next);
         setPan({ x: 0, y: 0 });
@@ -285,7 +292,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
     const observer = new ResizeObserver(updateFit);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [fitMode, imageSize, scale]);
+  }, [fitMode, imageSize, scale, rawCrop?.active, JSON.stringify(cropFitGeometry?.geometry.rect)]);
 
   useLayoutEffect(() => {
     const previous = previousNativeSize.current;

@@ -930,3 +930,8 @@ dialog.workspace-save-dialog { color: #ececee; }
 .raw-crop-custom label { display: grid; flex: 1; min-width: 60px; gap: 4px; }
 .raw-crop-custom input { width: 100%; min-width: 0; box-sizing: border-box; }
 .raw-crop-reset { margin-top: 12px; width: 100%; }
+
+.raw-crop-aspect select { color-scheme: dark; background: #252528; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px 7px; }
+.raw-crop-aspect select option { background: #252528; color: #eee; }
+.raw-crop-aspect select:focus-visible { outline: 2px solid #aaa; outline-offset: 1px; }
+.raw-crop-aspect select:disabled { color: #888; border-color: #3b3b3e; opacity: .65; }
