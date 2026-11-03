@@ -31,7 +31,8 @@ MAX_HISTORY_RESPONSE_BYTES = 1024 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
-                     "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation"}
+                     "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation",
+                     "raw_geometry_gesture_pending", "raw_geometry_outcome_unknown", "raw_geometry_request_conflict"}
 LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
@@ -82,6 +83,7 @@ class RawPreviewApi:
         self.diagnostics_busy = lambda: False
         self._recipe_save = None
         self._history_save = None
+        self._geometry_gesture = None
         self._history_identity = None
         self._history_initialized = self._history_enabled = self._history_draining = False
         # A reset can outlive document release; retain its owner so the same request can retry safely.
@@ -101,6 +103,8 @@ class RawPreviewApi:
             Route("/documents/{handle}/region/cancel", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/geometry/begin", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/geometry", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
             Route("/documents/{handle}/history", self.endpoint, methods=["GET"]),
             *[Route(f"/documents/{{handle}}/history/{action}", self.endpoint, methods=["POST"])
@@ -513,7 +517,9 @@ class RawPreviewApi:
                 return JSONResponse(self.document)
             settings_request = path.endswith("/settings")
             history_request = "/history" in path
-            doc = self._document(request.path_params["handle"], resync=settings_request or history_request)
+            doc = self._document(request.path_params["handle"], resync=settings_request or history_request or "/geometry" in path)
+            if "/geometry" in path:
+                return await self._geometry(request, body, doc)
             if history_request:
                 return await self._history(request, body, doc)
             if path.endswith("/recipe"):
@@ -546,6 +552,85 @@ class RawPreviewApi:
             if method == "GET":
                 return JSONResponse({**doc, "state": self.raw.status().state})
             raise LightCraftError("raw_invalid_request")
+
+    async def _geometry(self, request, body, doc):
+        from raw_geometry import GESTURES, validate_operation, geometry_state
+        begin = request.url.path.endswith('/begin')
+        required = {'workspaceId', 'generation', 'documentToken', 'expectedRevision', 'settingsFingerprint', 'gestureId', 'operation'}
+        if not begin:
+            required.add('sequence')
+        if (set(body) != required or type(body.get('generation')) is not int
+                or type(body.get('expectedRevision')) is not int or not 0 <= body['expectedRevision'] < 2**53
+                or type(body.get('gestureId')) is not str or re.fullmatch('[a-f0-9]{32}', body['gestureId']) is None
+                or type(body.get('settingsFingerprint')) is not str or re.fullmatch('[a-f0-9]{64}', body['settingsFingerprint']) is None):
+            raise LightCraftError('raw_invalid_request')
+        if any(body[k] != doc[k] for k in ('generation', 'documentToken')):
+            raise LightCraftError('raw_stale_handle')
+        if begin:
+            if type(body['operation']) is not str or body['operation'] not in GESTURES:
+                raise LightCraftError('raw_invalid_request')
+            if self._geometry_gesture is not None:
+                if self._geometry_gesture['begin'] != body:
+                    raise LightCraftError('raw_geometry_gesture_pending')
+                return JSONResponse(self._geometry_gesture['beginResponse'])
+            self._history_unsettled()
+        else:
+            op = validate_operation(body['operation'])
+            if type(body['sequence']) is not int or not 0 <= body['sequence'] < 256:
+                raise LightCraftError('raw_invalid_request')
+            g = self._geometry_gesture
+            if not g or g['id'] != body['gestureId'] or op['type'] != g['operation']:
+                raise LightCraftError('raw_geometry_request_conflict')
+            if g['stage'] == 'unknown':
+                raise LightCraftError('raw_geometry_outcome_unknown')
+            # Only the last immutable request is replayable; older sequences fail without sending.
+            if g.get('lastRequest') == body:
+                return JSONResponse(g['response'])
+            if body['sequence'] != g['sequence'] + 1:
+                raise LightCraftError('raw_geometry_request_conflict')
+            self._history_unsettled(allow_geometry=True)
+        if body['expectedRevision'] != doc['revision'] or body['settingsFingerprint'] != doc['settingsFingerprint']:
+            raise LightCraftError('raw_revision_conflict')
+        if begin:
+            if self._recipe_save and not self._recipe_save.get('settled', False):
+                raise LightCraftError('raw_recipe_save_pending')
+            state = await self._history_load(doc)
+            if not state['initialized'] or not state['recipe']:
+                raise LightCraftError('raw_history_not_initialized')
+            if self._fingerprint(state['recipe']['settings']) != doc['settingsFingerprint']:
+                raise LightCraftError('raw_history_commit_required')
+            self._geometry_gesture = {'id': body['gestureId'], 'operation': body['operation'], 'begin': body,
+                                      'sequence': -1, 'stage': 'ready', 'baseline': state['recipe']['settings']}
+            snapshot = self.raw.confirmed_settings(self._raw_handle, doc['revision'])
+            payload = {**doc, **controls_state(snapshot), 'gestureId': body['gestureId'], 'sequence': -1}
+            self._geometry_gesture['beginResponse'] = payload
+            return JSONResponse(payload)
+        if op['type'] == 'drag':
+            rect = geometry_state(g['baseline'])['crop']['geometry']['rect']
+            start = [rect[k] for k in ('x0', 'y0', 'x1', 'y1')]
+            if 'start' in op['params'] and op['params']['start'] != start:
+                raise LightCraftError('raw_geometry_request_conflict')
+            if 'grab' in g and g['grab'] != (op['params']['handle'], op['params']['from']):
+                raise LightCraftError('raw_geometry_request_conflict')
+            g['grab'] = (op['params']['handle'], op['params']['from'])
+            op['params']['start'] = start
+        g['stage'] = 'unknown'
+        lightcraft_log('raw.geometry.started', level='debug', generation=doc['generation'], revision=doc['revision'])
+        try:
+            snapshot = await self.raw.apply_geometry(self._raw_handle, op, doc['revision'])
+        except BaseException as error:
+            from raw_geometry import NOT_SENT
+            if getattr(error, 'code', '') in NOT_SENT:
+                g['stage'] = 'ready'
+            lightcraft_log('raw.geometry.failed', level='error', generation=doc['generation'], revision=doc['revision'],
+                           errorCode=getattr(error, 'code', 'raw_geometry_outcome_unknown'))
+            raise
+        self._history_verify(doc)
+        self._confirmed(doc, snapshot)
+        payload = {**doc, **controls_state(snapshot), 'gestureId': g['id'], 'sequence': body['sequence']}
+        g.update(stage='ready', sequence=body['sequence'], lastRequest=body, response=payload)
+        lightcraft_log('raw.geometry.confirmed', level='debug', generation=doc['generation'], revision=doc['revision'])
+        return JSONResponse(payload)
 
     async def _preview(self, request, body, lease=None):
         async with self._lock:
@@ -714,7 +799,9 @@ class RawPreviewApi:
             "documentRevision": body["documentRevision"], "settingsFingerprint": pending["fingerprint"],
             "recipeRevision": result["revision"], "saveId": result["lastSaveId"], "updatedAt": result["updatedAt"]})
 
-    def _history_unsettled(self):
+    def _history_unsettled(self, *, allow_geometry=False):
+        if self._geometry_gesture is not None and not allow_geometry:
+            raise LightCraftError("raw_geometry_gesture_pending")
         if self._history_save and self._history_save["stage"] != "complete":
             raise LightCraftError("raw_history_save_pending")
 
@@ -725,6 +812,9 @@ class RawPreviewApi:
             raise LightCraftError("raw_stale_handle")
 
     def _confirmed(self, doc, snapshot):
+        if doc["revision"] != snapshot.revision:
+            self._region_geometry.clear()
+            self._wb_frames.clear()
         doc["revision"] = snapshot.revision
         doc["settingsFingerprint"] = self._fingerprint(snapshot.settings)
         doc.update(self._edit_budget())
@@ -759,7 +849,7 @@ class RawPreviewApi:
         before_settings = with_legacy_grading_defaults(before_settings)
         after_settings = with_legacy_grading_defaults(after_settings)
         metadata = step["metadata"]
-        if step['kind'] == 'vignetteStyle':
+        if step['kind'] in ('vignetteStyle', 'geometry'):
             return []
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
@@ -812,6 +902,8 @@ class RawPreviewApi:
             required.add("saveId")
         if action in ("commit", "operate"):
             required |= {"kind", "metadata"}
+            if body.get('kind') == 'geometry':
+                required.add('geometry' if action == 'operate' else 'gestureId')
         elif action == "jump":
             required.add("targetStepId")
         if action == 'operate' and body.get('kind') == 'wbPick':
@@ -837,7 +929,17 @@ class RawPreviewApi:
                     body[key] = str(UUID(body[key]))
         except ValueError:
             raise LightCraftError("raw_invalid_request") from None
-        if action == "commit":
+        if body.get('kind') == 'geometry':
+            from raw_geometry import validate_operation, valid_metadata
+            if not valid_metadata(body.get('metadata')):
+                raise LightCraftError('raw_invalid_request')
+            if action == 'operate':
+                op = validate_operation(body['geometry'])
+                if op['type'] != body['metadata']['operation']:
+                    raise LightCraftError('raw_invalid_request')
+            elif type(body.get('gestureId')) is not str or len(body['gestureId']) != 32 or not re.fullmatch('[a-f0-9]{32}', body['gestureId']):
+                raise LightCraftError('raw_invalid_request')
+        elif action == "commit":
             from raw_controls import CONTROLS
             metadata = body["metadata"]
             if (body["kind"] != "control" or type(metadata) is not dict or set(metadata) != {"control"}
@@ -875,6 +977,9 @@ class RawPreviewApi:
             return self._history_json({**doc, **self._history_public(doc, state), "steps": public_steps}, MAX_HISTORY_RESPONSE_BYTES)
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)
+        geometry_commit = action == 'commit' and body.get('kind') == 'geometry'
+        if self._geometry_gesture is not None and action != 'recover' and not geometry_commit:
+            raise LightCraftError('raw_geometry_gesture_pending')
         fingerprint = hashlib.sha256(json.dumps([doc["handle"], action, body], sort_keys=True,
                                                 separators=(",", ":")).encode()).hexdigest()
         if self._recipe_save and not self._recipe_save.get("settled", False):
@@ -898,7 +1003,11 @@ class RawPreviewApi:
             if action == "recover":
                 return await self._history_recover(doc, body)
             if not pending or pending["request"].get("saveId") != body["saveId"]:
-                self._history_unsettled()
+                self._history_unsettled(allow_geometry=geometry_commit)
+                if geometry_commit:
+                    g = self._geometry_gesture
+                    if not g or g['id'] != body['gestureId'] or g['operation'] != body['metadata']['operation'] or g['stage'] != 'ready':
+                        raise LightCraftError('raw_geometry_request_conflict')
                 if body["documentRevision"] != doc["revision"] or body["settingsFingerprint"] != doc["settingsFingerprint"]:
                     raise LightCraftError("raw_revision_conflict")
                 state = await self._history_load(doc)
@@ -942,6 +1051,9 @@ class RawPreviewApi:
             state = await self._history_load(doc)
             if state["revision"] != body["expectedRecipeRevision"]:
                 raise LightCraftError("raw_history_revision_conflict")
+            if pending['stage'] == 'applying' and action == 'operate' and body.get('kind') == 'geometry':
+                # A relative command may have run. No snapshot comparison proves execution count.
+                raise LightCraftError('raw_geometry_outcome_unknown')
             if pending["stage"] != "save":
                 snapshot = await self.raw.get_settings(self._raw_handle)
                 self._history_verify(doc)
@@ -968,12 +1080,24 @@ class RawPreviewApi:
                     self._confirmed(doc, snapshot)
                 if action == "operate" and not wb_operation:
                     pending["stage"] = "applying"
-                    snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
+                    if body['kind'] == 'geometry':
+                        try:
+                            snapshot = await self.raw.apply_geometry(self._raw_handle, body['geometry'], snapshot.revision)
+                        except BaseException as error:
+                            from raw_geometry import NOT_SENT
+                            if getattr(error, 'code', '') in NOT_SENT:
+                                pending['stage'] = 'readback'
+                            raise
+                    else:
+                        snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 # Keep supported legacy omission of WB scale in saved snapshots; the adapter has
                 # verified their complete normalized engine representation, as in C3-B restore.
                 pending["settings"] = pending["selected"] if pending["selected"] is not None and action != "operate" else snapshot.settings
+                if action == 'operate' and body.get('kind') == 'geometry' and self._fingerprint(snapshot.settings) == self._fingerprint(pending['selected']):
+                    # Preserve a legacy snapshot's omitted serde defaults when the operation is a semantic no-op.
+                    pending['settings'] = pending['selected']
                 pending["stage"] = "save"
             self._history_verify(doc)
             if self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
@@ -994,6 +1118,8 @@ class RawPreviewApi:
             except LightCraftError:
                 raise LightCraftError("raw_history_save_unknown") from None
             pending["stage"] = "complete"
+            if geometry_commit:
+                self._geometry_gesture = None
             self._history_initialized = self._history_enabled = True
             lightcraft_log("raw.history.saved", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
                            generation=doc["generation"], documentRevision=doc["revision"],
@@ -1089,15 +1215,16 @@ class RawPreviewApi:
         try:
             snapshot = await self.raw.get_settings(self._raw_handle)
             self._history_verify(doc)
-            self._confirmed(doc, snapshot)
             if self._fingerprint(snapshot.settings) != self._fingerprint(state["recipe"]["settings"]):
                 snapshot = await self.raw.restore_persisted_settings(self._raw_handle, state["recipe"], snapshot.revision)
                 self._history_verify(doc)
-                self._confirmed(doc, snapshot)
+            # Recovery may read malformed geometry. Publish only the verified saved snapshot.
+            self._confirmed(doc, snapshot)
             verified = await self._history_load(doc)
             if verified["revision"] != state["revision"]:
                 raise LightCraftError("raw_history_revision_conflict")
             self._history_save = None
+            self._geometry_gesture = None
             self._history_enabled = verified["initialized"]
             return await self._history_response(doc, None)
         except BaseException:
@@ -1177,6 +1304,7 @@ class RawPreviewApi:
         self._wb_frames.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
+        self._geometry_gesture = None
         self._history_initialized = self._history_enabled = False
         self._workspace_state = "releasing"
         try:
@@ -1321,5 +1449,6 @@ class RawPreviewApi:
         self._wb_frames.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
+        self._geometry_gesture = None
         self._history_initialized = self._history_enabled = False
         self._workspace_state = "empty"

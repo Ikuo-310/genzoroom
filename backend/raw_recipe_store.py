@@ -437,7 +437,10 @@ def _history_uuid(value):
 def _history_metadata(kind, metadata):
     if type(kind) is not str or type(metadata) is not dict:
         raise InvalidRawHistory()
-    if kind in ("control", "controlReset"):
+    if kind == 'geometry':
+        from raw_geometry import valid_metadata
+        valid = valid_metadata(metadata)
+    elif kind in ("control", "controlReset"):
         valid = set(metadata) == {"control"} and type(metadata["control"]) is str and metadata["control"] in HISTORY_CONTROLS
     elif kind == "sectionToggle":
         valid = (set(metadata) == {"section", "enabled"} and type(metadata["section"]) is str

@@ -37,7 +37,19 @@ export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
 export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paintOverlay'] as const;
 export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
 export type RawValues = Record<RawControlId, number>;
+export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
+export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
+export type RawCropRect = [number, number, number, number];
+export type RawCrop = { geometry: { rect: { x0: number; y0: number; x1: number; y1: number }; angle: number };
+  aspect: [number, number] | null; flip_h: boolean; flip_v: boolean };
+export type RawGeometryOperation = { type: 'set'; params: { rect?: RawCropRect; angle?: number } }
+  | { type: 'drag'; params: { handle: 'topLeft' | 'topRight' | 'bottomRight' | 'bottomLeft' | 'top' | 'right' | 'bottom' | 'left' | 'move';
+      from: [number, number]; to: [number, number]; start?: RawCropRect; keepRatio?: boolean } }
+  | { type: 'aspect'; params: { aspect: 'free' | 'original' | 'current' | 'toggle' | `${number}x${number}` | [number, number]; orientation?: 'crop' | 'given' } }
+  | { type: 'straighten'; params: { angle: number } }
+  | { type: 'swap' | 'reset' | 'rotateLeft' | 'rotateRight' | 'flipHorizontal' | 'flipVertical'; params: Record<string, never> };
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  crop?: RawCrop; orientation?: string;
   importDefaultsFingerprint: string;
   sections: Record<RawSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
@@ -57,15 +69,17 @@ export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string
 export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
 export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
+  | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId }; geometry: RawGeometryOperation }
   | { kind: 'sectionReset'; metadata: { section: RawResetSectionId } }
   | { kind: 'vignetteStyle'; metadata: { style: RawVignetteStyle } }
   | { kind: 'sectionToggle'; metadata: { section: RawSectionId; enabled: boolean } }
   | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
-  control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick';
-  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle }; createdAt: string;
+  control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
+  geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten' } };
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry';
+  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
@@ -246,6 +260,7 @@ export async function resetRawEdits(assetId: string, doc?: RawSettings) {
 }
 function settings(value: RawSettings, doc: RawDocument): RawSettings {
   document(value, doc.workspaceId, doc.assetId);
+  if (value.crop !== undefined || value.orientation !== undefined) validateCropSettings(value);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
     || !fingerprint(value.settingsFingerprint) || !fingerprint(value.importDefaultsFingerprint)
     || value.beforeKey != null && !fingerprint(value.beforeKey) || !integer(value.recipeRevision)
@@ -271,6 +286,31 @@ export async function setRawControls(doc: RawDocument, values: Partial<RawValues
   const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values }), RAW_SETTINGS_RESPONSE_BYTES), doc);
   if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
   return result;
+}
+function validateCropSettings(value: RawSettings) {
+  const c = value.crop, r = c?.geometry?.rect, a = c?.aspect;
+  if (!c || !r || ![r.x0, r.y0, r.x1, r.y1, c.geometry.angle].every(Number.isFinite)
+    || r.x0 >= r.x1 || r.y0 >= r.y1 || Math.abs(c.geometry.angle) > 45
+    || typeof c.flip_h !== 'boolean' || typeof c.flip_v !== 'boolean'
+    || !(a === null || Array.isArray(a) && a.length === 2 && a.every(n => Number.isInteger(n) && n > 0 && n <= 0xffffffff) && a[0] / a[1] >= 1 / 20 && a[0] / a[1] <= 20)
+    || !['Normal', 'FlipH', 'Rotate180', 'FlipV', 'Transpose', 'Rotate90', 'Transverse', 'Rotate270'].includes(value.orientation ?? ''))
+    throw new RawApiError('raw_invalid_response');
+}
+export type RawGeometryGesture = RawSettings & { gestureId: string; sequence: number };
+export async function beginRawGeometry(doc: RawSettings, gestureId: string, operation: 'set' | 'drag' | 'straighten'): Promise<RawGeometryGesture> {
+  return geometryGesture(doc, { gestureId, operation }, '/begin');
+}
+export async function updateRawGeometry(doc: RawSettings, gestureId: string, sequence: number, operation: RawGeometryOperation): Promise<RawGeometryGesture> {
+  return geometryGesture(doc, { gestureId, sequence, operation }, '');
+}
+async function geometryGesture(doc: RawSettings, intent: { gestureId: string; sequence?: number; operation: string | RawGeometryOperation }, suffix: string): Promise<RawGeometryGesture> {
+  // Retain this exact intent on reply loss; changing its revision/sequence is a new operation.
+  const value = await json(`/documents/${doc.handle}/geometry${suffix}`, post({ ...identityBody(doc), expectedRevision: doc.revision,
+    settingsFingerprint: doc.settingsFingerprint, ...intent }), RAW_SETTINGS_RESPONSE_BYTES);
+  settings(value, doc); validateCropSettings(value);
+  if (value.gestureId !== intent.gestureId || value.sequence !== (intent.sequence ?? -1)
+    || (suffix ? value.revision !== doc.revision : value.revision <= doc.revision)) throw new RawApiError('raw_invalid_response');
+  return value;
 }
 export async function readRawRecipe(doc: RawDocument): Promise<RawRecipeState> {
   const value = await json(`/documents/${doc.handle}/recipe`, { headers: { 'X-Raw-Workspace': doc.workspaceId,
@@ -309,7 +349,8 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
   try {
     const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
-      ...(action === 'commit' ? { kind: 'control', metadata: { control } } : {}),
+      ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation },
+        gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' ? operation : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
     accepted = true;
@@ -347,7 +388,8 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     const m = step?.metadata;
     if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
       || !m || typeof m !== 'object' || Array.isArray(m)
-      || (step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
+      || (step.kind === 'geometry' ? Object.keys(m).length !== 1 || !RAW_GEOMETRY_OPERATIONS.includes(m.operation)
+        : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)

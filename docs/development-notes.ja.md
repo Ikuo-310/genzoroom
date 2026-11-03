@@ -1,5 +1,25 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 2：Backend Geometry / Recipe / History統合（2026-11-03）
+
+標準Crop操作をBackendの既存Native mutation ownerとRecipe / Historyへ接続した。`raw_geometry.py`でclosed typed operation、有限数値、rect順序、angle、custom aspect、handle、readback CropGeometryを検証する。任意Native commandやphoto IDを外部公開しない。`lightcraft_runtime.py`の内部allowlistへ標準Crop / Rotate / Flipを追加し、`LightCraftRawSession.apply_geometry()`は既存`_mutate()`でcommand→完全settings readback→revision確定を行う。成功値nullを受け入れ、境界制約・aspect・refitはNativeへ委譲する。Crop Resetはorientationを維持し、無関係な現像値の保持もreadbackで検証する。
+
+離散操作は既存`POST /documents/{handle}/history/operate`へ`kind:"geometry",metadata:{operation},geometry:{type,params}`を追加した。gestureは`/geometry/begin`で保存済みbaselineを確保し、`/geometry`のsequence付き更新をHistory未保存で行い、既存`/history/commit`のgeometry kind＋gestureIdで1 stepへ確定する。新HTTP経路も既存API lockとNative owner queueを共有する。gesture中は他mutation、Undo/Redo/Jump、保存前の通常離脱を拒否する。History metadataは操作名のみで、pointer座標や表示transformは保存しない。
+
+相対操作の二重実行防止を優先し、History pendingの`applying`からの再送は`raw_geometry_outcome_unknown`で停止する。baselineへ戻っている場合でも実行回数を推測して再実行しない。保存確定前の障害は明示的recoverでdurable Recipeへ戻す。readback完了後のDB保存失敗は凍結snapshotを使い、保存済みsaveId receiptや失われたHTTP応答の再取得ではNativeを再実行しない。gestureは最新1件の完全同一requestだけを再応答でき、過去sequence・異なるbody・別gestureを拒否する。既知の送信前edit-limit / admission / revisionエラーは未送信として区別し、確定済みgestureをcommitして既存の再open手順へ進める。
+
+Recipe / Historyは完全DevelopSettings方式と既存DBを維持した。旧Recipeでcrop / orientationが欠ける場合はengine viewだけserde default化し、事前書換えをしない。等価な旧snapshotへのgeometry no-opも余分なstepやRedo削除を起こさない。Undo/Redo/Jumpはsnapshot復元のみで、逆Rotateや逆dragは実行しない。revision更新時にRegion / WB frame mappingを破棄し、通常Wholeの新receiptでNative geometryを再評価する。geometryIdが同じaspect lock操作もrevisionで区別する。
+
+主要変更は`backend/raw_geometry.py`、`lightcraft_raw.py`、`lightcraft_runtime.py`、`windows_raw_api.py`、`raw_controls.py`、`raw_recipe_store.py`と関連テスト。`frontend/src/rawApi.ts`へ操作union、Crop state、gesture client、History operate / commitの型とresponse validationを追加した。既存RawControls / RawRecipeSaveのUI接続やViewer入力は変更していない。Phase 1のmock artifact receiptに新contract項目が欠けていたため、共通Native fixtureを現manifestへ合わせた。Native patch / pin / manifest / binary / receiptは変更しておらず、Native rebuildも実施していない。
+
+新Geometry試験は操作群、各corner / edge / move、正負angle、custom aspect、Reset、gesture集約、Undo/Redo/Jump、no-op / Redo保持、旧Recipe欠落、stale revision / generation / token、並行重複request、reply再取得、Native command / readback / 保存失敗、不正readbackからの回復、edit-limit / document再openを検証した。監査で、回復処理が不正geometryを復元前に公開・検証して停止する問題を修正し、保存済みsnapshotへrestoreした後にだけ公開するようにした。入力validationは0未満・1超のrectを保持する。Native readbackの欠落fieldは旧Recipeのdefault補完と区別して拒否し、既にmutationが送信された不正readbackは502で返す。400の未実行拒否と混同させない。
+
+合成Bayer DNGと実managed Nativeを使うHTTP＋隔離SQLite統合も成功した。Crop / Aspect / Straighten / Rotate / Flip、全9 handle gesture、Resetのorientation保持とUndo、Crop後の通常scalar、通常Whole Preview、保存・release・再openでのgeometry復元を確認した。実写真や実ブラウザの手動受入ではない。
+
+検証結果：関連Backend 23 filesの回帰809件成功。監査修正後はGeometry・History API・category operation・Native sessionのfocused 181件成功。追加でHTTP待機取消・同一sequence競合2件、不正Native readbackのHTTP status分類2件を成功確認した（前述の実行と一部重複）。Frontend API・controls・History save・Recipe save・document hookの6 files / 299件成功。TypeScriptチェックとproduction build成功（既存の500 kB超chunk警告あり）。DB schema・依存・起動条件の変更がないためDocker release Smoke Testは実行していない。
+
+Phase 3へは固定Crop枠・行列・8ハンドルUI、gesture ownerの操作開始／終了／出発境界と再生成連携、geometry Historyラベルを引き継ぐ。Crop編集用未crop表示のHTTP / Frontend切替と編集Regionは後続Phaseのまま。RAW実写真、画面上の位置合わせ、操作感は未検証。README / CHANGELOGは更新していない。
+
 ## RAW Crop Phase 1：Native未crop編集表示・Geometry契約（2026-11-03）
 
 LightCraft v0.18.0 / upstream `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`の既存MCP `render_preview`と同じrender dispatchへ、明示的な`display_mode:"crop-edit"` / `crop_edit_contract:1`を追加した。`id`、32-hex `request_id`、64-hex `settings_fingerprint`を要求し、呼出し時のNative settingsと一致しないsnapshotを拒否する。fingerprintは既存WB契約のtoken-preserving `get_develop` SHA-256と同じ。PNG、Draft / Full、max_side 16〜4096、既存StageCache予算を扱い、Beforeや通常`preview_contract`との混在、不正mode、未知引数を拒否する。

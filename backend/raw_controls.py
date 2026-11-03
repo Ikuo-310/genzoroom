@@ -86,7 +86,8 @@ def controls_state(snapshot):
     disabled = settings.get("disabled_sections", [])
     if type(disabled) is not list or any(type(section) is not str for section in disabled):
         raise LightCraftError("raw_invalid_settings")
-    return {"values": values, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+    from raw_geometry import geometry_state
+    return {**geometry_state(settings), "values": values, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
             "sections": {section: section not in disabled for section in SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
@@ -111,6 +112,11 @@ def validate_controls(values, wb_available):
 def validate_history_operation(kind, metadata):
     if type(metadata) is not dict:
         raise LightCraftError("raw_invalid_request")
+    if kind == 'geometry':
+        from raw_geometry import valid_metadata
+        if not valid_metadata(metadata):
+            raise LightCraftError('raw_invalid_request')
+        return
     valid = (kind == "controlReset" and set(metadata) == {"control"}
              and type(metadata["control"]) is str and metadata["control"] in CONTROLS
              or kind == "sectionReset" and set(metadata) == {"section"}

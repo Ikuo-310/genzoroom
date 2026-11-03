@@ -21,6 +21,8 @@ from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 
 
 DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "tint": 0., "scale": "kelvin"},
+           "crop": {"geometry": {"rect": {"x0": 0., "y0": 0., "x1": 1., "y1": 1.}, "angle": 0.},
+                    "aspect": None, "flip_h": False, "flip_v": False}, "orientation": "Normal",
            "disabled_sections": [],
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
            "grading": {**{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")}, "blending": 50., "balance": 0.},
@@ -277,7 +279,8 @@ async def create(tmp_path, *, timeouts=QUICK):
     exe.with_suffix('.genzoroom.json').write_text(json.dumps({
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
-        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1}), encoding='utf-8')
+        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1,
+        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

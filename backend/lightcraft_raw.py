@@ -236,6 +236,10 @@ def _settings_json(value):
     if wb["scale"] not in ("legacy", "kelvin"):
         raise LightCraftError("raw_invalid_settings")
     from raw_controls import with_legacy_grading_defaults
+    # Missing native serde-default crop fields are normalized only in the engine view.
+    from raw_geometry import DEFAULT_CROP
+    value.setdefault('crop', json.loads(json.dumps(DEFAULT_CROP)))
+    value.setdefault('orientation', 'Normal')
     return _object_json(with_legacy_grading_defaults(value), MAX_SETTINGS_BYTES)
 
 
@@ -548,8 +552,10 @@ class LightCraftRawSession:
         return await self.manager._raw_command(self._generation, command, params,
                                                timeout=min(limit, self._remaining(deadline)))
 
-    async def _read_settings(self, photo, deadline):
+    async def _read_settings(self, photo, deadline, *, validate=None):
         value = await self._command("develop.get", {"id": photo.photo_id}, deadline)
+        if validate is not None:
+            validate(value)
         try:
             return _settings_json(value)
         except LightCraftError:
@@ -808,7 +814,7 @@ class LightCraftRawSession:
         return actual
 
     async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None,
-                      *, commands=None, check=None, prepare=None):
+                      *, commands=None, check=None, prepare=None, readback_check=None):
         photo = self._photo(handle, active=True)
         cost = len(commands) if commands is not None else 1
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
@@ -863,7 +869,7 @@ class LightCraftRawSession:
                 else:
                     self._edits += 1
                     await self._command(command, params, deadline)
-                    actual = await self._read_settings(photo, deadline)
+                    actual = await self._read_settings(photo, deadline, validate=readback_check)
                 if check is not None:
                     check(json.loads(actual))
                 if verify is not None:
@@ -896,6 +902,26 @@ class LightCraftRawSession:
         if not values or any(not isinstance(k, str) or type(v) not in (float, int) for k, v in values.items()):
             raise LightCraftError("raw_invalid_controls")
         return await self._mutate(handle, "develop.set", {"values": values}, expected_revision)
+
+    async def apply_geometry(self, handle, operation, expected_revision):
+        from raw_geometry import native_command, geometry_state
+        photo = self._photo(handle, active=True)
+        command, params = native_command(operation, photo.photo_id)
+        before = json.loads(photo.settings_json)
+
+        def check(actual):
+            geometry_state(actual, required=True)
+            # Geometry commands must not silently alter unrelated development settings.
+            if ({k: v for k, v in actual.items() if k not in ('crop', 'orientation')}
+                    != {k: v for k, v in before.items() if k not in ('crop', 'orientation')}):
+                raise LightCraftError('raw_geometry_readback_mismatch')
+            if operation['type'] == 'reset':
+                from raw_geometry import DEFAULT_CROP
+                if actual['crop'] != DEFAULT_CROP or actual['orientation'] != before.get('orientation', 'Normal'):
+                    raise LightCraftError('raw_geometry_readback_mismatch')
+
+        return await self._mutate(handle, command, params, expected_revision, check=check,
+                                  readback_check=lambda value: geometry_state(value, required=True))
 
     async def estimate_white_balance(self, handle, expected_revision, *, prepared, verify, frame=None):
         from raw_white_balance import result_fingerprint, validate_candidate
