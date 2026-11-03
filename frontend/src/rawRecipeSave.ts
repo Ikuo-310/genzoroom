@@ -1,6 +1,6 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
-import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, readRawSettings, recoverRawGeometry, type RawGeometryOperation, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
+import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
   type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import type { RawControls } from './rawControls';
 
@@ -28,8 +28,9 @@ export class RawRecipeSave {
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
-  private cropGesture?: { id: string; ready: boolean; sequence: number; latest?: RawGeometryOperation; running: boolean; ending: boolean;
+  private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; ready: boolean; sequence: number; latest?: RawGeometryOperation; running: boolean; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; commit?: RawHistoryRequest };
+  get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
   private gesture?: { control: RawControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
@@ -46,7 +47,7 @@ export class RawRecipeSave {
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
   get locked() { return !!this.cropGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
-  get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture); }
+  get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture || !!this.cropGesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
   async waitHistory(retry = false) { try { await this.historyOperation; } catch (cause) { if (!retry) throw cause; } }
   move(action: 'undo' | 'redo' | 'jump', targetStepId?: string | null): Promise<void> {
@@ -146,18 +147,18 @@ export class RawRecipeSave {
       assetId: this.confirmed.assetId, generation: this.confirmed.generation, revision: this.confirmed.revision,
       sequence: this.cropGesture?.sequence ?? null, errorCode: this.error } }); } catch { /* Optional diagnostics. */ }
   }
-  beginGeometry(): Promise<void> {
+  beginGeometry(type: 'drag' | 'straighten' = 'drag'): Promise<void> {
     if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history)
       return Promise.reject(new RawApiError('raw_busy'));
     const preceding = this.save();
-    const g = { id: crypto.randomUUID().replaceAll('-', ''), ready: false, sequence: 0, running: false, ending: false,
+    const g = { type, id: crypto.randomUUID().replaceAll('-', ''), ready: false, sequence: 0, running: false, ending: false,
       started: Promise.resolve() } as NonNullable<typeof this.cropGesture>;
     this.cropGesture = g;
     g.started = new Promise<void>((resolve, reject) => this.options.schedule(async () => {
       try {
         await preceding;
         if (!this.active || this.cropGesture !== g) throw new RawApiError('raw_document_closed');
-        const confirmed = await beginRawGeometry(this.options.controls!.confirmed, g.id, 'drag');
+        const confirmed = await beginRawGeometry(this.options.controls!.confirmed, g.id, type);
         this.confirmed = this.options.controls!.confirmed = confirmed;
         g.ready = true;
         this.options.controls!.beginPreview();
@@ -172,6 +173,8 @@ export class RawRecipeSave {
   updateGeometry(operation: RawGeometryOperation) {
     const g = this.cropGesture;
     if (!g || g.error || g.ending || !this.active) return;
+    if (operation.type !== g.type) return;
+    if (operation.type === 'drag') g.action = operation.params.handle === 'move' ? 'move' : 'resize';
     g.latest = structuredClone(operation);
     this.pumpGeometry();
   }
@@ -209,7 +212,7 @@ export class RawRecipeSave {
             this.options.changed();
           }
           if (!g.commit) g.commit = { doc: structuredClone(this.options.controls!.confirmed), action: 'commit',
-            expectedRecipeRevision: this.revision, saveId: createEditStateSaveId(), geometryCommit: { gestureId: g.id, operation: 'drag' } };
+            expectedRecipeRevision: this.revision, saveId: createEditStateSaveId(), geometryCommit: { gestureId: g.id, operation: g.type, ...(g.action ? { action: g.action } : {}) } };
           this.retryRequest = g.commit;
           await this.sendHistory();
           this.cropGesture = undefined; this.error = undefined;
@@ -222,10 +225,16 @@ export class RawRecipeSave {
   }
   recoverGeometry(): Promise<void> {
     const g = this.cropGesture;
-    if (!g || !g.error) return Promise.reject(new RawApiError('raw_busy'));
+    if (!this.error || g && !g.error) return Promise.reject(new RawApiError('raw_busy'));
     return new Promise((resolve, reject) => this.options.schedule(async () => {
       try {
-        const doc = await readRawSettings(this.options.controls!.confirmed);
+        let doc = this.options.controls!.confirmed;
+        try { doc = await readRawSettings(doc); }
+        catch (cause) {
+          // Malformed Native geometry cannot be published by /settings. Recovery still
+          // uses the last confirmed public identity and restores durable Recipe truth.
+          if (!(cause instanceof RawApiError) || !['raw_invalid_geometry','raw_invalid_response'].includes(cause.code)) throw cause;
+        }
         const result = await recoverRawGeometry(doc);
         const data = await readRawHistory(result);
         if (data.historyPending || data.nativeState !== 'synced' || !data.nativeMatchesRecipe
@@ -234,7 +243,7 @@ export class RawRecipeSave {
         this.confirmed = this.options.controls!.confirmed = result;
         this.revision = result.recipeRevision; this.savedFingerprint = result.recipeFingerprint!; this.history = data.history;
         this.steps = data.steps; this.historyError = undefined;
-        this.cropGesture = undefined; this.retryRequest = undefined; this.error = undefined;
+        this.cropGesture = undefined; this.retryRequest = undefined; this.moveIntent = undefined; this.error = undefined;
         this.options.controls!.endPreview(); this.options.controls!.refreshPreview();
         resolve();
       } catch (cause) { reject(cause); }

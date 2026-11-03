@@ -69,8 +69,13 @@ export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: 
 export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
 export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
 export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
+export type RawGeometryAction = 'move' | 'resize' | 'lock' | 'unlock';
+export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; action?: RawGeometryAction }) {
+  return !!m.operation && RAW_GEOMETRY_OPERATIONS.includes(m.operation) && Object.keys(m).every(k => k === 'operation' || k === 'action')
+    && (m.action === undefined || (m.operation === 'drag' ? ['move','resize'] : m.operation === 'aspect' ? ['lock','unlock'] : []).includes(m.action));
+}
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
-  | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId }; geometry: RawGeometryOperation }
+  | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId; action?: RawGeometryAction }; geometry: RawGeometryOperation }
   | { kind: 'sectionReset'; metadata: { section: RawResetSectionId } }
   | { kind: 'vignetteStyle'; metadata: { style: RawVignetteStyle } }
   | { kind: 'sectionToggle'; metadata: { section: RawSectionId; enabled: boolean } }
@@ -78,9 +83,9 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
-  geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten' } };
+  geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry';
-  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId }; createdAt: string;
+  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction }; createdAt: string;
   changes: { control: RawControlId; before: number; after: number }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
@@ -350,7 +355,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
   try {
     const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
-      ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation },
+      ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation, ...(request.geometryCommit.action ? { action: request.geometryCommit.action } : {}) },
         gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' ? operation : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
@@ -389,7 +394,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     const m = step?.metadata;
     if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
       || !m || typeof m !== 'object' || Array.isArray(m)
-      || (step.kind === 'geometry' ? Object.keys(m).length !== 1 || !RAW_GEOMETRY_OPERATIONS.includes(m.operation)
+      || (step.kind === 'geometry' ? !validGeometryMetadata(m)
         : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)

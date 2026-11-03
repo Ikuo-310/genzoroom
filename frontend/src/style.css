@@ -916,3 +916,17 @@ dialog.workspace-save-dialog { color: #ececee; }
 .photo-card.development-excluded .photo-info > p {
   opacity: 0.25;
 }
+
+.raw-edit-categories { flex: 0 0 auto; padding: 0 10px; border-bottom: 1px solid #3b3b3e; }
+.raw-edit-categories .binary-radio-choice { margin: 5px 0; }
+.raw-edit-categories .binary-radio-options { width: 100%; }
+.raw-edit-categories label { flex: 1; }
+.raw-edit-categories .binary-radio-options span { text-align: center; }
+.raw-crop-controls { padding: 10px; min-width: 0; }
+.raw-crop-aspect { display: grid; gap: 6px; }
+.raw-crop-aspect select { width: 100%; min-width: 0; }
+.raw-crop-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.raw-crop-custom { display: flex; gap: 5px; align-items: end; flex-wrap: wrap; }
+.raw-crop-custom label { display: grid; flex: 1; min-width: 60px; gap: 4px; }
+.raw-crop-custom input { width: 100%; min-width: 0; box-sizing: border-box; }
+.raw-crop-reset { margin-top: 12px; width: 100%; }

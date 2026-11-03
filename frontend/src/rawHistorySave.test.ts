@@ -465,3 +465,26 @@ it('retries only the immutable persistence receipt after a lost geometry commit 
   await saver.save(true);expect(vi.mocked(api.saveRawHistory).mock.calls.at(-1)![0]).toEqual(lost);
   expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(saver.locked).toBe(false);
 });
+
+it('coalesces Straighten on the same geometry owner and commits its final angle once',async()=>{
+ const {saver,controls}=owner();await saver.save();
+ vi.mocked(api.beginRawGeometry).mockImplementation(async doc=>({...doc as api.RawSettings,gestureId:'g',sequence:-1}));
+ const held=gate<api.RawGeometryGesture>();vi.mocked(api.updateRawGeometry).mockImplementationOnce(()=>held.promise).mockImplementation(async(doc,id,sequence,intent)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:fp(1003),gestureId:id,sequence,crop:{geometry:{rect:{x0:.3,y0:.3,x1:.7,y1:.7},angle:intent.type==='straighten'?intent.params.angle:0},aspect:null,flip_h:false,flip_v:false}}));
+ await saver.beginGeometry('straighten');expect(api.beginRawGeometry).toHaveBeenLastCalledWith(expect.anything(),expect.any(String),'straighten');
+ saver.updateGeometry({type:'straighten',params:{angle:-45}});await drain();
+ saver.updateGeometry({type:'straighten',params:{angle:0}});saver.updateGeometry({type:'straighten',params:{angle:45}});
+ await expect(saver.beginGeometry()).rejects.toThrow('raw_busy');await saver.operate({kind:'geometry',metadata:{operation:'rotateRight'},geometry:{type:'rotateRight',params:{}}});
+ const end=saver.finishGeometry();held.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0});await end;
+ expect(api.updateRawGeometry).toHaveBeenCalledTimes(2);expect(vi.mocked(api.updateRawGeometry).mock.calls.at(-1)![3]).toEqual({type:'straighten',params:{angle:45}});
+ const commits=vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit');expect(commits).toHaveLength(1);expect(commits[0][0].geometryCommit?.operation).toBe('straighten');
+ expect(controls.confirmed.crop?.geometry.angle).toBe(45);expect(saver.locked).toBe(false);
+});
+
+it('allows explicit saved-recipe recovery when Native geometry cannot be published by settings',async()=>{
+ const {saver,controls}=owner();await saver.save();const saved=structuredClone(controls.confirmed);
+ vi.mocked(api.saveRawHistory).mockRejectedValueOnce(new api.RawSaveError('raw_invalid_geometry','unknown'));
+ await expect(saver.operate({kind:'geometry',metadata:{operation:'rotateRight'},geometry:{type:'rotateRight',params:{}}})).rejects.toThrow();
+ vi.mocked(api.readRawSettings).mockRejectedValueOnce(new api.RawApiError('raw_invalid_geometry'));
+ vi.mocked(api.recoverRawGeometry).mockResolvedValue(saved);await saver.recoverGeometry();expect(saver.locked).toBe(false);
+ expect(api.recoverRawGeometry).toHaveBeenCalledWith(saved);
+});

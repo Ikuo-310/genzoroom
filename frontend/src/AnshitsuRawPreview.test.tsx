@@ -30,7 +30,7 @@ vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjuste
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(async () => 'workspace'), openRawDocument: vi.fn(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 })),
-  rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
+  beginRawGeometry:vi.fn(), updateRawGeometry:vi.fn(), rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
@@ -1496,4 +1496,42 @@ it('keeps a pending Shadows mutation bound to Shadows after switching to Midtone
   act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[0].click());
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!.value).toBe('240');
   expect(commitHistory.mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(1);
+});
+
+it('exposes RAW-only categories, switches display contracts without mutation and resets selection after Asset departure',async()=>{
+ const crop:rawApi.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ vi.mocked(rawApi.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop,orientation:'Normal'}));
+ vi.mocked(rawApi.rawPreview).mockImplementation(async(doc,_serial,_signal,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,
+  frame:{geometryId:target?.mode==='crop-edit'?'e'.repeat(64):'a'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
+  ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop,orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
+ await mount();expect(host.querySelectorAll('.raw-edit-categories input')).toHaveLength(2);
+ expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
+ const saves=vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+ await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[1].click());await flush();
+ expect(host.querySelector('.raw-crop-controls')).not.toBeNull();expect(host.querySelector('.raw-adjustment-controls')).toBeNull();
+ expect(host.querySelector('.raw-crop-reset')?.textContent).toBe('Reset Crop');
+ expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('crop-edit');expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
+ await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].click());await flush();
+ expect(host.querySelector('.raw-adjustment-controls')).not.toBeNull();expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('whole');
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click());await flush();expect(host.querySelector('.raw-edit-categories')).toBeNull();
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());await flush();
+ expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
+});
+
+it('commits keyboard Straighten before Undo and displays the restored Native angle',async()=>{
+ const crop:rawApi.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ vi.mocked(rawApi.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop,orientation:'Normal'}));
+ vi.mocked(rawApi.rawPreview).mockImplementation(async(doc,_serial,_signal,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,
+  frame:{geometryId:'e'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
+  ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop:(doc as rawApi.RawSettings).crop!,orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
+ vi.mocked(rawApi.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(rawApi.updateRawGeometry).mockImplementation(async(doc,id,sequence,intent)=>({...doc as rawApi.RawSettings,revision:doc.revision+1,settingsFingerprint:'f'.repeat(64),crop:{...crop,geometry:{...crop.geometry,angle:intent.type==='straighten'?intent.params.angle:0}},gestureId:id,sequence}));
+ commitHistory.mockImplementation(async request=>request.action==='undo'?rawHistoryResult({...request,doc:{...request.doc,revision:request.doc.revision+1,settingsFingerprint:'a'.repeat(64),crop}}, {history:{initialized:true,cursor:0,length:1,selectedStepId:null}}):rawHistoryResult(request));
+ await mount();await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[1].click());await flush();
+ const range=host.querySelector<HTMLInputElement>('[data-adjustment-id="crop.angle"]')!;await act(async()=>range.focus());
+ act(()=>range.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true})));await flush();
+ expect(rawApi.beginRawGeometry).toHaveBeenCalledOnce();expect(host.querySelector<HTMLInputElement>('.adjustment-number')!.value).toBe('0.1');
+ await act(async()=>host.querySelector<HTMLButtonElement>('.edit-actions button')!.click());await flush();
+ expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([r])=>r.action)).toEqual(['initialize','commit','undo']);
+ expect(host.querySelector<HTMLInputElement>('.adjustment-number')!.value).toBe('0.0');
 });

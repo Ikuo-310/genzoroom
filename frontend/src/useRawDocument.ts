@@ -81,6 +81,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
+  const cropActiveRef = useRef(false);
   const cropModeRef = useRef<(enabled: boolean) => Promise<void>>(async () => {});
   const regionRef = useRef<RawRegionDelivery | null>(null);
   const connectRegionRef = useRef<() => Promise<boolean>>(async () => false);
@@ -95,7 +96,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let editor: RawControls | undefined;
     let saver: RawRecipeSave | undefined;
     frozen.current = false;
-    let frameSerial = 0, cropMode = false;
+    let frameSerial = 0, cropMode = false, modeChanging = false;
+    cropActiveRef.current = false;
     // Native geometry is available only after the first validated bitmap; never infer it from the PNG.
     let side = 1024, latestView: RawView | undefined;
     let viewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -518,13 +520,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     const setCropMode = async (enabled: boolean) => {
       if (!current() || !saver || !editor || frozen.current) throw new RawApiError('raw_document_closed');
-      await saver.save();
-      if (!current()) throw new RawApiError('raw_document_closed');
-      if (cropMode === enabled) return;
-      cropMode = enabled; viewGeneration++; latestView = undefined; side = 1024;
-      invalidateDisplay(); wholeSurfaces.current = {}; publishedFrame = undefined;
-      setState(previous => previous && ({ ...previous, cropMode, url: undefined, frame: undefined, cropDisplay: undefined, imageRevision: undefined }));
-      displayPreview(editor.confirmed);
+      if (modeChanging) throw new RawApiError('raw_busy');
+      modeChanging = true; frozen.current = true; notify();
+      const owner = saver;
+      try {
+        await owner.save();
+        if (!current() || saver !== owner) throw new RawApiError('raw_document_closed');
+        if (cropMode === enabled) return;
+        cropMode = enabled; cropActiveRef.current = enabled; viewGeneration++; latestView = undefined; side = 1024;
+        invalidateDisplay(); wholeSurfaces.current = {}; publishedFrame = undefined;
+        setState(previous => previous && ({ ...previous, cropMode, url: undefined, frame: undefined, cropDisplay: undefined, imageRevision: undefined }));
+      } finally {
+        modeChanging = false;
+        if (current()) { frozen.current = false; notify(); displayPreview(editor.confirmed); }
+      }
     };
     cropModeRef.current = setCropMode;
     const cropDiagnostics = {
@@ -904,11 +913,18 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     && visible.imageToken === visible.document?.documentToken && visible.imageRevision === visible.document?.revision
     ? { url: visible.url, frame: visible.frame, display: visible.cropDisplay } : undefined;
   return visible && { ...visible,
-    crop: { active: !!visible.cropMode, surface: cropSurface, canStart: !!cropSurface && !visible.locked && !visible.pending && !visible.editError,
-      begin: () => { cancelPick(); if (!callbackEditor() || frozen.current || !cropSaver) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.beginGeometry(); },
+    crop: { operation: cropSaver?.cropOperation,
+      operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
+        cancelPick();
+        if (!callbackEditor() || frozen.current || !cropSaver || !cropActiveRef.current) return Promise.reject(new RawApiError('raw_busy'));
+        return cropSaver.operate({ kind: 'geometry', metadata: { operation: operation.type, ...(action ? { action } : {}) }, geometry: operation });
+      },
+      recover: () => { if (!callbackEditor() || frozen.current || !cropSaver) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.recoverGeometry(); },
+      active: !!visible.cropMode, surface: cropSurface, canStart: !!cropSurface && !visible.locked && !visible.pending && !visible.editError,
+      begin: (type: 'drag' | 'straighten' = 'drag') => { cancelPick(); if (!callbackEditor() || frozen.current || !cropSaver || !cropActiveRef.current) return Promise.reject(new RawApiError('raw_busy')); return cropSaver.beginGeometry(type); },
       update: (intent: RawGeometryOperation) => { if (callbackEditor() && !frozen.current) cropSaver?.updateGeometry(intent); },
       end: () => cropSaver?.finishGeometry() ?? Promise.resolve(),
-      setMode: (enabled: boolean) => { cancelPick(); return cropModeRef.current(enabled); } },
+      setMode: (enabled: boolean) => { cancelPick(); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
     beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,
     cancelPick,

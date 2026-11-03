@@ -1,5 +1,30 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 4：カテゴリ切替・正式Crop操作パネル（2026-11-04）
+
+RAW右ペインのScope / Histogramと既存Resize handleの後、DevelopPanelの前に「現像 / Develop | 切り抜き / Crop」のテキストradioを追加した。RAWの各Assetは現像から開始する。JPEG UIは従来どおり。ScopeのResizeとpanelのscroll領域を維持し、Cropカテゴリでは見出しを切り抜きに変更、DevelopのAll Resetを表示せず、パネル内へ専用「切り抜きをリセット / Reset Crop」を配置した。native radioのTab / Arrow操作と一時的なdisabled後のfocus復帰を使い、新しいグローバルショートカットは追加していない。
+
+`RawEditCategories`は既存登録済み入力をcommitし、`rawDocument.crop.setMode()`の保存フェンスを待つ。`useRawDocument`では切替中の新規入力を凍結し、完了時にownerを再検証してからmodeと表示世代を更新する。カテゴリは既存cropModeだけを正とし、楽観的に成功表示しない。Native documentの再open、Recipe復元、Crop Reset、不要なrevision変更やHistory追加はしない。未保存の現像入力だけ既存経路で確定する。Asset変更後の旧カテゴリcallbackと、同じdocumentで現像へ復帰後の旧Crop mutation callbackを拒否する。Previewのmode分離・decode後検証・Region/Before/WB無効化はPhase 3を再利用した。
+
+`RawCropControls.tsx`を追加し、全指定Aspect preset、Custom、縦横交換、固定／解除、Straighten slider / number / 0°、左右90°回転、水平／垂直反転、Crop Resetを接続した。コンポーネントからNativeやRecipeを直接呼ばず、typed geometry operationを既存RawRecipeSave ownerへ渡す。Presetは現在のCrop方向へ合わせるNative契約を使い、Customにも`orientation:"crop"`を明示した。8.5×11は正確な整数比[17,22]へ約分してNativeへ渡し、Native保存値は[1700,2200]となる。Customの正の有限小数／指数表記を整数演算で処理し、ゼロ・負数・非数値、1:20〜20:1外、Nativeのu32×100上限を超える比率を送信前に拒否する。編集中の文字列はローカル状態であり、readback / Undoで確定比率へ再同期する。
+
+managed LightCraft v0.18.0の実装を確認し、Freeはaspect=None、Currentは現Cropのpixel形状を固定、Originalはuser-oriented元画像比、Toggleは固定／解除と確認した。UIの固定は明示`current`、解除は`free`を送り、独自の保存lockを設けない。Preset表示はreadbackの比率を縦横どちらでも照合する。Nativeのaspect lockがハンドル制約を担い、ShiftのkeepRatioとは独立する。Swapや各refitの計算はFrontendで再実装しない。
+
+Straightenは共通`AdjustmentSlider`を使い、±45°、0.1°、時計回り正方向、数値入力と0°への操作を提供した。`crop.angle`はUI focus identityとしてのみ追加し、36 scalar APIやJPEG Recipeは拡張しない。`RawRecipeSave`の既存geometry ownerへ`straighten`型を追加し、begin→最新未送信値を保持するupdate→最終readback→1 History commitを共有する。Pointer up/cancel、数値Enter/blur、window blur、カテゴリ切替、unmountで終了する。数値blurは子の最終draft送信後にbubble側で処理し、先にgestureを終了しない。Undo/Redo/JumpはStraightenを先に確定してsnapshotを復元し、UIの角度draftも解除する。既存scalar Undoの予約順序を維持するため、追加の入力commitはStraightenだけへ限定した。
+
+離散操作は1 clickを既存History operateへ接続し、同期busy refとowner lockで連打・frame gestureとの競合を防止する。結果不明では相対commandを無条件再送しない。Crop Resetは標準crop.resetでrect・aspect・angle・flipを初期化し、独立orientationは維持する。追加の逆Rotateは送らない。失敗時は既存保存再試行と、未確定変更を破棄して保存済みRecipeへ戻す明示recoveryを表示する。離散操作にもrecoveryを公開し、malformed geometryで通常settingsを取得できない場合は最後の確定public identityから既存recoverを呼び、History整合確認後にunlockする。
+
+Historyの既存metadata.operationだけでは移動／resizeと固定／解除が区別できないため、任意の安定識別子actionを追加した。許可値はdragのmove / resizeとaspectのlock / unlockのみ。既存operationのみの保存データを維持し、未知キー・不正組合せはBackend / Frontendで拒否する。pointer、gesture ID、UI draftや翻訳文字列は保存しない。日本語・英語の全操作ラベルを整備し、DB schema・persistent versionは変更していない。この表示上の区別を実現するための限定的なBackend変更であり、Native mutation / History snapshot契約は維持した。
+
+主要変更：`frontend/src/RawCropControls.tsx`（カテゴリとパネル）、`AnshitsuPage.tsx`、`useRawDocument.ts`、`rawRecipeSave.ts`、`rawApi.ts`、`RawEditHistory.tsx`、`adjustmentSliderIds.ts`、`style.css`、`locales/en.json`・`ja.json`、関連Frontendテスト、`backend/raw_geometry.py`・`tests/test_raw_geometry.py`、architectureと本記録。Phase 1〜3のNative managed identity / patch / manifest / binary / receiptは変更していない。README / CHANGELOGは未公開開発機能のため変更しない。
+
+検証結果：関連Frontend 15 files / 700件成功。カテゴリRAW限定・初期値・現像復帰・Asset切替・未保存scalar確定・Preview mode、全Preset・Customの小数整数化／不正入力・Swap／Lock、Straighten最終値／cancel／数値blur／unmount／Undo、連打抑止・明示recovery、既存JPEG/RAW Viewer・scalar・History・Recipe・Scope/Resize・shortcuts・Before/Region・schedulerを対象とした。監査追加後のAPI metadata＋パネル2 files / 142件、旧Crop callback拒否を含むdocument hook 105件も成功（一部重複）。TypeScript・production build・git diff --check成功。buildには従来の500 kB超chunk警告がある。
+
+Backend Geometry / History API focused 95件成功。追加actionの閉じたvalidationとSQLite保存・Undo/Redoに加え、実managed Native＋合成DNG＋HTTPで8.5×11の正確なaspect、Free / Current、左右各4回Rotate後のorientation復帰、-45→0→45°のgestureと1 commit、Resetのorientation維持、既存Preview・保存・再openを検証した。Native rebuild、DB migration、Docker release Smoke Testは対象変更がないため実施していない。
+
+実写真・実ブラウザ・NASの手動受入は未実施。Warp由来の欠損、crop-relative effectsの最終表示差、既存のsequence 0..255 / Native edit budgetはPhase 3の制約を維持する。カテゴリ選択・Custom未確定値・角度draft・focus・coverScale・Viewer zoom/panは保存しない。Phase 5へはユーザーによる実写真／ブラウザ受入、Crop出入り後のWhole/Region/Before/WB横断確認、Undo/Redo/Jump後の画面整合、Export / Thumbnailの後続受入を引き継ぐ。今回その横断受入や新規Export / Thumbnail経路には着手していない。
+
+
 ## RAW Crop Phase 3：固定枠・座標変換・Gesture基盤（2026-11-04）
 
 Phase 1の未crop編集PreviewとPhase 2のGeometry APIをFrontendへ接続した。正式な「現像／切り抜き」パネルは未実装。document所有の内部入口`window.genzoroomCrop.enter()/exit()/straighten(angle)/recover()`を用意した。実装は既存Native managed 0.18.0、upstream `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`を維持し、patch / manifest / binary / artifact receiptを変更していない。

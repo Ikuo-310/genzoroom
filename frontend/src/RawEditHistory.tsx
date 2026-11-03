@@ -52,7 +52,7 @@ const formatters: Record<RawControlId, (value: number) => string> = {
   'detail.nrColorSmoothness': value => value.toFixed(0) };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
-  if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.operation}`);
+  if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   const control = step.metadata.control;
@@ -95,7 +95,7 @@ export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<Re
       ? 'workspace.rawPreview.historyTargetMissing' : 'workspace.rawPreview.historyFailed')}</p>
       <button type="button" className="tool-button" disabled={raw.historyLoading || raw.locked || disabled}
         onClick={() => raw.retryHistory()}>{t('workspace.rawPreview.retryHistory')}</button></div>}
-    <HistoryList rows={rows} cursor={raw.history?.cursor ?? 0} disabled={disabled || !!raw.locked || !!raw.historyLoading || !!raw.historyError || !raw.history}
+    <HistoryList rows={rows} cursor={raw.history?.cursor ?? 0} disabled={disabled || !!raw.locked && !(raw.crop?.operation === 'straighten' && !raw.saveError) || !!raw.historyLoading || !!raw.historyError || !raw.history}
       onJump={position => raw.jumpHistory(position === 0 ? null : steps[position - 1].stepId)} />
   </>;
 }

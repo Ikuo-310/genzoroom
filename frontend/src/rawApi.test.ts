@@ -323,3 +323,10 @@ it.each(['valid','normalContract','wrongFingerprint','wrongGeometry','missingCro
   if(mode==='valid')expect((await result).cropDisplay?.canonicalGeometry.crop).toEqual(crop);
   else await expect(result).rejects.toThrow();
 });
+
+it.each([['drag','move',true],['drag','resize',true],['aspect','lock',true],['aspect','unlock',true],['reset','move',false],['drag','lock',false]] as const)('validates geometry History action %s/%s',async(operation,action,valid)=>{
+ const request:RawHistoryRequest={doc:rawSettings(doc),action:'commit',control:'light.exposure',expectedRecipeRevision:4,saveId:'00000000-0000-4000-8000-000000000001'};const result=rawHistoryResult(request,{history:{initialized:true,cursor:1,length:1,selectedStepId:request.saveId}}),data=rawHistoryData(result);
+ data.steps[0].kind='geometry';data.steps[0].metadata={operation,action};
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}})));
+ if(valid)await expect(readRawHistory(result)).resolves.toMatchObject({steps:[{metadata:{operation,action}}]});else await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
+});

@@ -1185,3 +1185,25 @@ it('isolates crop display mode, drops delayed edit decode on exit, and disables 
   expect(current!.frame?.geometryId).toBe('a'.repeat(64));
   expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.mode).toBe('whole');
 });
+
+it('rejects a retained old category callback after Asset replacement',async()=>{
+ await render('a');await flush();const old=current!.crop.setMode;await render('b');await flush();
+ await expect(old(true)).rejects.toThrow('raw_document_closed');expect(current!.crop.active).toBe(false);
+});
+
+it('flushes an unsaved scalar gesture before entering Crop without recreating the Native document',async()=>{
+ await render('a');await flush();
+ await act(async()=>{current!.beginControls('light.exposure');current!.changeControls({'light.exposure':1.25});});
+ await act(async()=>current!.crop.setMode(true));await flush();
+ expect(current!.crop.active).toBe(true);expect(current!.settings!.values['light.exposure']).toBe(1.25);
+ expect(api.openRawDocument).toHaveBeenCalledOnce();expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(1);
+});
+
+it('rejects retained Crop mutation callbacks after returning to Develop on the same document',async()=>{
+ await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();const old=current!.crop;
+ await act(async()=>current!.crop.setMode(false));await flush();
+ await expect(old.begin()).rejects.toThrow('raw_busy');
+ await expect(old.operate({type:'rotateRight',params:{}})).rejects.toThrow('raw_busy');
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='operate')).toHaveLength(0);
+});

@@ -1,3 +1,4 @@
+import { RawCropControls, RawEditCategories } from './RawCropControls';
 import { useAppSettings } from './appSettings';
 import { useWorkspaceGpu } from './useWorkspaceGpu';
 import { SettingsButton, useSettingsDialog } from './SettingsDialog';
@@ -268,10 +269,11 @@ export function AnshitsuPage() {
   }, [assetId, workspaceKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
   const rawHistoryEnabled = !!activeDetail?.is_raw && rawDocument?.status === 'ready' && !!rawDocument.history
-    && !rawDocument.locked && !rawDocument.historyLoading && !rawDocument.historyError && !workspaceKeyboardBlocked;
+    && (!rawDocument.locked || rawDocument.crop.operation === 'straighten' && !rawDocument.saveError) && !rawDocument.historyLoading && !rawDocument.historyError && !workspaceKeyboardBlocked;
   function rawHistoryAction(type: 'undo' | 'redo') {
     if (!rawHistoryEnabled || !rawDocument || !(type === 'undo' ? rawDocument.canUndo : rawDocument.canRedo)) return;
     clearExclusionUndo();
+    if (rawDocument.crop.operation === 'straighten') commitAdjustmentsInScope(selectedOperationPanelRef.current);
     rawDocument[type]();
   }
   const canResetHistory = session.history.length > 0 || !recipesEqual(session.recipe, defaultRecipe());
@@ -833,7 +835,10 @@ export function AnshitsuPage() {
             keyboardBlocked={!editable || workspaceKeyboardBlocked} />
         </WorkspaceSection>
         <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
-        <DevelopPanel panelRef={selectedOperationPanelRef} headerAction={editable
+        {rawDocument && <RawEditCategories key={assetId} raw={rawDocument} disabled={workspaceKeyboardBlocked}
+          commit={() => commitAdjustmentsInScope(selectedOperationPanelRef.current)} />}
+        <DevelopPanel title={rawDocument?.crop.active ? t('workspace.rawCrop.crop') : undefined} panelRef={selectedOperationPanelRef} headerAction={rawDocument?.crop.active
+          ? undefined : editable
           ? <button type="button" className="tool-button workspace-section-action" onClick={() => dispatch({ type: 'allReset' })}>{t('workspace.allReset')}</button>
           : rawDocument ? <button type="button" className="tool-button workspace-section-action"
             disabled={workspaceKeyboardBlocked || rawDocument.status !== 'ready' || rawDocument.locked || !!rawDocument.editError
@@ -880,7 +885,7 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : rawDocument ? <RawAdjustmentControls raw={{ ...rawDocument, changeControls: values => {
+          </div> : rawDocument?.crop.active ? <RawCropControls key={assetId} raw={rawDocument} disabled={workspaceKeyboardBlocked} /> : rawDocument ? <RawAdjustmentControls raw={{ ...rawDocument, changeControls: values => {
             if (!rawDocument.locked && !workspaceKeyboardBlocked) clearExclusionUndo();
             rawDocument.changeControls(values);
           } }} disabled={workspaceKeyboardBlocked} /> : <p>{t('workspace.jpegOnly')}</p>}
@@ -1000,9 +1005,9 @@ export function AnshitsuPage() {
   </main>;
 }
 
-export function DevelopPanel({ children, headerAction, panelRef }: { children: ReactNode; headerAction?: ReactNode; panelRef?: Ref<HTMLElement> }) {
+export function DevelopPanel({ children, headerAction, panelRef, title }: { title?: string; children: ReactNode; headerAction?: ReactNode; panelRef?: Ref<HTMLElement> }) {
   const { t } = useTranslation();
-  return <WorkspaceSection title={t('workspace.developControls')} className="develop-panel" headerAction={headerAction} sectionRef={panelRef}>
+  return <WorkspaceSection title={title ?? t('workspace.developControls')} className="develop-panel" headerAction={headerAction} sectionRef={panelRef}>
     <div className="develop-scroll-region">{children}</div>
   </WorkspaceSection>;
 }

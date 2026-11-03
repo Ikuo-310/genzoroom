@@ -250,6 +250,25 @@ def test_actual_native_geometry_history_reload_and_preview(local, tmp_path, monk
                                op('aspect', aspect='current'), op('swap'), op('straighten', angle=-12),
                                op('straighten', angle=12), op('rotateRight'), op('flipHorizontal'), op('flipVertical')]:
                     doc = await operate(http, doc, intent)
+                # Formal panel uses orientation-independent decimal ratios and explicit lock targets.
+                doc = await operate(http, doc, op('aspect', aspect=[17, 22], orientation='crop'))
+                assert sorted(doc['crop']['aspect']) == [1700, 2200]
+                doc = await operate(http, doc, op('aspect', aspect='free'))
+                rect = copy.deepcopy(doc['crop']['geometry']['rect'])
+                doc = await operate(http, doc, op('aspect', aspect='current'))
+                assert doc['crop']['aspect'] is not None and doc['crop']['geometry']['rect'] == rect
+                turned = copy.deepcopy(doc)
+                for _ in range(4): doc = await operate(http, doc, op('rotateRight'))
+                assert doc['orientation'] == turned['orientation']
+                for _ in range(4): doc = await operate(http, doc, op('rotateLeft'))
+                assert doc['orientation'] == turned['orientation']
+                doc = await begin(http, doc, kind='straighten')
+                for sequence, angle in enumerate([-45, 0, 45]):
+                    response = await http.post(f'/api/raw/documents/{doc["handle"]}/geometry', json=update_body(doc, sequence, op('straighten', angle=angle)))
+                    assert response.status_code == 200, response.text
+                    doc = response.json()
+                    assert doc['crop']['geometry']['angle'] == angle
+                doc = await operation(http, doc, 'commit', body(doc) | {'kind':'geometry','metadata':{'operation':'straighten'},'gestureId':doc['gestureId']})
                 before_reset = copy.deepcopy(doc)
                 reset = await operate(http, doc, op('reset'))
                 assert reset['orientation'] == before_reset['orientation'] and reset['crop'] == DEFAULT_CROP
@@ -472,4 +491,35 @@ def test_parallel_gesture_updates_cannot_reuse_sequence_for_different_intent(loc
                 doc = await operation(http, current, 'commit', body(current) | {'kind': 'geometry', 'metadata': {'operation': 'straighten'}, 'gestureId': current['gestureId']})
                 assert doc['history']['length'] == 1
             finally: await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('metadata,valid', [
+    ({'operation':'drag','action':'move'},True), ({'operation':'drag','action':'resize'},True),
+    ({'operation':'aspect','action':'lock'},True), ({'operation':'aspect','action':'unlock'},True),
+    ({'operation':'drag','action':'lock'},False), ({'operation':'reset','action':'move'},False),
+    ({'operation':'drag','action':{}},False), ({'operation':'drag','pointer':[1,2]},False),
+])
+def test_geometry_history_action_labels_are_closed(metadata,valid):
+    from raw_geometry import valid_metadata
+    assert valid_metadata(metadata) is valid
+
+
+def test_geometry_action_metadata_survives_saved_history(local,tmp_path,monkeypatch):
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            try:
+                doc=await begin(http,doc)
+                response=await http.post(f'/api/raw/documents/{doc["handle"]}/geometry',json=update_body(doc,0,op('drag',handle='bottomRight',**{'from':[1,1],'to':[.8,.8]})))
+                assert response.status_code==200
+                doc=response.json()
+                doc=await operation(http,doc,'commit',body(doc)|{'kind':'geometry','metadata':{'operation':'drag','action':'resize'},'gestureId':doc['gestureId']})
+                steps=store.get_raw_history(api._history_identity)['history']['steps']
+                assert steps[-1]['metadata']=={'operation':'drag','action':'resize'}
+                undone=await operation(http,doc,'undo')
+                assert undone['crop']==DEFAULT_CROP
+                assert (await operation(http,undone,'redo'))['crop']==doc['crop']
+            finally:
+                await api.close()
     asyncio.run(run())

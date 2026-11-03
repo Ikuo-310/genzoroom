@@ -158,3 +158,10 @@ it.each(['ja','en'])('labels geometry History independently of scalar Reset in %
   const markup=renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps,1) as never} disabled={false} onReset={()=>{}}/>);
   expect(markup).toContain(language==='ja'?'切り抜き移動・サイズ変更':'Crop move / resize');expect(markup).not.toContain('workspace.');
 });
+
+it.each(['ja','en'])('distinguishes move/resize and lock/unlock metadata in %s',async language=>{
+ await i18n.changeLanguage(language);
+ const steps:RawHistoryStep[]=(['move','resize','lock','unlock'] as const).map(action=>({stepId:action,kind:'geometry',metadata:{operation:action==='move'||action==='resize'?'drag':'aspect',action},changes:[],createdAt:'2026-11-04T00:00:00Z'}));
+ const markup=renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps,4) as never} disabled={false} onReset={()=>{}}/>);
+ for(const label of language==='en'?['Crop Move','Crop Resize','Aspect Lock','Aspect Unlock']:['切り抜き移動','切り抜きサイズ変更','縦横比の固定','縦横比の固定解除'])expect(markup).toContain(label);
+});

@@ -98,4 +98,10 @@ def native_command(operation, photo_id):
 
 
 def valid_metadata(metadata):
-    return type(metadata) is dict and set(metadata) == {'operation'} and (type(metadata['operation']) is str) and (metadata['operation'] in OPERATIONS)
+    if type(metadata) is not dict or not {'operation'} <= set(metadata) or set(metadata) - {'operation', 'action'}:
+        return False
+    operation = metadata['operation']
+    if type(operation) is not str or operation not in OPERATIONS:
+        return False
+    # Optional stable labels refine History presentation without persisting pointer data.
+    return 'action' not in metadata or metadata['action'] in ({'drag': ('move', 'resize'), 'aspect': ('lock', 'unlock')}.get(operation, ()))
